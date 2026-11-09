@@ -11,6 +11,8 @@ pub(super) struct SecretPrompt {
     error: Option<String>,
     task: Option<Task<()>>,
     _input_subscription: Subscription,
+    connections: Option<Entity<crate::views::service_connections::ServiceConnections>>,
+    _connection_subscription: Option<Subscription>,
 }
 
 impl ChatView {
@@ -51,6 +53,18 @@ impl ChatView {
                         }
                     },
                 );
+                let connections = request.connection.as_ref().map(|connection| {
+                    cx.new(|cx| {
+                        crate::views::service_connections::ServiceConnections::new(
+                            Some(connection.provider),
+                            Some((request.thread_id.clone(), request.id.clone())),
+                            cx,
+                        )
+                    })
+                });
+                let connection_subscription = connections.as_ref().map(|connections| {
+                    cx.observe(connections, |_: &mut SecretPrompt, _, cx| cx.notify())
+                });
                 SecretPrompt {
                     request: request.clone(),
                     input,
@@ -58,6 +72,8 @@ impl ChatView {
                     error: None,
                     task: None,
                     _input_subscription: subscription,
+                    connections,
+                    _connection_subscription: connection_subscription,
                 }
             }));
         }
@@ -82,6 +98,28 @@ impl SecretPrompt {
             return;
         }
         let decision = match action {
+            "connection" => {
+                let id = self
+                    .request
+                    .connection
+                    .as_ref()
+                    .and_then(|connection| {
+                        self.connections
+                            .as_ref()?
+                            .read(cx)
+                            .current(connection.provider)
+                    })
+                    .filter(|connection| {
+                        connection.state == bruhs_models::connections::ConnectionState::Connected
+                    })
+                    .and_then(|connection| connection.id.clone());
+                let Some(id) = id else {
+                    self.error = Some("Connect an account before approving this operation.".into());
+                    cx.notify();
+                    return;
+                };
+                SecretDecision::UseConnection { id }
+            }
             "once" | "save" => SecretDecision::Provide {
                 value,
                 save: action == "save",
@@ -147,6 +185,28 @@ impl SecretPrompt {
 impl Render for SecretPrompt {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         let command = serde_json::to_string(&self.request.operation.command).unwrap_or_default();
+        if let Some(connections) = &self.connections {
+            let connected = self
+                .request
+                .connection
+                .as_ref()
+                .and_then(|connection| connections.read(cx).current(connection.provider))
+                .is_some_and(|connection| {
+                    connection.state == bruhs_models::connections::ConnectionState::Connected
+                        && connection.configured
+                });
+            return div().id("private-service-request").role(Role::Group).aria_label("Service connection request")
+                .max_h(px(f32::from(window.viewport_size().height) * 0.6)).overflow_y_scroll().p_3().rounded(px(8.0)).border_1().border_color(theme::blueberry_400().opacity(0.3)).bg(theme::longan_900())
+                .font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200()).flex().flex_col().gap_2()
+                .child(div().font_weight(FontWeight::MEDIUM).child("Account access needed"))
+                .child(self.request.operation.reason.clone())
+                .child(format!("Command: {command}\nFolder: {}\nVariable: {}", bruhs_models::secrets::review_text(&self.request.cwd), self.request.operation.env_var))
+                .child(connections.clone())
+                .child("This command can access the account token. Only its exit status returns to the AI. Connecting an account does not approve this command.")
+                .when_some(self.error.clone(), |element, error| element.child(div().id("service-request-error").role(Role::Alert).text_color(theme::lychee_300()).child(error)))
+                .child(div().flex().flex_wrap().gap_2().when(connected, |element| element.child(self.action_button("connection", "Approve operation", cx))).child(self.action_button("decline", "Decline", cx)))
+                .into_any_element();
+        }
         div().id("private-credential-request").role(Role::Group).aria_label("Private credential request")
             .max_h(px(f32::from(window.viewport_size().height) * 0.6)).overflow_y_scroll()
             .p_3().rounded(px(8.0)).border_1().border_color(theme::blueberry_400().opacity(0.3)).bg(theme::longan_900())
@@ -164,7 +224,7 @@ impl Render for SecretPrompt {
                 .child(self.action_button("save", "Save securely and use", cx))
                 .when(self.request.saved_available, |row| row.child(self.action_button("saved", "Use saved", cx)).child(self.action_button("forget", "Forget saved", cx)))
                 .child(self.action_button("decline", "Decline", cx)))
-            .child(div().text_color(theme::rambutan_400()).child(if self.busy { "Submitting privately…" } else { "Saved credentials stay in your OS keychain for this project. Every use needs approval." }))
+            .child(div().text_color(theme::rambutan_400()).child(if self.busy { "Submitting privately…" } else { "Saved credentials stay in your OS keychain for this project. Every use needs approval." })).into_any_element()
     }
 }
 

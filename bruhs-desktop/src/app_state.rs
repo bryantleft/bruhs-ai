@@ -36,7 +36,9 @@ impl DesktopState {
         // the same keychain entry and cursor files with no subscriber.
         let builder = AppState::builder();
         #[cfg(test)]
-        let builder = builder.secret_store(bruhs_core::secrets::SecretStore::in_memory());
+        let builder = builder
+            .secret_store(bruhs_core::secrets::SecretStore::in_memory())
+            .connections(bruhs_core::connections::Connections::in_memory());
         Ok(Self {
             app: Arc::new(builder.build()),
             runtime: Arc::new(runtime),

@@ -7,6 +7,7 @@ pub mod meetings_hub;
 pub mod native_blur;
 pub mod page_header;
 pub mod preview_panel;
+pub(crate) mod service_connections;
 pub mod sidebar_order;
 mod task_registry_subscription;
 pub mod tasks_panel;
