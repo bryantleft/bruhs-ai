@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { COMMANDS, filterCommands } from "../public/palette.js";
+import { COMMANDS, filterCommands } from "../src/scripts/palette.js";
 
 const ids = (query: string): string[] => filterCommands(COMMANDS, query).map((command) => command.id);
 

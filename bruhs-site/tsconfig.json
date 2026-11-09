@@ -22,9 +22,8 @@
     "allowJs": true
   },
   "include": [
-    "api",
     "test",
-    "scripts",
-    "public/*.js"
+    "src/**/*.js",
+    "src/**/*.ts"
   ]
 }
