@@ -826,6 +826,15 @@ impl Workspace {
     }
 
     pub(super) fn render_settings_about_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+        // Web `AboutSettings`: the packaged release version (from the bundle,
+        // the one updates compare), else the crate version in a dev build.
+        let version = self
+            .updates
+            .read(cx)
+            .report
+            .as_ref()
+            .and_then(|report| report.installed_release().map(str::to_owned))
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned());
         let code = |text: String| {
             div()
                 .text_size(px(SETTINGS_BODY_TEXT_SIZE_PX))
@@ -896,7 +905,7 @@ impl Workspace {
                                     .text_color(theme::rambutan_100())
                                     .child("bruhs"),
                             )
-                            .child(code(env!("CARGO_PKG_VERSION").to_string()))
+                            .child(code(version))
                             .child(
                                 div()
                                     .text_size(px(SETTINGS_META_TEXT_SIZE_PX))

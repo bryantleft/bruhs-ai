@@ -672,3 +672,24 @@ fn release_notes_link_to_the_versions_changelog_entry() {
     };
     assert_eq!(unknown.notes_url(), None);
 }
+
+#[test]
+fn installed_release_is_the_packaged_version_and_none_from_source() {
+    let mut report = UpdatesReport {
+        checked_at: EpochMs::saturating_from_i64(1_000),
+        online: true,
+        providers: vec![],
+        app: app(AppUpdateState::UpToDate),
+        runs: vec![],
+    };
+    report.app.release = None;
+    assert_eq!(report.installed_release(), None);
+    report.app.release = Some(ReleaseUpdate {
+        current_version: "0.1.1".into(),
+        latest_version: Some("0.1.1".into()),
+        release_url: None,
+        download_url: None,
+        sha256: None,
+    });
+    assert_eq!(report.installed_release(), Some("0.1.1"));
+}
