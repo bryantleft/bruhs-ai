@@ -132,17 +132,44 @@ async fn handle(frame: &[u8], connection: &Connection) -> Option<Value> {
                     "command": {"type": "array", "minItems": 1, "items": {"type": "string"}, "description": "Executable followed by exact literal arguments. No credential values."}
                 }
             }
+        }, {
+            "name": "request_connection",
+            "description": "Request approval for a command using the user's Google Workspace, Microsoft 365, or GitHub account. Bruhs offers browser SSO connection if needed. Only a short-lived access token reaches the approved command; no credentials or command output return to the model. Every operation needs user approval. Google grants calendar-events read access, Microsoft grants basic calendar read access, and GitHub grants profile and organization read access, not private repository access.",
+            "inputSchema": {
+                "type": "object", "additionalProperties": false,
+                "required": ["provider", "reason", "env_var", "command"],
+                "properties": {
+                    "provider": {"type": "string", "enum": ["google", "microsoft", "github"]},
+                    "reason": {"type": "string"},
+                    "env_var": {"type": "string", "description": "Variable that receives this service's access token."},
+                    "command": {"type": "array", "minItems": 1, "items": {"type": "string"}}
+                }
+            }
         }]}),
         Some("tools/call") => {
-            if request["params"]["name"] != "request_secret" {
+            let (operation, provider) = if request["params"]["name"] == "request_secret" {
+                (
+                    serde_json::from_value::<SecretOperation>(
+                        request["params"]["arguments"].clone(),
+                    ),
+                    None,
+                )
+            } else if request["params"]["name"] == "request_connection" {
+                match serde_json::from_value::<bruhs_models::connections::ServiceOperation>(
+                    request["params"]["arguments"].clone(),
+                ) {
+                    Ok(operation) => (Ok(operation.secret_operation()), Some(operation.provider)),
+                    Err(error) => (Err(error), None),
+                }
+            } else {
                 return Some(error(id, -32602, "Unknown credential tool."));
-            }
-            let operation =
-                serde_json::from_value::<SecretOperation>(request["params"]["arguments"].clone());
+            };
             let result = match operation {
-                Ok(operation) if operation.validate().is_ok() => call(connection, operation)
-                    .await
-                    .unwrap_or_else(|_| OperationResult::status("broker_disconnected")),
+                Ok(operation) if operation.validate().is_ok() => {
+                    call_from(connection, operation, provider)
+                        .await
+                        .unwrap_or_else(|_| OperationResult::status("broker_disconnected"))
+                }
                 _ => OperationResult::status("invalid_operation"),
             };
             json!({"content": [{"type": "text", "text": json!(&result).to_string()}], "isError": result.status != "completed" || result.exit_code != Some(0)})
@@ -156,9 +183,18 @@ fn error(id: Value, code: i32, message: &str) -> Value {
     json!({"jsonrpc": "2.0", "id": id, "error": {"code": code, "message": message}})
 }
 
+#[cfg(test)]
 pub(super) async fn call(
     connection: &Connection,
     operation: SecretOperation,
+) -> std::io::Result<OperationResult> {
+    call_from(connection, operation, None).await
+}
+
+async fn call_from(
+    connection: &Connection,
+    operation: SecretOperation,
+    provider: Option<bruhs_models::connections::ServiceProvider>,
 ) -> std::io::Result<OperationResult> {
     let mut stream = TcpStream::connect((std::net::Ipv4Addr::LOCALHOST, connection.port)).await?;
     write_frame(
@@ -166,6 +202,7 @@ pub(super) async fn call(
         &BrokerRequest {
             token: connection.token.clone(),
             operation,
+            connection: provider,
         },
     )
     .await?;
@@ -195,17 +232,21 @@ impl SecretBroker {
                     "command": executable, "args": ["--secret-mcp"], "env": {BROKER_ENV: connection}
                 }}}).to_string());
                 // Opening the form needs no second generic approval; its execution still does.
-                let tool = "mcp__bruhs_secrets__request_secret";
-                match &mut options.tools {
-                    claude_sdk_rs::Tools::CliDefault => {
-                        options.tools = claude_sdk_rs::Tools::Allow(vec![tool.into()])
+                for tool in [
+                    "mcp__bruhs_secrets__request_secret",
+                    "mcp__bruhs_secrets__request_connection",
+                ] {
+                    match &mut options.tools {
+                        claude_sdk_rs::Tools::CliDefault => {
+                            options.tools = claude_sdk_rs::Tools::Allow(vec![tool.into()])
+                        }
+                        claude_sdk_rs::Tools::Allow(tools)
+                            if !tools.iter().any(|name| name == tool) =>
+                        {
+                            tools.push(tool.into())
+                        }
+                        _ => {}
                     }
-                    claude_sdk_rs::Tools::Allow(tools)
-                        if !tools.iter().any(|name| name == tool) =>
-                    {
-                        tools.push(tool.into())
-                    }
-                    _ => {}
                 }
                 append_claude_instructions(options);
             }
@@ -216,7 +257,7 @@ impl SecretBroker {
                 // The one-day ceiling covers an unattended overnight turn; turn teardown revokes it sooner.
                 // Required servers finish startup before Codex builds its initial tool catalog.
                 // Approving this one tool opens our form; the harness still gates command execution.
-                let config = format!("{{ command = {executable}, args = [\"--secret-mcp\"], env = {{ {BROKER_ENV} = {connection} }}, tool_timeout_sec = 86400, required = true, tools = {{ request_secret = {{ approval_mode = \"approve\" }} }} }}");
+                let config = format!("{{ command = {executable}, args = [\"--secret-mcp\"], env = {{ {BROKER_ENV} = {connection} }}, tool_timeout_sec = 86400, required = true, tools = {{ request_secret = {{ approval_mode = \"approve\" }}, request_connection = {{ approval_mode = \"approve\" }} }} }}");
                 options.config.push(
                     codex_sdk_rs::ConfigOverride::new("mcp_servers.bruhs_secrets", config)
                         .map_err(std::io::Error::other)?,
@@ -263,7 +304,10 @@ mod tests {
         };
         assert_eq!(
             options.tools,
-            claude_sdk_rs::Tools::Allow(vec!["mcp__bruhs_secrets__request_secret".into()])
+            claude_sdk_rs::Tools::Allow(vec![
+                "mcp__bruhs_secrets__request_secret".into(),
+                "mcp__bruhs_secrets__request_connection".into()
+            ])
         );
         let config: Value = serde_json::from_str(options.mcp_config.as_ref().unwrap()).unwrap();
         assert!(config["mcpServers"]["bruhs_secrets"]["env"][BROKER_ENV]
@@ -284,7 +328,7 @@ mod tests {
         assert!(options.config[0].value().contains("required = true"));
         assert!(options.config[0]
             .value()
-            .contains("tools = { request_secret = { approval_mode = \"approve\" } }"));
+            .contains("request_secret = { approval_mode = \"approve\" }"));
         assert!(!options.config[0]
             .value()
             .contains("default_tools_approval_mode"));
@@ -377,7 +421,7 @@ mod tests {
         )
         .await
         .unwrap();
-        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 1);
+        assert_eq!(list["result"]["tools"].as_array().unwrap().len(), 2);
         let response = handle(br#"{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"request_secret","arguments":{"name":"key","reason":"test","env_var":"KEY","command":["true"],"value":"synthetic-private-value"}}}"#, &connection).await.unwrap();
         assert_eq!(response["result"]["isError"], true);
         assert!(!response.to_string().contains("synthetic-private-value"));

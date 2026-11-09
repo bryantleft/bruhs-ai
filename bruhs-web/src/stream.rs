@@ -227,6 +227,7 @@ mod tests {
             cwd: "/tmp".into(),
             saved_available: false,
             storage_unavailable: false,
+            connection: None,
         };
         assert!(matches!(
             apply_event(&mut message, &AgentStreamEvent::SecretRequest(request), 0.0),

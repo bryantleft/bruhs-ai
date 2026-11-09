@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod capture_client;
 mod codex_lean;
+pub mod connections;
 pub mod editor;
 pub mod files;
 pub mod git;

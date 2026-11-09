@@ -109,6 +109,9 @@ fn codex_review_options(prompt: String, project_path: &str) -> codex_sdk_rs::Que
         })
         .session(Session::Ephemeral)
         .skip_git_repo_check(true);
+    for key in crate::connections::PRIVATE_ENV {
+        options = options.env_remove(key);
+    }
     crate::agent::lean_codex(&mut options);
     options
 }

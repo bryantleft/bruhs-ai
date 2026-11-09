@@ -126,11 +126,16 @@ pub struct AppState {
 #[derive(Default)]
 pub struct AppStateBuilder {
     secret_store: Option<crate::secrets::SecretStore>,
+    connections: Option<crate::connections::Connections>,
     meetings: Option<Arc<dyn MeetingStore>>,
     google_calendar: Option<Arc<GoogleCalendarHandle>>,
 }
 
 impl AppStateBuilder {
+    pub fn connections(mut self, connections: crate::connections::Connections) -> Self {
+        self.connections = Some(connections);
+        self
+    }
     pub fn secret_store(mut self, store: crate::secrets::SecretStore) -> Self {
         self.secret_store = Some(store);
         self
@@ -153,10 +158,12 @@ impl AppStateBuilder {
     /// should run the background loops.
     pub fn build(self) -> AppState {
         let registry = Arc::new(BackgroundTaskRegistry::new());
-        let orchestrator = AgentOrchestrator::new(registry.clone()).with_secret_store(
-            self.secret_store
-                .unwrap_or_else(crate::secrets::SecretStore::os),
-        );
+        let orchestrator = AgentOrchestrator::new(registry.clone())
+            .with_secret_store(
+                self.secret_store
+                    .unwrap_or_else(crate::secrets::SecretStore::os),
+            )
+            .with_connections(self.connections.unwrap_or_default());
         let (meeting_events_tx, _) = broadcast::channel(MEETING_EVENT_CHANNEL_CAPACITY);
         AppState {
             threads: RwLock::new(HashMap::new()),

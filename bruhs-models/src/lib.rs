@@ -18,6 +18,7 @@ pub mod api;
 pub mod calendar;
 pub mod capture_auth;
 pub mod capture_recovery;
+pub mod connections;
 pub mod ids;
 pub mod logic;
 pub mod models;

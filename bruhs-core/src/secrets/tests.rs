@@ -3,6 +3,207 @@ use super::*;
 const PRIVATE: &str = "synthetic-credential-canary";
 
 #[tokio::test]
+async fn a_missing_account_token_keeps_the_operation_pending_for_reconnect() {
+    use bruhs_models::connections::{ConnectionState, ServiceProvider};
+    let provider = ServiceProvider::Google;
+    let connections = crate::connections::Connections::test_missing_tokens(provider).await;
+    let mut fixture = Fixture::with_manager(
+        SecretManager::new(SecretStore::in_memory()).with_connections(connections),
+    )
+    .await;
+    let scope = fixture.scope.clone();
+    let call = tokio::spawn(async move {
+        scope
+            .request_from(
+                SecretOperation {
+                    name: "Google".into(),
+                    reason: "Read calendar".into(),
+                    env_var: "TOKEN".into(),
+                    command: vec!["/usr/bin/true".into()],
+                },
+                Some(provider),
+            )
+            .await
+    });
+    let request = fixture.request().await;
+    let id = request.connection.unwrap().id.unwrap();
+    assert!(fixture
+        .manager
+        .resolve(
+            &request.thread_id,
+            &request.id,
+            SecretDecision::UseConnection { id }
+        )
+        .await
+        .is_err());
+    assert!(!call.is_finished());
+    assert_eq!(
+        fixture
+            .manager
+            .connections()
+            .connection(provider)
+            .await
+            .unwrap()
+            .state,
+        ConnectionState::NeedsSignIn
+    );
+    fixture
+        .manager
+        .resolve(&request.thread_id, &request.id, SecretDecision::Decline)
+        .await
+        .unwrap();
+    assert_eq!(call.await.unwrap().status, "declined");
+}
+
+#[tokio::test]
+async fn withdrawing_one_tool_call_cancels_its_login_without_ending_the_turn() {
+    use bruhs_models::connections::{AttemptState, ServiceProvider};
+    let provider = ServiceProvider::Google;
+    let connections = crate::connections::Connections::test_connected(provider, PRIVATE).await;
+    let mut fixture = Fixture::with_manager(
+        SecretManager::new(SecretStore::in_memory()).with_connections(connections),
+    )
+    .await;
+    let scope = fixture.scope.clone();
+    let call = tokio::spawn(async move {
+        scope
+            .request_from(
+                SecretOperation {
+                    name: "Google".into(),
+                    reason: "Read calendar".into(),
+                    env_var: "TOKEN".into(),
+                    command: vec!["/usr/bin/true".into()],
+                },
+                Some(provider),
+            )
+            .await
+    });
+    let request = fixture.request().await;
+    let login = fixture
+        .manager
+        .connect_request(&request.thread_id, &request.id, provider)
+        .await
+        .unwrap();
+    call.abort();
+    let _ = call.await;
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while fixture
+            .manager
+            .connections()
+            .attempt(&login.id)
+            .unwrap()
+            .state
+            != AttemptState::Cancelled
+        {
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .unwrap();
+    assert!(fixture.scope.active.load(Ordering::Acquire));
+    assert!(fixture
+        .manager
+        .connections()
+        .connection(provider)
+        .await
+        .unwrap()
+        .id
+        .is_some());
+}
+
+#[tokio::test]
+async fn a_connected_account_still_requires_approval_and_never_returns_token_output() {
+    use bruhs_models::connections::ServiceProvider;
+    let provider = ServiceProvider::Github;
+    let connections = crate::connections::Connections::test_connected(provider, PRIVATE).await;
+    let mut fixture = Fixture::with_manager(
+        SecretManager::new(SecretStore::in_memory()).with_connections(connections),
+    )
+    .await;
+    let scope = fixture.scope.clone();
+    let call = tokio::spawn(async move {
+        scope.request_from(SecretOperation {
+        name: "GitHub".into(), reason: "Verify private account use".into(), env_var: "SERVICE_TOKEN".into(),
+        command: vec!["/bin/sh".into(), "-c".into(), "printf '%s' \"$SERVICE_TOKEN\"; printf '%s' \"$SERVICE_TOKEN\" >&2; test -n \"$SERVICE_TOKEN\"".into()],
+    }, Some(provider)).await
+    });
+    let request = fixture.request().await;
+    let public = serde_json::to_string(&request).unwrap();
+    assert!(!public.contains(PRIVATE));
+    assert!(
+        !call.is_finished(),
+        "A saved account cannot auto-approve a command"
+    );
+    assert!(fixture
+        .manager
+        .resolve(&request.thread_id, &request.id, SecretDecision::UseSaved)
+        .await
+        .is_err());
+    let id = request.connection.as_ref().unwrap().id.clone().unwrap();
+    fixture
+        .manager
+        .resolve(
+            &request.thread_id,
+            &request.id,
+            SecretDecision::UseConnection { id },
+        )
+        .await
+        .unwrap();
+    let result = call.await.unwrap();
+    assert_eq!(result.exit_code, Some(0));
+    assert!(!serde_json::to_string(&result).unwrap().contains(PRIVATE));
+}
+
+#[tokio::test]
+async fn stale_account_approval_cannot_run_after_disconnect() {
+    use bruhs_models::connections::ServiceProvider;
+    let provider = ServiceProvider::Google;
+    let connections = crate::connections::Connections::test_connected(provider, PRIVATE).await;
+    let mut fixture = Fixture::with_manager(
+        SecretManager::new(SecretStore::in_memory()).with_connections(connections),
+    )
+    .await;
+    let scope = fixture.scope.clone();
+    let call = tokio::spawn(async move {
+        scope
+            .request_from(
+                SecretOperation {
+                    name: "Google".into(),
+                    reason: "Read calendar".into(),
+                    env_var: "TOKEN".into(),
+                    command: vec!["/usr/bin/true".into()],
+                },
+                Some(provider),
+            )
+            .await
+    });
+    let request = fixture.request().await;
+    let id = request.connection.unwrap().id.unwrap();
+    fixture
+        .manager
+        .connections()
+        .disconnect(provider)
+        .await
+        .unwrap();
+    assert!(fixture
+        .manager
+        .resolve(
+            &request.thread_id,
+            &request.id,
+            SecretDecision::UseConnection { id }
+        )
+        .await
+        .is_err());
+    assert!(!call.is_finished());
+    fixture
+        .manager
+        .resolve(&request.thread_id, &request.id, SecretDecision::Decline)
+        .await
+        .unwrap();
+    assert_eq!(call.await.unwrap().status, "declined");
+}
+
+#[tokio::test]
 async fn management_does_not_wait_for_an_unread_turn_stream() {
     let mut fixture = Fixture::new().await;
     let call = fixture.call("exit 0");
@@ -84,7 +285,14 @@ impl Fixture {
     }
 
     async fn with_store(store: SecretStore) -> Self {
-        let manager = SecretManager::new(store);
+        Self::with_manager(
+            SecretManager::new(store)
+                .with_connections(crate::connections::Connections::in_memory()),
+        )
+        .await
+    }
+
+    async fn with_manager(manager: SecretManager) -> Self {
         let directory = tempfile::tempdir().unwrap();
         let (tx, events) = mpsc::channel(32);
         let scope = manager.turn(ThreadId::new_v4(), directory.path().into(), tx.clone());

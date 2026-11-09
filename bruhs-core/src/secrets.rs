@@ -35,10 +35,12 @@ use zeroize::Zeroizing;
 /// Matches the existing local MCP bridge's frame budget. Only metadata crosses it.
 const MAX_FRAME_BYTES: usize = 64 * 1024;
 const BROKER_ENV: &str = "BRUHS_SECRET_BROKER";
-const INSTRUCTIONS: &str = "When you need a password, token, or API key, use the bruhs_secrets request_secret tool. Never ask the user to paste credentials into chat. Supply the exact command as an argv array and the credential environment variable. The user reviews that operation in a private form. The harness runs it in this turn's working directory and returns ONLY exit status; stdout/stderr are discarded. Never print, persist, or exfiltrate credentials, or request them as ordinary tool arguments. A shell must be explicit in argv. Saved credentials still require approval. Do not claim success on cancellation or nonzero exit.";
+const INSTRUCTIONS: &str = "When you need a password, token, or API key, use the bruhs_secrets request_secret tool. Never ask the user to paste credentials into chat. Supply the exact command as an argv array and the credential environment variable. The user reviews that operation in a private form. The harness runs it in this turn's working directory and returns ONLY exit status; stdout/stderr are discarded. Never print, persist, or exfiltrate credentials, or request them as ordinary tool arguments. A shell must be explicit in argv. Saved credentials still require approval. Do not claim success on cancellation or nonzero exit. For Google Workspace, Microsoft 365, and GitHub service access, use request_connection with the provider, reason, exact argv, and access-token variable. The private form offers browser SSO using the user's existing session; connecting an account does not approve its operation. Never ask for SSO passwords, browser cookies, or refresh tokens.";
 
 #[derive(Debug, thiserror::Error)]
 pub enum SecretError {
+    #[error("{0}")]
+    Connection(#[from] crate::connections::ConnectionError),
     #[error("This credential request is no longer pending in this thread.")]
     NotPending,
     #[error("A submission for this credential request is already in progress.")]
@@ -59,10 +61,12 @@ struct Pending {
     key: String,
     reply: oneshot::Sender<Approved>,
     busy: bool,
+    login_cancel: watch::Sender<bool>,
 }
 
 enum Approved {
     Run(Zeroizing<String>),
+    Connected(Zeroizing<String>, oneshot::Sender<()>),
     Decline,
 }
 
@@ -70,6 +74,7 @@ enum Approved {
 pub struct SecretManager {
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     store: SecretStore,
+    connections: crate::connections::Connections,
 }
 
 impl Default for SecretManager {
@@ -125,7 +130,51 @@ impl SecretManager {
         Self {
             pending: Arc::default(),
             store,
+            connections: crate::connections::Connections::default(),
         }
+    }
+
+    pub fn connections(&self) -> &crate::connections::Connections {
+        &self.connections
+    }
+
+    pub(crate) fn with_connections(mut self, connections: crate::connections::Connections) -> Self {
+        self.connections = connections;
+        self
+    }
+
+    pub async fn connect_request(
+        &self,
+        thread: &ThreadId,
+        id: &str,
+        requested_provider: bruhs_models::connections::ServiceProvider,
+    ) -> Result<bruhs_models::connections::ConnectionStart, SecretError> {
+        let (provider, cancel) = {
+            let pending = self.lock();
+            let item = pending
+                .get(id)
+                .filter(|p| &p.scope.thread_id == thread && p.scope.active.load(Ordering::Acquire))
+                .ok_or(SecretError::NotPending)?;
+            let connection = item
+                .request
+                .connection
+                .as_ref()
+                .ok_or(SecretError::Invalid(
+                    "This request does not use a service connection.",
+                ))?;
+            if connection.provider != requested_provider {
+                return Err(SecretError::Invalid(
+                    "The service does not match this pending request.",
+                ));
+            }
+            let result = (connection.provider, item.login_cancel.subscribe());
+            drop(pending);
+            result
+        };
+        self.connections
+            .start_scoped(provider, Some(cancel))
+            .await
+            .map_err(SecretError::Connection)
     }
 
     fn lock(&self) -> MutexGuard<'_, HashMap<String, Pending>> {
@@ -152,6 +201,10 @@ impl SecretManager {
     }
 
     /// Only the app UI calls this. Neither MCP nor provider tools can submit values.
+    #[expect(
+        clippy::significant_drop_tightening,
+        reason = "The prepared account lease is moved into submission ownership until the approved spawn is acknowledged."
+    )]
     pub async fn resolve(
         &self,
         thread_id: &ThreadId,
@@ -178,7 +231,50 @@ impl SecretManager {
             manager: self.clone(),
             id: id.to_string(),
         };
+        if request.connection.is_some()
+            && !matches!(
+                decision,
+                SecretDecision::UseConnection { .. } | SecretDecision::Decline
+            )
+        {
+            return Err(SecretError::Invalid(
+                "Approve the connected account or decline this operation.",
+            ));
+        }
+        let mut access = None;
+        let mut spawned = None;
         let approved = match decision {
+            SecretDecision::UseConnection { id } => {
+                let provider = request
+                    .connection
+                    .as_ref()
+                    .ok_or(SecretError::Invalid(
+                        "This request requires a private credential.",
+                    ))?
+                    .provider;
+                let current = self
+                    .connections
+                    .connection(provider)
+                    .await
+                    .map_err(SecretError::Connection)?;
+                if current.id.as_deref() != Some(&id)
+                    || current.state != bruhs_models::connections::ConnectionState::Connected
+                {
+                    return Err(SecretError::Invalid(
+                        "The account connection changed. Refresh and approve the current account.",
+                    ));
+                }
+                let prepared = self
+                    .connections
+                    .access(provider, &id)
+                    .await
+                    .map_err(SecretError::Connection)?;
+                let (started, receive) = oneshot::channel();
+                let approved = Approved::Connected(prepared.value.clone(), started);
+                access = Some(prepared);
+                spawned = Some(receive);
+                approved
+            }
             SecretDecision::Provide { value, save } => {
                 let value = Zeroizing::new(value);
                 if value.is_empty() || value.contains('\0') {
@@ -225,6 +321,15 @@ impl SecretManager {
         item.reply
             .send(approved)
             .map_err(|_| SecretError::NotPending)?;
+        // The service lease fences disconnect until this approved spawn is attempted.
+        let started = match spawned {
+            Some(spawned) => spawned.await.is_ok(),
+            None => true,
+        };
+        drop(access);
+        if !started {
+            return Err(SecretError::NotPending);
+        }
         drop(claim);
         scope
             .emit(QueryEvent::SecretResolved { id: id.to_string() })
@@ -285,6 +390,8 @@ struct Connection {
 struct BrokerRequest {
     token: String,
     operation: SecretOperation,
+    #[serde(default)]
+    connection: Option<bruhs_models::connections::ServiceProvider>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -369,7 +476,7 @@ impl SecretScope {
             Ok(request) if same_token(&request.token, token) => {
                 let mut probe = [0u8; 1];
                 tokio::select! {
-                    result = self.request(request.operation) => result,
+                    result = self.request_from(request.operation, request.connection) => result,
                     _ = stream.read(&mut probe) => OperationResult::status("cancelled"),
                 }
             }
@@ -378,7 +485,11 @@ impl SecretScope {
         write_frame(stream, &result).await
     }
 
-    async fn request(self: &Arc<Self>, operation: SecretOperation) -> OperationResult {
+    async fn request_from(
+        self: &Arc<Self>,
+        operation: SecretOperation,
+        provider: Option<bruhs_models::connections::ServiceProvider>,
+    ) -> OperationResult {
         if operation.validate().is_err() {
             return OperationResult::status("invalid_operation");
         }
@@ -389,12 +500,23 @@ impl SecretScope {
             return OperationResult::status("working_directory_unavailable");
         };
         let key = storage_key(&cwd, &operation.name);
-        let (saved_available, storage_unavailable) =
+        let (saved_available, storage_unavailable) = if provider.is_some() {
+            (false, false)
+        } else {
             match self.manager.store.find(project, &operation.name).await {
                 Ok(value) => (value.is_some(), false),
                 // Use-once still works; the form explicitly reports unavailable saved credentials.
                 Err(_) => (false, true),
-            };
+            }
+        };
+        let connection = if let Some(provider) = provider {
+            match self.manager.connections.connection(provider).await {
+                Ok(connection) => Some(connection),
+                Err(_) => return OperationResult::status("connection_unavailable"),
+            }
+        } else {
+            None
+        };
         if !self.active.load(Ordering::Acquire) {
             return OperationResult::status("cancelled");
         }
@@ -405,6 +527,7 @@ impl SecretScope {
             cwd: project.to_owned(),
             saved_available,
             storage_unavailable,
+            connection: connection.map(Box::new),
         };
         let (reply, receive) = oneshot::channel();
         {
@@ -420,6 +543,7 @@ impl SecretScope {
                     key,
                     reply,
                     busy: false,
+                    login_cancel: watch::channel(false).0,
                 },
             );
         }
@@ -428,12 +552,14 @@ impl SecretScope {
             id: request.id.clone(),
         };
         self.emit(QueryEvent::SecretRequest(request.clone())).await;
-        let value = match receive.await {
-            Ok(Approved::Run(value)) => value,
+        let (value, spawned) = match receive.await {
+            Ok(Approved::Run(value)) => (value, None),
+            Ok(Approved::Connected(value, spawned)) => (value, Some(spawned)),
             Ok(Approved::Decline) => return OperationResult::status("declined"),
             Err(_) => return OperationResult::status("cancelled"),
         };
         let mut command = tokio::process::Command::new(&request.operation.command[0]);
+        crate::connections::protect_command(&mut command);
         command
             .args(&request.operation.command[1..])
             .current_dir(cwd)
@@ -461,6 +587,9 @@ impl SecretScope {
         };
         drop(command);
         drop(value);
+        if let Some(spawned) = spawned {
+            let _ = spawned.send(());
+        }
         let Ok(mut child) = child else {
             return OperationResult::status("command_start_failed");
         };

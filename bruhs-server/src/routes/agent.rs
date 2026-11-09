@@ -481,6 +481,7 @@ mod tests {
                     cwd: "/tmp/project".into(),
                     saved_available: false,
                     storage_unavailable: false,
+                    connection: None,
                 };
                 (
                     QueryEvent::SecretRequest(request.clone()),
