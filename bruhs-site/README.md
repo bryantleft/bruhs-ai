@@ -1,12 +1,18 @@
 # bruhs-site
 
-The landing page at https://bruhs.ai (www redirects with a 308). Static HTML,
-CSS and JS in `public/`, with no build step and no functions.
+The landing page at https://bruhs.ai (www redirects with a 308). An Astro
+site with static output and no functions: one layout (`src/layouts/Base.astro`)
+for the head, nav and footer, three pages in `src/pages/`, plain modules in
+`src/scripts/`, and fonts, logos and screenshots in `public/`.
 
 ```
-npm test           # page + command-bar tests, no install needed (Node 22.18+)
-npm ci && npm run typecheck
+npm ci             # Node 22.23.4+
+npm run dev        # http://localhost:4321
+npm test           # builds dist/, then page, CSP, changelog and command-bar tests
+npm run typecheck
 ```
+
+The hero mascot is drawn in dithered braille dots by `src/scripts/braille.js`.
 
 ## Deploys
 
@@ -44,12 +50,14 @@ crop and WebP step from the raw PNGs in `/tmp/bruhs-shots`.
 
 ## Keeping it honest
 
-- `public/changelog.html` is written by hand from `git log`, one `<article>`
-  per Monday-to-Sunday week, newest first, and only the newest carries
-  `badge-current`. `test/page.test.ts` checks the ids, order and badge.
+- `/changelog` is built from the repository's `CHANGELOG.md`
+  (`src/lib/changelog.js` parses it), so a push that only edits
+  `CHANGELOG.md` redeploys the site (`ignoreCommand` in `vercel.json`).
 - The keyboard map mirrors the defaults in
   `bruhs-models/src/logic/keybindings.rs`. Update both together.
 - Captions under each screenshot describe what the app does today. Re-capture
   when a surface changes enough that the picture and the caption disagree.
 - The CSP in `vercel.json` allows only same-origin scripts, styles, fonts and
-  images, so no inline `style=""` or `<script>` in the HTML.
+  images, so no inline `style=""` or `<script>` in the HTML. Astro inlines
+  small ones by default; `astro.config.mjs` turns that off and
+  `test/build.test.ts` fails if any appear in `dist/`.

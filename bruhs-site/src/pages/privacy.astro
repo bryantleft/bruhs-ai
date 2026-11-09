@@ -1,23 +1,15 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Privacy · bruhs</title>
-  <meta name="description" content="The bruhs.ai website collects nothing about you. What the bruhs app sends online, and where downloads come from.">
-  <link rel="canonical" href="https://bruhs.ai/privacy">
-  <meta name="theme-color" content="#141210">
-  <link rel="icon" href="/bruhs.svg" type="image/svg+xml">
-  <link rel="stylesheet" href="/site.css">
-</head>
-<body>
-  <header class="nav">
-    <div class="wrap">
-      <a class="brand" href="/" aria-label="bruhs home"><img src="/bruhs.svg" alt="" width="26" height="26"><span class="brand-name">bruhs</span></a>
-      <div class="nav-actions"><a class="btn btn-quiet" href="/">Back to the page</a></div>
-    </div>
-  </header>
-  <main class="doc">
+---
+import Base from "../layouts/Base.astro";
+---
+
+<Base
+  title="Privacy · bruhs"
+  description="The bruhs.ai website collects nothing about you. What the bruhs app sends online, and where downloads come from."
+  path="/privacy"
+  current="privacy"
+  fonts={[]}
+>
+  <main id="main" class="doc">
     <div class="wrap">
       <h1>Privacy</h1>
       <p>This page covers the bruhs.ai website and the downloads it links to. The bruhs app keeps your data on your device; the <a href="/#privacy">privacy section</a> of the home page lists what goes online.</p>
@@ -34,5 +26,4 @@
       <p class="subtle">Last updated November 8, 2026.</p>
     </div>
   </main>
-</body>
-</html>
+</Base>

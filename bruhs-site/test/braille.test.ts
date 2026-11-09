@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { FACE, HALO, MOUTH, sample, threshold } from "../public/braille.js";
+import { FACE, HALO, MOUTH, sample, threshold } from "../src/scripts/braille.js";
 
 const face = { cx: 0, cy: 0, r: 100, lookX: 0, lookY: 0, minRy: 0.05 };
 

@@ -4,15 +4,19 @@
   "type": "module",
   "description": "bruhs.ai landing page, deployed on Vercel",
   "scripts": {
-    "test": "node --test \"test/**/*.test.ts\"",
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "test": "astro build --silent && node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p .",
-    "changelog": "node scripts/changelog.mjs"
+    "changelog:check": "node src/lib/changelog.js --check"
   },
   "engines": {
-    "node": ">=22.18"
+    "node": ">=22.23.4"
   },
   "devDependencies": {
     "@types/node": "24.19.2",
+    "astro": "7.4.4",
     "typescript": "7.0.2"
   }
 }

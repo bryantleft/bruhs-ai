@@ -6,7 +6,7 @@
 # Runs from a clean checkout of `origin/main` (on `main` or detached) that
 # the gate passed on. CHANGELOG.md must have a dated `## [<version>]` section:
 # it becomes the release notes, and bruhs.ai/changelog shows the same entry
-# (bruhs-site/public/changelog.html must already be regenerated from it).
+# (the site builds that page from CHANGELOG.md when main deploys).
 # Builds with
 # scripts/bundle-macos.sh --sign --notarize, uploads the disk image, the
 # update zip and SHA256SUMS to a draft release, then publishes it, which
@@ -40,7 +40,7 @@ notes=$(awk -v v="$version" '
   END { if (buf != "") print buf }
 ')
 [[ -n $notes ]] || { echo "CHANGELOG.md has no dated '## [$version] - YYYY-MM-DD' section" >&2; exit 1; }
-(cd bruhs-site && node scripts/changelog.mjs --check) || exit 1
+node bruhs-site/src/lib/changelog.js --check || exit 1
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
   echo "$tag already exists" >&2; exit 1
 fi

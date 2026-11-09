@@ -1,0 +1,86 @@
+---
+// Head, nav and footer for every page, so they can't drift apart.
+import "../styles/site.css";
+
+interface Props {
+  title: string;
+  description: string;
+  /** Path for the canonical URL, e.g. "/" or "/changelog". */
+  path: string;
+  ogTitle?: string;
+  ogDescription?: string;
+  /** Font files to preload, by Monaspace family name, e.g. "Krypton". */
+  fonts?: readonly string[];
+  /** Highlights the matching nav and footer link. */
+  current?: "home" | "changelog" | "privacy";
+  /** The ⌘K button needs the home page's script. */
+  palette?: boolean;
+}
+
+const {
+  title,
+  description,
+  path,
+  ogTitle = title,
+  ogDescription = description,
+  fonts = ["Krypton", "Neon"],
+  current,
+  palette = false,
+} = Astro.props;
+const canonical = new URL(path, "https://bruhs.ai").href;
+const download = current === "home" ? "#get" : "/#get";
+const here = (page: Props["current"]) => (page === current ? "page" : undefined);
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title}</title>
+    <meta name="description" content={description} />
+    <meta name="theme-color" content="#141210" />
+    <link rel="canonical" href={canonical} />
+    <meta property="og:type" content="website" />
+    <meta property="og:url" content={canonical} />
+    <meta property="og:title" content={ogTitle} />
+    <meta property="og:description" content={ogDescription} />
+    <meta name="twitter:card" content="summary" />
+    <link rel="icon" href="/bruhs.svg" type="image/svg+xml" />
+    {fonts.map((font) => <link rel="preload" href={`/fonts/Monaspace${font}Variable.woff2`} as="font" type="font/woff2" crossorigin />)}
+  </head>
+  <body>
+    <a class="skip" href="#main">Skip to content</a>
+
+    <header class="nav">
+      <div class="wrap">
+        <a class="brand" href="/" aria-label="bruhs home"><img src="/bruhs.svg" alt="" width="26" height="26" /><span class="brand-name">bruhs</span></a>
+        <div class="nav-actions">
+          <a class="nav-link" href="/changelog" aria-current={here("changelog")}>Changelog</a>
+          <a class="nav-link hide-sm" href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
+          {palette && (
+            <button class="btn btn-ghost hide-sm" type="button" data-open-palette aria-haspopup="dialog" aria-label="Jump to a section">
+              <kbd><span class="mod">⌘</span>K</kbd>
+            </button>
+          )}
+          <a class="btn btn-primary" href={download}>Download</a>
+        </div>
+      </div>
+    </header>
+
+    <slot />
+
+    <footer class="foot">
+      <div class="wrap">
+        <span>© 2026 bruhs.ai</span>
+        <nav aria-label="Footer">
+          <a href="/privacy" aria-current={here("privacy")}>Privacy</a>
+          <a href="/changelog" aria-current={here("changelog")}>Changelog</a>
+          <a href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
+        </nav>
+      </div>
+    </footer>
+
+    <slot name="after" />
+  </body>
+</html>

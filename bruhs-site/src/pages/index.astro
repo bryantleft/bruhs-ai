@@ -1,41 +1,15 @@
-<!doctype html>
-<html lang="en">
-<head>
-  <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>bruhs: one window for your whole day</title>
-  <meta name="description" content="A local-first, keyboard-native agent for your whole day: coding agents, tasks, calendar, meetings, people, notes, money and health in one window. Free, open source, for macOS.">
-  <meta name="theme-color" content="#141210">
-  <link rel="canonical" href="https://bruhs.ai/">
-  <meta property="og:type" content="website">
-  <meta property="og:url" content="https://bruhs.ai/">
-  <meta property="og:title" content="bruhs: one window for your whole day">
-  <meta property="og:description" content="Agents, tasks, calendar, meetings, people, notes, money and health. One ⌘K away, on your machine.">
-  <meta name="twitter:card" content="summary">
-  <link rel="icon" href="/bruhs.svg" type="image/svg+xml">
-  <link rel="preload" href="/fonts/MonaspaceKryptonVariable.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="preload" href="/fonts/MonaspaceNeonVariable.woff2" as="font" type="font/woff2" crossorigin>
-  <link rel="stylesheet" href="/site.css">
-  <script type="module" src="/site.js"></script>
-</head>
-<body>
-  <a class="skip" href="#main">Skip to content</a>
+---
+import Base from "../layouts/Base.astro";
+---
 
-  <header class="nav">
-    <div class="wrap">
-      <a class="brand" href="/" aria-label="bruhs home">
-        <img src="/bruhs.svg" alt="" width="26" height="26"><span class="brand-name">bruhs</span></a>
-      <div class="nav-actions">
-        <a class="nav-link" href="/changelog">Changelog</a>
-        <a class="nav-link hide-sm" href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
-        <button class="btn btn-ghost hide-sm" type="button" data-open-palette aria-haspopup="dialog" aria-label="Jump to a section">
-          <kbd><span class="mod">⌘</span>K</kbd>
-        </button>
-        <a class="btn btn-primary" href="#get">Download</a>
-      </div>
-    </div>
-  </header>
-
+<Base
+  title="bruhs: one window for your whole day"
+  description="A local-first, keyboard-native agent for your whole day: coding agents, tasks, calendar, meetings, people, notes, money and health in one window. Free, open source, for macOS."
+  ogDescription="Agents, tasks, calendar, meetings, people, notes, money and health. One ⌘K away, on your machine."
+  path="/"
+  current="home"
+  palette
+>
   <main id="main">
     <section class="hero">
       <div class="wrap hero-grid">
@@ -140,7 +114,7 @@
 
         <div id="privacy" class="duo-col">
           <h2 class="h2" tabindex="-1">Stays on your Mac.</h2>
-          <p class="muted">No bruhs cloud. Only your messages to Claude or Codex leave, and Google Calendar if you connect it.</p>
+          <p class="muted">No bruhs cloud. Only your messages to Claude or Codex leave, plus Google Calendar if you connect it and update checks you can turn off.</p>
         </div>
       </div>
     </section>
@@ -173,18 +147,7 @@
     </section>
   </main>
 
-  <footer class="foot">
-    <div class="wrap">
-      <span>© 2026 bruhs.ai</span>
-      <nav aria-label="Footer">
-        <a href="/privacy">Privacy</a>
-        <a href="/changelog">Changelog</a>
-        <a href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
-      </nav>
-    </div>
-  </footer>
-
-  <dialog class="palette-dialog" aria-label="Jump to">
+  <dialog slot="after" class="palette-dialog" aria-label="Jump to">
     <div class="palette" data-palette data-palette-mode="dialog">
       <div class="palette-input">
         <span class="prompt" aria-hidden="true">›</span>
@@ -195,5 +158,8 @@
       <ul class="palette-list" id="dialog-palette-list" role="listbox" aria-label="Commands"></ul>
     </div>
   </dialog>
-</body>
-</html>
+</Base>
+
+<script>
+  import "../scripts/site.js";
+</script>

@@ -1,0 +1,69 @@
+---
+import Base from "../layouts/Base.astro";
+import CHANGELOG from "../../../CHANGELOG.md?raw";
+import { inline, longDate, parseChangelog } from "../lib/changelog.js";
+
+const REPO = "https://github.com/bryantleft/bruhs-ai";
+const releases = parseChangelog(CHANGELOG);
+if (releases.length === 0) throw new Error("CHANGELOG.md has no released versions to show on /changelog");
+---
+
+<Base
+  title="Changelog · bruhs"
+  description="What changed in each release of bruhs: new features, changes and fixes, newest first."
+  ogDescription="What changed in each release of bruhs."
+  path="/changelog"
+  current="changelog"
+  fonts={["Krypton"]}
+>
+  <main id="main" class="changelog">
+    <div class="wrap">
+      <header class="changelog-head">
+        <p class="eyebrow">Changelog</p>
+        <h1 class="display">Better with<br><span class="soft">every release.</span></h1>
+        <p class="lede">What changed, and when it shipped. Every entry is one signed release, and the app links here when an update is ready.</p>
+      </header>
+
+      {releases.map((release, index) => {
+        const id = `v${release.version}`;
+        return (
+          <article class="release" id={id}>
+            <header class="release-meta">
+              <p class="release-week"><time datetime={release.date}>{longDate(release.date)}</time></p>
+              <h2 class="release-title"><a href={`#${id}`}>{id}</a></h2>
+              {index === 0 && <p class="badges"><span class="badge badge-current">Current</span></p>}
+            </header>
+            <div class="release-body">
+              {release.summary && <p class="release-summary" set:html={inline(release.summary)} />}
+              {release.sections.map((section) => {
+                const kind = section.kind.toLowerCase();
+                const sid = `${id}-${kind}`;
+                return (
+                  <section class="changes" aria-labelledby={sid}>
+                    <h3 class={`change-kind kind-${kind}`} id={sid}>{section.kind}</h3>
+                    <ul>
+                      {/* One <span> per item: the <li> is a two-column grid (dash, text), so inline <code> must not become a grid cell of its own. */}
+                      {section.items.map((item) => <li><span set:html={inline(item)} /></li>)}
+                    </ul>
+                  </section>
+                );
+              })}
+              <p class="release-links">
+                {index === 0 && <a href="/#get">Download latest</a>}
+                <a href={`${REPO}/releases/tag/${id}`}>Release details <span aria-hidden="true">→</span></a>
+              </p>
+            </div>
+          </article>
+        );
+      })}
+
+      <section class="changelog-join" aria-labelledby="changelog-join-title">
+        <h2 class="h2" id="changelog-join-title">Try the latest build</h2>
+        <div class="get-row">
+          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg">Download for macOS</a>
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai">View on GitHub</a>
+        </div>
+      </section>
+    </div>
+  </main>
+</Base>

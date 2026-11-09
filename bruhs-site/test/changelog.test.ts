@@ -2,16 +2,11 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { inline, parseChangelog, renderPage } from "../scripts/changelog.mjs";
+import { inline, parseChangelog } from "../src/lib/changelog.js";
 
 const CHANGELOG = readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8");
-const PAGE = readFileSync(new URL("../public/changelog.html", import.meta.url), "utf8");
 
 describe("CHANGELOG.md", () => {
-  it("is what public/changelog.html shows (run `npm run changelog` after editing it)", () => {
-    assert.equal(renderPage(PAGE, CHANGELOG), PAGE);
-  });
-
   it("dates every released version", () => {
     for (const release of parseChangelog(CHANGELOG)) {
       assert.match(release.date, /^\d{4}-\d{2}-\d{2}$/, `v${release.version}`);

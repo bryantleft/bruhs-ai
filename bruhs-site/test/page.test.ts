@@ -2,9 +2,10 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { COMMANDS } from "../public/palette.js";
+import { COMMANDS } from "../src/scripts/palette.js";
 
-const PUBLIC = new URL("../public/", import.meta.url);
+// The built site: `npm test` runs `astro build` first.
+const PUBLIC = new URL("../dist/", import.meta.url);
 const html = readFileSync(new URL("index.html", PUBLIC), "utf8");
 const ids = new Set([...html.matchAll(/\sid="([^"]+)"/g)].map((match) => match[1]));
 
