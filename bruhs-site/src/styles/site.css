@@ -360,6 +360,42 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
   .brand-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 
+/* Page transitions: the next page resolves through braille-sized dots
+   in 2×2 ordered-dither order (one dot of each 16px tile per layer), while
+   the nav holds still. Cross-document view
+   transitions need no script; browsers without them just navigate. */
+@view-transition { navigation: auto; }
+@property --dot-a { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --dot-b { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --dot-c { syntax: "<length>"; inherits: false; initial-value: 0px; }
+@property --dot-d { syntax: "<length>"; inherits: false; initial-value: 0px; }
+.nav { view-transition-name: nav; }
+/* Navs differ a little per page (⌘K is home only): swap, don't overlap. */
+::view-transition-group(nav), ::view-transition-new(nav) { animation: none; }
+::view-transition-old(nav) { display: none; }
+::view-transition-old(root) { animation: none; }
+::view-transition-new(root) {
+  mask-image:
+    radial-gradient(circle at center, #000 var(--dot-a), transparent calc(var(--dot-a) + .5px)),
+    radial-gradient(circle at center, #000 var(--dot-b), transparent calc(var(--dot-b) + .5px)),
+    radial-gradient(circle at center, #000 var(--dot-c), transparent calc(var(--dot-c) + .5px)),
+    radial-gradient(circle at center, #000 var(--dot-d), transparent calc(var(--dot-d) + .5px));
+  mask-size: 16px 16px;
+  mask-position: 0 0, 8px 8px, 8px 0, 0 8px;
+  /* 200ms per layer, 33ms apart: done in ~300ms, the reveal budget. */
+  animation:
+    dot-a 200ms var(--ease) both,
+    dot-b 200ms var(--ease) 33ms both,
+    dot-c 200ms var(--ease) 66ms both,
+    dot-d 200ms var(--ease) 100ms both;
+}
+/* 6px covers the corners of each 8px cell (half-diagonal 5.7px). */
+@keyframes dot-a { to { --dot-a: 6px; } }
+@keyframes dot-b { to { --dot-b: 6px; } }
+@keyframes dot-c { to { --dot-c: 6px; } }
+@keyframes dot-d { to { --dot-d: 6px; } }
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
+  @view-transition { navigation: none; }
 }
