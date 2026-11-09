@@ -199,6 +199,19 @@ fn router(state: ServerState) -> Router {
         .route("/api/agent/approve", post(routes::approve::post_approve))
         .route("/api/agent/secret", post(routes::secrets::submit))
         .route("/api/credentials", get(routes::secrets::list))
+        .route("/api/connections", get(routes::connections::list))
+        .route(
+            "/api/connections/{provider}/start",
+            post(routes::connections::start),
+        )
+        .route(
+            "/api/connections/{provider}",
+            get(routes::connections::get).delete(routes::connections::disconnect),
+        )
+        .route(
+            "/api/connections/attempts/{id}",
+            get(routes::connections::attempt).delete(routes::connections::cancel),
+        )
         .route(
             "/api/credentials/{id}",
             axum::routing::put(routes::secrets::replace).delete(routes::secrets::delete),

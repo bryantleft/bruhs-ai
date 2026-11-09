@@ -101,6 +101,8 @@ pub struct SecretRequest {
     pub saved_available: bool,
     #[serde(default)]
     pub storage_unavailable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub connection: Option<Box<crate::connections::ServiceConnection>>,
 }
 
 /// Sent only to the private submission endpoint, never to the provider.
@@ -110,6 +112,7 @@ pub struct SecretRequest {
 pub enum SecretDecision {
     Provide { value: String, save: bool },
     UseSaved,
+    UseConnection { id: String },
     ForgetSaved,
     Decline,
 }

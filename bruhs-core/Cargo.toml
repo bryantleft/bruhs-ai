@@ -30,6 +30,7 @@ futures-core = { workspace = true }
 async-trait = "0.1"
 # ── Phase 1 (Calendar v1 Google Sync) ──
 reqwest = { workspace = true }
+axum = { workspace = true }
 keyring = { workspace = true }
 directories = { workspace = true }
 base64 = "0.22"

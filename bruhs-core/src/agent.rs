@@ -454,6 +454,11 @@ impl AgentOrchestrator {
         &self.secrets
     }
 
+    pub(crate) fn with_connections(mut self, connections: crate::connections::Connections) -> Self {
+        self.secrets = self.secrets.with_connections(connections);
+        self
+    }
+
     pub(crate) fn with_secret_store(mut self, store: crate::secrets::SecretStore) -> Self {
         self.secrets = crate::secrets::SecretManager::new(store);
         self
@@ -934,6 +939,9 @@ fn build_query_options(
                 .access(codex_access(permission_mode))
                 .skip_git_repo_check(true);
             // New threads are saved (not ephemeral) so the next turn can resume them.
+            for key in crate::connections::PRIVATE_ENV {
+                options = options.env_remove(key);
+            }
             if let Some(thread_id) = session_id {
                 options = options.resume(thread_id);
             }
@@ -990,7 +998,10 @@ pub(crate) fn claude_query_options(
     keep_api_key: bool,
 ) -> claude_sdk_rs::QueryOptions {
     let mut options = claude_sdk_rs::QueryOptions::new(prompt);
-    for key in PARENT_SESSION_ENV {
+    for key in PARENT_SESSION_ENV
+        .into_iter()
+        .chain(crate::connections::PRIVATE_ENV)
+    {
         options = options.env_remove(key);
     }
     if keep_api_key {
@@ -1763,6 +1774,24 @@ mod tests {
                     "{key}"
                 );
             }
+        }
+    }
+
+    #[test]
+    fn both_providers_remove_service_client_secrets_from_child_environments() {
+        let claude = claude_query_options("hi", true);
+        let codex = codex(build_query_options(
+            AgentProvider::Codex,
+            "hi",
+            "/tmp",
+            "model",
+            PermissionMode::Default,
+            None,
+            None,
+        ));
+        for key in crate::connections::PRIVATE_ENV {
+            assert!(claude.env_remove.iter().any(|removed| removed == key));
+            assert!(codex.env_remove.iter().any(|removed| removed == key));
         }
     }
 

@@ -6,6 +6,7 @@ pub mod calendar_google;
 pub mod capture_proxy;
 pub mod capture_status;
 pub mod cli;
+pub mod connections;
 pub mod editor;
 pub mod events_stream;
 pub mod files;

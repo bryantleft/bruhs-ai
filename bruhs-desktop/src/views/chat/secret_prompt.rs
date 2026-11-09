@@ -206,6 +206,7 @@ mod tests {
                 cwd: "/tmp".into(),
                 saved_available: false,
                 storage_unavailable: false,
+                connection: None,
             });
             drop(chat.render_secret_prompt(window, cx));
             let prompt = chat.secret_prompt.clone().unwrap();
