@@ -38,28 +38,30 @@ describe("index.html", () => {
 
 describe("changelog.html", () => {
   const changelog = readFileSync(new URL("changelog.html", PUBLIC), "utf8");
-  const releases = [...changelog.matchAll(/<article class="release" id="week-(\d{4}-\d{2}-\d{2})">([\s\S]*?)<\/article>/g)];
+  const releases = [...changelog.matchAll(/<article class="release" id="v(\d+\.\d+\.\d+)">([\s\S]*?)<\/article>/g)];
 
   it("lists at least one release", () => {
     assert.ok(releases.length > 0);
   });
 
-  it("names each release by the Monday that starts its week, newest first", () => {
-    const dates = releases.map((match) => match[1] ?? "");
-    for (const date of dates) {
-      assert.equal(new Date(`${date}T00:00:00Z`).getUTCDay(), 1, `week-${date} doesn't start on a Monday`);
-    }
-    assert.deepEqual(dates, [...dates].sort().reverse(), "releases are out of order");
-  });
-
-  it("links each release title to itself", () => {
-    for (const [, date, body] of releases) {
-      assert.match(body ?? "", new RegExp(`<h2 class="release-title"><a href="#week-${date}">`), `week-${date} title link`);
+  it("orders releases newest first", () => {
+    const versions = releases.map((match) => (match[1] ?? "").split(".").map(Number));
+    for (let i = 1; i < versions.length; i += 1) {
+      const [a = [], b = []] = [versions[i - 1], versions[i]];
+      const newer = a[0]! - b[0]! || a[1]! - b[1]! || a[2]! - b[2]!;
+      assert.ok(newer > 0, `v${releases[i - 1]?.[1]} is listed before an equal or newer v${releases[i]?.[1]}`);
     }
   });
 
-  it("marks only the newest release as Latest", () => {
-    const latest = releases.map(([, , body]) => (body ?? "").includes("badge-current"));
-    assert.deepEqual(latest, releases.map((_, index) => index === 0));
+  it("links each release title to itself and to its GitHub release", () => {
+    for (const [, version, body] of releases) {
+      assert.match(body ?? "", new RegExp(`<h2 class="release-title"><a href="#v${version}">`), `v${version} title link`);
+      assert.match(body ?? "", new RegExp(`/releases/tag/v${version}"`), `v${version} release link`);
+    }
+  });
+
+  it("marks only the newest release as Current", () => {
+    const current = releases.map(([, , body]) => (body ?? "").includes("badge-current"));
+    assert.deepEqual(current, releases.map((_, index) => index === 0));
   });
 });

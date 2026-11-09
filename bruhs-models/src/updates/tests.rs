@@ -644,3 +644,31 @@ fn a_packaged_build_reads_like_a_release() {
     assert_eq!(report.summary(), "Bruhs v0.2.0 is out");
     assert_eq!(sidebar_label(&report), "Update Bruhs");
 }
+
+#[test]
+fn release_notes_link_to_the_versions_changelog_entry() {
+    assert_eq!(
+        release_notes_url("0.1.1"),
+        "https://bruhs.ai/changelog#v0.1.1"
+    );
+    assert_eq!(
+        release_notes_url("v0.2.0"),
+        "https://bruhs.ai/changelog#v0.2.0"
+    );
+    let release = ReleaseUpdate {
+        current_version: "0.1.0".into(),
+        latest_version: Some("0.1.1".into()),
+        release_url: Some("https://github.com/bryantleft/bruhs-ai/releases/tag/v0.1.1".into()),
+        download_url: None,
+        sha256: None,
+    };
+    assert_eq!(
+        release.notes_url().as_deref(),
+        Some("https://bruhs.ai/changelog#v0.1.1")
+    );
+    let unknown = ReleaseUpdate {
+        latest_version: None,
+        ..release
+    };
+    assert_eq!(unknown.notes_url(), None);
+}

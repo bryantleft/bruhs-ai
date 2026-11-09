@@ -92,10 +92,26 @@ agent CLIs and records pass/fail and tokens; `scripts/token-bench.sh`
 measures per-turn overhead. Both spend real tokens. See
 [bench/README.md](bench/README.md) and [bench/RESULTS.md](bench/RESULTS.md).
 
+## Changelog
+
+User-facing changes go under `## [Unreleased]` in [CHANGELOG.md](CHANGELOG.md)
+([Keep a Changelog](https://keepachangelog.com/en/1.1.0/): Added, Changed,
+Fixed…), written for people who use bruhs rather than for its code. The site
+renders it at [bruhs.ai/changelog](https://bruhs.ai/changelog); after editing a
+released entry, run `npm run changelog` in `bruhs-site` (its tests fail until
+the page matches).
+
 ## Releases
 
-`scripts/release.sh <version>` publishes a release from a clean `main` that
-matches `origin/main`. It builds with
+To cut a release:
+
+1. In `CHANGELOG.md`, rename `## [Unreleased]` to `## [<version>] - <date>`,
+   add a fresh empty `## [Unreleased]`, and update the links at the bottom.
+2. Run `npm run changelog` in `bruhs-site`, commit, and push `main`.
+3. Run `scripts/release.sh <version>`.
+
+`scripts/release.sh <version>` publishes a release from a clean checkout of
+`origin/main` and uses the version's `CHANGELOG.md` section as its notes. It builds with
 `scripts/bundle-macos.sh <version> --sign --notarize`, uploads
 `Bruhs-macOS-<arch>.dmg`, `Bruhs-macOS-<arch>.zip` (what installed apps
 update from) and `SHA256SUMS` to a draft release, then publishes it, which

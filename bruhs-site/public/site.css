@@ -318,6 +318,13 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
 .kind-added::before { background: var(--pandan-300); }
 .kind-changed::before { background: var(--blueberry-300); }
 .kind-fixed::before { background: var(--durian-300); }
+.kind-removed::before, .kind-deprecated::before { background: var(--mangosteen-300); }
+.kind-security::before { background: var(--lychee-300); }
+.release-summary code, .changes code { font: 400 .875em/1.4 var(--neon); color: var(--rambutan-100); }
+.release-links { display: flex; flex-wrap: wrap; gap: 8px 24px; margin: 24px 0 0; font: 500 .875rem/1.4 var(--argon); }
+.release-links a { color: var(--rambutan-300); text-decoration: none; }
+.release-links a:first-child:not(:only-child) { color: var(--persimmon-400); }
+.release-links a:hover { color: var(--rambutan-100); }
 .changes ul { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; color: var(--rambutan-300); }
 .changes li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 8px; }
 .changes li::before { content: "–"; color: var(--rambutan-600); }

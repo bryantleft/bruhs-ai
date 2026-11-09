@@ -9,8 +9,8 @@ use bruhs_models::agent::AgentProvider;
 use bruhs_models::time::{format_relative_ms, EpochMs, RelativeTimeStyle};
 use bruhs_models::updates::{
     confirm_title, provider_cli_label, running_label, sidebar_label, AppUpdateState, ProviderRun,
-    ProviderUpdate, ProviderUpdateState, UpdatesReport, POLL_INTERVAL_MS, RUN_POLL_INTERVAL_MS,
-    SUCCESS_VISIBLE_MS,
+    ProviderUpdate, ProviderUpdateState, ReleaseUpdate, UpdatesReport, POLL_INTERVAL_MS,
+    RUN_POLL_INTERVAL_MS, SUCCESS_VISIBLE_MS,
 };
 use std::collections::HashSet;
 
@@ -1163,6 +1163,11 @@ impl Workspace {
             .as_ref()
             .and_then(|app| app.release.as_ref())
             .and_then(|release| release.release_url.clone());
+        let notes_url = app
+            .as_ref()
+            .filter(|app| app.state == AppUpdateState::Behind)
+            .and_then(|app| app.release.as_ref())
+            .and_then(ReleaseUpdate::notes_url);
         let control = match (app.as_ref().map(|app| app.state), &install) {
             (_, AppInstall::Ready { .. }) => web_button(
                 "desktop-settings-restart-update",
@@ -1192,6 +1197,27 @@ impl Workspace {
             }
             (Some(AppUpdateState::UpToDate), _) => up_to_date_badge(),
             _ => div().into_any_element(),
+        };
+        // "Release notes" opens this version's entry on bruhs.ai/changelog.
+        let control = match notes_url {
+            Some(url) => div()
+                .flex()
+                .items_center()
+                .gap(px(8.0))
+                .child(
+                    web_button(
+                        "desktop-settings-release-notes",
+                        WebButtonVariant::Ghost,
+                        WebButtonSize::Small,
+                        ButtonState::Enabled,
+                    )
+                    .debug_selector(|| "desktop-settings-release-notes".to_string())
+                    .child("Release notes")
+                    .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
+                )
+                .child(control)
+                .into_any_element(),
+            None => control,
         };
         let mut rows = vec![self.settings_row_opts(
             "desktop-settings-row-update-app",
