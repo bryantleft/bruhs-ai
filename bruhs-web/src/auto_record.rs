@@ -107,6 +107,7 @@ impl RecordingTargets {
 /// Transcription and diarization options for a new recording.
 #[derive(Clone, Debug)]
 pub struct CaptureOptions {
+    pub transcription: bruhs_models::TranscriptionSettings,
     pub whisper_model: WhisperModel,
     pub live_whisper_model: WhisperModel,
     pub diarize: DiarizeSettings,
@@ -116,6 +117,7 @@ pub struct CaptureOptions {
 /// context once by a component.
 #[derive(Clone, Copy)]
 pub struct CaptureSettings {
+    transcription: RwSignal<bruhs_models::TranscriptionSettings>,
     whisper_model: ReadSignal<WhisperModel>,
     live_whisper_model: ReadSignal<WhisperModel>,
     diarize: ReadSignal<DiarizeSettings>,
@@ -123,10 +125,12 @@ pub struct CaptureSettings {
 
 impl CaptureSettings {
     pub fn from_context() -> Self {
+        let crate::state::TranscriptionSettingsSignal(transcription) = expect_context();
         let WhisperModelSignal(whisper_model) = expect_context();
         let LiveWhisperModelSignal(live_whisper_model) = expect_context();
         let DiarizeSettingsSignal(diarize) = expect_context();
         Self {
+            transcription,
             whisper_model,
             live_whisper_model,
             diarize,
@@ -136,6 +140,7 @@ impl CaptureSettings {
     /// The options as currently set.
     pub fn current(self) -> CaptureOptions {
         CaptureOptions {
+            transcription: self.transcription.get_untracked(),
             whisper_model: self.whisper_model.get_untracked(),
             live_whisper_model: self.live_whisper_model.get_untracked(),
             diarize: self.diarize.get_untracked(),
@@ -146,7 +151,7 @@ impl CaptureSettings {
 impl CaptureOptions {
     fn body(&self, meeting: &Meeting) -> Result<api::CaptureStartBody, IdError> {
         Ok(api::CaptureStartBody {
-            transcription: None,
+            transcription: Some(self.transcription.clone()),
             meeting_id: MeetingId::try_from(meeting.id.as_str())?,
             started_at_ms: api::epoch_ms(meeting.started_at_ms),
             model: Some(self.whisper_model),
@@ -430,6 +435,10 @@ mod tests {
     fn capture_options_build_the_shared_start_body() {
         let meeting = Meeting::new("Standup", 1_234.9);
         let options = CaptureOptions {
+            transcription: bruhs_models::TranscriptionSettings {
+                provider: bruhs_models::TranscriptionProvider::OpenAiCompatible,
+                remote_model: "chosen-model".into(),
+            },
             whisper_model: WhisperModel::default(),
             live_whisper_model: WhisperModel::default(),
             diarize: DiarizeSettings::default(),
@@ -437,6 +446,7 @@ mod tests {
         let body = options.body(&meeting).unwrap();
         assert_eq!(body.meeting_id.as_str(), meeting.id);
         assert_eq!(body.started_at_ms.as_millis(), 1_234);
+        assert_eq!(body.transcription, Some(options.transcription.clone()));
         let mut bad = meeting;
         bad.id = "a/b".into();
         assert!(options.body(&bad).is_err());

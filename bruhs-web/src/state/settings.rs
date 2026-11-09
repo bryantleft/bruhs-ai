@@ -3,6 +3,7 @@
 use bruhs_models::logic::compact::{autocompact_tokens, IdleCompact};
 use bruhs_models::logic::keybindings::{stored_keybindings, Keybinding};
 use bruhs_models::logic::run_place::{claude_effort, RememberedWorktree, WorkspaceChoice};
+use bruhs_models::TranscriptionSettings;
 
 use super::*;
 
@@ -51,6 +52,9 @@ pub struct SetWhisperModelSignal(pub WriteSignal<WhisperModel>);
 pub struct LiveWhisperModelSignal(pub ReadSignal<WhisperModel>);
 #[derive(Copy, Clone)]
 pub struct SetLiveWhisperModelSignal(pub WriteSignal<WhisperModel>);
+
+#[derive(Copy, Clone)]
+pub struct TranscriptionSettingsSignal(pub RwSignal<TranscriptionSettings>);
 
 #[derive(Copy, Clone)]
 pub struct DiarizeSettingsSignal(pub ReadSignal<DiarizeSettings>);
@@ -165,6 +169,12 @@ pub(super) fn provide() {
         let current = live_whisper_model.get();
         save_json_pref("bruhs.whisper_model_live", &current);
     });
+
+    let transcription = RwSignal::new(
+        load_json_pref::<TranscriptionSettings>("bruhs.transcription").unwrap_or_default(),
+    );
+    Effect::new(move |_| save_json_pref("bruhs.transcription", &transcription.get()));
+    provide_context(TranscriptionSettingsSignal(transcription));
 
     let initial_personality: PersonalitySettings =
         load_json_pref("bruhs.personality").unwrap_or_default();

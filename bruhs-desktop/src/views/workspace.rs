@@ -1097,6 +1097,7 @@ pub struct Workspace {
     settings_slider_drag: Option<settings_ui::SettingsSlider>,
     /// Text fields of the Recording steppers (web `Stepper` input).
     settings_stepper_inputs: Vec<Entity<InputState>>,
+    settings_transcription_model_input: Entity<InputState>,
     /// Open date / date-time picker popover (web `DatePicker` / `DateTimePicker`).
     date_picker: Option<date_picker_ui::DatePickerOpen>,
     date_picker_hour_input: Entity<InputState>,
@@ -1403,6 +1404,8 @@ impl Workspace {
         let stepper_prefs = meetings_hub.read(cx).prefs.clone();
         let settings_stepper_inputs =
             Self::new_settings_stepper_inputs(&stepper_prefs, window, cx, &mut subscriptions);
+        let settings_transcription_model_input =
+            Self::new_transcription_model_input(&stepper_prefs, window, cx, &mut subscriptions);
         let (date_picker_hour_input, date_picker_minute_input) =
             Self::new_date_picker_inputs(window, cx, &mut subscriptions);
         let (threads, active_thread_id) = Self::restore_threads(
@@ -1557,6 +1560,7 @@ impl Workspace {
                 .collect(),
             settings_slider_drag: None,
             settings_stepper_inputs,
+            settings_transcription_model_input,
             date_picker: None,
             date_picker_hour_input,
             date_picker_minute_input,
