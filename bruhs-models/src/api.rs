@@ -440,6 +440,10 @@ pub struct AgentRequest {
     /// Claude `--autocompact`. Omitted when unset, and never sent to Codex.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub autocompact: Option<String>,
+    /// What the agent may do with other threads. Omitted for the default
+    /// (list, read and message).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub thread_access: Option<crate::thread_link::ThreadAccess>,
 }
 
 /// `POST /api/agent/second-opinion`: a read-only review of a thread's last
@@ -540,6 +544,9 @@ pub enum AgentStreamEvent {
     SecretResolved {
         id: String,
     },
+    /// The turn's agent asks about, or writes to, another thread. The app
+    /// that owns the threads answers at `/api/agent/thread-reply`.
+    ThreadRequest(crate::thread_link::ThreadRequest),
     /// The provider session started.
     Init {
         #[serde(default)]

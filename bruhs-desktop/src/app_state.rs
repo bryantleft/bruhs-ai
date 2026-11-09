@@ -34,7 +34,9 @@ impl DesktopState {
         // the desktop reads Google Calendar through bruhs-server's SSE
         // stream, and a second sync loop here would race the server's on
         // the same keychain entry and cursor files with no subscriber.
-        let builder = AppState::builder();
+        // Threads run side by side here, so an agent may wait for another
+        // thread's reply inside one tool call.
+        let builder = AppState::builder().thread_waits(true);
         #[cfg(test)]
         let builder = builder
             .secret_store(bruhs_core::secrets::SecretStore::in_memory())

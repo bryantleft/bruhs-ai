@@ -19,6 +19,8 @@ use crate::state::{AgentMessage, MessagePart, PermissionRequest, ToolCallInfo, U
 pub enum StreamEffect {
     SecretRequest(bruhs_models::secrets::SecretRequest),
     SecretResolved(String),
+    /// The turn's agent asks about another thread; the app answers.
+    ThreadRequest(bruhs_models::thread_link::ThreadRequest),
     None,
     /// The provider announced (or confirmed) the session id for this thread.
     SessionId(String),
@@ -76,6 +78,7 @@ pub fn apply_event(msg: &mut AgentMessage, event: &AgentStreamEvent, now_ms: f64
     match event {
         AgentStreamEvent::SecretRequest(request) => StreamEffect::SecretRequest(request.clone()),
         AgentStreamEvent::SecretResolved { id } => StreamEffect::SecretResolved(id.clone()),
+        AgentStreamEvent::ThreadRequest(request) => StreamEffect::ThreadRequest(request.clone()),
         AgentStreamEvent::Text { text } => {
             if text.is_empty() {
                 return StreamEffect::None;

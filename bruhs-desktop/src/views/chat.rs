@@ -359,9 +359,21 @@ impl Message {
     }
 }
 
+/// How a message another thread's agent waited on ended here.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ThreadMessageAnswer {
+    Replied(String),
+    Stopped,
+    Failed(String),
+    /// It left the queue before it ran.
+    Removed,
+}
+
 enum AgentUiEvent {
     SecretRequest(bruhs_models::secrets::SecretRequest),
     SecretResolved(String),
+    /// The turn's agent asks about another thread; the workspace answers.
+    ThreadRequest(bruhs_models::thread_link::ThreadRequest),
     Text(String),
     Thinking(String),
     ToolCall {
@@ -419,6 +431,9 @@ pub enum ChatViewEvent {
     Handoff {
         brief: String,
     },
+    /// This thread's agent asks about, or writes to, another thread. The
+    /// workspace owns the threads, so it answers.
+    ThreadRequest(bruhs_models::thread_link::ThreadRequest),
     /// Something the user should know about failed (shown as a banner).
     Notice(String),
     /// Saved chat content (messages or title) changed outside a turn's start
@@ -464,6 +479,8 @@ pub struct ComposerPrefs {
     pub follow_up_steer: bool,
     pub autocompact: Option<String>,
     pub compact_idle: IdleCompact,
+    /// What agents may do with other threads.
+    pub thread_access: bruhs_models::thread_link::ThreadAccess,
 }
 
 pub struct ChatView {
@@ -575,6 +592,8 @@ pub struct ChatView {
     pub claude_autocompact: Option<String>,
     /// Idle compact for a Claude thread over the token floor.
     pub compact_idle: IdleCompact,
+    /// What this thread's agent may do with other threads (Settings).
+    pub thread_access: bruhs_models::thread_link::ThreadAccess,
     /// This message sends in full. The return chip sets it. Not saved.
     compact_full: bool,
     pub previous_worktree: Option<RememberedWorktree>,
@@ -913,6 +932,7 @@ impl ChatView {
             follow_up_steer: false,
             claude_autocompact: None,
             compact_idle: IdleCompact::Return,
+            thread_access: bruhs_models::thread_link::ThreadAccess::default(),
             compact_full: false,
             previous_worktree: None,
             base_branch: String::new(),
@@ -1071,6 +1091,7 @@ impl ChatView {
         self.follow_up_steer = composer.follow_up_steer;
         self.claude_autocompact = composer.autocompact;
         self.compact_idle = composer.compact_idle;
+        self.thread_access = composer.thread_access;
         if !self.effort_chip_visible() {
             self.effort_menu_open = false;
         }
@@ -1082,6 +1103,7 @@ impl ChatView {
             follow_up_steer: self.follow_up_steer,
             autocompact: self.claude_autocompact.clone(),
             compact_idle: self.compact_idle,
+            thread_access: self.thread_access,
         }
     }
 

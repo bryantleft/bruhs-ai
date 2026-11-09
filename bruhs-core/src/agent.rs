@@ -6,6 +6,7 @@ use crate::models::{BackgroundTask, TaskKind};
 use crate::registry::BackgroundTaskRegistry;
 use bruhs_models::agent::{AgentProvider, PermissionMode};
 use bruhs_models::ids::ThreadId;
+use bruhs_models::thread_link::ThreadAccess;
 use codex_sdk_rs::{ApprovalPolicy, CodexAccess, SandboxMode};
 use futures_core::Stream;
 use serde::{Deserialize, Serialize};
@@ -61,6 +62,8 @@ pub struct AgentTurn {
     pub autocompact: Option<String>,
     /// Run with a lean context (see [`AgentTurn::lean`]).
     pub lean: bool,
+    /// What the turn's agent may do with the app's other threads.
+    pub thread_access: ThreadAccess,
 }
 
 impl AgentTurn {
@@ -86,7 +89,14 @@ impl AgentTurn {
             effort: None,
             autocompact: None,
             lean: false,
+            thread_access: ThreadAccess::default(),
         }
+    }
+
+    /// The user's setting for messages between threads.
+    pub fn thread_access(mut self, access: ThreadAccess) -> Self {
+        self.thread_access = access;
+        self
     }
 
     /// Run a Claude turn without the user's settings files, and so without
@@ -160,6 +170,10 @@ pub enum QueryEvent {
     SecretResolved {
         id: String,
     },
+    /// The turn's agent asks about, or writes to, another thread. The app
+    /// that owns the threads answers with
+    /// [`crate::thread_link::ThreadLinks::resolve`].
+    ThreadRequest(bruhs_models::thread_link::ThreadRequest),
     Init {
         session_id: String,
         model: Option<String>,
@@ -293,6 +307,7 @@ pub enum OrchestratorEvent {
 pub struct OrchestratorEventStream {
     rx: mpsc::Receiver<OrchestratorEvent>,
     _secrets: crate::secrets::SecretGuard,
+    _threads: crate::thread_link::ThreadScopeGuard,
     _turn: TurnGuard,
 }
 
@@ -400,6 +415,7 @@ pub(crate) enum ProviderQueryOptions {
 
 pub struct AgentOrchestrator {
     secrets: crate::secrets::SecretManager,
+    thread_links: crate::thread_link::ThreadLinks,
     registry: Arc<BackgroundTaskRegistry>,
     sessions: Sessions,
     permissions: Permissions,
@@ -443,6 +459,7 @@ impl AgentOrchestrator {
     pub fn new(registry: Arc<BackgroundTaskRegistry>) -> Self {
         Self {
             secrets: crate::secrets::SecretManager::default(),
+            thread_links: crate::thread_link::ThreadLinks::default(),
             registry,
             sessions: Arc::new(Mutex::new(HashMap::new())),
             permissions: Arc::new(RwLock::new(HashMap::new())),
@@ -454,8 +471,18 @@ impl AgentOrchestrator {
         &self.secrets
     }
 
+    /// Pending requests from turns about other threads.
+    pub fn thread_links(&self) -> &crate::thread_link::ThreadLinks {
+        &self.thread_links
+    }
+
     pub(crate) fn with_connections(mut self, connections: crate::connections::Connections) -> Self {
         self.secrets = self.secrets.with_connections(connections);
+        self
+    }
+
+    pub(crate) fn with_thread_waits(mut self, waits: bool) -> Self {
+        self.thread_links = self.thread_links.with_waits(waits);
         self
     }
 
@@ -548,6 +575,7 @@ impl AgentOrchestrator {
             effort,
             autocompact,
             lean,
+            thread_access,
         } = turn;
 
         // Claim the thread and pick the session to resume, atomically.
@@ -621,6 +649,14 @@ impl AgentOrchestrator {
             .turn(thread_id.clone(), project_path.into(), tx.clone());
         let consumer_secrets = secrets.guard();
         let producer_secrets = secrets.guard();
+        let threads = self.thread_links.turn(thread_id.clone(), &tx);
+        let consumer_threads = threads.guard();
+        let producer_threads = threads.guard();
+        // A Plan turn changes nothing, and Codex cannot ask first, so both
+        // only read threads; so does a turn the user limited to reading.
+        let threads_read_only = thread_access == ThreadAccess::Read
+            || permission_mode == PermissionMode::Plan
+            || (provider == AgentProvider::Codex && permission_mode == PermissionMode::Default);
         let turn = TurnContext {
             _guard: producer_guard,
             tx,
@@ -638,6 +674,7 @@ impl AgentOrchestrator {
 
         tokio::spawn(async move {
             let _secrets = producer_secrets;
+            let _threads = producer_threads;
             let broker = match secrets.start().await {
                 Ok(broker) => broker,
                 Err(_) => {
@@ -659,6 +696,25 @@ impl AgentOrchestrator {
                 .await;
                 return;
             }
+            // Off in Settings: no thread tools. The turn also runs without
+            // them when the broker cannot start.
+            let _thread_broker = if thread_access == ThreadAccess::Off {
+                None
+            } else {
+                match threads.start(threads_read_only).await {
+                    Ok(broker) => match broker.configure(&mut query_options) {
+                        Ok(()) => Some(broker),
+                        Err(error) => {
+                            tracing::warn!("Thread tools could not be configured: {error}");
+                            None
+                        }
+                    },
+                    Err(error) => {
+                        tracing::warn!("Thread broker could not start: {error}");
+                        None
+                    }
+                }
+            };
             match query_options {
                 ProviderQueryOptions::Claude(options) => {
                     stream_claude(options, turn, permissions, steers).await;
@@ -672,6 +728,7 @@ impl AgentOrchestrator {
         Ok(OrchestratorEventStream {
             rx,
             _secrets: consumer_secrets,
+            _threads: consumer_threads,
             _turn: consumer_guard,
         })
     }

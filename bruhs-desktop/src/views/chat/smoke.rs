@@ -1,4 +1,5 @@
-//! Hooks for `BRUHS_DESKTOP_COMMANDS_SMOKE` (see `src/smoke.rs`). Debug
+//! Hooks for `BRUHS_DESKTOP_COMMANDS_SMOKE` and
+//! `BRUHS_DESKTOP_THREADS_SMOKE` (see `src/smoke.rs`). Debug
 //! builds only: a release build has no way to auto-submit prompts.
 
 use super::*;
@@ -19,6 +20,16 @@ impl ChatView {
     /// The composer's text.
     pub(crate) fn smoke_composer(&self, cx: &App) -> String {
         self.input_state.read(cx).value().to_string()
+    }
+
+    /// The latest prompt's text.
+    pub(crate) fn smoke_last_prompt(&self) -> String {
+        self.messages
+            .iter()
+            .rev()
+            .find(|message| matches!(message.role, MessageRole::User))
+            .map(|message| message.content.clone())
+            .unwrap_or_default()
     }
 
     /// The last assistant reply's text.

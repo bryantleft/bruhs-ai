@@ -51,6 +51,7 @@ use bruhs_models::logic::compact::{autocompact_flag, autocompact_tokens, IdleCom
 use bruhs_models::logic::pages::{page_from_key, page_key, PageHistory};
 use bruhs_models::logic::run_place::{RememberedWorktree, WorkspaceChoice};
 use bruhs_models::logic::sidebar::SidebarSection;
+use bruhs_models::thread_link::ThreadAccess;
 use bruhs_models::EpochMs;
 use bruhs_models::{
     backlinks_for, AutomationState, CaptureKind, CaptureRecord, ConflictResolution,
@@ -109,6 +110,7 @@ mod state_file;
 mod state_fixture_tests;
 mod task_forms_ui;
 mod tasks_ui;
+mod thread_link_ui;
 mod thread_snapshot;
 mod threads_ui;
 mod today_ui;
@@ -762,6 +764,12 @@ struct PersistedWorkspaceState {
     /// `before` or `never`. Absent means compact when you return.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     compact_idle: Option<String>,
+    /// `read` or `off`. Absent lets agents message other threads.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thread_access: Option<String>,
+    /// Agent-to-agent messages allowed in a row. Absent means the default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    thread_hops: Option<u32>,
     /// Last worktree this client created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     previous_worktree: Option<RememberedWorktree>,
@@ -1161,6 +1169,12 @@ pub struct Workspace {
     autocompact_input: Entity<InputState>,
     /// What to do with an idle Claude thread over the token floor.
     compact_idle: IdleCompact,
+    /// What agents may do with other threads.
+    thread_access: ThreadAccess,
+    /// Agent-to-agent messages allowed in a row before the user is asked.
+    thread_hops: u32,
+    /// Tool calls held until another thread has replied.
+    thread_waits: Vec<thread_link_ui::ThreadWait>,
     /// Visited pages. `Cmd+[` and `Cmd+]` walk this stack.
     page_history: PageHistory,
     /// Offered as Previous worktree. Shared by every thread.
@@ -1483,6 +1497,16 @@ impl Workspace {
             .and_then(|state| state.compact_idle.as_deref())
             .map(IdleCompact::parse)
             .unwrap_or_default();
+        let thread_access = persisted
+            .as_ref()
+            .and_then(|state| state.thread_access.as_deref())
+            .map(ThreadAccess::parse)
+            .unwrap_or_default();
+        let thread_hops = persisted
+            .as_ref()
+            .and_then(|state| state.thread_hops)
+            .filter(|hops| bruhs_models::thread_link::HOP_CHOICES.contains(hops))
+            .unwrap_or(bruhs_models::thread_link::MAX_HOPS);
         let base_branch = String::new();
         let mut workspace = Self {
             workflow_window: window.window_handle(),
@@ -1637,6 +1661,9 @@ impl Workspace {
             claude_autocompact,
             autocompact_input,
             compact_idle,
+            thread_access,
+            thread_hops,
+            thread_waits: Vec::new(),
             page_history: PageHistory::new(),
             previous_worktree,
             base_branch,

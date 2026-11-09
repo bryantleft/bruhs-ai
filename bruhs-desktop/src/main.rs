@@ -92,6 +92,16 @@ fn main() {
         }
         return;
     }
+    if bruhs_core::thread_link::is_mcp_helper() {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .and_then(|runtime| runtime.block_on(bruhs_core::thread_link::run_mcp_helper()));
+        if result.is_err() {
+            std::process::exit(1);
+        }
+        return;
+    }
     // Bruhs.app opened from Finder has launchd's bare PATH; adopt the login
     // shell's so providers, git and the helpers resolve. Before any thread.
     if bruhs_core::updates::release::current_app_bundle().is_some() {
@@ -244,6 +254,12 @@ fn main() {
                 Ok(window) if smoke::desktop_commands_smoke_enabled() => {
                     if let Some(workspace) = workspace_cell.borrow().clone() {
                         smoke::schedule_desktop_commands_smoke(window, workspace, cx);
+                    }
+                }
+                #[cfg(debug_assertions)]
+                Ok(window) if smoke::desktop_threads_smoke_enabled() => {
+                    if let Some(workspace) = workspace_cell.borrow().clone() {
+                        smoke::schedule_desktop_threads_smoke(window, workspace, cx);
                     }
                 }
                 #[cfg(debug_assertions)]

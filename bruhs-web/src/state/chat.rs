@@ -797,6 +797,8 @@ impl Default for SidebarUndo {
 /// First line of the prompt, capped at 48 characters, for auto-naming a
 /// thread that still has its placeholder title.
 pub fn auto_title(prompt: &str) -> String {
+    // A message from another thread's agent is named after what it says.
+    let prompt = bruhs_models::thread_link::delivery_body(prompt);
     let first = prompt.trim().lines().next().unwrap_or("").trim();
     crate::format::truncate_chars(first, 48)
 }

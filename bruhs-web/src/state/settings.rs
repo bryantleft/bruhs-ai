@@ -77,6 +77,14 @@ pub struct ClaudeEffortSignal(pub RwSignal<Option<String>>);
 #[derive(Copy, Clone)]
 pub struct FollowUpSteerSignal(pub RwSignal<bool>);
 
+/// What agents may do with other threads. Stored as `bruhs.threadAccess`.
+#[derive(Copy, Clone)]
+pub struct ThreadAccessSignal(pub RwSignal<bruhs_models::thread_link::ThreadAccess>);
+
+/// Agent-to-agent messages allowed in a row. Stored as `bruhs.threadHops`.
+#[derive(Copy, Clone)]
+pub struct ThreadHopsSignal(pub RwSignal<u32>);
+
 /// Claude `--autocompact` (`bruhs.claudeAutoCompact`). Empty omits the flag.
 #[derive(Copy, Clone)]
 pub struct ClaudeAutoCompactSignal(pub RwSignal<Option<String>>);
@@ -274,6 +282,18 @@ pub(super) fn provide() {
     );
     Effect::new(move |_| save_pref("bruhs.compactIdle", compact_idle.get().as_str()));
     provide_context(FollowUpSteerSignal(follow_up_steer));
+    let thread_access = RwSignal::new(
+        load_pref("bruhs.threadAccess")
+            .map(|value| bruhs_models::thread_link::ThreadAccess::parse(&value))
+            .unwrap_or_default(),
+    );
+    Effect::new(move |_| save_pref("bruhs.threadAccess", thread_access.get().as_str()));
+    let thread_hops = RwSignal::new(bruhs_models::thread_link::parse_hops(
+        &load_pref("bruhs.threadHops").unwrap_or_default(),
+    ));
+    Effect::new(move |_| save_pref("bruhs.threadHops", &thread_hops.get().to_string()));
+    provide_context(ThreadAccessSignal(thread_access));
+    provide_context(ThreadHopsSignal(thread_hops));
     provide_context(ClaudeAutoCompactSignal(claude_autocompact));
     provide_context(CompactIdleSignal(compact_idle));
     provide_context(CompactFullSignal(RwSignal::new(false)));

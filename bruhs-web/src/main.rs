@@ -25,6 +25,7 @@ mod task_style;
 mod tasks_stream;
 mod thread_catalog;
 mod thread_history;
+mod thread_link;
 mod transcript_sync;
 mod ui;
 mod updates;

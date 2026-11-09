@@ -55,6 +55,10 @@ pub struct AgentRequest {
     /// Claude `--autocompact`. Missing omits the flag. Codex ignores it.
     #[serde(default)]
     pub autocompact: Option<String>,
+    /// What the agent may do with other threads. Missing means list, read
+    /// and message; an unknown value is rejected.
+    #[serde(default)]
+    pub thread_access: Option<bruhs_models::thread_link::ThreadAccess>,
 }
 
 /// Convert a `QueryEvent` into a `serde_json::Value`.
@@ -64,6 +68,12 @@ fn query_event_to_json(event: &QueryEvent) -> Value {
             json!({"type": "secret_request", "id": request.id, "thread_id": request.thread_id, "operation": request.operation, "cwd": request.cwd, "saved_available": request.saved_available, "storage_unavailable": request.storage_unavailable})
         }
         QueryEvent::SecretResolved { id } => json!({"type": "secret_resolved", "id": id}),
+        QueryEvent::ThreadRequest(request) => json!({
+            "type": "thread_request",
+            "id": request.id,
+            "thread_id": request.thread_id,
+            "operation": request.operation,
+        }),
         QueryEvent::Init {
             session_id,
             model,
@@ -202,6 +212,7 @@ pub async fn post_agent(
     .resume(body.session_id)
     .effort(body.effort.as_deref())
     .autocompact(body.autocompact.as_deref())
+    .thread_access(body.thread_access.unwrap_or_default())
     // A chat with no project (life surfaces, meetings) runs in the home
     // directory and needs no coding plugins.
     .lean(project.is_home());
@@ -266,6 +277,21 @@ pub async fn post_second_opinion(
             usage: None,
         },
     }))
+}
+
+/// `POST /api/agent/thread-reply`. The web app's answer to a
+/// `thread_request` event: it owns the threads, so it lists, reads and
+/// queues; this only hands the answer back to the waiting tool call.
+pub async fn post_thread_reply(
+    State(state): State<Arc<AppState>>,
+    body: Result<Json<bruhs_models::thread_link::ThreadReplySubmission>, JsonRejection>,
+) -> Result<impl IntoResponse, AppError> {
+    let Json(body) = body.map_err(|rejection| AppError::BadRequest(rejection.body_text()))?;
+    state
+        .thread_links()
+        .resolve(&body.thread_id, &body.request_id, body.reply)
+        .map_err(|error| AppError::NotFound(error.to_string()))?;
+    Ok(Json(json!({ "success": true })))
 }
 
 /// `POST /api/agent/steer`. Writes one user message into the running Claude turn.
@@ -488,6 +514,22 @@ mod tests {
                     Typed::SecretRequest(request),
                 )
             },
+            {
+                let request = bruhs_models::thread_link::ThreadRequest {
+                    id: "ask-1".into(),
+                    thread_id: bruhs_models::ids::ThreadId::new_v4(),
+                    operation: bruhs_models::thread_link::ThreadOperation::Message {
+                        thread_id: Some("abcd1234".into()),
+                        title: None,
+                        message: "Report back".into(),
+                        wait: true,
+                    },
+                };
+                (
+                    QueryEvent::ThreadRequest(request.clone()),
+                    Typed::ThreadRequest(request),
+                )
+            },
             (
                 QueryEvent::Init {
                     session_id: "s-1".into(),
@@ -626,6 +668,7 @@ mod tests {
             match event {
                 QueryEvent::SecretRequest(_)
                 | QueryEvent::SecretResolved { .. }
+                | QueryEvent::ThreadRequest(_)
                 | QueryEvent::Init { .. }
                 | QueryEvent::Text(_)
                 | QueryEvent::Thinking(_)

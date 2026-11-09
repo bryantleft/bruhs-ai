@@ -267,6 +267,7 @@ pub fn ChatPage() -> impl IntoView {
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
     let history = expect_context::<crate::thread_history::ThreadHistory>();
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
+    let thread_link = expect_context::<crate::thread_link::ThreadLink>();
     let saves = expect_context::<crate::task_saves::TaskSaves>();
     let thread_notice = expect_context::<ThreadNotice>();
     let PromptQueueSignal(prompt_queue) = expect_context::<PromptQueueSignal>();
@@ -280,6 +281,8 @@ pub fn ChatPage() -> impl IntoView {
     let CompactIdleSignal(compact_idle) = expect_context::<CompactIdleSignal>();
     let CompactFullSignal(compact_full) = expect_context::<CompactFullSignal>();
     let FollowUpSteerSignal(follow_up_steer) = expect_context::<FollowUpSteerSignal>();
+    let crate::state::ThreadAccessSignal(thread_access) =
+        expect_context::<crate::state::ThreadAccessSignal>();
     let BaseBranchSignal(base_branch) = expect_context::<BaseBranchSignal>();
     let PreviousWorktreeSignal(previous_worktree) = expect_context::<PreviousWorktreeSignal>();
     let RightPanelSignal(panel) = expect_context::<RightPanelSignal>();
@@ -935,6 +938,8 @@ pub fn ChatPage() -> impl IntoView {
                         } else {
                             None
                         },
+                        thread_access: Some(thread_access.get_untracked())
+                            .filter(|access| *access != Default::default()),
                     };
                     let saw_init = Rc::new(Cell::new(false));
                     let saw_init_cb = Rc::clone(&saw_init);
@@ -968,6 +973,11 @@ pub fn ChatPage() -> impl IntoView {
                                 }
                                 StreamEffect::SecretResolved(id) => pending_secrets
                                     .update(|items| items.retain(|item| item.id != id)),
+                                StreamEffect::ThreadRequest(request) => {
+                                    if request.thread_id.as_str() == tid {
+                                        thread_link.answer(request);
+                                    }
+                                }
                                 StreamEffect::SessionId(sess) => {
                                     saw_init_cb.set(true);
                                     let tid2 = tid.clone();
@@ -1117,6 +1127,29 @@ pub fn ChatPage() -> impl IntoView {
                     thread_notice.flash(
                         "The handoff brief is the last reply in its thread; copy it into a new thread.",
                     );
+                }
+            }
+
+            // The agent wrote to another thread: its message is queued there
+            // and one turn runs at a time, so the view follows it. Never away
+            // from another thread, a draft, or this thread's own queue.
+            if let Some(next) = thread_link.follow(&thread_id) {
+                let here = active_thread_id.get_untracked().as_deref() == Some(thread_id.as_str());
+                if here
+                    && input_value.get_untracked().trim().is_empty()
+                    && !prompt_queue.with_untracked(|queue| queue.has_for(&thread_id))
+                {
+                    crate::state::activate_thread(
+                        history,
+                        active_thread_id,
+                        next,
+                        set_active_thread_id,
+                        set_messages,
+                        stream_buffer,
+                        unread_threads,
+                    );
+                } else {
+                    thread_notice.flash(crate::thread_link::QUEUED_ELSEWHERE);
                 }
             }
         });

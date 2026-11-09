@@ -42,6 +42,15 @@ pub async fn submit_secret(
     Ok(result.resolved)
 }
 
+/// The app's answer to a `thread_request` stream event.
+pub async fn submit_thread_reply(
+    body: &bruhs_models::thread_link::ThreadReplySubmission,
+) -> Result<(), ApiError> {
+    let _: serde_json::Value =
+        send_json(Method::POST, "/api/agent/thread-reply", Some(body)).await?;
+    Ok(())
+}
+
 pub async fn saved_credentials() -> Result<Vec<bruhs_models::secrets::SavedCredential>, ApiError> {
     get_json("/api/credentials").await
 }

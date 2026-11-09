@@ -36,6 +36,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bruhs_core::secrets::run_mcp_helper().await?;
         return Ok(());
     }
+    if bruhs_core::thread_link::is_mcp_helper() {
+        bruhs_core::thread_link::run_mcp_helper().await?;
+        return Ok(());
+    }
     tracing_subscriber::registry()
         .with(log_filter())
         .with(tracing_subscriber::fmt::layer())
@@ -198,6 +202,10 @@ fn router(state: ServerState) -> Router {
         )
         .route("/api/agent/approve", post(routes::approve::post_approve))
         .route("/api/agent/secret", post(routes::secrets::submit))
+        .route(
+            "/api/agent/thread-reply",
+            post(routes::agent::post_thread_reply),
+        )
         .route("/api/credentials", get(routes::secrets::list))
         .route("/api/connections", get(routes::connections::list))
         .route(
