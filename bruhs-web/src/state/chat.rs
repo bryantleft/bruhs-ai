@@ -834,9 +834,8 @@ pub(super) fn provide() {
     let (is_streaming, set_is_streaming) = signal(false);
     let (tasks, set_tasks) = signal(Vec::<BackgroundTask>::new());
 
-    // Each thread keeps its model (T3: a thread's `modelSelection`), so
-    // opening one puts its model in the composer and its session resumes on
-    // the provider that owns it. A thread with no turn yet is on the default.
+    // Each thread keeps its model, so opening one puts its model in the
+    // composer and its session resumes on the provider that owns it. A thread with no turn yet is on the default.
     let crate::state::SetCurrentModel(set_current_model) =
         expect_context::<crate::state::SetCurrentModel>();
     let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();

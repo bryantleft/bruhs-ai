@@ -1789,9 +1789,8 @@ impl Workspace {
     }
 
     /// Pick the model of the open thread (the composer's chip), which new
-    /// threads then start on. Each thread keeps its own model (T3: a
-    /// thread's `modelSelection`), so another thread's session still
-    /// resumes on the provider that owns it.
+    /// threads then start on. Each thread keeps its own model, so another
+    /// thread's session still resumes on the provider that owns it.
     fn set_current_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
         let model_id = model_id.into();
         self.current_model = model_id.clone();
