@@ -112,10 +112,10 @@ export const COMMANDS = [
     target: "/changelog",
   },
   {
-    id: "get",
+    id: "download",
     tag: "page",
-    label: "Get bruhs",
-    detail: "open source, run it from source",
+    label: "Download for macOS",
+    detail: "free and open source",
     keywords: "download install mac macos app get open source github source clone release",
     target: "#get",
   },
