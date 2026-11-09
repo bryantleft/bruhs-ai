@@ -1,22 +1,21 @@
-//! Dither, the Bruhs brand texture: the Bruh mascot and a level meter drawn as
-//! braille-style dots (cells of 2 columns × 4 rows). A port of
-//! `@bruhs/theme/dither` (AGENTS.md section 19) so the web canvas and the
-//! desktop painter place the same dots. Pure math; each surface draws.
+//! Dither, the Bruhs brand texture, for the app: the Bruh mascot as a
+//! halftone of dots, and a level meter drawn as one braille cell. A port of
+//! `@bruhs/theme/dither` (AGENTS.md section 19) and of bruhs.ai's
+//! `src/scripts/braille.js`, so every surface places the same dots. Pure math;
+//! each surface draws.
 
 use crate::num::{ToFloatLossy, ToIntSaturating};
-
-/// 4×4 Bayer matrix, row-major. Thresholds are `(n + 0.5) / 16`.
-const BAYER: [u8; 16] = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5];
-
-/// Ordered-dither threshold in (0, 1) for the dot at grid position (col, row).
-pub fn threshold(col: usize, row: usize) -> f32 {
-    let n = BAYER[(row % 4) * 4 + col % 4];
-    (f32::from(n) + 0.5) / 16.0
-}
 
 /// The Bruh's colors, from `bruhs.svg` (theme tokens `bruh-base`, `bruh-mouth`).
 pub const BRUH_FACE_RGB: u32 = 0x00fa_da5e;
 pub const BRUH_MOUTH_RGB: u32 = 0x00fc_4141;
+
+// Light from the upper left, mostly frontal (normalized in `shade`), with some
+// ambient so the shadow side keeps its dots and the outline stays whole.
+const LIGHT: (f32, f32, f32) = (-0.35, -0.45, 0.82);
+const AMBIENT: f32 = 0.25;
+/// How much the dots shrink toward the rim, which rounds the silhouette.
+const RIM: f32 = 0.35;
 
 // Geometry in face radii, from the logo's 600×600 viewBox (r = 300), facing
 // forward (`bruhGeometry.faces.original`).
@@ -26,123 +25,91 @@ const MOUTH: (f32, f32) = (0.023, 0.26);
 const EYE_RX: f32 = 40.0 / 300.0;
 const MOUTH_RX: f32 = 120.0 / 300.0;
 const FEATURE_RY: f32 = 10.0 / 300.0;
-// Light from the upper left, mostly frontal.
-const LIGHT: (f32, f32, f32) = (-0.36, -0.42, 0.83);
 
-/// Which layer a dot belongs to; each is drawn in one color.
+/// Which color a dot is drawn in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DotKind {
     Face,
     Mouth,
-    /// Sparse dots just outside the face, drawn in a quiet neutral.
-    Halo,
 }
 
-/// One dot to draw: its center, in the same units as the box it was laid out in.
+/// One dot to draw: its center and radius, in the box's units.
 #[derive(Debug, Clone, Copy, PartialEq)]
 pub struct Dot {
     pub x: f32,
     pub y: f32,
+    pub radius: f32,
     pub kind: DotKind,
 }
 
-/// Spacing of the dot grid. [`DotGrid::with_pitch`] gives the Bruhs proportions.
-#[derive(Debug, Clone, Copy, PartialEq)]
-pub struct DotGrid {
-    /// Distance between dots inside a cell.
-    pub pitch: f32,
-    /// Extra space between cells, which is what makes the dots read as braille.
-    pub gap: f32,
-    /// Dot radius.
-    pub dot: f32,
+/// Grid spacing for a face radius `r`: about 15 dots per radius on a large
+/// face, down to 9 on a small one (fewer turns the outline into a hexagon).
+pub fn pitch_for(r: f32) -> f32 {
+    r / (r / 10.0).clamp(9.0, 15.0)
 }
 
-impl DotGrid {
-    pub fn with_pitch(pitch: f32) -> Self {
-        Self {
-            pitch,
-            gap: pitch * 0.6,
-            dot: pitch * 0.36,
-        }
-    }
-
-    /// The grid for a Bruh `size` across: about 18 dots per face radius so
-    /// the eyes stay legible on a small mark, 1.5 to 6 px apart.
-    pub fn for_size(size: f32) -> Self {
-        Self::with_pitch((size * 0.4 / 18.0).clamp(1.5, 6.0))
-    }
-}
-
-/// What lies under a point of a Bruh centered at (`cx`, `cy`) with radius `r`:
-/// its layer and brightness (0 to 1), or `None` inside an eye, which is a hole.
-/// `min_feature` is the thinnest an eye or the mouth may be, in face radii, so
-/// they survive a coarse grid.
-pub fn sample(
-    x: f32,
-    y: f32,
-    cx: f32,
-    cy: f32,
-    r: f32,
-    min_feature: f32,
-) -> Option<(DotKind, f32)> {
-    let dx = (x - cx) / r;
-    let dy = (y - cy) / r;
+/// Brightness (0 to 1) of the sphere at a point in face radii, or `None`
+/// outside it.
+pub fn shade(dx: f32, dy: f32) -> Option<f32> {
     let d2 = dx * dx + dy * dy;
     if d2 > 1.0 {
-        // Fades to nothing a fifth of a radius out.
-        let fade = (1.0 - (d2.sqrt() - 1.0) / 0.2).max(0.0);
-        return Some((DotKind::Halo, 0.24 * fade * fade));
+        return None;
     }
-    let ry = FEATURE_RY.max(min_feature);
-    let inside = |(ex, ey): (f32, f32), rx: f32| {
+    let nz = (1.0 - d2).sqrt();
+    let length = (LIGHT.0 * LIGHT.0 + LIGHT.1 * LIGHT.1 + LIGHT.2 * LIGHT.2).sqrt();
+    let lambert = ((LIGHT.0 * dx + LIGHT.1 * dy + LIGHT.2 * nz) / length).max(0.0);
+    Some((AMBIENT + (1.0 - AMBIENT) * lambert) * (1.0 - RIM + RIM * nz.sqrt()))
+}
+
+/// Every dot of a static Bruh filling a `size` × `size` box (face radius
+/// 0.42 × size): a hex grid anchored on the face's center, each dot's area
+/// tracking the light; eyes are holes and the mouth is one row.
+pub fn bruh_dots(size: f32) -> Vec<Dot> {
+    if size.is_nan() || size <= 0.0 {
+        return Vec::new();
+    }
+    let (cx, cy, r) = (size / 2.0, size / 2.0, size * 0.42);
+    let pitch = pitch_for(r);
+    let row_h = pitch * 3.0_f32.sqrt() / 2.0;
+    let eye_ry = FEATURE_RY.max(pitch * 0.9 / r);
+    let mouth_row = (MOUTH.1 * r / row_h).round().to_i32_saturating();
+    let rows = (r / row_h).ceil().to_i32_saturating() + 1;
+    let cols = (r / pitch).ceil().to_i32_saturating() + 1;
+    let in_ellipse = |dx: f32, dy: f32, (ex, ey): (f32, f32), rx: f32, ry: f32| {
         let u = (dx - ex) / rx;
         let v = (dy - ey) / ry;
         u * u + v * v <= 1.0
     };
-    if inside(MOUTH, MOUTH_RX) {
-        return Some((DotKind::Mouth, 1.0));
-    }
-    if inside(LEFT_EYE, EYE_RX) || inside(RIGHT_EYE, EYE_RX) {
-        return None;
-    }
-    let nz = (1.0 - d2).sqrt();
-    let lambert = (LIGHT.0 * dx + LIGHT.1 * dy + LIGHT.2 * nz).max(0.0);
-    Some((DotKind::Face, (0.1 + lambert).min(1.0)))
-}
-
-/// Every dot for a Bruh filling a `size` × `size` box (face radius 0.4 × size),
-/// grid centered. Static by design: the app draws the finished face.
-pub fn bruh_dots(size: f32, grid: DotGrid) -> Vec<Dot> {
-    let DotGrid { pitch, gap, .. } = grid;
-    if size.is_nan() || pitch.is_nan() || size <= 0.0 || pitch <= 0.0 {
-        return Vec::new();
-    }
-    let cell_w = pitch * 2.0 + gap;
-    let cell_h = pitch * 4.0 + gap;
-    let cols = (size / cell_w).ceil().to_usize_saturating();
-    let rows = (size / cell_h).ceil().to_usize_saturating();
-    let ox = (size - cols.to_f32_lossy() * cell_w + gap + pitch) / 2.0;
-    let oy = (size - rows.to_f32_lossy() * cell_h + gap + pitch) / 2.0;
-    let (cx, cy, r) = (size / 2.0, size / 2.0, size * 0.4);
-    // Eyes and mouth at least 1.8 dot rows tall, so they read past the gaps
-    // between braille cells on a small mark.
-    let min_feature = pitch * 1.8 / r;
 
     let mut dots = Vec::new();
-    for cell_row in 0..rows {
-        for cell_col in 0..cols {
-            for dr in 0..4_usize {
-                for dc in 0..2_usize {
-                    let x = ox + cell_col.to_f32_lossy() * cell_w + dc.to_f32_lossy() * pitch;
-                    let y = oy + cell_row.to_f32_lossy() * cell_h + dr.to_f32_lossy() * pitch;
-                    let Some((kind, value)) = sample(x, y, cx, cy, r, min_feature) else {
-                        continue;
-                    };
-                    if value > threshold(cell_col * 2 + dc, cell_row * 4 + dr) {
-                        dots.push(Dot { x, y, kind });
-                    }
-                }
+    for row in -rows..=rows {
+        let y = cy + row.to_f32_lossy() * row_h;
+        let offset = if row % 2 == 0 { 0.0 } else { pitch / 2.0 };
+        for col in -cols..=cols {
+            let x = cx + col.to_f32_lossy() * pitch + offset;
+            let (dx, dy) = ((x - cx) / r, (y - cy) / r);
+            let Some(mut value) = shade(dx, dy) else {
+                continue;
+            };
+            if in_ellipse(dx, dy, LEFT_EYE, EYE_RX, eye_ry)
+                || in_ellipse(dx, dy, RIGHT_EYE, EYE_RX, eye_ry)
+            {
+                continue;
             }
+            let is_mouth = row == mouth_row && ((dx - MOUTH.0) / MOUTH_RX).abs() <= 1.0;
+            if is_mouth {
+                value = value.max(0.75);
+            }
+            let radius = pitch / 2.0 * 0.92 * value.sqrt();
+            if radius < pitch * 0.07 {
+                continue;
+            }
+            let kind = if is_mouth {
+                DotKind::Mouth
+            } else {
+                DotKind::Face
+            };
+            dots.push(Dot { x, y, radius, kind });
         }
     }
     dots
@@ -172,54 +139,49 @@ pub fn meter_column(level: f32) -> [bool; 4] {
 mod tests {
     use super::*;
 
-    #[test]
-    fn every_bayer_level_appears_once_per_tile() {
-        let mut levels: Vec<f32> = (0..4)
-            .flat_map(|row| (0..4).map(move |col| threshold(col, row)))
-            .collect();
-        levels.sort_by(f32::total_cmp);
-        levels.dedup();
-        assert_eq!(levels.len(), 16);
-        assert!(levels.iter().all(|t| *t > 0.0 && *t < 1.0));
-        assert_eq!(threshold(1, 2), threshold(5, 6));
-    }
-
-    #[test]
-    fn the_face_is_lit_from_the_upper_left_with_holes_for_eyes() {
-        let lit = sample(-30.0, -55.0, 0.0, 0.0, 100.0, 0.05);
-        let shaded = sample(70.0, 60.0, 0.0, 0.0, 100.0, 0.05);
-        assert!(matches!(lit, Some((DotKind::Face, _))));
-        assert!(lit.unwrap().1 > shaded.unwrap().1);
-        assert_eq!(sample(-34.0, -25.7, 0.0, 0.0, 100.0, 0.05), None);
-        assert_eq!(sample(33.7, -25.7, 0.0, 0.0, 100.0, 0.05), None);
-        assert!(matches!(
-            sample(2.3, 26.0, 0.0, 0.0, 100.0, 0.05),
-            Some((DotKind::Mouth, _))
-        ));
-    }
-
-    #[test]
-    fn the_halo_fades_out_before_the_box_edge() {
-        let near = sample(110.0, 0.0, 0.0, 0.0, 100.0, 0.0).unwrap();
-        assert_eq!(near.0, DotKind::Halo);
-        assert!(near.1 > 0.0);
-        assert_eq!(
-            sample(125.0, 0.0, 0.0, 0.0, 100.0, 0.0),
-            Some((DotKind::Halo, 0.0))
-        );
-    }
-
-    #[test]
-    fn a_bruh_has_face_mouth_and_halo_dots_inside_its_box() {
-        let size = 96.0;
-        let dots = bruh_dots(size, DotGrid::with_pitch(2.5));
-        let count = |kind| dots.iter().filter(|d| d.kind == kind).count();
-        assert!(count(DotKind::Face) > 200, "face {}", count(DotKind::Face));
-        assert!(count(DotKind::Mouth) > 0);
-        assert!(dots
+    fn nearest(dots: &[Dot], x: f32, y: f32) -> Dot {
+        *dots
             .iter()
-            .all(|d| (0.0..=size).contains(&d.x) && (0.0..=size).contains(&d.y)));
-        assert!(bruh_dots(0.0, DotGrid::with_pitch(2.5)).is_empty());
+            .min_by(|a, b| {
+                let da = (a.x - x).hypot(a.y - y);
+                let db = (b.x - x).hypot(b.y - y);
+                da.total_cmp(&db)
+            })
+            .expect("a Bruh has dots")
+    }
+
+    #[test]
+    fn the_sphere_is_lit_from_the_upper_left_and_keeps_its_shadow_side() {
+        assert!(shade(-0.3, -0.4).unwrap() > shade(0.5, 0.5).unwrap());
+        assert!(shade(0.9, 0.3).unwrap() > 0.1);
+        assert_eq!(shade(0.8, 0.8), None);
+    }
+
+    #[test]
+    fn the_grid_scales_with_the_face() {
+        assert!((pitch_for(150.0) - 10.0).abs() < 1e-4);
+        assert!((pitch_for(40.0) - 40.0 / 9.0).abs() < 1e-4);
+    }
+
+    #[test]
+    fn a_bruh_is_round_symmetric_and_lit_with_eye_holes_and_a_one_row_mouth() {
+        let size = 360.0;
+        let dots = bruh_dots(size);
+        let (c, r) = (size / 2.0, size * 0.42);
+        assert!(dots.iter().all(|d| (d.x - c).hypot(d.y - c) <= r + 1e-3));
+        let left = dots.iter().filter(|d| d.x < c - 1.0).count();
+        let right = dots.iter().filter(|d| d.x > c + 1.0).count();
+        assert!(left.abs_diff(right) <= 2, "left {left} vs right {right}");
+        assert!(
+            nearest(&dots, c - 0.4 * r, c - 0.5 * r).radius
+                > nearest(&dots, c + 0.5 * r, c + 0.6 * r).radius
+        );
+        let eye = (c - 0.34 * r, c - 0.257 * r);
+        assert!(dots.iter().all(|d| (d.x - eye.0).hypot(d.y - eye.1) > 4.0));
+        let mouth: Vec<&Dot> = dots.iter().filter(|d| d.kind == DotKind::Mouth).collect();
+        assert!(mouth.len() >= 6);
+        assert!(mouth.iter().all(|d| (d.y - mouth[0].y).abs() < 1e-3));
+        assert!(bruh_dots(0.0).is_empty());
     }
 
     #[test]
