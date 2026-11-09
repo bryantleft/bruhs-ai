@@ -18,6 +18,25 @@ fn default_true() -> bool {
     true
 }
 
+// ── Live events ────────────────────────────────────────────────────────────
+
+/// `GET /api/events/stream`: the web app's one live connection. Each frame's
+/// SSE `event:` name says which source it comes from; its data is the JSON
+/// that source's own stream sends.
+pub mod live_events {
+    /// Path of the combined stream.
+    pub const PATH: &str = "/api/events/stream";
+    /// Query a client adds when it reopens the stream: it may have missed
+    /// calendar events, so the server replays the calendar sync window.
+    pub const RESUME_QUERY: &str = "resume=true";
+    /// Full task list snapshot (`Vec<BackgroundTask>`), as `/api/tasks/stream`.
+    pub const TASKS: &str = "tasks";
+    /// `CalendarSyncEvent`, as `/api/calendar/events/stream`.
+    pub const CALENDAR: &str = "calendar";
+    /// `MeetingEvent`, as `/api/meetings/stream`.
+    pub const MEETINGS: &str = "meetings";
+}
+
 // ── Meetings ───────────────────────────────────────────────────────────────
 
 /// `POST /api/meetings`.

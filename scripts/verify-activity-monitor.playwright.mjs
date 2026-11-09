@@ -72,7 +72,7 @@ const server = createServer(async (req, res) => {
     if (req.method !== 'GET') return json(res, 403, { error: 'Only synthetic activity-monitor writes permitted' });
     if (path.endsWith('/stream')) {
       res.writeHead(200, { 'Content-Type': 'text/event-stream' });
-      res.write(path === '/api/tasks/stream' ? 'data: []\n\n' : 'data: {"kind":"stream_opened"}\n\n'); return;
+      res.write(path === '/api/events/stream' ? 'event: tasks\ndata: []\n\nevent: calendar\ndata: {"kind":"stream_opened"}\n\nevent: meetings\ndata: {"kind":"stream_opened"}\n\n' : 'data: {"kind":"stream_opened"}\n\n'); return;
     }
     const data = {
       '/api/calendar/google/state': { connected: false, email: null, last_synced_at: null, last_error: null, calendars: [] },

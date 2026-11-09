@@ -51,7 +51,7 @@ pub async fn get_tasks_stream(
     Sse::new(task_snapshots(state.registry().clone())).keep_alive(KeepAlive::default())
 }
 
-fn task_snapshots(
+pub(crate) fn task_snapshots(
     registry: Arc<BackgroundTaskRegistry>,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     let mut changes = registry.watch_changes();

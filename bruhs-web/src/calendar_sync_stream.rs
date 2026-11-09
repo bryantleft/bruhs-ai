@@ -1,4 +1,5 @@
-//! Subscriber for the /api/calendar/events/stream SSE endpoint.
+//! Subscriber for the calendar frames of the live stream
+//! (`crate::live_events`), the same events as /api/calendar/events/stream.
 //!
 //! Each `CalendarSyncEvent` triggers a write into the IDB stores plus a
 //! reducer update on the in-memory signal:
@@ -10,14 +11,12 @@
 //!     (the user explicitly clears them via "Remove all Google events"
 //!     in Phase 3+)
 
+use crate::live_events::LiveEvents;
+use crate::state::{Calendar, CalendarEvent, GoogleCalendarSyncState, SchedulingPreferences};
+use bruhs_models::api::live_events::CALENDAR;
+use bruhs_models::CalendarSyncEvent;
 use bruhs_models::EpochMs;
 use leptos::prelude::*;
-use wasm_bindgen::prelude::*;
-use wasm_bindgen::JsCast;
-use web_sys::{EventSource, MessageEvent};
-
-use crate::state::{Calendar, CalendarEvent, GoogleCalendarSyncState, SchedulingPreferences};
-use bruhs_models::CalendarSyncEvent;
 
 #[derive(Clone, Copy)]
 struct CalendarState {
@@ -30,13 +29,10 @@ struct CalendarState {
     saves: crate::task_saves::TaskSaves,
 }
 
-// Built from the shared API origin (portless-aware) at call time, since
-// `concat!` can't join a non-literal const.
-
-/// Subscribe to the stream and update the calendar signals on every
-/// event. Wires once per app lifetime; the underlying EventSource
-/// auto-reconnects on transient errors.
+/// Update the calendar signals on every calendar event of the live stream.
+/// Wires once per app lifetime.
 pub fn subscribe(
+    live: &mut LiveEvents,
     events_read: ReadSignal<Vec<CalendarEvent>>,
     set_events: WriteSignal<Vec<CalendarEvent>>,
     sync_state_read: ReadSignal<GoogleCalendarSyncState>,
@@ -44,7 +40,7 @@ pub fn subscribe(
     set_calendars: WriteSignal<Vec<Calendar>>,
     scheduling_preferences: RwSignal<SchedulingPreferences>,
 ) {
-    // Capture app-owned context before entering native EventSource callbacks.
+    // Capture app-owned context before entering native stream callbacks.
     let state = CalendarState {
         events_read,
         set_events,
@@ -67,19 +63,7 @@ pub fn subscribe(
             apply_event(event, state);
         }
     });
-    let stream_url = format!("{}/api/calendar/events/stream", crate::api::BASE_URL);
-    let src = match EventSource::new(&stream_url) {
-        Ok(s) => s,
-        Err(e) => {
-            log::warn!("calendar events EventSource failed to open: {e:?}");
-            return;
-        }
-    };
-
-    let on_message = Closure::<dyn FnMut(MessageEvent)>::new(move |ev: MessageEvent| {
-        let Some(data) = ev.data().as_string() else {
-            return;
-        };
+    live.on(CALENDAR, move |data| {
         match serde_json::from_str::<CalendarSyncEvent>(&data) {
             Ok(event) => {
                 pending.update(|events| events.push(event));
@@ -87,8 +71,6 @@ pub fn subscribe(
             Err(e) => log::warn!("malformed calendar sync event: {e}; data: {data}"),
         }
     });
-    src.set_onmessage(Some(on_message.as_ref().unchecked_ref()));
-    on_message.forget();
 }
 
 fn apply_event(event: CalendarSyncEvent, state: CalendarState) {

@@ -9,6 +9,7 @@ mod components;
 mod durable_metadata;
 mod format;
 mod highlight;
+mod live_events;
 mod markdown;
 mod meeting_actions;
 mod meetings_stream;

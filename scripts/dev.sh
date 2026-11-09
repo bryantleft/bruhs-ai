@@ -92,7 +92,6 @@ echo "→ web SPA         :$WEB_PORT  →  $WEB_OPEN"
 (
   cd bruhs-web &&
     BRUHS_API_URL="$API_URL" \
-    BRUHS_STREAM_URL="$API_URL/api/meetings/stream" \
     exec trunk serve --port "$WEB_PORT"
 ) &
 pids+=("$!")
