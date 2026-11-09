@@ -1036,6 +1036,7 @@ mod tests {
                 .with_capture_token_file(Some(token_file.clone()));
             client
                 .capture_start(super::CaptureStartBody {
+                    transcription: None,
                     meeting_id: "m-1".parse().unwrap(),
                     started_at_ms: bruhs_models::time::EpochMs::new(1).unwrap(),
                     model: None,

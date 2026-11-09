@@ -1856,6 +1856,7 @@ pub fn capture_start_body(
 ) -> Result<CaptureStartBody, ServerError> {
     let d = prefs.diarize;
     Ok(CaptureStartBody {
+        transcription: None,
         meeting_id: MeetingId::try_from(meeting_id)
             .map_err(|_| ServerError::Invalid("The meeting has an invalid id."))?,
         started_at_ms: EpochMs::from_f64_floor(started_at_ms)
