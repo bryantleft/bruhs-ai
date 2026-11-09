@@ -1,13 +1,16 @@
-// The bruh mascot as a field of braille dots: 2×4 dot cells, shaded like a
-// lit sphere and ordered-dithered (4×4 Bayer), so the face is solid where the
-// light hits and breaks into scattered dots toward the edge. Geometry follows
-// bruhs.svg. No DOM here: drawing takes any 2D context, so tests run in Node.
+// The Bruh mascot as a halftone of dots: a hex grid over the face, each dot
+// sized by the light on a sphere (dot area tracks brightness) and shrunk a
+// little toward the rim, so the silhouette stays round and the face reads as
+// a lit ball. The eyes are holes and the mouth is one row of red. Geometry
+// from bruhs.svg; `lookX` turns toward its `left` and `right` variants.
+// The same algorithm lives in @bruhs/theme/dither and bruhs-models
+// logic/dither.rs. No DOM here: tests run it in Node.
 
-/** 4×4 Bayer matrix as thresholds in (0, 1). */
+/** 4×4 Bayer matrix as thresholds in (0, 1); the screenshot dissolve's order. */
 const BAYER = [0, 8, 2, 10, 12, 4, 14, 6, 3, 11, 1, 9, 15, 7, 13, 5].map((n) => (n + 0.5) / 16);
 
 /**
- * Ordered-dither threshold for a dot at grid position (col, row).
+ * Ordered-dither threshold for a grid position.
  * @param {number} col
  * @param {number} row
  */
@@ -16,7 +19,7 @@ export function threshold(col, row) {
 }
 
 /**
- * Cheap stable noise in [0, 1) for a grid position, used for the reveal order.
+ * Stable noise in [0, 1) per grid position: the order dots appear in a reveal.
  * @param {number} col
  * @param {number} row
  */
@@ -25,120 +28,145 @@ export function noise(col, row) {
   return n - Math.floor(n);
 }
 
-// Mascot geometry in face radii, from bruhs.svg (r = 300 there).
-const EYE_X = 0.336;
-const EYE_Y = -0.257;
-const EYE_RX = 0.133;
-const MOUTH_X = 0.023;
-const MOUTH_Y = 0.26;
-const MOUTH_RX = 0.4;
-const FEATURE_RY = 0.033;
-// Light from the upper left, mostly frontal.
-const LIGHT_X = -0.36;
-const LIGHT_Y = -0.42;
-const LIGHT_Z = 0.83;
+// Light from the upper left, mostly frontal; some ambient so the shadow side
+// keeps its dots and the outline stays whole.
+const LIGHT = normalize([-0.35, -0.45, 0.82]);
+const AMBIENT = 0.25;
+const RIM = 0.35;
+
+// Mascot geometry in face radii (bruhs.svg: r = 300, center 300,300).
+/** @param {number} x @param {number} y */
+const unit = (x, y) => ({ x: (x - 300) / 300, y: (y - 300) / 300 });
+const FACES = {
+  original: { leftEye: unit(198, 223), rightEye: unit(401, 223), mouth: unit(307, 378) },
+  left: { leftEye: unit(97, 209), rightEye: unit(300, 209), mouth: unit(191, 364) },
+  right: { leftEye: unit(300, 209), rightEye: unit(503, 209), mouth: unit(409, 364) },
+};
+const EYE_RX = 40 / 300;
+const MOUTH_RX = 120 / 300;
+const FEATURE_RY = 10 / 300;
 
 export const FACE = 1;
 export const MOUTH = 2;
-export const HALO = 3;
 
 /**
  * @typedef {object} Face
  * @property {number} cx      Center, in canvas pixels.
  * @property {number} cy
  * @property {number} r       Radius, in canvas pixels.
- * @property {number} lookX   Where the eyes point, -1 (left) to 1 (right).
- * @property {number} lookY   -1 (up) to 1 (down).
- * @property {number} minRy   Thinnest a feature may be, in face radii, so the eyes survive the dot grid.
+ * @property {number} [lookX] -1 turns fully to the logo's `left` variant, 1 to `right`.
+ * @property {number} [lookY] -1 (up) to 1 (down), a small nudge.
  */
 
 /**
- * What sits under a point: which layer, and how bright (0 to 1). Dots whose
- * brightness beats their dither threshold are drawn.
- * @param {number} x
- * @param {number} y
- * @param {Face} face
- * @returns {{ kind: 0 | 1 | 2 | 3, value: number }}
+ * @typedef {object} Dot
+ * @property {number} x
+ * @property {number} y
+ * @property {number} radius
+ * @property {1 | 2} kind  FACE or MOUTH.
+ * @property {number} col  Grid position, for the reveal order.
+ * @property {number} row
  */
-export function sample(x, y, face) {
-  const dx = (x - face.cx) / face.r;
-  const dy = (y - face.cy) / face.r;
-  const d2 = dx * dx + dy * dy;
-  const ry = Math.max(FEATURE_RY, face.minRy);
 
-  if (d2 > 1) {
-    // Fades to nothing a fifth of a radius out, inside any canvas edge.
-    const fade = Math.max(0, 1 - (Math.sqrt(d2) - 1) / 0.2);
-    return { kind: HALO, value: 0.24 * fade * fade };
-  }
-
-  const mx = (dx - MOUTH_X) / MOUTH_RX;
-  const my = (dy - MOUTH_Y) / ry;
-  if (mx * mx + my * my <= 1) return { kind: MOUTH, value: 1 };
-
-  const ey = (dy - EYE_Y - face.lookY * 0.05) / ry;
-  for (const side of [-1, 1]) {
-    const ex = (dx - side * EYE_X - face.lookX * 0.07) / EYE_RX;
-    if (ex * ex + ey * ey <= 1) return { kind: 0, value: 0 };
-  }
-
-  const nz = Math.sqrt(1 - d2);
-  const lambert = Math.max(0, LIGHT_X * dx + LIGHT_Y * dy + LIGHT_Z * nz);
-  return { kind: FACE, value: Math.min(1, 0.1 + lambert) };
+/**
+ * Grid spacing for a face radius: about 15 dots per radius on a large face,
+ * down to 9 on a small one (fewer turns the outline into a hexagon).
+ * @param {number} r
+ */
+export function pitchFor(r) {
+  return r / Math.max(9, Math.min(15, r / 10));
 }
 
 /**
- * @typedef {object} Style
- * @property {number} pitch    Distance between dots inside a cell, in canvas pixels.
- * @property {number} gap      Extra space between cells.
- * @property {number} dot      Dot radius.
- * @property {number} reveal   0 to 1: how much of the field has resolved (1 = all).
- * @property {{ face: string, mouth: string, halo: string }} colors
+ * Brightness of the sphere at a point in face radii, or null outside it.
+ * @param {number} dx
+ * @param {number} dy
  */
+export function shade(dx, dy) {
+  const d2 = dx * dx + dy * dy;
+  if (d2 > 1) return null;
+  const nz = Math.sqrt(1 - d2);
+  const lambert = Math.max(0, LIGHT[0] * dx + LIGHT[1] * dy + LIGHT[2] * nz);
+  return (AMBIENT + (1 - AMBIENT) * lambert) * (1 - RIM + RIM * Math.sqrt(nz));
+}
 
 /**
- * Draws the whole field. One path per color keeps it to three fills.
+ * Every dot of a Bruh in a `width` × `height` box. The hex grid is anchored on
+ * the face's center, so the face is symmetric wherever it sits.
+ * @param {number} width
+ * @param {number} height
+ * @param {Face} face
+ * @returns {Dot[]}
+ */
+export function bruhDots(width, height, face) {
+  const { cx, cy, r } = face;
+  const pitch = pitchFor(r);
+  const rowH = (pitch * Math.sqrt(3)) / 2;
+  const look = Math.max(-1, Math.min(1, face.lookX ?? 0));
+  const nudge = Math.max(-1, Math.min(1, face.lookY ?? 0)) * 0.05;
+  const turned = look < 0 ? FACES.left : FACES.right;
+  const t = Math.abs(look);
+  /** @param {{ x: number, y: number }} a @param {{ x: number, y: number }} b */
+  const toward = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t + nudge });
+  const eyes = [toward(FACES.original.leftEye, turned.leftEye), toward(FACES.original.rightEye, turned.rightEye)];
+  const mouth = toward(FACES.original.mouth, turned.mouth);
+  const eyeRy = Math.max(FEATURE_RY, (pitch * 0.9) / r);
+  // The mouth is exactly one row: the one nearest its line.
+  const mouthRow = Math.round((mouth.y * r) / rowH);
+
+  /** @type {Dot[]} */
+  const dots = [];
+  const rows = Math.ceil(r / rowH) + 1;
+  const cols = Math.ceil(r / pitch) + 1;
+  for (let row = -rows; row <= rows; row++) {
+    const y = cy + row * rowH;
+    if (y < -pitch || y > height + pitch) continue;
+    const offset = row & 1 ? pitch / 2 : 0;
+    for (let col = -cols; col <= cols; col++) {
+      const x = cx + col * pitch + offset;
+      if (x < -pitch || x > width + pitch) continue;
+      const dx = (x - cx) / r;
+      const dy = (y - cy) / r;
+      let value = shade(dx, dy);
+      if (value === null) continue;
+      if (eyes.some((e) => ((dx - e.x) / EYE_RX) ** 2 + ((dy - e.y) / eyeRy) ** 2 <= 1)) continue;
+      const isMouth = row === mouthRow && Math.abs((dx - mouth.x) / MOUTH_RX) <= 1;
+      if (isMouth) value = Math.max(value, 0.75);
+      const radius = (pitch / 2) * 0.92 * Math.sqrt(value);
+      if (radius < pitch * 0.07) continue;
+      dots.push({ x, y, radius, kind: isMouth ? MOUTH : FACE, col, row });
+    }
+  }
+  return dots;
+}
+
+/**
+ * Draws a Bruh, one path per color. `reveal` below 1 keeps that share of the
+ * dots, in `noise` order, for an entrance; leave it at 1 under reduced motion.
  * @param {CanvasRenderingContext2D} ctx
  * @param {number} width
  * @param {number} height
  * @param {Face} face
- * @param {Style} style
+ * @param {{ reveal?: number, colors: { face: string, mouth: string } }} style
  */
 export function drawBruh(ctx, width, height, face, style) {
-  const { pitch, gap, dot, reveal, colors } = style;
-  const cellW = pitch * 2 + gap;
-  const cellH = pitch * 4 + gap;
-  const cols = Math.ceil(width / cellW);
-  const rows = Math.ceil(height / cellH);
-  // Center the grid so the field doesn't hug one edge.
-  const ox = (width - cols * cellW + gap + pitch) / 2;
-  const oy = (height - rows * cellH + gap + pitch) / 2;
-
-  const paths = { [FACE]: new Path2D(), [MOUTH]: new Path2D(), [HALO]: new Path2D() };
-  for (let cr = 0; cr < rows; cr++) {
-    for (let cc = 0; cc < cols; cc++) {
-      for (let dr = 0; dr < 4; dr++) {
-        for (let dc = 0; dc < 2; dc++) {
-          const col = cc * 2 + dc;
-          const row = cr * 4 + dr;
-          if (reveal < 1 && noise(col, row) > reveal) continue;
-          const x = ox + cc * cellW + dc * pitch;
-          const y = oy + cr * cellH + dr * pitch;
-          const { kind, value } = sample(x, y, face);
-          if (kind === 0 || value <= threshold(col, row)) continue;
-          const path = paths[kind];
-          path.moveTo(x + dot, y);
-          path.arc(x, y, dot, 0, Math.PI * 2);
-        }
-      }
-    }
+  const reveal = style.reveal ?? 1;
+  const paths = { [FACE]: new Path2D(), [MOUTH]: new Path2D() };
+  for (const dot of bruhDots(width, height, face)) {
+    if (reveal < 1 && noise(dot.col, dot.row) > reveal) continue;
+    const path = paths[dot.kind];
+    path.moveTo(dot.x + dot.radius, dot.y);
+    path.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
   }
-
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = colors.halo;
-  ctx.fill(paths[HALO]);
-  ctx.fillStyle = colors.face;
+  ctx.fillStyle = style.colors.face;
   ctx.fill(paths[FACE]);
-  ctx.fillStyle = colors.mouth;
+  ctx.fillStyle = style.colors.mouth;
   ctx.fill(paths[MOUTH]);
+}
+
+/** @param {[number, number, number]} v @returns {[number, number, number]} */
+function normalize([x, y, z]) {
+  const length = Math.hypot(x, y, z);
+  return [x / length, y / length, z / length];
 }

@@ -30,9 +30,8 @@
   canvas.width = canvas.height = size * dpr;
   const ctx = canvas.getContext("2d");
   ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-  const r = size * 0.4, pitch = 6;
-  drawBruh(ctx, size, size, { cx: size / 2, cy: size / 2, r, lookX: -0.35, lookY: 0.1, minRy: (pitch * 1.1) / r },
-    { pitch, gap: pitch * 0.6, dot: pitch * 0.36, reveal: 1, colors: { face: "#fada5e", mouth: "#fc4141", halo: "#443a2c" } });
+  drawBruh(ctx, size, size, { cx: size / 2, cy: size / 2, r: size * 0.42, lookX: -0.3, lookY: 0.1 },
+    { colors: { face: "#fada5e", mouth: "#fc4141" } });
   await document.fonts.ready;
   document.title = "ready";
 </script>

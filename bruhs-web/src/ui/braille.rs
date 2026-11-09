@@ -1,17 +1,14 @@
-//! Dither pieces (Bruhs AGENTS.md section 19): the Bruh drawn in braille-style
+//! Dither pieces (Bruhs AGENTS.md section 19): the Bruh drawn as a halftone of
 //! dots, and a level meter as one braille cell. Dot math lives in
 //! `bruhs_models::logic::dither`, shared with the desktop app.
 
 use bruhs_models::logic::dither::{
-    bruh_dots, meter_column, DotGrid, DotKind, BRUH_FACE_RGB, BRUH_MOUTH_RGB,
+    bruh_dots, meter_column, DotKind, BRUH_FACE_RGB, BRUH_MOUTH_RGB,
 };
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
-
-/// longan-700, the quiet neutral for halo dots (same value as the desktop theme).
-const HALO_RGB: u32 = 0x0044_3a2c;
 
 /// A static, dithered Bruh `size` CSS pixels square. Decorative: hidden from
 /// assistive technology, and it never moves.
@@ -45,16 +42,14 @@ fn draw_bruh(canvas: &web_sys::HtmlCanvasElement, size: f64) {
     // Lay the dots out in CSS pixels and let the transform scale them.
     let _ = ctx.set_transform(scale, 0.0, 0.0, scale, 0.0, 0.0);
     let size_f32 = size.to_f32_lossy();
-    let grid = DotGrid::for_size(size_f32);
-    let dots = bruh_dots(size_f32, grid);
+    let dots = bruh_dots(size_f32);
     for (kind, rgb) in [
-        (DotKind::Halo, HALO_RGB),
         (DotKind::Face, BRUH_FACE_RGB),
         (DotKind::Mouth, BRUH_MOUTH_RGB),
     ] {
         ctx.begin_path();
         for dot in dots.iter().filter(|dot| dot.kind == kind) {
-            let (x, y, r) = (f64::from(dot.x), f64::from(dot.y), f64::from(grid.dot));
+            let (x, y, r) = (f64::from(dot.x), f64::from(dot.y), f64::from(dot.radius));
             ctx.move_to(x + r, y);
             let _ = ctx.arc(x, y, r, 0.0, std::f64::consts::TAU);
         }

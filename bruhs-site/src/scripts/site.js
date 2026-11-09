@@ -409,11 +409,13 @@ document.addEventListener("keydown", (event) => {
 });
 
 // ---------------------------------------------------------------------------
-// Braille bruh: the mascot drawn in dithered dots. The hero one resolves out
-// of noise once; the closing one peeks up from the bottom edge. Both watch
-// the pointer. Redraws happen only on resize, pointer moves and the reveal.
+// Dot Bruh: the mascot as a halftone sphere of dots. The hero one resolves
+// out of noise once; the closing one peeks up from the bottom edge. Both turn
+// toward the pointer. Redraws happen only on resize, pointer moves and the reveal.
 
-const BRUH_COLORS = { face: "#fada5e", mouth: "#fc4141", halo: "#443a2c" };
+const BRUH_COLORS = { face: "#fada5e", mouth: "#fc4141" };
+// How far the face turns at the pointer's farthest reach (1 = the logo's side variant).
+const LOOK_REACH = 0.6;
 const REVEAL_MS = 700;
 
 /**
@@ -424,7 +426,6 @@ const REVEAL_MS = 700;
  * @property {number} width
  * @property {number} height
  * @property {import("./braille.js").Face} face
- * @property {number} pitch
  * @property {number} reveal
  * @property {boolean} visible
  */
@@ -440,8 +441,7 @@ for (const canvas of document.querySelectorAll("canvas[data-bruh]")) {
     kind: canvas.dataset.bruh === "peek" ? "peek" : "hero",
     width: 0,
     height: 0,
-    face: { cx: 0, cy: 0, r: 1, lookX: 0, lookY: 0, minRy: 0 },
-    pitch: 5,
+    face: { cx: 0, cy: 0, r: 1, lookX: 0, lookY: 0 },
     reveal: reducedMotion.matches ? 1 : 0,
     visible: false,
   });
@@ -461,20 +461,12 @@ function layoutBruh(bruh) {
   bruh.face.r = r;
   bruh.face.cx = width / 2;
   bruh.face.cy = bruh.kind === "hero" ? height / 2 : height + r * 0.1;
-  bruh.pitch = Math.max(3.5, Math.min(6, r / 34));
-  bruh.face.minRy = (bruh.pitch * 1.1) / r;
 }
 
 /** @param {Bruh} bruh */
 function drawOne(bruh) {
   if (bruh.width === 0) return;
-  drawBruh(bruh.ctx, bruh.width, bruh.height, bruh.face, {
-    pitch: bruh.pitch,
-    gap: bruh.pitch * 0.6,
-    dot: bruh.pitch * 0.36,
-    reveal: bruh.reveal,
-    colors: BRUH_COLORS,
-  });
+  drawBruh(bruh.ctx, bruh.width, bruh.height, bruh.face, { reveal: bruh.reveal, colors: BRUH_COLORS });
 }
 
 let bruhFrame = 0;
@@ -531,7 +523,7 @@ document.addEventListener("pointermove", (event) => {
     const rect = bruh.canvas.getBoundingClientRect();
     const dx = event.clientX - (rect.left + bruh.face.cx);
     const dy = event.clientY - (rect.top + bruh.face.cy);
-    bruh.face.lookX = Math.max(-1, Math.min(1, dx / 480));
+    bruh.face.lookX = Math.max(-1, Math.min(1, dx / 480)) * LOOK_REACH;
     bruh.face.lookY = Math.max(-1, Math.min(1, dy / 360));
   }
   scheduleBruhs();
