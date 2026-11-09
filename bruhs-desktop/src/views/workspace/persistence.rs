@@ -225,8 +225,14 @@ pub(super) fn initial_permission_mode_from_persisted(
         .unwrap_or(PermissionMode::Default)
 }
 
-pub(super) fn restored_thread_model_id(current_model: &str, _persisted_model_id: &str) -> String {
-    current_model.to_string()
+/// A saved thread reopens on its own model; one saved without a model
+/// takes the current one.
+pub(super) fn restored_thread_model_id(current_model: &str, persisted_model_id: &str) -> String {
+    if persisted_model_id.trim().is_empty() {
+        current_model.to_string()
+    } else {
+        persisted_model_id.to_string()
+    }
 }
 
 /// The saved provider session and its owner. A session whose provider this

@@ -9,7 +9,7 @@ use crate::components::automations_page::AutomationsPage;
 use crate::components::booking_page::BookingPage;
 use crate::components::calendar_page::CalendarPage;
 use crate::components::chat::ChatPage;
-use crate::components::command_bar::CommandBar;
+use crate::components::command_bar::{ActiveThreadExport, CommandBar, ThreadExport};
 use crate::components::find_bar::{focus_within, FindCommands};
 use crate::components::import_thread_dialog::ImportThreadDialog;
 use crate::components::inbox_page::InboxPage;
@@ -136,6 +136,9 @@ pub fn Shell() -> impl IntoView {
     let RunChoiceSignal(run_choice) = expect_context::<RunChoiceSignal>();
     let PreviousWorktreeSignal(previous_worktree) = expect_context::<PreviousWorktreeSignal>();
     let thread_notice = expect_context::<ThreadNotice>();
+    let crate::state::ImportThreadOpen(import_open) =
+        expect_context::<crate::state::ImportThreadOpen>();
+    let thread_export = ActiveThreadExport::from_context();
     let TerminalOpen(terminal_open) = expect_context::<TerminalOpen>();
     let ComposerDraft(composer_draft) = expect_context::<ComposerDraft>();
     let ComposerChips(composer_chips) = expect_context::<ComposerChips>();
@@ -692,6 +695,16 @@ pub fn Shell() -> impl IntoView {
                 "pull.copyLink" => {
                     ev.prevent_default();
                     copy_open_pull(true);
+                }
+                "thread.import" => {
+                    ev.prevent_default();
+                    import_open.set(true);
+                }
+                command if ThreadExport::from_command(command).is_some() => {
+                    ev.prevent_default();
+                    if let Some(export) = ThreadExport::from_command(command) {
+                        thread_export.run(export);
+                    }
                 }
                 "pull.copyNumber" => {
                     ev.prevent_default();

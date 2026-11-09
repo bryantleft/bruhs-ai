@@ -24,14 +24,14 @@ use crate::views::chat::{FindInThread, StashDraft};
 use crate::views::diff_panel::FindInDiff;
 
 use super::{
-    CloseOverlays, ClosePanel, CopyPullLink, CopyPullNumber, CopyThreadLink, FocusChatInput,
-    FocusCommandBar, JumpThread, MentionFile, NavigateBack, NavigateForward, NewThread, NextThread,
-    OpenCapture, OpenInboxView, OpenKnowledgeView, OpenProjectInEditor, OpenSettings,
-    OpenTaskCreateShortcut, OpenTodayView, PinThread, PrevThread, SaveKnowledgeDocument,
-    SearchThreads, SettleThread, ToggleBranchMenu, ToggleDiff, ToggleEffortMenu, ToggleModelPicker,
-    TogglePanel, TogglePreview, ToggleSidebar, ToggleTasks, ToggleTerminal, ToggleWorkspaceMenu,
-    UndoSidebar, UsePreviousWorktree, Workspace, SETTINGS_CODE_RADIUS_PX,
-    SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
+    CloseOverlays, ClosePanel, ContinueInT3, CopyPullLink, CopyPullNumber, CopyResumeCommand,
+    CopyThreadLink, CopyThreadMarkdown, FocusChatInput, FocusCommandBar, ImportThread, JumpThread,
+    MentionFile, NavigateBack, NavigateForward, NewThread, NextThread, OpenCapture, OpenInboxView,
+    OpenKnowledgeView, OpenProjectInEditor, OpenSettings, OpenTaskCreateShortcut, OpenTodayView,
+    PinThread, PrevThread, SaveKnowledgeDocument, SearchThreads, SettleThread, ToggleBranchMenu,
+    ToggleDiff, ToggleEffortMenu, ToggleModelPicker, TogglePanel, TogglePreview, ToggleSidebar,
+    ToggleTasks, ToggleTerminal, ToggleWorkspaceMenu, UndoSidebar, UsePreviousWorktree, Workspace,
+    SETTINGS_CODE_RADIUS_PX, SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
 };
 
 const KEY_INPUT_WIDTH_PX: f32 = 144.0;
@@ -146,6 +146,10 @@ pub(super) fn binding_names(command: &str) -> &'static [&'static str] {
         "thread.copyLink" => &["workspace::CopyThreadLink"],
         "pull.copyLink" => &["workspace::CopyPullLink"],
         "pull.copyNumber" => &["workspace::CopyPullNumber"],
+        "thread.import" => &["workspace::ImportThread"],
+        "thread.copyResumeCommand" => &["workspace::CopyResumeCommand"],
+        "thread.copyMarkdown" => &["workspace::CopyThreadMarkdown"],
+        "thread.continueInT3" => &["workspace::ContinueInT3"],
         "settings.open" => &["workspace::OpenSettings"],
         "terminal.toggle" => &["workspace::ToggleTerminal"],
         "preview.toggle" => &["workspace::TogglePreview"],
@@ -646,6 +650,12 @@ fn push_rule_bindings(
         "thread.copyLink" => bind(&shortcut, CopyThreadLink, name, None, add, installed),
         "pull.copyLink" => bind(&shortcut, CopyPullLink, name, None, add, installed),
         "pull.copyNumber" => bind(&shortcut, CopyPullNumber, name, None, add, installed),
+        "thread.import" => bind(&shortcut, ImportThread, name, None, add, installed),
+        "thread.copyResumeCommand" => {
+            bind(&shortcut, CopyResumeCommand, name, None, add, installed)
+        }
+        "thread.copyMarkdown" => bind(&shortcut, CopyThreadMarkdown, name, None, add, installed),
+        "thread.continueInT3" => bind(&shortcut, ContinueInT3, name, None, add, installed),
         "settings.open" => bind(&shortcut, OpenSettings, name, None, add, installed),
         "terminal.toggle" => bind(&shortcut, ToggleTerminal, name, None, add, installed),
         "preview.toggle" => bind(&shortcut, TogglePreview, name, None, add, installed),
@@ -762,7 +772,8 @@ mod tests {
             }
             if rule.key.is_empty() {
                 assert!(
-                    matches!(rule.command.as_str(), "pull.copyLink" | "pull.copyNumber"),
+                    bruhs_models::logic::keybindings::UNBOUND_BY_DEFAULT
+                        .contains(&rule.command.as_str()),
                     "{}",
                     rule.command
                 );

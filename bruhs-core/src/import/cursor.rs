@@ -5,10 +5,14 @@
 //! `workspaceStorage/<hash>/state.vscdb` (`composer.composerData`) next to
 //! its `workspace.json`.
 //!
+//! Chats Cursor keeps only as agent transcripts (the Cursor Agent CLI's)
+//! are listed too; see [`super::cursor_agent`].
+//!
 //! Cursor has no session another tool can resume, so a Cursor chat comes
 //! in as a transcript (see `ImportedThread::context`).
 
-use super::{files_in, ImportError};
+use super::cursor_agent::{self, AgentTranscript};
+use super::{files_in, ImportError, ImportRoots};
 use bruhs_models::agent::Role;
 use bruhs_models::logic::portable::{
     title_from_prompt, ImportCandidate, ImportSource, PortableMessage, PortablePart,
@@ -17,7 +21,7 @@ use bruhs_models::logic::portable::{
 use bruhs_models::EpochMs;
 use rusqlite::{Connection, OpenFlags, OptionalExtension};
 use serde_json::Value;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::Path;
 
 fn open(path: &Path) -> Result<Option<Connection>, ImportError> {
@@ -126,54 +130,100 @@ fn is_listable(composer: &Value) -> bool {
     !flag("isBestOfNSubcomposer") && !headers(composer).is_empty()
 }
 
+/// A chat the listing may show: an editor chat or an agent transcript.
+enum Chat {
+    Editor { id: String, composer: Value },
+    Agent(AgentTranscript),
+}
+
 /// The newest `limit` chats `keep` accepts. Every chat's header is read
 /// (it holds the time), but a title that needs its first message is looked
 /// up only on the way to `limit`.
 pub(super) fn list(
-    root: &Path,
+    roots: &ImportRoots,
     limit: usize,
     keep: &dyn Fn(&ImportCandidate) -> bool,
 ) -> Result<Vec<ImportCandidate>, ImportError> {
-    let Some(connection) = global(root)? else {
-        return Ok(Vec::new());
-    };
-    let folders = folders(root);
-    let mut statement = connection
-        .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'")
-        .map_err(unreadable)?;
-    let composers: Vec<(String, String)> = statement
-        .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
-        .map_err(unreadable)?
-        .filter_map(Result::ok)
-        .collect();
-    let mut chats: Vec<(String, Value, EpochMs)> = composers
-        .into_iter()
-        .filter_map(|(key, value)| {
-            let composer = serde_json::from_str::<Value>(&value).ok()?;
-            is_listable(&composer).then(|| {
+    let connection = global(&roots.cursor)?;
+    let mut chats: Vec<(EpochMs, Chat)> = Vec::new();
+    // Every chat the editor has, listed or not, so its transcript is not
+    // listed a second time.
+    let mut editor_ids = HashSet::new();
+    if let Some(connection) = &connection {
+        let mut statement = connection
+            .prepare("SELECT key, value FROM cursorDiskKV WHERE key LIKE 'composerData:%'")
+            .map_err(unreadable)?;
+        let composers: Vec<(String, String)> = statement
+            .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .map_err(unreadable)?
+            .filter_map(Result::ok)
+            .collect();
+        for (key, value) in composers {
+            let id = key.trim_start_matches("composerData:").to_string();
+            editor_ids.insert(id.clone());
+            let Ok(composer) = serde_json::from_str::<Value>(&value) else {
+                continue;
+            };
+            if is_listable(&composer) {
                 let updated_at = millis(composer.get("lastUpdatedAt"))
                     .or_else(|| millis(composer.get("createdAt")))
                     .map_or(EpochMs::UNIX_EPOCH, EpochMs::saturating_from_i64);
-                let id = key.trim_start_matches("composerData:").to_string();
-                (id, composer, updated_at)
-            })
-        })
-        .collect();
-    chats.sort_by_key(|(_, _, updated_at)| std::cmp::Reverse(*updated_at));
+                chats.push((updated_at, Chat::Editor { id, composer }));
+            }
+        }
+    }
+    // An editor chat's transcript still names its folder, which the
+    // editor's workspaces do not always list.
+    let mut transcript_folders = HashMap::new();
+    for transcript in cursor_agent::transcripts(&roots.cursor_home) {
+        if editor_ids.contains(&transcript.id) {
+            transcript_folders.insert(transcript.id, transcript.folder);
+        } else {
+            chats.push((transcript.updated_at, Chat::Agent(transcript)));
+        }
+    }
+    chats.sort_by_key(|(updated_at, _)| std::cmp::Reverse(*updated_at));
+    let folders = if connection.is_some() {
+        folders(&roots.cursor)
+    } else {
+        HashMap::new()
+    };
+    // Each folder is looked up on disk once per listing.
+    let mut folder_paths: HashMap<String, Option<String>> = HashMap::new();
+    let mut folder_of = |folder: &str| {
+        folder_paths
+            .entry(folder.to_string())
+            .or_insert_with(|| cursor_agent::folder_path(folder))
+            .clone()
+    };
     let mut found = Vec::new();
-    for (id, composer, updated_at) in chats {
+    for (updated_at, chat) in chats {
         if found.len() >= limit {
             break;
         }
-        let candidate = ImportCandidate {
-            source: ImportSource::Cursor,
-            title: title_of(&connection, &id, &composer),
-            cwd: folders.get(&id).cloned(),
-            updated_at,
-            provider: None,
-            session_id: None,
-            model: None,
-            id,
+        let candidate = match (chat, &connection) {
+            (Chat::Editor { id, composer }, Some(connection)) => ImportCandidate {
+                source: ImportSource::Cursor,
+                title: title_of(connection, &id, &composer),
+                cwd: folders.get(&id).cloned().or_else(|| {
+                    transcript_folders
+                        .get(&id)
+                        .and_then(|folder| folder_of(folder))
+                }),
+                updated_at,
+                provider: None,
+                session_id: None,
+                model: None,
+                id,
+            },
+            (Chat::Agent(transcript), _) => {
+                let cwd = folder_of(&transcript.folder);
+                let Some(candidate) = cursor_agent::candidate(&transcript, cwd) else {
+                    continue;
+                };
+                candidate
+            }
+            (Chat::Editor { .. }, None) => continue,
         };
         if keep(&candidate) {
             found.push(candidate);
@@ -200,13 +250,20 @@ fn title_of(connection: &Connection, id: &str, composer: &Value) -> String {
     title_from_prompt(&first)
 }
 
+/// Chat `id`: from the editor's database, else its agent transcript.
 pub(super) fn load(
-    root: &Path,
+    roots: &ImportRoots,
     id: &str,
 ) -> Result<(ImportCandidate, Vec<PortableMessage>), ImportError> {
     let not_found = || ImportError::not_found(ImportSource::Cursor, id);
-    let connection = global(root)?.ok_or_else(not_found)?;
-    let composer = get(&connection, &format!("composerData:{id}")).ok_or_else(not_found)?;
+    let root = roots.cursor.as_path();
+    let composer = global(root)?.and_then(|connection| {
+        get(&connection, &format!("composerData:{id}")).map(|composer| (connection, composer))
+    });
+    let Some((connection, composer)) = composer else {
+        let transcript = cursor_agent::find(&roots.cursor_home, id).ok_or_else(not_found)?;
+        return cursor_agent::load(&transcript);
+    };
     let mut transcript = super::Transcript::default();
     for (bubble_id, kind) in headers(&composer) {
         let Some(bubble) = get(&connection, &format!("bubbleId:{id}:{bubble_id}")) else {
@@ -272,7 +329,10 @@ pub(super) fn load(
                 || title_from_prompt(&first_prompt),
                 |name| name.trim().to_string(),
             ),
-        cwd: folders(root).get(id).cloned(),
+        cwd: folders(root).get(id).cloned().or_else(|| {
+            cursor_agent::find(&roots.cursor_home, id)
+                .and_then(|transcript| cursor_agent::folder_path(&transcript.folder))
+        }),
         updated_at: millis(composer.get("lastUpdatedAt"))
             .map_or(EpochMs::UNIX_EPOCH, EpochMs::saturating_from_i64),
         provider: None,

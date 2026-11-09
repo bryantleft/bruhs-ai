@@ -65,6 +65,7 @@ impl Workspace {
             "command-bar" => self.focus_command_bar(&FocusCommandBar, window, cx),
             "model-picker" => self.toggle_model_picker(&ToggleModelPicker, window, cx),
             "project-picker" => self.open_project_picker(&OpenProjectPicker, window, cx),
+            "import-thread" => self.open_import_thread(&ImportThread, window, cx),
             "task-create" => self.open_task_create(window, cx),
             "event-create" => self.open_event_create(None, window, cx),
             "meetings" => self.open_meetings_list(cx),

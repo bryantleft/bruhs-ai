@@ -20,7 +20,7 @@ use leptos::task::spawn_local;
 use crate::api::{import_sessions, import_thread, list_dir};
 use crate::state::{
     now_epoch_ms, ActiveView, AgentMessage, AppView, ImportThreadOpen, MessagePart, MessageStatus,
-    SetActiveView, SetCurrentModel, Thread, ThreadNotice, ToolCallInfo,
+    SetActiveView, Thread, ThreadNotice, ToolCallInfo,
 };
 use crate::ui::Dialog;
 
@@ -157,7 +157,6 @@ pub fn ImportThreadDialog() -> impl IntoView {
     let set_threads = expect_context::<crate::state::SetThreadsSignal>().0;
     let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
     let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
-    let SetCurrentModel(set_current_model) = expect_context::<SetCurrentModel>();
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
     let ActiveView(_active_view) = expect_context::<ActiveView>();
     let thread_notice = expect_context::<ThreadNotice>();
@@ -271,9 +270,6 @@ pub fn ImportThreadDialog() -> impl IntoView {
                     let messages: Vec<AgentMessage> =
                         imported.messages.iter().map(agent_message).collect();
                     let id = thread.id.clone();
-                    if let Some(model) = thread.model.clone() {
-                        set_current_model.set(model);
-                    }
                     set_threads.update(|ts| ts.push(thread.clone()));
                     catalog.persist(None, thread);
                     saves.edit_conversation(id.clone(), messages.clone());
@@ -349,6 +345,9 @@ pub fn ImportThreadDialog() -> impl IntoView {
                 </div>
                 <input
                     node_ref=input_ref
+                    // The Dialog focuses this, not the first source tab, so
+                    // typing searches at once.
+                    data-autofocus=""
                     type="text"
                     placeholder="Search titles and folders"
                     aria-label="Search threads"

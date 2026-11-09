@@ -14,6 +14,7 @@ use bruhs_models::logic::portable::{
     ImportedThread, PortableMessage, PortablePart, PortableToolCall, IMPORT_CONTEXT_MAX_CHARS,
 };
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
+use gpui_component::Sizable as _;
 use std::time::Duration;
 
 pub(super) const IMPORT_DIALOG_LABEL: &str = "Import thread";
@@ -430,8 +431,6 @@ impl Workspace {
         let candidate = &imported.candidate;
         let home = home_dir_path().map(|home| path_to_string(&home));
         let place = import_place(candidate.cwd.as_deref(), home.as_deref());
-        // The model is shared by every thread here, as on the web.
-        self.set_current_model(import_model(candidate), cx);
         let title = if candidate.title.trim().is_empty() {
             threads_ui::THREAD_TITLE_GENERAL.to_string()
         } else {
@@ -440,7 +439,8 @@ impl Workspace {
         let thread = Self::create_thread_with_title(
             place.project_name,
             place.run_path.unwrap_or_else(current_dir_string),
-            self.current_model.clone(),
+            // The thread stays on its session's provider.
+            import_model(candidate),
             self.permission_mode,
             &title,
             window,
@@ -857,9 +857,12 @@ impl Workspace {
                                     .border_1()
                                     .border_color(theme::longan_700())
                                     .px(px(10.0))
-                                    .py(px(6.0))
+                                    // A small (24px) input in 2px padding and a
+                                    // 1px border: 30px, the web's py-1.5 field.
+                                    .py(px(2.0))
                                     .child(
                                         Input::new(&self.import_input)
+                                            .small()
                                             .aria_label("Search threads")
                                             .appearance(false)
                                             .bordered(false)
