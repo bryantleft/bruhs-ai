@@ -34,6 +34,8 @@ pub const CALENDAR_ICON_PATH: &str = "icons/calendar.svg";
 pub const PLUS_ICON_PATH: &str = "icons/plus.svg";
 pub const MINUS_ICON_PATH: &str = "icons/minus.svg";
 pub const BOOK_OPEN_ICON_PATH: &str = "icons/book-open.svg";
+pub const SUN_ICON_PATH: &str = "icons/sun.svg";
+pub const INBOX_ICON_PATH: &str = "icons/inbox.svg";
 pub const WRAP_TEXT_ICON_PATH: &str = "icons/wrap-text.svg";
 pub const MESSAGE_SQUARE_ICON_PATH: &str = "icons/message-square.svg";
 pub const PEN_LINE_ICON_PATH: &str = "icons/pen-line.svg";
@@ -80,6 +82,8 @@ const MIC_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill
 const MINUS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M5 12h14"/></svg>"#;
 const WRAP_TEXT_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M3 6h18"/><path d="M3 12h15a3 3 0 1 1 0 6h-4"/><path d="m16 16-2 2 2 2"/><path d="M3 18h7"/></svg>"#;
 const BOOK_OPEN_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 7v14"/><path d="M3 18a1 1 0 0 1-1-1V4a1 1 0 0 1 1-1h5a4 4 0 0 1 4 4 4 4 0 0 1 4-4h5a1 1 0 0 1 1 1v13a1 1 0 0 1-1 1h-6a3 3 0 0 0-3 3 3 3 0 0 0-3-3z"/></svg>"#;
+const SUN_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="4"/><path d="M12 2v2"/><path d="M12 20v2"/><path d="m4.93 4.93 1.41 1.41"/><path d="m17.66 17.66 1.41 1.41"/><path d="M2 12h2"/><path d="M20 12h2"/><path d="m6.34 17.66-1.41 1.41"/><path d="m19.07 4.93-1.41 1.41"/></svg>"#;
+const INBOX_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><polyline points="22 12 16 12 14 15 10 15 8 12 2 12"/><path d="M5.45 5.11 2 12v6a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2v-6l-3.45-6.89A2 2 0 0 0 16.76 4H7.24a2 2 0 0 0-1.79 1.11z"/></svg>"#;
 const USERS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M22 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>"#;
 const MESSAGE_SQUARE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>"#;
 const PEN_LINE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 20h9"/><path d="M16.376 3.622a1 1 0 0 1 3.002 3.002L7.368 18.635a2 2 0 0 1-.855.506l-2.872.838a.5.5 0 0 1-.62-.62l.838-2.872a2 2 0 0 1 .506-.854z"/></svg>"#;
@@ -201,6 +205,8 @@ impl AssetSource for DesktopAssets {
             USERS_ICON_PATH => Ok(Some(Cow::Borrowed(USERS_ICON))),
             MINUS_ICON_PATH => Ok(Some(Cow::Borrowed(MINUS_ICON))),
             BOOK_OPEN_ICON_PATH => Ok(Some(Cow::Borrowed(BOOK_OPEN_ICON))),
+            SUN_ICON_PATH => Ok(Some(Cow::Borrowed(SUN_ICON))),
+            INBOX_ICON_PATH => Ok(Some(Cow::Borrowed(INBOX_ICON))),
             WRAP_TEXT_ICON_PATH => Ok(Some(Cow::Borrowed(WRAP_TEXT_ICON))),
             MESSAGE_SQUARE_ICON_PATH => Ok(Some(Cow::Borrowed(MESSAGE_SQUARE_ICON))),
             PEN_LINE_ICON_PATH => Ok(Some(Cow::Borrowed(PEN_LINE_ICON))),
@@ -236,6 +242,8 @@ impl AssetSource for DesktopAssets {
             ]),
             "icons" => Ok(vec![
                 "activity.svg".into(),
+                "sun.svg".into(),
+                "inbox.svg".into(),
                 "arrow-up.svg".into(),
                 "x.svg".into(),
                 "check.svg".into(),
@@ -309,6 +317,49 @@ mod tests {
             assert!(
                 DesktopAssets.load(path).unwrap().is_some(),
                 "missing {path}"
+            );
+        }
+    }
+
+    /// Every `"icons/….svg"` the desktop names must be in the table above:
+    /// an unknown path loads nothing and the icon draws blank (Today and
+    /// Inbox in the sidebar footer did).
+    #[test]
+    fn every_icon_path_in_the_source_is_served() {
+        fn visit(dir: &std::path::Path, found: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).unwrap() {
+                let path = entry.unwrap().path();
+                if path.is_dir() {
+                    visit(&path, found);
+                } else if path.extension().is_some_and(|ext| ext == "rs") {
+                    let text = std::fs::read_to_string(&path).unwrap();
+                    let mut rest = text.as_str();
+                    while let Some(start) = rest.find("\"icons/") {
+                        rest = &rest[start + 1..];
+                        let end = rest.find('"').unwrap();
+                        let literal = &rest[..end];
+                        if literal.ends_with(".svg")
+                            && literal.bytes().all(|b| {
+                                b.is_ascii_lowercase() || b.is_ascii_digit() || b"-./".contains(&b)
+                            })
+                        {
+                            found.push(literal.to_string());
+                        }
+                        rest = &rest[end..];
+                    }
+                }
+            }
+        }
+        let mut paths = Vec::new();
+        visit(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut paths,
+        );
+        assert!(paths.iter().any(|path| path == "icons/sun.svg"));
+        for path in paths {
+            assert!(
+                DesktopAssets.load(&path).unwrap().is_some(),
+                "{path} is named in the source but not served"
             );
         }
     }

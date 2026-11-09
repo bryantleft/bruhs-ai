@@ -27,7 +27,7 @@ use super::{
 };
 use crate::views::sidebar_order::relative_age;
 use crate::{assets, theme};
-use bruhs_models::agent::{provider_for_model_id, MODEL_CATALOG};
+use bruhs_models::agent::provider_for_model_id;
 use bruhs_models::EpochMs;
 
 // Header (web `h-[52px] px-5 gap-3`).
@@ -144,12 +144,9 @@ pub struct StashEntry {
     pub chips: Vec<ContextChip>,
 }
 
-/// Web `model_label`: the option's label, else the raw id.
+/// Web `model_label` (see `bruhs_models::agent::model_label`).
 pub fn model_label(model_id: &str) -> String {
-    MODEL_CATALOG
-        .iter()
-        .find(|m| m.id == model_id)
-        .map_or_else(|| model_id.to_string(), |m| m.label.to_string())
+    bruhs_models::agent::model_label(model_id)
 }
 
 /// Web `stash_preview`: first line, cut to `max` chars with an ellipsis.

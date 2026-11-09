@@ -46,8 +46,8 @@ const CARD_CLASS: &str =
     "min-w-0 rounded-grape bg-longan-900/65 p-3 inset-ring inset-ring-longan-800";
 const TAB_ON: &str = "min-h-[44px] sm:min-h-6 rounded-seed bg-longan-700 px-3 py-1.5 text-label-sm text-rambutan-100 cursor-pointer";
 const TAB_OFF: &str = "min-h-[44px] sm:min-h-6 rounded-seed px-3 py-1.5 text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer";
-const SMALL_ACTION: &str = "min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 mt-1 rounded-seed bg-longan-800 px-2 text-label-sm text-rambutan-300 cursor-pointer";
-const ADD_BUTTON: &str = "min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 mt-2 rounded-grape bg-blueberry-500/15 px-3 py-2 text-label-sm text-blueberry-300 cursor-pointer";
+const SMALL_ACTION: &str = "mt-1 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-9";
+const ADD_BUTTON: &str = "mt-2 inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-9";
 const ROW: &str =
     "flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-seed bg-longan-950/45 px-2.5 py-2";
 const ROW_AMOUNT: &str =
@@ -424,14 +424,13 @@ pub fn LifePage() -> impl IntoView {
                         {tab_button(LifeSection::Finance, "Finance")}
                         {tab_button(LifeSection::Health, "Health")}
                     </div>
-                    <button
-                        type="button"
-                        disabled=move || !life.ready()
-                        class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 rounded-grape bg-persimmon-500 px-3 py-2 text-label text-longan-950 hover:bg-persimmon-400 cursor-pointer"
-                        on:click=ask_agent
+                    <crate::ui::Button
+                        size=crate::ui::ButtonSize::Small
+                        disabled=Signal::derive(move || !life.ready())
+                        on_click=Callback::new(ask_agent)
                     >
                         "Ask agent"
-                    </button>
+                    </crate::ui::Button>
                 </div>
             </header>
             <super::metadata_status::MetadataStatus
@@ -586,7 +585,7 @@ fn accounts(page: Page) -> impl IntoView {
                 {labelled_field("Balance", "Account balance", "2500.00", i.account_balance, Some("decimal"), caption)}
                 <button
                     type="button"
-                    class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 mt-5 h-9 rounded-grape bg-blueberry-500/15 px-3 text-label-sm text-blueberry-300 cursor-pointer"
+                    class="mt-5 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-9"
                     on:click=move |_| page.add_account()
                 >
                     "Add"
@@ -894,7 +893,7 @@ fn habits(page: Page) -> impl IntoView {
                 {field("New habit title", "Walk after lunch", i.habit_title, None)}
                 <button
                     type="button"
-                    class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 mt-1 rounded-seed bg-longan-800 px-3 text-label-sm text-rambutan-300 cursor-pointer"
+                    class=SMALL_ACTION
                     on:click=move |_| page.add_habit()
                 >
                     "Add"

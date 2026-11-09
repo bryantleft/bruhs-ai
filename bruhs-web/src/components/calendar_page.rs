@@ -14,8 +14,6 @@ use crate::state::{
     SetCalendarModeSignal, SetEventCreateOpen, SetEventCreateStart,
 };
 
-const DAY_MS: f64 = 1000.0 * 60.0 * 60.0 * 24.0;
-
 /// Shift `anchor_ms` by `delta_months` (signed). Keeps day-of-month stable
 /// when the target month has enough days; otherwise clamps.
 fn shift_month(anchor_ms: f64, delta_months: i32) -> f64 {
@@ -80,15 +78,8 @@ fn format_full_date(anchor_ms: f64) -> String {
 /// "May 3 — 9, 2026" or "Apr 28 — May 4, 2026" — used as the Week-view title.
 fn format_week_range(anchor_ms: f64) -> String {
     let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(anchor_ms));
-    let dow = f64::from(d.get_day());
-    let start = js_sys::Date::new_with_year_month_day(
-        d.get_full_year(),
-        crate::clock::field(d.get_month()),
-        crate::clock::field(d.get_date()),
-    )
-    .get_time()
-        - dow * DAY_MS;
-    let end = start + 6.0 * DAY_MS;
+    let start = crate::clock::add_local_days(anchor_ms, -crate::clock::field(d.get_day()));
+    let end = crate::clock::add_local_days(start, 6);
 
     let s = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(start));
     let e = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(end));
@@ -141,8 +132,8 @@ pub fn CalendarPage() -> impl IntoView {
         set_anchor.update(|a| {
             *a = match m {
                 CalendarMode::Month => shift_month(*a, -1),
-                CalendarMode::Week => *a - 7.0 * DAY_MS,
-                CalendarMode::Day => *a - DAY_MS,
+                CalendarMode::Week => crate::clock::add_local_days(*a, -7),
+                CalendarMode::Day => crate::clock::add_local_days(*a, -1),
             }
         });
     };
@@ -151,8 +142,8 @@ pub fn CalendarPage() -> impl IntoView {
         set_anchor.update(|a| {
             *a = match m {
                 CalendarMode::Month => shift_month(*a, 1),
-                CalendarMode::Week => *a + 7.0 * DAY_MS,
-                CalendarMode::Day => *a + DAY_MS,
+                CalendarMode::Week => crate::clock::add_local_days(*a, 7),
+                CalendarMode::Day => crate::clock::add_local_days(*a, 1),
             }
         });
     };

@@ -1259,8 +1259,13 @@ impl Workspace {
             .items_center()
             .gap(px(SIDEBAR_FOOTER_GAP_PX))
             .flex_shrink_0()
-            .child(self.render_sidebar_nav_icon(AppView::Today, "icons/sun.svg", "Today", cx))
-            .child(self.render_sidebar_nav_icon(AppView::Inbox, "icons/inbox.svg", "Inbox", cx))
+            .child(self.render_sidebar_nav_icon(AppView::Today, assets::SUN_ICON_PATH, "Today", cx))
+            .child(self.render_sidebar_nav_icon(
+                AppView::Inbox,
+                assets::INBOX_ICON_PATH,
+                "Inbox",
+                cx,
+            ))
             .child(self.render_sidebar_nav_icon(
                 AppView::Knowledge,
                 assets::BOOK_OPEN_ICON_PATH,

@@ -77,8 +77,14 @@ pub fn PeoplePage() -> impl IntoView {
     let (enroll_open_id, set_enroll_open_id) = signal::<Option<String>>(None);
 
     view! {
-        <div class="p-4 space-y-3 overflow-y-auto h-full">
-            <h1 class="text-h4 text-rambutan-100">"People"</h1>
+        <div class="flex h-full flex-col bg-longan-950">
+            <crate::ui::PageHeader title="People" subtitle="Profiles from your meetings, with notes and reminders." />
+            <div aria-label="Relationship save status">
+                <MetadataStatus status=relationship_store.status
+                    retry=Callback::new(move |_| relationship_store.retry())
+                    recovery=Signal::derive(move || relationship_store.recovery_json()) />
+            </div>
+            <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-6">
             <merge_status::ContactMergeStatus />
             <Show when=move || workflow_executor.loading_people()>
                 <p role="status" aria-label="Local contact loading" class="text-label-sm text-rambutan-400">"Loading cached contacts…"</p>
@@ -100,12 +106,6 @@ pub fn PeoplePage() -> impl IntoView {
                     <button type="button" class="mt-1 rounded-grape bg-longan-800 px-3 py-2 cursor-pointer" on:click=move |_| workflow_executor.retry_contact_sync()>"Retry contact sync"</button>
                 </div>
             })}
-            <div aria-label="Relationship save status">
-                <p class="px-4 text-label-sm text-rambutan-500">"Relationship details and reminders"</p>
-                <MetadataStatus status=relationship_store.status
-                    retry=Callback::new(move |_| relationship_store.retry())
-                    recovery=Signal::derive(move || relationship_store.recovery_json()) />
-            </div>
             <draft_status::RelationshipDraftStatus />
             <Show
                 when=move || people.with(|people| !people.is_empty())
@@ -407,6 +407,7 @@ pub fn PeoplePage() -> impl IntoView {
                     </nav>
                 </Show>
             </Show>
+            </div>
         </div>
     }
 }

@@ -41,14 +41,26 @@ pub fn AutomationsPage() -> impl IntoView {
         if !automation.ready() {
             return;
         }
+        // Tracked, so the suggestion appears once tasks load after the store.
+        // Nothing to focus on yet: no suggestion (Today does the same). The
+        // store is only written when the suggestion is actually added.
+        let unfinished =
+            work_items.with(|items| items.iter().filter(|item| !item.is_completed()).count());
+        let exists = automation.with(|state| {
+            state
+                .suggestions
+                .iter()
+                .any(|suggestion| suggestion.id == "protect-focus")
+        });
+        if unfinished == 0 || exists {
+            return;
+        }
         automation.update(|state| {
         if state
             .suggestions
             .iter()
             .all(|suggestion| suggestion.id != "protect-focus")
         {
-            let unfinished = work_items
-                .with_untracked(|items| items.iter().filter(|item| !item.is_completed()).count());
             let conflicts = events.with_untracked(|evs| {
                 evs.iter()
                     .filter(|event| event.end_at_ms >= bruhs_models::EpochMs::saturating_from_i64(now_ms).as_f64())
@@ -294,8 +306,11 @@ pub fn AutomationsPage() -> impl IntoView {
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50">
                             <p class="text-label-sm uppercase tracking-wide text-rambutan-400">"Safety contract"</p>
                             <p class="mt-2 text-body-sm text-rambutan-300">"Writes never inherit Read access. Every workflow requires a dry run. Undo reverts completed steps, including a partial run, only if their records are unchanged."</p>
-                            <p class="mt-2 text-label-sm text-pandan-300">{move || automation.with(|state| format!("{} typed tools · {} workflows", bruhs_models::agent_tool_definitions().len(), state.workflows.len()))}</p>
-                            <p class="mt-1 text-label-sm text-rambutan-400">{move || format!("{} local records in connected workflow domains", meeting_notes.with(Vec::len) + threads.with(Vec::len) + work_items.with(Vec::len) + events.with(Vec::len) + captures.with(Vec::len) + documents.with(Vec::len) + conversations.with(Vec::len) + life.with(|life| life.finance.transactions.len() + life.health.workouts.len()))}</p>
+                            <p class="mt-2 text-label-sm text-pandan-300">{move || automation.with(|state| { let n = state.workflows.len(); format!("{} typed tools · {n} {}", bruhs_models::agent_tool_definitions().len(), if n == 1 { "workflow" } else { "workflows" }) })}</p>
+                            <p class="mt-1 text-label-sm text-rambutan-400">{move || {
+                                let count = meeting_notes.with(Vec::len) + threads.with(Vec::len) + work_items.with(Vec::len) + events.with(Vec::len) + captures.with(Vec::len) + documents.with(Vec::len) + conversations.with(Vec::len) + life.with(|life| life.finance.transactions.len() + life.health.workouts.len());
+                                format!("{count} local {} in connected workflow domains", if count == 1 { "record" } else { "records" })
+                            }}</p>
                         </section>
 
                         {move || automation.with(|state| state.workflows.last().cloned().map(|workflow| view! {
