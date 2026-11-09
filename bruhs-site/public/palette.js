@@ -112,12 +112,12 @@ export const COMMANDS = [
     target: "/changelog",
   },
   {
-    id: "join",
+    id: "get",
     tag: "page",
-    label: "Join the waitlist",
-    detail: "one email, when bruhs is ready",
-    keywords: "waitlist signup email early access",
-    target: "#join",
+    label: "Get bruhs",
+    detail: "open source, run it from source",
+    keywords: "download install mac macos app get open source github source clone release",
+    target: "#get",
   },
 ];
 

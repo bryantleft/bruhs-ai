@@ -23,7 +23,7 @@
       <a class="brand" href="/" aria-label="bruhs home"><img src="/bruhs.svg" alt="" width="26" height="26"><span class="brand-name">bruhs</span></a>
       <div class="nav-actions">
         <a class="nav-link" href="/changelog" aria-current="page">Changelog</a>
-        <a class="btn btn-primary" href="/#join">Join the waitlist</a>
+        <a class="btn btn-primary" href="/#get">Get bruhs</a>
       </div>
     </div>
   </header>
@@ -235,19 +235,11 @@
         </article>
 
       <section class="changelog-join" aria-labelledby="changelog-join-title">
-        <h2 class="h2" id="changelog-join-title">Want it when it's ready?</h2>
-        <form class="join-form" action="/api/waitlist" method="post">
-          <div class="join-row">
-            <label class="sr-only" for="changelog-email">Email address</label>
-            <input id="changelog-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@domain.com" required maxlength="254">
-            <div class="trap" aria-hidden="true">
-              <label for="changelog-website">Leave this empty</label>
-              <input id="changelog-website" name="website" type="text" tabindex="-1" autocomplete="off">
-            </div>
-            <button class="btn btn-primary" type="submit">Join the waitlist <kbd>⏎</kbd></button>
-          </div>
-          <p class="fine">One email, when bruhs is ready for you. No tracking. <a href="/privacy">Privacy</a></p>
-        </form>
+        <h2 class="h2" id="changelog-join-title">Try the latest build</h2>
+        <div class="get-row">
+          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai">View on GitHub</a>
+          <a class="btn btn-ghost" href="/#get">Run it from source</a>
+        </div>
       </section>
     </div>
   </main>
@@ -258,7 +250,7 @@
       <nav aria-label="Footer">
         <a href="/privacy">Privacy</a>
         <a href="/changelog" aria-current="page">Changelog</a>
-        <a href="/#join">Waitlist</a>
+        <a href="/#get">Get bruhs</a>
       </nav>
     </div>
   </footer>

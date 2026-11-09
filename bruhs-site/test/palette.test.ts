@@ -25,7 +25,7 @@ describe("filterCommands", () => {
   });
 
   it("ranks a label prefix above a keyword match", () => {
-    assert.equal(ids("join")[0], "join");
+    assert.equal(ids("get")[0], "get");
   });
 
   it("requires every word to match", () => {
