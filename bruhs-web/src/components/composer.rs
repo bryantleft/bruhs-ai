@@ -622,9 +622,12 @@ pub fn Composer(
                 })
             }}
 
+            // `relative` paints the surface above the context strip tucked
+            // 12px beneath it (`-mt-3`), so the strip's top edge stays hidden.
+            // No z-index: popovers inside keep their page-level stacking.
             <div
                 data-composer-surface=""
-                class="rounded-mango bg-longan-900 inset-ring inset-ring-white/10 transition-[box-shadow] focus-within:inset-ring-persimmon-400/40"
+                class="relative rounded-mango bg-longan-900 inset-ring inset-ring-white/10 transition-[box-shadow] focus-within:inset-ring-persimmon-400/40"
                 on:dragover=on_drag_over
                 on:drop=on_drop
             >
