@@ -18,14 +18,12 @@ redeploy the site. To deploy by hand, run `npx vercel@latest deploy [--prod]`
 from the repository root (the project's Root Directory is resolved from
 there).
 
-## Getting bruhs
+## Downloads
 
-There is no backend. Until the first Mac release, the buttons point at the
-GitHub repository and the "Get bruhs" section shows how to run from source.
-Once `scripts/release.sh` (see the main repo's CONTRIBUTING.md) has published
-a release, the primary button should link to
+There is no backend. The Download buttons link to
 `https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg`,
-which GitHub resolves to the newest release.
+which GitHub resolves to the newest release. Releases are published with
+`scripts/release.sh` (see the main repo's CONTRIBUTING.md).
 
 ## Screenshots
 

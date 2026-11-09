@@ -32,7 +32,7 @@
           Jump to <kbd><span class="mod">⌘</span>K</kbd>
         </button>
         <a class="nav-link hide-sm" href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
-        <a class="btn btn-primary" href="#get">Get bruhs</a>
+        <a class="btn btn-primary" href="#get">Download</a>
       </div>
     </div>
   </header>
@@ -48,10 +48,10 @@
         <div>
           <div class="get">
             <div class="get-row">
-              <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai" data-primary>View on GitHub</a>
-              <a class="btn btn-ghost" href="#get">Run it from source</a>
+              <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-primary>Download for macOS</a>
+              <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai">View on GitHub</a>
             </div>
-            <p class="fine">Free and MIT licensed. Runs on macOS with your own Claude Code or Codex. A signed Mac app comes with the first release.</p>
+            <p class="fine">Free and MIT licensed. macOS 13 or later on Apple silicon. Uses your own Claude Code or Codex. <a href="#get">Install notes</a></p>
           </div>
         </div>
       </div>
@@ -297,14 +297,19 @@
       <div class="wrap">
         <img src="/bruhs.svg" alt="" width="48" height="48">
         <h2 class="display display-sm" id="get-title" tabindex="-1">Your whole day deserves better than twelve tabs.</h2>
-        <p class="lede">bruhs is free and open source. Run it from a checkout today; a signed Mac app comes with the first release.</p>
+        <p class="lede">bruhs is free and open source. Download the Mac app, or run it from a checkout.</p>
         <div class="get-row">
-          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai" data-primary>View on GitHub</a>
-          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/releases">Releases</a>
+          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-primary>Download for macOS</a>
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai">View on GitHub</a>
         </div>
         <ol class="install-steps">
-          <li>Install <a href="https://rustup.rs">Rust</a>, Trunk (<code>cargo install trunk</code>) and portless (<code>npm i -g portless</code>).</li>
+          <li>Open <code>Bruhs-macOS-arm64.dmg</code> and drag Bruhs to Applications.</li>
           <li>Install Claude Code or Codex and sign in (<code>claude auth login</code>, <code>codex login</code>). bruhs runs the CLIs you already have.</li>
+          <li>Open Bruhs. It keeps itself and those CLIs up to date from Settings → Updates.</li>
+        </ol>
+        <h3 class="get-sub">Or run it from source</h3>
+        <ol class="install-steps">
+          <li>Install <a href="https://rustup.rs">Rust</a>, Trunk (<code>cargo install trunk</code>) and portless (<code>npm i -g portless</code>).</li>
           <li>Clone it and start it. It opens at <code>https://bruhs.localhost</code>.
             <div class="cmd">
               <div class="cmd-head">
@@ -317,7 +322,7 @@ scripts/dev.sh</code></pre>
             </div>
           </li>
         </ol>
-        <p class="fine">Watch the repository’s releases to hear when the Mac app ships. <a href="/privacy">Privacy</a></p>
+        <p class="fine">Signed with a Developer ID and notarized by Apple. <a href="https://github.com/bryantleft/bruhs-ai/releases">All releases</a> · <a href="/privacy">Privacy</a></p>
       </div>
     </section>
   </main>
@@ -328,7 +333,7 @@ scripts/dev.sh</code></pre>
       <nav aria-label="Footer">
         <a href="/privacy">Privacy</a>
         <a href="/changelog">Changelog</a>
-        <a href="#get">Get bruhs</a>
+        <a href="#get">Download</a>
         <a href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
       </nav>
     </div>
