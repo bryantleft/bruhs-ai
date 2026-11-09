@@ -32,13 +32,14 @@ impl SaveStatus {
         };
     }
 
-    pub(super) fn message(&self) -> &'static str {
+    /// The warning a save needs the user to act on. Routine saves stay
+    /// silent, so `Saved` and `Saving` have none.
+    pub(super) fn alert(&self) -> Option<&'static str> {
         match self {
-            Self::Saved => "Saved locally.",
-            Self::Saving => "Saving locally. Workflow changes are provisional until the save finishes.",
-            Self::Failed(_) => "Local save failed. Keep this window open; copy a recovery snapshot or retry. Workflows cannot advance yet.",
-            Self::Conflict => "Another instance changed this workspace. Your draft is kept here. Copy recovery before reloading; retry cannot overwrite the newer saved version.",
-            Self::RecoveryRequired(_) => "Saved data needs recovery. The original file is preserved and saving is paused. Copy this window's recovery snapshot before repairing or reloading.",
+            Self::Saved | Self::Saving => None,
+            Self::Failed(_) => Some("Local save failed. Keep this window open; copy a recovery snapshot or retry. Workflows cannot advance yet."),
+            Self::Conflict => Some("Another instance changed this workspace. Your draft is kept here. Copy recovery before reloading; retry cannot overwrite the newer saved version."),
+            Self::RecoveryRequired(_) => Some("Saved data needs recovery. The original file is preserved and saving is paused. Copy this window's recovery snapshot before repairing or reloading."),
         }
     }
 }
@@ -46,37 +47,35 @@ impl SaveStatus {
 use super::*;
 
 impl Workspace {
-    pub(super) fn render_save_status(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let failed = matches!(
-            self.save_status,
-            SaveStatus::Failed(_) | SaveStatus::RecoveryRequired(_) | SaveStatus::Conflict
-        );
-        div()
-            .id("workspace-save-status")
-            .debug_selector(|| "desktop-save-status".into())
-            .role(if failed { Role::Alert } else { Role::Status })
-            .aria_label(self.save_status.message())
-            .w_full()
-            .flex_shrink_0()
-            .flex()
-            .flex_wrap()
-            .items_center()
-            .gap_2()
-            .px_3()
-            .py_2()
-            .bg(theme::longan_900())
-            .text_size(px(12.0))
-            .text_color(if failed { theme::durian_300() } else { theme::rambutan_400() })
-            .child(div().flex_1().min_w_0().child(self.save_status.message()))
-            .when(matches!(self.save_status, SaveStatus::Failed(_)), |el| {
-                el.child(web_button("retry-workspace-save", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
-                    .debug_selector(|| "desktop-retry-save".into())
-                    .aria_label("Retry local save")
-                    .child("Retry save")
-                    .on_click(cx.listener(|this, _, _, cx| this.persist_and_notify(cx))))
-            })
-            .when(failed, |el| {
-                el.child(web_button("copy-workspace-recovery", WebButtonVariant::Ghost, WebButtonSize::Small, ButtonState::Enabled)
+    /// The strip appears only when a save failed; routine saves show nothing.
+    pub(super) fn render_save_status(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        let message = self.save_status.alert()?;
+        Some(
+            div()
+                .id("workspace-save-status")
+                .debug_selector(|| "desktop-save-status".into())
+                .role(Role::Alert)
+                .aria_label(message)
+                .w_full()
+                .flex_shrink_0()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .px_3()
+                .py_2()
+                .bg(theme::longan_900())
+                .text_size(px(12.0))
+                .text_color(theme::durian_300())
+                .child(div().flex_1().min_w_0().child(message))
+                .when(matches!(self.save_status, SaveStatus::Failed(_)), |el| {
+                    el.child(web_button("retry-workspace-save", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
+                        .debug_selector(|| "desktop-retry-save".into())
+                        .aria_label("Retry local save")
+                        .child("Retry save")
+                        .on_click(cx.listener(|this, _, _, cx| this.persist_and_notify(cx))))
+                })
+                .child(web_button("copy-workspace-recovery", WebButtonVariant::Ghost, WebButtonSize::Small, ButtonState::Enabled)
                     .debug_selector(|| "desktop-copy-recovery".into())
                     .aria_label("Copy private recovery snapshot")
                     .child("Copy recovery")
@@ -88,14 +87,15 @@ impl Workspace {
                         }
                         cx.notify();
                     })))
-            })
-            .into_any_element()
+                .into_any_element(),
+        )
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::SaveStatus;
+    use super::{theme, DesktopState, SaveStatus, Workspace};
+    use gpui::AppContext;
 
     #[test]
     fn workflow_may_advance_only_after_successful_save_acknowledgment() {
@@ -129,6 +129,43 @@ mod tests {
     #[test]
     fn global_message_does_not_expose_private_error_details() {
         let state = SaveStatus::Failed("private path and payload".into());
-        assert!(!state.message().contains("private path"));
+        assert!(!state.alert().unwrap().contains("private path"));
+    }
+
+    #[gpui::test]
+    fn only_a_failed_save_shows_the_status_strip(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().unwrap());
+        });
+        let (root, cx) = cx.add_window_view(|window, cx| {
+            gpui_component::Root::new(cx.new(|cx| Workspace::new(window, cx)), window, cx)
+        });
+        for (status, shown) in [
+            (SaveStatus::Saving, false),
+            (SaveStatus::Saved, false),
+            (SaveStatus::Failed("disk full".into()), true),
+            (SaveStatus::Conflict, true),
+            (SaveStatus::RecoveryRequired("bad file".into()), true),
+        ] {
+            let label = format!("{status:?}");
+            root.update(cx, |root, cx| {
+                root.view()
+                    .clone()
+                    .downcast::<Workspace>()
+                    .unwrap()
+                    .update(cx, |workspace, cx| {
+                        workspace.save_status = status;
+                        cx.notify();
+                    });
+            });
+            cx.run_until_parked();
+            assert_eq!(
+                cx.debug_bounds("desktop-save-status").is_some(),
+                shown,
+                "{label}"
+            );
+        }
     }
 }
