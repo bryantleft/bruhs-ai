@@ -14,6 +14,17 @@ npm run typecheck
 
 The hero mascot is drawn in dithered braille dots by `src/scripts/braille.js`.
 
+## Brand assets
+
+The bruhs.ai mark is the Bruh as a machine: a 6×6 disc of dots with a blue
+visor where the eyes were. It's separate from the Bruhs mascot (`bruhs.svg`,
+the design system's logo) and reads down to a 16px favicon.
+
+```
+node brand/logo.mjs   # public/logo.svg (nav) and public/favicon.svg (tab)
+brand/render.sh       # public/og.png (social card) and apple-touch-icon.png, via Chrome
+```
+
 ## Deploys
 
 Vercel deploys from GitHub (Root Directory
