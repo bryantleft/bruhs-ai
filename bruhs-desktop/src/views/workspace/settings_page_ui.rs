@@ -3,6 +3,9 @@
 use super::*;
 use gpui_component::input::Input;
 
+/// Web `<BrailleBruh size=96.0 />` in Settings → About.
+const SETTINGS_ABOUT_BRUH_PX: f32 = 96.0;
+
 fn follow_up_button(
     id: &'static str,
     label: &'static str,
@@ -870,12 +873,41 @@ impl Workspace {
             )
             .into_any_element();
         vec![
-                self.settings_row(
-                    "desktop-settings-about-version",
-                    "Version",
-                    "bruhs-desktop, built from the workspace crate.",
-                    code(env!("CARGO_PKG_VERSION").to_string()),
-                ),
+                // Web `AboutSettings` header: the dithered Bruh beside name and version.
+                div()
+                    .debug_selector(|| "desktop-settings-about-version".to_string())
+                    .px(px(SETTINGS_ROW_X_PADDING_PX))
+                    .py_3()
+                    .flex()
+                    .items_center()
+                    .gap_4()
+                    .child(crate::views::braille::braille_bruh(SETTINGS_ABOUT_BRUH_PX))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .child(
+                                div()
+                                    .text_size(px(SETTINGS_ROW_TITLE_TEXT_SIZE_PX))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .line_height(relative(1.5))
+                                    .text_color(theme::rambutan_100())
+                                    .child("bruhs"),
+                            )
+                            .child(code(env!("CARGO_PKG_VERSION").to_string()))
+                            .child(
+                                div()
+                                    .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .line_height(relative(1.625))
+                                    .text_color(theme::rambutan_500())
+                                    .child("bruhs-desktop, built from the workspace crate."),
+                            ),
+                    )
+                    .into_any_element(),
                 self.settings_row(
                     "desktop-settings-about-mcp",
                     "MCP servers",

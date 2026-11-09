@@ -1,3 +1,4 @@
+pub mod braille;
 pub mod chat;
 pub mod diff_panel;
 pub mod dropdown;
