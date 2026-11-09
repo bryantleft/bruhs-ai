@@ -50,6 +50,10 @@ Codex CLIs you already have, on your own logins.
 Every action is reachable from the command bar (`⌘K`), and most are one
 shortcut away.
 
+The standing [configurability goal](docs/configurability-goal-2026-11-09.md)
+tracks user control over models, project profiles, summaries, privacy,
+recording, automation, memory, and appearance across web and desktop.
+
 ## Install
 
 Download **Bruhs** for macOS (13 or later, Apple silicon) from the
@@ -203,12 +207,16 @@ is down, **+ Record** is disabled.
   Settings → Privacy & Security → Screen Recording if you missed it). Linux
   and Windows record the microphone only. Each meeting keeps
   `<meeting>.mic.wav`, `<meeting>.sys.wav` and the mixed file Whisper reads.
-- **Transcription.** Whisper runs on device (Metal on Apple silicon). While
+- **Transcription.** Whisper runs on device by default (Metal on Apple silicon). While
   recording, both channels are transcribed in ~5-second batches as previews;
   at stop, a full pass replaces them. Pick the models in Settings: Tiny (75
   MB), Base (150 MB, default), Small (470 MB) or Large v3 Turbo (1.6 GB,
   multilingual), with a separate, smaller **Live preview model** if you
-  like. Models download on first use.
+  like. Models download on first use. Settings → Transcription also supports a
+  configured **OpenAI-compatible server** and its model for the final pass;
+  selecting it uploads recorded audio to that server after Stop. Live previews
+  stay on device. See [provider setup](docs/transcription-providers.md) and the
+  standing [quality improvement goal](docs/transcription-goal-2026-11-09.md).
 - **Speakers.** Microphone segments are **Me** and system-audio segments
   **Them**. sherpa-onnx voice embeddings split **Them** into Speaker 1,
   Speaker 2…, and match voices to People profiles across meetings (cosine
