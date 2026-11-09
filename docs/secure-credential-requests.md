@@ -27,6 +27,9 @@ flowchart LR
 - One `request_secret` MCP tool names the credential, reason, environment variable,
   and command argument array. The harness supplies the thread and working directory;
   model arguments cannot choose another turn. Approval always displays the operation.
+  For Google Workspace, Microsoft 365, and GitHub, `request_connection` offers
+  browser SSO with the same command-review boundary. See
+  [service connections](service-connections.md) for account setup and lifecycle.
 - Each turn gets a separate authenticated loopback broker. The host binary also
   supplies its MCP stdio helper, so running the UI needs no separately installed
   bridge binary. Provider configuration contains a temporary broker capability,
@@ -89,7 +92,7 @@ cancellation revokes access sooner. The deadline is a harness interaction policy
 not a guarantee that a provider process remains alive for a day.
 
 The injected Codex server is required at startup so its tool is present in the
-initial catalog. Only `bruhs_secrets.request_secret` gets the CLI's per-tool
+initial catalog. `bruhs_secrets.request_secret` and `request_connection` get the CLI's per-tool
 `approval_mode = "approve"` override: opening the form can proceed under the
 non-interactive CLI policy, while executing its command still requires approval
 inside Bruhs. Other MCP tools and the turn's shell sandbox retain their policies.
