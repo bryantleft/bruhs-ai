@@ -1,0 +1,38 @@
+<!doctype html>
+<!-- Source of public/og.png (1200×630): run brand/render.sh. -->
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: Krypton; src: url(/public/fonts/MonaspaceKryptonVariable.woff2) format("woff2"); font-weight: 200 800; }
+  @font-face { font-family: Neon; src: url(/public/fonts/MonaspaceNeonVariable.woff2) format("woff2"); font-weight: 200 800; }
+  html, body { margin: 0; width: 1200px; height: 630px; overflow: hidden; background: #141210; }
+  .card { position: relative; width: 1200px; height: 630px; display: grid; grid-template-columns: 640px 1fr; align-items: center; }
+  .copy { padding: 0 0 0 80px; display: grid; gap: 36px; }
+  .brand { display: flex; align-items: center; gap: 16px; font: 500 30px/1 Neon, monospace; color: #f5ede7; }
+  .brand img { width: 52px; height: 52px; }
+  h1 { margin: 0; font: 400 76px/1.02 Krypton, monospace; letter-spacing: -0.02em; color: #f5ede7; }
+  p { margin: 0; font: 400 24px/1.4 Neon, monospace; color: #c3afa1; }
+  canvas { width: 560px; height: 560px; }
+  .rule { position: absolute; left: 0; right: 0; bottom: 34px; height: 7px; background: radial-gradient(circle, #443a2c 1px, transparent 1.5px) 0 50% / 7px 7px repeat-x; }
+</style>
+<div class="card">
+  <div class="copy">
+    <div class="brand"><img src="/public/logo.svg" alt="">bruhs.ai</div>
+    <h1>One window for your whole day.</h1>
+    <p>Coding agents, tasks, calendar and meetings, on your Mac.</p>
+  </div>
+  <canvas id="bruh"></canvas>
+  <div class="rule"></div>
+</div>
+<script type="module">
+  import { drawBruh } from "/src/scripts/braille.js";
+  const canvas = document.getElementById("bruh");
+  const size = 560, dpr = devicePixelRatio;
+  canvas.width = canvas.height = size * dpr;
+  const ctx = canvas.getContext("2d");
+  ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+  const r = size * 0.4, pitch = 6;
+  drawBruh(ctx, size, size, { cx: size / 2, cy: size / 2, r, lookX: -0.35, lookY: 0.1, minRy: (pitch * 1.1) / r },
+    { pitch, gap: pitch * 0.6, dot: pitch * 0.36, reveal: 1, colors: { face: "#fada5e", mouth: "#fc4141", halo: "#443a2c" } });
+  await document.fonts.ready;
+  document.title = "ready";
+</script>
