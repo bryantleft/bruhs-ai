@@ -483,12 +483,22 @@ fn KeyboardSettings() -> impl IntoView {
 
 #[component]
 fn AboutSettings() -> impl IntoView {
+    // A packaged app reports its release version (from the bundle, the one
+    // updates compare); a dev build has only the crate version.
+    let updates = crate::updates::Updates::get();
+    let version = move || {
+        updates
+            .report
+            .get()
+            .and_then(|report| report.installed_release().map(str::to_owned))
+            .unwrap_or_else(|| env!("CARGO_PKG_VERSION").to_owned())
+    };
     view! {
         <div data-testid="settings-about-version" class="flex items-center gap-4 px-4 py-3">
             <BrailleBruh size=96.0 />
             <div class="flex min-w-0 flex-col gap-1">
                 <h3 class="text-label text-rambutan-100">"bruhs"</h3>
-                <span class="text-code-sm text-rambutan-200">{env!("CARGO_PKG_VERSION")}</span>
+                <span class="text-code-sm text-rambutan-200">{version}</span>
                 <p class="text-label-sm leading-relaxed text-rambutan-500">"bruhs-web, built from the workspace crate."</p>
             </div>
         </div>

@@ -1045,6 +1045,15 @@ fn online_default() -> bool {
 }
 
 impl UpdatesReport {
+    /// The version a packaged app was released as (read from its bundle;
+    /// what updates compare against), or `None` for a source build.
+    pub fn installed_release(&self) -> Option<&str> {
+        self.app
+            .release
+            .as_ref()
+            .map(|release| release.current_version.as_str())
+    }
+
     pub fn provider(&self, provider: AgentProvider) -> Option<&ProviderUpdate> {
         self.providers.iter().find(|p| p.provider == provider)
     }
