@@ -2518,9 +2518,7 @@ impl Render for Workspace {
             .text_color(cx.theme().foreground)
             .flex()
             .flex_col()
-            .when(!self.save_status.is_saved(), |el| {
-                el.child(self.render_save_status(cx))
-            })
+            .when_some(self.render_save_status(cx), |el, status| el.child(status))
             .when_some(self.render_workflow_status(cx), |el, status| {
                 el.child(status)
             })

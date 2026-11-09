@@ -1,7 +1,8 @@
 use crate::durable_metadata::SaveState;
 use leptos::prelude::*;
 
-/// Save failures stay visible and keep a local recovery copy available.
+/// Routine loads and saves stay silent: nothing renders until a save fails.
+/// A failure stays visible with a retry and a local recovery copy.
 #[component]
 pub fn MetadataStatus(
     status: RwSignal<SaveState>,
@@ -15,14 +16,9 @@ pub fn MetadataStatus(
         }
     });
     view! {
-        <div class="shrink-0 border-b border-longan-800/40 px-4 py-2 text-label-sm text-rambutan-400 sm:px-6">
-            <p role="status" aria-live="polite">{move || match status.get() {
-                SaveState::Loading => "Loading local data… Close older Bruhs tabs if storage upgrade is waiting.",
-                SaveState::Saving => "Saving locally… Keep this tab open until saved.",
-                SaveState::Saved => "Saved locally",
-                SaveState::Error { .. } => "Not saved",
-            }}</p>
-            <Show when=move || matches!(status.get(), SaveState::Error { .. })>
+        <Show when=move || matches!(status.get(), SaveState::Error { .. })>
+            <div class="shrink-0 border-b border-longan-800/40 px-4 py-2 text-label-sm text-rambutan-400 sm:px-6">
+                <p>"Not saved"</p>
                 <p role="alert" class="mt-1 text-lychee-300">{move || match status.get() {
                     SaveState::Error { message, .. } => message,
                     _ => String::new(),
@@ -41,7 +37,7 @@ pub fn MetadataStatus(
                         <textarea aria-label="Unsaved recovery data" readonly class="h-32 w-full rounded-grape bg-longan-950 p-2 text-rambutan-300" prop:value=move || recovery.get()></textarea>
                     </Show>
                 </details>
-            </Show>
-        </div>
+            </div>
+        </Show>
     }
 }
