@@ -1,11 +1,10 @@
 # bruhs-site
 
-The landing page at https://bruhs.ai (www redirects with a 308) and its
-waitlist endpoint. Static HTML, CSS and
-JS in `public/` (no build step), plus one Vercel function in `api/`.
+The landing page at https://bruhs.ai (www redirects with a 308). Static HTML,
+CSS and JS in `public/`, with no build step and no functions.
 
 ```
-npm test           # handler + command-bar tests, no install needed (Node 22.18+)
+npm test           # page + command-bar tests, no install needed (Node 22.18+)
 npm ci && npm run typecheck
 ```
 
@@ -19,17 +18,14 @@ redeploy the site. To deploy by hand, run `npx vercel@latest deploy [--prod]`
 from the repository root (the project's Root Directory is resolved from
 there).
 
-## Waitlist storage
+## Getting bruhs
 
-`api/waitlist.ts` writes to Upstash Redis through its REST API. It reads
-`KV_REST_API_URL` and `KV_REST_API_TOKEN`, which the Upstash integration in
-the Vercel dashboard sets when the database is linked to `bruhs-ai-site`.
-Until they exist the endpoint answers 503 `storage_unconfigured`.
-
-- Signups: hash `waitlist:entries`, field = lowercased email, value =
-  `{ joinedAt, consent }`. Export with `HGETALL waitlist:entries`.
-- Rate limit: `waitlist:rate:<sha256(ip)>`, 10 per hour, expires.
-- Changing the wording under the form? Bump `CONSENT_VERSION`.
+There is no backend. Until the first Mac release, the buttons point at the
+GitHub repository and the "Get bruhs" section shows how to run from source.
+Once `scripts/release.sh` (see the main repo's CONTRIBUTING.md) has published
+a release, the primary button should link to
+`https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg`,
+which GitHub resolves to the newest release.
 
 ## Screenshots
 

@@ -2,7 +2,7 @@
   "name": "bruhs-site",
   "private": true,
   "type": "module",
-  "description": "bruhs.ai landing page and waitlist endpoint, deployed on Vercel",
+  "description": "bruhs.ai landing page, deployed on Vercel",
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
     "typecheck": "tsc -p ."

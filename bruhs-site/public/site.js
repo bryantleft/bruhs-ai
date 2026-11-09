@@ -1,7 +1,6 @@
 // Page behavior: the ⌘K bar (inline in the hero and as a dialog), the surface
-// tour, waitlist forms, and key tiles that light up when pressed.
+// tour, and key tiles that light up when pressed.
 
-import { waitlistMessage } from "./messages.js";
 import { COMMANDS, filterCommands } from "./palette.js";
 
 /** @typedef {import("./palette.js").Command} Command */
@@ -9,8 +8,6 @@ import { COMMANDS, filterCommands } from "./palette.js";
 const IS_MAC = /mac|iphone|ipad/i.test(
   /** @type {{ userAgentData?: { platform?: string } }} */ (navigator).userAgentData?.platform ?? navigator.platform,
 );
-
-const NETWORK_ERROR = "We couldn't reach the waitlist. Check your connection and try again.";
 
 // ---------------------------------------------------------------------------
 // Modifier labels
@@ -160,7 +157,7 @@ function go(command) {
   const section = document.getElementById(id);
   if (!section) return;
   section.scrollIntoView({ block: "start" });
-  const focusTarget = id === "join" ? section.querySelector('input[type="email"]') : section.querySelector("h2");
+  const focusTarget = id === "get" ? section.querySelector("a[data-primary]") : section.querySelector("h2");
   if (focusTarget instanceof HTMLElement) focusTarget.focus({ preventScroll: true });
 }
 
@@ -344,65 +341,19 @@ document.addEventListener("keydown", (event) => {
 });
 
 // ---------------------------------------------------------------------------
-// Waitlist forms
+// Copy buttons: `data-copy` names the element whose text goes to the clipboard.
 
-for (const form of /** @type {NodeListOf<HTMLFormElement>} */ (document.querySelectorAll("form[data-join]"))) {
-  const status = /** @type {HTMLElement} */ (form.querySelector(".join-status"));
-  const button = /** @type {HTMLButtonElement} */ (form.querySelector('button[type="submit"]'));
-  const done = form.nextElementSibling;
-
-  /**
-   * @param {string} message
-   * @param {"error" | "ok" | ""} tone
-   */
-  function say(message, tone) {
-    status.textContent = message;
-    status.dataset.tone = tone;
-  }
-
-  form.addEventListener("submit", async (event) => {
-    event.preventDefault();
-    const data = new FormData(form);
-    button.disabled = true;
-    say("Joining…", "");
+for (const button of document.querySelectorAll("button[data-copy]")) {
+  const label = button.textContent;
+  button.addEventListener("click", async () => {
+    const source = document.getElementById(button.getAttribute("data-copy") ?? "");
+    if (!source) return;
     try {
-      const response = await fetch(form.action, {
-        method: "POST",
-        headers: { "content-type": "application/json", accept: "application/json" },
-        body: JSON.stringify({ email: data.get("email"), website: data.get("website") }),
-      });
-      /** @type {{ status?: string, error?: string }} */
-      const body = await response.json().catch(() => ({}));
-      if (response.ok && body.status === "joined") {
-        markJoined();
-        return;
-      }
-      say(waitlistMessage(body.error), "error");
+      await navigator.clipboard.writeText(source.textContent ?? "");
+      button.textContent = "Copied";
     } catch {
-      say(NETWORK_ERROR, "error");
-    } finally {
-      button.disabled = false;
+      button.textContent = "Select and copy";
     }
+    setTimeout(() => { button.textContent = label; }, 1600);
   });
-
-  // Back from the no-JS form fallback: say why the signup failed.
-  const code = new URLSearchParams(location.search).get("waitlist");
-  if (code && form.closest("#join")) say(waitlistMessage(code), "error");
-
-  function markJoined() {
-    for (const other of document.querySelectorAll("form[data-join]")) {
-      if (!(other instanceof HTMLElement)) continue;
-      other.hidden = true;
-      const sibling = other.nextElementSibling;
-      if (sibling instanceof HTMLElement && sibling.hasAttribute("data-join-done")) sibling.hidden = false;
-    }
-    if (done instanceof HTMLElement) {
-      done.tabIndex = -1;
-      done.focus({ preventScroll: true });
-    }
-  }
-}
-
-if (new URLSearchParams(location.search).has("waitlist")) {
-  history.replaceState(null, "", location.pathname + location.hash);
 }

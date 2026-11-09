@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>bruhs: one window for your whole day</title>
-  <meta name="description" content="A local-first, keyboard-native agent for your whole day: agentic threads, tasks, calendar, meetings, people, notes, money and health in one window. Join the waitlist.">
+  <meta name="description" content="A local-first, keyboard-native agent for your whole day: agentic threads, tasks, calendar, meetings, people, notes, money and health in one window. Free, open source, for macOS.">
   <meta name="theme-color" content="#141210">
   <link rel="canonical" href="https://bruhs.ai/">
   <meta property="og:type" content="website">
@@ -31,7 +31,8 @@
         <button class="btn btn-ghost hide-sm" type="button" data-open-palette aria-haspopup="dialog">
           Jump to <kbd><span class="mod">⌘</span>K</kbd>
         </button>
-        <a class="btn btn-primary" href="#join">Join the waitlist</a>
+        <a class="nav-link hide-sm" href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
+        <a class="btn btn-primary" href="#get">Get bruhs</a>
       </div>
     </div>
   </header>
@@ -40,27 +41,17 @@
     <section class="hero">
       <div class="wrap hero-head">
         <div class="hero-title">
-          <p class="eyebrow">In private testing · macOS and the browser</p>
+          <p class="eyebrow">Open source · macOS and the browser</p>
           <h1 class="display">One window<br>for your whole day.</h1>
         </div>
         <p class="lede">Agentic threads, tasks, calendar, meetings, people, notes, money and health. Everything is a keystroke away, and it all lives on your machine.</p>
         <div>
-          <form class="join-form" action="/api/waitlist" method="post" data-join>
-            <div class="join-row">
-              <label class="sr-only" for="hero-email">Email address</label>
-              <input id="hero-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@domain.com" required maxlength="254">
-              <div class="trap" aria-hidden="true">
-                <label for="hero-website">Leave this empty</label>
-                <input id="hero-website" name="website" type="text" tabindex="-1" autocomplete="off">
-              </div>
-              <button class="btn btn-primary" type="submit">Join the waitlist <kbd>⏎</kbd></button>
+          <div class="get">
+            <div class="get-row">
+              <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai" data-primary>View on GitHub</a>
+              <a class="btn btn-ghost" href="#get">Run it from source</a>
             </div>
-            <p class="join-status" role="status" aria-live="polite"></p>
-            <p class="fine">One email, when bruhs is ready for you. No tracking. <a href="/privacy">Privacy</a></p>
-          </form>
-          <div class="join-done" hidden data-join-done>
-            <img src="/bruhs.svg" alt="" width="28" height="28">
-            <p>You're on the list. We'll send one email when bruhs is ready for you.</p>
+            <p class="fine">Free and MIT licensed. Runs on macOS with your own Claude Code or Codex. A signed Mac app comes with the first release.</p>
           </div>
         </div>
       </div>
@@ -267,9 +258,10 @@
               <dd><b>Money and health.</b> Your agent can't see them until you opt in, and exact amounts need a second opt-in.</dd>
             </div>
             <div class="ledger-group">
-              <dt>Online only when you ask</dt>
+              <dt>What goes online</dt>
               <dd><b>Messages to Claude or Codex.</b> They go to Anthropic or OpenAI through your own login.</dd>
               <dd><b>Google Calendar.</b> Read-only, and only if you connect it.</dd>
+              <dd><b>Update checks.</b> GitHub for new bruhs releases, npm or Homebrew for new CLIs. One switch in Settings turns them off.</dd>
             </div>
           </dl>
         </div>
@@ -301,28 +293,31 @@
       </div>
     </section>
 
-    <section class="section closing" id="join" aria-labelledby="join-title">
+    <section class="section closing" id="get" aria-labelledby="get-title">
       <div class="wrap">
         <img src="/bruhs.svg" alt="" width="48" height="48">
-        <h2 class="display display-sm" id="join-title" tabindex="-1">Your whole day deserves better than twelve tabs.</h2>
-        <p class="lede">bruhs is in private testing. Leave your email and we'll write once, when it's ready for you.</p>
-        <form class="join-form" action="/api/waitlist" method="post" data-join>
-          <div class="join-row">
-            <label class="sr-only" for="join-email">Email address</label>
-            <input id="join-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@domain.com" required maxlength="254">
-            <div class="trap" aria-hidden="true">
-              <label for="join-website">Leave this empty</label>
-              <input id="join-website" name="website" type="text" tabindex="-1" autocomplete="off">
-            </div>
-            <button class="btn btn-primary" type="submit">Join the waitlist <kbd>⏎</kbd></button>
-          </div>
-          <p class="join-status" role="status" aria-live="polite"></p>
-          <p class="fine">One email, when bruhs is ready for you. No tracking. <a href="/privacy">Privacy</a></p>
-        </form>
-        <div class="join-done" hidden data-join-done>
-          <img src="/bruhs.svg" alt="" width="28" height="28">
-          <p>You're on the list. We'll send one email when bruhs is ready for you.</p>
+        <h2 class="display display-sm" id="get-title" tabindex="-1">Your whole day deserves better than twelve tabs.</h2>
+        <p class="lede">bruhs is free and open source. Run it from a checkout today; a signed Mac app comes with the first release.</p>
+        <div class="get-row">
+          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai" data-primary>View on GitHub</a>
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/releases">Releases</a>
         </div>
+        <ol class="install-steps">
+          <li>Install <a href="https://rustup.rs">Rust</a>, Trunk (<code>cargo install trunk</code>) and portless (<code>npm i -g portless</code>).</li>
+          <li>Install Claude Code or Codex and sign in (<code>claude auth login</code>, <code>codex login</code>). bruhs runs the CLIs you already have.</li>
+          <li>Clone it and start it. It opens at <code>https://bruhs.localhost</code>.
+            <div class="cmd">
+              <div class="cmd-head">
+                <span>Terminal</span>
+                <button class="btn btn-quiet cmd-copy" type="button" data-copy="cmd-start" aria-live="polite">Copy</button>
+              </div>
+              <pre id="cmd-start"><code>git clone https://github.com/bryantleft/bruhs-ai.git
+cd bruhs-ai
+scripts/dev.sh</code></pre>
+            </div>
+          </li>
+        </ol>
+        <p class="fine">Watch the repository’s releases to hear when the Mac app ships. <a href="/privacy">Privacy</a></p>
       </div>
     </section>
   </main>
@@ -333,7 +328,8 @@
       <nav aria-label="Footer">
         <a href="/privacy">Privacy</a>
         <a href="/changelog">Changelog</a>
-        <a href="#join">Waitlist</a>
+        <a href="#get">Get bruhs</a>
+        <a href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
       </nav>
     </div>
   </footer>
