@@ -9,6 +9,18 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ## [Unreleased]
 
+### Added
+
+- Added messages between threads. An agent can list your threads, read one,
+  and send one a message or start a new thread; the other thread's agent can
+  answer back. A message waits in that thread's queue like one you typed, so
+  you can still edit or remove it, and it shows who sent it. On desktop an
+  agent can also wait for the other thread's reply. Plan turns can list and
+  read threads.
+- Added two settings under General: Messages between threads (Read and
+  message, Read only, or Off) and Agent message limit, which stops a chain of
+  agent messages after 2, 4, 6 or 10 and hands back to you.
+
 ## [0.1.1] - 2026-11-09
 
 This release fixes the calendar around daylight saving time and tidies the
