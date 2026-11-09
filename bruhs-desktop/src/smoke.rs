@@ -10,6 +10,11 @@
 //!   in the composer, then quit. Spends real tokens; point
 //!   `BRUHS_DESKTOP_STATE_FILE` at a scratch file so no threads are kept.
 //!
+//! - `BRUHS_DESKTOP_THREADS_SMOKE=1`: in a new project-less chat, have the
+//!   agent start a thread with `message_thread` and wait for that thread's
+//!   agent to answer back, print what each thread received, then quit.
+//!   Spends real tokens; use a scratch `BRUHS_DESKTOP_STATE_FILE`.
+//!
 //! None of this is compiled into a release build: a shipped app must not be
 //! drivable (or made to auto-submit prompts) through its environment.
 
@@ -270,6 +275,143 @@ pub(crate) fn schedule_desktop_commands_smoke(
         });
         let moved = cx.update(|cx| workspace.read(cx).smoke_active_id() != source);
         eprintln!("{tag} handoff opened={handed} new_thread={moved} brief={brief:?}");
+        eprintln!("{tag} done");
+        cx.update(|cx| cx.quit());
+    })
+    .detach();
+}
+
+/// Has one thread's agent message another and get an answer back.
+const DESKTOP_THREADS_SMOKE_ENV: &str = "BRUHS_DESKTOP_THREADS_SMOKE";
+/// The word the second thread must send back.
+const DESKTOP_THREADS_SMOKE_WORD: &str = "SCOUT-OK";
+/// The word the third thread must answer inside the waiting call.
+const DESKTOP_THREADS_SMOKE_WAIT_WORD: &str = "RELAY-OK";
+
+pub(crate) fn desktop_threads_smoke_enabled() -> bool {
+    env::var(DESKTOP_THREADS_SMOKE_ENV)
+        .ok()
+        .is_some_and(|value| desktop_window_smoke_value_enabled(&value))
+}
+
+/// Messages between threads, driven through the desktop's own composer.
+/// First the agent starts a second thread whose agent answers back with a
+/// message of its own. Then it starts a third and waits, inside the tool
+/// call, for that thread's reply.
+pub(crate) fn schedule_desktop_threads_smoke(
+    window: WindowHandle<Root>,
+    workspace: Entity<views::workspace::Workspace>,
+    cx: &mut App,
+) {
+    let tag = DESKTOP_THREADS_SMOKE_ENV;
+    eprintln!("{tag} ready");
+    cx.spawn(async move |cx: &mut AsyncApp| {
+        cx.background_executor().timer(Duration::from_secs(1)).await;
+        let new_workspace = workspace.clone();
+        let Ok(Some(chat)) = window.update(cx, move |_, window, cx| {
+            new_workspace.update(cx, |workspace, cx| {
+                workspace.smoke_bypass_permissions(cx);
+                workspace.smoke_new_chat(window, cx)
+            })
+        }) else {
+            eprintln!("{tag} no chat");
+            cx.update(|cx| cx.quit());
+            return;
+        };
+        let enter = |text: &'static str, cx: &mut AsyncApp| {
+            let sender = chat.clone();
+            let _ = window.update(cx, move |_, window, cx| {
+                sender.update(cx, |chat, cx| chat.smoke_enter(text, window, cx));
+            });
+        };
+        // Poll until `done` says so or the step times out.
+        async fn wait(cx: &mut AsyncApp, done: impl Fn(&mut AsyncApp) -> bool) -> bool {
+            for _ in 0..DESKTOP_COMMANDS_SMOKE_STEP_SECS {
+                if done(cx) {
+                    return true;
+                }
+                cx.background_executor().timer(Duration::from_secs(1)).await;
+            }
+            false
+        }
+        let last = |title: &'static str, cx: &mut AsyncApp| {
+            cx.update(|cx| {
+                workspace
+                    .read(cx)
+                    .smoke_chat_titled(title, cx)
+                    .map(|chat| {
+                        let chat = chat.read(cx);
+                        (chat.smoke_last_prompt(), chat.smoke_last_reply())
+                    })
+                    .unwrap_or_default()
+            })
+        };
+
+        enter(
+            "This is a harness check of the bruhs_threads MCP tools. Call message_thread once with no thread_id, the title \"Scout\", and exactly this message: \"Harness check. Call message_thread once, addressed to the thread id named in the header of this message, with exactly the message: SCOUT-OK. Then stop.\" Do not set wait. Do not use any other tool. Then answer in one short line.",
+            cx,
+        );
+        // The answer is a new prompt in the first thread, and its turn ends.
+        let watched = chat.clone();
+        let answered = wait(cx, move |cx| {
+            cx.update(|cx| {
+                let chat = watched.read(cx);
+                let prompt = chat.smoke_last_prompt();
+                !chat.is_streaming
+                    && bruhs_models::thread_link::prompt_hops(&prompt) == 2
+                    && prompt.contains(DESKTOP_THREADS_SMOKE_WORD)
+            })
+        })
+        .await;
+        let (scout_prompt, scout_reply) = last("Scout", cx);
+        let stayed = cx.update(|cx| {
+            workspace
+                .read(cx)
+                .smoke_active_chat()
+                .map(|active| active.entity_id())
+                == Some(chat.entity_id())
+        });
+        let (answer_prompt, final_reply) = cx.update(|cx| {
+            let chat = chat.read(cx);
+            (chat.smoke_last_prompt(), chat.smoke_last_reply())
+        });
+        eprintln!(
+            "{tag} started={} scout_hops={} scout_prompt={:?} scout_reply={scout_reply:?}",
+            !scout_prompt.is_empty(),
+            bruhs_models::thread_link::prompt_hops(&scout_prompt),
+            scout_prompt.lines().next().unwrap_or_default(),
+        );
+        eprintln!(
+            "{tag} answered={answered} view_stayed={stayed} answer_prompt={answer_prompt:?} final_reply={final_reply:?}"
+        );
+
+        // A waiting call: the third thread's reply comes back as the tool
+        // result, inside this one turn, and no message is sent back.
+        enter(
+            "Second harness check. Call message_thread once with no thread_id, the title \"Relay\", wait set to true, and exactly this message: \"Harness check. Reply with exactly the word RELAY-OK and nothing else. Do not call any tool.\" Do not use any other tool. Then tell me, in one short line, the exact text that tool call returned.",
+            cx,
+        );
+        let watched = chat.clone();
+        let waited = wait(cx, move |cx| {
+            cx.update(|cx| {
+                let chat = watched.read(cx);
+                !chat.is_streaming
+                    && chat.smoke_last_prompt().starts_with("Second harness check")
+                    && chat.smoke_last_reply().contains(DESKTOP_THREADS_SMOKE_WAIT_WORD)
+            })
+        })
+        .await;
+        let (relay_prompt, relay_reply) = last("Relay", cx);
+        let (last_prompt, waited_reply) = cx.update(|cx| {
+            let chat = chat.read(cx);
+            (chat.smoke_last_prompt(), chat.smoke_last_reply())
+        });
+        eprintln!(
+            "{tag} waited={waited} relay_awaited={} relay_reply={relay_reply:?} sender_got_no_message_back={} sender_reply={waited_reply:?}",
+            bruhs_models::thread_link::parse_delivery(&relay_prompt)
+                .is_some_and(|delivery| delivery.awaited),
+            last_prompt.starts_with("Second harness check"),
+        );
         eprintln!("{tag} done");
         cx.update(|cx| cx.quit());
     })

@@ -319,6 +319,12 @@ impl ChatView {
     /// with the copy button and clock revealed on hover.
     fn render_user_row(&self, index: usize, msg: &Message, cx: &Context<'_, Self>) -> AnyElement {
         let group: SharedString = format!("desktop-user-turn-{index}").into();
+        // A message another thread's agent sent shows who sent it, not the
+        // header written for the model.
+        let (caption, body) = match bruhs_models::thread_link::parse_delivery(&msg.content) {
+            Some(delivery) => (Some(delivery.caption()), delivery.body.to_string()),
+            None => (None, msg.content.clone()),
+        };
         div()
             .id(("desktop-user-turn", index))
             .debug_selector(move || format!("desktop-user-message-{index}"))
@@ -340,7 +346,21 @@ impl ChatView {
                     .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                     .line_height(relative(1.5))
                     .text_color(theme::rambutan_100())
-                    .child(msg.content.clone())
+                    .flex()
+                    .flex_col()
+                    .when_some(caption, |bubble, caption| {
+                        bubble.child(
+                            div()
+                                .debug_selector(move || format!("desktop-user-from-thread-{index}"))
+                                .mb(px(6.0))
+                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                .text_size(px(12.0))
+                                .line_height(relative(1.5))
+                                .text_color(theme::blueberry_400())
+                                .child(caption),
+                        )
+                    })
+                    .child(div().child(body))
                     .when(!msg.files.is_empty(), |bubble| {
                         bubble.child(self.render_sent_files(index, msg, cx))
                     }),

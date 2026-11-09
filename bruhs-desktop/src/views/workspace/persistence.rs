@@ -413,6 +413,10 @@ impl Workspace {
             claude_autocompact: self.claude_autocompact.clone(),
             compact_idle: (self.compact_idle != IdleCompact::Return)
                 .then(|| self.compact_idle.as_str().to_string()),
+            thread_access: (self.thread_access != ThreadAccess::default())
+                .then(|| self.thread_access.as_str().to_string()),
+            thread_hops: (self.thread_hops != bruhs_models::thread_link::MAX_HOPS)
+                .then_some(self.thread_hops),
             previous_worktree: self.previous_worktree.clone(),
             keybindings: self.keybindings.clone(),
         }

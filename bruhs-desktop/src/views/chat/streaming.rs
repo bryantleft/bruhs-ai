@@ -284,6 +284,9 @@ async fn forward_turn_events(
             OrchestratorEvent::Query(QueryEvent::SecretResolved { id }) => {
                 let _ = tx.send(AgentUiEvent::SecretResolved(id));
             }
+            OrchestratorEvent::Query(QueryEvent::ThreadRequest(request)) => {
+                let _ = tx.send(AgentUiEvent::ThreadRequest(request));
+            }
             OrchestratorEvent::Query(QueryEvent::Text(text)) => {
                 let _ = tx.send(AgentUiEvent::Text(text));
             }
@@ -756,6 +759,69 @@ impl ChatView {
         let chips = next.chips;
         self.finish_submit(text, Vec::new(), chips, Vec::new(), cx);
         cx.emit(ChatViewEvent::MessagesChanged);
+    }
+
+    /// Take a message another thread's agent sent here: run it now when the
+    /// thread is free, otherwise queue it behind what already waits. Returns
+    /// whether its turn started. A held queue stays held.
+    pub fn accept_thread_message(&mut self, prompt: &str, cx: &mut Context<'_, Self>) -> bool {
+        let thread_id = self
+            .thread_id
+            .get_or_insert_with(|| uuid::Uuid::new_v4().to_string())
+            .clone();
+        let free = !(self.is_streaming
+            || self.placing
+            || self.queue_held
+            || self.prompt_queue.has_for(&thread_id));
+        if free {
+            self.submit_prompt(prompt.to_string(), cx);
+            // A turn that could not start (a local command, a missing
+            // project) leaves the thread idle.
+            return self.is_streaming || self.placing;
+        }
+        let at_ms = EpochMs::now().as_millis().to_f64_lossy();
+        self.prompt_queue.push(&thread_id, prompt, at_ms);
+        cx.emit(ChatViewEvent::MessagesChanged);
+        cx.notify();
+        false
+    }
+
+    /// How the message `prompt`, sent here by another thread's agent that is
+    /// waiting, ended. `None` while it is still queued or running.
+    pub fn thread_message_answer(&self, prompt: &str) -> Option<ThreadMessageAnswer> {
+        let prompt = prompt.trim();
+        let queued = self.thread_id.as_deref().is_some_and(|id| {
+            self.prompt_queue
+                .for_thread(id)
+                .iter()
+                .any(|item| item.text.trim() == prompt)
+        });
+        if queued || self.placing {
+            return None;
+        }
+        let Some(asked) = self.messages.iter().rposition(|message| {
+            message.role == MessageRole::User && message.content.trim() == prompt
+        }) else {
+            return Some(ThreadMessageAnswer::Removed);
+        };
+        let reply = self.messages[asked + 1..]
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::Assistant);
+        match reply.map(|reply| (&reply.state, reply)) {
+            Some((TurnState::Streaming, _)) => None,
+            None if self.is_streaming => None,
+            Some((TurnState::Finished, reply)) => {
+                Some(ThreadMessageAnswer::Replied(reply.content.clone()))
+            }
+            Some((TurnState::Stopped, _)) => Some(ThreadMessageAnswer::Stopped),
+            Some((TurnState::Failed { error }, _)) => {
+                Some(ThreadMessageAnswer::Failed(error.clone()))
+            }
+            None => Some(ThreadMessageAnswer::Failed(
+                "its turn ended without a reply".to_string(),
+            )),
+        }
     }
 
     fn schedule_drain(&mut self, cx: &mut Context<'_, Self>) {
@@ -1526,6 +1592,7 @@ impl ChatView {
             )
             .effort(send_effort.as_deref())
             .autocompact(autocompact)
+            .thread_access(self.thread_access)
             // A chat with no project needs no coding plugins (web: no `project_path`).
             .lean(!project_scoped);
             if self.fresh_session {
@@ -1560,6 +1627,15 @@ impl ChatView {
                     if view.turn_generation != generation {
                         return false;
                     }
+                    let event = match event {
+                        AgentUiEvent::ThreadRequest(request) => {
+                            if view.thread_id.as_deref() == Some(request.thread_id.as_str()) {
+                                cx.emit(ChatViewEvent::ThreadRequest(request));
+                            }
+                            return true;
+                        }
+                        event => event,
+                    };
                     let saved = (view.session_id.clone(), view.import_context.is_some());
                     view.apply_agent_event(event);
                     if saved != (view.session_id.clone(), view.import_context.is_some()) {
@@ -1725,6 +1801,8 @@ impl ChatView {
                     self.secret_prompt = None;
                 }
             }
+            // Answered by the workspace before events reach this reducer.
+            AgentUiEvent::ThreadRequest(_) => {}
             AgentUiEvent::Text(text) => {
                 if let Some(message) = self.active_assistant_message_mut() {
                     message.content.push_str(&text);

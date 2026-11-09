@@ -127,6 +127,7 @@ pub struct AppState {
 pub struct AppStateBuilder {
     secret_store: Option<crate::secrets::SecretStore>,
     connections: Option<crate::connections::Connections>,
+    thread_waits: bool,
     meetings: Option<Arc<dyn MeetingStore>>,
     google_calendar: Option<Arc<GoogleCalendarHandle>>,
 }
@@ -140,6 +141,13 @@ impl AppStateBuilder {
         self.secret_store = Some(store);
         self
     }
+    /// Let an agent wait, inside one tool call, for another thread's reply.
+    /// Only for an app that runs threads side by side (default: off).
+    pub fn thread_waits(mut self, waits: bool) -> Self {
+        self.thread_waits = waits;
+        self
+    }
+
     /// The meeting store (default: an empty in-memory store).
     pub fn meetings(mut self, store: Arc<dyn MeetingStore>) -> Self {
         self.meetings = Some(store);
@@ -163,7 +171,8 @@ impl AppStateBuilder {
                 self.secret_store
                     .unwrap_or_else(crate::secrets::SecretStore::os),
             )
-            .with_connections(self.connections.unwrap_or_default());
+            .with_connections(self.connections.unwrap_or_default())
+            .with_thread_waits(self.thread_waits);
         let (meeting_events_tx, _) = broadcast::channel(MEETING_EVENT_CHANNEL_CAPACITY);
         AppState {
             threads: RwLock::new(HashMap::new()),
@@ -208,6 +217,12 @@ impl AppState {
 
     pub fn secrets(&self) -> &crate::secrets::SecretManager {
         self.orchestrator.secrets()
+    }
+
+    /// Pending requests from agent turns about other threads; the app that
+    /// owns the threads answers them here.
+    pub fn thread_links(&self) -> &crate::thread_link::ThreadLinks {
+        self.orchestrator.thread_links()
     }
 
     /// Meetings, transcripts and people.

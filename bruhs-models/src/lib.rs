@@ -24,6 +24,7 @@ pub mod logic;
 pub mod models;
 pub mod num;
 pub mod secrets;
+pub mod thread_link;
 pub mod time;
 mod unknown_variant;
 pub mod updates;

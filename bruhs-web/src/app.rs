@@ -81,6 +81,7 @@ pub fn App() -> impl IntoView {
     crate::navigation_guard::install();
     crate::workflow_executor::WorkflowExecutor::install();
     crate::thread_catalog::ThreadCatalog::install();
+    crate::thread_link::ThreadLink::install();
     crate::meeting_actions::MeetingActions::install();
 
     // ── URL hash routing ─────────────────────────────────────────────────────

@@ -17,7 +17,8 @@ use crate::components::whisper_model_settings::WhisperModelSettings;
 use crate::state::{
     AppView, ClaudeAutoCompactSignal, CompactIdleSignal, EditorSignal, FollowUpSteerSignal,
     KeybindingsSignal, PermissionMode, PermissionModeSignal, SetActiveView,
-    SetPermissionModeSignal, SidebarChrome, TitleInstructionsSignal,
+    SetPermissionModeSignal, SidebarChrome, ThreadAccessSignal, ThreadHopsSignal,
+    TitleInstructionsSignal,
 };
 use crate::ui::BrailleBruh;
 use crate::ui::{Dropdown, DropdownOption, Icon, Switch};
@@ -188,6 +189,7 @@ fn GeneralSettings() -> impl IntoView {
         <FollowUpBehavior />
         <AutoCompactAfter />
         <CompactIdleThreads />
+        <ThreadMessages />
         <TextGeneration />
     }
 }
@@ -262,6 +264,54 @@ fn CompactIdleThreads() -> impl IntoView {
                     mode.set(bruhs_models::logic::compact::IdleCompact::parse(&v));
                 })
                 label="Compact idle threads"
+                class=ROW_CONTROL
+                align_end=true
+            />
+        </SettingsRow>
+    }
+}
+
+/// Messages between threads: what agents may do, and how long a chain of
+/// their messages may run before it hands back to the user.
+#[component]
+fn ThreadMessages() -> impl IntoView {
+    let ThreadAccessSignal(access) = expect_context::<ThreadAccessSignal>();
+    let ThreadHopsSignal(hops) = expect_context::<ThreadHopsSignal>();
+    let hop_options = bruhs_models::thread_link::HOP_CHOICES
+        .into_iter()
+        .map(|count| DropdownOption::new(count.to_string(), format!("{count} messages")))
+        .collect::<Vec<_>>();
+    view! {
+        <SettingsRow
+            title="Messages between threads"
+            description="Lets a thread's agent list your other threads, read them, and send one a message or start a new thread. Read only keeps listing and reading. Off removes the tools. Plan turns only read."
+        >
+            <Dropdown
+                options=vec![
+                    DropdownOption::new("message", "Read and message"),
+                    DropdownOption::new("read", "Read only"),
+                    DropdownOption::new("off", "Off"),
+                ]
+                value=Signal::derive(move || access.get().as_str().to_string())
+                on_change=Callback::new(move |value: String| {
+                    access.set(bruhs_models::thread_link::ThreadAccess::parse(&value));
+                })
+                label="Messages between threads"
+                class=ROW_CONTROL
+                align_end=true
+            />
+        </SettingsRow>
+        <SettingsRow
+            title="Agent message limit"
+            description="How many messages agents may send each other in a row before the chain stops and hands back to you. A message you type starts the count again."
+        >
+            <Dropdown
+                options=hop_options
+                value=Signal::derive(move || hops.get().to_string())
+                on_change=Callback::new(move |value: String| {
+                    hops.set(bruhs_models::thread_link::parse_hops(&value));
+                })
+                label="Agent message limit"
                 class=ROW_CONTROL
                 align_end=true
             />

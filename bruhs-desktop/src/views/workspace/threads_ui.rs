@@ -243,7 +243,11 @@ impl Workspace {
                 ChatViewEvent::OpenSettings => {
                     this.open_settings(&OpenSettings, window, cx);
                 }
-                ChatViewEvent::MessagesChanged => this.persist_and_notify(cx),
+                ChatViewEvent::MessagesChanged => {
+                    // A queued message another thread waits on may be gone.
+                    this.settle_thread_waits(chat, cx);
+                    this.persist_and_notify(cx);
+                }
                 ChatViewEvent::Notice(message) => {
                     let message = message.clone();
                     this.meetings_hub
@@ -297,6 +301,7 @@ impl Workspace {
                     if chat_is_active {
                         this.refresh_branch_pull(cx);
                     }
+                    this.settle_thread_waits(chat, cx);
                     this.persist_and_notify(cx);
                 }
                 ChatViewEvent::SetPermissionMode(mode) => {
@@ -313,6 +318,9 @@ impl Workspace {
                 }
                 ChatViewEvent::Handoff { brief } => {
                     this.open_handoff(chat, brief.clone(), window, cx);
+                }
+                ChatViewEvent::ThreadRequest(request) => {
+                    this.answer_thread_request(chat, request, window, cx);
                 }
                 ChatViewEvent::NewThreadInProject => {
                     let project = this
@@ -347,6 +355,7 @@ impl Workspace {
                     this.follow_up_steer = composer.follow_up_steer;
                     this.claude_autocompact = composer.autocompact.clone();
                     this.compact_idle = composer.compact_idle;
+                    this.thread_access = composer.thread_access;
                     this.stamp_run_prefs_on_threads(cx);
                     this.persist_and_notify(cx);
                 }
@@ -413,6 +422,7 @@ impl Workspace {
             follow_up_steer: self.follow_up_steer,
             autocompact: self.claude_autocompact.clone(),
             compact_idle: self.compact_idle,
+            thread_access: self.thread_access,
         };
         chat.update(cx, |chat, cx| {
             chat.apply_run_prefs(choice, effort, previous, base, composer, cx);
@@ -693,6 +703,7 @@ impl Workspace {
     }
 
     pub(super) fn delete_thread_by_id(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+        self.end_thread_waits_on(id, cx);
         self.threads.retain(|thread| thread.id != id);
         self.unread_thread_ids.remove(id);
         self.active_thread_id = thread_selection_after_delete(self.active_thread_id.clone(), id);

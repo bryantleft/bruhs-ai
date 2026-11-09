@@ -180,6 +180,10 @@ pub(super) const SETTINGS_MODEL_DROPDOWN_ID: &str = "desktop-model";
 pub(super) const SETTINGS_ACCESS_MODE_DROPDOWN_ID: &str = "desktop-access-mode";
 pub(super) const SETTINGS_EDITOR_DROPDOWN_ID: &str = "desktop-editor";
 pub(super) const SETTINGS_COMPACT_IDLE_DROPDOWN_ID: &str = "desktop-compact-idle";
+pub(super) const SETTINGS_THREAD_ACCESS_DROPDOWN_ID: &str = "desktop-thread-access";
+pub(super) const SETTINGS_THREAD_HOPS_DROPDOWN_ID: &str = "desktop-thread-hops";
+/// [`bruhs_models::thread_link::HOP_CHOICES`] as dropdown values.
+const THREAD_HOP_OPTIONS: [&str; 4] = ["2", "4", "6", "10"];
 
 pub(super) fn settings_cards_width(viewport_width: f32) -> f32 {
     let available = viewport_width - SETTINGS_NAV_WIDTH_PX - 2.0 * SETTINGS_BODY_X_PADDING_PX;
@@ -354,6 +358,15 @@ impl Workspace {
                 self.stamp_run_prefs_on_threads(cx);
                 self.persist_and_notify(cx);
             }
+            SETTINGS_THREAD_ACCESS_DROPDOWN_ID => {
+                self.thread_access = ThreadAccess::parse(value);
+                self.stamp_run_prefs_on_threads(cx);
+                self.persist_and_notify(cx);
+            }
+            SETTINGS_THREAD_HOPS_DROPDOWN_ID => {
+                self.thread_hops = bruhs_models::thread_link::parse_hops(value);
+                self.persist_and_notify(cx);
+            }
             _ => {}
         }
         self.set_settings_open_dropdown(None);
@@ -404,6 +417,63 @@ impl Workspace {
                 cx,
             ))
             .into_any_element()
+    }
+
+    fn render_thread_access_control(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let groups = vec![DropdownGroup {
+            label: None,
+            mark: None,
+            options: ["message", "read", "off"]
+                .into_iter()
+                .zip(["Read and message", "Read only", "Off"])
+                .map(|(value, label)| DropdownOption {
+                    value,
+                    label: label.to_string(),
+                    description: None,
+                })
+                .collect(),
+        }];
+        let (toggle, select) =
+            self.settings_dropdown_handlers(SETTINGS_THREAD_ACCESS_DROPDOWN_ID, cx);
+        dropdown(
+            SETTINGS_THREAD_ACCESS_DROPDOWN_ID,
+            "Messages between threads",
+            self.thread_access.as_str(),
+            groups,
+            self.settings_listbox(SETTINGS_THREAD_ACCESS_DROPDOWN_ID),
+            toggle,
+            select,
+        )
+    }
+
+    fn render_thread_hops_control(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let groups = vec![DropdownGroup {
+            label: None,
+            mark: None,
+            options: THREAD_HOP_OPTIONS
+                .into_iter()
+                .map(|value| DropdownOption {
+                    value,
+                    label: format!("{value} messages"),
+                    description: None,
+                })
+                .collect(),
+        }];
+        let selected = THREAD_HOP_OPTIONS
+            .into_iter()
+            .find(|value| bruhs_models::thread_link::parse_hops(value) == self.thread_hops)
+            .unwrap_or("6");
+        let (toggle, select) =
+            self.settings_dropdown_handlers(SETTINGS_THREAD_HOPS_DROPDOWN_ID, cx);
+        dropdown(
+            SETTINGS_THREAD_HOPS_DROPDOWN_ID,
+            "Agent message limit",
+            selected,
+            groups,
+            self.settings_listbox(SETTINGS_THREAD_HOPS_DROPDOWN_ID),
+            toggle,
+            select,
+        )
     }
 
     fn render_compact_idle_control(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -771,6 +841,18 @@ impl Workspace {
                 "Compact idle threads",
                 "When you return, a Compact chip sits beside send after the prompt cache expires on a Claude thread over 200,000 tokens. Enter summarizes, then sends the draft. Before the cache expires compacts that thread while bruhs is open. Never skips both. Manual /compact still works.",
                 settings_ui::control_column(self.render_compact_idle_control(cx)),
+            ),
+            self.settings_row(
+                "desktop-settings-row-thread-access",
+                "Messages between threads",
+                "Lets a thread's agent list your other threads, read them, and send one a message or start a new thread. Read only keeps listing and reading. Off removes the tools. Plan turns only read.",
+                settings_ui::control_column(self.render_thread_access_control(cx)),
+            ),
+            self.settings_row(
+                "desktop-settings-row-thread-hops",
+                "Agent message limit",
+                "How many messages agents may send each other in a row before the chain stops and hands back to you. A message you type starts the count again.",
+                settings_ui::control_column(self.render_thread_hops_control(cx)),
             ),
             self.settings_row(
                 "desktop-settings-row-title-instructions",

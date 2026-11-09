@@ -73,6 +73,36 @@ fn assistant_contents(chat: &Entity<ChatView>, cx: &mut VisualTestContext) -> Ve
 }
 
 #[gpui::test]
+fn a_message_from_another_threads_agent_shows_its_sender_not_the_header(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    chat.update(cx, |chat, cx| {
+        chat.messages = vec![
+            super::Message::user(bruhs_models::thread_link::delivery_prompt(
+                "Research",
+                "1a2b3c4d",
+                1,
+                6,
+                false,
+                "Report what broke.",
+            )),
+            super::Message::user("Typed by hand."),
+        ];
+        chat.scroll_messages_to_bottom();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-user-message-0").is_some());
+    assert!(
+        cx.debug_bounds("desktop-user-from-thread-0").is_some(),
+        "the sender caption is drawn above an agent-sent message"
+    );
+    assert!(
+        cx.debug_bounds("desktop-user-from-thread-1").is_none(),
+        "a typed message has no sender caption"
+    );
+}
+
+#[gpui::test]
 fn events_from_a_stopped_turn_never_reach_the_next_turn(cx: &mut TestAppContext) {
     let (chat, cx) = chat_window(cx);
 

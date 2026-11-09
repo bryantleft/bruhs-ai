@@ -26,6 +26,21 @@ impl Workspace {
         self.active_thread_id.clone()
     }
 
+    /// `BRUHS_DESKTOP_THREADS_SMOKE`: never ask, so a message between threads
+    /// needs no click.
+    pub fn smoke_bypass_permissions(&mut self, cx: &mut Context<'_, Self>) {
+        self.set_permission_mode(PermissionMode::BypassPermissions, cx);
+    }
+
+    /// `BRUHS_DESKTOP_THREADS_SMOKE`: the chat of the thread titled `title`.
+    pub fn smoke_chat_titled(&self, title: &str, cx: &App) -> Option<Entity<ChatView>> {
+        self.threads
+            .iter()
+            .map(|thread| &thread.chat)
+            .find(|chat| chat.read(cx).thread_title == title)
+            .cloned()
+    }
+
     /// Id of the active terminal session (`BRUHS_DESKTOP_TERMINAL_SMOKE`).
     pub fn terminal_active_id(&self, cx: &App) -> Option<String> {
         self.terminal_panel.read(cx).active_id().map(str::to_string)

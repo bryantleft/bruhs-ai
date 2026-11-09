@@ -570,16 +570,25 @@ fn UserRow(
 ) -> impl IntoView {
     let OpenFileSignal(open_file) = expect_context::<crate::state::OpenFileSignal>();
     let RightPanelSignal(panel) = expect_context::<crate::state::RightPanelSignal>();
+    // A message another thread's agent sent shows who sent it, not the
+    // header written for the model. Copy still takes the whole prompt.
+    let copy_text = text.clone();
+    let (from_thread, text) = match bruhs_models::thread_link::parse_delivery(&text) {
+        Some(delivery) => (Some(delivery.caption()), delivery.body.to_string()),
+        None => (None, text),
+    };
     let can_collapse = should_collapse_user_message(&text);
     let (collapsed, set_collapsed) = signal(can_collapse);
     let (confirming, set_confirming) = signal(false);
-    let copy_text = text.clone();
     let time = at_ms.map(clock_time).unwrap_or_default();
     let rewind_id = message_id.clone();
     let has_checkpoint = checkpoint.as_deref().is_some_and(|tree| !tree.is_empty());
     view! {
         <div class="group/user flex flex-col items-end gap-1 pb-4">
             <div class="relative w-fit max-w-[85%] rounded-lychee bg-longan-800 px-3.5 py-2.5 text-body-sm text-rambutan-100">
+                {from_thread.map(|from| view! {
+                    <div data-from-thread="" class="mb-1.5 text-label-sm text-blueberry-400">{from}</div>
+                })}
                 <div class=move || {
                     if collapsed.get() {
                         "msg-collapsed max-h-44 overflow-hidden whitespace-pre-wrap break-words"

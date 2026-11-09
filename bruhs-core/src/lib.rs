@@ -20,6 +20,7 @@ pub mod store;
 pub mod summarize;
 pub mod summary_generation;
 pub mod terminal;
+pub mod thread_link;
 pub mod transcript;
 pub mod updates;
 pub mod uploads;
