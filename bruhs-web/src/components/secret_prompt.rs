@@ -22,6 +22,10 @@ pub fn SecretPrompts() -> impl IntoView {
 
 #[component]
 fn SecretPrompt(request: SecretRequest) -> impl IntoView {
+    if request.connection.is_some() {
+        return view! { <super::service_connections::ServiceOperationPrompt request=request /> }
+            .into_any();
+    }
     let PendingSecretsSignal(pending) = expect_context::<PendingSecretsSignal>();
     let input = NodeRef::<Input>::new();
     let busy = RwSignal::new(false);
@@ -148,5 +152,5 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
                 <p aria-live="polite" class="mt-2 text-label-sm text-rambutan-400">{move || if busy.get() { "Submitting privately…" } else { "Saved credentials stay in your OS keychain for this project. Every use needs approval." }}</p>
             </form>
         </section>
-    }
+    }.into_any()
 }

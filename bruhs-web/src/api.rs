@@ -46,6 +46,48 @@ pub async fn saved_credentials() -> Result<Vec<bruhs_models::secrets::SavedCrede
     get_json("/api/credentials").await
 }
 
+pub async fn service_connection(
+    provider: bruhs_models::connections::ServiceProvider,
+) -> Result<bruhs_models::connections::ServiceConnection, ApiError> {
+    get_json(&format!("/api/connections/{}", provider.id())).await
+}
+pub async fn connect_service(
+    provider: bruhs_models::connections::ServiceProvider,
+    login: &bruhs_models::connections::ConnectionLogin,
+) -> Result<bruhs_models::connections::ConnectionStart, ApiError> {
+    send_json(
+        Method::POST,
+        &format!("/api/connections/{}/start", provider.id()),
+        Some(login),
+    )
+    .await
+}
+pub async fn connection_attempt(
+    id: &str,
+) -> Result<bruhs_models::connections::ConnectionAttempt, ApiError> {
+    get_json(&format!("/api/connections/attempts/{}", segment(id))).await
+}
+pub async fn cancel_connection(id: &str) -> Result<(), ApiError> {
+    send(
+        Method::DELETE,
+        &format!("/api/connections/attempts/{}", segment(id)),
+        NO_BODY,
+    )
+    .await
+    .map(drop)
+}
+pub async fn disconnect_service(
+    provider: bruhs_models::connections::ServiceProvider,
+) -> Result<(), ApiError> {
+    send(
+        Method::DELETE,
+        &format!("/api/connections/{}", provider.id()),
+        NO_BODY,
+    )
+    .await
+    .map(drop)
+}
+
 pub async fn replace_credential(id: &str, value: String) -> Result<(), ApiError> {
     let body = bruhs_models::secrets::CredentialReplacement { value };
     send(

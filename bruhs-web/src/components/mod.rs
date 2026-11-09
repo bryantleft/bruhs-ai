@@ -46,6 +46,7 @@ pub mod render_pass;
 pub mod right_panel;
 pub mod search_page;
 pub mod secret_prompt;
+pub mod service_connections;
 pub mod settings_page;
 pub mod shell;
 pub mod sidebar;
