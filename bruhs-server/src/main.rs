@@ -263,6 +263,10 @@ fn router(state: ServerState) -> Router {
             post(routes::login::post_login_for_provider),
         )
         .route("/api/tasks", get(routes::tasks::get_tasks))
+        .route(
+            bruhs_models::api::live_events::PATH,
+            get(routes::events_stream::get_events_stream),
+        )
         .route("/api/tasks/stream", get(routes::tasks::get_tasks_stream))
         .route("/api/tasks/{id}", delete(routes::tasks::delete_task))
         .route("/api/meetings", get(routes::meetings::list_meetings))

@@ -20,7 +20,7 @@ pub async fn get_events_stream(
     Sse::new(event_stream(state)).keep_alive(KeepAlive::default())
 }
 
-fn event_stream(state: Arc<AppState>) -> impl Stream<Item = Result<Event, Infallible>> {
+pub(crate) fn event_stream(state: Arc<AppState>) -> impl Stream<Item = Result<Event, Infallible>> {
     let mut rx = state.google_calendar().subscribe();
     async_stream::stream! {
         // Handshake: emit a `stream_opened` frame so subscribers can

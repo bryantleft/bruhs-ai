@@ -24,7 +24,7 @@ pub async fn get_meetings_stream(
     Sse::new(bridge(state.subscribe_meeting_events())).keep_alive(KeepAlive::default())
 }
 
-fn bridge(
+pub(crate) fn bridge(
     mut server_rx: tokio::sync::broadcast::Receiver<MeetingEvent>,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     async_stream::stream! {

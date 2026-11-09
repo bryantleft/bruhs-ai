@@ -153,14 +153,17 @@ pub fn App() -> impl IntoView {
     let SchedulingPreferencesSignal(scheduling_preferences) =
         expect_context::<SchedulingPreferencesSignal>();
 
-    // Subscribe to the background-task SSE stream so the tasks panel reflects
-    // live registry updates from the server.
-    let set_tasks = expect_context::<crate::state::SetBackgroundTasksSignal>().0;
-    crate::tasks_stream::subscribe_tasks_stream(set_tasks);
+    // One live stream from the server carries background tasks, calendar
+    // sync and meeting events; each subscriber handles its own frames.
+    let mut live_events = crate::live_events::LiveEvents::default();
 
-    // Subscribe to the calendar sync SSE stream so Google Calendar events are
-    // kept in sync with the server's event feed.
+    // Background tasks, so the tasks panel reflects the server's registry.
+    let set_tasks = expect_context::<crate::state::SetBackgroundTasksSignal>().0;
+    crate::tasks_stream::subscribe_tasks_stream(&mut live_events, set_tasks);
+
+    // Calendar sync, so Google Calendar events follow the server's feed.
     crate::calendar_sync_stream::subscribe(
+        &mut live_events,
         events_read,
         set_calendar_events_for_sync,
         sync_state_read,
@@ -172,14 +175,16 @@ pub fn App() -> impl IntoView {
     let PersonalitySettingsSignal(personality_for_stream) =
         expect_context::<PersonalitySettingsSignal>();
 
-    // Subscribe to the meetings SSE stream so MeetingDetail can render live
-    // transcript segments as bruhs-capture emits them, trigger summarization
-    // when transcription completes, and refresh the people list when
-    // PersonObservationsAppended fires.
+    // Meeting events, so MeetingDetail can render live transcript segments as
+    // bruhs-capture emits them, trigger summarization when transcription
+    // completes, and refresh the people list when PersonObservationsAppended
+    // fires.
     crate::meetings_stream::subscribe(
+        &mut live_events,
         expect_context::<crate::workflow_executor::WorkflowExecutor>(),
         personality_for_stream,
     );
+    live_events.connect(use_context::<crate::components::banner::BannerStackSignal>());
 
     // Wire the calendar-driven auto-record watcher. Reads settings +
     // live calendar events + capture status each tick to decide whether

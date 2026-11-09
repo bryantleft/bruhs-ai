@@ -114,9 +114,10 @@ and `BRUHS_DESKTOP_LOG` sets its level.
 
 When the server or daemon move, point the others at them:
 `BRUHS_CAPTURE_URL` (server and desktop → daemon), `BRUHS_SERVER_URL`
-(desktop → server), and `BRUHS_API_URL` / `BRUHS_STREAM_URL` for the web app
-(baked in at build time). The browser never calls the daemon directly; it
-goes through the server's `/api/capture/*` proxy.
+(desktop → server), and `BRUHS_API_URL` for the web app (baked in at build
+time). The web app gets live updates over one stream per tab,
+`/api/events/stream`. The browser never calls the daemon directly; it goes
+through the server's `/api/capture/*` proxy.
 
 ## Privacy and security
 
