@@ -681,7 +681,7 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let chat = thread.chat.read(cx);
-        let title = chat.thread_title.clone();
+        let title = bruhs_models::logic::text::plain_title(&chat.thread_title).into_owned();
         let is_active = self.active_thread_id.as_deref() == Some(thread.id.as_str());
         let status = self.card_status(thread, cx);
         let key = thread.chat.entity_id();

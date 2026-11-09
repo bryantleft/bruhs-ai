@@ -13,8 +13,35 @@ pub fn truncate_utf8(s: &mut String, max: usize) {
     s.truncate(end);
 }
 
+/// A thread title as shown: inline-code backticks dropped when they come in
+/// pairs (titles are often a first prompt such as "Fix `parse` in
+/// `lib.rs`"), or when the title was cut short ("…") through a pair. Any
+/// other odd backtick count is left alone, since one may be literal.
+pub fn plain_title(title: &str) -> std::borrow::Cow<'_, str> {
+    let ticks = title.matches('`').count();
+    if ticks == 0 || (ticks % 2 == 1 && !title.ends_with('…')) {
+        return std::borrow::Cow::Borrowed(title);
+    }
+    std::borrow::Cow::Owned(title.replace('`', ""))
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn plain_title_drops_paired_backticks_only() {
+        use super::plain_title;
+        assert_eq!(
+            plain_title("Implement `compute_invoice` in `invoice.py`"),
+            "Implement compute_invoice in invoice.py"
+        );
+        assert_eq!(plain_title("Plain title"), "Plain title");
+        assert_eq!(plain_title("Why does ` break it"), "Why does ` break it");
+        assert_eq!(
+            plain_title("Implement `compute_invoice` in `invoice.py` exactly as `SPEC…"),
+            "Implement compute_invoice in invoice.py exactly as SPEC…"
+        );
+    }
+
     use super::*;
 
     #[test]

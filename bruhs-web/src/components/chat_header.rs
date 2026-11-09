@@ -125,7 +125,7 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
                                     title="Double-click to rename"
                                     on:dblclick=move |_| start_rename()
                                 >
-                                    {move || title.get()}
+                                    {move || bruhs_models::logic::text::plain_title(&title.get()).into_owned()}
                                 </h1>
                                 <button
                                     type="button"

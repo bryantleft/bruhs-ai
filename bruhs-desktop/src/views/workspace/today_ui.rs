@@ -238,13 +238,10 @@ impl Workspace {
                     .child(title),
             )
             .when(rows.is_empty(), |element| {
+                // Web `empty_row`: a quiet line, not a box inside the card.
                 element.child(
                     div()
-                        .rounded(px(6.0))
-                        .border_1()
-                        .border_color(theme::longan_700().opacity(0.6))
-                        .px_3()
-                        .py_3()
+                        .py_1()
                         .text_size(px(12.0))
                         .text_color(theme::rambutan_500())
                         .child(empty),
@@ -561,79 +558,54 @@ impl Workspace {
             .flex()
             .flex_col()
             .child(
-                div()
-                    .px_5()
-                    .py_3()
-                    .border_b_1()
-                    .border_color(theme::longan_800().opacity(0.5))
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .child(
-                                div()
-                                    .font_family(theme::HEADING_FONT_FAMILY)
-                                    .text_size(px(16.0))
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .text_color(theme::rambutan_100())
-                                    .child("Today"),
+                crate::views::page_header::page_header("Today", Some(date.into())).child(
+                    div()
+                        .flex()
+                        .gap_2()
+                        .child(
+                            web_button(
+                                "open-agent-workflows",
+                                WebButtonVariant::Outline,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
                             )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(theme::rambutan_500())
-                                    .child(date),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap_2()
-                            .child(
-                                web_button(
-                                    "open-agent-workflows",
-                                    WebButtonVariant::Outline,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .child("Agent workflows")
-                                .on_click(cx.listener(
-                                    |this, _event, window, cx| {
-                                        this.activate_sidebar_view(AppView::Automations, window, cx)
-                                    },
-                                )),
+                            .child("Agent workflows")
+                            .on_click(cx.listener(
+                                |this, _event, window, cx| {
+                                    this.activate_sidebar_view(AppView::Automations, window, cx)
+                                },
+                            )),
+                        )
+                        .child(
+                            web_button(
+                                "open-life-context",
+                                WebButtonVariant::Outline,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
                             )
-                            .child(
-                                web_button(
-                                    "open-life-context",
-                                    WebButtonVariant::Outline,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .child("Life context")
-                                .on_click(cx.listener(
-                                    |this, _event, window, cx| {
-                                        this.activate_sidebar_view(AppView::Life, window, cx)
-                                    },
-                                )),
+                            .child("Life context")
+                            .on_click(cx.listener(
+                                |this, _event, window, cx| {
+                                    this.activate_sidebar_view(AppView::Life, window, cx)
+                                },
+                            )),
+                        )
+                        .child(
+                            web_button(
+                                "plan-my-day",
+                                WebButtonVariant::Primary,
+                                WebButtonSize::Small,
+                                ButtonState::disabled_if(self.day_plan_proposal.is_some()),
                             )
-                            .child(
-                                web_button(
-                                    "plan-my-day",
-                                    WebButtonVariant::Primary,
-                                    WebButtonSize::Small,
-                                    ButtonState::disabled_if(self.day_plan_proposal.is_some()),
-                                )
-                                .debug_selector(|| "desktop-today-plan".to_string())
-                                .child("Plan my day")
-                                .on_click(cx.listener(
-                                    |this, _event, _window, cx| {
-                                        this.draft_desktop_day_plan(cx);
-                                    },
-                                )),
-                            ),
-                    ),
+                            .debug_selector(|| "desktop-today-plan".to_string())
+                            .child("Plan my day")
+                            .on_click(cx.listener(
+                                |this, _event, _window, cx| {
+                                    this.draft_desktop_day_plan(cx);
+                                },
+                            )),
+                        ),
+                ),
             )
             .child(
                 div()

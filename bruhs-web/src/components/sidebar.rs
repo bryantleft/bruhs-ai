@@ -673,7 +673,11 @@ pub fn Sidebar() -> impl IntoView {
                     .and_then(|&i| threads.with(|ts| ts.get(i).cloned()))
             })
         });
-        let title = Signal::derive(move || live.get().map(|t| t.title).unwrap_or_default());
+        let title = Signal::derive(move || {
+            live.get()
+                .map(|t| bruhs_models::logic::text::plain_title(&t.title).into_owned())
+                .unwrap_or_default()
+        });
         let project = Signal::derive(move || {
             live.get()
                 .map(|t| {

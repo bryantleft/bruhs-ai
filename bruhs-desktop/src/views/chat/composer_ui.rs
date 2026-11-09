@@ -272,7 +272,10 @@ impl ChatView {
                             .flex_1()
                             .truncate()
                             .text_color(theme::rambutan_100())
-                            .child(self.thread_title.clone()),
+                            .child(
+                                bruhs_models::logic::text::plain_title(&self.thread_title)
+                                    .into_owned(),
+                            ),
                     ),
             )
             .child(

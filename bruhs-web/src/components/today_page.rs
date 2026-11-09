@@ -108,12 +108,9 @@ fn duration_label(start_at_ms: f64, end_at_ms: f64) -> String {
     }
 }
 
+/// A card's empty state: a quiet line of text, not a box inside the card.
 fn empty_row(label: &'static str) -> impl IntoView {
-    view! {
-        <div class="rounded-grape border border-dashed border-longan-700/60 px-3 py-3 text-body-sm text-rambutan-400">
-            {label}
-        </div>
-    }
+    view! { <p class="py-1 text-body-sm text-rambutan-500">{label}</p> }
 }
 
 #[component]
