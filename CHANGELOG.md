@@ -9,8 +9,15 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-09
+
 This release fixes the calendar around daylight saving time and tidies the
 app's pages and controls.
+
+### Added
+
+- Added a Release notes link to Settings → Updates that opens this changelog
+  at the version on offer.
 
 ### Fixed
 
@@ -24,11 +31,15 @@ app's pages and controls.
 - Fixed the Today icon showing as a dot on the web, and Today and Inbox
   showing no icon on desktop.
 - Fixed Agent workflows suggesting a focus block when you have no tasks.
+- Fixed thread titles showing the backticks from a first message such as
+  "Implement `compute_invoice`", in the sidebar, the chat header and the
+  import list.
 
 ### Changed
 
 - Gave Inbox, Knowledge, People, Meetings and Terminal the same page header
-  as Today and Life.
+  as Today and Life, and desktop Today the same header as the web.
+- Made empty Today cards a quiet line instead of a dashed box.
 - Made every Settings menu use the same dropdown, with inputs at the same
   height.
 - Made Inbox, Life and meeting notes controls match the rest of the app.
@@ -75,5 +86,6 @@ signed Mac app and a web app that both run on your machine.
   when you choose Restart to update.
 - Editable keyboard shortcuts for every action, and a command bar (⌘K).
 
-[Unreleased]: https://github.com/bryantleft/bruhs-ai/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/bryantleft/bruhs-ai/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/bryantleft/bruhs-ai/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/bryantleft/bruhs-ai/releases/tag/v0.1.0
