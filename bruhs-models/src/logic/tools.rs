@@ -227,6 +227,14 @@ pub fn tool_label(call: &impl ToolCallView, state: ToolState, root: Option<&str>
                 tense("Requesting credential", "Requested credential"),
                 s("name")
             ),
+            "mcp__bruhs_secrets__request_connection" => format!(
+                "{} {}",
+                tense(
+                    "Requesting account access to",
+                    "Requested account access to"
+                ),
+                s("provider")
+            ),
             "Skill" => {
                 let name = s("skill");
                 if name.is_empty() {

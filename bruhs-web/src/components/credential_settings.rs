@@ -40,6 +40,7 @@ pub fn CredentialSettings() -> impl IntoView {
     let button = "min-h-11 rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50 sm:min-h-10";
     view! {
         <div class="p-4 text-body-sm text-rambutan-200">
+            <super::service_connections::ServiceConnections />
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
                 <input type="search" aria-label="Search saved credentials" placeholder="Search by name or project" class="min-h-10 w-full min-w-0 rounded-seed bg-longan-950 px-3 inset-ring inset-ring-longan-700 focus:outline focus:outline-persimmon-400 sm:flex-1" on:input=move |event| query.set(event_target_value(&event)) />
                 <button type="button" class=button disabled=move || busy.get() on:click=move |_| refresh.run(())>"Refresh credentials"</button>
