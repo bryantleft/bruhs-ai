@@ -384,7 +384,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
                         .enumerate()
                         .map(|(index, row)| {
                             let detail = row_detail(&row, home.as_deref());
-                            let title = row.title.clone();
+                            let title = bruhs_models::logic::text::plain_title(&row.title).into_owned();
                             let chosen = index == selected;
                             view! {
                                 <button

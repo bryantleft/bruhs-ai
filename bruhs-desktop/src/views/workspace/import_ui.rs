@@ -696,7 +696,7 @@ impl Workspace {
             .children(rows.into_iter().enumerate().map(|(index, row)| {
                 let chosen = index == selected;
                 let detail = import_row_detail(&row, home.as_deref(), now);
-                let title = row.title.clone();
+                let title = bruhs_models::logic::text::plain_title(&row.title).into_owned();
                 let debug_key = element_key(&row.id);
                 div()
                     .id(("desktop-import-row", index))
