@@ -67,9 +67,9 @@ pub struct CurrentSession {
     pub mic_wav_path: std::path::PathBuf,
     pub sys_wav_path: std::path::PathBuf,
     pub mixed_wav_path: std::path::PathBuf,
-    pub whisper_model: WhisperModel,
+    pub transcription: crate::transcribe::TranscriptionJob,
     /// Model used by the live transcriber during recording.
-    /// Falls back to `whisper_model` (the final-pass model) if absent.
+    /// Independent of the provider selected for the final transcript.
     /// Stored for status inspection and future per-session reporting.
     #[expect(
         dead_code,
@@ -99,6 +99,7 @@ pub struct CaptureState {
     pub data: crate::paths::DataRoot,
     /// Verified model downloads under `data`.
     pub models: crate::models_dir::ModelStore,
+    pub remote_transcription: crate::transcribe::remote::RemoteProvider,
     /// Screen Recording permission, probed off the async workers and cached.
     pub permission: crate::capture::PermissionCache,
     /// `/enroll`'s speaker-embedding model, loaded on first use.
@@ -127,6 +128,7 @@ impl CaptureState {
         Self {
             recovery: crate::recovery::RecoveryQueue::new(Some(data.recovery_db_path())),
             models: crate::models_dir::ModelStore::new(data.models_dir()),
+            remote_transcription: crate::transcribe::remote::RemoteProvider::from_env(),
             permission: crate::capture::PermissionCache::new(crate::capture::probe_permission),
             #[cfg(target_os = "macos")]
             speaker_extractor: std::sync::Arc::default(),
@@ -270,7 +272,8 @@ impl CaptureState {
 #[cfg(test)]
 pub fn isolated_state() -> (tempfile::TempDir, CaptureState) {
     let dir = tempfile::tempdir().expect("temporary data root");
-    let state = CaptureState::new(crate::paths::DataRoot::at(dir.path()));
+    let mut state = CaptureState::new(crate::paths::DataRoot::at(dir.path()));
+    state.remote_transcription = crate::transcribe::remote::RemoteProvider::unconfigured();
     (dir, state)
 }
 

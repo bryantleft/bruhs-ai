@@ -11,6 +11,7 @@ use std::sync::Arc;
 
 use crate::audio::MicRecorder;
 use crate::state::{CaptureState, CurrentSession, LinkingThreshold, MaxSpeakers};
+use crate::transcribe::TranscriptionJob;
 #[cfg(target_os = "macos")]
 use crate::video_ocr::OcrError;
 
@@ -23,6 +24,8 @@ pub struct StartRequest {
     pub model: Option<WhisperModel>,
     #[serde(default)]
     pub live_model: Option<WhisperModel>,
+    #[serde(default)]
+    pub transcription: Option<bruhs_models::TranscriptionSettings>,
     #[serde(default)]
     pub subspeaker_enabled: Option<bool>,
     /// Phase 3d: whether to auto-link clusters to existing profiles.
@@ -73,7 +76,23 @@ pub async fn start_capture(
     }
     let bad_request =
         |error: crate::state::StartOptionError| (StatusCode::BAD_REQUEST, error.to_string());
+    let transcription = req.transcription.clone().unwrap_or_default();
+    transcription
+        .validate()
+        .map_err(|error| (StatusCode::BAD_REQUEST, error.to_string()))?;
+    let transcription = match transcription.provider {
+        bruhs_models::TranscriptionProvider::LocalWhisper => {
+            TranscriptionJob::Whisper(req.model.unwrap_or_default())
+        }
+        bruhs_models::TranscriptionProvider::OpenAiCompatible => TranscriptionJob::Compatible(
+            state
+                .remote_transcription
+                .prepare(&transcription.remote_model)
+                .map_err(|error| (StatusCode::SERVICE_UNAVAILABLE, error.to_string()))?,
+        ),
+    };
     let options = ValidatedOptions {
+        transcription,
         max_speakers: req
             .max_speakers
             .map(MaxSpeakers::new)
@@ -99,6 +118,7 @@ pub async fn start_capture(
 
 /// Range-checked start options (400 when out of range).
 struct ValidatedOptions {
+    transcription: TranscriptionJob,
     max_speakers: Option<MaxSpeakers>,
     linking_threshold: Option<LinkingThreshold>,
 }
@@ -176,7 +196,7 @@ fn start_capture_blocking(
         mic_wav_path: mic_wav_path.clone(),
         sys_wav_path: sys_wav_path.clone(),
         mixed_wav_path: mixed_wav_path.clone(),
-        whisper_model: model,
+        transcription: options.transcription,
         live_model: Some(live_model),
         subspeaker_enabled,
         cross_meeting_linking_auto: req.cross_meeting_linking_auto,
@@ -410,7 +430,7 @@ fn stop_capture_blocking(
         mic_wav: session.mic_wav_path.clone(),
         sys_wav: session.sys_wav_path.clone(),
         mixed_wav: session.mixed_wav_path.clone(),
-        whisper_model: session.whisper_model,
+        transcription: session.transcription,
         subspeaker_enabled: session.subspeaker_enabled,
         max_speakers: session.max_speakers.unwrap_or(MaxSpeakers::DEFAULT),
         video_ocr_enabled: session.video_ocr_enabled,
