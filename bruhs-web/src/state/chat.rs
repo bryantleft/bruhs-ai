@@ -834,6 +834,24 @@ pub(super) fn provide() {
     let (is_streaming, set_is_streaming) = signal(false);
     let (tasks, set_tasks) = signal(Vec::<BackgroundTask>::new());
 
+    // Each thread keeps its model (T3: a thread's `modelSelection`), so
+    // opening one puts its model in the composer and its session resumes on
+    // the provider that owns it. A thread with no turn yet is on the default.
+    let crate::state::SetCurrentModel(set_current_model) =
+        expect_context::<crate::state::SetCurrentModel>();
+    let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
+    let active_model = Memo::new(move |_| {
+        let id = active_thread_id.get()?;
+        threads.with(|ts| ts.iter().find(|t| t.id == id)?.model.clone())
+    });
+    Effect::new(move |_| {
+        let model = active_model
+            .get()
+            .filter(|model| !model.is_empty())
+            .unwrap_or_else(|| default_model.get());
+        set_current_model.set(model);
+    });
+
     let stream_buffer = RwSignal::new(StreamBuffer::default());
     let streaming_thread_id = Memo::new(move |_| {
         if is_streaming.get() {

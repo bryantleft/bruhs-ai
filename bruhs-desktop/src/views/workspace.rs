@@ -1788,18 +1788,31 @@ impl Workspace {
         chat.update(cx, |chat, cx| chat.compact_idle_if_due(cx));
     }
 
+    /// Pick the model of the open thread (the composer's chip), which new
+    /// threads then start on. Each thread keeps its own model (T3: a
+    /// thread's `modelSelection`), so another thread's session still
+    /// resumes on the provider that owns it.
     fn set_current_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
         let model_id = model_id.into();
         self.current_model = model_id.clone();
-        let chats: Vec<_> = self
-            .threads
-            .iter()
+        if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
+            chat.update(cx, |chat, cx| chat.set_model(model_id, cx));
+        }
+        self.persist_and_notify(cx);
+    }
+
+    /// Settings → Model: the model new threads start on. The open thread
+    /// follows only while it has no turn yet (web: a thread without a model
+    /// is on the default).
+    fn set_default_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
+        let model_id = model_id.into();
+        self.current_model = model_id.clone();
+        if let Some(chat) = self
+            .active_thread()
             .map(|thread| thread.chat.clone())
-            .collect();
-        for chat in chats {
-            chat.update(cx, |chat, cx| {
-                chat.set_model(model_id.clone(), cx);
-            });
+            .filter(|chat| chat.read(cx).messages.is_empty())
+        {
+            chat.update(cx, |chat, cx| chat.set_model(model_id, cx));
         }
         self.persist_and_notify(cx);
     }

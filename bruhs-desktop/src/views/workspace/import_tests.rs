@@ -262,7 +262,10 @@ fn an_imported_session_becomes_a_resumable_project_thread(cx: &mut gpui::TestApp
         workspace.open_top_layer(TopLayer::ImportThread);
         workspace.open_imported_thread(imported, window, cx);
         assert!(workspace.top_layer.is_none(), "the dialog closes");
-        assert_eq!(workspace.current_model, "claude-opus-4-6");
+        assert_ne!(
+            workspace.current_model, "claude-opus-4-6",
+            "an import does not change the model new threads start on"
+        );
         let thread = workspace.active_thread().expect("the import is open");
         assert_eq!(thread.project_name, "shop");
         assert_eq!(thread.project_path, "/tmp/bruhs-import-test/shop");
@@ -348,4 +351,56 @@ fn a_transcript_import_is_a_home_chat_carrying_its_context(cx: &mut gpui::TestAp
         copied.as_deref().map(|text| text.contains("--resume")),
         Some(true)
     );
+}
+
+/// Each thread keeps its model: picking one in another thread leaves the
+/// import on its session's provider. Opening a thread does not change the
+/// model new threads start on; Settings changes only that (and a thread with
+/// no turn yet).
+#[gpui::test]
+fn each_thread_keeps_its_own_model(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = workspace_window(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.open_imported_thread(
+            ImportedThread::new(
+                candidate(Some("/tmp/bruhs-import-test/shop"), Some("sess-9")),
+                vec![PortableMessage {
+                    role: Role::User,
+                    parts: vec![PortablePart::Text("fix paging".into())],
+                    started_at_ms: None,
+                    model: None,
+                }],
+            ),
+            window,
+            cx,
+        );
+        let imported = workspace.active_thread_id.clone().expect("import open");
+
+        workspace.new_thread(&super::NewThread, window, cx);
+        let fresh = workspace.active_thread_id.clone().expect("new thread open");
+        assert_ne!(fresh, imported);
+        workspace.set_current_model("gpt-5.5", cx);
+
+        let model_of = |workspace: &Workspace, id: &str, cx: &gpui::App| {
+            workspace
+                .threads
+                .iter()
+                .find(|thread| thread.id == id)
+                .map(|thread| thread.chat.read(cx).model_id.clone())
+        };
+        assert_eq!(model_of(workspace, &fresh, cx).as_deref(), Some("gpt-5.5"));
+        assert_eq!(
+            model_of(workspace, &imported, cx).as_deref(),
+            Some("claude-opus-4-6")
+        );
+
+        workspace.select_thread_by_id(&imported, cx);
+        assert_eq!(workspace.current_model, "gpt-5.5");
+
+        // Settings with a thread open that has turns: only the default moves.
+        workspace.set_default_model("claude-sonnet-4-6", cx);
+        assert_eq!(workspace.current_model, "claude-sonnet-4-6");
+        let imported_model = model_of(workspace, &imported, cx);
+        assert_eq!(imported_model.as_deref(), Some("claude-opus-4-6"));
+    });
 }

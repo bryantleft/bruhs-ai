@@ -472,11 +472,75 @@ mod tests {
     }
 }
 
-/// The palette's three ways to take the active thread elsewhere. `run_dir`
-/// is where the thread's turns run (its project, else the active one; none
-/// for a home-directory chat).
+/// The three ways to take the active thread elsewhere, from the palette
+/// or from a keybinding.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ThreadExport {
+    ResumeCommand,
+    Markdown,
+    ContinueInT3,
+}
+
+impl ThreadExport {
+    /// The export a keybinding command runs.
+    pub fn from_command(command: &str) -> Option<Self> {
+        match command {
+            "thread.copyResumeCommand" => Some(Self::ResumeCommand),
+            "thread.copyMarkdown" => Some(Self::Markdown),
+            "thread.continueInT3" => Some(Self::ContinueInT3),
+            _ => None,
+        }
+    }
+}
+
+/// What exporting the active thread reads, taken from context when a
+/// component mounts (an event handler has no context to read).
+#[derive(Clone, Copy)]
+pub struct ActiveThreadExport {
+    threads: ReadSignal<Vec<crate::state::Thread>>,
+    active_thread_id: ReadSignal<Option<String>>,
+    messages: ReadSignal<Vec<crate::state::AgentMessage>>,
+    active_project: ReadSignal<Option<crate::state::ActiveProject>>,
+    notice: ThreadNotice,
+}
+
+impl ActiveThreadExport {
+    pub fn from_context() -> Self {
+        Self {
+            threads: expect_context::<crate::state::ThreadsSignal>().0,
+            active_thread_id: expect_context::<crate::state::ActiveThreadId>().0,
+            messages: expect_context::<crate::state::MessagesSignal>().0,
+            active_project: expect_context::<ActiveProjectSignal>().0,
+            notice: expect_context::<ThreadNotice>(),
+        }
+    }
+
+    /// Run `export` on the active thread, if there is one.
+    pub fn run(self, export: ThreadExport) {
+        let thread = self.active_thread_id.get_untracked().and_then(|id| {
+            self.threads
+                .with_untracked(|ts| ts.iter().find(|t| t.id == id).cloned())
+        });
+        let Some(thread) = thread else {
+            return;
+        };
+        let portable = self
+            .messages
+            .with_untracked(|ms| crate::components::import_thread_dialog::portable_messages(ms));
+        // Where its turns run (chat.rs: the thread's project, else the
+        // active one).
+        let run_dir = thread
+            .project_path
+            .clone()
+            .or_else(|| self.active_project.get_untracked().map(|p| p.path));
+        export_thread(export, &thread, run_dir, portable, self.notice);
+    }
+}
+
+/// `export` for `thread`. `run_dir` is where the thread's turns run (its
+/// project, else the active one; none for a home-directory chat).
 fn export_thread(
-    id: ActionId,
+    export: ThreadExport,
     thread: &crate::state::Thread,
     run_dir: Option<String>,
     messages: Vec<bruhs_models::logic::portable::PortableMessage>,
@@ -488,8 +552,8 @@ fn export_thread(
     };
     let markdown =
         || transcript_markdown(&thread.title, "bruhs", &messages, IMPORT_CONTEXT_MAX_CHARS);
-    match id {
-        ActionId::CopyResumeCommand => match thread.session_id.as_deref() {
+    match export {
+        ThreadExport::ResumeCommand => match thread.session_id.as_deref() {
             Some(session) => {
                 let provider =
                     AgentProvider::for_model(thread.model.as_deref().unwrap_or_default());
@@ -498,11 +562,11 @@ fn export_thread(
             }
             None => notice.flash("This thread has no session to resume yet."),
         },
-        ActionId::CopyThreadMarkdown => {
+        ThreadExport::Markdown => {
             copy_to_clipboard(&markdown());
             notice.flash("Thread copied as Markdown");
         }
-        ActionId::ContinueInT3 => {
+        ThreadExport::ContinueInT3 => {
             let Some(project_path) = run_dir else {
                 notice.flash("Continue in T3 Code needs a thread with a project.");
                 return;
@@ -523,7 +587,6 @@ fn export_thread(
                 }
             });
         }
-        _ => {}
     }
 }
 
@@ -569,9 +632,9 @@ pub fn CommandBar() -> impl IntoView {
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
     let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
-    let messages = expect_context::<crate::state::MessagesSignal>().0;
     let crate::state::ImportThreadOpen(import_open) =
         expect_context::<crate::state::ImportThreadOpen>();
+    let thread_export = ActiveThreadExport::from_context();
     let SetTaskCreateOpen(set_task_create_open) = expect_context::<SetTaskCreateOpen>();
     let SetModelSelectOpen(set_model_select_open) = expect_context::<SetModelSelectOpen>();
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
@@ -668,23 +731,9 @@ pub fn CommandBar() -> impl IntoView {
             }
             ActionId::OpenProject => set_project_picker_open.set(true),
             ActionId::ImportThread => import_open.set(true),
-            ActionId::CopyResumeCommand | ActionId::CopyThreadMarkdown | ActionId::ContinueInT3 => {
-                let thread = active_thread_id.get_untracked().and_then(|id| {
-                    threads.with_untracked(|ts| ts.iter().find(|t| t.id == id).cloned())
-                });
-                if let Some(thread) = thread {
-                    let portable = messages.with_untracked(|ms| {
-                        crate::components::import_thread_dialog::portable_messages(ms)
-                    });
-                    // Where its turns run (chat.rs: the thread's project, else
-                    // the active one).
-                    let run_dir = thread
-                        .project_path
-                        .clone()
-                        .or_else(|| active_project.get_untracked().map(|p| p.path));
-                    export_thread(id, &thread, run_dir, portable, thread_notice);
-                }
-            }
+            ActionId::CopyResumeCommand => thread_export.run(ThreadExport::ResumeCommand),
+            ActionId::CopyThreadMarkdown => thread_export.run(ThreadExport::Markdown),
+            ActionId::ContinueInT3 => thread_export.run(ThreadExport::ContinueInT3),
             ActionId::PinThread => {
                 if let Some(id) = active_thread_id.get_untracked() {
                     toggle_pinned(catalog, set_threads, &id);

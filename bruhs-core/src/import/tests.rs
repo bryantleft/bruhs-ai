@@ -357,3 +357,103 @@ fn a_line_that_is_not_utf8_is_skipped() {
         1
     );
 }
+
+/// Chats Cursor keeps only as agent transcripts (the Cursor Agent CLI's)
+/// are listed under Cursor; a transcript of an editor chat is not listed
+/// twice. Without Cursor's editor installed, the transcripts still are.
+#[test]
+fn cursor_agent_transcripts_import_without_the_editor() {
+    let home = tempfile::tempdir().unwrap();
+    let roots = ImportRoots::under(home.path());
+    // The chat's directory, encoded the way Cursor names its folder.
+    let project = home.path().join("work/my_app");
+    std::fs::create_dir_all(&project).unwrap();
+    let project = project.canonicalize().unwrap();
+    let folder: String = project
+        .display()
+        .to_string()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+        .trim_start_matches('-')
+        .to_string();
+    let transcripts = roots
+        .cursor_home
+        .join("projects")
+        .join(&folder)
+        .join("agent-transcripts");
+    write_lines(
+        &transcripts.join("cli-1/cli-1.jsonl"),
+        &[
+            json!({"role":"user","message":{"content":[{"type":"text","text":"<timestamp>Friday</timestamp>\n<user_query>\nwhy is signup failing\n</user_query>"}]}}),
+            json!({"role":"assistant","message":{"content":[{"type":"text","text":"Checking the auth route."},{"type":"tool_use","name":"Read","input":{"path":"auth.ts"}}]}}),
+            json!({"role":"assistant","message":{"content":[{"type":"text","text":"The callback URL is wrong."}]}}),
+        ],
+    );
+    write_lines(
+        &transcripts.join("flat-2.jsonl"),
+        &[json!({"role":"user","message":{"content":[{"type":"text","text":"second chat"}]}})],
+    );
+
+    let listed = list(&roots, ImportSource::Cursor, None, None).unwrap();
+    let ids: Vec<&str> = listed.iter().map(|row| row.id.as_str()).collect();
+    assert_eq!(ids.len(), 2, "{ids:?}");
+    let cli = listed.iter().find(|row| row.id == "cli-1").unwrap();
+    assert_eq!(cli.title, "why is signup failing");
+    assert_eq!(
+        cli.cwd.as_deref(),
+        Some(project.display().to_string().as_str())
+    );
+    assert_eq!(cli.session_id, None);
+
+    let thread = load(&roots, ImportSource::Cursor, "cli-1").unwrap();
+    let roles: Vec<Role> = thread.messages.iter().map(|m| m.role).collect();
+    assert_eq!(roles, [Role::User, Role::Assistant]);
+    let parts = &thread.messages[1].parts;
+    assert!(matches!(&parts[1], PortablePart::ToolCall(c) if c.tool == "Read"));
+    assert!(matches!(&parts[2], PortablePart::Text(t) if t == "The callback URL is wrong."));
+    assert!(thread
+        .context
+        .is_some_and(|context| context.contains("why is signup failing")));
+    assert!(matches!(
+        load(&roots, ImportSource::Cursor, "../cli-1"),
+        Err(ImportError::NotFound { .. })
+    ));
+
+    // The editor has `flat-2`: its transcript is not listed again.
+    let db = roots.cursor.join("globalStorage/state.vscdb");
+    std::fs::create_dir_all(db.parent().unwrap()).unwrap();
+    let connection = rusqlite::Connection::open(&db).unwrap();
+    connection
+        .execute_batch(
+            r#"CREATE TABLE cursorDiskKV (key TEXT PRIMARY KEY, value BLOB);
+               INSERT INTO cursorDiskKV VALUES ('composerData:flat-2', '{"fullConversationHeadersOnly":[]}');"#,
+        )
+        .unwrap();
+    drop(connection);
+    let listed = list(&roots, ImportSource::Cursor, None, None).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].id, "cli-1");
+}
+
+/// A renamed Claude Code session lists under its newest title, which
+/// Claude Code repeats near the end of the transcript.
+#[test]
+fn a_renamed_claude_session_lists_under_its_newest_title() {
+    let home = tempfile::tempdir().unwrap();
+    let roots = ImportRoots::under(home.path());
+    claude_session(&roots, "sess-1", "/work/shop", "cli");
+    let path = roots.claude.join("projects/-work-shop/sess-1.jsonl");
+    let mut text = std::fs::read_to_string(&path).unwrap();
+    text.push_str(&format!(
+        "{}\n{}\n",
+        json!({"type":"custom-title","customTitle":"Old name"}),
+        json!({"type":"custom-title","customTitle":"Paging fix"})
+    ));
+    std::fs::write(&path, text).unwrap();
+
+    let listed = list(&roots, ImportSource::ClaudeCode, None, None).unwrap();
+    assert_eq!(listed[0].title, "Paging fix");
+    let thread = load(&roots, ImportSource::ClaudeCode, "sess-1").unwrap();
+    assert_eq!(thread.candidate.title, "Paging fix");
+}

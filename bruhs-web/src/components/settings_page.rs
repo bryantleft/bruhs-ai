@@ -110,8 +110,7 @@ pub const ROW_CONTROL: &str = "w-full sm:w-60";
 
 #[component]
 fn GeneralSettings() -> impl IntoView {
-    let current_model = expect_context::<crate::state::CurrentModel>().0;
-    let set_current_model = expect_context::<crate::state::SetCurrentModel>().0;
+    let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
     let PermissionModeSignal(permission_mode) = expect_context::<PermissionModeSignal>();
     let SetPermissionModeSignal(set_permission_mode) = expect_context::<SetPermissionModeSignal>();
     let EditorSignal(editor_id) = expect_context::<EditorSignal>();
@@ -152,8 +151,8 @@ fn GeneralSettings() -> impl IntoView {
         >
             <Dropdown
                 options=model_options
-                value=Signal::derive(move || current_model.get())
-                on_change=Callback::new(move |v: String| set_current_model.set(v))
+                value=Signal::derive(move || default_model.get())
+                on_change=Callback::new(move |v: String| default_model.set(v))
                 label="Default model"
                 class=ROW_CONTROL
                 align_end=true
@@ -677,7 +676,8 @@ mod tests {
         assert!(rules.iter().all(|rule| {
             !rule.command.is_empty()
                 && (rule.key.is_empty()
-                    && matches!(rule.command.as_str(), "pull.copyLink" | "pull.copyNumber")
+                    && bruhs_models::logic::keybindings::UNBOUND_BY_DEFAULT
+                        .contains(&rule.command.as_str())
                     || bruhs_models::logic::keybindings::parse_chord(&rule.key, true).is_some())
         }));
         assert!(rules

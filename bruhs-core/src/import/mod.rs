@@ -12,6 +12,7 @@
 mod claude;
 mod codex;
 mod cursor;
+mod cursor_agent;
 mod export;
 mod t3;
 
@@ -30,8 +31,11 @@ pub struct ImportRoots {
     pub codex: PathBuf,
     /// T3 Code's data dir (`~/.t3`, or `T3CODE_HOME`).
     pub t3: PathBuf,
-    /// Cursor's `User` dir.
+    /// Cursor's `User` dir (the editor's chats).
     pub cursor: PathBuf,
+    /// `~/.cursor` (agent transcripts, the only record of the Cursor Agent
+    /// CLI's chats).
+    pub cursor_home: PathBuf,
 }
 
 impl ImportRoots {
@@ -50,6 +54,7 @@ impl ImportRoots {
             codex: var("CODEX_HOME").map_or_else(|| home.join(".codex"), PathBuf::from),
             t3: var("T3CODE_HOME").map_or_else(|| home.join(".t3"), PathBuf::from),
             cursor,
+            cursor_home: home.join(".cursor"),
         }
     }
 
@@ -61,6 +66,7 @@ impl ImportRoots {
             codex: home.join(".codex"),
             t3: home.join(".t3"),
             cursor: home.join("Cursor/User"),
+            cursor_home: home.join(".cursor"),
         }
     }
 }
@@ -145,7 +151,7 @@ pub fn list(
         ImportSource::ClaudeCode => claude::list(&roots.claude, limit, &keep)?,
         ImportSource::Codex => codex::list(&roots.codex, limit, &keep)?,
         ImportSource::T3 => t3::list(&roots.t3, &keep)?,
-        ImportSource::Cursor => cursor::list(&roots.cursor, limit, &keep)?,
+        ImportSource::Cursor => cursor::list(roots, limit, &keep)?,
     };
     found.sort_by_key(|candidate| std::cmp::Reverse(candidate.updated_at));
     found.truncate(limit);
@@ -167,7 +173,7 @@ pub fn load(
         ImportSource::ClaudeCode => claude::load(&roots.claude, id)?,
         ImportSource::Codex => codex::load(&roots.codex, id)?,
         ImportSource::T3 => t3::load(roots, id)?,
-        ImportSource::Cursor => cursor::load(&roots.cursor, id)?,
+        ImportSource::Cursor => cursor::load(roots, id)?,
     };
     Ok(ImportedThread::new(candidate, messages))
 }

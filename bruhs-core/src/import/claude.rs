@@ -56,17 +56,46 @@ fn read_head(path: &Path) -> Option<Head> {
         if head.entrypoint.is_none() {
             head.entrypoint = str_field(&row, "entrypoint");
         }
-        if row.get("type").and_then(Value::as_str) == Some("custom-title") {
-            head.title = str_field(&row, "customTitle").filter(|t| !t.is_empty());
+        if let Some(title) = title_of(&row) {
+            head.title = Some(title);
         }
         if head.prompt.is_none() {
             head.prompt = prompt_of(&row);
         }
-        if head.prompt.is_some() && head.cwd.is_some() && head.title.is_some() {
+        if head.prompt.is_some() && head.cwd.is_some() {
             break;
         }
     }
     Some(head)
+}
+
+/// Bytes read from the end of a transcript to find its newest title.
+/// Claude Code repeats the title record as the session goes on, so the
+/// newest one is near the end; reading only the end keeps a listing of
+/// long sessions fast.
+const TAIL_BYTES: u64 = 256 * 1024;
+
+fn title_of(row: &Value) -> Option<String> {
+    (row.get("type").and_then(Value::as_str) == Some("custom-title"))
+        .then(|| str_field(row, "customTitle"))
+        .flatten()
+        .filter(|title| !title.is_empty())
+}
+
+/// The newest `custom-title` in the last [`TAIL_BYTES`] of `path`.
+fn last_title(path: &Path) -> Option<String> {
+    use std::io::{Read as _, Seek as _, SeekFrom};
+    let mut file = std::fs::File::open(path).ok()?;
+    let length = file.metadata().ok()?.len();
+    file.seek(SeekFrom::Start(length.saturating_sub(TAIL_BYTES)))
+        .ok()?;
+    let mut tail = Vec::new();
+    file.read_to_end(&mut tail).ok()?;
+    String::from_utf8_lossy(&tail)
+        .lines()
+        .rev()
+        .filter(|line| line.contains("\"custom-title\""))
+        .find_map(|line| title_of(&serde_json::from_str(line).ok()?))
 }
 
 pub(super) fn list(
@@ -93,7 +122,9 @@ pub(super) fn list(
         };
         let candidate = ImportCandidate {
             source: ImportSource::ClaudeCode,
-            title: head.title.unwrap_or_else(|| title_from_prompt(&prompt)),
+            title: last_title(&path)
+                .or(head.title)
+                .unwrap_or_else(|| title_from_prompt(&prompt)),
             cwd: head.cwd,
             updated_at,
             provider: Some(AgentProvider::Claude),
@@ -142,8 +173,8 @@ pub(super) fn load(
         if cwd.is_none() {
             cwd = str_field(&row, "cwd");
         }
-        if row.get("type").and_then(Value::as_str) == Some("custom-title") {
-            title = str_field(&row, "customTitle").filter(|t| !t.is_empty());
+        if let Some(found) = title_of(&row) {
+            title = Some(found);
         }
         apply(&mut transcript, &row, &mut first_prompt);
     }

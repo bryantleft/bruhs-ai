@@ -317,7 +317,7 @@ impl Workspace {
         match id {
             SETTINGS_MODEL_DROPDOWN_ID => {
                 if let Some(model) = model_info(value) {
-                    self.set_current_model(model.id, cx);
+                    self.set_default_model(model.id, cx);
                 }
             }
             SETTINGS_ACCESS_MODE_DROPDOWN_ID => {

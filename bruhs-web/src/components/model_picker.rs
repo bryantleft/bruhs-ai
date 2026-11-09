@@ -74,6 +74,7 @@ pub fn ModelPicker() -> impl IntoView {
     let SetModelSelectOpen(set_open) = expect_context::<SetModelSelectOpen>();
     let current_model = expect_context::<crate::state::CurrentModel>().0;
     let set_current_model = expect_context::<crate::state::SetCurrentModel>().0;
+    let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
     let auth_status = expect_context::<crate::state::ClaudeAuthSignal>().0;
     let CodexAuthSignal(codex_auth) = expect_context::<CodexAuthSignal>();
 
@@ -110,7 +111,9 @@ pub fn ModelPicker() -> impl IntoView {
         q
     });
 
+    // The pick is this thread's model, and the one new threads start on.
     let choose = move |id: String| {
+        default_model.set(id.clone());
         set_current_model.set(id);
         set_open.set(false);
     };

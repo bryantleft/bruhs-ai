@@ -6,9 +6,14 @@ use bruhs_models::logic::run_place::{claude_effort, RememberedWorktree, Workspac
 
 use super::*;
 
-/// Model id the next turn uses.
+/// Model id the next turn uses: the open thread's, else [`DefaultModel`].
 #[derive(Copy, Clone)]
 pub struct CurrentModel(pub ReadSignal<String>);
+/// Model a thread with no turn yet starts on: Settings → Model, and the
+/// last model picked in the composer. Saved; opening a thread on another
+/// model does not change it.
+#[derive(Copy, Clone)]
+pub struct DefaultModel(pub RwSignal<String>);
 #[derive(Copy, Clone)]
 pub struct SetCurrentModel(pub WriteSignal<String>);
 
@@ -121,10 +126,10 @@ pub(super) fn provide() {
     let initial_model = load_pref("bruhs.model")
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| bruhs_models::agent::DEFAULT_AGENT_MODEL.to_string());
+    let default_model = RwSignal::new(initial_model.clone());
     let (current_model, set_current_model) = signal(initial_model);
-    // Persist model selection to localStorage whenever it changes.
     Effect::new(move |_| {
-        save_pref("bruhs.model", &current_model.get());
+        save_pref("bruhs.model", &default_model.get());
     });
 
     let initial_permission_mode = load_pref("bruhs.permissionMode")
@@ -180,6 +185,7 @@ pub(super) fn provide() {
     provide_context(SetModelSelectOpen(set_model_select_open));
     provide_context(CurrentModel(current_model));
     provide_context(SetCurrentModel(set_current_model));
+    provide_context(DefaultModel(default_model));
     provide_context(PermissionModeSignal(permission_mode));
     provide_context(SetPermissionModeSignal(set_permission_mode));
     provide_context(EditorSignal(editor_id));

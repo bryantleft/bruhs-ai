@@ -4533,6 +4533,10 @@ fn permission_mode_should_be_workspace_global_like_web_reference() {
     );
     assert_eq!(
         restored_thread_model_id("claude-sonnet-4-6", "gpt-5.4"),
+        "gpt-5.4"
+    );
+    assert_eq!(
+        restored_thread_model_id("claude-sonnet-4-6", ""),
         "claude-sonnet-4-6"
     );
     assert_eq!(

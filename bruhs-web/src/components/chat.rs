@@ -16,6 +16,7 @@ use bruhs_models::ids::ThreadId;
 use gloo_timers::callback::Interval;
 use leptos::html::Div;
 use leptos::prelude::*;
+use wasm_bindgen::closure::Closure;
 use wasm_bindgen::JsCast;
 
 use crate::api::{
@@ -74,6 +75,18 @@ use bruhs_models::logic::run_place::{claude_effort, first_send, FirstSend, Remem
 /// Distance from the bottom (px) within which the transcript still follows
 /// new content.
 const FOLLOW_THRESHOLD_PX: i32 = 48;
+
+/// After a scroll event: whether the view follows new rows, and whether to
+/// scroll back to the bottom. Only the user scrolling up stops following;
+/// a following view that is short of the bottom because rows grew taller
+/// is put back there.
+fn follow_after_scroll(following: bool, bottom: bool, moved_up: bool) -> (bool, bool) {
+    match (bottom, moved_up, following) {
+        (true, _, _) => (true, false),
+        (false, true, _) => (false, false),
+        (false, false, following) => (following, following),
+    }
+}
 
 /// How often a turn sent to a thread that is still finishing its previous
 /// turn (409) is retried, and the base wait between tries.
@@ -429,6 +442,44 @@ pub fn ChatPage() -> impl IntoView {
     let scroll_soon = move || {
         gloo_timers::callback::Timeout::new(0, scroll_to_bottom).forget();
     };
+    // Where the last scroll event left the view, to tell the user scrolling
+    // up from rows rendering taller under a view that follows them.
+    let last_scroll_top = StoredValue::new(0i32);
+    // Rows that grow after they render (highlighted code, diagrams, fonts)
+    // fire no scroll event: keep a following view at the bottom as they do.
+    let content_observer =
+        StoredValue::new_local(None::<(web_sys::ResizeObserver, Closure<dyn FnMut()>)>);
+    Effect::new(move |_| {
+        let Some(container) = messages_container.get() else {
+            return;
+        };
+        let Some(content) = container.first_element_child() else {
+            return;
+        };
+        let callback = Closure::wrap(Box::new(move || {
+            if at_bottom.get_untracked() {
+                scroll_to_bottom();
+            }
+        }) as Box<dyn FnMut()>);
+        match web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
+            Ok(resize) => {
+                resize.observe(&content);
+                content_observer.update_value(|value| {
+                    if let Some((old, _)) = value.replace((resize, callback)) {
+                        old.disconnect();
+                    }
+                });
+            }
+            Err(error) => log::warn!("Transcript resize observation unavailable: {error:?}"),
+        }
+    });
+    on_cleanup(move || {
+        content_observer.update_value(|value| {
+            if let Some((resize, _callback)) = value.take() {
+                resize.disconnect();
+            }
+        });
+    });
     Effect::new(move |_| {
         settled_turns.track();
         live_turn.track();
@@ -1741,10 +1792,19 @@ pub fn ChatPage() -> impl IntoView {
                                             on:scroll=move |_| {
                                                 if let Some(Some(el)) = messages_container.try_get_untracked() {
                                                     let html_el: web_sys::HtmlElement = (*el).clone();
-                                                    let bottom = html_el.scroll_top() + html_el.client_height()
+                                                    let top = html_el.scroll_top();
+                                                    let bottom = top + html_el.client_height()
                                                         >= html_el.scroll_height() - FOLLOW_THRESHOLD_PX;
-                                                    if at_bottom.get_untracked() != bottom {
-                                                        at_bottom.set(bottom);
+                                                    let moved_up = top < last_scroll_top.get_value();
+                                                    last_scroll_top.set_value(top);
+                                                    let following = at_bottom.get_untracked();
+                                                    let (follow, repin) =
+                                                        follow_after_scroll(following, bottom, moved_up);
+                                                    if follow != following {
+                                                        at_bottom.set(follow);
+                                                    }
+                                                    if repin {
+                                                        scroll_to_bottom();
                                                     }
                                                 }
                                             }
@@ -1900,6 +1960,16 @@ mod tests {
         assert!(text.contains("cargo test"));
         assert!(text.contains("ok"));
         assert!(!text.contains("\"n\""));
+    }
+
+    /// Rows rendering taller under a following view keep it following;
+    /// only scrolling up parks it.
+    #[test]
+    fn only_scrolling_up_stops_following_new_rows() {
+        assert_eq!(follow_after_scroll(false, true, false), (true, false));
+        assert_eq!(follow_after_scroll(true, false, true), (false, false));
+        assert_eq!(follow_after_scroll(true, false, false), (true, true));
+        assert_eq!(follow_after_scroll(false, false, false), (false, false));
     }
 
     #[test]

@@ -63,6 +63,17 @@ impl KeyContext {
     }
 }
 
+/// Commands that ship with no key: each waits for the user to pick one in
+/// Settings. Cmd+Shift+C and Cmd+Shift+K stay the thread link and Knowledge.
+pub const UNBOUND_BY_DEFAULT: &[&str] = &[
+    "pull.copyLink",
+    "pull.copyNumber",
+    "thread.import",
+    "thread.copyResumeCommand",
+    "thread.copyMarkdown",
+    "thread.continueInT3",
+];
+
 /// Bindings the app ships. Several rows can share a command id.
 pub fn default_keybindings() -> Vec<Keybinding> {
     const ROWS: &[(&str, &str, Option<&str>)] = &[
@@ -120,15 +131,17 @@ pub fn default_keybindings() -> Vec<Keybinding> {
         ("mod+]", "navigation.forward", Some("!terminalFocus")),
         ("/", "composer.focus", Some("!editableFocus")),
         ("c", "task.new", Some("!editableFocus")),
-        // Unbound until the user picks a key. Cmd+Shift+C and Cmd+Shift+K
-        // stay the thread link and Knowledge.
-        ("", "pull.copyLink", None),
-        ("", "pull.copyNumber", None),
     ];
     ROWS.iter()
+        .copied()
+        .chain(
+            UNBOUND_BY_DEFAULT
+                .iter()
+                .map(|command| ("", *command, None)),
+        )
         .map(|(key, command, when)| Keybinding {
-            key: (*key).to_string(),
-            command: (*command).to_string(),
+            key: key.to_string(),
+            command: command.to_string(),
             when: when.map(str::to_string),
         })
         .collect()
@@ -631,8 +644,7 @@ mod tests {
     fn new_defaults_keep_a_customized_command_and_append_a_new_one() {
         let defaults = default_keybindings();
         assert!(defaults.iter().all(|rule| {
-            rule.key.is_empty()
-                && matches!(rule.command.as_str(), "pull.copyLink" | "pull.copyNumber")
+            rule.key.is_empty() && UNBOUND_BY_DEFAULT.contains(&rule.command.as_str())
                 || parse_chord(&rule.key, true).is_some()
         }));
         assert_eq!(fill_new_defaults(&defaults, &defaults), defaults);
