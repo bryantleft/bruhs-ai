@@ -485,7 +485,7 @@ fn AppRow() -> impl IntoView {
                 <div class="px-4 pb-3">
                     <p class="text-label-sm text-rambutan-400">
                         "The Bruhs app downloads the update and asks to restart. "
-                        {release.release_url.map(|url| view! {
+                        {release.notes_url().map(|url| view! {
                             <a href=url target="_blank" rel="noreferrer" class="text-blueberry-300 hover:text-blueberry-200">"Release notes"</a>
                         })}
                     </p>

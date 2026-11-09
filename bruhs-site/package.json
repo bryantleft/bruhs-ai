@@ -5,7 +5,8 @@
   "description": "bruhs.ai landing page, deployed on Vercel",
   "scripts": {
     "test": "node --test \"test/**/*.test.ts\"",
-    "typecheck": "tsc -p ."
+    "typecheck": "tsc -p .",
+    "changelog": "node scripts/changelog.mjs"
   },
   "engines": {
     "node": ">=22.18"

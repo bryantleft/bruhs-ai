@@ -55,7 +55,8 @@ shortcut away.
 Download **Bruhs** for macOS (13 or later, Apple silicon) from the
 [latest release](https://github.com/bryantleft/bruhs-ai/releases/latest):
 open `Bruhs-macOS-arm64.dmg` and drag Bruhs to Applications. It is signed
-with a Developer ID and notarized, and it updates itself.
+with a Developer ID and notarized, and it updates itself. What changed in each
+release: [CHANGELOG.md](CHANGELOG.md) or [bruhs.ai/changelog](https://bruhs.ai/changelog).
 
 The app starts its own server (which also serves the web app on
 `http://127.0.0.1:3001`) and capture daemon. Sign in to Claude Code

@@ -6075,10 +6075,15 @@ fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext)
         .expect("workspace entity should be captured");
     workspace.update_in(cx, |workspace, _window, cx| {
         workspace.updates.update(cx, |updates, cx| {
-            updates.set_report_for_test(
-                update_report(("0.167.0", "0.167.0"), AppUpdateState::Behind, vec![]),
-                cx,
-            );
+            let mut report = update_report(("0.167.0", "0.167.0"), AppUpdateState::Behind, vec![]);
+            report.app.release = Some(bruhs_models::updates::ReleaseUpdate {
+                current_version: "0.1.0".into(),
+                latest_version: Some("0.2.0".into()),
+                release_url: None,
+                download_url: None,
+                sha256: None,
+            });
+            updates.set_report_for_test(report, cx);
             updates.install = super::updates_ui::AppInstall::Ready {
                 version: "0.2.0".into(),
                 staged: std::path::PathBuf::from("/nonexistent/Bruhs.app"),
@@ -6100,4 +6105,6 @@ fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext)
     });
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-settings-restart-update");
+    // The version's changelog entry sits beside Restart.
+    assert_rendered_bounds(cx, "desktop-settings-release-notes");
 }

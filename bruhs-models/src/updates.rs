@@ -851,6 +851,14 @@ pub fn release_asset_names(arch: &str) -> (String, String) {
 /// The checksums file published with every release.
 pub const RELEASE_CHECKSUMS: &str = "SHA256SUMS";
 
+/// The public changelog; each release has an anchor (`#v0.1.1`).
+pub const CHANGELOG_URL: &str = "https://bruhs.ai/changelog";
+
+/// The changelog entry for `version` (`0.1.1` or `v0.1.1`).
+pub fn release_notes_url(version: &str) -> String {
+    format!("{CHANGELOG_URL}#v{}", version.trim_start_matches('v'))
+}
+
 /// The hex SHA-256 for `name` in a `shasum -a 256` listing.
 pub fn checksum_for(sums: &str, name: &str) -> Option<String> {
     sums.lines().find_map(|line| {
@@ -877,6 +885,13 @@ pub struct ReleaseUpdate {
     /// Its SHA-256 from the release's `SHA256SUMS`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub sha256: Option<String>,
+}
+
+impl ReleaseUpdate {
+    /// The changelog entry for the latest version, when there is one.
+    pub fn notes_url(&self) -> Option<String> {
+        self.latest_version.as_deref().map(release_notes_url)
+    }
 }
 
 /// The running build against the checkout's remote default branch, or, for
