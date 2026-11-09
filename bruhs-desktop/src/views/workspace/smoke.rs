@@ -87,6 +87,10 @@ impl Workspace {
                 self.open_settings(&OpenSettings, window, cx);
                 self.set_settings_section(SettingsSection::Updates, cx);
             }
+            "settings-about" => {
+                self.open_settings(&OpenSettings, window, cx);
+                self.set_settings_section(SettingsSection::About, cx);
+            }
             "search" => self.activate_sidebar_view(AppView::Search, window, cx),
             "search-query" => {
                 self.activate_sidebar_view(AppView::Search, window, cx);

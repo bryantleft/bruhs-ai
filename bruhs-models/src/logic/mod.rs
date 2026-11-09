@@ -12,6 +12,7 @@ pub mod compact;
 pub mod composer_text;
 pub mod context_chip;
 pub mod diff;
+pub mod dither;
 pub mod editor;
 pub mod find;
 pub mod follow_up;

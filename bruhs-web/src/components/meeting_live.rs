@@ -15,6 +15,7 @@ use crate::state::{
     SetLiveMeetingIdSignal, SetMeetingsSignal,
 };
 use crate::storage;
+use crate::ui::BrailleMeter;
 
 /// Format elapsed milliseconds as MM:SS if < 1h, else HH:MM:SS.
 fn format_elapsed(elapsed_ms: f64) -> String {
@@ -207,29 +208,6 @@ pub fn MeetingLive() -> impl IntoView {
                             <p class="text-label text-rambutan-100 break-words">{m.title.clone()}</p>
                             <p class="text-label-sm text-rambutan-400">"Screen context not connected"</p>
                             <p class="text-label-sm text-rambutan-400">"Latest 50 segments · full transcript in Meetings"</p>
-                            {move || {
-                                let (mic_rms, sys_rms) = audio_level.get();
-                                let mic = mic_rms.clamp(0.0, 1.0);
-                                let mic_percent = mic * 100.0;
-                                view! {
-                                    <div class="flex items-center gap-3 text-label-sm text-rambutan-400">
-                                        <span>"Mic"</span>
-                                        <div role="meter" aria-label="Microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow=mic_percent class="h-1 w-12 overflow-hidden rounded-orb bg-longan-700">
-                                            <div class="h-full origin-left bg-dragonfruit-500" style=format!("transform:scaleX({mic})")></div>
-                                        </div>
-                                        {sys_rms.map(|level| {
-                                            let level = level.clamp(0.0, 1.0);
-                                            let percent = level * 100.0;
-                                            view! {
-                                                <span>"System"</span>
-                                                <div role="meter" aria-label="System audio level" aria-valuemin="0" aria-valuemax="100" aria-valuenow=percent class="h-1 w-12 overflow-hidden rounded-orb bg-longan-700">
-                                                    <div class="h-full origin-left bg-pandan-500" style=format!("transform:scaleX({level})")></div>
-                                                </div>
-                                            }
-                                        })}
-                                    </div>
-                                }
-                            }}
                             {move || stop_error.get().map(|error| view! { <p role="alert" class="text-body-sm text-lychee-400 break-words">{error}</p> })}
                             {move || chunk_note.get().map(|note| view! { <p role="status" class="text-body-sm text-lychee-400 break-words">{note}</p> })}
                             {segments.is_empty().then(|| view! { <p class="text-body-sm text-rambutan-400">"Waiting for transcript…"</p> })}
@@ -407,6 +385,7 @@ pub fn MeetingLive() -> impl IntoView {
                             </div>
                         </div>
                     </div>
+                    <BrailleMeter level=audio_level />
                     <button type="button" aria-label=move || if expanded.get() { "Collapse meeting dock" } else { "Expand meeting dock" }
                         aria-expanded=move || expanded.get().to_string()
                         class="h-11 w-[52px] shrink-0 rounded-orb text-label-sm text-rambutan-200 hover:bg-longan-800 active:bg-longan-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 focus-visible:outline-offset-[-2px]"

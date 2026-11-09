@@ -5,11 +5,15 @@
 //! the hub's observers (the workspace and its transcript views).
 
 use crate::theme;
-use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
+use bruhs_models::logic::dither::meter_column;
 use gpui::prelude::*;
-use gpui::{div, px, Context, Window};
+use gpui::{div, px, Context, Div, Hsla, Window};
 
-const METER_HEIGHT_PX: f32 = 20.0;
+// One braille cell (Bruhs AGENTS.md section 19), the same size as web's
+// `BrailleMeter`: 4px dots, 2px apart in a column, columns 3px apart.
+const DOT_PX: f32 = 4.0;
+const ROW_GAP_PX: f32 = 2.0;
+const COLUMN_GAP_PX: f32 = 3.0;
 
 #[derive(Debug, Default)]
 pub struct AudioLevelMeter {
@@ -33,44 +37,36 @@ impl AudioLevelMeter {
     }
 }
 
-/// Bar height for an RMS level in [0, 1]: 2–20 px.
-fn bar_height(rms: f32) -> f32 {
-    (rms * METER_HEIGHT_PX)
-        .to_u32_saturating()
-        .clamp(2, METER_HEIGHT_PX.to_u32_saturating())
-        .to_f32_lossy()
+/// One column of dots, lit from the bottom for `level`.
+fn column(level: f32, lit: Hsla) -> Div {
+    div()
+        .flex()
+        .flex_col()
+        .gap(px(ROW_GAP_PX))
+        .children(meter_column(level).map(|on| {
+            div()
+                .size(px(DOT_PX))
+                .rounded_full()
+                .bg(if on { lit } else { theme::longan_700() })
+        }))
 }
 
 impl Render for AudioLevelMeter {
     fn render(&mut self, _window: &mut Window, _cx: &mut Context<'_, Self>) -> impl IntoElement {
-        let mut levels = div()
+        div()
+            .debug_selector(|| "desktop-braille-meter".to_string())
             .flex()
-            .items_end()
-            .gap(px(2.0))
-            .h(px(METER_HEIGHT_PX))
-            .child(
-                div()
-                    .w(px(3.0))
-                    .h(px(bar_height(self.mic_rms)))
-                    .rounded(px(4.0))
-                    .bg(theme::dragonfruit_500()),
-            );
-        if let Some(sys) = self.sys_rms {
-            levels = levels.child(
-                div()
-                    .w(px(3.0))
-                    .h(px(bar_height(sys)))
-                    .rounded(px(4.0))
-                    .bg(theme::pandan_500()),
-            );
-        }
-        levels
+            .flex_none()
+            .gap(px(COLUMN_GAP_PX))
+            .child(column(self.mic_rms, theme::dragonfruit_500()))
+            .when_some(self.sys_rms, |el, sys| {
+                el.child(column(sys, theme::pandan_500()))
+            })
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::bar_height;
     use crate::server_client::ServerClient;
     use crate::views::meetings_hub::{MeetingPrefs, MeetingsHub};
     use bruhs_models::MeetingEvent;
@@ -115,13 +111,5 @@ mod tests {
             meter.read_with(cx, |meter, _| meter.levels()),
             (0.8, Some(0.4))
         );
-    }
-
-    #[test]
-    fn bars_stay_between_two_and_twenty_pixels() {
-        assert_eq!(bar_height(0.0), 2.0);
-        assert_eq!(bar_height(0.5), 10.0);
-        assert_eq!(bar_height(1.0), 20.0);
-        assert_eq!(bar_height(3.0), 20.0);
     }
 }

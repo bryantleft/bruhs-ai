@@ -19,6 +19,7 @@ use crate::state::{
     KeybindingsSignal, PermissionMode, PermissionModeSignal, SetActiveView,
     SetPermissionModeSignal, SidebarChrome, TitleInstructionsSignal,
 };
+use crate::ui::BrailleBruh;
 use crate::ui::{Dropdown, DropdownOption, Icon, Switch};
 
 /// `(id, icon, label)` for the section nav, in page order.
@@ -483,9 +484,14 @@ fn KeyboardSettings() -> impl IntoView {
 #[component]
 fn AboutSettings() -> impl IntoView {
     view! {
-        <SettingsRow title="Version" description="bruhs-web, built from the workspace crate.">
-            <span class="text-code-sm text-rambutan-200">{env!("CARGO_PKG_VERSION")}</span>
-        </SettingsRow>
+        <div data-testid="settings-about-version" class="flex items-center gap-4 px-4 py-3">
+            <BrailleBruh size=96.0 />
+            <div class="flex min-w-0 flex-col gap-1">
+                <h3 class="text-label text-rambutan-100">"bruhs"</h3>
+                <span class="text-code-sm text-rambutan-200">{env!("CARGO_PKG_VERSION")}</span>
+                <p class="text-label-sm leading-relaxed text-rambutan-500">"bruhs-web, built from the workspace crate."</p>
+            </div>
+        </div>
         <SettingsRow
             title="MCP servers"
             description="Configured through Claude Code settings; connected servers appear in each session's init event."
