@@ -1,0 +1,2 @@
+Floors: Ben 1 snake, Eli 2 dog, Ana 3 cat, Dee 4 fish, Cy 5 owl.
+ANSWER: Eli, 4

@@ -1,0 +1,353 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>bruhs: one window for your whole day</title>
+  <meta name="description" content="A local-first, keyboard-native agent for your whole day: agentic threads, tasks, calendar, meetings, people, notes, money and health in one window. Join the waitlist.">
+  <meta name="theme-color" content="#141210">
+  <link rel="canonical" href="https://bruhs.ai/">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://bruhs.ai/">
+  <meta property="og:title" content="bruhs: one window for your whole day">
+  <meta property="og:description" content="Agents, tasks, calendar, meetings, people, notes, money and health. One ⌘K away, on your machine.">
+  <meta name="twitter:card" content="summary">
+  <link rel="icon" href="/bruhs.svg" type="image/svg+xml">
+  <link rel="preload" href="/fonts/MonaspaceNeonVariable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/fonts/MonaspaceKryptonVariable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="preload" href="/shots/hero-1440.webp" as="image" type="image/webp" imagesrcset="/shots/hero-1440.webp 1440w, /shots/hero-2880.webp 2880w" imagesizes="(min-width: 1328px) 1280px, calc(100vw - 48px)">
+  <link rel="stylesheet" href="/site.css">
+  <script type="module" src="/site.js"></script>
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="bruhs home">
+        <img src="/bruhs.svg" alt="" width="26" height="26"><span class="brand-name">bruhs</span></a>
+      <div class="nav-actions">
+        <a class="nav-link" href="/changelog">Changelog</a>
+        <button class="btn btn-ghost hide-sm" type="button" data-open-palette aria-haspopup="dialog">
+          Jump to <kbd><span class="mod">⌘</span>K</kbd>
+        </button>
+        <a class="btn btn-primary" href="#join">Join the waitlist</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main">
+    <section class="hero">
+      <div class="wrap hero-head">
+        <div class="hero-title">
+          <p class="eyebrow">In private testing · macOS and the browser</p>
+          <h1 class="display">One window<br>for your whole day.</h1>
+        </div>
+        <p class="lede">Agentic threads, tasks, calendar, meetings, people, notes, money and health. Everything is a keystroke away, and it all lives on your machine.</p>
+        <div>
+          <form class="join-form" action="/api/waitlist" method="post" data-join>
+            <div class="join-row">
+              <label class="sr-only" for="hero-email">Email address</label>
+              <input id="hero-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@domain.com" required maxlength="254">
+              <div class="trap" aria-hidden="true">
+                <label for="hero-website">Leave this empty</label>
+                <input id="hero-website" name="website" type="text" tabindex="-1" autocomplete="off">
+              </div>
+              <button class="btn btn-primary" type="submit">Join the waitlist <kbd>⏎</kbd></button>
+            </div>
+            <p class="join-status" role="status" aria-live="polite"></p>
+            <p class="fine">One email, when bruhs is ready for you. No tracking. <a href="/privacy">Privacy</a></p>
+          </form>
+          <div class="join-done" hidden data-join-done>
+            <img src="/bruhs.svg" alt="" width="28" height="28">
+            <p>You're on the list. We'll send one email when bruhs is ready for you.</p>
+          </div>
+        </div>
+      </div>
+
+      <div class="stage">
+        <figure class="window window-hero">
+          <img src="/shots/hero-1440.webp" srcset="/shots/hero-1440.webp 1440w, /shots/hero-2880.webp 2880w" sizes="(min-width: 1328px) 1280px, calc(100vw - 48px)" width="1440" height="900" fetchpriority="high"
+            alt="The bruhs app: a sidebar of Claude and Codex threads across several projects, and an open thread where Claude reads session.rs, runs cargo test, explains a race on a shared test clock, and shows a two-file diff.">
+          <div class="palette" data-palette data-palette-mode="inline">
+            <div class="palette-input">
+              <span class="prompt" aria-hidden="true">›</span>
+              <label class="sr-only" for="hero-palette-input">Jump to a part of bruhs</label>
+              <input id="hero-palette-input" type="text" role="combobox" aria-expanded="true" aria-controls="hero-palette-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Try it: meetings, codex, finance">
+              <kbd class="hint-key"><span class="mod">⌘</span>K</kbd>
+            </div>
+            <ul class="palette-list" id="hero-palette-list" role="listbox" aria-label="Commands"></ul>
+            <div class="palette-foot">
+              <span class="hint-key"><kbd>↑</kbd> <kbd>↓</kbd> move</span>
+              <span class="hint-key"><kbd>⏎</kbd> open</span>
+              <div class="tries" aria-label="Suggestions">
+                <button class="chip" type="button" data-try="meetings">meetings</button>
+                <button class="chip" type="button" data-try="codex">codex</button>
+                <button class="chip" type="button" data-try="finance">finance</button>
+                <button class="chip" type="button" data-try="shortcuts">shortcuts</button>
+              </div>
+            </div>
+          </div>
+        </figure>
+      </div>
+    </section>
+
+    <section class="section section-feature" id="surfaces" aria-labelledby="surfaces-title">
+      <div class="wrap split-head">
+        <h2 class="h2 h2-lg" id="surfaces-title" tabindex="-1">Seven apps' worth of work, one window.</h2>
+        <p class="lede">Every part of bruhs shares one agent and one set of data on your machine. A meeting becomes tasks, a task goes to Claude, and your calendar makes room to review what it did.</p>
+      </div>
+
+      <div class="surfaces" data-surfaces>
+        <div class="wrap tabs-row">
+          <div class="tabs" role="tablist" aria-label="Surfaces">
+            <button class="tab" role="tab" id="tab-agents" aria-controls="agents" aria-selected="true" type="button"><span class="dot dot-agent" aria-hidden="true"></span>Agents<span class="num" aria-hidden="true">1</span></button>
+            <button class="tab" role="tab" id="tab-tasks" aria-controls="tasks" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-tasks" aria-hidden="true"></span>Tasks<span class="num" aria-hidden="true">2</span></button>
+            <button class="tab" role="tab" id="tab-calendar" aria-controls="calendar" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-calendar" aria-hidden="true"></span>Calendar<span class="num" aria-hidden="true">3</span></button>
+            <button class="tab" role="tab" id="tab-meetings" aria-controls="meetings" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-meetings" aria-hidden="true"></span>Meetings<span class="num" aria-hidden="true">4</span></button>
+            <button class="tab" role="tab" id="tab-people" aria-controls="people" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-people" aria-hidden="true"></span>People<span class="num" aria-hidden="true">5</span></button>
+            <button class="tab" role="tab" id="tab-notes" aria-controls="notes" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-notes" aria-hidden="true"></span>Notes<span class="num" aria-hidden="true">6</span></button>
+            <button class="tab" role="tab" id="tab-life" aria-controls="life" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-life" aria-hidden="true"></span>Life<span class="num" aria-hidden="true">7</span></button>
+          </div>
+          <button class="btn btn-ghost cycle-toggle" type="button" data-tour-toggle hidden><svg class="icon-pause" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><rect x="2" y="1" width="3" height="10" rx="1"/><rect x="7" y="1" width="3" height="10" rx="1"/></svg><svg class="icon-play" viewBox="0 0 12 12" width="12" height="12" aria-hidden="true"><path d="M3 1.5v9a.5.5 0 0 0 .76.43l7.2-4.5a.5.5 0 0 0 0-.86l-7.2-4.5A.5.5 0 0 0 3 1.5Z"/></svg><span class="cycle-label">Pause tour</span></button>
+        </div>
+
+        <div class="stage panels">
+          <div class="panel" role="tabpanel" id="agents" aria-labelledby="tab-agents" tabindex="0">
+            <figure class="window">
+              <img src="/shots/agents-1168.webp" srcset="/shots/agents-1168.webp 1168w, /shots/agents-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+                alt="A Claude Code thread in bruhs: grouped tool calls for reading and editing session.rs, Claude's explanation of the race, and a changed-files card showing +12 −4 with an Open diff button.">
+            </figure>
+            <div class="wrap panel-copy">
+              <h3 class="h3">Your coding agents, in the same room as everything else.</h3>
+              <div>
+                <p>Run Claude Code and Codex in threads, with a terminal one keystroke away.</p>
+                <ul class="points">
+                  <li>Follow every tool call and the diff from each turn.</li>
+                  <li>Rewind an agent's worktree to an earlier turn without touching your branch.</li>
+                  <li>Redirect Claude mid-reply, or queue your next message.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" role="tabpanel" id="tasks" aria-labelledby="tab-tasks" tabindex="0" hidden>
+            <figure class="window">
+              <img src="/shots/tasks-1168.webp" srcset="/shots/tasks-1168.webp 1168w, /shots/tasks-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+                alt="The Today view: a briefing, the current focus block and the rest of the day's schedule, a ranked focus queue with priorities and estimates, and columns for overdue work, waiting on, follow-ups and decisions.">
+            </figure>
+            <div class="wrap panel-copy">
+              <h3 class="h3">Tasks that know what's blocked and who you're waiting on.</h3>
+              <div>
+                <p>Today puts your schedule, focus queue, overdue work and meeting decisions in one view.</p>
+                <ul class="points">
+                  <li>Set priorities, estimates and due dates.</li>
+                  <li>Link dependencies so blocked work stands out.</li>
+                  <li>Plan in cycles, and make tasks repeat.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" role="tabpanel" id="calendar" aria-labelledby="tab-calendar" tabindex="0" hidden>
+            <figure class="window">
+              <img src="/shots/calendar-1168.webp" srcset="/shots/calendar-1168.webp 1168w, /shots/calendar-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+                alt="A week in the bruhs calendar: meetings, blue focus blocks for tasks like the flaky auth test and the launch post, green workouts, and evening plans, with a line marking the current time on Wednesday.">
+            </figure>
+            <div class="wrap panel-copy">
+              <h3 class="h3">Your estimates turn into protected time.</h3>
+              <div>
+                <p>“Plan my day” proposes focus blocks around your meetings and shows the whole change before anything moves.</p>
+                <ul class="points">
+                  <li>Share booking links that respect your minimum notice and buffers.</li>
+                  <li>Choose which copy to keep when Google and bruhs disagree.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" role="tabpanel" id="meetings" aria-labelledby="tab-meetings" tabindex="0" hidden>
+            <figure class="window">
+              <img src="/shots/meetings-1168.webp" srcset="/shots/meetings-1168.webp 1168w, /shots/meetings-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+                alt="A recorded meeting: the end of a speaker-labeled transcript, then a summary, four action items with due dates, the decisions made, and topics.">
+            </figure>
+            <div class="wrap panel-copy">
+              <h3 class="h3">Meetings that take their own notes, without a bot in the room.</h3>
+              <div>
+                <p>bruhs records your mic and system audio, and Whisper transcribes it on your Mac. The audio never leaves your machine.</p>
+                <ul class="points">
+                  <li>See who said what, with speaker labels.</li>
+                  <li>Get a summary with decisions and action items.</li>
+                  <li>Send action items straight to Tasks.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" role="tabpanel" id="people" aria-labelledby="tab-people" tabindex="0" hidden>
+            <figure class="window">
+              <img src="/shots/people-1168.webp" srcset="/shots/people-1168.webp 1168w, /shots/people-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+                alt="A person in bruhs: company, role and contact details, private notes, a suggested follow-up, and a list of commitments, reminders and past interactions.">
+            </figure>
+            <div class="wrap panel-copy">
+              <h3 class="h3">A CRM you never have to update.</h3>
+              <div>
+                <p>People fill in from your meetings and the conversations you import.</p>
+                <ul class="points">
+                  <li>Import from email, Slack, Discord, iMessage and X.</li>
+                  <li>Keep commitments, reminders and private notes for each person.</li>
+                  <li>Get a suggested follow-up before it slips.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" role="tabpanel" id="notes" aria-labelledby="tab-notes" tabindex="0" hidden>
+            <figure class="window">
+              <img src="/shots/notes-1168.webp" srcset="/shots/notes-1168.webp 1168w, /shots/notes-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+                alt="The Notes view: tagged Markdown documents such as a pilot plan and a launch checklist, and saved web clips that keep their source.">
+            </figure>
+            <div class="wrap panel-copy">
+              <h3 class="h3">Notes your agent can read.</h3>
+              <div>
+                <p>Markdown docs, meeting notes and web clips live together, local and searchable.</p>
+                <ul class="points">
+                  <li>Tag documents and connect them to your work.</li>
+                  <li>Clip web pages and keep their source.</li>
+                  <li>Add any doc or clip to a thread as context.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+
+          <div class="panel" role="tabpanel" id="life" aria-labelledby="tab-life" tabindex="0" hidden>
+            <figure class="window">
+              <img src="/shots/life-1168.webp" srcset="/shots/life-1168.webp 1168w, /shots/life-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+                alt="The finance side of Life: net worth, 30-day spend and expected income, the agent-access and redaction switches, a list of accounts, and recent transactions.">
+            </figure>
+            <div class="wrap panel-copy">
+              <h3 class="h3">Money and health, kept with the rest of your day.</h3>
+              <div>
+                <p>A local ledger and health log. Your agent sees them only after you opt in.</p>
+                <ul class="points">
+                  <li>Track accounts, budgets, income and holdings, or import a CSV.</li>
+                  <li>Log workouts, sleep, recovery and habits.</li>
+                  <li>Keep exact amounts behind a second opt-in.</li>
+                </ul>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" aria-label="Providers and privacy">
+      <div class="wrap duo">
+        <div id="subs" class="duo-col">
+          <h2 class="h2" tabindex="-1">Bring your own sub.</h2>
+          <p class="lede">bruhs runs the Claude Code and Codex CLIs you already have, on the subscriptions you already pay for. It never resells tokens or asks for an API key.</p>
+          <ul class="logins">
+            <li><img src="/logos/claude.svg" alt="" width="22" height="22"><span class="who">Claude Code</span><code><span class="p">$</span> claude auth login</code></li>
+            <li><img src="/logos/openai.svg" alt="" width="22" height="22"><span class="who">Codex</span><code><span class="p">$</span> codex login</code></li>
+          </ul>
+          <ul class="ticks">
+            <li>Choose Claude or Codex for each thread.</li>
+            <li>Keep Codex read-only until you allow edits.</li>
+          </ul>
+        </div>
+
+        <div id="privacy" class="duo-col">
+          <h2 class="h2" tabindex="-1">Stays on your machine.</h2>
+          <p class="lede">Your data lives in your browser's storage, or in the app's folder on your Mac.</p>
+          <dl class="ledger">
+            <div class="ledger-group">
+              <dt>On your device</dt>
+              <dd><b>Threads, tasks, notes and people.</b> There's no bruhs cloud or sync server.</dd>
+              <dd><b>Meeting audio and transcripts.</b> Whisper transcribes on your Mac, and no bot joins the call.</dd>
+              <dd><b>Money and health.</b> Your agent can't see them until you opt in, and exact amounts need a second opt-in.</dd>
+            </div>
+            <div class="ledger-group">
+              <dt>Online only when you ask</dt>
+              <dd><b>Messages to Claude or Codex.</b> They go to Anthropic or OpenAI through your own login.</dd>
+              <dd><b>Google Calendar.</b> Read-only, and only if you connect it.</dd>
+            </div>
+          </dl>
+        </div>
+      </div>
+    </section>
+
+    <section class="section" id="keys" aria-labelledby="keys-title">
+      <div class="wrap">
+        <div class="section-head">
+          <h2 class="h2" id="keys-title" tabindex="-1">Built for the keyboard.</h2>
+          <p class="lede">These are the app's default shortcuts. Press one and it lights up here. Only <kbd><span class="mod">⌘</span>K</kbd> works on this page, and it opens the command bar.</p>
+        </div>
+        <div class="keys-top">
+          <div class="bigkey" data-keys="mod+k"><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>K</kbd></span><span>Command bar</span></div>
+          <div class="bigkey" data-keys="mod+n"><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>N</kbd></span><span>New thread</span></div>
+          <div class="bigkey" data-keys="mod+shift+y"><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>⇧</kbd><kbd>Y</kbd></span><span>Today</span></div>
+          <div class="bigkey" data-keys="mod+shift+space"><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>⇧</kbd><kbd>Space</kbd></span><span>Capture anything</span></div>
+        </div>
+        <ul class="keys-rest">
+          <li data-keys="mod+shift+i"><span>Inbox</span><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>⇧</kbd><kbd>I</kbd></span></li>
+          <li data-keys="mod+shift+k"><span>Notes</span><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>⇧</kbd><kbd>K</kbd></span></li>
+          <li data-keys="mod+shift+m"><span>Model picker</span><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>⇧</kbd><kbd>M</kbd></span></li>
+          <li data-keys="mod+d"><span>Diff panel</span><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>D</kbd></span></li>
+          <li data-keys="mod+j"><span>Terminal</span><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>J</kbd></span></li>
+          <li data-keys="mod+shift+t"><span>Agent's task list</span><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>⇧</kbd><kbd>T</kbd></span></li>
+          <li data-keys="mod+s"><span>Stash draft</span><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>S</kbd></span></li>
+          <li data-keys="mod+["><span>Back</span><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>[</kbd></span></li>
+        </ul>
+      </div>
+    </section>
+
+    <section class="section closing" id="join" aria-labelledby="join-title">
+      <div class="wrap">
+        <img src="/bruhs.svg" alt="" width="48" height="48">
+        <h2 class="display display-sm" id="join-title" tabindex="-1">Your whole day deserves better than twelve tabs.</h2>
+        <p class="lede">bruhs is in private testing. Leave your email and we'll write once, when it's ready for you.</p>
+        <form class="join-form" action="/api/waitlist" method="post" data-join>
+          <div class="join-row">
+            <label class="sr-only" for="join-email">Email address</label>
+            <input id="join-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@domain.com" required maxlength="254">
+            <div class="trap" aria-hidden="true">
+              <label for="join-website">Leave this empty</label>
+              <input id="join-website" name="website" type="text" tabindex="-1" autocomplete="off">
+            </div>
+            <button class="btn btn-primary" type="submit">Join the waitlist <kbd>⏎</kbd></button>
+          </div>
+          <p class="join-status" role="status" aria-live="polite"></p>
+          <p class="fine">One email, when bruhs is ready for you. No tracking. <a href="/privacy">Privacy</a></p>
+        </form>
+        <div class="join-done" hidden data-join-done>
+          <img src="/bruhs.svg" alt="" width="28" height="28">
+          <p>You're on the list. We'll send one email when bruhs is ready for you.</p>
+        </div>
+      </div>
+    </section>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <span>© 2026 bruhs.ai</span>
+      <nav aria-label="Footer">
+        <a href="/privacy">Privacy</a>
+        <a href="/changelog">Changelog</a>
+        <a href="#join">Waitlist</a>
+      </nav>
+    </div>
+  </footer>
+
+  <dialog class="palette-dialog" aria-label="Jump to">
+    <div class="palette" data-palette data-palette-mode="dialog">
+      <div class="palette-input">
+        <span class="prompt" aria-hidden="true">›</span>
+        <label class="sr-only" for="dialog-palette-input">Jump to a part of bruhs</label>
+        <input id="dialog-palette-input" type="text" role="combobox" aria-expanded="true" aria-controls="dialog-palette-list" aria-autocomplete="list" autocomplete="off" spellcheck="false" placeholder="Jump to…">
+        <kbd>esc</kbd>
+      </div>
+      <ul class="palette-list" id="dialog-palette-list" role="listbox" aria-label="Commands"></ul>
+    </div>
+  </dialog>
+</body>
+</html>

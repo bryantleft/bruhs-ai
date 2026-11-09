@@ -1,0 +1,58 @@
+[package]
+name = "bruhs-desktop"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[dependencies]
+# SIGTERM for the bundled helpers on quit: bruhs-server shuts down cleanly on
+# it; anything still running after 5 s is killed.
+libc = "0.2"
+alacritty_terminal = "0.26"
+async-channel = "2"
+bruhs-core = { workspace = true }
+bruhs-models = { workspace = true }
+chrono = { workspace = true, features = ["serde"] }
+cpal = { workspace = true }
+directories = { workspace = true }
+# gpui comes from the bnleft/zed fork pinned once in the root Cargo.toml
+# ([workspace.dependencies]); see the note there before bumping the rev.
+gpui = { workspace = true }
+gpui-component = { path = "../third_party/gpui-component/crates/ui" }
+gpui_platform = { workspace = true, features = ["font-kit"] }
+markdown = "1"
+reqwest = { workspace = true, features = ["stream"] }
+mathjax-svg-rs = "0.4.0"
+mermaid-rs-renderer = { version = "0.2.2", default-features = false }
+serde = { workspace = true, features = ["rc"] }
+serde_json = { workspace = true }
+sha2 = { workspace = true }
+thiserror = { workspace = true }
+tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
+tokio-stream = { workspace = true }
+tracing = { workspace = true }
+tracing-subscriber = { workspace = true }
+uuid = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+# Embedded preview (WKWebView as a child of the gpui window).
+wry = { version = "0.55", default-features = false }
+# Backdrop blur behind modal scrims (a Core Image filter on a native layer
+# above the Metal one).
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSView", "NSResponder", "NSGraphics"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+raw-window-handle = "0.6"
+
+[dev-dependencies]
+bruhs-core = { workspace = true, features = ["test-support"] }
+gpui = { workspace = true, features = ["test-support"] }
+gpui-component = { path = "../third_party/gpui-component/crates/ui", features = ["test-support"] }
+tempfile = { workspace = true }

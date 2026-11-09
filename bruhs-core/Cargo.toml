@@ -1,0 +1,50 @@
+[package]
+name = "bruhs-core"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[lints]
+workspace = true
+
+[features]
+# Test fixtures for other crates' tests (e.g. BackgroundTaskRegistry::update).
+test-support = []
+
+[dependencies]
+bruhs-models = { workspace = true }
+claude-sdk-rs = { path = "../claude-sdk-rs" }
+codex-sdk-rs = { path = "../codex-sdk-rs" }
+serde = { workspace = true }
+serde_json = { workspace = true }
+uuid = { workspace = true }
+tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "process", "net", "io-util", "io-std", "fs"] }
+tokio-stream = { workspace = true }
+portable-pty = "0.9"
+# portable-pty reports its errors as anyhow::Error; kept as error sources.
+anyhow = "1"
+futures-core = { workspace = true }
+async-trait = "0.1"
+# ── Phase 1 (Calendar v1 Google Sync) ──
+reqwest = { workspace = true }
+keyring = { workspace = true }
+directories = { workspace = true }
+base64 = "0.22"
+sha2 = { workspace = true }
+rand = { workspace = true }
+chrono = { workspace = true }
+url = "2"
+tracing = { workspace = true }
+thiserror = { workspace = true }
+zeroize = "1"
+libc = "0.2"
+rusqlite = { workspace = true }
+# Fresh empty working directory for the summary CLI.
+tempfile = { workspace = true }
+
+[dev-dependencies]
+tokio = { workspace = true, features = ["full", "test-util"] }
+wiremock = "0.6"

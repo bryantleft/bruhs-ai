@@ -1,0 +1,266 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Changelog · bruhs</title>
+  <meta name="description" content="What changed in bruhs, week by week: new features, changes and fixes in the private test build.">
+  <meta name="theme-color" content="#141210">
+  <link rel="canonical" href="https://bruhs.ai/changelog">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://bruhs.ai/changelog">
+  <meta property="og:title" content="Changelog · bruhs">
+  <meta property="og:description" content="What changed in bruhs, week by week.">
+  <link rel="icon" href="/bruhs.svg" type="image/svg+xml">
+  <link rel="preload" href="/fonts/MonaspaceKryptonVariable.woff2" as="font" type="font/woff2" crossorigin>
+  <link rel="stylesheet" href="/site.css">
+</head>
+<body>
+  <a class="skip" href="#main">Skip to content</a>
+
+  <header class="nav">
+    <div class="wrap">
+      <a class="brand" href="/" aria-label="bruhs home"><img src="/bruhs.svg" alt="" width="26" height="26"><span class="brand-name">bruhs</span></a>
+      <div class="nav-actions">
+        <a class="nav-link" href="/changelog" aria-current="page">Changelog</a>
+        <a class="btn btn-primary" href="/#join">Join the waitlist</a>
+      </div>
+    </div>
+  </header>
+
+  <main id="main" class="changelog">
+    <div class="wrap">
+      <header class="changelog-head">
+        <p class="eyebrow">Changelog</p>
+        <h1 class="display">What's shipping,<br><span class="soft">week by week.</span></h1>
+        <p class="lede">No testimonials yet, so here's what we built instead. Each entry covers one week of the private test build, newest first.</p>
+      </header>
+
+        <article class="release" id="week-2026-10-26">
+            <header class="release-meta">
+                <p class="release-week">Week 44 · 2026</p>
+                <h2 class="release-title"><a href="#week-2026-10-26">Oct 26 – Nov 1</a></h2>
+                <p class="badges"><span class="badge">Private testing</span><span class="badge badge-current">Latest</span></p>
+            </header>
+            <div class="release-body">
+                <p class="release-summary">You can redirect Claude mid-reply, and a coding thread can run in its own worktree and rewind to any message.</p>
+                <section class="changes" aria-labelledby="week-2026-10-26-added">
+                    <h3 class="change-kind kind-added" id="week-2026-10-26-added">Added</h3>
+                    <ul>
+                        <li>Added Steer to redirect Claude mid-reply, and /compact with auto-compact for long Claude threads, on web and desktop.</li>
+                        <li>Added a choice to start a project thread in the current checkout or a new worktree, with shortcuts to pick the branch and Claude's effort.</li>
+                        <li>Added Edit from here to rewind a thread to before a message, and in worktree threads to restore the files as they were then.</li>
+                        <li>Added file and image attachments by paste or drop, and a web viewer that opens images, audio, HTML, and PDF beside the conversation.</li>
+                        <li>Added a Files tab beside the chat, and a link to the branch's GitHub pull request when the gh tool is signed in.</li>
+                        <li>Added selecting a range of a live transcript to copy or delete it, on web and desktop.</li>
+                    </ul>
+                </section>
+                <section class="changes" aria-labelledby="week-2026-10-26-changed">
+                    <h3 class="change-kind kind-changed" id="week-2026-10-26-changed">Changed</h3>
+                    <ul>
+                        <li>Made diffs easier to review, with a filter for code, tests and docs, per-file viewed marks, and ⌘F find.</li>
+                        <li>Made threads easier to sort, with snooze, a Working section, and five seconds to undo a move.</li>
+                        <li>Made queued follow-ups editable, and let ↑ in an empty composer bring back the prompts you sent earlier.</li>
+                        <li>Made the composer style Markdown as you type and turn very large pastes into attachments.</li>
+                        <li>Made every shortcut editable under Settings, Keybindings, with ⌘[ and ⌘] now moving back and forward between pages.</li>
+                        <li>Made small controls easier to hit and raised the contrast of secondary text on web and desktop.</li>
+                    </ul>
+                </section>
+            </div>
+        </article>
+
+        <article class="release" id="week-2026-10-05">
+            <header class="release-meta">
+                <p class="release-week">Week 41 · 2026</p>
+                <h2 class="release-title"><a href="#week-2026-10-05">Oct 5 – 11</a></h2>
+                <p class="badges"><span class="badge">Private testing</span></p>
+            </header>
+            <div class="release-body">
+                <p class="release-summary">The access-mode menu now explains what each mode lets Claude or Codex do.</p>
+                <section class="changes" aria-labelledby="week-2026-10-05-changed">
+                    <h3 class="change-kind kind-changed" id="week-2026-10-05-changed">Changed</h3>
+                    <ul>
+                        <li>Made the access-mode menu describe each mode for the selected model, and explained in the chip's tooltip why Codex can't edit files in Default.</li>
+                    </ul>
+                </section>
+            </div>
+        </article>
+
+        <article class="release" id="week-2026-09-28">
+            <header class="release-meta">
+                <p class="release-week">Week 40 · 2026</p>
+                <h2 class="release-title"><a href="#week-2026-09-28">Sep 28 – Oct 4</a></h2>
+                <p class="badges"><span class="badge">Private testing</span></p>
+            </header>
+            <div class="release-body">
+                <p class="release-summary">Live meetings now shrink into a small movable dock, and a reliability pass closed many ways a save or recording could fail silently.</p>
+                <section class="changes" aria-labelledby="week-2026-09-28-added">
+                    <h3 class="change-kind kind-added" id="week-2026-09-28-added">Added</h3>
+                    <ul>
+                        <li>Added a compact meeting dock with live status and Stop, as a movable panel with a transcript preview on web and a floating window on desktop.</li>
+                        <li>Added Chat and Code tabs at the top of the workspace, separating general conversations from project threads, on web and desktop.</li>
+                        <li>Added an opt-in record of which app was in front during each recording on desktop, kept on your device and limited to app names.</li>
+                        <li>Added a warning before you close a tab with unsent text, unsaved changes, or a reply still streaming.</li>
+                    </ul>
+                </section>
+                <section class="changes" aria-labelledby="week-2026-09-28-changed">
+                    <h3 class="change-kind kind-changed" id="week-2026-09-28-changed">Changed</h3>
+                    <ul>
+                        <li>Made streaming replies in long threads far lighter on web and desktop by redrawing only the reply being written.</li>
+                        <li>Made the command bar faster as you type, and kept long thread lists and large note libraries quick.</li>
+                        <li>Changed Codex to run read-only in Default mode, because it can't ask before editing. Choose Auto-accept when you want it to write.</li>
+                        <li>Blocked other websites from reaching bruhs on your machine, and stopped replies from loading raw HTML, unsafe links or remote images.</li>
+                        <li>Kept unsaved task and contact drafts when you move to another page, and kept your current work when saved threads fail to load.</li>
+                        <li>Made the desktop app stay responsive while it reads git status, switches branches or lists files.</li>
+                    </ul>
+                </section>
+                <section class="changes" aria-labelledby="week-2026-09-28-fixed">
+                    <h3 class="change-kind kind-fixed" id="week-2026-09-28-fixed">Fixed</h3>
+                    <ul>
+                        <li>Fixed saves that could leave half a record behind. Every kind of item now saves completely or not at all.</li>
+                        <li>Fixed recordings marked complete after losing audio or transcript lines. The meeting now shows what failed.</li>
+                        <li>Fixed Stop hanging, live timestamps running about three times too fast, and the same meeting recording twice.</li>
+                        <li>Fixed branch switching that could discard uncommitted edits when a branch name matched a file path.</li>
+                        <li>Fixed a stopped Codex turn that kept editing files, and Claude turns that hung after hitting a limit or failed without saying why.</li>
+                        <li>Fixed Google Calendar sign-ins that were never saved, so the connection now survives a restart.</li>
+                    </ul>
+                </section>
+            </div>
+        </article>
+
+        <article class="release" id="week-2026-09-14">
+            <header class="release-meta">
+                <p class="release-week">Week 38 · 2026</p>
+                <h2 class="release-title"><a href="#week-2026-09-14">Sep 14 – 20</a></h2>
+                <p class="badges"><span class="badge">Private testing</span></p>
+            </header>
+            <div class="release-body">
+                <p class="release-summary">Meeting notes became editable, and live meetings now recover cleanly from dropped connections and restarts.</p>
+                <section class="changes" aria-labelledby="week-2026-09-14-added">
+                    <h3 class="change-kind kind-added" id="week-2026-09-14-added">Added</h3>
+                    <ul>
+                        <li>Added meeting notes you write and edit yourself, which can link to a recording, on web and desktop.</li>
+                        <li>Added recovery for meeting summaries, so one started before a reload or disconnect can be picked up later or cancelled.</li>
+                    </ul>
+                </section>
+                <section class="changes" aria-labelledby="week-2026-09-14-changed">
+                    <h3 class="change-kind kind-changed" id="week-2026-09-14-changed">Changed</h3>
+                    <ul>
+                        <li>Changed auto-record's microphone activity checks to need your opt-in each app session, with a Settings switch to turn them off.</li>
+                        <li>Stopped renaming transcript speakers from names read off the screen, since a visible name doesn't prove who is talking.</li>
+                    </ul>
+                </section>
+                <section class="changes" aria-labelledby="week-2026-09-14-fixed">
+                    <h3 class="change-kind kind-fixed" id="week-2026-09-14-fixed">Fixed</h3>
+                    <ul>
+                        <li>Fixed live transcripts falling out of sync after a dropped connection, on web and desktop.</li>
+                        <li>Fixed accented letters, emoji, and other non-Latin text getting garbled in live desktop updates.</li>
+                        <li>Fixed speaker matching that gave up after a brief failure or a restart, so it now picks up where it left off.</li>
+                        <li>Fixed false recording errors when the live meeting feed fell behind.</li>
+                        <li>Fixed stacked notifications covering workspace controls, and made desktop notifications dismissable from the keyboard.</li>
+                    </ul>
+                </section>
+            </div>
+        </article>
+
+        <article class="release" id="week-2026-09-07">
+            <header class="release-meta">
+                <p class="release-week">Week 37 · 2026</p>
+                <h2 class="release-title"><a href="#week-2026-09-07">Sep 7 – 13</a></h2>
+                <p class="badges"><span class="badge">Private testing</span></p>
+            </header>
+            <div class="release-body">
+                <p class="release-summary">Today, Life, Inbox and Knowledge arrived, with one shortcut to capture anything and one search across all of it.</p>
+                <section class="changes" aria-labelledby="week-2026-09-07-added">
+                    <h3 class="change-kind kind-added" id="week-2026-09-07-added">Added</h3>
+                    <ul>
+                        <li>Added Today (⌘⇧Y), one view of your schedule, focus tasks, overdue work and meeting decisions, with Plan my day to preview focus blocks.</li>
+                        <li>Added Life, a private finance ledger and health journal with budgets, CSV import, workouts, sleep, and habits, hidden from the agent until you opt in.</li>
+                        <li>Added Inbox for conversations you bring in from other apps, and Knowledge for Markdown notes and web clips that keep their source.</li>
+                        <li>Added Smart scheduling, which turns task estimates into focus blocks, plus local booking links, and asks before a Google change overwrites a local edit.</li>
+                        <li>Added Capture anything (⌘⇧Space) for quickly saving a task, note, event, contact, or message draft from anywhere.</li>
+                        <li>Added agent workflows that preview a multi-step change you can undo, and on desktop, let other agents propose changes over MCP for you to approve.</li>
+                    </ul>
+                </section>
+                <section class="changes" aria-labelledby="week-2026-09-07-changed">
+                    <h3 class="change-kind kind-changed" id="week-2026-09-07-changed">Changed</h3>
+                    <ul>
+                        <li>Made ⌘⇧F search everything in bruhs, ranked as you type.</li>
+                        <li>Moved meetings, transcripts, and contacts into a private database on your device, so they survive a server restart.</li>
+                        <li>Made desktop dialogs and line wrapping match the web app.</li>
+                    </ul>
+                </section>
+            </div>
+        </article>
+
+        <article class="release" id="week-2026-08-31">
+            <header class="release-meta">
+                <p class="release-week">Week 36 · 2026</p>
+                <h2 class="release-title"><a href="#week-2026-08-31">Aug 31 – Sep 6</a></h2>
+                <p class="badges"><span class="badge">Private testing</span></p>
+            </header>
+            <div class="release-body">
+                <p class="release-summary">Chat now runs on a live timeline with diffs, a terminal and tool approvals, and the macOS app matches the web app.</p>
+                <section class="changes" aria-labelledby="week-2026-08-31-added">
+                    <h3 class="change-kind kind-added" id="week-2026-08-31-added">Added</h3>
+                    <ul>
+                        <li>Added tool approval prompts, so Claude asks before running a tool and you approve or decline from the composer, on web and desktop.</li>
+                        <li>Added a diff panel that shows each turn's changes or all uncommitted ones, with syntax highlighting and Open in editor (⌘O).</li>
+                        <li>Added a terminal drawer (⌘J) and a Terminal view on web and desktop, with web tabs that keep their scrollback across reloads.</li>
+                        <li>Added a Preview panel (⌘⇧J) that finds dev servers running on your machine and shows them beside the chat.</li>
+                        <li>Added a queue for prompts typed while a turn runs, and a prompt stash (⌘S) for drafts you want to keep.</li>
+                        <li>Added pinned and settled threads, and shortcuts for new threads, switching threads, mentioning files and search.</li>
+                    </ul>
+                </section>
+                <section class="changes" aria-labelledby="week-2026-08-31-changed">
+                    <h3 class="change-kind kind-changed" id="week-2026-08-31-changed">Changed</h3>
+                    <ul>
+                        <li>Rebuilt the chat as a timeline that groups tool activity and folds finished turns behind "Worked for…".</li>
+                        <li>Redesigned the workspace into three columns, with a sidebar of thread cards you can filter by project and a resizable right panel.</li>
+                        <li>Redesigned the composer around the model, access mode and current branch.</li>
+                        <li>Moved Settings to a full page with sections.</li>
+                        <li>Made each thread resume its Claude or Codex session, so earlier turns stay in context, and name itself from your first message.</li>
+                        <li>Brought the macOS app level with the web app, from chat to calendar, meetings and settings.</li>
+                    </ul>
+                </section>
+                <section class="changes" aria-labelledby="week-2026-08-31-fixed">
+                    <h3 class="change-kind kind-fixed" id="week-2026-08-31-fixed">Fixed</h3>
+                    <ul>
+                        <li>Fixed the Monaspace font not loading, and sixteen desktop icons that never appeared.</li>
+                        <li>Fixed desktop controls that took focus without showing a focus ring, and a People expander you couldn't reach from the keyboard.</li>
+                        <li>Fixed the right panel squeezing the chat on narrow windows.</li>
+                    </ul>
+                </section>
+            </div>
+        </article>
+
+      <section class="changelog-join" aria-labelledby="changelog-join-title">
+        <h2 class="h2" id="changelog-join-title">Want it when it's ready?</h2>
+        <form class="join-form" action="/api/waitlist" method="post">
+          <div class="join-row">
+            <label class="sr-only" for="changelog-email">Email address</label>
+            <input id="changelog-email" name="email" type="email" autocomplete="email" inputmode="email" placeholder="you@domain.com" required maxlength="254">
+            <div class="trap" aria-hidden="true">
+              <label for="changelog-website">Leave this empty</label>
+              <input id="changelog-website" name="website" type="text" tabindex="-1" autocomplete="off">
+            </div>
+            <button class="btn btn-primary" type="submit">Join the waitlist <kbd>⏎</kbd></button>
+          </div>
+          <p class="fine">One email, when bruhs is ready for you. No tracking. <a href="/privacy">Privacy</a></p>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <footer class="foot">
+    <div class="wrap">
+      <span>© 2026 bruhs.ai</span>
+      <nav aria-label="Footer">
+        <a href="/privacy">Privacy</a>
+        <a href="/changelog" aria-current="page">Changelog</a>
+        <a href="/#join">Waitlist</a>
+      </nav>
+    </div>
+  </footer>
+</body>
+</html>

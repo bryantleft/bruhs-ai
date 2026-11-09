@@ -1,0 +1,17 @@
+{
+  "name": "bruhs-site",
+  "private": true,
+  "type": "module",
+  "description": "bruhs.ai landing page and waitlist endpoint, deployed on Vercel",
+  "scripts": {
+    "test": "node --test \"test/**/*.test.ts\"",
+    "typecheck": "tsc -p ."
+  },
+  "engines": {
+    "node": ">=22.18"
+  },
+  "devDependencies": {
+    "@types/node": "24.19.2",
+    "typescript": "7.0.2"
+  }
+}

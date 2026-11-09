@@ -1,0 +1,3 @@
+Counting 30 weekdays and skipping the three holidays.
+
+ANSWER: 2027-01-14, Thursday

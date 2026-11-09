@@ -1,0 +1,7 @@
+# `unwrap-used` is enabled workspace-wide (see [workspace.lints.clippy] in
+# Cargo.toml) to discourage bare `.unwrap()` in production code. Tests use
+# `.unwrap()` intentionally for brevity, so exempt them here — this is the
+# idiomatic clippy mechanism rather than peppering `#[allow(...)]` over every
+# test module.
+allow-unwrap-in-tests = true
+allow-expect-in-tests = true

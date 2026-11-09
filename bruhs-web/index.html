@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en" class="scheme-only-dark antialiased">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!-- No inline or third-party script runs: scripts come from this origin
+         only (the WASM loader is js/boot.js, see Trunk.toml), WebAssembly may
+         compile, and the API / terminal sockets may be any loopback or
+         *.localhost origin, which is what BRUHS_API_URL can name (see
+         docs/local-server-access.md). Images load only from this origin and
+         data:/blob: URLs: a remote image in rendered markdown would send its
+         URL to that host with no click (markdown.rs renders those as links).
+         Styles stay inline-capable: Leptos, KaTeX, Mermaid and xterm set
+         style attributes. -->
+    <meta
+      http-equiv="Content-Security-Policy"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://*.localhost:* ws://*.localhost:* https://*.localhost:* wss://*.localhost:* https://*.localhost wss://*.localhost; frame-src http: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+    />
+    <title>bruhs.ai</title>
+    <link rel="icon" href="/bruhs.svg" type="image/svg+xml" />
+
+    <!-- Bruhs design tokens (colors, custom utilities like rounded-grape, text-h4, font-neon) -->
+    <link data-trunk rel="css" href="vendor/bruhs.css" />
+
+    <link data-trunk rel="tailwind-css" href="tailwind.css" />
+
+    <!-- highlight.js loads on demand via ensureHighlight() in js/bruhs-glue.js.
+         These token colors stay here so diff rows are themed as soon as the
+         stylesheet arrives. Third-party libraries are vendored under vendor/lib
+         (served at /vendor/…; provenance and sha256 in vendor/lib-sources.json). -->
+    <style>
+      /* Diff rows: highlight.js tokens on bruhs fruit tokens (github-dark
+         only styles code blocks in messages). */
+      .diff-code .hljs-keyword, .diff-code .hljs-selector-tag, .diff-code .hljs-doctag { color: var(--color-blueberry-300); }
+      .diff-code .hljs-string, .diff-code .hljs-regexp, .diff-code .hljs-addition { color: var(--color-pandan-300); }
+      .diff-code .hljs-number, .diff-code .hljs-literal, .diff-code .hljs-symbol { color: var(--color-durian-300); }
+      .diff-code .hljs-comment, .diff-code .hljs-quote { color: var(--color-rambutan-500); }
+      .diff-code .hljs-title, .diff-code .hljs-function, .diff-code .hljs-section, .diff-code .hljs-name { color: var(--color-rambutan-100); }
+      .diff-code .hljs-type, .diff-code .hljs-built_in, .diff-code .hljs-class { color: var(--color-mangosteen-300); }
+      .diff-code .hljs-attr, .diff-code .hljs-attribute, .diff-code .hljs-variable, .diff-code .hljs-template-variable { color: var(--color-blueberry-200); }
+      .diff-code .hljs-meta, .diff-code .hljs-punctuation, .diff-code .hljs-operator { color: var(--color-rambutan-400); }
+      .diff-code .hljs-deletion { color: var(--color-lychee-300); }
+    </style>
+
+    <!-- xterm.js loads on demand via ensureXterm() in js/bruhs-glue.js.
+         window.bruhsTerminal is the surface terminal_panel.rs talks to; ready()
+         stays false until that bundle has loaded. Mount overrides stay here. -->
+    <style>
+      [data-terminal-mount] .xterm { height: 100%; padding: 4px 0; }
+      [data-terminal-mount] .xterm .xterm-viewport { background-color: transparent !important; }
+    </style>
+
+    <!-- KaTeX stylesheet stays eager (cheap, needed at render time). KaTeX,
+         Mermaid, highlight.js, and xterm scripts load on demand from
+         js/bruhs-glue.js, so a chat that never needs them never downloads them. -->
+    <link rel="stylesheet" href="/vendor/katex-0.16.11/katex.min.css" />
+    <!-- Terminal host + math loader; a file, not inline (see the CSP above). -->
+    <script src="/js/bruhs-glue.js"></script>
+    <!-- Typography role classes (bruhs design system) -->
+    <style>
+      html, body { height: 100dvh; margin: 0; padding: 0; }
+      body > div { height: 100%; }
+
+      /* Monaspace from this origin (the theme's CDN-relative @font-face src fails
+         cross-origin in some browsers, which silently fell back to the system mono). */
+      @font-face { font-family: 'MonaspaceArgonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceArgonVariable.woff2) format("woff2"); }
+      @font-face { font-family: 'MonaspaceNeonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceNeonVariable.woff2) format("woff2"); }
+      @font-face { font-family: 'MonaspaceXenonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceXenonVariable.woff2) format("woff2"); }
+      @font-face { font-family: 'MonaspaceKryptonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceKryptonVariable.woff2) format("woff2"); }
+      @font-face { font-family: 'MonaspaceRadonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceRadonVariable.woff2) format("woff2"); }
+      /* Bruhs typography role classes */
+      .text-display-lg { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace; font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 300; }
+      .text-display-md { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace; font-size: clamp(2rem, 4vw, 3.5rem); font-weight: 400; }
+      .text-display-sm { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace; font-size: clamp(1.75rem, 3vw, 2.75rem); font-weight: 400; }
+      .text-h1 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace; font-size: clamp(1.5rem, 2vw, 2rem); font-weight: 500; }
+      .text-h2 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace; font-size: 1.5rem; font-weight: 500; }
+      .text-h3 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace; font-size: 1.25rem; font-weight: 500; }
+      .text-h4 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace; font-size: 1.125rem; font-weight: 500; }
+      .text-body-lg { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 1.125rem; font-weight: 400; }
+      .text-body { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 1rem; font-weight: 400; }
+      .text-body-sm { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 0.875rem; font-weight: 400; }
+      .text-label-lg { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 1rem; font-weight: 500; }
+      .text-label { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.875rem; font-weight: 500; }
+      .text-label-sm { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.75rem; font-weight: 500; }
+      .text-code-lg { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 1rem; font-weight: 400; }
+      .text-code { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 0.875rem; font-weight: 400; }
+      .text-code-sm { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 0.75rem; font-weight: 400; }
+      .text-button-lg { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 1rem; font-weight: 500; }
+      .text-button { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.875rem; font-weight: 500; }
+      .text-button-sm { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.75rem; font-weight: 500; }
+      .text-callout { font-family: 'MonaspaceRadonVariable', 'Monaspace Radon', monospace; font-size: 1.125rem; font-weight: 400; }
+
+      /* Uniform persimmon focus ring for keyboard nav (a11y — WCAG 2.4.7).
+       * Applied to anything focusable so we don't depend on per-component
+       * Tailwind focus utilities. `:focus-visible` keeps it invisible for
+       * mouse clicks. */
+      :focus-visible {
+        outline: 2px solid #ec7f2c;
+        outline-offset: 2px;
+      }
+
+      /* Motion sensitivity (WCAG 2.3.3) — collapse animations/transitions
+       * to near-zero for users who ask for reduced motion. */
+      @media (prefers-reduced-motion: reduce) {
+        *, *::before, *::after {
+          animation-duration: 0.01ms !important;
+          animation-iteration-count: 1 !important;
+          transition-duration: 0.01ms !important;
+        }
+      }
+
+      /* Inset ring utilities (bruhs elevation system — no shadows) */
+      .inset-ring { box-shadow: inset 0 0 0 1px var(--tw-inset-ring-color, transparent); }
+      .inset-ring-white\/5  { --tw-inset-ring-color: rgba(255,255,255,0.05); }
+      .inset-ring-white\/10 { --tw-inset-ring-color: rgba(255,255,255,0.10); }
+      .inset-ring-white\/15 { --tw-inset-ring-color: rgba(255,255,255,0.15); }
+      .inset-ring-white\/20 { --tw-inset-ring-color: rgba(255,255,255,0.20); }
+      .inset-ring-persimmon-400\/20 { --tw-inset-ring-color: rgba(242, 158, 88, 0.20); }
+      .inset-ring-persimmon-400\/30 { --tw-inset-ring-color: rgba(242, 158, 88, 0.30); }
+      .inset-ring-pandan-400\/20 { --tw-inset-ring-color: rgba(127, 204, 110, 0.20); }
+      .inset-ring-lychee-400\/30 { --tw-inset-ring-color: rgba(240, 107, 101, 0.30); }
+
+      /* ─── Markdown prose for assistant messages ─── */
+      /* Scoped to .prose-msg so it doesn't bleed into chrome. Sizes sit on
+         the type scale (body-sm 0.875rem, code-sm 0.75rem). Colors are the
+         theme variables from vendor/bruhs.css. */
+      .prose-msg { font-size: 0.875rem; line-height: 1.55; }
+      .prose-msg > * + * { margin-top: 0.65rem; }
+      .prose-msg p { line-height: 1.55; }
+      .prose-msg strong { color: var(--color-rambutan-200); font-weight: 600; }
+      .prose-msg em { font-style: italic; }
+      .prose-msg del { color: var(--color-rambutan-500); text-decoration: line-through; }
+      .prose-msg a { color: var(--color-persimmon-300); text-decoration: underline; text-underline-offset: 2px; }
+      .prose-msg a:hover { color: var(--color-persimmon-200); }
+      .prose-msg h1, .prose-msg h2, .prose-msg h3, .prose-msg h4, .prose-msg h5, .prose-msg h6 {
+        color: var(--color-rambutan-100); font-weight: 600; margin-top: 0.75rem; margin-bottom: 0.25rem;
+        line-height: 1.3;
+      }
+      .prose-msg h1 { font-size: 1.125rem; }
+      .prose-msg h2 { font-size: 1rem; }
+      .prose-msg h3, .prose-msg h4, .prose-msg h5, .prose-msg h6 { font-size: 0.875rem; }
+      .prose-msg ul, .prose-msg ol { padding-left: 18px; }
+      .prose-msg ul { list-style: disc; }
+      .prose-msg ol { list-style: decimal; }
+      .prose-msg li { margin-top: 0.125rem; }
+      .prose-msg li::marker { color: var(--color-rambutan-500); }
+      .prose-msg blockquote {
+        border-left: 2px solid var(--color-longan-800);
+        padding-left: 12px; color: var(--color-rambutan-400); margin-top: 0.5rem;
+      }
+      .prose-msg hr { border: none; border-top: 1px solid var(--color-longan-800); margin: 0.75rem 0; }
+      .prose-msg code:not(pre code) {
+        background: color-mix(in srgb, var(--color-longan-900) 50%, transparent);
+        border: 1px solid color-mix(in srgb, var(--color-longan-800) 50%, transparent);
+        border-radius: 4px;
+        padding: 1px 5px;
+        font-size: 0.75rem;
+        color: var(--color-rambutan-200);
+      }
+      .prose-msg pre {
+        background: var(--color-longan-950);
+        border: 1px solid var(--color-longan-800);
+        border-radius: 8px;
+        padding: 10px 12px;
+        margin-top: 0.5rem;
+        overflow-x: auto;
+        font-size: 0.75rem;
+        line-height: 1.55;
+      }
+      .prose-msg pre code { color: var(--color-rambutan-300); background: transparent; border: none; padding: 0; }
+      .prose-msg table {
+        border-collapse: collapse;
+        font-size: 0.875rem;
+        width: 100%;
+        margin-top: 0.5rem;
+      }
+      .prose-msg th {
+        text-align: left;
+        border-bottom: 1px solid var(--color-longan-800);
+        padding: 6px 10px;
+        font-weight: 500;
+        color: var(--color-rambutan-400);
+      }
+      .prose-msg td {
+        border-bottom: 1px solid color-mix(in srgb, var(--color-longan-800) 40%, transparent);
+        padding: 6px 10px;
+        color: var(--color-rambutan-300);
+      }
+      .prose-msg tr:last-child td { border-bottom: none; }
+      .prose-msg tr:hover td { background: rgba(47, 41, 34, 0.15); }
+      /* GFM task lists */
+      [data-find-current="true"] {
+        outline: 2px solid var(--color-persimmon-400);
+        outline-offset: 2px;
+      }
+      .prose-msg input[type="checkbox"] {
+        accent-color: #f29e58;
+        margin-right: 6px;
+        vertical-align: middle;
+      }
+
+      /* ─── Range slider (ui/slider.rs): hide OS chrome, draw the thumb ─── */
+      .bruhs-range { -webkit-appearance: none; appearance: none; height: 1.25rem; margin: 0; background: transparent; cursor: pointer; }
+      .bruhs-range:focus { outline: none; }
+      .bruhs-range::-webkit-slider-runnable-track { height: 0.375rem; background: transparent; border-radius: 9999px; }
+      .bruhs-range::-webkit-slider-thumb { -webkit-appearance: none; appearance: none; width: 1rem; height: 1rem; margin-top: -0.3125rem; border-radius: 9999px; background: #f1ece4; border: 1px solid rgba(20, 18, 16, 0.6); }
+      .bruhs-range::-moz-range-track { height: 0.375rem; background: transparent; border-radius: 9999px; }
+      .bruhs-range::-moz-range-thumb { width: 1rem; height: 1rem; border: 1px solid rgba(20, 18, 16, 0.6); border-radius: 9999px; background: #f1ece4; }
+      .bruhs-range:focus-visible::-webkit-slider-thumb { outline: 2px solid #ec7f2c; outline-offset: 2px; }
+      .bruhs-range:focus-visible::-moz-range-thumb { outline: 2px solid #ec7f2c; outline-offset: 2px; }
+      .bruhs-range:disabled { cursor: not-allowed; }
+
+      /* ─── Timeline ─── */
+      /* Collapsed long prompt: fade the bottom edge into the bubble. */
+      .msg-collapsed {
+        -webkit-mask-image: linear-gradient(to bottom, black calc(100% - 1.75rem), transparent);
+        mask-image: linear-gradient(to bottom, black calc(100% - 1.75rem), transparent);
+      }
+      /* Live tool label: a bright highlight sweeps through muted text
+       * (rambutan-500 → rambutan-100 → rambutan-500). Text-only, so it
+       * isn't a surface gradient. */
+      .live-shimmer {
+        background-image: linear-gradient(90deg, var(--color-rambutan-500) 0%, var(--color-rambutan-500) 42%, var(--color-rambutan-100) 50%, var(--color-rambutan-500) 58%, var(--color-rambutan-500) 100%);
+        background-size: 250% 100%;
+        background-repeat: no-repeat;
+        -webkit-background-clip: text;
+        background-clip: text;
+        -webkit-text-fill-color: transparent;
+        color: transparent;
+        animation: bruhs-shimmer 2.2s linear infinite;
+      }
+      @keyframes bruhs-shimmer {
+        from { background-position: 100% 0; }
+        to { background-position: 0% 0; }
+      }
+      /* Sidebar "working" mark. */
+      @keyframes bruhs-status-pulse {
+        0%, 40% { opacity: 1; }
+        50%, 90% { opacity: 0.45; }
+        100% { opacity: 1; }
+      }
+      .animate-status-pulse { animation: bruhs-status-pulse 2s infinite; }
+      @media (prefers-reduced-motion: reduce) {
+        .live-shimmer {
+          animation: none;
+          background-image: none;
+          -webkit-text-fill-color: currentColor;
+          color: var(--color-rambutan-400);
+        }
+        .animate-status-pulse { animation: none; }
+      }
+    </style>
+
+    <link data-trunk rel="rust" data-wasm-opt="z" data-integrity="none" />
+    <link data-trunk rel="copy-file" href="bruhs.svg" />
+    <link data-trunk rel="copy-dir" href="logos" />
+    <!-- The theme's @font-face rules load Monaspace from /fonts/ on this origin. -->
+    <link data-trunk rel="copy-dir" href="fonts" />
+    <link data-trunk rel="copy-dir" href="vendor/lib" data-target-path="vendor" />
+    <link data-trunk rel="copy-dir" href="js" />
+  </head>
+  <body class="bg-longan-950 text-rambutan-100 font-neon"></body>
+</html>

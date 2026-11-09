@@ -1,0 +1,10 @@
+[package]
+name = "ztracing"
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+publish = false
+description = "No-op stand-in for zed's GPL-3.0 `ztracing`, patched in so bruhs binaries stay MIT. See README.md."
+
+[lib]
+proc-macro = true
