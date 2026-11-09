@@ -19,6 +19,7 @@ enum Editor {
 }
 
 pub(super) struct CredentialSettings {
+    connections: Entity<crate::views::service_connections::ServiceConnections>,
     rows: Vec<SavedCredential>,
     load: Load,
     search: Entity<InputState>,
@@ -42,6 +43,9 @@ impl CredentialSettings {
             cx.notify();
         });
         Self {
+            connections: cx.new(|cx| {
+                crate::views::service_connections::ServiceConnections::new(None, None, cx)
+            }),
             rows: Vec::new(),
             load: Load::Idle,
             search,
@@ -69,6 +73,8 @@ impl CredentialSettings {
             return;
         }
         self.clear_editor();
+        self.connections
+            .update(cx, |connections, cx| connections.refresh(cx));
         self.notice = None;
         self.load = Load::Loading;
         self.busy = true;
@@ -362,6 +368,7 @@ impl Render for CredentialSettings {
             .map(|row| self.row(row, cx))
             .collect();
         div().id("credential-manager").p_4().min_w_0().font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200()).flex().flex_col().gap_3()
+            .child(self.connections.clone())
             .child(Input::new(&self.search).h(px(40.0)).aria_label("Search saved credentials"))
             .child(web_button("refresh-credentials", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(self.busy)).min_h(px(40.0)).child("Refresh credentials")
                 .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
