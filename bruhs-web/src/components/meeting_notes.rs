@@ -36,12 +36,21 @@ pub fn MeetingNotes() -> impl IntoView {
     });
     view! {
         <section aria-label="Meeting notes" class="min-w-0 border-b border-longan-800 p-4 sm:p-6">
-            <h2 class="text-body text-rambutan-100">"Meeting notes"</h2>
-            <button type="button" disabled=move || !executor.ready.get()
-                class="mt-2 min-h-11 rounded-grape px-3 py-2 text-label-sm text-persimmon-300 hover:bg-longan-800 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400"
-                on:click=move |_| executor.note_editor.begin(None)>"New meeting note"</button>
+            <div class="flex flex-wrap items-start justify-between gap-3">
+                <div class="min-w-0">
+                    <h2 class="text-body text-rambutan-100">"Meeting notes"</h2>
+                    <p class="mt-1 text-body-sm text-rambutan-400">"Local text notes, separate from recordings and generated summaries."</p>
+                </div>
+                <crate::ui::Button
+                    variant=crate::ui::ButtonVariant::Outline
+                    size=crate::ui::ButtonSize::Small
+                    disabled=Signal::derive(move || !executor.ready.get())
+                    on_click=Callback::new(move |_| executor.note_editor.begin(None))
+                >
+                    "New meeting note"
+                </crate::ui::Button>
+            </div>
             <super::meeting_note_editor::MeetingNoteEditor/>
-            <p class="mt-1 text-body-sm text-rambutan-400">"Local text notes, separate from recordings and generated summaries."</p>
             <Show when=move || executor.ready.get() fallback=move || view! {
                 <p role="status" class="mt-3 text-body-sm text-rambutan-400">"Loading local meeting notes…"</p>
                 {move || executor.load_error.get().map(|message| view! {

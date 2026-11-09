@@ -122,10 +122,9 @@ pub fn permission_summary(tool: &str, input: &serde_json::Value) -> String {
     }
 }
 
-/// Display label for a model id (falls back to the id itself).
+/// Display label for a model id (see `bruhs_models::agent::model_label`).
 pub fn model_label(model_id: &str) -> String {
-    bruhs_models::agent::model_info(model_id)
-        .map_or_else(|| model_id.to_string(), |m| m.label.to_string())
+    bruhs_models::agent::model_label(model_id)
 }
 
 /// Tokens that occupy the context window after a turn: the reported window,
@@ -133,6 +132,13 @@ pub fn model_label(model_id: &str) -> String {
 pub fn context_usage(usage: &UsageInfo) -> u64 {
     usage.window()
 }
+
+/// Tallest the chips row is on one line (h-7 chips plus p-1); taller means
+/// it wrapped.
+const CHIPS_ONE_ROW_MAX_PX: i32 = 48;
+/// How much wider than where it wrapped the row must get before the
+/// Attach and Stash labels come back.
+const CHIPS_EXPAND_MARGIN_PX: i32 = 8;
 
 const CHIP: &str = "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-grape px-2.5 text-label-sm text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 cursor-pointer";
 
@@ -389,6 +395,56 @@ pub fn Composer(
         input.set_value("");
     };
     let file_input: NodeRef<leptos::html::Input> = NodeRef::new();
+    // When the chips row would wrap, it drops the Attach and Stash text
+    // (icons and accessible names stay) to stay on one row, and brings it
+    // back once the row is wider than where it wrapped. A ResizeObserver
+    // sees the wrap as a height change; a CSS container query would contain
+    // the menus' fixed click-away layers inside the row.
+    let chips_row: NodeRef<leptos::html::Div> = NodeRef::new();
+    let chips_compact = RwSignal::new(false);
+    let chips_observer = StoredValue::new_local(
+        None::<(
+            web_sys::ResizeObserver,
+            wasm_bindgen::closure::Closure<dyn FnMut()>,
+        )>,
+    );
+    Effect::new(move |_| {
+        let Some(row) = chips_row.get() else {
+            return;
+        };
+        let measured = row.clone();
+        let wrapped_at = std::cell::Cell::new(0);
+        let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+            let width = measured.client_width();
+            let wraps = measured.client_height() > CHIPS_ONE_ROW_MAX_PX;
+            let compact = chips_compact.get_untracked();
+            if !compact && wraps {
+                wrapped_at.set(width);
+                chips_compact.set(true);
+            } else if compact && width > wrapped_at.get() + CHIPS_EXPAND_MARGIN_PX {
+                // Try the labels again; if they wrap, this fires once more.
+                chips_compact.set(false);
+            }
+        }) as Box<dyn FnMut()>);
+        match web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
+            Ok(observer) => {
+                observer.observe(&row);
+                chips_observer.update_value(|value| {
+                    if let Some((old, _)) = value.replace((observer, callback)) {
+                        old.disconnect();
+                    }
+                });
+            }
+            Err(error) => log::warn!("Composer chips resize observation unavailable: {error:?}"),
+        }
+    });
+    on_cleanup(move || {
+        chips_observer.update_value(|value| {
+            if let Some((observer, _callback)) = value.take() {
+                observer.disconnect();
+            }
+        });
+    });
     let pick_files = move |_| {
         if let Some(input) = file_input.get() {
             input.click();
@@ -798,7 +854,7 @@ pub fn Composer(
 
                 // Footer: chips left, meter + primary action right.
                 <div class="flex items-center justify-between gap-2 px-3 pb-3 sm:px-4 sm:pb-4">
-                    <div class="-m-1 flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1">
+                    <div node_ref=chips_row data-composer-chips="" data-compact=move || chips_compact.get().then_some("") class="-m-1 flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1">
                         <div class="relative shrink-0">
                             <button
                                 type="button"
@@ -942,7 +998,7 @@ pub fn Composer(
                             on:click=pick_files
                         >
                             <Icon name="paperclip" size=14 />
-                            <span>"Attach"</span>
+                            <span data-chip-label="secondary">"Attach"</span>
                         </button>
                         <input
                             node_ref=file_input
@@ -961,13 +1017,17 @@ pub fn Composer(
                                     type="button"
                                     class=CHIP
                                     data-stash-chip=""
+                                    aria-label=move || match stash.with(|s| s.len()) {
+                                        0 => "Prompt stash".to_string(),
+                                        n => format!("Prompt stash, {n} saved"),
+                                    }
                                     aria-haspopup="menu"
                                     aria-expanded=move || stash_open.get().to_string()
                                     title="Prompt stash (⌘S stashes the draft)"
                                     on:click=move |_| stash_open.update(|v| *v = !*v)
                                 >
                                     <Icon name="archive" size=14 />
-                                    <span>"Stash"</span>
+                                    <span data-chip-label="secondary">"Stash"</span>
                                     {move || {
                                         let n = stash.with(|s| s.len());
                                         (n > 0).then(|| view! {

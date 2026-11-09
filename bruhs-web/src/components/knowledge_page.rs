@@ -124,25 +124,17 @@ fn KnowledgeLibrary() -> impl IntoView {
     };
 
     view! {
-        <div class="h-full overflow-auto bg-longan-950 text-rambutan-300">
+        <div class="flex h-full flex-col bg-longan-950 text-rambutan-300">
+            <crate::ui::PageHeader title="Knowledge" subtitle="Markdown documents and saved sources, local and searchable.">
+                <crate::ui::Button variant=crate::ui::ButtonVariant::Ghost size=crate::ui::ButtonSize::Small on_click=Callback::new(move |_| clip_dialog_open.set(true))>
+                    "Web clip"
+                </crate::ui::Button>
+                <crate::ui::Button size=crate::ui::ButtonSize::Small on_click=Callback::new(new_document)>
+                    "New document"
+                </crate::ui::Button>
+            </crate::ui::PageHeader>
+            <div class="min-h-0 flex-1 overflow-auto">
             <div class="mx-auto w-full max-w-5xl space-y-6 px-4 py-5 sm:px-6">
-                <header class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <p class="text-label-sm uppercase tracking-[0.16em] text-persimmon-300">"Knowledge"</p>
-                        <h1 class="mt-1 text-title text-rambutan-100">"Living context, close at hand"</h1>
-                        <p class="mt-1 max-w-2xl text-body-sm text-rambutan-500">
-                            "Write in Markdown, connect work, and keep every source traceable. Everything stays local and searchable."
-                        </p>
-                    </div>
-                    <div class="flex items-center gap-2">
-                        <button type="button" class="rounded-grape px-3 py-2 text-label text-rambutan-300 inset-ring inset-ring-longan-700 hover:bg-longan-800/60 cursor-pointer" on:click=move |_| clip_dialog_open.set(true)>
-                            "+ Web clip"
-                        </button>
-                        <button type="button" class="rounded-grape bg-persimmon-500 px-3 py-2 text-label text-longan-950 hover:bg-persimmon-400 cursor-pointer" on:click=new_document>
-                            "+ Document"
-                        </button>
-                    </div>
-                </header>
 
                 <Input
                     aria_label="Search knowledge"
@@ -225,6 +217,7 @@ fn KnowledgeLibrary() -> impl IntoView {
                     }}
                     <LibraryPagination label="Source pages" noun="sources" page=source_page count=Signal::derive(move || matching_sources.with(Vec::len)) />
                 </section>
+            </div>
             </div>
         </div>
 

@@ -14,10 +14,7 @@ pub fn TerminalPage() -> impl IntoView {
 
     view! {
         <div class="flex h-full min-h-0 flex-1 flex-col" data-terminal-page="">
-            <header class="flex h-[52px] shrink-0 items-center gap-2 px-4 text-label text-rambutan-100">
-                <span>"Terminal"</span>
-                <span class="text-label-sm text-rambutan-500">"— shells on this machine, independent of any thread"</span>
-            </header>
+            <crate::ui::PageHeader title="Terminal" subtitle="Shells on this machine, independent of any thread." />
             <TerminalPanel mode=TerminalPanelMode::Page context_project=context_project />
         </div>
     }

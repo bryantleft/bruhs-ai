@@ -320,6 +320,75 @@ fn strip_context_suffix(model_id: &str) -> &str {
         .unwrap_or(model_id)
 }
 
+/// A readable name for `model_id`: the catalog label, also for the dated,
+/// region-prefixed and context-suffixed forms the Claude CLI records
+/// (`claude-haiku-4-5-20251001`, `us.anthropic.claude-opus-4-8-v1:0`,
+/// `claude-sonnet-4-6@20260101`, `opus[1m]`), else a name built from a
+/// `claude-<family>-<version>` id, else the id itself.
+pub fn model_label(model_id: &str) -> String {
+    if let Some(model) = model_info(model_id) {
+        return model.label.to_string();
+    }
+    let base = strip_context_suffix(model_id);
+    let window = (base.len() < model_id.len()).then(|| {
+        model_id[base.len()..]
+            .trim_matches(|c| c == '[' || c == ']')
+            .to_uppercase()
+    });
+    let name = claude_name(base).unwrap_or_else(|| base.to_string());
+    if name == base && window.is_none() {
+        return model_id.to_string();
+    }
+    match window {
+        Some(window) => format!("{name} {window}"),
+        None => name,
+    }
+}
+
+/// The readable name of a Claude id in any of its recorded forms.
+fn claude_name(base: &str) -> Option<String> {
+    let id = base.rsplit_once("anthropic.").map_or(base, |(_, id)| id);
+    let id = id.split_once('@').map_or(id, |(id, _)| id);
+    let id = id
+        .split_once("-v")
+        .filter(|(_, rest)| rest.contains(':'))
+        .map_or(id, |(id, _)| id);
+    let id = id
+        .rsplit_once('-')
+        .filter(|(_, date)| date.len() == 8 && date.bytes().all(|b| b.is_ascii_digit()))
+        .map_or(id, |(id, _)| id);
+    if let Some(model) = model_info(id) {
+        return Some(model.label.to_string());
+    }
+    if CLAUDE_MODEL_ALIASES.contains(&id) && id != "default" && id != "opusplan" {
+        return Some(format!("Claude {}", capitalized(id)));
+    }
+    let mut parts = id.strip_prefix("claude-")?.split('-');
+    let family = parts
+        .next()
+        .filter(|f| f.bytes().all(|b| b.is_ascii_alphabetic()))?;
+    let version: Vec<&str> = parts.collect();
+    if version.is_empty()
+        || version
+            .iter()
+            .any(|v| v.is_empty() || !v.bytes().all(|b| b.is_ascii_digit()))
+    {
+        return None;
+    }
+    Some(format!(
+        "Claude {} {}",
+        capitalized(family),
+        version.join(".")
+    ))
+}
+
+fn capitalized(word: &str) -> String {
+    let mut chars = word.chars();
+    chars.next().map_or_else(String::new, |first| {
+        first.to_uppercase().chain(chars).collect()
+    })
+}
+
 /// Longest model id accepted, in bytes.
 pub const MAX_MODEL_ID_LEN: usize = 128;
 
@@ -559,6 +628,25 @@ mod tests {
         ids.sort_unstable();
         ids.dedup();
         assert_eq!(ids.len(), MODEL_CATALOG.len());
+    }
+
+    #[test]
+    fn model_labels_cover_recorded_claude_ids() {
+        assert_eq!(model_label("claude-sonnet-4-6"), "Claude Sonnet 4.6");
+        assert_eq!(model_label("claude-haiku-4-5-20251001"), "Claude Haiku 4.5");
+        assert_eq!(model_label("claude-sonnet-4-20250514"), "Claude Sonnet 4");
+        assert_eq!(model_label("claude-opus-4-8@20260101"), "Claude Opus 4.8");
+        assert_eq!(
+            model_label("us.anthropic.claude-opus-4-8-v1:0"),
+            "Claude Opus 4.8"
+        );
+        assert_eq!(model_label("claude-sonnet-4-6[1m]"), "Claude Sonnet 4.6 1M");
+        assert_eq!(model_label("opus[1m]"), "Claude Opus 1M");
+        assert_eq!(model_label("sonnet"), "Claude Sonnet");
+        assert_eq!(model_label("gpt-5.5"), "GPT-5.5");
+        assert_eq!(model_label("gpt-4.1-mini"), "gpt-4.1-mini");
+        assert_eq!(model_label("default"), "default");
+        assert_eq!(model_label("claude-next"), "claude-next");
     }
 
     #[test]

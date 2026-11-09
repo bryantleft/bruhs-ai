@@ -15,8 +15,6 @@ use crate::state::{
     SetEventCreateStart, SetSelectedEventId, SetSelectedWorkItem, WorkItem, WorkItemsSignal,
 };
 
-const DAY_MS: f64 = 1000.0 * 60.0 * 60.0 * 24.0;
-
 #[derive(Clone)]
 struct GridCell {
     /// Local-midnight ms of this day.
@@ -44,7 +42,7 @@ fn build_grid(anchor_ms: f64) -> Vec<GridCell> {
     let first_ms = first.get_time();
 
     // Walk back to the most recent Sunday.
-    let start_ms = first_ms - f64::from(first_dow) * DAY_MS;
+    let start_ms = crate::clock::add_local_days(first_ms, -first_dow);
 
     let today = js_sys::Date::new_0();
     let today_y = crate::clock::field(today.get_full_year());
@@ -56,20 +54,13 @@ fn build_grid(anchor_ms: f64) -> Vec<GridCell> {
 
     (0..42)
         .map(|i| {
-            // Use Date arithmetic instead of raw ms so DST transitions don't
-            // shift the cell off the day boundary.
-            let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
-                start_ms + f64::from(i) * DAY_MS,
-            ));
+            // Calendar steps, not 24-hour ones: a DST change makes one day
+            // 23 or 25 hours long.
+            let day_ms = crate::clock::add_local_days(start_ms, i);
+            let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(day_ms));
             let cell_y = crate::clock::field(d.get_full_year());
             let cell_m = crate::clock::field(d.get_month());
             let cell_d = crate::clock::field(d.get_date());
-            let normalized = js_sys::Date::new_with_year_month_day(
-                crate::clock::year_arg(cell_y),
-                cell_m,
-                cell_d,
-            );
-            let day_ms = normalized.get_time();
             GridCell {
                 day_ms,
                 day_num: cell_d.unsigned_abs(),
@@ -80,9 +71,9 @@ fn build_grid(anchor_ms: f64) -> Vec<GridCell> {
         .collect()
 }
 
-/// Events that overlap the interval `[day_ms, day_ms + DAY_MS)`.
+/// Events that overlap the local day starting at `day_ms`.
 fn events_for_day(events: &[CalendarEvent], day_ms: f64) -> Vec<CalendarEvent> {
-    let day_end = day_ms + DAY_MS;
+    let day_end = crate::clock::add_local_days(day_ms, 1);
     events
         .iter()
         .filter(|e| e.start_at_ms < day_end && e.end_at_ms > day_ms)

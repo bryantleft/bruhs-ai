@@ -647,6 +647,14 @@ fn desktop_terminal_drawer_and_view_should_render_like_web(cx: &mut gpui::TestAp
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-terminal-page");
     assert_rendered_bounds(cx, "desktop-terminal-page-header");
+    // The shared page header is one bar, not a column whose text wrapped
+    // a glyph per line and pushed the terminal off the page.
+    assert!(
+        rendered_bounds(cx, "desktop-terminal-page-header")
+            .size
+            .height
+            < gpui::px(96.0)
+    );
     assert_rendered_bounds(cx, "desktop-terminal-empty");
     assert_no_rendered_bounds(cx, "desktop-terminal-close-drawer");
 

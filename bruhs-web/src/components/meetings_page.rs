@@ -136,35 +136,28 @@ pub fn MeetingsPage() -> impl IntoView {
 
     view! {
         <div class="flex flex-col h-full bg-longan-950 text-rambutan-300">
-            <header class="flex shrink-0 flex-wrap items-center justify-between gap-3 inset-ring inset-ring-longan-800 px-4 py-4 sm:px-6">
-                <h1 class="shrink-0 text-body tracking-tight text-rambutan-100">
-                    "Meetings"
-                </h1>
-                <span class=move || {
+            <crate::ui::PageHeader
+                title="Meetings"
+                subtitle=Signal::derive(move || {
                     if capture_status.get().is_running() {
-                        "order-3 w-full text-label text-pandan-400 sm:order-none sm:w-auto"
+                        "Capture daemon ready".to_string()
                     } else {
-                        "order-3 w-full text-label text-rambutan-500 sm:order-none sm:w-auto"
+                        "Capture daemon not running".to_string()
                     }
-                }>
-                    {move || if capture_status.get().is_running() {
-                        "Capture daemon: ready".to_string()
-                    } else {
-                        "Capture daemon: not running".to_string()
-                    }}
-                </span>
+                })
+            >
                 <Button
                     variant=ButtonVariant::Primary
-                    size=ButtonSize::Default
+                    size=ButtonSize::Small
                     on_click=on_new_meeting_cb
-                    class="min-h-11 shrink-0 whitespace-nowrap"
+                    class="shrink-0 whitespace-nowrap"
                     disabled=Signal::derive(move || !capture_status.get().is_running())
                 >
-                    "+ Record"
+                    "Record"
                 </Button>
-            </header>
+            </crate::ui::PageHeader>
 
-            <div class="px-6 pt-3">
+            <div class="px-4 pt-3 sm:px-6">
                 <CaptureStatusBanner />
             </div>
 
@@ -184,7 +177,7 @@ pub fn MeetingsPage() -> impl IntoView {
                                 {move || if capture_status.get().is_running() {
                                     "Press + Record to start one manually."
                                 } else {
-                                    "Start the bruhs-capture daemon (cargo run from bruhs-capture/) to enable recording."
+                                    "Recording needs the bruhs-capture daemon. Start it, and Record turns on here."
                                 }}
                             </div>
                         </div>

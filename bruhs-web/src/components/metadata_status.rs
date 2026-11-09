@@ -15,7 +15,7 @@ pub fn MetadataStatus(
         }
     });
     view! {
-        <div class="shrink-0 border-b border-longan-800/40 px-4 py-2 text-label-sm text-rambutan-400">
+        <div class="shrink-0 border-b border-longan-800/40 px-4 py-2 text-label-sm text-rambutan-400 sm:px-6">
             <p role="status" aria-live="polite">{move || match status.get() {
                 SaveState::Loading => "Loading local data… Close older Bruhs tabs if storage upgrade is waiting.",
                 SaveState::Saving => "Saving locally… Keep this tab open until saved.",

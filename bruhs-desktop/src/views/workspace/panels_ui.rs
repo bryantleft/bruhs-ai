@@ -49,12 +49,9 @@ pub(super) fn showing_surface(
         RightPanelSurface::Tasks
     }
 }
-/// Web `terminal_page.rs`: `h-[52px]`, `text-label` title, `text-label-sm` hint.
-pub(super) const TERMINAL_PAGE_HEADER_HEIGHT_PX: f32 = 52.0;
-pub(super) const TERMINAL_PAGE_HEADER_TEXT_SIZE_PX: f32 = 14.0;
-pub(super) const TERMINAL_PAGE_HEADER_HINT_SIZE_PX: f32 = 12.0;
+/// Web `terminal_page.rs`: the page header's title and subtitle.
 pub(super) const TERMINAL_PAGE_TITLE: &str = "Terminal";
-pub(super) const TERMINAL_PAGE_HINT: &str = "— shells on this machine, independent of any thread";
+pub(super) const TERMINAL_PAGE_HINT: &str = "Shells on this machine, independent of any thread.";
 
 /// Web `clamp_panel_width`: the right panel stays between 360px and the
 /// viewport minus the chat column's 360px.
@@ -516,29 +513,10 @@ impl Workspace {
         cx.notify();
     }
 
-    /// Web `terminal_page.rs` header: "Terminal — shells on this machine…".
+    /// Web `terminal_page.rs` header: the shared page header.
     pub(super) fn render_terminal_page_header(&self) -> Div {
-        div()
+        crate::views::page_header::page_header(TERMINAL_PAGE_TITLE, Some(TERMINAL_PAGE_HINT.into()))
             .debug_selector(|| "desktop-terminal-page-header".to_string())
-            .h(px(TERMINAL_PAGE_HEADER_HEIGHT_PX))
-            .px_4()
-            .flex()
-            .items_center()
-            .gap_2()
-            .flex_shrink_0()
-            .font_family(theme::UI_FONT_FAMILY)
-            .child(
-                div()
-                    .text_size(px(TERMINAL_PAGE_HEADER_TEXT_SIZE_PX))
-                    .text_color(theme::rambutan_100())
-                    .child(TERMINAL_PAGE_TITLE),
-            )
-            .child(
-                div()
-                    .text_size(px(TERMINAL_PAGE_HEADER_HINT_SIZE_PX))
-                    .text_color(theme::rambutan_500())
-                    .child(TERMINAL_PAGE_HINT),
-            )
     }
 
     /// Right panel shell: tab bar (Diff · Tasks · Preview · Files) over the

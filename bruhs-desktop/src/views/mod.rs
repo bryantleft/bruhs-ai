@@ -4,6 +4,7 @@ pub mod dropdown;
 pub mod meeting_dock;
 pub mod meetings_hub;
 pub mod native_blur;
+pub mod page_header;
 pub mod preview_panel;
 pub mod sidebar_order;
 mod task_registry_subscription;

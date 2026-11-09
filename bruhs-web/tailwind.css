@@ -46,3 +46,10 @@
 @media (prefers-reduced-motion: reduce) {
   .bruhs-update-progress { display: none; }
 }
+
+/* Composer chips stay on one row: below a width the composer measures
+   (`data-compact`), Attach and Stash drop their text and keep their icons and
+   accessible names. */
+[data-composer-chips][data-compact] [data-chip-label="secondary"] {
+  display: none;
+}

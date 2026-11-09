@@ -30,6 +30,24 @@ pub fn year_arg(year: i32) -> u32 {
     u32::try_from(year).unwrap_or(0)
 }
 
+/// Local midnight of the date `days` after the one containing `ms` (negative
+/// goes back). Steps by calendar date, not 24 hours, so the 23- and 25-hour
+/// days of a daylight-saving change still land on the right midnight.
+pub fn add_local_days(ms: f64, days: i32) -> f64 {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
+    js_sys::Date::new_with_year_month_day(
+        d.get_full_year(),
+        field(d.get_month()),
+        field(d.get_date()).saturating_add(days),
+    )
+    .get_time()
+}
+
+/// Local midnight of the date containing `ms`.
+pub fn local_day_start(ms: f64) -> f64 {
+    add_local_days(ms, 0)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

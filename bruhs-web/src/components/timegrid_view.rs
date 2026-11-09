@@ -24,13 +24,13 @@ use bruhs_models::EpochMs;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+use crate::clock::{add_local_days, local_day_start as day_start_ms};
 use crate::state::{
     CalendarAnchor, CalendarEvent, CalendarEventsSignal, EventSource, SetCalendarEventsSignal,
     SetEventCreateOpen, SetEventCreateStart, SetSelectedEventId,
 };
 use crate::storage;
 
-const DAY_MS: f64 = 1000.0 * 60.0 * 60.0 * 24.0;
 const HOUR_MS: f64 = 1000.0 * 60.0 * 60.0;
 const HOUR_PX: f64 = 40.0;
 /// Snap interval for drag-move and resize, in ms. 15 minutes feels like
@@ -49,22 +49,10 @@ fn handler_offset_y(client_y: i32, target: Option<web_sys::EventTarget>) -> Opti
         .map(|element| f64::from(client_y) - element.get_bounding_client_rect().top())
 }
 
-/// Local-midnight ms for the day containing `ms`.
-fn day_start_ms(ms: f64) -> f64 {
-    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
-    js_sys::Date::new_with_year_month_day(
-        d.get_full_year(),
-        crate::clock::field(d.get_month()),
-        crate::clock::field(d.get_date()),
-    )
-    .get_time()
-}
-
 /// Local-midnight ms of the most recent Sunday on-or-before `ms`.
 fn week_start_ms(ms: f64) -> f64 {
     let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
-    let dow = f64::from(d.get_day()); // 0 = Sun
-    day_start_ms(ms) - dow * DAY_MS
+    add_local_days(ms, -crate::clock::field(d.get_day())) // 0 = Sun
 }
 
 /// Day-of-month abbreviation row (e.g. "Sun 3"). We always include the
@@ -133,7 +121,8 @@ fn lay_out(events: &[CalendarEvent], day_start: f64) -> Vec<LaidOutEvent> {
         .map(|placement| {
             let ev = timed[placement.index];
             let from = (ev.start_at_ms.max(day_start) - day_start).max(0.0);
-            let to = (ev.end_at_ms.min(day_start + DAY_MS) - day_start).max(from + HOUR_MS / 2.0);
+            let to = (ev.end_at_ms.min(add_local_days(day_start, 1)) - day_start)
+                .max(from + HOUR_MS / 2.0);
             let top_px = (from / HOUR_MS) * HOUR_PX;
             let height_px = ((to - from) / HOUR_MS) * HOUR_PX;
             LaidOutEvent {
@@ -147,9 +136,9 @@ fn lay_out(events: &[CalendarEvent], day_start: f64) -> Vec<LaidOutEvent> {
         .collect()
 }
 
-/// Filter events that intersect `[day_start, day_start + DAY_MS)`.
+/// Filter events that intersect the local day starting at `day_start`.
 fn events_for_day(events: &[CalendarEvent], day_start: f64) -> Vec<CalendarEvent> {
-    let day_end = day_start + DAY_MS;
+    let day_end = add_local_days(day_start, 1);
     events
         .iter()
         .filter(|e| e.start_at_ms < day_end && e.end_at_ms > day_start)
@@ -186,7 +175,7 @@ pub fn TimegridView(
             day_start_ms(a)
         };
         (0..columns)
-            .map(|i| start + i.to_f64_lossy() * DAY_MS)
+            .map(|i| add_local_days(start, i32::try_from(i).unwrap_or(i32::MAX)))
             .collect::<Vec<_>>()
     });
 
@@ -216,7 +205,8 @@ pub fn TimegridView(
                     let new_offset_ms = (new_top_px / HOUR_PX) * HOUR_MS;
                     let snapped = snap_ms(new_offset_ms);
                     // Clamp so the event stays inside the column day.
-                    let max_start = DAY_MS - duration.min(DAY_MS);
+                    let day_len = add_local_days(day_start, 1) - day_start;
+                    let max_start = day_len - duration.min(day_len);
                     let clamped = snapped.clamp(0.0, max_start.max(0.0));
                     let new_start = day_start + clamped;
                     if new_start != ev.start_at_ms {
@@ -243,7 +233,7 @@ pub fn TimegridView(
                 let snapped = snap_ms(new_end_offset_ms);
                 let candidate = day_start + snapped;
                 let min_end = ev.start_at_ms + MIN_DURATION_MS;
-                let max_end = day_start + DAY_MS;
+                let max_end = add_local_days(day_start, 1);
                 let new_end = candidate.max(min_end).min(max_end);
                 if new_end != ev.end_at_ms {
                     let original = ev.clone();

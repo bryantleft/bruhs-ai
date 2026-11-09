@@ -394,9 +394,9 @@ pub fn ImportThreadDialog() -> impl IntoView {
                                     on:mouseenter=move |_| picked.set(index)
                                     on:click=move |_| import(row.clone())
                                     class=if chosen {
-                                        "flex w-full flex-col items-start gap-0.5 bg-longan-800/60 px-4 py-2 text-left cursor-pointer"
+                                        "flex w-full flex-col items-start gap-0.5 bg-longan-700/70 px-4 py-2 text-left cursor-pointer"
                                     } else {
-                                        "flex w-full flex-col items-start gap-0.5 px-4 py-2 text-left hover:bg-longan-800/40 cursor-pointer"
+                                        "flex w-full flex-col items-start gap-0.5 px-4 py-2 text-left hover:bg-longan-700/40 cursor-pointer"
                                     }
                                 >
                                     <span class="w-full truncate text-label-sm text-rambutan-200">{title}</span>
@@ -409,7 +409,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
                 }}
             </div>
 
-            <div class="flex items-center justify-between border-t border-longan-800/50 px-4 py-2.5 text-label text-rambutan-300">
+            <div class="flex items-center justify-between border-t border-longan-800/50 px-4 py-2.5 text-label-sm text-rambutan-300">
                 <span>
                     {move || if importing.get() {
                         "Importing…"

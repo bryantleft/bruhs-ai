@@ -200,17 +200,14 @@ fn FollowUpBehavior() -> impl IntoView {
             title="Follow-up behavior"
             description="Steer sends the next message into a running Claude turn. Codex always queues. The send button names the action. Hold Command or Control and press Enter for the other one."
         >
-            <select
-                aria-label="Follow-up behavior"
-                class="min-h-10 w-full rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 sm:w-60"
-                prop:value=move || if steer.get() { "steer" } else { "queue" }
-                on:change=move |ev| {
-                    steer.set(event_target_value(&ev) == "steer");
-                }
-            >
-                <option value="queue">"Queue"</option>
-                <option value="steer">"Steer"</option>
-            </select>
+            <Dropdown
+                options=vec![DropdownOption::new("queue", "Queue"), DropdownOption::new("steer", "Steer")]
+                value=Signal::derive(move || if steer.get() { "steer".to_string() } else { "queue".to_string() })
+                on_change=Callback::new(move |v: String| steer.set(v == "steer"))
+                label="Follow-up behavior"
+                class=ROW_CONTROL
+                align_end=true
+            />
         </SettingsRow>
     }
 }
@@ -228,7 +225,7 @@ fn AutoCompactAfter() -> impl IntoView {
                 type="text"
                 inputmode="numeric"
                 aria-label="Auto-compact after"
-                class="min-h-10 w-full rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 sm:w-60"
+                class="h-8 w-full rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 sm:w-60"
                 placeholder="Claude default"
                 prop:value=move || tokens.get().unwrap_or_default()
                 on:change=move |ev| {
@@ -253,20 +250,20 @@ fn CompactIdleThreads() -> impl IntoView {
             title="Compact idle threads"
             description="When you return, a Compact chip sits beside send after the prompt cache expires on a Claude thread over 200,000 tokens. Enter summarizes, then sends the draft. Before the cache expires compacts that thread while bruhs is open. Never skips both. Manual /compact still works."
         >
-            <select
-                aria-label="Compact idle threads"
-                class="min-h-10 w-full rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 sm:w-60"
-                prop:value=move || mode.get().as_str().to_string()
-                on:change=move |ev| {
-                    mode.set(bruhs_models::logic::compact::IdleCompact::parse(
-                        &event_target_value(&ev),
-                    ));
-                }
-            >
-                <option value="return">"When you return"</option>
-                <option value="before">"Before the cache expires"</option>
-                <option value="never">"Never"</option>
-            </select>
+            <Dropdown
+                options=vec![
+                    DropdownOption::new("return", "When you return"),
+                    DropdownOption::new("before", "Before the cache expires"),
+                    DropdownOption::new("never", "Never"),
+                ]
+                value=Signal::derive(move || mode.get().as_str().to_string())
+                on_change=Callback::new(move |v: String| {
+                    mode.set(bruhs_models::logic::compact::IdleCompact::parse(&v));
+                })
+                label="Compact idle threads"
+                class=ROW_CONTROL
+                align_end=true
+            />
         </SettingsRow>
     }
 }
@@ -297,7 +294,7 @@ fn TextGeneration() -> impl IntoView {
         >
             <textarea
                 aria-label="Thread title instructions"
-                class="min-h-24 w-full rounded-grape bg-longan-950 px-2 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 sm:w-72"
+                class="min-h-24 w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 sm:w-72"
                 placeholder="prefix: Bug\nmax 48"
                 prop:value=move || instructions.with(|store| store.global.clone())
                 on:input=move |ev| {
@@ -310,24 +307,25 @@ fn TextGeneration() -> impl IntoView {
             title="Project title instructions"
             description="Optional extra lines for one project. They are applied after the instructions above."
         >
-            <select
-                aria-label="Project for title instructions"
-                class="min-h-10 w-full rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 sm:w-60"
-                on:change=move |ev| set_project.set(event_target_value(&ev))
-            >
-                <option value="">"Choose a project"</option>
-                {move || names.get().into_iter().map(|name| {
-                    let selected = name == project.get();
-                    let label = name.clone();
-                    view! { <option value=name selected=selected>{label}</option> }
-                }).collect_view()}
-            </select>
+            <Dropdown
+                options=Signal::derive(move || {
+                    std::iter::once(DropdownOption::new("", "Choose a project"))
+                        .chain(names.get().into_iter().map(|name| DropdownOption::new(name.clone(), name)))
+                        .collect::<Vec<_>>()
+                })
+                value=project
+                placeholder="Choose a project"
+                on_change=Callback::new(move |v: String| set_project.set(v))
+                label="Project for title instructions"
+                class=ROW_CONTROL
+                align_end=true
+            />
         </SettingsRow>
         <Show when=move || !project.get().is_empty()>
             <SettingsRowBody>
                 <textarea
                     aria-label="Project thread title instructions"
-                    class="min-h-20 w-full rounded-grape bg-longan-950 px-2 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
+                    class="min-h-20 w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
                     prop:value=move || {
                         let name = project.get();
                         instructions.with(|store| store.by_project.get(&name).cloned().unwrap_or_default())

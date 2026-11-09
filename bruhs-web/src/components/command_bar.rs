@@ -1037,7 +1037,7 @@ pub fn CommandBar() -> impl IntoView {
                                 .collect();
                             view! {
                                 <div class="mb-1">
-                                    <div class="px-3 pb-1 text-label uppercase tracking-widest text-rambutan-300">
+                                    <div class="px-3 pb-1 text-label-sm uppercase tracking-widest text-rambutan-400">
                                         {group}
                                     </div>
                                     {item_views}
@@ -1079,7 +1079,7 @@ pub fn CommandBar() -> impl IntoView {
             </div>
 
             // Footer hint row (TS pattern).
-            <div class="flex items-center justify-between border-t border-longan-800/50 px-5 py-2.5 text-label text-rambutan-300">
+            <div class="flex items-center justify-between border-t border-longan-800/50 px-5 py-2.5 text-label-sm text-rambutan-300">
                 <span>
                     <kbd class="text-rambutan-200">"↑↓"</kbd>
                     " navigate · "

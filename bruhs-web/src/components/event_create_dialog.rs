@@ -24,8 +24,6 @@ use crate::ui::{
     Input, Textarea,
 };
 
-const DAY_MS: f64 = 1000.0 * 60.0 * 60.0 * 24.0;
-
 /// Format a local-time millis timestamp as `YYYY-MM-DDTHH:MM`, the format
 /// expected by `<input type="datetime-local">`.
 fn format_datetime_local(ms: f64) -> String {
@@ -148,14 +146,8 @@ pub fn EventCreateDialog() -> impl IntoView {
             end_ms = start_ms + 3_600_000.0;
         }
         let (start_ms, end_ms) = if all_day.get() {
-            let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(start_ms));
-            let midnight = js_sys::Date::new_with_year_month_day(
-                d.get_full_year(),
-                crate::clock::field(d.get_month()),
-                crate::clock::field(d.get_date()),
-            )
-            .get_time();
-            (midnight, midnight + DAY_MS)
+            let midnight = crate::clock::local_day_start(start_ms);
+            (midnight, crate::clock::add_local_days(midnight, 1))
         } else {
             (start_ms, end_ms)
         };

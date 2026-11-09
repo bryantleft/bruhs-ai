@@ -305,44 +305,32 @@ impl Workspace {
             .bg(theme::longan_950())
             .text_color(theme::rambutan_300())
             .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .border_b_1()
-                    .border_color(theme::longan_800())
-                    .px_6()
-                    .py_4()
-                    .child(body("Meetings", BODY_PX, theme::rambutan_100()))
-                    .child(label(
+                crate::views::page_header::page_header(
+                    "Meetings",
+                    Some(
                         if running {
-                            "Capture daemon: ready"
+                            "Capture daemon ready"
                         } else {
-                            "Capture daemon: not running"
-                        },
-                        LABEL_PX,
-                        if running {
-                            theme::pandan_400()
-                        } else {
-                            theme::rambutan_500()
-                        },
-                    ))
-                    .child(
-                        web_button(
-                            "desktop-meetings-record",
-                            WebButtonVariant::Primary,
-                            WebButtonSize::Default,
-                            ButtonState::disabled_if(record_disabled),
-                        )
-                        .aria_label("Record a meeting")
-                        .min_h(px(44.0))
-                        .when(!record_disabled, |el| {
-                            el.on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.meetings_hub.update(cx, |hub, cx| hub.record_now(cx));
-                            }))
-                        })
-                        .child("+ Record"),
+                            "Capture daemon not running"
+                        }
+                        .into(),
                     ),
+                )
+                .child(
+                    web_button(
+                        "desktop-meetings-record",
+                        WebButtonVariant::Primary,
+                        WebButtonSize::Small,
+                        ButtonState::disabled_if(record_disabled),
+                    )
+                    .aria_label("Record a meeting")
+                    .when(!record_disabled, |el| {
+                        el.on_click(cx.listener(|this, _ev, _window, cx| {
+                            this.meetings_hub.update(cx, |hub, cx| hub.record_now(cx));
+                        }))
+                    })
+                    .child("Record"),
+                ),
             )
             .child(
                 div()
@@ -368,7 +356,7 @@ impl Workspace {
                             if running {
                                 "Press + Record to start one manually."
                             } else {
-                                "Start the bruhs-capture daemon (cargo run from bruhs-capture/) to enable recording."
+                                "Recording needs the bruhs-capture daemon. Start it, and Record turns on here."
                             },
                             BODY_SM_PX,
                             theme::rambutan_500(),

@@ -138,16 +138,14 @@ fn InboxLibrary() -> impl IntoView {
     };
 
     view! {
-        <div class="h-full overflow-auto bg-longan-950 text-rambutan-300">
+        <div class="flex h-full flex-col bg-longan-950 text-rambutan-300">
+            <crate::ui::PageHeader title="Inbox" subtitle="Email, Slack, Discord, iMessage and X, triaged locally.">
+                <crate::ui::Button size=crate::ui::ButtonSize::Small on_click=Callback::new(move |_| import_open.set(true))>
+                    "Import conversation"
+                </crate::ui::Button>
+            </crate::ui::PageHeader>
+            <div class="min-h-0 flex-1 overflow-auto">
             <div class="mx-auto w-full max-w-5xl space-y-5 px-4 py-5 sm:px-6">
-                <header class="flex flex-wrap items-start justify-between gap-3">
-                    <div>
-                        <p class="text-label-sm uppercase tracking-[0.16em] text-persimmon-300">"Inbox"</p>
-                        <h1 class="mt-1 text-title text-rambutan-100">"Every conversation, one decisive queue"</h1>
-                        <p class="mt-1 max-w-2xl text-body-sm text-rambutan-500">"Triage email, Slack, Discord, iMessage, and X in one fast local workflow. Import works now; connected adapters can sync into the same model."</p>
-                    </div>
-                    <button type="button" class="rounded-grape bg-persimmon-500 px-3 py-2 text-label text-longan-950 hover:bg-persimmon-400 cursor-pointer" on:click=move |_| import_open.set(true)>"+ Import conversation"</button>
-                </header>
 
                 <div class="flex flex-col gap-3 sm:flex-row sm:items-center">
                     <div class="min-w-0 flex-1"><Input aria_label="Search inbox" input_type="search".to_string() placeholder="Search people, subjects, and messages…".to_string() value=Signal::derive(move || query.get()) on_input=Callback::new(move |value| query.set(value)) /></div>
@@ -195,7 +193,8 @@ fn InboxLibrary() -> impl IntoView {
                     }}
                 </section>
 
-                <p class="text-label-sm text-rambutan-400">"Adapter contract: Email · Slack · Discord · iMessage · X. Until an account is connected, share or paste a message here—the triage, drafts, and relationship links remain fully local."</p>
+                <p class="text-label-sm text-rambutan-400">"No accounts are connected yet. Import a message to triage it here; drafts and relationship links stay on this device."</p>
+            </div>
             </div>
         </div>
 
@@ -221,7 +220,7 @@ fn FilterButton(
     value: InboxFilter,
     filter: RwSignal<InboxFilter>,
 ) -> impl IntoView {
-    view! { <button type="button" aria-pressed=move || (filter.get() == value).to_string() class=move || if filter.get() == value { "rounded-seed bg-rambutan-100 px-2.5 py-1.5 text-label-sm text-longan-950 cursor-pointer" } else { "rounded-seed px-2.5 py-1.5 text-label-sm text-rambutan-400 hover:bg-longan-800 cursor-pointer" } on:click=move |_| filter.set(value)>{label}</button> }
+    view! { <button type="button" aria-pressed=move || (filter.get() == value).to_string() class=move || if filter.get() == value { "rounded-seed bg-longan-800 px-2.5 py-1.5 text-label-sm text-rambutan-100 inset-ring inset-ring-longan-700 cursor-pointer" } else { "rounded-seed px-2.5 py-1.5 text-label-sm text-rambutan-400 hover:bg-longan-800 cursor-pointer" } on:click=move |_| filter.set(value)>{label}</button> }
 }
 
 #[component]

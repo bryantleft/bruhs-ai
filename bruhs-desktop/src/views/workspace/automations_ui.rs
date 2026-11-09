@@ -968,11 +968,14 @@ impl Workspace {
                                                     .mt_3()
                                                     .text_size(px(10.0))
                                                     .text_color(theme::pandan_300())
-                                                    .child(format!(
-                                                        "{} typed tools · {} workflows",
-                                                        agent_tool_definitions().len(),
-                                                        self.automation_state.workflows.len()
-                                                    )),
+                                                    .child({
+                                                        let n = self.automation_state.workflows.len();
+                                                        format!(
+                                                            "{} typed tools · {n} {}",
+                                                            agent_tool_definitions().len(),
+                                                            if n == 1 { "workflow" } else { "workflows" }
+                                                        )
+                                                    }),
                                             ),
                                     )),
                             ),
