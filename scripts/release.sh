@@ -31,7 +31,14 @@ notes=$(awk -v v="$version" '
   $0 ~ "^## \\[" v "\\] - [0-9]{4}-[0-9]{2}-[0-9]{2}$" { on = 1; next }
   on && (/^## \[/ || /^\[[^]]+\]: /) { exit }
   on { print }
-' CHANGELOG.md | sed -e '/./,$!d')
+' CHANGELOG.md | sed -e '/./,$!d' | awk '
+  # GitHub shows every newline in release notes, so join wrapped lines:
+  # a continuation (indented, or a plain line after text) joins the line above.
+  /^$/ { if (buf != "") print buf; print ""; buf = ""; next }
+  /^(#|- )/ { if (buf != "") print buf; buf = $0; next }
+  { sub(/^ +/, ""); buf = (buf == "") ? $0 : buf " " $0 }
+  END { if (buf != "") print buf }
+')
 [[ -n $notes ]] || { echo "CHANGELOG.md has no dated '## [$version] - YYYY-MM-DD' section" >&2; exit 1; }
 (cd bruhs-site && node scripts/changelog.mjs --check) || exit 1
 if git rev-parse -q --verify "refs/tags/$tag" >/dev/null || git ls-remote --exit-code --tags origin "$tag" >/dev/null 2>&1; then
