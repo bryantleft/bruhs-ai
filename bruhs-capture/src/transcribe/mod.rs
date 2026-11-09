@@ -2,6 +2,7 @@
 //! runs Whisper, and emits `MeetingEvent::Segment` for each result.
 
 pub mod decode;
+pub mod remote;
 mod segment_sink;
 pub mod segments_log;
 pub mod whisper;
@@ -23,6 +24,14 @@ pub enum TranscribeError {
     Log(#[source] segments_log::LogError),
     #[error("io: {0}")]
     Io(#[source] std::io::Error),
+    #[error("remote: {0}")]
+    Remote(#[source] remote::RemoteError),
+}
+
+#[derive(Debug, Clone)]
+pub enum TranscriptionJob {
+    Whisper(bruhs_models::WhisperModel),
+    Compatible(remote::RemoteJob),
 }
 
 /// Transcribe `wav_path` to JSONL alongside it. Broadcasts a

@@ -10,7 +10,7 @@ fn session() -> CurrentSession {
         mic_wav_path: "unused-synthetic-mic.wav".into(),
         sys_wav_path: "unused-synthetic-sys.wav".into(),
         mixed_wav_path: "unused-synthetic-mixed.wav".into(),
-        whisper_model: WhisperModel::default(),
+        transcription: TranscriptionJob::Whisper(WhisperModel::default()),
         live_model: None,
         subspeaker_enabled: false,
         cross_meeting_linking_auto: Some(false),
@@ -86,8 +86,43 @@ struct SyntheticSystemRecorder {
 fn isolated_state() -> (tempfile::TempDir, Arc<CaptureState>) {
     let dir = tempfile::tempdir().unwrap();
     let mut state = CaptureState::new(crate::paths::DataRoot::at(dir.path()));
+    state.remote_transcription = crate::transcribe::remote::RemoteProvider::unconfigured();
     state.recovery = crate::recovery::RecoveryQueue::new(Some(dir.path().join("recovery.sqlite3")));
     (dir, Arc::new(state))
+}
+
+#[tokio::test]
+async fn invalid_remote_choice_fails_before_any_recording_or_path_access() {
+    let (root, state) = isolated_state();
+    // A valid request would hit Conflict, so a regression cannot open hardware.
+    state.with_current_mut(|slot| *slot = Some(session()));
+    for (model, expected_status) in [
+        ("", StatusCode::BAD_REQUEST),
+        ("synthetic-model", StatusCode::SERVICE_UNAVAILABLE),
+    ] {
+        let request: StartRequest = serde_json::from_value(serde_json::json!({
+            "meeting_id": "synthetic-remote", "started_at_ms": 1.0,
+            "transcription": {"provider": "open_ai_compatible", "remote_model": model}
+        }))
+        .unwrap();
+        let error = start_capture(State(state.clone()), Ok(Json(request)))
+            .await
+            .unwrap_err();
+        assert_eq!(error.0, expected_status);
+        assert!(state.lifecycle.try_enter().is_some());
+        assert!(!root.path().join("audio").exists());
+    }
+    let legacy: StartRequest = serde_json::from_value(serde_json::json!({
+        "meeting_id": "synthetic-local", "started_at_ms": 1.0
+    }))
+    .unwrap();
+    assert_eq!(
+        start_capture(State(state), Ok(Json(legacy)))
+            .await
+            .unwrap_err()
+            .0,
+        StatusCode::CONFLICT
+    );
 }
 
 #[tokio::test]

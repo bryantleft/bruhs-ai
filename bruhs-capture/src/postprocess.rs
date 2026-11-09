@@ -33,7 +33,7 @@ pub struct PostprocessOpts {
     pub mic_wav: PathBuf,
     pub sys_wav: PathBuf,
     pub mixed_wav: PathBuf,
-    pub whisper_model: bruhs_models::WhisperModel,
+    pub transcription: crate::transcribe::TranscriptionJob,
     pub subspeaker_enabled: bool,
     pub max_speakers: crate::state::MaxSpeakers,
     pub video_ocr_enabled: bool,
@@ -47,7 +47,7 @@ pub async fn postprocess_meeting(state: Arc<CaptureState>, opts: PostprocessOpts
     let mic_wav = opts.mic_wav;
     let sys_wav = opts.sys_wav;
     let mixed_wav = opts.mixed_wav;
-    let model_for_task = opts.whisper_model;
+    let transcription = opts.transcription;
     let subspeaker_enabled = opts.subspeaker_enabled;
     let max_speakers = opts.max_speakers.get();
     let video_ocr_enabled = opts.video_ocr_enabled;
@@ -68,44 +68,51 @@ pub async fn postprocess_meeting(state: Arc<CaptureState>, opts: PostprocessOpts
         return;
     }
 
-    // 2. Ensure whisper model is available, then transcribe.
-    let model_path = match state
-        .models
-        .ensure_whisper(model_for_task, |downloaded, total| {
-            tracing::info!(
-                "model download: {downloaded} / {} bytes",
-                total.map_or_else(|| "?".into(), |t| t.to_string())
-            );
-        })
-        .await
-    {
-        Ok(p) => p,
-        Err(e) => {
-            tracing::warn!("whisper model unavailable: {e}");
-            worker::fail(
-                &state,
-                &meeting_id,
-                started_at_ms,
-                format!("model download failed: {e}"),
-            )
-            .await;
-            return;
+    let join_result = match transcription {
+        crate::transcribe::TranscriptionJob::Compatible(job) => Ok(job
+            .transcribe(state.clone(), meeting_id.clone(), mixed_wav.clone())
+            .await
+            .map_err(crate::transcribe::TranscribeError::Remote)),
+        crate::transcribe::TranscriptionJob::Whisper(model_for_task) => {
+            let model_path = match state
+                .models
+                .ensure_whisper(model_for_task, |downloaded, total| {
+                    tracing::info!(
+                        "model download: {downloaded} / {} bytes",
+                        total.map_or_else(|| "?".into(), |t| t.to_string())
+                    );
+                })
+                .await
+            {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::warn!("whisper model unavailable: {e}");
+                    worker::fail(
+                        &state,
+                        &meeting_id,
+                        started_at_ms,
+                        format!("model download failed: {e}"),
+                    )
+                    .await;
+                    return;
+                }
+            };
+
+            let state_inner = state.clone();
+            let mid_inner = meeting_id.clone();
+            let wav_inner = mixed_wav.clone();
+            tokio::task::spawn_blocking(move || {
+                crate::transcribe::transcribe_wav(
+                    state_inner,
+                    mid_inner,
+                    &wav_inner,
+                    &model_path,
+                    model_for_task,
+                )
+            })
+            .await
         }
     };
-
-    let state_inner = state.clone();
-    let mid_inner = meeting_id.clone();
-    let wav_inner = mixed_wav.clone();
-    let join_result = tokio::task::spawn_blocking(move || {
-        crate::transcribe::transcribe_wav(
-            state_inner,
-            mid_inner,
-            &wav_inner,
-            &model_path,
-            model_for_task,
-        )
-    })
-    .await;
 
     if let Ok(()) = worker::finish_required(
         &state,

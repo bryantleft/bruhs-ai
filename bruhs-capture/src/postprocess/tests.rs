@@ -18,7 +18,7 @@ async fn mix_failure_retains_durable_attempt_without_entering_model_download() {
             mic_wav: dir.path().join("missing.wav"),
             sys_wav: dir.path().join("sys.wav"),
             mixed_wav: dir.path().join("mixed.wav"),
-            whisper_model: WhisperModel::default(),
+            transcription: crate::transcribe::TranscriptionJob::Whisper(WhisperModel::default()),
             subspeaker_enabled: false,
             max_speakers: crate::state::MaxSpeakers::new(2).unwrap(),
             video_ocr_enabled: false,

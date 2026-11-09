@@ -29,7 +29,7 @@ hound = "3.5"
 whisper-rs = { version = "0.12", default-features = false }
 rubato = "0.15"
 rand = { workspace = true }
-reqwest = { workspace = true, features = ["stream"] }
+reqwest = { workspace = true, features = ["stream", "multipart"] }
 thiserror = { workspace = true }
 rusqlite = { workspace = true }
 sha2 = { workspace = true }
