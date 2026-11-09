@@ -139,7 +139,7 @@ impl SettingsSection {
             Self::Beta => "Sidebar sections that are still settling in.",
             Self::Calendar => "Google Calendar sync for the calendar view and meeting auto-record.",
             Self::Recording => "When bruhs starts recording meetings on its own.",
-            Self::Transcription => "Whisper models for the final transcript and the live preview.",
+            Self::Transcription => "Provider and model for the final transcript, plus an on-device live preview.",
             Self::Speakers => "Telling voices apart and remembering them across meetings.",
             Self::People => "What meeting summaries record about each person.",
             Self::Keyboard => "Each shortcut is a key, a command id, and an optional when clause. A new default is added when its command is not already listed.",
@@ -337,6 +337,11 @@ impl Workspace {
             settings_ui::SETTINGS_WHISPER_DROPDOWN_ID => {
                 if let Some(model) = settings_ui::whisper_model_for_key(value) {
                     self.update_meeting_prefs(|prefs| prefs.whisper_model = model, cx);
+                }
+            }
+            settings_ui::SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID => {
+                if let Some(provider) = bruhs_models::TranscriptionProvider::for_key(value) {
+                    self.update_meeting_prefs(|prefs| prefs.transcription.provider = provider, cx);
                 }
             }
             settings_ui::SETTINGS_LIVE_WHISPER_DROPDOWN_ID => {

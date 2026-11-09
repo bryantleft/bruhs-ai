@@ -641,7 +641,7 @@ pub fn SettingsPage() -> impl IntoView {
                         <SettingsSection id="recording" title="Recording" description="When bruhs starts recording meetings on its own.">
                             <AutoRecordSettingsPanel />
                         </SettingsSection>
-                        <SettingsSection id="transcription" title="Transcription" description="Whisper models for the final transcript and the live preview.">
+                        <SettingsSection id="transcription" title="Transcription" description="Provider and model for the final transcript, plus an on-device live preview.">
                             <WhisperModelSettings />
                         </SettingsSection>
                         <SettingsSection id="speakers" title="Speakers" description="Telling voices apart and remembering them across meetings.">

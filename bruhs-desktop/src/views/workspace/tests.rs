@@ -400,6 +400,52 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
         assert_eq!(workspace.editor_id, "zed");
     });
 
+    click_debug_selector(cx, "desktop-settings-nav-transcription");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-transcription-provider");
+    cx.run_until_parked();
+    click_debug_selector(
+        cx,
+        "desktop-transcription-provider-option-open_ai_compatible",
+    );
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-settings-row-transcription-server-model");
+    assert_no_rendered_bounds(cx, "desktop-settings-row-whisper-model");
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .settings_transcription_model_input
+            .update(cx, |input, cx| {
+                input.replace_all("synthetic-model", window, cx);
+            });
+    });
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _window, cx| {
+        let prefs = &workspace.meetings_hub.read(cx).prefs;
+        assert_eq!(
+            prefs.transcription.provider,
+            bruhs_models::TranscriptionProvider::OpenAiCompatible
+        );
+        assert_eq!(prefs.transcription.remote_model, "synthetic-model");
+        let body =
+            crate::views::meetings_hub::capture_start_body(prefs, "synthetic-recording", 1.0)
+                .unwrap();
+        assert_eq!(body.transcription, Some(prefs.transcription.clone()));
+        let restored: crate::views::meetings_hub::MeetingPrefs =
+            serde_json::from_str(&serde_json::to_string(prefs).unwrap()).unwrap();
+        assert_eq!(restored, *prefs);
+    });
+    click_debug_selector(cx, "desktop-transcription-provider");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-transcription-provider-option-local_whisper");
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-settings-row-whisper-model");
+    assert_no_rendered_bounds(cx, "desktop-settings-row-transcription-server-model");
+    assert_rendered_bounds(cx, "desktop-settings-row-live-whisper-model");
+    workspace.update_in(cx, |workspace, _window, cx| {
+        let prefs = &workspace.meetings_hub.read(cx).prefs;
+        assert_eq!(prefs.transcription.remote_model, "synthetic-model");
+    });
+
     // Nav jumps scroll the page (web `scroll_into_view`); the spy then
     // highlights the section under the fold line.
     click_debug_selector(cx, "desktop-settings-nav-keyboard");

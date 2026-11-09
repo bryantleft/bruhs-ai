@@ -22,6 +22,8 @@ use bruhs_models::EpochMs;
 use gpui_component::input::{InputEvent, InputState};
 
 pub(super) const SETTINGS_WHISPER_DROPDOWN_ID: &str = "desktop-whisper-model";
+pub(super) const SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID: &str =
+    "desktop-transcription-provider";
 pub(super) const SETTINGS_LIVE_WHISPER_DROPDOWN_ID: &str = "desktop-live-whisper-model";
 /// Web whisper dropdowns: `sm:w-80`.
 const WHISPER_DROPDOWN_WIDTH_PX: f32 = 320.0;
@@ -1146,6 +1148,61 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> Vec<AnyElement> {
         let prefs = self.meetings_hub.read(cx).prefs.clone();
+        let (provider_toggle, provider_select) =
+            self.settings_dropdown_handlers(SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID, cx);
+        let provider_control = div()
+            .w(px(WHISPER_DROPDOWN_WIDTH_PX))
+            .child(dropdown(
+                SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID,
+                "Transcription provider",
+                prefs.transcription.provider.key(),
+                vec![DropdownGroup {
+                    label: None,
+                    mark: None,
+                    options: bruhs_models::TranscriptionProvider::ALL
+                        .into_iter()
+                        .map(|provider| DropdownOption {
+                            value: provider.key(),
+                            label: provider.label().into(),
+                            description: None,
+                        })
+                        .collect(),
+                }],
+                self.settings_listbox(SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID),
+                provider_toggle,
+                provider_select,
+            ))
+            .into_any_element();
+        let mut rows = vec![self.settings_row(
+            "desktop-settings-row-transcription-provider",
+            "Transcription provider",
+            "Applies to the final transcript on your next recording. On-device Whisper keeps audio here. A compatible server receives recorded audio after Stop and may charge for usage. Live previews always stay on-device.",
+            provider_control,
+        )];
+        if prefs.transcription.provider == bruhs_models::TranscriptionProvider::OpenAiCompatible {
+            rows.push(self.settings_row(
+                "desktop-settings-row-transcription-server-model",
+                "Server transcription model",
+                "Enter a model ID supported by your configured server. It must return timestamped segments in verbose_json format. Configure the server URL, key, and request deadline in the capture daemon environment.",
+                div().w(px(WHISPER_DROPDOWN_WIDTH_PX))
+                    .child(Input::new(&self.settings_transcription_model_input)
+                        .aria_label("Server transcription model"))
+                    .into_any_element(),
+            ));
+            if let Err(error) = prefs.transcription.validate() {
+                rows.push(
+                    div()
+                        .px_4()
+                        .pb_3()
+                        .child(label_text(
+                            error.to_string(),
+                            LABEL_SM_PX,
+                            theme::lychee_300(),
+                        ))
+                        .into_any_element(),
+                );
+            }
+        }
         let (final_toggle, final_select) =
             self.settings_dropdown_handlers(SETTINGS_WHISPER_DROPDOWN_ID, cx);
         let final_control = div()
@@ -1174,20 +1231,21 @@ impl Workspace {
                 live_select,
             ))
             .into_any_element();
-        vec![
-            self.settings_row(
+        if prefs.transcription.provider == bruhs_models::TranscriptionProvider::LocalWhisper {
+            rows.push(self.settings_row(
                 "desktop-settings-row-whisper-model",
                 "Transcription model",
                 "Downloaded on first use to ~/Library/Application Support/dev.bruhs.bruhs-ai/models. Takes effect on the next recording.",
                 final_control,
-            ),
-            self.settings_row(
+            ));
+        }
+        rows.push(self.settings_row(
                 "desktop-settings-row-live-whisper-model",
                 "Live preview model",
-                "Used for the live transcript while recording. Smaller is faster; the final pass still uses the model above.",
+            "Used for the live transcript while recording. Smaller is faster; the final pass uses your selected provider and model.",
                 live_control,
-            ),
-        ]
+            ));
+        rows
     }
 
     // ── Speakers ────────────────────────────────────────────────────────
@@ -1335,6 +1393,30 @@ pub(super) fn control_column(control: AnyElement) -> AnyElement {
 }
 
 impl Workspace {
+    pub(super) fn new_transcription_model_input(
+        prefs: &MeetingPrefs,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+        subscriptions: &mut Vec<Subscription>,
+    ) -> Entity<InputState> {
+        let input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Model ID from your server")
+                .default_value(prefs.transcription.remote_model.clone())
+        });
+        subscriptions.push(cx.subscribe_in(
+            &input,
+            window,
+            |this: &mut Self, input, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let value = input.read(cx).value().to_string();
+                    this.update_meeting_prefs(|prefs| prefs.transcription.remote_model = value, cx);
+                }
+            },
+        ));
+        input
+    }
+
     /// The Recording steppers' text fields; Enter or blur commits.
     pub(super) fn new_settings_stepper_inputs(
         stepper_prefs: &MeetingPrefs,

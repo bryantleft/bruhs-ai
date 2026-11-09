@@ -57,6 +57,7 @@ const OAUTH_POLL_INTERVAL: Duration = Duration::from_secs(2);
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct MeetingPrefs {
+    pub transcription: bruhs_models::TranscriptionSettings,
     pub whisper_model: WhisperModel,
     pub live_whisper_model: WhisperModel,
     pub diarize: DiarizeSettings,
@@ -1856,7 +1857,7 @@ pub fn capture_start_body(
 ) -> Result<CaptureStartBody, ServerError> {
     let d = prefs.diarize;
     Ok(CaptureStartBody {
-        transcription: None,
+        transcription: Some(prefs.transcription.clone()),
         meeting_id: MeetingId::try_from(meeting_id)
             .map_err(|_| ServerError::Invalid("The meeting has an invalid id."))?,
         started_at_ms: EpochMs::from_f64_floor(started_at_ms)
@@ -1885,6 +1886,19 @@ pub fn upsert_google_event(list: &mut Vec<CalendarEvent>, event: CalendarEvent) 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn legacy_meeting_preferences_keep_models_and_default_to_on_device() {
+        let prefs: MeetingPrefs =
+            serde_json::from_str(r#"{"whisper_model":"small_en","live_whisper_model":"tiny_en"}"#)
+                .unwrap();
+        assert_eq!(prefs.whisper_model, WhisperModel::SmallEn);
+        assert_eq!(prefs.live_whisper_model, WhisperModel::TinyEn);
+        assert_eq!(
+            prefs.transcription.provider,
+            bruhs_models::TranscriptionProvider::LocalWhisper
+        );
+    }
 
     #[gpui::test]
     fn a_server_that_answers_with_an_error_is_not_offline(cx: &mut gpui::TestAppContext) {
