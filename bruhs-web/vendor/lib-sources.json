@@ -1,0 +1,895 @@
+{
+  "note": "Third-party browser libraries served from this origin instead of a CDN (Content-Security-Policy allows scripts only from 'self'). Each file (path relative to bruhs-web/vendor/lib, served at /vendor/\u2026) is copied unmodified from the npm tarball named here; sha256/bytes are of the vendored file. Regenerate with the steps in README.md.",
+  "packages": [
+    {
+      "package": "@highlightjs/cdn-assets",
+      "version": "11.10.0",
+      "license": "BSD-3-Clause",
+      "tarball": "https://registry.npmjs.org/@highlightjs/cdn-assets/-/cdn-assets-11.10.0.tgz",
+      "integrity": "sha512-vWXpu+Rdm0YMJmugFdUiL/9DmgYjEiV+d5DBqlXdApnGPSIeo6+LRS5Hpx6fvVsKkvR4RsLYD9rQ6DOLkj7OKA==",
+      "replaces": [
+        "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/highlight.min.js",
+        "https://cdn.jsdelivr.net/gh/highlightjs/cdn-release@11.10.0/build/styles/github-dark.min.css"
+      ],
+      "note": "Byte-identical to the jsDelivr cdn-release files it replaces (sha256 checked 2026-10-04).",
+      "files": [
+        {
+          "path": "highlight-11.10.0/highlight.min.js",
+          "from": "highlight.min.js",
+          "sha256": "471ef9ae90c407af440fcdc48edfeeb562106b3267bd12d99071c162fb52ed32",
+          "bytes": 124980
+        },
+        {
+          "path": "highlight-11.10.0/github-dark.min.css",
+          "from": "styles/github-dark.min.css",
+          "sha256": "9f208d022102b1d0c7aebfecd8e42ca7997d5de636649d2b31ea63093d809019",
+          "bytes": 1315
+        },
+        {
+          "path": "highlight-11.10.0/LICENSE",
+          "from": "LICENSE",
+          "sha256": "6c081431591d9df696c82dc598fe1423765b8a299b200ed00b281afd0f64c490",
+          "bytes": 1514
+        }
+      ]
+    },
+    {
+      "package": "katex",
+      "version": "0.16.11",
+      "license": "MIT",
+      "tarball": "https://registry.npmjs.org/katex/-/katex-0.16.11.tgz",
+      "integrity": "sha512-RQrI8rlHY92OLf3rho/Ts8i/XvjgguEjOkO1BEXcU3N8BqPpSzBNwV/G0Ukr+P/l3ivvJUE/Fa/CwbS6HesGNQ==",
+      "replaces": [
+        "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.css",
+        "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/katex.min.js",
+        "https://cdn.jsdelivr.net/npm/katex@0.16.11/dist/contrib/auto-render.min.js"
+      ],
+      "note": "Only the WOFF2 fonts are kept; katex.min.css lists WOFF2 first, so browsers never request the WOFF/TTF fallbacks.",
+      "files": [
+        {
+          "path": "katex-0.16.11/katex.min.css",
+          "from": "dist/katex.min.css",
+          "sha256": "717bc9ae7853b61f0f76455dddf0ecd4f527a783f42de2ac24684899c1c46258",
+          "bytes": 23335
+        },
+        {
+          "path": "katex-0.16.11/katex.min.js",
+          "from": "dist/katex.min.js",
+          "sha256": "e6bfe5deebd4c7ccd272055bab63bd3ab2c73b907b6e6a22d352740a81381fd4",
+          "bytes": 275414
+        },
+        {
+          "path": "katex-0.16.11/contrib/auto-render.min.js",
+          "from": "dist/contrib/auto-render.min.js",
+          "sha256": "7b57d427ac6270677daf8d8380ded2cc73336f9149a167b8e1fe0d6ef66604ae",
+          "bytes": 3481
+        },
+        {
+          "path": "katex-0.16.11/LICENSE",
+          "from": "LICENSE",
+          "sha256": "766ccc1f306c885aa45542a9846bbd0a505b27a0374f146778171c2254ce18e3",
+          "bytes": 1107
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_AMS-Regular.woff2",
+          "from": "dist/fonts/KaTeX_AMS-Regular.woff2",
+          "sha256": "0cdd387c9590a1a9f9794560022dbb59654a7d86f187aa0c81495ad42d3a7308",
+          "bytes": 28076
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Caligraphic-Bold.woff2",
+          "from": "dist/fonts/KaTeX_Caligraphic-Bold.woff2",
+          "sha256": "de7701e42cf1f4cf0b766c03fb27977207eee2f4fd5d76fa82188406da43ea4c",
+          "bytes": 6912
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Caligraphic-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Caligraphic-Regular.woff2",
+          "sha256": "5d53e70ad607c2352162dec9e0923fb54ecdafaccbf604cd8dcf7d00facb989b",
+          "bytes": 6908
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Fraktur-Bold.woff2",
+          "from": "dist/fonts/KaTeX_Fraktur-Bold.woff2",
+          "sha256": "74444efd593c005e3f4573b44524704c0af0a937fe911cca9e94068d0d140d3f",
+          "bytes": 11348
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Fraktur-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Fraktur-Regular.woff2",
+          "sha256": "51814d270d06ff0255dba0799994fa4d8c84d11f09951d47595f4abb1f3602dc",
+          "bytes": 11316
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Main-Bold.woff2",
+          "from": "dist/fonts/KaTeX_Main-Bold.woff2",
+          "sha256": "0f60d1b897938ec918c8ce073092411baf9438f6739465693ff18b0f9d20b021",
+          "bytes": 25324
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Main-BoldItalic.woff2",
+          "from": "dist/fonts/KaTeX_Main-BoldItalic.woff2",
+          "sha256": "99cd42a3c072d918f2f44984a807cf7aa16e13545fd0875fc07c6c65f99e715b",
+          "bytes": 16780
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Main-Italic.woff2",
+          "from": "dist/fonts/KaTeX_Main-Italic.woff2",
+          "sha256": "97479ca6cce906abc961ecac96faa5f9ca2e61b8e7670d475826bcdee9a7c267",
+          "bytes": 16988
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Main-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Main-Regular.woff2",
+          "sha256": "c2342cd8b869e01752a9321dc17213fc40d4d04c79688c1d43f2cf316abd7866",
+          "bytes": 26272
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Math-BoldItalic.woff2",
+          "from": "dist/fonts/KaTeX_Math-BoldItalic.woff2",
+          "sha256": "dc47344dbb6cb5b655c8460d561f4df5f501b90c804ad3c6cec65fe322351ab1",
+          "bytes": 16400
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Math-Italic.woff2",
+          "from": "dist/fonts/KaTeX_Math-Italic.woff2",
+          "sha256": "7af58c5ec8f132a2ddde9027c6d7814decce4d3b822a11192a42a20e2e973264",
+          "bytes": 16440
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_SansSerif-Bold.woff2",
+          "from": "dist/fonts/KaTeX_SansSerif-Bold.woff2",
+          "sha256": "e99ae51144bf1232efcc1bfe5add36262c6866b0faab24fa75740e1b98577a62",
+          "bytes": 12216
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_SansSerif-Italic.woff2",
+          "from": "dist/fonts/KaTeX_SansSerif-Italic.woff2",
+          "sha256": "00b26ac825e2095056396e0553b8ac26d3f8ad158c3826e28b4c45b385c4714a",
+          "bytes": 12028
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_SansSerif-Regular.woff2",
+          "from": "dist/fonts/KaTeX_SansSerif-Regular.woff2",
+          "sha256": "68e8c73ef42afd3ccec58bf0fba302cce448938e7fc020a5e31f8a952eee1342",
+          "bytes": 10344
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Script-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Script-Regular.woff2",
+          "sha256": "036d4e95149b69ff9bcc0cd55771efeb25ffa3947293e69acd78d5ac328c684b",
+          "bytes": 9644
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Size1-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Size1-Regular.woff2",
+          "sha256": "6b47c40166b6dbe21a5dfca7718413f2147fd2399be1ba605d8ad39cedf25dfe",
+          "bytes": 5468
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Size2-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Size2-Regular.woff2",
+          "sha256": "d04c54219f9eaec6d4d4fd42dfb28785975a4794d6b2fc71e566b9cd6db842dd",
+          "bytes": 5208
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Size3-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Size3-Regular.woff2",
+          "sha256": "73d591271b1604960cb10bb90fee021670af7297017e0e98480b332d11f51995",
+          "bytes": 3624
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Size4-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Size4-Regular.woff2",
+          "sha256": "a4af7d414440a1c1790825cfb700cf9cf43b0f2c4b04f0ebc523011ad9853ec0",
+          "bytes": 4928
+        },
+        {
+          "path": "katex-0.16.11/fonts/KaTeX_Typewriter-Regular.woff2",
+          "from": "dist/fonts/KaTeX_Typewriter-Regular.woff2",
+          "sha256": "71d517d67827787cfabdf186914cc3358eda539e37931941f2b2fd4a21f68c0b",
+          "bytes": 13568
+        }
+      ]
+    },
+    {
+      "package": "@xterm/xterm",
+      "version": "5.5.0",
+      "license": "MIT",
+      "tarball": "https://registry.npmjs.org/@xterm/xterm/-/xterm-5.5.0.tgz",
+      "integrity": "sha512-hqJHYaQb5OptNunnyAnkHyM8aCjZ1MEIDTQu1iIbbTD/xops91NB5yq1ZK/dC2JDbVWtF23zUtl9JE2NqwT87A==",
+      "replaces": [
+        "https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js",
+        "https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css"
+      ],
+      "note": "The CDN served jsDelivr's on-the-fly minified copies; these are the package's own lib/xterm.js (already minified) and css/xterm.css.",
+      "files": [
+        {
+          "path": "xterm-5.5.0/xterm.js",
+          "from": "lib/xterm.js",
+          "sha256": "1f991ac3b4b283ebf96e60ae23a00a52765dd3a2e46fa6fdda9f1aab032f7495",
+          "bytes": 289441
+        },
+        {
+          "path": "xterm-5.5.0/xterm.css",
+          "from": "css/xterm.css",
+          "sha256": "ba8e6985669488981ccf40c0cefe3aba80722cb6c92de7ad628b0bd717faf2b6",
+          "bytes": 5559
+        },
+        {
+          "path": "xterm-5.5.0/LICENSE",
+          "from": "LICENSE",
+          "sha256": "b569f629d00f2626a8100df2a1798210535621e42164dfd426a6fe5aac7b0ccd",
+          "bytes": 1261
+        }
+      ]
+    },
+    {
+      "package": "@xterm/addon-fit",
+      "version": "0.10.0",
+      "license": "MIT",
+      "tarball": "https://registry.npmjs.org/@xterm/addon-fit/-/addon-fit-0.10.0.tgz",
+      "integrity": "sha512-UFYkDm4HUahf2lnEyHvio51TNGiLK66mqP2JoATy7hRZeXaGMRDr00JiSF7m63vR5WKATF605yEggJKsw0JpMQ==",
+      "replaces": [
+        "https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"
+      ],
+      "files": [
+        {
+          "path": "addon-fit-0.10.0/addon-fit.js",
+          "from": "lib/addon-fit.js",
+          "sha256": "bdaefa370b1bfc42ee88d46fe6072400902a4d4b2d45cd93438dda9b23c97089",
+          "bytes": 1497
+        },
+        {
+          "path": "addon-fit-0.10.0/LICENSE",
+          "from": "LICENSE",
+          "sha256": "e256f01188af527e4d06d21d06fbf785ae9c50d4b328bf03cbe0ba7f0aa4228f",
+          "bytes": 1103
+        }
+      ]
+    },
+    {
+      "package": "mermaid",
+      "version": "11.17.2",
+      "license": "MIT",
+      "tarball": "https://registry.npmjs.org/mermaid/-/mermaid-11.17.2.tgz",
+      "integrity": "sha512-V6K3C8EBdEsPFZXSKMJe6ppQOENxuHARr9GvHX4hh47lAbhMRD9qf4oEK7LoaRQxULMa80/qt5gHO73aCleBBg==",
+      "replaces": [
+        "https://cdn.jsdelivr.net/npm/mermaid@11/dist/mermaid.esm.min.mjs"
+      ],
+      "note": "mermaid@11 resolved to 11.17.2 on jsDelivr on 2026-10-04. The ESM entry and every chunk it can import (dist/chunks/mermaid.esm.min/*.mjs); source maps are not vendored.",
+      "files": [
+        {
+          "path": "mermaid-11.17.2/mermaid.esm.min.mjs",
+          "from": "dist/mermaid.esm.min.mjs",
+          "sha256": "462d6f73fc9833044bca6dc08e62e0ee83f5a2b09583f588f95d5fd91b1960ed",
+          "bytes": 30255
+        },
+        {
+          "path": "mermaid-11.17.2/LICENSE",
+          "from": "LICENSE",
+          "sha256": "ec9fb67dcb25eccc416ed56e1aab819222c805a2a4bfe4cb19e7556bf2ffde80",
+          "bytes": 1089
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/abnfDiagram-PAR5IXJI.mjs",
+          "from": "dist/chunks/mermaid.esm.min/abnfDiagram-PAR5IXJI.mjs",
+          "sha256": "a55e85b538a93d43b4f7c6e98468692167b982696fc77f9b1c1e62f5758904da",
+          "bytes": 2293
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/architecture-7GRP2DOG-M7G3SWCO.mjs",
+          "from": "dist/chunks/mermaid.esm.min/architecture-7GRP2DOG-M7G3SWCO.mjs",
+          "sha256": "ea6754908d6ed4705375302afae2d82835d1bfeb170d53a60e670199562c1b10",
+          "bytes": 171
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/architectureDiagram-2PNWDENW.mjs",
+          "from": "dist/chunks/mermaid.esm.min/architectureDiagram-2PNWDENW.mjs",
+          "sha256": "d7be63b2046400915cae32fa1e4027b2911b4d7b2e800f5fd140834ce3f8c609",
+          "bytes": 155489
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/blockDiagram-PUWGUBOA.mjs",
+          "from": "dist/chunks/mermaid.esm.min/blockDiagram-PUWGUBOA.mjs",
+          "sha256": "173c31ea4916cfb6abc10f7c3dd26afb1b1a99f1c6b210899ccc1fb1fa198163",
+          "bytes": 40279
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/c4Diagram-3NLNHZP5.mjs",
+          "from": "dist/chunks/mermaid.esm.min/c4Diagram-3NLNHZP5.mjs",
+          "sha256": "96709c448ee37a52fe2010e9a0dd514a445a0f3d6c3b0afd68b3b25ff9a95a22",
+          "bytes": 65832
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-2NMSUPJH.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-2NMSUPJH.mjs",
+          "sha256": "b398a4e9da693d9f308248c6fa278c2567c11a7098c69ade60c60a886fc7ce59",
+          "bytes": 6261
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-32MCUW2P.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-32MCUW2P.mjs",
+          "sha256": "89b27140dfec6113d4b7ebec0f2da53d84adc6961c0180098b0976760886717f",
+          "bytes": 49281
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-3NPNU5GP.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-3NPNU5GP.mjs",
+          "sha256": "54ac6b5c2b7cd55aff3599580ad1d87ed129db124f5f8a925cfa0952d579b77e",
+          "bytes": 555
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-3SMGFRGC.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-3SMGFRGC.mjs",
+          "sha256": "a99edd6e8a918a262e80383f7b2106c7f137c661440afdd65e6ba2e3ff1dc02e",
+          "bytes": 597
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-4CAJECRU.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-4CAJECRU.mjs",
+          "sha256": "be13c6cc5a08abbacc854665dd8a16baac552f5de8e2e2261e621d3e22180635",
+          "bytes": 42423
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-4OADUZ5Q.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-4OADUZ5Q.mjs",
+          "sha256": "9bf3697e257ac173a527ce20d473447d909aba338028dcd8b4bfeca7ae42f368",
+          "bytes": 36746
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-5IMINLNL.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-5IMINLNL.mjs",
+          "sha256": "ed3c40c332ee25f9c86e89507f2a6d18edefda66eadfb38ef3aeb59b95dad2b2",
+          "bytes": 28157
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-5IQCK5RY.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-5IQCK5RY.mjs",
+          "sha256": "50330b12265054ea03877a2f3e6946e133b6bf2146a0c59e860a66b7203bc5a1",
+          "bytes": 3414
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-5MVFYWFU.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-5MVFYWFU.mjs",
+          "sha256": "da8327f2ce9790ba09dc0f905f39b29b7d8a01d1d9e2c0085b60bea5857ff7a8",
+          "bytes": 730
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-AQ6EADP3.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-AQ6EADP3.mjs",
+          "sha256": "13f83482f9731f6ed320746bf4f69aaaff5e1efdda94f64cd9ea6d9030b868c2",
+          "bytes": 663
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-AZZRMDJM.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-AZZRMDJM.mjs",
+          "sha256": "e5c109a799a86fc58b75bbb2cbdb72a6570c8c29821037d181ebe019db0beab1",
+          "bytes": 360
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-CLS4B6BI.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-CLS4B6BI.mjs",
+          "sha256": "d9d9807f18794a72e4ff199be084911035412ef28202a4f9499d792e84a70ca4",
+          "bytes": 62070
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-DZP67EKU.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-DZP67EKU.mjs",
+          "sha256": "e18a319b2c57124bb847dbc773d2bf01c38b724e20b7236a54849e88278711de",
+          "bytes": 49688
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-EICP7K5X.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-EICP7K5X.mjs",
+          "sha256": "589aa7a2687f2e1f2372e320196930bf0810dc8d8f27300cdafb4d11234328f5",
+          "bytes": 1991
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-GDY2UAB4.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-GDY2UAB4.mjs",
+          "sha256": "1292f7b58fdf9b2f283ee144e9089ac0b6894dbbfdc69ca718cf9377d1493e74",
+          "bytes": 1792
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-H7VHZCWX.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-H7VHZCWX.mjs",
+          "sha256": "4db617f30526ebfe1549ac8e873a922b35f4864d23d584b19bc52e9bda420965",
+          "bytes": 120482
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-IJBDOHL6.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-IJBDOHL6.mjs",
+          "sha256": "90fea472974e49e0f757e6ad31836dae671d1587f3b136e52de9d7ca2a74c24e",
+          "bytes": 316
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-JFFVMJIA.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-JFFVMJIA.mjs",
+          "sha256": "1f41f091a2ca39e6de91fae454d6c82d9771c6a0b98fb5adb5894ec20a43ff69",
+          "bytes": 1055
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-JQRUD6KW.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-JQRUD6KW.mjs",
+          "sha256": "ab31e28cd7a9246443f102d2d34e07740bb9a872d1a6a65deb165f163a641517",
+          "bytes": 221
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-JZGDI5JK.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-JZGDI5JK.mjs",
+          "sha256": "f1fe430d628dafbe9e47ad961c825e91022049933eac550c0a0ce2410d207048",
+          "bytes": 567
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-KD6SPIPN.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-KD6SPIPN.mjs",
+          "sha256": "295957e1edbe58548b83eb8b6ea4045ac7216c65f204d471d5c92270790faa01",
+          "bytes": 1186
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-NF366YI6.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-NF366YI6.mjs",
+          "sha256": "4d7a9173ed984bfb96722ccce824a8a2b01f81700de80c248350d6e23c8df650",
+          "bytes": 38388
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-NUDPKBEF.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-NUDPKBEF.mjs",
+          "sha256": "c10f6b350e128803e833adb6ea35b3074a69de13123d378654442ce3d43fc4ec",
+          "bytes": 47129
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-OJINMHTS.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-OJINMHTS.mjs",
+          "sha256": "ef50d37eb37dc732ecf2aba37db04bee1ab78b57f5ae2d88454f755b7352cc92",
+          "bytes": 1849
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-Q6NGPIAH.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-Q6NGPIAH.mjs",
+          "sha256": "65d0dbd87a4968db88063f45b5434f522eb75d6892aa04c325b29888d63b8c11",
+          "bytes": 1285
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-QJSWEUOL.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-QJSWEUOL.mjs",
+          "sha256": "3391f563eeeadc7ea41e174529bedf753a53d762518991e6e147de9e728758aa",
+          "bytes": 240059
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-R7JDMUKV.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-R7JDMUKV.mjs",
+          "sha256": "7d6880f7972b8e762f6e9ed6ac5b43eaac710e014d3917f30c6e0e567abb892c",
+          "bytes": 28563
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-RCXAM2GK.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-RCXAM2GK.mjs",
+          "sha256": "6839f1cffe1cf5cc6ef9db8d3622645cca8a93f0046d7889eb160a5f2ea6468e",
+          "bytes": 263
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-RT4MAWR3.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-RT4MAWR3.mjs",
+          "sha256": "05cfec7a5021dd214e7e7a125cf5da032cac60181b05f4b3d334aa616dc02eb0",
+          "bytes": 991
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-SFMINX4W.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-SFMINX4W.mjs",
+          "sha256": "62c0f226c1f6538717024ab3dc83cf247c3cc79fffe2055c88c399814b920df3",
+          "bytes": 1066
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-SLDQ463B.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-SLDQ463B.mjs",
+          "sha256": "f21a468ad1ad72859d3ecde501d3962ca120d70be027ff7d3f0accc1aeeac4c0",
+          "bytes": 15737
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-STOV2HOB.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-STOV2HOB.mjs",
+          "sha256": "b9dcf40a130db7675f59151f77ea069438782074fa847001abcd6bb82b8d9b02",
+          "bytes": 2020
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-T5OCTHI4.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-T5OCTHI4.mjs",
+          "sha256": "bcf848310d29d090f623a39375c36b19f4c78c0856bddd8a68b3998a729f2fdc",
+          "bytes": 189
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-TCEHX7R3.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-TCEHX7R3.mjs",
+          "sha256": "1c1c1e7d628172d88a6b99f3a6f7aa78790048b3e473102b0dddab6f9cb1d2c0",
+          "bytes": 556
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-VQC2EELJ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-VQC2EELJ.mjs",
+          "sha256": "643f189a49f174b871f9ebb3bc64785d24c76a17a75df04a3ed136ade0132dc4",
+          "bytes": 550
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-VRZKL3EH.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-VRZKL3EH.mjs",
+          "sha256": "d5f4b9482941721b7e66b11b5f2ad1b4fa429817f066b52e1dbe5a9622ed7948",
+          "bytes": 1415
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-VTHDQ7BV.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-VTHDQ7BV.mjs",
+          "sha256": "20eac5601b2d52ac6964c2bb342ff5d9d54b3d394d83382a43d349cc53194c55",
+          "bytes": 562
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-VY2OSTJR.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-VY2OSTJR.mjs",
+          "sha256": "355ab014d80cbf7c4a1b95b918f5f81d57323568e1044d2c3d8a0fb763b122a2",
+          "bytes": 18563
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-WUBWJARI.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-WUBWJARI.mjs",
+          "sha256": "4bcad87eea22a611249efbde3bbe17318f6c4aa4a287b5e45b2ed807d962b90e",
+          "bytes": 10142
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-YBMQ5JGJ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-YBMQ5JGJ.mjs",
+          "sha256": "ce240c1af80d2e1f9abc1c9320d6b4157c0daaec447ec47c12282a79b2477903",
+          "bytes": 1212
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-YDMLL4PJ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-YDMLL4PJ.mjs",
+          "sha256": "6786c76c702e2c7902c8c84e5c054f79e43005108ea1779b45b029c4eb0346b2",
+          "bytes": 2515
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-Z6V44ARX.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-Z6V44ARX.mjs",
+          "sha256": "8a42faac8d625c35b141d5dc8a6b3c23395196ca019c293edf9dd356ba00cf14",
+          "bytes": 105603
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-ZJJ7VQJP.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-ZJJ7VQJP.mjs",
+          "sha256": "18de2a79b1a33703a7ae4d5e26fd4e61f6abaedd5cb0da82767f3213a907d600",
+          "bytes": 470118
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-ZNLK7HRR.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-ZNLK7HRR.mjs",
+          "sha256": "8c9d1739ef3a4cf127de90b40d6bf3b30b22a25949739315f7830b28a091842d",
+          "bytes": 1944
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-ZQN7UHIL.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-ZQN7UHIL.mjs",
+          "sha256": "808ed4f224bf4b9cb698526c985f79d2d3bcf904d7016e5ae78cac18fb3119e1",
+          "bytes": 9746
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-ZS6VBONO.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-ZS6VBONO.mjs",
+          "sha256": "82769cff88bed14ec547cd2dc951dc294cd93bffca703a32e956eb4fbb0366a6",
+          "bytes": 705086
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/chunk-ZUNWM646.mjs",
+          "from": "dist/chunks/mermaid.esm.min/chunk-ZUNWM646.mjs",
+          "sha256": "e01309bd90be317eeaa84704a007206631eeda60d889360cf140ea8074359d3c",
+          "bytes": 568
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/classDiagram-FGAMPOII.mjs",
+          "from": "dist/chunks/mermaid.esm.min/classDiagram-FGAMPOII.mjs",
+          "sha256": "7ac8207454eb3e1812f19401efd31644d8627e2e92da3f204ff7d49deefb05aa",
+          "bytes": 765
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/classDiagram-v2-AI5RJEK4.mjs",
+          "from": "dist/chunks/mermaid.esm.min/classDiagram-v2-AI5RJEK4.mjs",
+          "sha256": "7ac8207454eb3e1812f19401efd31644d8627e2e92da3f204ff7d49deefb05aa",
+          "bytes": 765
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/cose-bilkent-Q72C2OJ3.mjs",
+          "from": "dist/chunks/mermaid.esm.min/cose-bilkent-Q72C2OJ3.mjs",
+          "sha256": "64b4e490460a504c67e6ed23e3793c3ce383e92f8f1bc7b899d50ff6b9005979",
+          "bytes": 84169
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/cynefin-OW5HDTMX-6OCTWOGG.mjs",
+          "from": "dist/chunks/mermaid.esm.min/cynefin-OW5HDTMX-6OCTWOGG.mjs",
+          "sha256": "3673a037dccd37b0a4ecf43174a2f4c3efe1401287df6d92a594b52ddacb4ce0",
+          "bytes": 161
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/cynefinDiagram-2OOWUY4M.mjs",
+          "from": "dist/chunks/mermaid.esm.min/cynefinDiagram-2OOWUY4M.mjs",
+          "sha256": "4845f013165a95b94ee6b47ec2ebc4b853062ac45924834eb3aa7f24e09681a9",
+          "bytes": 10595
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/dagre-MPVFI544.mjs",
+          "from": "dist/chunks/mermaid.esm.min/dagre-MPVFI544.mjs",
+          "sha256": "ddebb5e97d88653c8b00abc5250ff9fbffe2dad2b73bdc314444747e55b5f4db",
+          "bytes": 11016
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/diagram-AE4NWXFW.mjs",
+          "from": "dist/chunks/mermaid.esm.min/diagram-AE4NWXFW.mjs",
+          "sha256": "400add280e256d632496cb7704c80b03cf0969ec32215556ee9c2cd67d173d23",
+          "bytes": 4781
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/diagram-BUJID5UG.mjs",
+          "from": "dist/chunks/mermaid.esm.min/diagram-BUJID5UG.mjs",
+          "sha256": "4a7394637300ee31a05a57724c057e502b3b3f3ee59bc689feacbc9da4e3c0c6",
+          "bytes": 6617
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/diagram-C44CZ5NI.mjs",
+          "from": "dist/chunks/mermaid.esm.min/diagram-C44CZ5NI.mjs",
+          "sha256": "a2afe06e031bc69e12854aff2bb065596ec3cf9bbd636b0108f4c6e004fc81e4",
+          "bytes": 11620
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/diagram-EYOLEXXS.mjs",
+          "from": "dist/chunks/mermaid.esm.min/diagram-EYOLEXXS.mjs",
+          "sha256": "f7a6f0b6277fc48491bcbec1176799f8601661a8e61434fa6c158219aaf17c8a",
+          "bytes": 8738
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/diagram-P7B6PWOJ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/diagram-P7B6PWOJ.mjs",
+          "sha256": "32a9ecbef01f8032e3cf932eac2625bb66af6762881022a1689824d08b2ed9fc",
+          "bytes": 11231
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/ebnfDiagram-FTPZ3PV6.mjs",
+          "from": "dist/chunks/mermaid.esm.min/ebnfDiagram-FTPZ3PV6.mjs",
+          "sha256": "645638dafef2e83d732f843d15b4e57f15f7d681f9dfd446e5311af8b835d50d",
+          "bytes": 2507
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/erDiagram-H3ERR26V.mjs",
+          "from": "dist/chunks/mermaid.esm.min/erDiagram-H3ERR26V.mjs",
+          "sha256": "dc265fa82b2da70d4226b863b6048b7b1f74b3cb4151f24c5a53d7a6f489f10f",
+          "bytes": 31112
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/eventmodeling-NTZA5JFV-WKSWQHFS.mjs",
+          "from": "dist/chunks/mermaid.esm.min/eventmodeling-NTZA5JFV-WKSWQHFS.mjs",
+          "sha256": "7a0d2259b0941d0c6657e8160e36d418518138fae3ec0b766c833f1724f8c802",
+          "bytes": 173
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/flowDiagram-YHGXBVSY.mjs",
+          "from": "dist/chunks/mermaid.esm.min/flowDiagram-YHGXBVSY.mjs",
+          "sha256": "1c0da2132dec1c08b762505be3091d401e2bd9fb43a1ae74f561ad05ac4b8bd9",
+          "bytes": 644
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/ganttDiagram-RWFTB7ED.mjs",
+          "from": "dist/chunks/mermaid.esm.min/ganttDiagram-RWFTB7ED.mjs",
+          "sha256": "739351c9e4700622e1a37618d553306e56acc595b058186449885e182dced32b",
+          "bytes": 50497
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/gitGraph-4MIJSDKK-JH2HKYUO.mjs",
+          "from": "dist/chunks/mermaid.esm.min/gitGraph-4MIJSDKK-JH2HKYUO.mjs",
+          "sha256": "04cb3a82503ad0ad6606d62cd3c5f3314b59546851825c0caedb47e150ebec94",
+          "bytes": 163
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/gitGraphDiagram-MAR6GKOP.mjs",
+          "from": "dist/chunks/mermaid.esm.min/gitGraphDiagram-MAR6GKOP.mjs",
+          "sha256": "d271799a57003c1f245b7792db21dc2d3771452974b8d2beae59d2a907174da4",
+          "bytes": 29721
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/info-A6RAGUB7-3TX3OFWW.mjs",
+          "from": "dist/chunks/mermaid.esm.min/info-A6RAGUB7-3TX3OFWW.mjs",
+          "sha256": "a049a15c97fe2ed00ed494e89732bd9ee3ee1edfbb4179cc36c5b595e561b7f2",
+          "bytes": 155
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/infoDiagram-LV547AFH.mjs",
+          "from": "dist/chunks/mermaid.esm.min/infoDiagram-LV547AFH.mjs",
+          "sha256": "1b82705da5326e34ec1c469fd5b6e6491ab33078e113a8fd004ed40be1cd3d3b",
+          "bytes": 1117
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/ishikawaDiagram-PUJQGNDS.mjs",
+          "from": "dist/chunks/mermaid.esm.min/ishikawaDiagram-PUJQGNDS.mjs",
+          "sha256": "75981c9d876c51d8af54b18f5f82c5dc347b7bc06a6a602043fe8c5b01a23335",
+          "bytes": 17602
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/journeyDiagram-EW5QJT4W.mjs",
+          "from": "dist/chunks/mermaid.esm.min/journeyDiagram-EW5QJT4W.mjs",
+          "sha256": "2a913827a97901d37276ab4372b446cee7f7eec7632e1909627edfabfd90b2e4",
+          "bytes": 23544
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/kanban-definition-JSQERAZB.mjs",
+          "from": "dist/chunks/mermaid.esm.min/kanban-definition-JSQERAZB.mjs",
+          "sha256": "7fab8d794dae6ce08ad9ed6c5754bc76b7bb5a3ae68facfeedfcc812abd2deb9",
+          "bytes": 20783
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/katex-CZ4GXH2S.mjs",
+          "from": "dist/chunks/mermaid.esm.min/katex-CZ4GXH2S.mjs",
+          "sha256": "9f719fd1391e8ef7121397c685dc3dc458c454c69a60ab853ffd592974545c73",
+          "bytes": 272628
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/mindmap-definition-VBJCLQLM.mjs",
+          "from": "dist/chunks/mermaid.esm.min/mindmap-definition-VBJCLQLM.mjs",
+          "sha256": "ca3bf77a2aa1df3dff8c65895312af8883d34f55c33648fdb9c53e0c1cbf25c3",
+          "bytes": 23892
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/packet-AYTQ26CC-MKII6P3Y.mjs",
+          "from": "dist/chunks/mermaid.esm.min/packet-AYTQ26CC-MKII6P3Y.mjs",
+          "sha256": "a42182bcd7e91e962c0b9ef4d595770049a8d05207fc6df9ae11134050eb676d",
+          "bytes": 159
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/pegDiagram-7WILOQTJ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/pegDiagram-7WILOQTJ.mjs",
+          "sha256": "6bb4d5ea1f98ace9a833a4ad0843a2340e202729b6dc3545c9c4b5d2ff4feabc",
+          "bytes": 2449
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/pie-WAS4IAKB-6B4OPMJ5.mjs",
+          "from": "dist/chunks/mermaid.esm.min/pie-WAS4IAKB-6B4OPMJ5.mjs",
+          "sha256": "e221cc7039d38156f61ef8b7e37bd4fcd973b798abbdd534339962befb246f3c",
+          "bytes": 153
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/pieDiagram-EFA7CBSB.mjs",
+          "from": "dist/chunks/mermaid.esm.min/pieDiagram-EFA7CBSB.mjs",
+          "sha256": "7c8083c97901cbd78efd599afb5a8d2580522c7d58531803fbe0ff0689bdc4a9",
+          "bytes": 5615
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/quadrantDiagram-WARVYA7P.mjs",
+          "from": "dist/chunks/mermaid.esm.min/quadrantDiagram-WARVYA7P.mjs",
+          "sha256": "b86e6660f1bd76e82862edf2362de20658e9c7dfdc5c1ec8abe4417ceed8f7c3",
+          "bytes": 34035
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/radar-RG4KPBEZ-UPTR3XUL.mjs",
+          "from": "dist/chunks/mermaid.esm.min/radar-RG4KPBEZ-UPTR3XUL.mjs",
+          "sha256": "1fffddc7a957598d17b0cbcf80cfc9ac64b525ca0a78890b30e86ebe23c42ec9",
+          "bytes": 157
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/railroad-74A4TZTK-MEFUPFMS.mjs",
+          "from": "dist/chunks/mermaid.esm.min/railroad-74A4TZTK-MEFUPFMS.mjs",
+          "sha256": "49858f63ad437c6d21b3f3dc337092899927138c19bb1adca2a439c2433d3c1f",
+          "bytes": 163
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/railroad-abnf-HS5TGJTU-R5YG2S5D.mjs",
+          "from": "dist/chunks/mermaid.esm.min/railroad-abnf-HS5TGJTU-R5YG2S5D.mjs",
+          "sha256": "699bc151d277be89f4bece8732cc4f1b164b05b1ce32c9013d8aa0b9aeb7a65f",
+          "bytes": 171
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/railroad-ebnf-LZEXJU2U-G5QEX2L6.mjs",
+          "from": "dist/chunks/mermaid.esm.min/railroad-ebnf-LZEXJU2U-G5QEX2L6.mjs",
+          "sha256": "893fe225cabee894ad304d0157984ee3cb81f5d88129eb6bc7cac1412469e70f",
+          "bytes": 171
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/railroad-peg-WCYAUIDC-H5I2ZRY2.mjs",
+          "from": "dist/chunks/mermaid.esm.min/railroad-peg-WCYAUIDC-H5I2ZRY2.mjs",
+          "sha256": "8704fa15153e0e1ea91c13abbdc00eb255e6825975a18219798dd29e98bda6e9",
+          "bytes": 169
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/railroadDiagram-5NIQVNLQ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/railroadDiagram-5NIQVNLQ.mjs",
+          "sha256": "31fa2d7d2172c7a2f3cb0796f47c7849e802d832e72f9cc46bf983fd4c7edb03",
+          "bytes": 2115
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/requirementDiagram-SXREGOKZ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/requirementDiagram-SXREGOKZ.mjs",
+          "sha256": "08da5c6d72853a695d15283221a4e0240a834eb350ac2070731e35eed5451326",
+          "bytes": 31417
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/sankeyDiagram-VV74M2VP.mjs",
+          "from": "dist/chunks/mermaid.esm.min/sankeyDiagram-VV74M2VP.mjs",
+          "sha256": "dd3d1dc24f20079cc5a3f3e5d3dfd373a63d9ecb13fe8d43d3170c9c9f3f1903",
+          "bytes": 24134
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/sequenceDiagram-52ZFIFDL.mjs",
+          "from": "dist/chunks/mermaid.esm.min/sequenceDiagram-52ZFIFDL.mjs",
+          "sha256": "7cc84b563c56b6abfc1d9f260ec8916975351f44498b20ab171dfebd03891466",
+          "bytes": 116945
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/sizeCapture-FGA5AGYP.mjs",
+          "from": "dist/chunks/mermaid.esm.min/sizeCapture-FGA5AGYP.mjs",
+          "sha256": "d35e060aabccb4c14e76f544a9925631e0b3dcea95dca128ee0ffe0ae3c803f9",
+          "bytes": 884
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/stateDiagram-3QAKPIVI.mjs",
+          "from": "dist/chunks/mermaid.esm.min/stateDiagram-3QAKPIVI.mjs",
+          "sha256": "b75710fcc8b6d579a7dcfd5003b53a3605b8e33399c040b75be2943bacb9db92",
+          "bytes": 10684
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/stateDiagram-v2-HN2P4RDZ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/stateDiagram-v2-HN2P4RDZ.mjs",
+          "sha256": "e2112d71443794ba154b40e2c854b20bd4a7fb232003ad5baa50c4989071fbec",
+          "bytes": 744
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/swimlanes-QLVP42QD.mjs",
+          "from": "dist/chunks/mermaid.esm.min/swimlanes-QLVP42QD.mjs",
+          "sha256": "78eceed73f4dafe2f48dca8d6258e1cb595d794c828a395cc2f11b2900f334ad",
+          "bytes": 113508
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/swimlanesDiagram-JKPDBFCN.mjs",
+          "from": "dist/chunks/mermaid.esm.min/swimlanesDiagram-JKPDBFCN.mjs",
+          "sha256": "6c69d000b2fb61d256a37dd206b7a3a2f41301724c9934419261c2fee07426e0",
+          "bytes": 848
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/timeline-definition-GS45XAXW.mjs",
+          "from": "dist/chunks/mermaid.esm.min/timeline-definition-GS45XAXW.mjs",
+          "sha256": "372c188af796d4da8597e40acdea07c67a2f347982a6ac706fea06cce64c9164",
+          "bytes": 30820
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/treeView-Q6P3EWNA-ZRJGANNQ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/treeView-Q6P3EWNA-ZRJGANNQ.mjs",
+          "sha256": "626ac2b55c359f8d66b23f808ace83e9b8fa42dc2d4b24f5fe220f46d77a4e07",
+          "bytes": 163
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/treemap-WGGIJYW6-K64VN5AS.mjs",
+          "from": "dist/chunks/mermaid.esm.min/treemap-WGGIJYW6-K64VN5AS.mjs",
+          "sha256": "5644609a51361da9b7af4eabcf737c6a01de13fbe88f7794b81d4b0b851549bc",
+          "bytes": 161
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/vennDiagram-QIQU2ZRJ.mjs",
+          "from": "dist/chunks/mermaid.esm.min/vennDiagram-QIQU2ZRJ.mjs",
+          "sha256": "228d23d9586cce323cfaeeeed75261d1efca5f8cb0da6ce9505ab5e8c0a36bb4",
+          "bytes": 43040
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/wardley-WFR3VGLG-D67OWCCH.mjs",
+          "from": "dist/chunks/mermaid.esm.min/wardley-WFR3VGLG-D67OWCCH.mjs",
+          "sha256": "ad773649e26871e4f65dc6262db9a65378777d1643237abfc9ce5c9cd4b5b7ae",
+          "bytes": 161
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/wardleyDiagram-U6YNM66N.mjs",
+          "from": "dist/chunks/mermaid.esm.min/wardleyDiagram-U6YNM66N.mjs",
+          "sha256": "8b12c487b127a98df6a58ebb16b897e8b796d5e44d18c7f1ede5fc8a83a4897f",
+          "bytes": 25906
+        },
+        {
+          "path": "mermaid-11.17.2/chunks/mermaid.esm.min/xychartDiagram-XJAZEDNM.mjs",
+          "from": "dist/chunks/mermaid.esm.min/xychartDiagram-XJAZEDNM.mjs",
+          "sha256": "500cf50c040f474f8efe8af2f98a606d0540099d91d4caf6ebcd2c464da2f933",
+          "bytes": 43329
+        }
+      ]
+    }
+  ]
+}

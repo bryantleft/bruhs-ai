@@ -1,0 +1,19 @@
+Third-party software in Bruhs
+=============================
+
+Bruhs is MIT licensed. It includes the open source software below; each
+entry lists the components under one license, followed by that license.
+
+Rust crates
+-----------
+{{#each licenses}}
+
+--------------------------------------------------------------------------
+{{name}} ({{id}})
+Used by:
+{{#each used_by}}
+  - {{crate.name}} {{crate.version}}{{#if crate.repository}} <{{crate.repository}}>{{/if}}
+{{/each}}
+
+{{text}}
+{{/each}}

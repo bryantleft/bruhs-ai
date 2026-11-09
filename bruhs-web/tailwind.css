@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+.bruhs-brand-logo {
+  display: block !important;
+  aspect-ratio: 1 / 1;
+  inline-size: 1.25rem !important;
+  block-size: 1.25rem !important;
+  width: 1.25rem !important;
+  height: 1.25rem !important;
+  min-width: 1.25rem !important;
+  max-width: 1.25rem !important;
+  min-height: 1.25rem !important;
+  max-height: 1.25rem !important;
+  object-fit: contain;
+  flex-shrink: 0;
+}
+
+.bruhs-provider-logo {
+  display: block !important;
+  aspect-ratio: 1 / 1;
+  inline-size: 0.75rem !important;
+  block-size: 0.75rem !important;
+  width: 0.75rem !important;
+  height: 0.75rem !important;
+  min-width: 0.75rem !important;
+  max-width: 0.75rem !important;
+  min-height: 0.75rem !important;
+  max-height: 0.75rem !important;
+  object-fit: contain;
+  flex-shrink: 0;
+  filter: brightness(0) invert(1);
+  opacity: 0.6;
+}
+
+/* The sidebar's "Codex updated" pill drains over its three visible seconds
+   (T3's provider pill). Reduced motion keeps the pill, not the bar. */
+.bruhs-update-progress {
+  animation: bruhs-update-progress 3s linear forwards;
+}
+@keyframes bruhs-update-progress {
+  from { transform: scaleX(1); }
+  to { transform: scaleX(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bruhs-update-progress { display: none; }
+}

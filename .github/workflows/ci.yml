@@ -1,0 +1,142 @@
+name: CI
+
+# Started by hand from the Actions tab. The gate is `scripts/gate.sh`, run
+# locally before merging; this repeats it on hosted Linux and macOS runners.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_TERM_COLOR: always
+  CARGO_BUILD_JOBS: "2"
+  # Hosted runners have limited disk; symbols aren't needed for these gates.
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+
+jobs:
+  # Crates that build and test on any platform. Everything except the macOS-only
+  # capture/desktop pair (see the `macos` job) and the wasm UI (see `wasm`).
+  linux:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      # Reads rust-toolchain.toml: pinned channel, components, wasm target.
+      - name: Install repository-pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # bruhs-core's keyring uses the Secret Service backend on Linux, which
+      # links libdbus through pkg-config.
+      - name: Install system libraries
+        run: sudo apt-get update && sudo apt-get install -y --no-install-recommends libdbus-1-dev pkg-config
+
+      - name: Formatting
+        run: cargo fmt --all --check
+
+      - name: Strict lint
+        run: >-
+          cargo clippy -p bruhs-models -p bruhs-core -p bruhs-server -p bruhs-mcp
+          -p claude-sdk-rs -p codex-sdk-rs --all-targets --all-features --locked
+          -- -D warnings
+
+      - name: Tests
+        run: >-
+          cargo test -p bruhs-models -p bruhs-core -p bruhs-server -p bruhs-mcp
+          -p claude-sdk-rs -p codex-sdk-rs --all-features --locked
+
+      - name: Rustdoc (broken links and bad markup fail the build)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: >-
+          cargo doc -p bruhs-models -p bruhs-core -p bruhs-server -p bruhs-mcp
+          -p claude-sdk-rs -p codex-sdk-rs --no-deps --locked
+
+  # bruhs-capture uses macOS-only frameworks (ScreenCaptureKit via cidre, Metal
+  # whisper, sherpa binaries) and bruhs-desktop is the native GPUI app, so these
+  # two stay on macOS. Their docs are built here for the same reason.
+  macos:
+    runs-on: macos-14
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install repository-pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Strict lint
+        run: cargo clippy -p bruhs-desktop -p bruhs-capture --all-targets --all-features --locked -- -D warnings
+
+      - name: Tests
+        run: cargo test -p bruhs-desktop -p bruhs-capture --all-features --locked
+
+      - name: Rustdoc (broken links and bad markup fail the build)
+        env:
+          RUSTDOCFLAGS: -D warnings
+        run: cargo doc -p bruhs-desktop -p bruhs-capture --no-deps --locked
+
+  wasm:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      # rust-toolchain.toml lists the wasm32-unknown-unknown target.
+      - name: Install repository-pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Cache cargo registry and build output
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      # bruhs-web also carries native unit tests (storage codecs, queues, ...).
+      - name: Native lint
+        run: cargo clippy -p bruhs-web --all-targets --all-features --locked -- -D warnings
+
+      - name: Native tests
+        run: cargo test -p bruhs-web --all-features --locked
+
+      - name: WASM lint
+        run: cargo clippy -p bruhs-web --target wasm32-unknown-unknown --locked -- -D warnings
+
+      - name: Install trunk
+        uses: jetli/trunk-action@1346cc09eace4beb84e403e199a471346d4684c9 # v0.5.1
+        with:
+          version: v0.21.14
+
+      - name: Build production WASM bundle
+        working-directory: bruhs-web
+        env:
+          BRUHS_API_URL: ""
+        run: trunk build --release --locked
+
+  deny:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Audit advisories, licenses, bans and sources
+        uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check

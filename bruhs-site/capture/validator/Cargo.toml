@@ -1,0 +1,12 @@
+[package]
+name = "bruhs-seed-validator"
+version = "0.0.0"
+edition = "2021"
+publish = false
+
+[dependencies]
+bruhs-models = { path = "/tmp/bruhs-shot-src/bruhs-models" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+
+[workspace]

@@ -1,0 +1,147 @@
+# Root Cargo workspace.
+#
+# Each member crate keeps its own [package] (name/version/edition) so they
+# remain independently buildable. None are published to crates.io. The
+# workspace exists to share a single target/ directory and
+# Cargo.lock across all crates, and to enable `cargo build --workspace`
+# from the repo root.
+#
+# To build a single member from root:
+#     cargo build -p bruhs-server
+#     cargo run -p bruhs-mcp
+#
+# To build everything natively (bruhs-web included: it compiles for the host
+# too, which is how its unit tests run; the browser bundle is
+# `cd bruhs-web && trunk build`):
+#     cargo build --workspace
+
+[workspace]
+resolver = "2"
+members = [
+    "bruhs-web",
+    "bruhs-server",
+    "bruhs-core",
+    "bruhs-models",
+    "bruhs-desktop",
+    "bruhs-mcp",
+    "bruhs-capture",
+    "claude-sdk-rs",
+    "codex-sdk-rs",
+]
+exclude = ["third_party/gpui-component"]
+
+[workspace.package]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/bryantleft/bruhs-ai"
+# Matches rust-toolchain.toml: the zed gpui pin needs a recent compiler, so the
+# MSRV is the pinned toolchain rather than something older we do not test.
+rust-version = "1.95"
+
+# Every dependency used by two or more members is declared once here. Members
+# opt in with `dep = { workspace = true }` and add only the features they need
+# on top (features are additive across the workspace).
+[workspace.dependencies]
+# Internal crates
+bruhs-core = { path = "bruhs-core" }
+bruhs-models = { path = "bruhs-models" }
+
+# Async runtime and futures
+tokio = "1"
+tokio-stream = "0.1"
+futures-core = "0.3"
+# Members choose their own feature set; `default-features = false` keeps the
+# wasm build (bruhs-web) and the server from pulling in more than they use.
+futures-util = { version = "0.3", default-features = false }
+async-stream = "0.3"
+
+# Serialization and data
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+uuid = { version = "1", features = ["v4"] }
+chrono = { version = "0.4", default-features = false, features = ["clock", "std"] }
+
+# HTTP
+axum = "0.8"
+tower-http = "0.6"
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+
+# Errors, logging
+thiserror = "2.0.18"
+tracing = "0.1"
+tracing-subscriber = "0.3"
+
+# Storage and platform
+# Pinned exactly once: bruhs-core and bruhs-capture both link libsqlite3-sys,
+# which cargo allows only one version of per build.
+rusqlite = { version = "=0.40.2", features = ["bundled"] }
+directories = "6"
+rand = "0.9"
+sha2 = "0.10"
+cpal = "0.15"
+# OS credential stores. Without a backend feature keyring silently falls back
+# to an in-memory mock, so every platform the app runs on is listed. The Linux
+# Secret Service backend links libdbus (CI installs libdbus-1-dev).
+keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
+
+# gpui comes from a fork, one commit ahead of upstream: it wraps prose the
+# way a browser does (no break at `/`, break after `-`) so the desktop app and
+# the web app break the same lines. Upstream deliberately does the opposite for
+# `/`, so this is not something to send back. To move gpui forward, rebase
+# `bruhs-prose-line-breaking` on bnleft/zed and bump the rev here and in
+# third_party/gpui-component/Cargo.toml (excluded from this workspace, so it
+# keeps its own pins; see third_party/gpui-component/VENDORED.md).
+gpui = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
+gpui_platform = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
+
+# Dev-only
+tempfile = "3"
+
+[patch."https://github.com/bnleft/zed"]
+# zed's `ztracing` (and through it `zlog`, `ztracing_macro`) is GPL-3.0; gpui's
+# sum_tree only uses its no-op `#[instrument]`. This keeps the distributed
+# binaries MIT. See third_party/ztracing-noop/README.md.
+ztracing = { path = "third_party/ztracing-noop" }
+
+[workspace.lints.rust]
+future-incompatible = "warn"
+nonstandard-style = "deny"
+rust-2018-idioms = "warn"
+
+[workspace.lints.clippy]
+# Group first (priority -1) so every individual lint below can override it.
+all = { level = "deny", priority = -1 }
+clone-on-copy = "deny"
+large-enum-variant = "deny"
+manual-ok-or = "deny"
+map-unwrap-or = "deny"
+needless-borrow = "deny"
+needless-collect = "deny"
+redundant-clone = "deny"
+# Warn on .unwrap() across all crates. Test code is exempt via
+# `allow-unwrap-in-tests` in clippy.toml, and CI runs clippy with `-D warnings`
+# (which promotes this warning to an error), so production unwraps fail CI.
+unwrap-used = { level = "warn", priority = 0 }
+# Every suppression says why, and `#[expect]` (which fails once the lint stops
+# firing) is preferred over `#[allow]` so stale suppressions get removed.
+allow-attributes = "warn"
+allow-attributes-without-reason = "deny"
+# Every `unsafe` block carries a `// SAFETY:` comment explaining why it is sound.
+undocumented-unsafe-blocks = "deny"
+# Locks are released right after their last use; where a guard must span more
+# (atomic multi-map updates), an explicit `drop` marks the end of the section.
+significant-drop-tightening = "warn"
+# Numeric `as` casts that can truncate, wrap, drop a sign or lose precision
+# are not silent: use `From`/`TryFrom`, `EpochMs` for timestamps, or the named
+# lossy conversions in `bruhs_models::num` when rounding is the intent.
+cast-possible-truncation = "warn"
+cast-sign-loss = "warn"
+cast-possible-wrap = "warn"
+cast-precision-loss = "warn"
+cast-lossless = "warn"
+
+# Profile tuning common to all members, including the wasm bundle:
+# `trunk build --release` builds bruhs-web with this cargo profile.
+[profile.release]
+lto = true
+codegen-units = 1

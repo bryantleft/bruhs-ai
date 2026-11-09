@@ -1,0 +1,35 @@
+# Rust build artifacts
+target/
+**/target/
+*.rs.bk
+
+# WASM build output (Trunk)
+bruhs-web/dist/
+
+# Editor / OS
+.DS_Store
+.idea/
+.vscode/
+*.swp
+
+# Env / secrets
+.env
+.env.local
+.env.*.local
+
+# Local-only logs / replays from dev tools
+.expect/
+.playwright-mcp/
+
+# Python / Node scratch
+__pycache__/
+*.pyc
+node_modules/
+
+# Local agent settings and scratch space
+.claude/
+CLAUDE.md
+AGENTS.md
+
+# Release bundles (scripts/bundle-macos.sh)
+/dist/

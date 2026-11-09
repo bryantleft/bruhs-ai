@@ -1,0 +1,5 @@
+[
+  {"sku": "B-200", "name": "Bolts, zinc (100)", "quantity": 12, "unit_price": "4.25"},
+  {"sku": "A-100", "name": "Anchor \"heavy\"", "quantity": 3, "unit_price": "19.99"},
+  {"sku": "C-300", "name": "Cable tie", "quantity": 250, "unit_price": "0.015"}
+]
