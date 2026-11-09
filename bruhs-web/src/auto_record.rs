@@ -146,6 +146,7 @@ impl CaptureSettings {
 impl CaptureOptions {
     fn body(&self, meeting: &Meeting) -> Result<api::CaptureStartBody, IdError> {
         Ok(api::CaptureStartBody {
+            transcription: None,
             meeting_id: MeetingId::try_from(meeting.id.as_str())?,
             started_at_ms: api::epoch_ms(meeting.started_at_ms),
             model: Some(self.whisper_model),

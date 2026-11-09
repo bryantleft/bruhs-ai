@@ -283,6 +283,8 @@ pub struct CaptureStartBody {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub live_model: Option<WhisperModel>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transcription: Option<crate::TranscriptionSettings>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub subspeaker_enabled: Option<bool>,
     /// Auto-link voice clusters to existing people.
     #[serde(default, skip_serializing_if = "Option::is_none")]
