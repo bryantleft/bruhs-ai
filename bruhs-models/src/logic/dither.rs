@@ -18,13 +18,14 @@ const AMBIENT: f32 = 0.25;
 const RIM: f32 = 0.35;
 
 // Geometry in face radii, from the logo's 600×600 viewBox (r = 300), facing
-// forward (`bruhGeometry.faces.original`).
-const LEFT_EYE: (f32, f32) = (-0.34, -0.257);
-const RIGHT_EYE: (f32, f32) = (0.337, -0.257);
+// forward (`bruhGeometry.faces.original`). The eyes are mirrored about the
+// center (the logo has them 102 and 101 units out): the hex grid is
+// symmetric, so mirrored eyes cut identical slits.
+const EYE_X: f32 = 101.5 / 300.0;
+const EYE_Y: f32 = -0.257;
 const MOUTH: (f32, f32) = (0.023, 0.26);
 const EYE_RX: f32 = 40.0 / 300.0;
 const MOUTH_RX: f32 = 120.0 / 300.0;
-const FEATURE_RY: f32 = 10.0 / 300.0;
 
 /// Which color a dot is drawn in.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -63,7 +64,8 @@ pub fn shade(dx: f32, dy: f32) -> Option<f32> {
 
 /// Every dot of a static Bruh filling a `size` × `size` box (face radius
 /// 0.42 × size): a hex grid anchored on the face's center, each dot's area
-/// tracking the light; eyes are holes and the mouth is one row.
+/// tracking the light. The eyes and mouth are one row each: an oval hole cut
+/// across staggered rows comes out ▽ on one eye and △ on the other.
 pub fn bruh_dots(size: f32) -> Vec<Dot> {
     if size.is_nan() || size <= 0.0 {
         return Vec::new();
@@ -71,29 +73,24 @@ pub fn bruh_dots(size: f32) -> Vec<Dot> {
     let (cx, cy, r) = (size / 2.0, size / 2.0, size * 0.42);
     let pitch = pitch_for(r);
     let row_h = pitch * 3.0_f32.sqrt() / 2.0;
-    let eye_ry = FEATURE_RY.max(pitch * 0.9 / r);
+    let eye_row = (EYE_Y * r / row_h).round().to_i32_saturating();
     let mouth_row = (MOUTH.1 * r / row_h).round().to_i32_saturating();
     let rows = (r / row_h).ceil().to_i32_saturating() + 1;
     let cols = (r / pitch).ceil().to_i32_saturating() + 1;
-    let in_ellipse = |dx: f32, dy: f32, (ex, ey): (f32, f32), rx: f32, ry: f32| {
-        let u = (dx - ex) / rx;
-        let v = (dy - ey) / ry;
-        u * u + v * v <= 1.0
-    };
 
     let mut dots = Vec::new();
     for row in -rows..=rows {
         let y = cy + row.to_f32_lossy() * row_h;
-        let offset = if row % 2 == 0 { 0.0 } else { pitch / 2.0 };
         for col in -cols..=cols {
-            let x = cx + col.to_f32_lossy() * pitch + offset;
-            let (dx, dy) = ((x - cx) / r, (y - cy) / r);
+            // Offsets in whole half-steps, so a dot and its mirror twin get
+            // exactly negated positions and the face stays symmetric.
+            let half_steps = (2 * col + row.rem_euclid(2)).to_f32_lossy();
+            let x = cx + half_steps * pitch / 2.0;
+            let (dx, dy) = (half_steps * pitch / (2.0 * r), (y - cy) / r);
             let Some(mut value) = shade(dx, dy) else {
                 continue;
             };
-            if in_ellipse(dx, dy, LEFT_EYE, EYE_RX, eye_ry)
-                || in_ellipse(dx, dy, RIGHT_EYE, EYE_RX, eye_ry)
-            {
+            if row == eye_row && ((dx.abs() - EYE_X) / EYE_RX).abs() <= 1.0 {
                 continue;
             }
             let is_mouth = row == mouth_row && ((dx - MOUTH.0) / MOUTH_RX).abs() <= 1.0;
@@ -176,8 +173,21 @@ mod tests {
             nearest(&dots, c - 0.4 * r, c - 0.5 * r).radius
                 > nearest(&dots, c + 0.5 * r, c + 0.6 * r).radius
         );
-        let eye = (c - 0.34 * r, c - 0.257 * r);
-        assert!(dots.iter().all(|d| (d.x - eye.0).hypot(d.y - eye.1) > 4.0));
+        // Eye slits: one row, mirror images (every face dot has a twin).
+        let row_h = pitch_for(r) * 3.0_f32.sqrt() / 2.0;
+        let eye_y = c + (EYE_Y * r / row_h).round() * row_h;
+        let in_slit = |d: &&Dot, side: f32| {
+            (d.y - eye_y).abs() < 1e-3 && (d.x - (c + side * EYE_X * r)).abs() <= EYE_RX * r
+        };
+        assert!(!dots.iter().any(|d| in_slit(&d, -1.0) || in_slit(&d, 1.0)));
+        let mouth_y = c + (MOUTH.1 * r / row_h).round() * row_h;
+        let face: Vec<&Dot> = dots
+            .iter()
+            .filter(|d| d.kind == DotKind::Face && (d.y - mouth_y).abs() > 1e-3)
+            .collect();
+        assert!(face.iter().all(|d| face
+            .iter()
+            .any(|t| (t.x - (2.0 * c - d.x)).abs() < 0.01 && (t.y - d.y).abs() < 0.01)));
         let mouth: Vec<&Dot> = dots.iter().filter(|d| d.kind == DotKind::Mouth).collect();
         assert!(mouth.len() >= 6);
         assert!(mouth.iter().all(|d| (d.y - mouth[0].y).abs() < 1e-3));
