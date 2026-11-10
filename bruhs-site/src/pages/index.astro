@@ -152,24 +152,40 @@ const highlights = latest.sections.flatMap((section) => section.items).slice(0, 
       <div class="wrap faq">
         <h2 class="h2" id="faq-title" tabindex="-1">Questions</h2>
         <details>
+          <summary>How is it different from Claude Code or Codex?</summary>
+          <p>It runs them. bruhs drives the Claude Code and Codex you already have, on your own login, and puts your tasks, calendar, meetings, people and notes in the same window, so an agent can work from your day. Bring your threads over from Claude Code, Codex, T3 Code or Cursor, and continue any thread back in Claude Code, Codex or T3 Code.</p>
+        </details>
+        <details>
           <summary>Is it free?</summary>
-          <p>Yes. bruhs is MIT licensed and has no paid tier. Agents run on your own Claude or ChatGPT subscription.</p>
+          <p>Yes. bruhs is MIT licensed, with no paid tier and no account to make. Agents run on the Claude or ChatGPT plan you already pay for.</p>
+        </details>
+        <details>
+          <summary>Can I use an API key instead?</summary>
+          <p>Yes, for Claude. bruhs ignores <code>ANTHROPIC_API_KEY</code> by default so a stray key doesn't switch you to per-token billing; set <code>BRUHS_CLAUDE_USE_API_KEY=1</code> to use it. Codex uses whatever <code>codex login</code> set up.</p>
+        </details>
+        <details>
+          <summary>Will an agent change my code without asking?</summary>
+          <p>Not in the default mode. Claude asks before it edits a file or runs a command, and Codex, which can't ask, runs read-only. Auto-accept lets either one write. Every change shows up in the diff panel, and Edit from here rewinds a thread and its files to an earlier message.</p>
+        </details>
+        <details>
+          <summary>Does a bot join my calls?</summary>
+          <p>No. bruhs records your microphone and your Mac's audio, so it works with Zoom, Meet, Teams or anything else that makes sound, and nobody sees a bot. It doesn't tell anyone you're recording, so ask first; some places require everyone's consent.</p>
         </details>
         <details>
           <summary>What leaves my Mac?</summary>
-          <p>Only what you send: messages to Claude or Codex through your own login, Google Calendar if you connect it, and update checks you can turn off. Meeting audio stays on your Mac unless you point transcription at your own server.</p>
+          <p>What you send to Claude or Codex, through your own login, including a meeting's transcript when Claude summarizes it. Google Calendar, if you connect it. Update checks, which you can turn off. Recordings stay on your Mac unless you point transcription at your own server.</p>
         </details>
         <details>
-          <summary>Do I need Claude Code or Codex?</summary>
-          <p>For agents, yes: bruhs runs the CLI you already have, signed in with <code>claude auth login</code> or <code>codex login</code>. Meeting summaries use Claude. Tasks, calendar, notes and transcription work without either.</p>
+          <summary>Does it work with my calendar?</summary>
+          <p>Google Calendar, read-only, through a Google Cloud client you create (the README walks through it). Tasks and focus blocks live in bruhs's own calendar. Outlook and iCloud aren't supported yet.</p>
         </details>
         <details>
-          <summary>What Mac do I need?</summary>
-          <p>macOS 13 or later on Apple silicon.</p>
+          <summary>Does it sync between my devices?</summary>
+          <p>No. There's no bruhs server to sync through, so your data stays on the Mac it's on.</p>
         </details>
         <details>
-          <summary>Windows or Linux?</summary>
-          <p>There's no download yet. bruhs runs from source in the browser there, and meetings record the microphone only.</p>
+          <summary>What do I need to run it?</summary>
+          <p>A Mac on Apple silicon with macOS 13 or later. On Windows and Linux there's no download yet: bruhs runs from source in the browser, and meetings record the microphone only.</p>
         </details>
       </div>
     </section>
