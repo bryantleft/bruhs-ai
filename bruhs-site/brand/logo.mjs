@@ -1,7 +1,7 @@
-// The bruhs.ai mark: the Bruh's sphere as a disc of yellow dots on a 6×6
-// grid, halftoned so the dots shrink toward the rim like a lit ball.
-// Dots on a coarse grid stay crisp down to a 16px favicon, where a dithered
-// face would turn to noise.
+// The bruhs.ai mark: a circle of yellow dots, the Bruh's sphere drawn in the
+// site's dot texture. One dot in the center and three rings around it, each
+// ring holding as many dots as fit its circumference evenly, so the outline
+// is a true circle and still reads as a solid disc at a 16px favicon.
 //
 //   node brand/logo.mjs
 //
@@ -12,9 +12,10 @@
 
 import { writeFileSync } from "node:fs";
 
-const N = 6;
-const PAD = 9;
-const CELL = (64 - PAD * 2) / N;
+const RINGS = 3;
+// Disc radius in the 64-unit box, and each dot's radius as a share of the ring gap.
+const RADIUS = 27;
+const DOT = 0.42;
 const FACE = "#fada5e"; // bruh-base
 const TILE = "#141210"; // longan-950
 
@@ -22,19 +23,16 @@ const round = (n) => Math.round(n * 100) / 100;
 
 /** @returns {string} */
 function dots() {
-  const r = N / 2;
-  let body = "";
-  for (let y = 0; y < N; y++) {
-    for (let x = 0; x < N; x++) {
-      const dx = (x + 0.5 - r) / r;
-      const dy = (y + 0.5 - r) / r;
-      const d2 = dx * dx + dy * dy;
-      if (d2 > 1.02) continue;
-      const cx = round(PAD + (x + 0.5) * CELL);
-      const cy = round(PAD + (y + 0.5) * CELL);
-      // Even halftone: dots shrink toward the rim, like a lit sphere seen head-on.
-      const nz = Math.sqrt(Math.max(0, 1 - d2));
-      body += `<circle cx="${cx}" cy="${cy}" r="${round(CELL * (0.2 + 0.24 * Math.min(1, 0.35 + 0.75 * nz)))}"/>`;
+  const gap = RADIUS / (RINGS + 0.5);
+  const r = round(gap * DOT);
+  let body = `<circle cx="32" cy="32" r="${r}"/>`;
+  for (let ring = 1; ring <= RINGS; ring++) {
+    const count = Math.round(2 * Math.PI * ring);
+    // Stagger alternate rings by half a step so the dots nest.
+    const phase = ring % 2 ? 0 : Math.PI / count;
+    for (let i = 0; i < count; i++) {
+      const a = phase + (i / count) * Math.PI * 2 - Math.PI / 2;
+      body += `<circle cx="${round(32 + ring * gap * Math.cos(a))}" cy="${round(32 + ring * gap * Math.sin(a))}" r="${r}"/>`;
     }
   }
   return `<g fill="${FACE}">${body}</g>`;
