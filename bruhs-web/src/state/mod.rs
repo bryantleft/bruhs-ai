@@ -31,6 +31,7 @@ mod settings;
 mod sidebar_edit;
 mod tasks;
 mod terminal;
+mod turns;
 mod workspace;
 
 pub use calendar::*;
@@ -42,6 +43,7 @@ pub use settings::*;
 pub use sidebar_edit::*;
 pub use tasks::*;
 pub use terminal::*;
+pub use turns::*;
 pub use workspace::*;
 
 /// Provide every app-wide context, one domain at a time. The workspace

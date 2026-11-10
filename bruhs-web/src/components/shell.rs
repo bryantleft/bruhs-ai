@@ -32,12 +32,12 @@ use crate::state::{
     activate_thread, create_thread, new_thread_or_pick, toggle_pinned, toggle_settled,
     ActiveProjectSignal, ActiveTerminalId, ActiveView, AppView, BranchMenuOpen, BranchPullSignal,
     ChipRetargetGuard, ComposerChips, ComposerDraft, EditorSignal, EffortMenuOpen,
-    KeybindingsSignal, KnowledgeSaveRequest, ModelSelectOpen, PanelSurface,
+    KeybindingsSignal, KnowledgeSaveRequest, ModelSelectOpen, PanelSurface, PendingPermissions,
     PendingPermissionsSignal, PreviousWorktreeSignal, PromptStashSignal, RightPanelSignal,
     RunChoiceSignal, SetActiveView, SetCaptureEditId, SetCaptureOpen, SetCommandBarOpen,
     SetModelSelectOpen, SetProjectPickerOpen, SetSidebarOpen, SetTaskCreateOpen, SidebarChrome,
-    SidebarOpen, SidebarUndo, StashMenuOpen, StreamBufferSignal, StreamingThreadId, TerminalOpen,
-    TerminalSessions, ThreadNotice, UndoRestore, UnreadThreads, WorkspaceMenuOpen,
+    SidebarOpen, SidebarUndo, StashMenuOpen, TerminalOpen, TerminalSessions, ThreadNotice, Turns,
+    UndoRestore, UnreadThreads, WorkspaceMenuOpen,
 };
 use crate::ui::copy_to_clipboard;
 
@@ -124,10 +124,9 @@ pub fn Shell() -> impl IntoView {
         }
     });
     let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
-    let StreamBufferSignal(stream_buffer) = expect_context::<StreamBufferSignal>();
+    let turns = expect_context::<Turns>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
 
-    let StreamingThreadId(streaming_thread_id) = expect_context::<StreamingThreadId>();
     let ModelSelectOpen(model_select_open) = expect_context::<ModelSelectOpen>();
     let BranchMenuOpen(branch_menu_open) = expect_context::<BranchMenuOpen>();
     let WorkspaceMenuOpen(workspace_menu_open) = expect_context::<WorkspaceMenuOpen>();
@@ -159,7 +158,7 @@ pub fn Shell() -> impl IntoView {
     let thread_order = move || {
         let now = js_sys::Date::now();
         let active = active_thread_id.get_untracked();
-        let working = streaming_thread_id.get_untracked();
+        let working = turns.running_untracked();
         unread_threads.with_untracked(|unread| {
             threads.with_untracked(|ts| {
                 sidebar_order(
@@ -167,10 +166,8 @@ pub fn Shell() -> impl IntoView {
                     &crate::components::sidebar::OrderQuery {
                         now_ms: now,
                         active: active.as_deref(),
-                        working: working.as_deref(),
-                        needs_you: working.as_deref().filter(|_| {
-                            pending_permissions.with_untracked(|pending| !pending.is_empty())
-                        }),
+                        working: &working,
+                        needs_you: &pending_permissions.with_untracked(PendingPermissions::threads),
                         unread,
                         working_section: sidebar_chrome.working_section.get_untracked(),
                         folds: bruhs_models::logic::sidebar::FoldOpen {
@@ -207,7 +204,7 @@ pub fn Shell() -> impl IntoView {
             id,
             set_active_thread_id,
             set_messages,
-            stream_buffer,
+            turns,
             unread_threads,
         );
     };
@@ -493,7 +490,7 @@ pub fn Shell() -> impl IntoView {
                 model_picker_open: model_select_open.get_untracked(),
                 composer_focus,
                 composer_draft: !composer_draft.get_untracked().trim().is_empty(),
-                turn_running: streaming_thread_id.get_untracked().is_some(),
+                turn_running: turns.any_running_untracked(),
                 editable_focus: target_is_input(),
                 is_web: true,
                 ..KeyContext::default()

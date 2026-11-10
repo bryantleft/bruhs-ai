@@ -18,9 +18,9 @@ use crate::format::relative_time;
 use crate::state::{
     activate_thread, apply_drag, create_thread, effect_for, groups_for, instructions_text,
     new_thread_or_pick, set_settled, snooze_until, thread_facts, titled, wake, ActiveView, AppView,
-    ComposerDraft, PendingPermissionsSignal, SetActiveView, SetProjectPickerOpen, SetSidebarOpen,
-    ShelfClock, SidebarChrome, SidebarProjectFilter, SidebarUndo, StreamBufferSignal,
-    StreamingThreadId, Thread, TitleInstructionsSignal, UndoEntry, UndoRestore, UnreadThreads,
+    ComposerDraft, PendingPermissions, PendingPermissionsSignal, SetActiveView,
+    SetProjectPickerOpen, SetSidebarOpen, ShelfClock, SidebarChrome, SidebarProjectFilter,
+    SidebarUndo, Thread, TitleInstructionsSignal, Turns, UndoEntry, UndoRestore, UnreadThreads,
     WorkspaceMode,
 };
 use crate::ui::{Icon, Menu, MenuAlign, MenuItem};
@@ -69,8 +69,10 @@ fn utc_offset_minutes_east() -> i32 {
 pub struct OrderQuery<'a> {
     pub now_ms: f64,
     pub active: Option<&'a str>,
-    pub working: Option<&'a str>,
-    pub needs_you: Option<&'a str>,
+    /// Threads with a running turn.
+    pub working: &'a [String],
+    /// Threads whose turn waits on an approval.
+    pub needs_you: &'a [String],
     pub unread: &'a HashSet<String>,
     pub working_section: bool,
     pub folds: FoldOpen,
@@ -250,8 +252,7 @@ pub fn Sidebar() -> impl IntoView {
     let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
     let PendingPermissionsSignal(pending_permissions) =
         expect_context::<PendingPermissionsSignal>();
-    let StreamingThreadId(streaming_thread_id) = expect_context::<StreamingThreadId>();
-    let StreamBufferSignal(stream_buffer) = expect_context::<StreamBufferSignal>();
+    let turns = expect_context::<Turns>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
     let SidebarProjectFilter(project_filter) = expect_context::<SidebarProjectFilter>();
     let WorkspaceMode(mode) = expect_context::<WorkspaceMode>();
@@ -302,7 +303,7 @@ pub fn Sidebar() -> impl IntoView {
             id,
             set_active_thread_id,
             set_messages,
-            stream_buffer,
+            turns,
             unread_threads,
         );
         // A thread always opens in the chat, whatever view was showing.
@@ -439,10 +440,8 @@ pub fn Sidebar() -> impl IntoView {
         let searching = query.with(|q| !q.trim().is_empty());
         let now = js_sys::Date::now();
         let active = active_thread_id.get();
-        let streaming = streaming_thread_id.get();
-        let needs_you = streaming
-            .clone()
-            .filter(|_| pending_permissions.with(|pending| !pending.is_empty()));
+        let streaming = turns.running();
+        let needs_you = pending_permissions.with(PendingPermissions::threads);
         unread_threads.with(|unread| {
             shelve(
                 list,
@@ -450,8 +449,8 @@ pub fn Sidebar() -> impl IntoView {
                 &OrderQuery {
                     now_ms: now,
                     active: active.as_deref(),
-                    working: streaming.as_deref(),
-                    needs_you: needs_you.as_deref(),
+                    working: &streaming,
+                    needs_you: &needs_you,
                     unread,
                     working_section: working_section.get(),
                     folds: FoldOpen {
@@ -585,10 +584,8 @@ pub fn Sidebar() -> impl IntoView {
         dragging.set(None);
         let now = clock_i64(js_sys::Date::now());
         let active = active_thread_id.get_untracked();
-        let streaming = streaming_thread_id.get_untracked();
-        let needs_you = streaming
-            .clone()
-            .filter(|_| pending_permissions.with_untracked(|pending| !pending.is_empty()));
+        let streaming = turns.running_untracked();
+        let needs_you = pending_permissions.with_untracked(PendingPermissions::threads);
         let working_on = working_section.get_untracked();
         let mut undo: Option<(Thread, &'static str)> = None;
         set_threads.update(|threads| {
@@ -596,8 +593,8 @@ pub fn Sidebar() -> impl IntoView {
             let clock = ShelfClock {
                 now_ms: now,
                 active: active.as_deref(),
-                working: streaming.as_deref(),
-                needs_you: needs_you.as_deref(),
+                working: &streaming,
+                needs_you: &needs_you,
                 unread: &unread,
                 working_section: working_on,
             };
@@ -653,8 +650,8 @@ pub fn Sidebar() -> impl IntoView {
         let is_active =
             Signal::derive(move || active_thread_id.get().as_deref() == Some(id_active.as_str()));
         let status = Signal::derive(move || {
-            let streaming = streaming_thread_id.get().as_deref() == Some(id_status.as_str());
-            if streaming && pending_permissions.with(|p| !p.is_empty()) {
+            let streaming = turns.is_running(&id_status);
+            if streaming && pending_permissions.with(|p| p.has_for(&id_status)) {
                 CardStatus::Approval
             } else if streaming {
                 CardStatus::Working
@@ -1182,7 +1179,7 @@ pub fn Sidebar() -> impl IntoView {
                 let id = menu_thread.get()?;
                 let thread = threads.with(|rows| rows.iter().find(|row| row.id == id).cloned())?;
                 let id = thread.id.clone();
-                let streaming = streaming_thread_id.get().as_deref() == Some(id.as_str());
+                let streaming = turns.is_running(&id);
                 let now = clock_i64(js_sys::Date::now());
                 let offset = utc_offset_minutes_east();
                 let presets = snooze_presets(now, offset);
@@ -1249,7 +1246,7 @@ pub fn Sidebar() -> impl IntoView {
                             disabled=streaming
                             class="flex min-h-10 w-full items-center rounded-seed px-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60 disabled:opacity-50"
                             on:click=move |_| {
-                                if streaming_thread_id.get_untracked().as_deref() == Some(regenerate_id.as_str()) { return; }
+                                if turns.is_running_untracked(&regenerate_id) { return; }
                                 menu_thread.set(None);
                                 let prompt = if active_thread_id.get_untracked().as_deref() == Some(regenerate_id.as_str()) {
                                     messages.with_untracked(|rows| rows.iter().find(|message| message.role == bruhs_models::agent::Role::User).map(|message| message.text()))
@@ -1514,8 +1511,8 @@ mod tests {
             &OrderQuery {
                 now_ms: now,
                 active: None,
-                working: None,
-                needs_you: None,
+                working: &[],
+                needs_you: &[],
                 unread: &unread,
                 working_section: true,
                 folds: bruhs_models::logic::sidebar::FoldOpen {

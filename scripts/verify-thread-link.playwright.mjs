@@ -1,8 +1,9 @@
 // Opt-in live check of thread-to-thread messages in the web app: a real
-// Claude turn in one thread messages another thread, the view follows the
-// message, the other thread's agent answers back, a turn starts a new
-// thread, and the two Settings rows take effect. Spends real tokens, so it
-// is not in the gate.
+// Claude turn in one thread messages another thread, which runs it in the
+// background and answers back; a turn waits for another thread's reply
+// inside one tool call; a turn starts a new thread; the two Settings rows
+// take effect; and one thread still stops and queues as before. Spends real
+// tokens, so it is not in the gate.
 //
 //   cargo build -p bruhs-server
 //   (cd bruhs-web && BRUHS_API_URL=http://127.0.0.1:43021 trunk build --dist /tmp/bruhs-thread-link-dist)
@@ -75,8 +76,9 @@ let server, browser, context, page, serverLog = '';
 /// Every `/api/agent` turn the page started, in order, with its events.
 const turnFor = thread => report.turns.filter(turn => turn.thread_id === thread);
 const finished = turn => turn.events.some(event => event.type === 'result' || event.type === 'error');
-const activeThread = () => page.evaluate(() => document.querySelector('button[data-thread-id][aria-current="true"], button[data-thread-id][aria-current="page"]')?.dataset.threadId ?? null);
 const transcript = () => page.locator('main').innerText();
+const stopButton = () => page.getByRole('button', { name: /^(Stop generation|Interrupt)$/ });
+const idle = () => waitFor(async () => !(await stopButton().isVisible()), 'the thread on screen to go idle', 60000);
 const settle = async () => {
   await page.locator('#chat-input').waitFor({ timeout: 45000 });
   await page.waitForFunction(() => !document.querySelector('[aria-label="Thread list loading status"]') && !document.querySelector('[aria-label="Conversation loading status"]'));
@@ -100,13 +102,14 @@ try {
     const record = report.turns[turn];
     if (!record) return;
     record.events.push(event);
+    if ((event.type === 'result' || event.type === 'error') && record.endedAt === null) record.endedAt = Date.now();
     if (event.type === 'thread_request') report.threadRequests.push({ from: event.thread_id, operation: event.operation });
     if (['thread_request', 'result', 'error', 'permission_request'].includes(event.type)) {
       console.error(JSON.stringify({ turn, observed: event.type, operation: event.operation?.op, isError: event.is_error || false }));
     }
   });
   await context.exposeBinding('__threadLinkTurn', (_source, body) => {
-    report.turns.push({ thread_id: body.thread_id, prompt: body.prompt, permission_mode: body.permission_mode, thread_access: body.thread_access, events: [] });
+    report.turns.push({ thread_id: body.thread_id, prompt: body.prompt, permission_mode: body.permission_mode, thread_access: body.thread_access, events: [], startedAt: Date.now(), endedAt: null });
     return report.turns.length - 1;
   });
   await context.addInitScript(() => {
@@ -204,29 +207,22 @@ try {
   const listed = first.events.find(event => event.type === 'tool_result' && event.content.includes('Threads, most recent first'));
   assert(listed && listed.content.includes(`${short(sender)} · Sender · no project · this thread`) && listed.content.includes(`${short(research)} · Research · no project · idle`), `Unexpected list: ${listed?.content}`);
   const delivered = first.events.find(event => event.type === 'tool_result' && event.content.includes('Sent to thread'));
-  assert(delivered && delivered.content.includes(`${short(research)} "Research". It is queued`), `Unexpected delivery reply: ${delivered?.content}`);
+  assert(delivered && delivered.content.includes(`${short(research)} "Research". It is running now.`), `Unexpected delivery reply: ${delivered?.content}`);
   check('sender-listed-and-messaged', { operations: ops.map(op => op.op) });
 
-  // 2. The view follows the message; Research runs it as its own turn.
+  // 2. Research runs the message in the background; the view stays put.
   await waitFor(() => turnFor(research).length === 1, 'the Research turn to start');
   const second = turnFor(research)[0];
   assert(second.prompt.startsWith(`[Message from thread "Sender" (id ${short(sender)}), hop 1/10.`), `Unexpected delivered prompt: ${second.prompt.slice(0, 200)}`);
   assert(second.prompt.includes(word), 'The delivered prompt lost the message');
-  // The transcript names the sender and hides the header written for the model.
-  const caption = page.locator('[data-from-thread]').last();
-  await caption.waitFor({ timeout: 20000 });
-  assert.equal((await caption.innerText()).trim(), 'From thread \u201cSender\u201d');
-  assert(!(await transcript()).includes('[Message from thread'), 'The model-facing header is shown to the user');
-  assert((await transcript()).includes(word), 'The message body is missing from the transcript');
-  check('view-followed-to-recipient', { prompt: second.prompt.split('\n')[0], caption: (await caption.innerText()).trim() });
-  await page.screenshot({ path: join(artifacts, 'recipient-running.png') });
+  assert((await transcript()).includes('harness check of the bruhs_threads MCP tools'), 'The view left the sender when its message started elsewhere');
   await waitFor(() => finished(second), 'the Research turn');
   assert(!second.events.some(event => event.type === 'error' || (event.type === 'result' && event.is_error)), 'The Research turn failed');
   const answer = report.threadRequests.find(request => request.from === research && request.operation.op === 'message');
   assert(answer, 'Research never answered');
   assert(sender.startsWith(answer.operation.thread_id), `Research addressed ${answer.operation.thread_id}, not Sender`);
   assert(answer.operation.message.includes(word), 'Research answered without the word');
-  check('recipient-answered', { message: answer.operation.message });
+  check('recipient-ran-in-the-background-and-answered', { prompt: second.prompt.split('\n')[0], message: answer.operation.message });
 
   // 3. The answer comes back as a new turn in Sender, one hop further.
   await waitFor(() => turnFor(sender).length === 2, 'the answer to start a turn in Sender');
@@ -235,37 +231,108 @@ try {
   assert(third.prompt.includes(word), 'The answer lost the word');
   await waitFor(() => finished(third), 'the answer turn');
   await waitFor(async () => (await transcript()).includes(word), 'the Sender transcript to show the answer', 20000);
+  // The transcript names the sender and hides the header written for the model.
+  const caption = page.locator('[data-from-thread]').last();
+  await caption.waitFor({ timeout: 20000 });
+  assert.equal((await caption.innerText()).trim(), 'From thread “Research”');
+  assert(!(await transcript()).includes('[Message from thread'), 'The model-facing header is shown to the user');
   await page.screenshot({ path: join(artifacts, 'sender-after-answer.png') });
-  check('answer-returned-to-sender', { prompt: third.prompt.split('\n')[0] });
+  check('answer-returned-to-sender', { prompt: third.prompt.split('\n')[0], caption: (await caption.innerText()).trim() });
 
-  // 4. A turn reads another thread, then starts a new one.
-  await waitFor(async () => !(await page.getByRole('button', { name: /^(Stop generation|Interrupt)$/ }).isVisible()), 'the app to go idle', 30000);
-  const turnsBefore = report.turns.length;
+  // Opening Research shows the turn it ran while it was off screen.
+  await idle();
+  await page.locator(`button[data-thread-id="${research}"]`).click();
+  await settle();
+  await waitFor(async () => (await transcript()).includes(word), 'the Research transcript to hold its background turn', 20000);
+  assert.equal((await page.locator('[data-from-thread]').first().innerText()).trim(), 'From thread “Sender”');
+  check('background-turn-was-saved');
+  await page.locator(`button[data-thread-id="${sender}"]`).click();
+  await settle();
+
+  // 4. A turn waits, inside one tool call, for another thread's reply. The
+  // two turns overlap: Research starts and ends while Sender's is held.
+  const waitWord = `WAIT-${Math.floor(1000 + Math.random() * 9000)}`;
+  const beforeWait = report.turns.length;
   await page.locator('#chat-input').fill(
-    `Harness check, second part. Call read_thread for the thread titled "Research" (id ${short(research)}) with limit 2. Then call message_thread once with no thread_id, title "Scout", and exactly this message: "Harness check. Reply to the user with the single word SCOUT-OK. Do not call any tool." Do not use any other tool. Then answer in one short line.`,
+    `Harness check of waiting. Call message_thread once, addressed to the thread titled "Research" (id ${short(research)}), with wait set to true and exactly this message: "Harness check. Reply with exactly ${waitWord} and nothing else. Do not call any tool." Do not use any other tool. Then tell me, in one short line, the exact text that tool call returned.`,
   );
   await page.locator('#chat-input').press('Enter');
-  await waitFor(() => report.turns.length > turnsBefore && finished(report.turns[turnsBefore]), 'the second sender turn');
-  const fourth = report.turns[turnsBefore];
+  await waitFor(() => report.turns.length >= beforeWait + 2 && report.turns.slice(beforeWait).every(finished), 'the waiting turn and the turn it waited on', 240000);
+  const waiting = report.turns.slice(beforeWait).find(turn => turn.thread_id === sender);
+  const waitedOn = report.turns.slice(beforeWait).find(turn => turn.thread_id === research);
+  assert(waiting && waitedOn, 'The waiting turn or the turn it waited on never ran');
+  assert(waitedOn.prompt.includes('hop 1/10, awaiting your reply.'), `The recipient was not told its reply is awaited: ${waitedOn.prompt.slice(0, 200)}`);
+  const returned = waiting.events.find(event => event.type === 'tool_result' && event.content.includes('answered:'));
+  assert(returned && returned.content.includes(waitWord) && !returned.is_error, `The call did not return the reply: ${JSON.stringify(waiting.events.filter(event => event.type === 'tool_result').map(event => event.content.slice(0, 200)))}`);
+  assert(waitedOn.startedAt > waiting.startedAt && waitedOn.endedAt < waiting.endedAt, 'The recipient did not run while the sender was held');
+  assert(!report.threadRequests.some(request => request.from === research && request.operation.op === 'message' && request.operation.message.includes(waitWord)), 'The recipient messaged back although its reply was awaited');
+  assert.equal(turnFor(sender).length, 3, 'The awaited reply also arrived as a message');
+  await page.screenshot({ path: join(artifacts, 'sender-after-wait.png') });
+  check('a-call-waited-for-another-threads-reply', { returned: returned.content.replace(/\s+/g, ' ').slice(0, 80), overlapMs: waitedOn.endedAt - waitedOn.startedAt });
+
+  // 5. A turn reads another thread, then starts a new one, which runs in
+  // the background.
+  await idle();
+  const turnsBefore = report.turns.length;
+  await page.locator('#chat-input').fill(
+    `Harness check, next part. Call read_thread for the thread titled "Research" (id ${short(research)}) with limit 2. Then call message_thread once with no thread_id, title "Scout", and exactly this message: "Harness check. Reply to the user with the single word SCOUT-OK. Do not call any tool." Do not set wait. Do not use any other tool. Then answer in one short line.`,
+  );
+  await page.locator('#chat-input').press('Enter');
+  await waitFor(() => report.turns.length >= turnsBefore + 2 && report.turns.slice(turnsBefore).every(finished), 'the reading turn and the new thread');
+  const fourth = report.turns.slice(turnsBefore).find(turn => turn.thread_id === sender);
+  const fifth = report.turns.slice(turnsBefore).find(turn => turn.thread_id !== sender);
   const read = fourth.events.find(event => event.type === 'tool_result' && event.content.startsWith('Thread "Research"'));
-  assert(read && read.content.includes('[Message from thread "Sender"') && read.content.includes('Assistant:'), `Unexpected read: ${read?.content.slice(0, 300)}`);
+  assert(read && read.content.includes('Assistant:') && read.content.includes(waitWord), `Unexpected read: ${read?.content.slice(0, 300)}`);
   const started = fourth.events.find(event => event.type === 'tool_result' && event.content.startsWith('Started a new thread'));
-  assert(started && started.content.includes('"Scout"'), `Unexpected new-thread reply: ${started?.content}`);
+  assert(started && started.content.includes('"Scout"') && started.content.includes('It is running now.'), `Unexpected new-thread reply: ${started?.content}`);
   check('sender-read-a-thread-and-started-one', { reply: started.content.split('.')[0] });
-  await waitFor(() => report.turns.length > turnsBefore + 1, 'the Scout turn to start');
-  const fifth = report.turns[turnsBefore + 1];
   assert(![sender, research].includes(fifth.thread_id), 'Scout did not get its own thread');
   assert(fifth.prompt.startsWith(`[Message from thread "Sender" (id ${short(sender)}), hop 1/10.`), `Unexpected Scout prompt: ${fifth.prompt.slice(0, 200)}`);
-  await waitFor(() => finished(fifth), 'the Scout turn');
+  assert((await transcript()).includes('Harness check, next part'), 'The view left the sender when the new thread started');
   await page.locator(`button[data-thread-id="${fifth.thread_id}"]`).waitFor();
   assert((await page.locator(`button[data-thread-id="${fifth.thread_id}"]`).innerText()).includes('Scout'), 'The new thread is not titled Scout');
+  await page.locator(`button[data-thread-id="${fifth.thread_id}"]`).click();
+  await settle();
   await waitFor(async () => (await transcript()).includes('SCOUT-OK'), 'the Scout transcript to show its reply', 20000);
   await page.screenshot({ path: join(artifacts, 'new-thread.png') });
   check('new-thread-ran', { thread: short(fifth.thread_id) });
 
-  // 5. Read only in Settings: the next turn is sent with that access and is
+  // 6. One thread on its own still behaves: a prompt sent while its turn
+  // runs is queued and runs next, and Stop ends a turn.
+  await page.locator(`button[data-thread-id="${sender}"]`).click();
+  await settle();
+  await idle();
+  const beforeQueue = report.turns.length;
+  await page.locator('#chat-input').fill('Harness check of the queue. Count from 1 to 40, one number per line, and nothing else.');
+  await page.locator('#chat-input').press('Enter');
+  await waitFor(() => report.turns.length === beforeQueue + 1, 'the counting turn to start');
+  await page.locator('#chat-input').fill('Reply with the single word QUEUED-OK. Do not call any tool.');
+  await page.locator('#chat-input').press('Enter');
+  assert.equal(report.turns.length, beforeQueue + 1, 'A prompt sent during a running turn started at once instead of queueing');
+  await waitFor(() => report.turns.length === beforeQueue + 2 && finished(report.turns[beforeQueue + 1]), 'the queued prompt to run after the turn');
+  assert(report.turns[beforeQueue + 1].startedAt >= report.turns[beforeQueue].endedAt, 'The queued prompt ran before the turn ahead of it ended');
+  await waitFor(async () => (await transcript()).includes('QUEUED-OK'), 'the queued reply', 20000);
+  check('a-prompt-sent-mid-turn-queued-and-ran-next');
+
+  await idle();
+  const beforeStop = report.turns.length;
+  await page.locator('#chat-input').fill('Harness check of Stop. Write the numbers from 1 to 2000, one per line. Do not call any tool.');
+  await page.locator('#chat-input').press('Enter');
+  await waitFor(() => report.turns.length === beforeStop + 1 && report.turns[beforeStop].events.some(event => event.type === 'text'), 'the long turn to start writing');
+  await stopButton().click();
+  await idle();
+  assert(!finished(report.turns[beforeStop]), 'The stopped turn ran to its end');
+  assert.equal(await page.evaluate(() => localStorage.getItem('bruhs.promptQueue')), '[]', 'Something was left queued');
+  // Stop pauses the queue; a send resumes it, and the thread still works.
+  await page.locator('#chat-input').fill('Reply with the single word AFTER-STOP. Do not call any tool.');
+  await page.locator('#chat-input').press('Enter');
+  await waitFor(() => report.turns.length === beforeStop + 2 && finished(report.turns[beforeStop + 1]), 'a turn after Stop');
+  await waitFor(async () => (await transcript()).includes('AFTER-STOP'), 'the reply after Stop', 20000);
+  check('stop-ended-the-turn-and-the-thread-still-runs');
+
+  // 7. Read only in Settings: the next turn is sent with that access and is
   // offered the two read tools, not message_thread.
-  await waitFor(async () => !(await page.getByRole('button', { name: /^(Stop generation|Interrupt)$/ }).isVisible()), 'the app to go idle', 30000);
+  await idle();
   await choose('Messages between threads', 'Read only');
   assert.equal(await page.evaluate(() => localStorage.getItem('bruhs.threadAccess')), 'read');
   await page.goto(origin + '/#/chat');
@@ -282,12 +349,11 @@ try {
   assert.deepEqual(offered.sort(), ['mcp__bruhs_threads__list_threads', 'mcp__bruhs_threads__read_thread']);
   check('read-only-setting-limits-the-tools', { offered });
 
-  assert(replies.length >= 5 && replies.every(status => status === 200), `Thread replies were not all accepted: ${replies}`);
+  assert(replies.length >= 6 && replies.every(status => status === 200), `Thread replies were not all accepted: ${replies}`);
   assert.equal(report.pageErrors.length, 0, `Browser runtime errors: ${report.pageErrors.join('\n')}`);
   check('all-answers-accepted', { answers: replies.length });
 } catch (error) {
   report.error = String(error.stack || error);
-  report.active = await activeThread().catch(() => null);
   await page?.screenshot({ path: join(artifacts, 'failure.png') }).catch(() => {});
   process.exitCode = 1;
 } finally {

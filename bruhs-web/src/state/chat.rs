@@ -24,11 +24,10 @@ pub struct MessagesSignal(pub ReadSignal<Vec<AgentMessage>>);
 #[derive(Copy, Clone)]
 pub struct SetMessagesSignal(pub WriteSignal<Vec<AgentMessage>>);
 
-/// A turn is running (in any thread).
+/// A turn is running in the thread on screen. Other threads may be running
+/// too; ask [`Turns`] about those.
 #[derive(Copy, Clone)]
 pub struct IsStreaming(pub ReadSignal<bool>);
-#[derive(Copy, Clone)]
-pub struct SetIsStreaming(pub WriteSignal<bool>);
 
 /// Background shells the agent started (`/api/tasks/stream`).
 #[derive(Copy, Clone)]
@@ -455,11 +454,15 @@ pub struct PermissionRequest {
     pub id: String,
     pub tool: String,
     pub input: serde_json::Value,
+    /// The thread whose turn asks. Empty until the turn that received the
+    /// request stamps it.
+    #[serde(default)]
+    pub thread_id: String,
 }
 
-/// Permission requests the running turn is waiting on, oldest first, at most
-/// one per id. A provider can ask for several at once; each is answered and
-/// cleared by its own id.
+/// Permission requests running turns are waiting on, oldest first, at most
+/// one per id. A provider can ask for several at once, and several threads
+/// can run at once; each request is answered and cleared by its own id.
 #[derive(Debug, Clone, Default, PartialEq)]
 pub struct PendingPermissions(Vec<PermissionRequest>);
 
@@ -479,17 +482,30 @@ impl PendingPermissions {
         self.0.len() != before
     }
 
-    /// The request to ask about now (the oldest).
-    pub fn first(&self) -> Option<&PermissionRequest> {
-        self.0.first()
+    /// The request `thread_id` should ask about now (its oldest).
+    pub fn first_for(&self, thread_id: &str) -> Option<&PermissionRequest> {
+        self.0.iter().find(|r| r.thread_id == thread_id)
     }
 
-    pub fn is_empty(&self) -> bool {
-        self.0.is_empty()
+    /// Whether a turn of `thread_id` is waiting on the user.
+    pub fn has_for(&self, thread_id: &str) -> bool {
+        self.first_for(thread_id).is_some()
     }
 
-    pub fn clear(&mut self) {
-        self.0.clear();
+    /// The threads waiting on the user, in the order they first asked.
+    pub fn threads(&self) -> Vec<String> {
+        let mut threads: Vec<String> = Vec::new();
+        for request in &self.0 {
+            if !threads.contains(&request.thread_id) {
+                threads.push(request.thread_id.clone());
+            }
+        }
+        threads
+    }
+
+    /// Drop the requests of `thread_id`: its turn ended.
+    pub fn clear_thread(&mut self, thread_id: &str) {
+        self.0.retain(|r| r.thread_id != thread_id);
     }
 }
 
@@ -500,42 +516,6 @@ pub struct PendingPermissionsSignal(pub RwSignal<PendingPermissions>);
 /// Request metadata only. Private input stays in its mounted form, never app state.
 #[derive(Copy, Clone)]
 pub struct PendingSecretsSignal(pub RwSignal<Vec<bruhs_models::secrets::SecretRequest>>);
-
-/// Settled messages of the thread whose turn is currently streaming (up to
-/// and including the prompt). `messages` is that thread's transcript while it
-/// is the active one, so switching threads mid-turn neither corrupts the
-/// visible list nor loses the turn. The running turn's own message is in
-/// [`LiveMessageSignal`]; it joins `messages` here when the turn ends.
-#[derive(Clone, Default, PartialEq)]
-pub struct StreamBuffer {
-    pub thread_id: Option<String>,
-    pub messages: Vec<AgentMessage>,
-}
-
-#[derive(Copy, Clone)]
-pub struct StreamBufferSignal(pub RwSignal<StreamBuffer>);
-
-/// The assistant message of the running turn, patched in place per token. It
-/// belongs to [`StreamBuffer::thread_id`]. Kept apart from the transcript so
-/// a token re-renders only that message, not the whole thread.
-#[derive(Copy, Clone)]
-pub struct LiveMessageSignal(pub RwSignal<Option<AgentMessage>>);
-
-/// Whether the running turn belongs to the `active` thread. Changes when a
-/// turn starts or ends or the thread changes, never per token.
-pub fn live_turn_here(
-    active: ReadSignal<Option<String>>,
-    buffer: RwSignal<StreamBuffer>,
-) -> Memo<bool> {
-    Memo::new(move |_| {
-        let active = active.get();
-        active.is_some() && buffer.with(|b| b.thread_id == active)
-    })
-}
-
-/// Id of the thread with a running turn, or `None` when idle.
-#[derive(Copy, Clone)]
-pub struct StreamingThreadId(pub Memo<Option<String>>);
 
 /// Threads whose last turn finished while another thread was active.
 #[derive(Copy, Clone)]
@@ -619,22 +599,22 @@ pub struct PromptStashSignal(pub RwSignal<crate::stash::PromptStash>);
 #[derive(Copy, Clone)]
 pub struct StashMenuOpen(pub RwSignal<bool>);
 
-/// Make `id` the active thread and load its transcript: from the stream
-/// buffer when that thread's turn is still running, otherwise from IndexedDB.
+/// Make `id` the active thread and load its transcript: from its running
+/// turn when it has one, otherwise from IndexedDB.
 pub fn activate_thread(
     history: crate::thread_history::ThreadHistory,
     active: ReadSignal<Option<String>>,
     id: String,
     set_active: WriteSignal<Option<String>>,
     set_messages: WriteSignal<Vec<AgentMessage>>,
-    stream_buffer: RwSignal<StreamBuffer>,
+    turns: Turns,
     unread: RwSignal<HashSet<String>>,
 ) {
     set_active.set(Some(id.clone()));
     unread.update(|s| {
         s.remove(&id);
     });
-    history.load(id, active, set_messages, stream_buffer);
+    history.load(id, active, set_messages, turns);
 }
 
 /// "New thread" from the sidebar, header, palette or ⌘⇧N: when projects are
@@ -853,12 +833,13 @@ pub(super) fn provide() {
         set_current_model.set(model);
     });
 
-    let stream_buffer = RwSignal::new(StreamBuffer::default());
-    let streaming_thread_id = Memo::new(move |_| {
-        if is_streaming.get() {
-            stream_buffer.with(|b| b.thread_id.clone())
-        } else {
-            None
+    // Kept as its own signal for the many readers that only care about the
+    // thread on screen. `Turns` is the truth; this follows it.
+    let turns = Turns::new();
+    Effect::new(move |_| {
+        let here = active_thread_id.with(|id| id.as_deref().is_some_and(|id| turns.is_running(id)));
+        if is_streaming.get_untracked() != here {
+            set_is_streaming.set(here);
         }
     });
     // Queued prompts survive a reload; they are sent when their thread is idle.
@@ -881,18 +862,13 @@ pub(super) fn provide() {
     provide_context(MessagesSignal(messages));
     provide_context(SetMessagesSignal(set_messages));
     provide_context(IsStreaming(is_streaming));
-    provide_context(SetIsStreaming(set_is_streaming));
+    provide_context(turns);
     provide_context(BackgroundTasksSignal(tasks));
     provide_context(SetBackgroundTasksSignal(set_tasks));
     provide_context(PendingPermissionsSignal(RwSignal::new(
         PendingPermissions::default(),
     )));
     provide_context(PendingSecretsSignal(RwSignal::new(Vec::new())));
-    provide_context(StreamBufferSignal(stream_buffer));
-    provide_context(LiveMessageSignal(RwSignal::new(
-        Option::<AgentMessage>::None,
-    )));
-    provide_context(StreamingThreadId(streaming_thread_id));
     provide_context(UnreadThreads(RwSignal::new(HashSet::<String>::new())));
     provide_context(ThreadNotice::new());
     provide_context(PromptQueueSignal(prompt_queue));
@@ -952,10 +928,15 @@ mod tests {
     use super::*;
 
     fn request(id: &str, tool: &str) -> PermissionRequest {
+        request_in("t1", id, tool)
+    }
+
+    fn request_in(thread: &str, id: &str, tool: &str) -> PermissionRequest {
         PermissionRequest {
             id: id.into(),
             tool: tool.into(),
             input: serde_json::Value::Null,
+            thread_id: thread.into(),
         }
     }
 
@@ -968,12 +949,34 @@ mod tests {
         pending.insert(request("b", "Edit"));
         pending.insert(request("a", "Write"));
         assert_eq!(pending.0.len(), 2);
-        assert_eq!(pending.first().map(|r| r.tool.as_str()), Some("Write"));
+        assert_eq!(
+            pending.first_for("t1").map(|r| r.tool.as_str()),
+            Some("Write")
+        );
         assert!(!pending.remove("missing"));
         assert!(pending.remove("a"));
-        assert_eq!(pending.first().map(|r| r.id.as_str()), Some("b"));
-        pending.clear();
-        assert!(pending.is_empty());
+        assert_eq!(pending.first_for("t1").map(|r| r.id.as_str()), Some("b"));
+        pending.clear_thread("t1");
+        assert!(pending.threads().is_empty());
+    }
+
+    /// Threads run side by side, so each sees and clears only its own.
+    #[test]
+    fn pending_permissions_belong_to_the_thread_that_asked() {
+        let mut pending = PendingPermissions::default();
+        pending.insert(request_in("t1", "a", "Bash"));
+        pending.insert(request_in("t2", "b", "Edit"));
+        pending.insert(request_in("t1", "c", "Write"));
+        assert_eq!(pending.first_for("t2").map(|r| r.id.as_str()), Some("b"));
+        assert_eq!(pending.first_for("t1").map(|r| r.id.as_str()), Some("a"));
+        assert!(pending.has_for("t2") && !pending.has_for("t3"));
+        assert_eq!(pending.threads(), ["t1", "t2"]);
+        pending.clear_thread("t1");
+        assert!(!pending.has_for("t1") && pending.has_for("t2"));
+        // A record saved before requests named their thread still loads.
+        let legacy: PermissionRequest =
+            serde_json::from_str(r#"{"id":"x","tool":"Bash","input":null}"#).unwrap();
+        assert_eq!(legacy.thread_id, "");
     }
 
     /// The oldest IndexedDB rows have no `parts`; they load with parts in

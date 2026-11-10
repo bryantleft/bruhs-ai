@@ -9,13 +9,14 @@ use crate::task_saves::TaskSaves;
 pub(crate) fn install() {
     let saves = expect_context::<TaskSaves>();
     let relationships = expect_context::<RelationshipStore>();
-    let streaming = expect_context::<crate::state::IsStreaming>().0;
+    let turns = expect_context::<crate::state::Turns>();
     let LifeContextSignal(life) = expect_context();
     let AutomationStateSignal(automation) = expect_context();
     let ComposerDraft(composer) = expect_context();
     let at_risk = Memo::new(move |_| {
         let pending = saves.pending();
-        let streaming = streaming.get();
+        // A turn running in any thread, not only the one on screen.
+        let streaming = turns.any_running();
         let life_pending = life.pending();
         let automation_pending = automation.pending();
         let relationships_pending = relationships.pending();

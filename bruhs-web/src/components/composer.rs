@@ -31,8 +31,8 @@ use crate::state::{
     PendingPermissionsSignal, PermissionModeSignal, PermissionRequest, PreviousWorktreeSignal,
     PromptQueueSignal, PromptStashSignal, QueueHeldSignal, RunChoiceSignal, SetActiveThreadId,
     SetActiveView, SetMessagesSignal, SetModelSelectOpen, SetPermissionModeSignal,
-    SetProjectPickerOpen, StashMenuOpen, StreamBufferSignal, ThreadNotice, ThreadsSignal,
-    UnreadThreads, UsageInfo, WorkspaceMenuOpen,
+    SetProjectPickerOpen, StashMenuOpen, ThreadNotice, ThreadsSignal, Turns, UnreadThreads,
+    UsageInfo, WorkspaceMenuOpen,
 };
 use crate::ui::{Icon, Kbd, Menu, MenuAlign, MenuItem, MenuSide, Tooltip};
 use bruhs_models::agent::Role;
@@ -242,7 +242,12 @@ pub fn Composer(
         expect_context::<PendingPermissionsSignal>();
     // Re-render the panel only when the request being asked about changes,
     // so a second request arriving keeps the first one's error and state.
-    let asking = Memo::new(move |_| pending_permissions.with(|p| p.first().cloned()));
+    // Only this thread's requests: another thread's turn asks in its own.
+    let asking_thread = expect_context::<ActiveThreadId>().0;
+    let asking = Memo::new(move |_| {
+        let thread = asking_thread.get()?;
+        pending_permissions.with(|p| p.first_for(&thread).cloned())
+    });
     let SetModelSelectOpen(set_model_select_open) = expect_context::<SetModelSelectOpen>();
     let ModelSelectOpen(model_select_open) = expect_context::<ModelSelectOpen>();
     let SetProjectPickerOpen(set_project_picker_open) = expect_context::<SetProjectPickerOpen>();
@@ -269,7 +274,7 @@ pub fn Composer(
     let SetActiveThreadId(set_active_thread) = expect_context::<SetActiveThreadId>();
     let active_for_chip = expect_context::<ActiveThreadId>().0;
     let set_messages_chip = expect_context::<SetMessagesSignal>().0;
-    let StreamBufferSignal(stream_buffer_chip) = expect_context::<StreamBufferSignal>();
+    let turns_chip = expect_context::<Turns>();
     let UnreadThreads(unread_chip) = expect_context::<UnreadThreads>();
     let SetActiveView(set_view_chip) = expect_context::<SetActiveView>();
     let active_view_chip = expect_context::<ActiveView>().0;
@@ -294,7 +299,7 @@ pub fn Composer(
                     thread_id,
                     set_active_thread,
                     set_messages_chip,
-                    stream_buffer_chip,
+                    turns_chip,
                     unread_chip,
                 );
                 if active_view_chip.get_untracked() != AppView::Chat {

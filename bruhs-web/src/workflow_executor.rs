@@ -36,7 +36,7 @@ pub struct WorkflowExecutor {
     pub note_editor: note_editor::NoteEditor,
     threads: WriteSignal<Vec<Thread>>,
     active_thread: ReadSignal<Option<String>>,
-    streaming_thread: crate::state::StreamingThreadId,
+    turns: crate::state::Turns,
     prompt_queue: crate::state::PromptQueueSignal,
     relationships: crate::relationship_store::RelationshipStore,
     people: crate::state::PeopleSignal,
@@ -80,7 +80,7 @@ impl WorkflowExecutor {
             note_editor: note_editor::NoteEditor::new(),
             threads: expect_context::<crate::state::SetThreadsSignal>().0,
             active_thread: expect_context::<crate::state::ActiveThreadId>().0,
-            streaming_thread: expect_context(),
+            turns: expect_context(),
             prompt_queue: expect_context(),
             relationships: expect_context(),
             people: expect_context(),
@@ -329,7 +329,10 @@ impl WorkflowExecutor {
                             step.operation.domain() == AgentDomain::Chat
                                 && step.target_id.is_some()
                                 && (step.target_id == *active
-                                    || step.target_id == self.streaming_thread.0.get_untracked()
+                                    || step
+                                        .target_id
+                                        .as_deref()
+                                        .is_some_and(|id| self.turns.is_running_untracked(id))
                                     || step.target_id.as_deref().is_some_and(|id| {
                                         self.prompt_queue
                                             .0

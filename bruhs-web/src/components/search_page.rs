@@ -18,8 +18,8 @@ use crate::state::{
     MeetingsSignal, PeopleSignal, ProjectsSignal, SchedulingPreferencesSignal, SelectedLifeRecord,
     SelectedLifeRecordSignal, SelectedPersonSignal, SetActiveView, SetCaptureEditId,
     SetCaptureOpen, SetEventCreateOpen, SetSelectedEventId, SetSelectedProject,
-    SetSelectedWorkItem, SourceClipsSignal, StreamBufferSignal, Thread, TranscriptSegment,
-    UnreadThreads, WorkItemsSignal,
+    SetSelectedWorkItem, SourceClipsSignal, Thread, TranscriptSegment, Turns, UnreadThreads,
+    WorkItemsSignal,
 };
 use crate::storage;
 use crate::ui::{Icon, Input};
@@ -541,7 +541,7 @@ pub(super) fn provide_local_search() {
     let SetCaptureEditId(set_capture_edit_id) = expect_context::<SetCaptureEditId>();
     let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
     let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
-    let StreamBufferSignal(stream_buffer) = expect_context::<StreamBufferSignal>();
+    let turns = expect_context::<Turns>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
 
     let stored_segments = RwSignal::new(Vec::<TranscriptSegment>::new());
@@ -600,7 +600,7 @@ pub(super) fn provide_local_search() {
                 hit.document.id,
                 set_active_thread_id,
                 set_messages,
-                stream_buffer,
+                turns,
                 unread_threads,
             );
             set_active_view.set(AppView::Chat);

@@ -14,9 +14,9 @@
 //! without either client storing anything new. [`parse_delivery`] reads the
 //! header back for display.
 //!
-//! A sender may wait for the answer inside its tool call where the app can
-//! run two threads at once (desktop). The recipient's reply to that turn is
-//! then the tool result ([`answer_reply`]).
+//! A sender may wait for the answer inside its tool call: both apps run
+//! threads side by side. The recipient's reply to that turn is then the tool
+//! result ([`answer_reply`]).
 
 use serde::{Deserialize, Serialize};
 
@@ -286,8 +286,8 @@ pub enum DeliveryState {
     /// It waits in the recipient's queue.
     Queued,
     /// It waits in the queue, and the sender asked to wait for the reply
-    /// but the app cannot hold the call (one turn at a time, or a paused
-    /// queue).
+    /// but the app cannot hold the call (a paused queue, or nothing free to
+    /// run the recipient).
     QueuedNotAwaited,
 }
 
