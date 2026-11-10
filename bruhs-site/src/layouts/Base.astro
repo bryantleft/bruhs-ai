@@ -1,6 +1,7 @@
 ---
 // Head, nav and footer for every page, so they can't drift apart.
 import "../styles/site.css";
+import Icon from "../components/Icon.astro";
 
 interface Props {
   title: string;
@@ -62,13 +63,13 @@ const here = (page: Props["current"]) => (page === current ? "page" : undefined)
         <a class="brand" href="/" aria-label="bruhs home"><img src="/logo.svg" alt="" width="26" height="26" /><span class="brand-name">bruhs</span></a>
         <div class="nav-actions">
           <a class="nav-link" href="/changelog" aria-current={here("changelog")}>Changelog</a>
-          <a class="nav-link hide-sm" href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
+          <a class="nav-link hide-sm" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />GitHub</a>
           {palette && (
             <button class="btn btn-ghost hide-sm" type="button" data-open-palette aria-haspopup="dialog" aria-label="Jump to a section">
               <kbd><span class="mod">⌘</span>K</kbd>
             </button>
           )}
-          <a class="btn btn-primary" href={download}>Download</a>
+          <a class="btn btn-primary" href={download}><Icon name="apple" />Download</a>
         </div>
       </div>
     </header>
@@ -81,7 +82,7 @@ const here = (page: Props["current"]) => (page === current ? "page" : undefined)
         <nav aria-label="Footer">
           <a href="/privacy" aria-current={here("privacy")}>Privacy</a>
           <a href="/changelog" aria-current={here("changelog")}>Changelog</a>
-          <a href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
+          <a href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" size={14} />GitHub</a>
         </nav>
       </div>
     </footer>
