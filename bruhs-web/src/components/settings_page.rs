@@ -190,6 +190,8 @@ fn GeneralSettings() -> impl IntoView {
         <AutoCompactAfter />
         <CompactIdleThreads />
         <ThreadMessages />
+        <crate::components::role_settings::RoleSettings />
+        <crate::components::role_settings::TaskModelSettings />
         <TextGeneration />
     }
 }

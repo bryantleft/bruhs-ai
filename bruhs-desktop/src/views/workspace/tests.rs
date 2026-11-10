@@ -4074,6 +4074,7 @@ fn persisted_thread(id: &str, model_id: &str, permission_mode: PermissionMode) -
         worktree_path: None,
         effort: None,
         run_locked: false,
+        role: None,
     }
 }
 

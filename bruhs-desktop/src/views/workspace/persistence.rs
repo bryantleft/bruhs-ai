@@ -417,6 +417,8 @@ impl Workspace {
                 .then(|| self.thread_access.as_str().to_string()),
             thread_hops: (self.thread_hops != bruhs_models::thread_link::MAX_HOPS)
                 .then_some(self.thread_hops),
+            roles: (!self.roles.is_empty()).then(|| self.roles.clone()),
+            task_models: (!self.task_models.is_default()).then(|| self.task_models.clone()),
             previous_worktree: self.previous_worktree.clone(),
             keybindings: self.keybindings.clone(),
         }

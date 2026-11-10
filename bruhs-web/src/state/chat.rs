@@ -94,6 +94,10 @@ pub struct Thread {
     /// create leaves this false so the next send can try again.
     #[serde(default, skip_serializing_if = "is_false")]
     pub run_locked: bool,
+    /// Id of the thread's role, when an agent started it with one. Its
+    /// effort, access and instructions come from the role each turn.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub role: Option<String>,
     /// The earlier conversation of a thread imported without a session
     /// (a Cursor chat). Sent with each turn until the thread has a
     /// session, then dropped; see `portable::with_import_context`.
@@ -128,6 +132,7 @@ impl Thread {
             worktree_path: None,
             effort: None,
             run_locked: false,
+            role: None,
             import_context: None,
         }
     }

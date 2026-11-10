@@ -96,6 +96,7 @@ mod person_merge;
 #[cfg(test)]
 mod project_picker_tests;
 mod project_picker_ui;
+mod role_settings_ui;
 mod save_queue;
 mod save_status;
 mod scheduling_ui;
@@ -770,6 +771,13 @@ struct PersistedWorkspaceState {
     /// Agent-to-agent messages allowed in a row. Absent means the default.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     thread_hops: Option<u32>,
+    /// The user's roles and each project's overrides. Absent means none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    roles: Option<bruhs_models::roles::RoleBook>,
+    /// Models for meeting summaries and second opinions. Absent means the
+    /// built-in defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    task_models: Option<bruhs_models::roles::TaskModels>,
     /// Last worktree this client created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     previous_worktree: Option<RememberedWorktree>,
@@ -835,6 +843,9 @@ struct PersistedThread {
     /// The thread keeps its checkout or worktree. Missing means it has not sent.
     #[serde(default, skip_serializing_if = "skip_false")]
     run_locked: bool,
+    /// Id of the role an agent started this thread with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    role: Option<String>,
 }
 
 fn skip_false(value: &bool) -> bool {
@@ -1175,6 +1186,13 @@ pub struct Workspace {
     thread_hops: u32,
     /// Tool calls held until another thread has replied.
     thread_waits: Vec<thread_link_ui::ThreadWait>,
+    /// Named model setups an agent can start a thread with.
+    roles: bruhs_models::roles::RoleBook,
+    /// Models for the jobs that are not threads.
+    task_models: bruhs_models::roles::TaskModels,
+    /// Id of the role open in Settings.
+    role_selected: Option<String>,
+    role_inputs: role_settings_ui::RoleInputs,
     /// Visited pages. `Cmd+[` and `Cmd+]` walk this stack.
     page_history: PageHistory,
     /// Offered as Previous worktree. Shared by every thread.
@@ -1507,6 +1525,18 @@ impl Workspace {
             .and_then(|state| state.thread_hops)
             .filter(|hops| bruhs_models::thread_link::HOP_CHOICES.contains(hops))
             .unwrap_or(bruhs_models::thread_link::MAX_HOPS);
+        let roles = persisted
+            .as_ref()
+            .and_then(|state| state.roles.clone())
+            .unwrap_or_default()
+            .sanitized();
+        let task_models = persisted
+            .as_ref()
+            .and_then(|state| state.task_models.clone())
+            .unwrap_or_default()
+            .sanitized();
+        crate::server_client::set_summary_model(task_models.summary.clone());
+        let role_inputs = Self::new_role_inputs(window, cx, &mut subscriptions);
         let base_branch = String::new();
         let mut workspace = Self {
             workflow_window: window.window_handle(),
@@ -1664,6 +1694,10 @@ impl Workspace {
             thread_access,
             thread_hops,
             thread_waits: Vec::new(),
+            roles,
+            task_models,
+            role_selected: None,
+            role_inputs,
             page_history: PageHistory::new(),
             previous_worktree,
             base_branch,

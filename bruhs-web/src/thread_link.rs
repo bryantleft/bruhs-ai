@@ -13,10 +13,12 @@
 
 use bruhs_models::agent::Role;
 use bruhs_models::ids::ThreadId;
+use bruhs_models::roles::RoleBook;
 use bruhs_models::thread_link::{
-    answer_reply, delivered_reply, list_reply, plan_message, read_reply, recipient_waiting_reply,
-    resolve_thread, Answer, Delivery, DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine,
-    ThreadOperation, ThreadReply, ThreadReplySubmission, ThreadRequest,
+    answer_reply, delivered_reply, list_reply, pick_role, plan_message, read_reply,
+    recipient_waiting_reply, resolve_thread, Answer, Created, Delivery, DeliveryState, Outgoing,
+    Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadReplySubmission,
+    ThreadRequest,
 };
 use leptos::prelude::*;
 
@@ -33,6 +35,17 @@ struct Wait {
     /// The delivered prompt, header included: what names the turn to wait
     /// for among the recipient's other turns.
     prompt: String,
+}
+
+/// One `message_thread` call's arguments.
+#[derive(Clone, Copy)]
+struct Outbound<'a> {
+    thread_id: Option<&'a str>,
+    title: Option<&'a str>,
+    message: &'a str,
+    /// Name of the role a new thread should start with.
+    role: Option<&'a str>,
+    wait: bool,
 }
 
 /// How the turn a call waited on ended.
@@ -57,17 +70,21 @@ pub struct ThreadLink {
     saves: crate::task_saves::TaskSaves,
     /// The user's limit on agent messages in a row.
     hops: RwSignal<u32>,
+    /// The user's roles: what a new thread can start with.
+    roles: RwSignal<RoleBook>,
     /// The chat page is mounted. It owns the turn lifecycle, so a queued
     /// message can only start while it is.
     chat_mounted: RwSignal<bool>,
     waits: StoredValue<Vec<Wait>>,
 }
 
-/// Threads as cards, most recent first.
+/// Threads as cards, most recent first. A thread whose role was deleted
+/// reads as having none.
 fn cards<'a>(
     threads: &'a [Thread],
     running: &[String],
     queue: &PromptQueue,
+    roles: &'a RoleBook,
 ) -> Vec<ThreadCard<'a>> {
     let mut recent: Vec<&Thread> = threads.iter().collect();
     recent.sort_by_key(|thread| std::cmp::Reverse(thread.updated_at));
@@ -79,6 +96,12 @@ fn cards<'a>(
             project: Some(thread.project_name.as_str()).filter(|name| !name.trim().is_empty()),
             running: running.contains(&thread.id),
             queued: queue.for_thread(&thread.id).len(),
+            model: thread.model.as_deref().filter(|model| !model.is_empty()),
+            role: thread
+                .role
+                .as_deref()
+                .and_then(|id| roles.find(id))
+                .map(|role| role.name.as_str()),
         })
         .collect()
 }
@@ -141,6 +164,7 @@ impl ThreadLink {
             catalog: expect_context(),
             saves: expect_context(),
             hops: expect_context::<crate::state::ThreadHopsSignal>().0,
+            roles: expect_context::<crate::state::RolesSignal>().0,
             chat_mounted: RwSignal::new(false),
             waits: StoredValue::new(Vec::new()),
         };
@@ -173,6 +197,7 @@ impl ThreadLink {
                     title,
                     message,
                     wait,
+                    role,
                 } => {
                     let held = Wait {
                         request_id: request.id.clone(),
@@ -180,14 +205,14 @@ impl ThreadLink {
                         recipient: String::new(),
                         prompt: String::new(),
                     };
-                    match self.send(
-                        &caller,
-                        thread_id.as_deref(),
-                        title.as_deref(),
-                        &message,
+                    let outbound = Outbound {
+                        thread_id: thread_id.as_deref(),
+                        title: title.as_deref(),
+                        message: &message,
+                        role: role.as_deref(),
                         wait,
-                        held,
-                    ) {
+                    };
+                    match self.send(&caller, &outbound, held) {
                         Some(reply) => reply,
                         // Held: answered when the recipient's turn ends.
                         None => return,
@@ -296,8 +321,20 @@ impl ThreadLink {
     fn list(self, caller: &str) -> ThreadReply {
         let threads = self.threads.get_untracked();
         let running = self.turns.running_untracked();
-        self.queue
-            .with_untracked(|queue| list_reply(&cards(&threads, &running, queue), caller))
+        let roles = self.roles.get_untracked();
+        // Roles as they run in the caller's project.
+        let project = threads
+            .iter()
+            .find(|thread| thread.id == caller)
+            .map(|thread| thread.project_name.as_str())
+            .unwrap_or_default();
+        self.queue.with_untracked(|queue| {
+            list_reply(
+                &cards(&threads, &running, queue, &roles),
+                caller,
+                &roles.resolved(project),
+            )
+        })
     }
 
     async fn read(self, reference: &str, limit: Option<u32>) -> ThreadReply {
@@ -355,15 +392,14 @@ impl ThreadLink {
 
     /// Deliver a message. `None` when the call is held for the reply; `held`
     /// then names the request to answer later.
-    fn send(
-        self,
-        caller: &str,
-        thread_id: Option<&str>,
-        title: Option<&str>,
-        message: &str,
-        wants_wait: bool,
-        held: Wait,
-    ) -> Option<ThreadReply> {
+    fn send(self, caller: &str, outbound: &Outbound<'_>, held: Wait) -> Option<ThreadReply> {
+        let Outbound {
+            thread_id,
+            title,
+            message,
+            role: wanted_role,
+            wait: wants_wait,
+        } = *outbound;
         let threads = self.threads.get_untracked();
         let Some(sender) = threads.iter().find(|thread| thread.id == caller) else {
             return Some(ThreadReply::refused(
@@ -371,6 +407,14 @@ impl ThreadLink {
             ));
         };
         let mut ids: Vec<&str> = threads.iter().map(|thread| thread.id.as_str()).collect();
+        // The role a new thread starts with, as it runs in this project.
+        let role = match self
+            .roles
+            .with_untracked(|book| pick_role(book, &sender.project_name, wanted_role))
+        {
+            Ok(role) => role,
+            Err(refusal) => return Some(refusal),
+        };
         let prompt = self
             .turns
             .messages(caller)
@@ -431,7 +475,12 @@ impl ThreadLink {
                 );
                 thread.worktree_path.clone_from(&sender.worktree_path);
                 thread.branch.clone_from(&sender.branch);
-                thread.model.clone_from(&sender.model);
+                // The role's model, or the sender's when it names none.
+                thread.model = role
+                    .as_ref()
+                    .and_then(|role| role.model.clone())
+                    .or_else(|| sender.model.clone());
+                thread.role = role.as_ref().map(|role| role.id.clone());
                 thread.run_locked = sender.run_locked;
                 Some(thread)
             }
@@ -492,7 +541,10 @@ impl ThreadLink {
             (false, true) => DeliveryState::QueuedNotAwaited,
             (false, false) => DeliveryState::Queued,
         };
-        Some(delivered_reply(&id, &title, &ids, created.is_some(), state))
+        let started = created.as_ref().map(|_| Created {
+            role: role.as_ref().map(|role| role.name.as_str()),
+        });
+        Some(delivered_reply(&id, &title, &ids, started, state))
     }
 }
 
@@ -531,16 +583,33 @@ mod tests {
 
     #[test]
     fn cards_are_most_recent_first_with_state() {
-        let threads = [
+        let mut threads = [
             thread("old", "Old", "", 1),
             thread("new", "New", "bruhs-ai", 9),
             thread("mid", "Mid", "", 5),
         ];
         let mut queue = PromptQueue::default();
         queue.push("old", "wait", 0.0);
+        let mut roles = RoleBook::default();
+        let writer = roles.add("Writer").unwrap();
+        threads[1].model = Some("claude-sonnet-4-6".into());
+        threads[1].role = Some(writer);
+        threads[2].role = Some("a-role-that-was-deleted".into());
         // Several threads can be running at once.
         let running = ["new".to_string(), "mid".to_string()];
-        let cards = cards(&threads, &running, &queue);
+        let cards = cards(&threads, &running, &queue, &roles);
+        // A card names its model and its role; a deleted role reads as none.
+        assert_eq!(
+            cards
+                .iter()
+                .map(|card| (card.model, card.role))
+                .collect::<Vec<_>>(),
+            [
+                (Some("claude-sonnet-4-6"), Some("Writer")),
+                (None, None),
+                (None, None)
+            ]
+        );
         assert_eq!(
             cards
                 .iter()

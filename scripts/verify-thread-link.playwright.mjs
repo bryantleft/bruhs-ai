@@ -1,9 +1,10 @@
 // Opt-in live check of thread-to-thread messages in the web app: a real
 // Claude turn in one thread messages another thread, which runs it in the
 // background and answers back; a turn waits for another thread's reply
-// inside one tool call; a turn starts a new thread; the two Settings rows
-// take effect; and one thread still stops and queues as before. Spends real
-// tokens, so it is not in the gate.
+// inside one tool call; a turn starts a new thread, and another starts one
+// with a role set up in Settings; the Settings rows take effect; and one
+// thread still stops and queues as before. Spends real tokens, so it is not
+// in the gate.
 //
 //   cargo build -p bruhs-server
 //   (cd bruhs-web && BRUHS_API_URL=http://127.0.0.1:43021 trunk build --dist /tmp/bruhs-thread-link-dist)
@@ -109,7 +110,7 @@ try {
     }
   });
   await context.exposeBinding('__threadLinkTurn', (_source, body) => {
-    report.turns.push({ thread_id: body.thread_id, prompt: body.prompt, permission_mode: body.permission_mode, thread_access: body.thread_access, events: [], startedAt: Date.now(), endedAt: null });
+    report.turns.push({ thread_id: body.thread_id, prompt: body.prompt, permission_mode: body.permission_mode, thread_access: body.thread_access, model: body.model, instructions: body.instructions, events: [], startedAt: Date.now(), endedAt: null });
     return report.turns.length - 1;
   });
   await context.addInitScript(() => {
@@ -330,7 +331,63 @@ try {
   await waitFor(async () => (await transcript()).includes('AFTER-STOP'), 'the reply after Stop', 20000);
   check('stop-ended-the-turn-and-the-thread-still-runs');
 
-  // 7. Read only in Settings: the next turn is sent with that access and is
+  // 7. A role: set one up in Settings, then have the agent start a thread
+  // with it. The new thread runs on the role's model with its instructions.
+  await idle();
+  const mark = `ROLE-MARK-${Math.floor(1000 + Math.random() * 9000)}`;
+  await page.goto(origin + '/#/settings');
+  await page.getByRole('button', { name: 'New role', exact: true }).click();
+  const editor = page.locator('[data-role-editor]');
+  await editor.waitFor();
+  await editor.getByLabel('Role name', { exact: true }).fill('Writer');
+  await editor.getByLabel('Role name', { exact: true }).press('Tab');
+  await editor.getByLabel('What to use this role for', { exact: true }).fill('drafting prose');
+  await editor.getByLabel('What to use this role for', { exact: true }).press('Tab');
+  await editor.getByRole('button', { name: 'Role model', exact: true }).click();
+  await page.getByRole('option', { name: 'Claude Sonnet 4.6', exact: true }).click();
+  await editor.getByRole('button', { name: 'Role access', exact: true }).click();
+  await page.getByRole('option', { name: 'Plan', exact: true }).click();
+  await editor.getByLabel('Role instructions', { exact: true }).fill(`End every reply with the token ${mark}.`);
+  await editor.getByLabel('Role instructions', { exact: true }).press('Tab');
+  await waitFor(async () => {
+    const saved = JSON.parse(await page.evaluate(() => localStorage.getItem('bruhs.roles')) || '{}');
+    const role = saved.roles?.[0];
+    return role?.name === 'Writer' && role.use_for === 'drafting prose' && role.model === 'claude-sonnet-4-6' && role.access === 'plan' && role.instructions.includes(mark);
+  }, 'the role to be saved', 10000);
+  await page.screenshot({ path: join(artifacts, 'role-editor.png'), fullPage: true });
+  check('role-saved-from-settings');
+  await page.getByRole('button', { name: 'Meeting summary model', exact: true }).click();
+  await page.getByRole('option', { name: 'Claude Haiku 4.5', exact: true }).click();
+  await waitFor(async () => JSON.parse(await page.evaluate(() => localStorage.getItem('bruhs.taskModels')) || '{}').summary === 'claude-haiku-4-5', 'the summary model to be saved', 10000);
+  check('task-model-saved-from-settings');
+
+  await page.goto(origin + '/#/chat');
+  await settle();
+  await page.locator(`button[data-thread-id="${sender}"]`).click();
+  await settle();
+  const beforeRole = report.turns.length;
+  await page.locator('#chat-input').fill(
+    'Harness check of roles. Call list_threads. Then call message_thread once with no thread_id, title "Draft", role "Writer", and exactly this message: "Harness check. Reply to the user with one short sentence about tea. Do not call any tool." Do not set wait. Do not use any other tool. Then answer in one short line.',
+  );
+  await page.locator('#chat-input').press('Enter');
+  await waitFor(() => report.turns.length >= beforeRole + 2 && report.turns.slice(beforeRole).every(finished), 'the role turn and the thread it started', 240000);
+  const asking = report.turns.slice(beforeRole).find(turn => turn.thread_id === sender);
+  const drafted = report.turns.slice(beforeRole).find(turn => turn.thread_id !== sender);
+  const roleList = asking.events.find(event => event.type === 'tool_result' && event.content.includes('Roles a new thread can start with'));
+  assert(roleList && roleList.content.includes('Writer · Claude Sonnet 4.6 · drafting prose'), `The list did not offer the role: ${roleList?.content.slice(-300)}`);
+  const startedAs = asking.events.find(event => event.type === 'tool_result' && event.content.startsWith('Started a new Writer thread'));
+  assert(startedAs, `The reply did not name the role: ${JSON.stringify(asking.events.filter(event => event.type === 'tool_result').map(event => event.content.slice(0, 120)))}`);
+  assert.equal(asking.model, model, 'The sender did not keep its own model');
+  assert.equal(drafted.model, 'claude-sonnet-4-6', 'The new thread did not run on the role model');
+  assert(drafted.instructions?.includes(mark), 'The new thread was not sent the role instructions');
+  // The user is in bypass; the role narrows its thread to Plan.
+  assert.equal(drafted.permission_mode, 'plan', 'The role did not narrow the access mode');
+  assert.equal(asking.instructions, undefined, 'A thread without a role was sent instructions');
+  const said = drafted.events.filter(event => event.type === 'text').map(event => event.text).join('');
+  assert(said.includes(mark), `The role instructions did not reach the model: ${said.slice(0, 200)}`);
+  check('agent-started-a-thread-with-a-role', { model: drafted.model, access: drafted.permission_mode, said: said.replace(/\s+/g, ' ').slice(0, 80) });
+
+  // 8. Read only in Settings: the next turn is sent with that access and is
   // offered the two read tools, not message_thread.
   await idle();
   await choose('Messages between threads', 'Read only');
@@ -349,7 +406,7 @@ try {
   assert.deepEqual(offered.sort(), ['mcp__bruhs_threads__list_threads', 'mcp__bruhs_threads__read_thread']);
   check('read-only-setting-limits-the-tools', { offered });
 
-  assert(replies.length >= 6 && replies.every(status => status === 200), `Thread replies were not all accepted: ${replies}`);
+  assert(replies.length >= 8 && replies.every(status => status === 200), `Thread replies were not all accepted: ${replies}`);
   assert.equal(report.pageErrors.length, 0, `Browser runtime errors: ${report.pageErrors.join('\n')}`);
   check('all-answers-accepted', { answers: replies.length });
 } catch (error) {

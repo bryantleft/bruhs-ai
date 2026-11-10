@@ -1393,6 +1393,7 @@ mod tests {
             worktree_path: None,
             effort: None,
             run_locked: false,
+            role: None,
             import_context: None,
         }
     }

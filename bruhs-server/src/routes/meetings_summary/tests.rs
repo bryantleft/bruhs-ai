@@ -60,6 +60,7 @@ fn replace() -> SummarizeBody {
         request_id: None,
         extract_observations: true,
         replace_observations: true,
+        model: None,
     }
 }
 

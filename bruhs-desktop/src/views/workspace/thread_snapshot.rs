@@ -28,6 +28,7 @@ impl DesktopThread {
             worktree_path: chat.worktree_path.clone(),
             effort: chat.effort.clone(),
             run_locked: chat.run_locked,
+            role: chat.role.clone(),
             messages: chat
                 .messages
                 .iter()

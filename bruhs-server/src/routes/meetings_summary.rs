@@ -24,6 +24,17 @@ pub async fn post_summarize(
 ) -> Result<Json<MeetingSummary>, AppError> {
     let id = meeting_id.as_str();
     let body = body.map(|Json(body)| body).unwrap_or_default();
+    // The user's model for summaries, or the built-in one. Summaries run on
+    // the Claude CLI, so another provider's model is refused, not swapped.
+    let model = match &body.model {
+        Some(model) if model.provider() != bruhs_models::agent::AgentProvider::Claude => {
+            return Err(AppError::BadRequest(
+                "Meeting summaries need a Claude model.".into(),
+            ));
+        }
+        Some(model) => model.as_str().to_string(),
+        None => DEFAULT_SUMMARIZE_MODEL.to_string(),
+    };
     // Read a known receipt before fetching transcript data or invoking capture/model services.
     if let Some(request_id) = &body.request_id {
         let request = generation_request(id, &body);
@@ -50,8 +61,7 @@ pub async fn post_summarize(
         segments,
         body,
         |segments, speakers, extract| async move {
-            summarize::summarize_segments(&segments, &speakers, DEFAULT_SUMMARIZE_MODEL, extract)
-                .await
+            summarize::summarize_segments(&segments, &speakers, &model, extract).await
         },
     )
     .await?;
