@@ -143,7 +143,7 @@ impl Layout {
     }
 
     fn push(&mut self, thread: &Thread, section: SidebarSection, index: usize) {
-        let height = if thread.branch.is_some() || thread.model.is_some() {
+        let height = if thread.branch.is_some() || thread.model.is_some() || thread.role.is_some() {
             85.0
         } else {
             65.0
@@ -251,6 +251,15 @@ mod tests {
         let layout = Layout::new(&[rich], &[thread(1)], true);
         assert_eq!(layout.row("1").unwrap().top, 89.0 + HEADER_HEIGHT + GAP);
         assert_eq!(layout.position("1"), Some(2));
+    }
+
+    #[test]
+    fn a_role_keeps_the_metadata_line() {
+        let mut with_role = thread(0);
+        with_role.role = Some("writer".into());
+        let layout = Layout::new(&[with_role, thread(1)], &[], false);
+        assert_eq!(layout.row("0").unwrap().height, 85.0);
+        assert_eq!(layout.row("1").unwrap().height, 65.0);
     }
 
     #[test]

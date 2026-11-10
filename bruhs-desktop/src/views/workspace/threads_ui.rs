@@ -173,6 +173,7 @@ impl Workspace {
             view.effort = persisted.effort.clone();
             view.run_locked = persisted.run_locked;
             view.role = persisted.role.clone();
+            view.instructions_stamp = persisted.instructions_stamp.clone();
             view.model_id = model_id;
             view.set_project_context(
                 project_path.clone(),
@@ -253,6 +254,9 @@ impl Workspace {
                     let message = message.clone();
                     this.meetings_hub
                         .update(cx, |hub, cx| hub.show_notice(message, true, cx));
+                }
+                ChatViewEvent::RoleCommand(argument) => {
+                    this.apply_role_command(chat, argument, cx);
                 }
                 ChatViewEvent::TurnStarted { model_id, branch } => {
                     let chat_id = chat.entity_id();

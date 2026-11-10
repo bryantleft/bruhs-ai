@@ -64,8 +64,8 @@ pub struct ThreadLink {
     messages: ReadSignal<Vec<AgentMessage>>,
     turns: Turns,
     queue: RwSignal<PromptQueue>,
-    /// Interrupt and a reload pause every queue until Resume or a send.
-    queue_held: RwSignal<bool>,
+    /// The threads whose queue is paused, by Interrupt there or a reload.
+    holds: crate::state::QueueHolds,
     catalog: crate::thread_catalog::ThreadCatalog,
     saves: crate::task_saves::TaskSaves,
     /// The user's limit on agent messages in a row.
@@ -152,7 +152,6 @@ fn is_removed(wait: &Wait, queue: &PromptQueue, exists: bool, busy: bool) -> boo
 impl ThreadLink {
     pub fn install() {
         let crate::state::PromptQueueSignal(queue) = expect_context();
-        let crate::state::QueueHeldSignal(queue_held) = expect_context();
         let link = Self {
             threads: expect_context::<crate::state::ThreadsSignal>().0,
             set_threads: expect_context::<crate::state::SetThreadsSignal>().0,
@@ -160,7 +159,7 @@ impl ThreadLink {
             messages: expect_context::<crate::state::MessagesSignal>().0,
             turns: expect_context(),
             queue,
-            queue_held,
+            holds: expect_context(),
             catalog: expect_context(),
             saves: expect_context(),
             hops: expect_context::<crate::state::ThreadHopsSignal>().0,
@@ -420,12 +419,15 @@ impl ThreadLink {
             .messages(caller)
             .map(|settled| running_prompt(&settled))
             .unwrap_or_default();
-        // The queue can start a message only while the chat page is mounted
-        // and nothing is paused.
-        let draining = self.chat_mounted.get_untracked() && !self.queue_held.get_untracked();
         let known = thread_id
             .and_then(|reference| resolve_thread(reference, &ids).ok())
             .map(str::to_string);
+        // The queue can start a message only while the chat page is mounted
+        // and the recipient's queue is not paused. A new thread has none.
+        let draining = self.chat_mounted.get_untracked()
+            && !known
+                .as_deref()
+                .is_some_and(|id| self.holds.is_held_untracked(id));
         // A wait needs a recipient that can answer inside this call: one
         // that is not itself waiting (that could never finish), and a turn
         // that can start (or is running, with this queued behind it).

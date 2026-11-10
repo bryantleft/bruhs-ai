@@ -175,6 +175,9 @@ pub(super) fn active_settings_section(tops: &[f32], fold_px: f32) -> Option<usiz
 /// Web settings nav column.
 pub(super) const SETTINGS_NAV_WIDTH_PX: f32 = 208.0;
 pub(super) const SETTINGS_ROW_CONTROL_WIDTH_PX: f32 = 240.0;
+/// The rows that end `render_settings_general_rows`: thread and project
+/// title instructions.
+const GENERAL_TITLE_ROWS: usize = 2;
 pub(super) const SETTINGS_ROW_TITLE_TEXT_SIZE_PX: f32 = 14.0;
 pub(super) const SETTINGS_MODEL_DROPDOWN_ID: &str = "desktop-model";
 pub(super) const SETTINGS_ACCESS_MODE_DROPDOWN_ID: &str = "desktop-access-mode";
@@ -1033,10 +1036,13 @@ impl Workspace {
                 .child(self.credential_settings.clone())
                 .into_any_element()],
             SettingsSection::General => {
-                // Web order: the general rows, then roles, then task models.
+                // Web order: roles and task models sit above the two title
+                // instruction rows, which close the section.
                 let mut rows = self.render_settings_general_rows(cx);
+                let titles = rows.split_off(rows.len().saturating_sub(GENERAL_TITLE_ROWS));
                 rows.extend(self.render_role_settings_rows(cx));
                 rows.extend(self.render_task_model_rows(cx));
+                rows.extend(titles);
                 rows
             }
             SettingsSection::Updates => self.render_settings_updates_rows(cx),

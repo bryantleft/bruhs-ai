@@ -29,6 +29,7 @@ impl DesktopThread {
             effort: chat.effort.clone(),
             run_locked: chat.run_locked,
             role: chat.role.clone(),
+            instructions_stamp: chat.instructions_stamp.clone(),
             messages: chat
                 .messages
                 .iter()

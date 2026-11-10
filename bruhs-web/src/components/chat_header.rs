@@ -38,6 +38,12 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
             .map(|t| t.project_name)
             .filter(|p| !p.is_empty())
     });
+    // The thread's role, by its current name. A deleted role shows nothing.
+    let roles = expect_context::<crate::state::RolesSignal>().0;
+    let role = Signal::derive(move || {
+        let id = thread.get()?.role?;
+        roles.with(|book| book.find(&id).map(|role| role.name.clone()))
+    });
     let running = Signal::derive(move || {
         tasks.with(|ts| {
             ts.iter()
@@ -127,6 +133,18 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
                                 >
                                     {move || bruhs_models::logic::text::plain_title(&title.get()).into_owned()}
                                 </h1>
+                                {move || role.get().map(|name| {
+                                    let hint = format!("Role: {name}. /role changes it.");
+                                    view! {
+                                        <span
+                                            data-thread-role=""
+                                            title=hint
+                                            class="ml-1 max-w-[8rem] shrink-0 truncate rounded-seed bg-longan-800/60 px-1.5 text-label-sm text-rambutan-300"
+                                        >
+                                            {name}
+                                        </span>
+                                    }
+                                })}
                                 <button
                                     type="button"
                                     aria-label="Rename thread"

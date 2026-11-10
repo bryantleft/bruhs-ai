@@ -297,7 +297,7 @@ impl ChatView {
                 cx.emit(ChatViewEvent::OpenSettings);
                 true
             }
-            "/goal" | "/compact" | "/handoff" | "/second-opinion" => {
+            "/goal" | "/compact" | "/handoff" | "/second-opinion" | "/role" => {
                 self.apply_local_command(command, cx);
                 true
             }

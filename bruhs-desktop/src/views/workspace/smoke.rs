@@ -137,6 +137,27 @@ impl Workspace {
                 self.toggle_date_picker(date_picker_ui::DatePickerTarget::EventStart, window, cx);
             }
             "settings" => self.open_settings(&OpenSettings, window, cx),
+            "settings-roles" => {
+                // The role editor with a role open, scrolled into view, for
+                // a comparison with the web's. Use a scratch state file: the
+                // fixture role is saved.
+                self.open_settings(&OpenSettings, window, cx);
+                if self.roles.is_empty() {
+                    self.smoke_add_role(
+                        "Writer",
+                        "claude-sonnet-4-6",
+                        "End every reply with the token ROLE-MARK-2885.",
+                        cx,
+                    );
+                }
+                let first = self.roles.roles.first().map(|role| role.id.clone());
+                self.select_role(first, window, cx);
+                let down = std::env::var("BRUHS_DESKTOP_SMOKE_SCROLL_PX")
+                    .ok()
+                    .and_then(|value| value.parse::<f32>().ok())
+                    .unwrap_or(0.0);
+                self.settings_scroll.set_offset(point(px(0.0), px(-down)));
+            }
             scene if scene.starts_with("settings-") => {
                 let Some(section) = scene
                     .strip_prefix("settings-")

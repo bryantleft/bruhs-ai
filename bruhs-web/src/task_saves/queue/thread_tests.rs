@@ -23,6 +23,7 @@ fn thread(title: &str) -> Record {
         effort: None,
         run_locked: false,
         role: None,
+        instructions_stamp: None,
         import_context: None,
     })
 }

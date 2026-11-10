@@ -464,7 +464,7 @@ impl Workspace {
 mod tests {
     use super::*;
     use crate::theme;
-    use crate::views::chat::{Message, TurnState};
+    use crate::views::chat::{ChatViewEvent, Message, TurnState};
     use bruhs_models::thread_link::{delivery_prompt, parse_delivery, prompt_hops, MAX_HOPS};
     use gpui::{AppContext, TestAppContext, VisualTestContext};
     use std::{cell::RefCell, rc::Rc};
@@ -977,6 +977,136 @@ mod tests {
             2
         );
         let _ = (recipient, recipient_id);
+    }
+
+    #[gpui::test]
+    fn the_user_gives_their_own_thread_a_role(cx: &mut TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        let (sender, sender_id, _recipient, _recipient_id) = two_threads(&workspace, cx);
+        let writer = workspace.update(cx, |workspace, cx| {
+            let writer = workspace.roles.add("Writer").unwrap();
+            workspace.roles.update(&writer, |role| {
+                role.model = Some("claude-haiku-4-5".into());
+                role.instructions = "Write plainly.".into();
+            });
+            workspace.active_thread_id = Some(sender_id.clone());
+            cx.notify();
+            writer
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-chat-header-role").is_none());
+
+        // `/role writer`, as the composer sends it to the workspace.
+        sender.update(cx, |_, cx| {
+            cx.emit(ChatViewEvent::RoleCommand("writer".into()));
+        });
+        cx.run_until_parked();
+        sender.read_with(cx, |chat, _| {
+            assert_eq!(chat.role.as_deref(), Some(writer.as_str()));
+            let profile = chat.role_profile.as_ref().expect("the role is resolved");
+            assert_eq!(profile.instructions, "Write plainly.");
+            assert_eq!(chat.model_id, "claude-haiku-4-5", "the role's model");
+        });
+        workspace.read_with(cx, |workspace, cx| {
+            let saved = workspace.snapshot(cx);
+            let thread = saved
+                .threads
+                .iter()
+                .find(|thread| thread.id == sender_id)
+                .expect("the thread is saved");
+            assert_eq!(thread.role.as_deref(), Some(writer.as_str()));
+            assert_eq!(thread.model_id, "claude-haiku-4-5");
+        });
+
+        // The header names the role right after the title, and the card
+        // names it too.
+        let title = cx
+            .debug_bounds("desktop-chat-header-title")
+            .expect("the title is drawn");
+        let tag = cx
+            .debug_bounds("desktop-chat-header-role")
+            .expect("the role tag is drawn");
+        let gap = f32::from(tag.left() - title.right());
+        assert!((0.0..=16.0).contains(&gap), "tag follows the title: {gap}");
+        let card: &'static str = Box::leak(
+            format!(
+                "desktop-thread-card-role-{}",
+                crate::views::workspace::element_key(&sender_id)
+            )
+            .into_boxed_str(),
+        );
+        assert!(cx.debug_bounds(card).is_some(), "the card names the role");
+
+        // A long title is cut short; the tag stays whole, left of the toggles.
+        sender.update(cx, |chat, cx| {
+            chat.thread_title = "A long title ".repeat(40);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let tag = cx
+            .debug_bounds("desktop-chat-header-role")
+            .expect("the role tag is drawn");
+        let toggle = cx
+            .debug_bounds("desktop-chat-diff-toggle")
+            .expect("the Diff toggle is drawn");
+        assert!(tag.right() <= toggle.left(), "{tag:?} {toggle:?}");
+        assert!(f32::from(tag.size.width) > 30.0, "{tag:?}");
+
+        // A name that matches no role changes nothing.
+        workspace.update(cx, |workspace, cx| {
+            workspace.apply_role_command(&sender, "Reviewer", cx);
+        });
+        assert_eq!(
+            sender.read_with(cx, |chat, _| chat.role.clone()),
+            Some(writer)
+        );
+
+        // `/role none` removes it. The thread keeps the model it is on.
+        workspace.update(cx, |workspace, cx| {
+            workspace.apply_role_command(&sender, "none", cx);
+        });
+        cx.run_until_parked();
+        sender.read_with(cx, |chat, _| {
+            assert!(chat.role.is_none() && chat.role_profile.is_none());
+            assert_eq!(chat.model_id, "claude-haiku-4-5");
+        });
+        assert!(cx.debug_bounds("desktop-chat-header-role").is_none());
+    }
+
+    #[gpui::test]
+    fn the_role_editor_follows_the_web_layout(cx: &mut TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_settings(&crate::views::workspace::OpenSettings, window, cx);
+            let id = workspace.roles.add("Writer");
+            workspace.select_role(id, window, cx);
+        });
+        cx.run_until_parked();
+        let drawn = |cx: &mut VisualTestContext, selector: &'static str| {
+            cx.debug_bounds(selector)
+                .unwrap_or_else(|| panic!("{selector} is not drawn"))
+        };
+        let roles = drawn(cx, "desktop-settings-row-roles");
+        let editor = drawn(cx, "desktop-settings-role-editor");
+        let new_role = drawn(cx, "desktop-settings-role-new");
+        let delete = drawn(cx, "desktop-settings-role-delete");
+        let summary = drawn(cx, "desktop-settings-row-summary-model");
+        let titles = drawn(cx, "desktop-settings-row-title-instructions");
+
+        // Web order: the Roles row, the open role's fields, the task models,
+        // then the title instructions.
+        assert!(roles.bottom() <= editor.top(), "{roles:?} {editor:?}");
+        assert!(editor.bottom() <= summary.top(), "{editor:?} {summary:?}");
+        assert!(summary.bottom() <= titles.top(), "{summary:?} {titles:?}");
+        // New role sits beside the dropdown in the Roles row; Delete role
+        // closes the editor at the right. Both are the web's 32px buttons.
+        assert!(new_role.top() >= roles.top() && new_role.bottom() <= roles.bottom());
+        assert!(delete.bottom() <= editor.bottom() && delete.right() <= editor.right());
+        assert!(delete.left() > editor.left() + editor.size.width / 2.0);
+        assert_eq!(f32::from(new_role.size.height), 32.0);
+        assert_eq!(f32::from(delete.size.height), 32.0);
+        // No project is chosen, so its overrides are not shown.
+        assert!(cx.debug_bounds("desktop-settings-role-override").is_none());
     }
 
     #[gpui::test]

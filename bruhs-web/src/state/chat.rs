@@ -98,6 +98,11 @@ pub struct Thread {
     /// effort, access and instructions come from the role each turn.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub role: Option<String>,
+    /// Stamp of the role instructions its session started with
+    /// (`roles::instructions_stamp`). A session keeps those, so when they
+    /// differ from the thread's now, its next turn starts a new session.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions_stamp: Option<String>,
     /// The earlier conversation of a thread imported without a session
     /// (a Cursor chat). Sent with each turn until the thread has a
     /// session, then dropped; see `portable::with_import_context`.
@@ -133,6 +138,7 @@ impl Thread {
             effort: None,
             run_locked: false,
             role: None,
+            instructions_stamp: None,
             import_context: None,
         }
     }
@@ -578,10 +584,44 @@ impl Default for ThreadNotice {
 #[derive(Copy, Clone)]
 pub struct PromptQueueSignal(pub RwSignal<crate::queue::PromptQueue>);
 
-/// Queued messages stay put after Interrupt or a reload until Resume or a
-/// new send. A turn that finishes on its own clears this and drains.
+/// Threads whose queued messages stay put: after Interrupt there, or a
+/// reload, until Resume or a new send in that thread. Each thread is held on
+/// its own, so pausing one leaves the others draining.
 #[derive(Copy, Clone)]
-pub struct QueueHeldSignal(pub RwSignal<bool>);
+pub struct QueueHolds(RwSignal<std::collections::BTreeSet<String>>);
+
+impl QueueHolds {
+    fn new(held: impl IntoIterator<Item = String>) -> Self {
+        Self(RwSignal::new(held.into_iter().collect()))
+    }
+
+    /// Pause `thread_id`'s queue.
+    pub fn hold(self, thread_id: &str) {
+        if !self.is_held_untracked(thread_id) {
+            self.0.update(|held| {
+                held.insert(thread_id.to_string());
+            });
+        }
+    }
+
+    /// Let `thread_id`'s queue drain again.
+    pub fn resume(self, thread_id: &str) {
+        if self.is_held_untracked(thread_id) {
+            self.0.update(|held| {
+                held.remove(thread_id);
+            });
+        }
+    }
+
+    /// Whether `thread_id`'s queue is paused. Tracks every hold.
+    pub fn is_held(self, thread_id: &str) -> bool {
+        self.0.with(|held| held.contains(thread_id))
+    }
+
+    pub fn is_held_untracked(self, thread_id: &str) -> bool {
+        self.0.with_untracked(|held| held.contains(thread_id))
+    }
+}
 
 /// The composer draft. Shared so ⌘S (stash) and the palette can reach it.
 #[derive(Copy, Clone)]
@@ -852,9 +892,15 @@ pub(super) fn provide() {
         load_json_pref::<crate::queue::PromptQueue>("bruhs.promptQueue").unwrap_or_default(),
     );
     Effect::new(move |_| prompt_queue.with(|q| save_json_pref("bruhs.promptQueue", q)));
-    // A reload is a restart: queued rows wait for Resume or the next send.
-    let queue_held = RwSignal::new(prompt_queue.with_untracked(|queue| !queue.is_empty()));
-    provide_context(QueueHeldSignal(queue_held));
+    // A reload is a restart: each thread's queued rows wait for Resume or
+    // the next send there.
+    provide_context(QueueHolds::new(prompt_queue.with_untracked(|queue| {
+        queue
+            .thread_ids()
+            .into_iter()
+            .map(str::to_string)
+            .collect::<Vec<_>>()
+    })));
     let prompt_stash = RwSignal::new(
         load_json_pref::<crate::stash::PromptStash>("bruhs.promptStash").unwrap_or_default(),
     );
@@ -931,6 +977,22 @@ pub(super) fn provide() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn each_threads_queue_is_held_on_its_own() {
+        let owner = Owner::new();
+        let holds = owner.with(|| QueueHolds::new(["a".to_string()]));
+        assert!(holds.is_held_untracked("a") && !holds.is_held_untracked("b"));
+        // Pausing one thread leaves the others draining.
+        holds.hold("b");
+        holds.resume("a");
+        assert!(!holds.is_held_untracked("a") && holds.is_held_untracked("b"));
+        // Holding or resuming twice changes nothing.
+        holds.hold("b");
+        holds.resume("a");
+        holds.resume("b");
+        assert!(!holds.is_held_untracked("a") && !holds.is_held_untracked("b"));
+    }
 
     fn request(id: &str, tool: &str) -> PermissionRequest {
         request_in("t1", id, tool)

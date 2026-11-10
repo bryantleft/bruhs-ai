@@ -843,9 +843,13 @@ struct PersistedThread {
     /// The thread keeps its checkout or worktree. Missing means it has not sent.
     #[serde(default, skip_serializing_if = "skip_false")]
     run_locked: bool,
-    /// Id of the role an agent started this thread with.
+    /// Id of the thread's role: an agent started it with one, or the user
+    /// set it with `/role`.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     role: Option<String>,
+    /// Stamp of the role instructions the thread's session started with.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    instructions_stamp: Option<String>,
 }
 
 fn skip_false(value: &bool) -> bool {

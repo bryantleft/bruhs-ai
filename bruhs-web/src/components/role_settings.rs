@@ -15,7 +15,7 @@ use crate::state::{RolesSignal, TaskModelsSignal, ThreadsSignal};
 use crate::ui::{Dropdown, DropdownOption};
 
 const TEXT_INPUT: &str = "h-8 w-full rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 sm:w-60";
-const TEXT_AREA: &str = "min-h-24 w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500";
+const TEXT_AREA: &str = "min-h-[6rem] w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500";
 const BUTTON: &str = "inline-flex h-8 shrink-0 items-center rounded-grape px-3 text-label-sm text-rambutan-200 inset-ring inset-ring-white/10 transition-colors hover:bg-longan-800/60 hover:text-rambutan-100 disabled:opacity-50 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer";
 const FIELD: &str = "flex flex-col gap-3 py-2 sm:flex-row sm:items-center sm:justify-between";
 const FIELD_LABEL: &str = "text-label-sm text-rambutan-300";
