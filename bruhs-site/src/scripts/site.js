@@ -545,3 +545,27 @@ for (const button of document.querySelectorAll("button[data-copy]")) {
     }, 1600);
   });
 }
+
+// "Send to your Mac" (phones and tablets, see public/os.js): the share sheet
+// hands the link to AirDrop, Messages or Mail; without one, copy it.
+for (const button of document.querySelectorAll("button[data-share]")) {
+  const label = button.querySelector("[data-label]");
+  const text = label?.textContent ?? "";
+  button.addEventListener("click", async () => {
+    const link = { title: "bruhs", text: "bruhs, one window for your whole day. Download it on your Mac.", url: "https://bruhs.ai" };
+    if (navigator.share) {
+      // A dismissed share sheet rejects; nothing to undo.
+      await navigator.share(link).catch(() => {});
+      return;
+    }
+    try {
+      await navigator.clipboard.writeText(link.url);
+      if (label) label.textContent = "Link copied";
+    } catch {
+      if (label) label.textContent = "bruhs.ai";
+    }
+    setTimeout(() => {
+      if (label) label.textContent = text;
+    }, 1600);
+  });
+}

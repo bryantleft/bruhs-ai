@@ -142,6 +142,15 @@ kbd, .kbd {
 .get-row { display: flex; flex-wrap: wrap; gap: 8px; }
 /* Flex centers an icon on the line box, which sits below the middle of the
    capitals (Monaspace keeps room for descenders): lift it onto the caps. */
+/* Per-device versions (public/os.js sets <html data-os>): the Mac download
+   by default, "Send to your Mac" on phones and tablets, run-from-source on
+   Windows and Linux. */
+:root:not([data-os="phone"], [data-os="pc"]) :is(.for-phone, .for-pc):not(.for-mac),
+:root[data-os="phone"] :is(.for-mac, .for-pc):not(.for-phone),
+:root[data-os="pc"] :is(.for-mac, .for-phone):not(.for-pc) { display: none; }
+.nav .btn-primary > span { display: inline-flex; align-items: center; gap: inherit; }
+.os-note { margin: -8px 0 0; max-width: 44ch; font-size: .875rem; color: var(--rambutan-400); text-wrap: balance; }
+
 .icon, .works-with img { flex: none; translate: 0 var(--icon-lift, -0.1em); }
 
 .bruh { display: block; width: 100%; }
