@@ -2,6 +2,7 @@
 // between screenshots) and the dot mascot.
 
 import { drawBruh } from "./braille.js";
+import { detectChip } from "./chip.js";
 import { COMMANDS, filterCommands } from "./palette.js";
 
 /** @typedef {import("./palette.js").Command} Command */
@@ -567,5 +568,17 @@ for (const button of document.querySelectorAll("button[data-share]")) {
     setTimeout(() => {
       if (label) label.textContent = text;
     }, 1600);
+  });
+}
+
+// An Intel Mac can't run the Apple silicon build: once the page is idle, ask
+// chip.js and, only when it's sure, offer run-from-source instead. Intel
+// Macs are rare, so the late swap costs everyone else nothing.
+if (document.documentElement.dataset.os === "mac") {
+  const whenIdle = window.requestIdleCallback ?? ((/** @type {() => void} */ run) => setTimeout(run, 300));
+  whenIdle(() => {
+    detectChip().then((chip) => {
+      if (chip === "intel") document.documentElement.dataset.os = "intel";
+    });
   });
 }

@@ -47,8 +47,9 @@ describe("index.html", () => {
   });
 
   it("offers every device its own button in the hero and at the end", () => {
-    for (const kind of ["for-mac", "for-phone", "for-pc"]) {
-      const count = html.match(new RegExp(`class="btn btn-primary ${kind}"`, "g"))?.length ?? 0;
+    // An Intel Mac (src/scripts/chip.js) shares the run-from-source button.
+    for (const kind of ["for-mac", "for-phone", "for-pc", "for-intel"]) {
+      const count = html.match(new RegExp(`class="btn btn-primary[^"]*\\b${kind}\\b[^"]*"`, "g"))?.length ?? 0;
       assert.equal(count, 2, `${kind} buttons`);
     }
   });
