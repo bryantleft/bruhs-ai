@@ -2,9 +2,7 @@
 //! dots, and a level meter as one braille cell. Dot math lives in
 //! `bruhs_models::logic::dither`, shared with the desktop app.
 
-use bruhs_models::logic::dither::{
-    bruh_dots, meter_column, DotKind, BRUH_FACE_RGB, BRUH_MOUTH_RGB,
-};
+use bruhs_models::logic::dither::{bruh_dots, meter_column};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use leptos::html;
 use leptos::prelude::*;
@@ -43,12 +41,16 @@ fn draw_bruh(canvas: &web_sys::HtmlCanvasElement, size: f64) {
     let _ = ctx.set_transform(scale, 0.0, 0.0, scale, 0.0, 0.0);
     let size_f32 = size.to_f32_lossy();
     let dots = bruh_dots(size_f32);
-    for (kind, rgb) in [
-        (DotKind::Face, BRUH_FACE_RGB),
-        (DotKind::Mouth, BRUH_MOUTH_RGB),
-    ] {
+    // One path per color: the mouth blends face → mouth in five steps.
+    let mut colors: Vec<u32> = dots
+        .iter()
+        .map(bruhs_models::logic::dither::Dot::rgb)
+        .collect();
+    colors.sort_unstable();
+    colors.dedup();
+    for rgb in colors {
         ctx.begin_path();
-        for dot in dots.iter().filter(|dot| dot.kind == kind) {
+        for dot in dots.iter().filter(|dot| dot.rgb() == rgb) {
             let (x, y, r) = (f64::from(dot.x), f64::from(dot.y), f64::from(dot.radius));
             ctx.move_to(x + r, y);
             let _ = ctx.arc(x, y, r, 0.0, std::f64::consts::TAU);

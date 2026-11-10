@@ -417,8 +417,9 @@ document.addEventListener("keydown", (event) => {
 const BRUH_COLORS = { face: "#fada5e", mouth: "#fc4141" };
 // How far the head turns at the pointer's farthest reach (1 = its full turn).
 const LOOK_REACH = 0.7;
-// Share of the remaining turn covered each frame: about 150ms to settle at 60fps.
-const LOOK_EASE = 0.22;
+// Exponential smoothing time constant for the turn, in ms: about 200ms to
+// settle, the same at 60 or 120 Hz and through dropped frames.
+const LOOK_TAU_MS = 70;
 const REVEAL_MS = 700;
 
 /**
@@ -513,20 +514,27 @@ for (const bruh of bruhs) {
 }
 
 let lookFrame = 0;
-function turnHeads() {
+let lastTurn = 0;
+/** @param {number} now */
+function turnHeads(now) {
   lookFrame = 0;
+  // Frame-rate independent: cover 1 - e^(-dt/τ) of the remaining turn.
+  const dt = lastTurn ? Math.min(64, now - lastTurn) : 16;
+  lastTurn = now;
+  const k = 1 - Math.exp(-dt / LOOK_TAU_MS);
   let turning = false;
   for (const bruh of bruhs) {
     if (!bruh.visible) continue;
     const dx = bruh.target.x - (bruh.face.lookX ?? 0);
     const dy = bruh.target.y - (bruh.face.lookY ?? 0);
-    if (Math.abs(dx) < 0.002 && Math.abs(dy) < 0.002) continue;
-    bruh.face.lookX = (bruh.face.lookX ?? 0) + dx * LOOK_EASE;
-    bruh.face.lookY = (bruh.face.lookY ?? 0) + dy * LOOK_EASE;
+    if (Math.abs(dx) < 0.001 && Math.abs(dy) < 0.001) continue;
+    bruh.face.lookX = (bruh.face.lookX ?? 0) + dx * k;
+    bruh.face.lookY = (bruh.face.lookY ?? 0) + dy * k;
     drawOne(bruh);
     turning = true;
   }
   if (turning) lookFrame = requestAnimationFrame(turnHeads);
+  else lastTurn = 0;
 }
 
 document.addEventListener("pointermove", (event) => {
@@ -542,3 +550,9 @@ document.addEventListener("pointermove", (event) => {
   }
   lookFrame ||= requestAnimationFrame(turnHeads);
 }, { passive: true });
+
+// The pointer left the window: look ahead again.
+document.documentElement.addEventListener("mouseleave", () => {
+  for (const bruh of bruhs) bruh.target = { x: 0, y: 0 };
+  lookFrame ||= requestAnimationFrame(turnHeads);
+});
