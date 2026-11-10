@@ -85,6 +85,26 @@ pub struct ThreadAccessSignal(pub RwSignal<bruhs_models::thread_link::ThreadAcce
 #[derive(Copy, Clone)]
 pub struct ThreadHopsSignal(pub RwSignal<u32>);
 
+/// The user's roles and each project's overrides. Stored as `bruhs.roles`.
+#[derive(Copy, Clone)]
+pub struct RolesSignal(pub RwSignal<bruhs_models::roles::RoleBook>);
+
+/// Models for meeting summaries and second opinions. Stored as
+/// `bruhs.taskModels`.
+#[derive(Copy, Clone)]
+pub struct TaskModelsSignal(pub RwSignal<bruhs_models::roles::TaskModels>);
+
+/// Where [`TaskModelsSignal`] is stored, for callers with no context.
+pub const TASK_MODELS_PREF: &str = "bruhs.taskModels";
+
+/// The stored task models, read fresh. For API calls made outside a
+/// component, where there is no context to ask.
+pub fn stored_task_models() -> bruhs_models::roles::TaskModels {
+    load_json_pref::<bruhs_models::roles::TaskModels>(TASK_MODELS_PREF)
+        .unwrap_or_default()
+        .sanitized()
+}
+
 /// Claude `--autocompact` (`bruhs.claudeAutoCompact`). Empty omits the flag.
 #[derive(Copy, Clone)]
 pub struct ClaudeAutoCompactSignal(pub RwSignal<Option<String>>);
@@ -294,6 +314,16 @@ pub(super) fn provide() {
     Effect::new(move |_| save_pref("bruhs.threadHops", &thread_hops.get().to_string()));
     provide_context(ThreadAccessSignal(thread_access));
     provide_context(ThreadHopsSignal(thread_hops));
+    let roles = RwSignal::new(
+        load_json_pref::<bruhs_models::roles::RoleBook>("bruhs.roles")
+            .unwrap_or_default()
+            .sanitized(),
+    );
+    Effect::new(move |_| roles.with(|book| save_json_pref("bruhs.roles", book)));
+    let task_models = RwSignal::new(stored_task_models());
+    Effect::new(move |_| task_models.with(|models| save_json_pref(TASK_MODELS_PREF, models)));
+    provide_context(RolesSignal(roles));
+    provide_context(TaskModelsSignal(task_models));
     provide_context(ClaudeAutoCompactSignal(claude_autocompact));
     provide_context(CompactIdleSignal(compact_idle));
     provide_context(CompactFullSignal(RwSignal::new(false)));

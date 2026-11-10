@@ -38,6 +38,7 @@ fn thread(id: &str, project: &str) -> Thread {
         worktree_path: None,
         effort: None,
         run_locked: false,
+        role: None,
         import_context: None,
     }
 }

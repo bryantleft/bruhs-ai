@@ -59,6 +59,10 @@ pub struct AgentRequest {
     /// and message; an unknown value is rejected.
     #[serde(default)]
     pub thread_access: Option<bruhs_models::thread_link::ThreadAccess>,
+    /// The thread's role instructions. Missing or blank adds nothing; text
+    /// longer than a role may hold is rejected.
+    #[serde(default)]
+    pub instructions: Option<String>,
 }
 
 /// Convert a `QueryEvent` into a `serde_json::Value`.
@@ -191,6 +195,15 @@ pub async fn post_agent(
     body: Result<Json<AgentRequest>, JsonRejection>,
 ) -> Result<impl IntoResponse, AppError> {
     let Json(body) = body.map_err(|rejection| AppError::BadRequest(rejection.body_text()))?;
+    if body
+        .instructions
+        .as_deref()
+        .is_some_and(|text| text.chars().count() > bruhs_models::roles::MAX_INSTRUCTIONS_CHARS)
+    {
+        return Err(AppError::BadRequest(
+            "role instructions are too long".into(),
+        ));
+    }
     crate::routes::uploads::reject_foreign_uploads(&body.file_attachments)?;
     let project = turn_dir(body.project_path.as_deref(), home::home_dir().as_deref()).await?;
     let model = body.model.unwrap_or_else(ModelId::default_agent_model);
@@ -213,6 +226,7 @@ pub async fn post_agent(
     .effort(body.effort.as_deref())
     .autocompact(body.autocompact.as_deref())
     .thread_access(body.thread_access.unwrap_or_default())
+    .instructions(body.instructions)
     // A chat with no project (life surfaces, meetings) runs in the home
     // directory and needs no coding plugins.
     .lean(project.is_home());
@@ -248,6 +262,16 @@ pub async fn post_second_opinion(
     }
     let project = turn_dir(body.project_path.as_deref(), home::home_dir().as_deref()).await?;
     let reviewer = bruhs_models::logic::handoff::reviewer_for(body.thread_provider);
+    // The other provider reviews; it cannot run this provider's models.
+    if body
+        .reviewer_model
+        .as_ref()
+        .is_some_and(|model| model.provider() != reviewer)
+    {
+        return Err(AppError::BadRequest(
+            "the reviewer model belongs to the other provider".into(),
+        ));
+    }
     let result =
         bruhs_core::second_opinion::second_opinion(bruhs_core::second_opinion::ReviewRequest {
             thread_provider: body.thread_provider,
@@ -255,6 +279,9 @@ pub async fn post_second_opinion(
             task: body.task,
             answer: body.answer,
             focus: body.focus,
+            reviewer_model: body
+                .reviewer_model
+                .map(bruhs_models::agent::ModelId::into_inner),
         })
         .await;
     Ok(Json(match result {
@@ -387,6 +414,45 @@ mod tests {
                 reqwest::StatusCode::BAD_REQUEST,
                 "{thread_id:?}"
             );
+        }
+    }
+
+    /// Role instructions are bounded before anything runs: a role holds at
+    /// most `MAX_INSTRUCTIONS_CHARS`, so longer text did not come from one.
+    #[tokio::test]
+    async fn oversized_role_instructions_are_rejected() {
+        let (_server, url) = serve(Arc::new(AppState::new())).await;
+        let mut request = body(ThreadId::new_v4().as_str(), Some("plan"));
+        request["instructions"] =
+            json!("x".repeat(bruhs_models::roles::MAX_INSTRUCTIONS_CHARS + 1));
+        let response = post(&url, &request).await;
+        assert_eq!(response.status(), reqwest::StatusCode::BAD_REQUEST);
+        let error: Value = response.json().await.unwrap();
+        assert!(error["error"].as_str().unwrap().contains("instructions"));
+    }
+
+    /// The other provider reviews, so a reviewer model of the thread's own
+    /// provider is refused rather than quietly swapped.
+    #[tokio::test]
+    async fn a_reviewer_model_of_the_wrong_provider_is_rejected() {
+        use bruhs_models::agent::{AgentProvider, ModelId};
+        for (thread_provider, model) in [
+            (AgentProvider::Claude, "claude-sonnet-4-6"),
+            (AgentProvider::Codex, "gpt-6.1-sol"),
+        ] {
+            let result = post_second_opinion(Ok(Json(bruhs_models::api::SecondOpinionRequest {
+                project_path: None,
+                thread_provider,
+                task: "task".into(),
+                answer: "answer".into(),
+                focus: String::new(),
+                reviewer_model: Some(ModelId::try_from(model.to_string()).unwrap()),
+            })))
+            .await;
+            let Err(AppError::BadRequest(message)) = result.map(|_| ()) else {
+                panic!("expected a bad request for {model}");
+            };
+            assert!(message.contains("other provider"), "{message}");
         }
     }
 
@@ -523,6 +589,7 @@ mod tests {
                         title: None,
                         message: "Report back".into(),
                         wait: true,
+                        role: None,
                     },
                 };
                 (

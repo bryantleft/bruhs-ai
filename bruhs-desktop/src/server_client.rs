@@ -540,6 +540,7 @@ impl ServerClient {
                 request_id: Some(request_id.to_string()),
                 extract_observations,
                 replace_observations: replace,
+                model: summary_model(),
             }),
             SUMMARY_REQUEST_TIMEOUT,
         )
@@ -995,6 +996,27 @@ impl SseParser {
 
 fn normalize_base(url: &str) -> String {
     url.trim().trim_end_matches('/').to_string()
+}
+
+/// The user's model for meeting summaries, set from Settings. A summary is
+/// requested from background work that holds only a client, so the choice
+/// lives here instead of travelling with every call.
+static SUMMARY_MODEL: std::sync::RwLock<Option<String>> = std::sync::RwLock::new(None);
+
+/// Use `model` for the meeting summaries requested from now on. `None`
+/// keeps the server's built-in model.
+pub fn set_summary_model(model: Option<String>) {
+    *SUMMARY_MODEL
+        .write()
+        .unwrap_or_else(std::sync::PoisonError::into_inner) = model;
+}
+
+fn summary_model() -> Option<bruhs_models::agent::ModelId> {
+    SUMMARY_MODEL
+        .read()
+        .unwrap_or_else(std::sync::PoisonError::into_inner)
+        .clone()
+        .and_then(|model| bruhs_models::agent::ModelId::try_from(model).ok())
 }
 
 #[cfg(test)]

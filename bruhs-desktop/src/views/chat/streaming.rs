@@ -1228,8 +1228,11 @@ impl ChatView {
         if !self.effort_chip_visible() {
             return None;
         }
-        self.claude_effort
-            .as_deref()
+        // The thread's role sets the effort when it names one.
+        self.role_profile
+            .as_ref()
+            .and_then(|role| role.effort.as_deref())
+            .or(self.claude_effort.as_deref())
             .and_then(bruhs_models::logic::run_place::claude_effort)
             .map(str::to_string)
     }
@@ -1523,7 +1526,16 @@ impl ChatView {
         self.thread_title = thread_title_after_submit_like_web(&self.thread_title, title_prompt);
         let project_path = self.project_path.clone();
         let project_scoped = self.project_scoped;
-        let permission_mode = self.permission_mode;
+        // The thread's role can narrow the access mode, never widen it.
+        let permission_mode = bruhs_models::roles::narrow_access(
+            self.permission_mode,
+            self.role_profile.as_ref().and_then(|role| role.access),
+        );
+        let instructions = self
+            .role_profile
+            .as_ref()
+            .map(|role| role.instructions.clone())
+            .filter(|text| !text.trim().is_empty());
         let model_id = self.model_id.clone();
         let paste_files = bruhs_core::write_paste_files(&attachments);
         let provider = provider_for_model_id(&model_id);
@@ -1593,6 +1605,7 @@ impl ChatView {
             .effort(send_effort.as_deref())
             .autocompact(autocompact)
             .thread_access(self.thread_access)
+            .instructions(instructions)
             // A chat with no project needs no coding plugins (web: no `project_path`).
             .lean(!project_scoped);
             if self.fresh_session {
@@ -2033,6 +2046,8 @@ impl ChatView {
             task,
             answer,
             focus,
+            // The user's model for this reviewer, if they chose one.
+            reviewer_model: self.task_models.review(reviewer).map(str::to_string),
         };
         let review = runtime.spawn(bruhs_core::second_opinion::second_opinion(request));
         cx.spawn(async move |this, cx| {

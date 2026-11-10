@@ -44,6 +44,7 @@ pub mod provider;
 mod record_focus;
 pub mod render_pass;
 pub mod right_panel;
+pub mod role_settings;
 pub mod search_page;
 pub mod secret_prompt;
 pub mod service_connections;

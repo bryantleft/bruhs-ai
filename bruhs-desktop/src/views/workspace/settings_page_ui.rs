@@ -367,7 +367,9 @@ impl Workspace {
                 self.thread_hops = bruhs_models::thread_link::parse_hops(value);
                 self.persist_and_notify(cx);
             }
-            _ => {}
+            _ => {
+                self.select_role_setting(id, value, window, cx);
+            }
         }
         self.set_settings_open_dropdown(None);
         // The clicked option unmounts with the list; keep focus in the dialog
@@ -1030,7 +1032,13 @@ impl Workspace {
             SettingsSection::Credentials => vec![div()
                 .child(self.credential_settings.clone())
                 .into_any_element()],
-            SettingsSection::General => self.render_settings_general_rows(cx),
+            SettingsSection::General => {
+                // Web order: the general rows, then roles, then task models.
+                let mut rows = self.render_settings_general_rows(cx);
+                rows.extend(self.render_role_settings_rows(cx));
+                rows.extend(self.render_task_model_rows(cx));
+                rows
+            }
             SettingsSection::Updates => self.render_settings_updates_rows(cx),
             SettingsSection::Beta => self.render_settings_beta_rows(cx),
             SettingsSection::Calendar => self.render_settings_calendar_rows(cx),

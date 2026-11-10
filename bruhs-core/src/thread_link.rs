@@ -542,6 +542,7 @@ fn tools(connection: &Connection) -> Value {
         let mut properties = json!({
             "thread_id": reference,
             "title": {"type": "string", "description": "Title for a new thread."},
+            "role": {"type": "string", "description": "For a new thread: the name of a role from list_threads. The thread runs on that role's model and instructions."},
             "message": {"type": "string", "description": "Self-contained: the other agent sees none of this conversation."}
         });
         let returns = if connection.can_wait {
@@ -690,6 +691,7 @@ mod tests {
             title: None,
             message: text.into(),
             wait: false,
+            role: None,
         }
     }
 
@@ -699,6 +701,7 @@ mod tests {
             title: None,
             message: text.into(),
             wait: true,
+            role: None,
         }
     }
 

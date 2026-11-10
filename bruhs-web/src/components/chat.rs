@@ -286,6 +286,9 @@ pub fn ChatPage() -> impl IntoView {
     let FollowUpSteerSignal(follow_up_steer) = expect_context::<FollowUpSteerSignal>();
     let crate::state::ThreadAccessSignal(thread_access) =
         expect_context::<crate::state::ThreadAccessSignal>();
+    let crate::state::RolesSignal(roles) = expect_context::<crate::state::RolesSignal>();
+    let crate::state::TaskModelsSignal(task_models) =
+        expect_context::<crate::state::TaskModelsSignal>();
     let BaseBranchSignal(base_branch) = expect_context::<BaseBranchSignal>();
     let PreviousWorktreeSignal(previous_worktree) = expect_context::<PreviousWorktreeSignal>();
     let RightPanelSignal(panel) = expect_context::<RightPanelSignal>();
@@ -828,7 +831,20 @@ pub fn ChatPage() -> impl IntoView {
         }
         flush_persist();
 
-        let perm_mode = permission_mode.get_untracked();
+        // The thread's role, as it runs in this project. It sets the effort
+        // and instructions, and can narrow the access mode, never widen it.
+        let role = thread
+            .role
+            .as_deref()
+            .and_then(|id| roles.with_untracked(|book| book.resolve(id, &thread.project_name)));
+        let perm_mode = bruhs_models::roles::narrow_access(
+            permission_mode.get_untracked(),
+            role.as_ref().and_then(|role| role.access),
+        );
+        let role_effort = role.as_ref().and_then(|role| role.effort.clone());
+        let role_instructions = role
+            .map(|role| role.instructions)
+            .filter(|text| !text.trim().is_empty());
         // A chat without a project sends no path; the server runs it in the
         // home directory.
         let project_path = thread.project_path.clone().or_else(|| {
@@ -847,7 +863,7 @@ pub fn ChatPage() -> impl IntoView {
         };
         let project_label = thread.project_name.clone();
         let effort = (provider == AgentProvider::Claude)
-            .then(|| claude_effort_pref.get_untracked())
+            .then(|| role_effort.or_else(|| claude_effort_pref.get_untracked()))
             .flatten()
             .as_deref()
             .and_then(claude_effort)
@@ -993,6 +1009,7 @@ pub fn ChatPage() -> impl IntoView {
                         },
                         thread_access: Some(thread_access.get_untracked())
                             .filter(|access| *access != Default::default()),
+                        instructions: role_instructions.clone(),
                     };
                     let saw_init = Rc::new(Cell::new(false));
                     let saw_init_cb = Rc::clone(&saw_init);
@@ -1235,6 +1252,10 @@ pub fn ChatPage() -> impl IntoView {
             task,
             answer,
             focus,
+            // The user's model for this reviewer, if they chose one.
+            reviewer_model: task_models
+                .with_untracked(|models| models.review(reviewer).map(str::to_string))
+                .and_then(|model| bruhs_models::agent::ModelId::try_from(model).ok()),
         };
         wasm_bindgen_futures::spawn_local(async move {
             match crate::api::second_opinion(&request).await {

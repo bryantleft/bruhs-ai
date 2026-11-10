@@ -64,6 +64,10 @@ pub struct AgentTurn {
     pub lean: bool,
     /// What the turn's agent may do with the app's other threads.
     pub thread_access: ThreadAccess,
+    /// The thread's role instructions, added to its context like a meeting
+    /// thread's. Keep them the same for a thread's whole life where
+    /// possible: a changed prompt prefix misses the cache.
+    pub instructions: Option<String>,
 }
 
 impl AgentTurn {
@@ -90,7 +94,16 @@ impl AgentTurn {
             autocompact: None,
             lean: false,
             thread_access: ThreadAccess::default(),
+            instructions: None,
         }
+    }
+
+    /// The thread's role instructions. Blank text is dropped.
+    pub fn instructions(mut self, instructions: Option<String>) -> Self {
+        self.instructions = instructions
+            .map(|text| text.trim().to_string())
+            .filter(|text| !text.is_empty());
+        self
     }
 
     /// The user's setting for messages between threads.
@@ -576,7 +589,17 @@ impl AgentOrchestrator {
             autocompact,
             lean,
             thread_access,
+            instructions,
         } = turn;
+        // The thread's own context first (a meeting's transcript), then what
+        // its role asks of it.
+        let context = match (system_prompt, instructions.as_deref()) {
+            (Some(prompt), Some(instructions)) => Some(format!("{prompt}\n\n{instructions}")),
+            (Some(prompt), None) => Some(prompt.to_string()),
+            (None, Some(instructions)) => Some(instructions.to_string()),
+            (None, None) => None,
+        };
+        let system_prompt = context.as_deref();
 
         // Claim the thread and pick the session to resume, atomically.
         let (turn_number, resume) = {

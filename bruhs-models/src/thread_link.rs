@@ -20,7 +20,9 @@
 
 use serde::{Deserialize, Serialize};
 
+use crate::agent::model_label;
 use crate::ids::ThreadId;
+use crate::roles::{ResolvedRole, RoleBook, MAX_NAME_CHARS};
 
 /// Longest chain of agent-to-agent messages after the user's own prompt,
 /// unless the user picks another of [`HOP_CHOICES`].
@@ -128,6 +130,10 @@ pub enum ThreadOperation {
         /// Hold the tool call until the recipient has replied.
         #[serde(default, skip_serializing_if = "is_false")]
         wait: bool,
+        /// The role a new thread starts with: its name, as `list_threads`
+        /// prints it. Only for a new thread.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        role: Option<String>,
     },
 }
 
@@ -160,10 +166,21 @@ impl ThreadOperation {
                 thread_id,
                 title,
                 message,
+                role,
                 ..
             } => {
                 if let Some(id) = thread_id {
                     reference(id)?;
+                }
+                if let Some(role) = role {
+                    if thread_id.is_some() {
+                        return Err(
+                            "role is for a new thread: omit thread_id to start one, or omit role.",
+                        );
+                    }
+                    if role.trim().is_empty() || role.chars().count() > MAX_NAME_CHARS {
+                        return Err("role is not a role name.");
+                    }
                 }
                 if title
                     .as_deref()
@@ -234,6 +251,10 @@ pub struct ThreadCard<'a> {
     pub running: bool,
     /// Prompts waiting in its queue.
     pub queued: usize,
+    /// Id of the model it last ran on, if it has run.
+    pub model: Option<&'a str>,
+    /// Name of its role, if it has one.
+    pub role: Option<&'a str>,
 }
 
 /// One settled message of a thread.
@@ -276,6 +297,13 @@ pub struct Outgoing<'a> {
     pub wait: bool,
     /// The user's hop limit.
     pub max_hops: u32,
+}
+
+/// A thread a message started. `role` is the name of the role it runs
+/// with, if it was given one.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct Created<'a> {
+    pub role: Option<&'a str>,
 }
 
 /// What became of a message once it was handed to its recipient.
@@ -402,9 +430,10 @@ pub fn resolve_thread<'a>(reference: &str, ids: &[&'a str]) -> Result<&'a str, T
 
 /// The `list_threads` reply. `threads` is most recent first; `caller` is the
 /// id of the thread that asked.
-pub fn list_reply(threads: &[ThreadCard<'_>], caller: &str) -> ThreadReply {
+pub fn list_reply(threads: &[ThreadCard<'_>], caller: &str, roles: &[ResolvedRole]) -> ThreadReply {
     let ids: Vec<&str> = threads.iter().map(|thread| thread.id).collect();
-    let mut text = String::from("Threads, most recent first (id · title · project · state):\n");
+    let mut text =
+        String::from("Threads, most recent first (id · title · project · state · model · role):\n");
     for thread in threads.iter().take(LIST_LIMIT) {
         let state = if thread.id == caller {
             "this thread".to_string()
@@ -417,10 +446,14 @@ pub fn list_reply(threads: &[ThreadCard<'_>], caller: &str) -> ThreadReply {
             }
         };
         text.push_str(&format!(
-            "{} · {} · {} · {state}\n",
+            "{} · {} · {} · {state} · {} · {}\n",
             short_id(thread.id, &ids),
             header_title(thread.title),
             thread.project.map_or("no project", str::trim),
+            thread
+                .model
+                .map_or_else(|| "no model yet".to_string(), model_label),
+            thread.role.map_or("no role", str::trim),
         ));
     }
     if threads.len() > LIST_LIMIT {
@@ -429,7 +462,60 @@ pub fn list_reply(threads: &[ThreadCard<'_>], caller: &str) -> ThreadReply {
             threads.len() - LIST_LIMIT
         ));
     }
+    if !roles.is_empty() {
+        text.push_str("\nRoles a new thread can start with (message_thread's role, by name):\n");
+        for role in roles {
+            text.push_str(&role_line(role));
+        }
+    }
     ThreadReply::ok(text)
+}
+
+/// One role as an agent sees it: name, model and what to hand it.
+fn role_line(role: &ResolvedRole) -> String {
+    let model = role
+        .model
+        .as_deref()
+        .map_or_else(|| "the sender's model".to_string(), model_label);
+    if role.use_for.is_empty() {
+        format!("{} · {model}\n", role.name)
+    } else {
+        format!("{} · {model} · {}\n", role.name, role.use_for)
+    }
+}
+
+/// The role a `message_thread` call asked for, as it runs in `project`.
+/// `Ok(None)` when it asked for none.
+///
+/// # Errors
+///
+/// The refusal to return to the model when no role has that name; it lists
+/// the roles there are.
+pub fn pick_role(
+    book: &RoleBook,
+    project: &str,
+    wanted: Option<&str>,
+) -> Result<Option<ResolvedRole>, ThreadReply> {
+    let Some(wanted) = wanted else {
+        return Ok(None);
+    };
+    if let Some(role) = book.resolve(wanted, project) {
+        return Ok(Some(role));
+    }
+    let roles = book.resolved(project);
+    if roles.is_empty() {
+        return Err(ThreadReply::refused(
+            "Not sent: the user has not set up any roles. Send again without role.",
+        ));
+    }
+    let mut text = format!(
+        "Not sent: there is no role named \"{}\". The roles are:\n",
+        header_title(wanted)
+    );
+    for role in &roles {
+        text.push_str(&role_line(role));
+    }
+    Err(ThreadReply::refused(text))
 }
 
 /// The `read_thread` reply: the last `limit` settled messages of a thread,
@@ -602,13 +688,13 @@ pub fn delivered_reply(
     recipient_id: &str,
     recipient_title: &str,
     ids: &[&str],
-    created: bool,
+    created: Option<Created<'_>>,
     state: DeliveryState,
 ) -> ThreadReply {
-    let what = if created {
-        "Started a new thread"
-    } else {
-        "Sent to thread"
+    let what = match created {
+        Some(Created { role: Some(role) }) => format!("Started a new {role} thread"),
+        Some(Created { role: None }) => "Started a new thread".to_string(),
+        None => "Sent to thread".to_string(),
     };
     let when = match state {
         DeliveryState::Started => "It is running now.",
@@ -707,6 +793,7 @@ mod tests {
                 title: None,
                 message: "hi".into(),
                 wait: false,
+                role: None,
             }
         );
         assert!(message.writes() && !message.waits() && !ThreadOperation::List.writes());
@@ -733,6 +820,7 @@ mod tests {
                 title,
                 message,
                 wait: false,
+                role: None,
             }
             .validate()
         };
@@ -798,24 +886,88 @@ mod tests {
             project: None,
             running,
             queued,
+            model: None,
+            role: None,
         };
         let reply = list_reply(
             &[
                 card(A, "Fix \"login\"\nbug", true, 0),
                 ThreadCard {
                     project: Some("bruhs-ai"),
+                    model: Some("claude-sonnet-4-6"),
+                    role: Some("Writer"),
                     ..card(B, "Research", true, 2)
                 },
             ],
             A,
+            &[],
         );
         assert!(reply.ok);
-        assert!(reply
+        assert!(reply.text.contains(
+            "11111111 · Fix 'login' bug · no project · this thread · no model yet · no role\n"
+        ));
+        assert!(reply.text.contains(
+            "22222222 · Research · bruhs-ai · running, 2 queued · Claude Sonnet 4.6 · Writer\n"
+        ));
+        assert!(!reply.text.contains("Roles a new thread can start with"));
+    }
+
+    fn roles() -> RoleBook {
+        let mut book = RoleBook::default();
+        let writer = book.add("Writer").unwrap();
+        book.update(&writer, |role| {
+            role.use_for = "drafting prose".into();
+            role.model = Some("claude-sonnet-4-6".into());
+        });
+        book.add("Executor").unwrap();
+        book
+    }
+
+    #[test]
+    fn list_names_the_roles_a_new_thread_can_start_with() {
+        let reply = list_reply(&[], A, &roles().resolved(""));
+        assert!(reply.text.ends_with(
+            "\nRoles a new thread can start with (message_thread's role, by name):\nWriter · Claude Sonnet 4.6 · drafting prose\nExecutor · the sender's model\n"
+        ));
+    }
+
+    #[test]
+    fn a_role_is_picked_by_name_and_an_unknown_one_lists_the_roles() {
+        let book = roles();
+        assert_eq!(pick_role(&book, "", None), Ok(None));
+        let picked = pick_role(&book, "", Some("writer")).unwrap().unwrap();
+        assert_eq!(picked.name, "Writer");
+        let unknown = pick_role(&book, "", Some("Reviewer")).unwrap_err();
+        assert!(!unknown.ok);
+        assert!(unknown
             .text
-            .contains("11111111 · Fix 'login' bug · no project · this thread\n"));
-        assert!(reply
+            .starts_with("Not sent: there is no role named \"Reviewer\"."));
+        assert!(unknown
             .text
-            .contains("22222222 · Research · bruhs-ai · running, 2 queued\n"));
+            .contains("Writer · Claude Sonnet 4.6 · drafting prose\n"));
+        let none = pick_role(&RoleBook::default(), "", Some("Writer")).unwrap_err();
+        assert!(none.text.contains("has not set up any roles"));
+        // A role only fits a thread that does not exist yet.
+        let to_existing = ThreadOperation::Message {
+            thread_id: Some(B.into()),
+            title: None,
+            message: "hi".into(),
+            wait: false,
+            role: Some("Writer".into()),
+        };
+        assert!(to_existing.validate().unwrap_err().contains("new thread"));
+        let named = ThreadOperation::Message {
+            thread_id: None,
+            title: None,
+            message: "hi".into(),
+            wait: false,
+            role: Some("Writer".into()),
+        };
+        assert!(named.validate().is_ok());
+        assert_eq!(
+            serde_json::to_string(&named).unwrap(),
+            r#"{"op":"message","message":"hi","role":"Writer"}"#
+        );
     }
 
     #[test]
@@ -831,10 +983,12 @@ mod tests {
                 project: None,
                 running: false,
                 queued: 0,
+                model: None,
+                role: None,
             })
             .collect();
-        let reply = list_reply(&cards, "none");
-        assert_eq!(reply.text.matches(" · idle\n").count(), LIST_LIMIT);
+        let reply = list_reply(&cards, "none", &[]);
+        assert_eq!(reply.text.matches(" · idle · ").count(), LIST_LIMIT);
         assert!(reply.text.ends_with("3 older threads not shown.\n"));
     }
 
@@ -1015,18 +1169,36 @@ mod tests {
     #[test]
     fn the_delivered_reply_tells_the_sender_not_to_wait() {
         let ids = [A, B];
-        let queued = delivered_reply(B, "Research", &ids, false, DeliveryState::Queued);
+        let queued = delivered_reply(B, "Research", &ids, None, DeliveryState::Queued);
         assert!(
             queued.ok
                 && queued
                     .text
                     .starts_with("Sent to thread 22222222 \"Research\". It is queued")
         );
-        let started = delivered_reply(B, "Research", &ids, true, DeliveryState::Started);
+        let started = delivered_reply(
+            B,
+            "Research",
+            &ids,
+            Some(Created { role: None }),
+            DeliveryState::Started,
+        );
+        let as_role = delivered_reply(
+            B,
+            "Research",
+            &ids,
+            Some(Created {
+                role: Some("Writer"),
+            }),
+            DeliveryState::Started,
+        );
+        assert!(as_role
+            .text
+            .starts_with("Started a new Writer thread 22222222"));
         assert!(started.text.starts_with("Started a new thread 22222222"));
         assert!(started.text.contains("running now") && started.text.contains("do not wait"));
         let not_awaited =
-            delivered_reply(B, "Research", &ids, false, DeliveryState::QueuedNotAwaited);
+            delivered_reply(B, "Research", &ids, None, DeliveryState::QueuedNotAwaited);
         assert!(not_awaited.ok && not_awaited.text.contains("could not wait for it"));
     }
 

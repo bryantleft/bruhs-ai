@@ -23,6 +23,7 @@ pub mod ids;
 pub mod logic;
 pub mod models;
 pub mod num;
+pub mod roles;
 pub mod secrets;
 pub mod thread_link;
 pub mod time;

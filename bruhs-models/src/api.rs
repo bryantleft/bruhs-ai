@@ -82,6 +82,10 @@ pub struct SummarizeRequest {
     /// generation.
     #[serde(default)]
     pub replace_observations: bool,
+    /// The Claude model that writes the summary, from the user's task
+    /// models. Missing uses the built-in default.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model: Option<crate::agent::ModelId>,
 }
 
 impl Default for SummarizeRequest {
@@ -90,6 +94,7 @@ impl Default for SummarizeRequest {
             request_id: None,
             extract_observations: true,
             replace_observations: false,
+            model: None,
         }
     }
 }
@@ -444,6 +449,10 @@ pub struct AgentRequest {
     /// (list, read and message).
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub thread_access: Option<crate::thread_link::ThreadAccess>,
+    /// The thread's role instructions. Omitted when it has no role or the
+    /// role has none.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub instructions: Option<String>,
 }
 
 /// `POST /api/agent/second-opinion`: a read-only review of a thread's last
@@ -462,6 +471,10 @@ pub struct SecondOpinionRequest {
     /// What to look at most closely; may be empty.
     #[serde(default)]
     pub focus: String,
+    /// The reviewer's model, from the user's task models. Missing uses the
+    /// reviewer's default. It must be a model the reviewing provider runs.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reviewer_model: Option<crate::agent::ModelId>,
 }
 
 /// Reply to [`SecondOpinionRequest`]: the review, or why there is none.

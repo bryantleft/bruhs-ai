@@ -26,6 +26,9 @@ pub struct ReviewRequest {
     pub answer: String,
     /// What to look at most closely; may be empty.
     pub focus: String,
+    /// The reviewer's model, from the user's task models. `None` uses the
+    /// reviewer's default. The caller checks it is one the reviewer runs.
+    pub reviewer_model: Option<String>,
 }
 
 /// A finished review.
@@ -59,8 +62,12 @@ pub async fn second_opinion(request: ReviewRequest) -> Result<Review, ReviewErro
     let prompt = second_opinion_prompt(&request.focus, &request.task, &request.answer);
     let run = async {
         match reviewer {
-            AgentProvider::Claude => review_with_claude(prompt, &request.project_path).await,
-            AgentProvider::Codex => review_with_codex(prompt, &request.project_path).await,
+            AgentProvider::Claude => {
+                review_with_claude(prompt, &request.project_path, request.reviewer_model).await
+            }
+            AgentProvider::Codex => {
+                review_with_codex(prompt, &request.project_path, request.reviewer_model).await
+            }
         }
     };
     let (text, usage) = tokio::time::timeout(REVIEW_TIMEOUT, run)
@@ -80,7 +87,11 @@ pub async fn second_opinion(request: ReviewRequest) -> Result<Review, ReviewErro
 /// Claude options for a review: no settings files, no permission prompts
 /// and only deny rules (the user's and the project's, plus the write tools),
 /// so only reads and searches run.
-fn claude_review_options(prompt: String, project_path: &str) -> claude_sdk_rs::QueryOptions {
+fn claude_review_options(
+    prompt: String,
+    project_path: &str,
+    model: Option<&str>,
+) -> claude_sdk_rs::QueryOptions {
     let mut options = claude_query_options_from_env(&prompt)
         .cwd(project_path)
         .permission_mode(claude_sdk_rs::PermissionMode::Default)
@@ -94,13 +105,21 @@ fn claude_review_options(prompt: String, project_path: &str) -> claude_sdk_rs::Q
     ));
     options.setting_sources = Some(Vec::new());
     options.settings = Some(crate::agent::reviewer_settings(&files));
-    options.model = Some(bruhs_models::agent::DEFAULT_AGENT_MODEL.to_string());
+    options.model = Some(
+        model
+            .unwrap_or(bruhs_models::agent::DEFAULT_AGENT_MODEL)
+            .to_string(),
+    );
     options
 }
 
 /// Codex options for a review: read-only sandbox, never asks, not saved,
 /// and lean (no plugins: a review reads and runs commands, nothing more).
-fn codex_review_options(prompt: String, project_path: &str) -> codex_sdk_rs::QueryOptions {
+fn codex_review_options(
+    prompt: String,
+    project_path: &str,
+    model: Option<&str>,
+) -> codex_sdk_rs::QueryOptions {
     let mut options = codex_sdk_rs::QueryOptions::new(prompt)
         .cwd(project_path)
         .access(CodexAccess::Sandboxed {
@@ -113,15 +132,21 @@ fn codex_review_options(prompt: String, project_path: &str) -> codex_sdk_rs::Que
         options = options.env_remove(key);
     }
     crate::agent::lean_codex(&mut options);
+    // `None` leaves the model to the user's Codex configuration.
+    if let Some(model) = model {
+        options = options.model(model);
+    }
     options
 }
 
 async fn review_with_claude(
     prompt: String,
     project_path: &str,
+    model: Option<String>,
 ) -> Result<(String, UsageInfo), ReviewError> {
-    let mut stream = claude_sdk_rs::query(claude_review_options(prompt, project_path))
-        .map_err(|error| ReviewError::Failed(error.to_string()))?;
+    let options = claude_review_options(prompt, project_path, model.as_deref());
+    let mut stream =
+        claude_sdk_rs::query(options).map_err(|error| ReviewError::Failed(error.to_string()))?;
     let mut failure = None;
     while let Some(event) = stream.next().await {
         match event {
@@ -155,9 +180,11 @@ async fn review_with_claude(
 async fn review_with_codex(
     prompt: String,
     project_path: &str,
+    model: Option<String>,
 ) -> Result<(String, UsageInfo), ReviewError> {
-    let mut stream = codex_sdk_rs::query(codex_review_options(prompt, project_path))
-        .map_err(|error| ReviewError::Failed(error.to_string()))?;
+    let options = codex_review_options(prompt, project_path, model.as_deref());
+    let mut stream =
+        codex_sdk_rs::query(options).map_err(|error| ReviewError::Failed(error.to_string()))?;
     let (mut text, mut usage, mut failure) = (String::new(), UsageInfo::default(), None);
     while let Some(event) = stream.next().await {
         match event {
@@ -181,7 +208,7 @@ mod tests {
 
     #[test]
     fn a_claude_review_is_lean_bounded_and_cannot_ask_for_writes() {
-        let options = claude_review_options("p".into(), "/tmp");
+        let options = claude_review_options("p".into(), "/tmp", None);
         assert!(!options.permission_prompts, "nothing can be approved");
         assert_eq!(
             options.permission_mode,
@@ -200,7 +227,7 @@ mod tests {
 
     #[test]
     fn a_codex_review_is_read_only_lean_and_not_saved() {
-        let options = codex_review_options("p".into(), "/tmp");
+        let options = codex_review_options("p".into(), "/tmp", None);
         assert_eq!(options.session, Session::Ephemeral);
         assert!(options
             .config
@@ -213,5 +240,19 @@ mod tests {
                 approval: ApprovalPolicy::Never,
             }
         );
+        assert_eq!(options.model, None);
+    }
+
+    #[test]
+    fn a_review_runs_on_the_model_the_user_chose_for_it() {
+        let claude = claude_review_options("p".into(), "/tmp", Some("claude-haiku-4-5"));
+        assert_eq!(claude.model.as_deref(), Some("claude-haiku-4-5"));
+        let default = claude_review_options("p".into(), "/tmp", None);
+        assert_eq!(
+            default.model.as_deref(),
+            Some(bruhs_models::agent::DEFAULT_AGENT_MODEL)
+        );
+        let codex = codex_review_options("p".into(), "/tmp", Some("gpt-5.5"));
+        assert_eq!(codex.model.as_deref(), Some("gpt-5.5"));
     }
 }

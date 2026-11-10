@@ -13,9 +13,9 @@ use crate::app_state::DesktopState;
 use crate::views::chat::{ChatView, MessageRole, ThreadMessageAnswer};
 use bruhs_models::ids::ThreadId;
 use bruhs_models::thread_link::{
-    answer_reply, delivered_reply, list_reply, plan_message, read_reply, recipient_waiting_reply,
-    resolve_thread, Answer, Delivery, DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine,
-    ThreadOperation, ThreadReply, ThreadRequest,
+    answer_reply, delivered_reply, list_reply, pick_role, plan_message, read_reply,
+    recipient_waiting_reply, resolve_thread, Answer, Created, Delivery, DeliveryState, Outgoing,
+    Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadRequest,
 };
 use gpui::{Context, Entity, Window};
 
@@ -28,6 +28,17 @@ pub(super) struct ThreadWait {
     /// The delivered prompt, header included: what names the turn to wait
     /// for among the recipient's other turns.
     prompt: String,
+}
+
+/// One `message_thread` call's arguments.
+#[derive(Clone, Copy)]
+struct Outbound<'a> {
+    thread_id: Option<&'a str>,
+    title: Option<&'a str>,
+    message: &'a str,
+    /// Name of the role a new thread should start with.
+    role: Option<&'a str>,
+    wait: bool,
 }
 
 /// What the app does with one request.
@@ -205,12 +216,16 @@ impl Workspace {
                 title,
                 message,
                 wait,
+                role,
             } => self.thread_message_reply(
                 &caller,
-                thread_id.as_deref(),
-                title.as_deref(),
-                message,
-                *wait,
+                &Outbound {
+                    thread_id: thread_id.as_deref(),
+                    title: title.as_deref(),
+                    message,
+                    role: role.as_deref(),
+                    wait: *wait,
+                },
                 window,
                 cx,
             ),
@@ -231,10 +246,24 @@ impl Workspace {
                         .filter(|name| !name.trim().is_empty()),
                     running: chat.is_streaming,
                     queued: chat.prompt_queue.for_thread(&thread.id).len(),
+                    model: Some(chat.model_id.as_str()),
+                    // A thread whose role was deleted reads as having none.
+                    role: chat
+                        .role
+                        .as_deref()
+                        .and_then(|id| self.roles.find(id))
+                        .map(|role| role.name.as_str()),
                 }
             })
             .collect();
-        list_reply(&cards, caller)
+        // Roles as they run in the caller's project.
+        let project = self
+            .threads
+            .iter()
+            .find(|thread| thread.id == caller)
+            .map(|thread| thread.project_name.as_str())
+            .unwrap_or_default();
+        list_reply(&cards, caller, &self.roles.resolved(project))
     }
 
     fn thread_read_reply(
@@ -277,20 +306,20 @@ impl Workspace {
         read_reply(&chat.thread_title, chat.is_streaming, &lines, limit)
     }
 
-    #[expect(
-        clippy::too_many_arguments,
-        reason = "the fields of one message_thread call, plus the window to create a thread in"
-    )]
     fn thread_message_reply(
         &mut self,
         caller: &str,
-        thread_id: Option<&str>,
-        title: Option<&str>,
-        message: &str,
-        wants_wait: bool,
+        outbound: &Outbound<'_>,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> ThreadAnswer {
+        let Outbound {
+            thread_id,
+            title,
+            message,
+            role: wanted_role,
+            wait: wants_wait,
+        } = *outbound;
         let Some(sender) = self.threads.iter().find(|thread| thread.id == caller) else {
             return ThreadAnswer::Now(ThreadReply::refused(
                 "Not sent: this thread no longer exists in the app.",
@@ -314,6 +343,11 @@ impl Workspace {
             sender_chat.run_locked,
             sender.branch.clone(),
         );
+        // The role a new thread starts with, as it runs in this project.
+        let role = match pick_role(&self.roles, &sender.project_name, wanted_role) {
+            Ok(role) => role,
+            Err(refusal) => return ThreadAnswer::Now(refusal),
+        };
         let ids: Vec<String> = self
             .threads
             .iter()
@@ -363,10 +397,16 @@ impl Workspace {
         let (id, created) = match recipient {
             Recipient::Existing(id) => (id, false),
             Recipient::New { title } => {
-                // Runs where the sender runs: same project, worktree and
-                // model. It joins the sidebar without taking the view.
+                // Runs where the sender runs: same project and worktree, and
+                // the role's model or else the sender's. It joins the
+                // sidebar without taking the view.
                 let (project_name, project_path, model_id, worktree_path, run_locked, branch) =
                     place;
+                let model_id = role
+                    .as_ref()
+                    .and_then(|role| role.model.clone())
+                    .unwrap_or(model_id);
+                let role_id = role.as_ref().map(|role| role.id.clone());
                 let mut thread = Self::create_thread_with_title(
                     project_name,
                     project_path,
@@ -377,11 +417,13 @@ impl Workspace {
                     cx,
                 );
                 thread.branch = branch;
-                self.stamp_chat_run_prefs(&thread.chat, cx);
+                // Before the prefs are stamped: they resolve the role.
                 thread.chat.update(cx, |chat, _| {
+                    chat.role = role_id;
                     chat.worktree_path = worktree_path;
                     chat.run_locked = run_locked;
                 });
+                self.stamp_chat_run_prefs(&thread.chat, cx);
                 let id = thread.id.clone();
                 self.threads.push(thread);
                 (id, true)
@@ -411,7 +453,10 @@ impl Workspace {
             (false, true) => DeliveryState::QueuedNotAwaited,
             (false, false) => DeliveryState::Queued,
         };
-        ThreadAnswer::Now(delivered_reply(&id, &title, &all, created, state))
+        let started_thread = created.then(|| Created {
+            role: role.as_ref().map(|role| role.name.as_str()),
+        });
+        ThreadAnswer::Now(delivered_reply(&id, &title, &all, started_thread, state))
     }
 }
 
@@ -501,6 +546,7 @@ mod tests {
             title: None,
             message: text.into(),
             wait,
+            role: None,
         }
     }
 
@@ -882,5 +928,126 @@ mod tests {
             sender.read_with(cx, |chat, _| chat.thread_access),
             ThreadAccess::Message
         );
+    }
+
+    #[gpui::test]
+    fn a_new_thread_starts_with_the_role_an_agent_names(cx: &mut TestAppContext) {
+        use bruhs_models::agent::PermissionMode;
+
+        let (workspace, cx) = fixture(cx);
+        let (sender, _sender_id, recipient, recipient_id) = two_threads(&workspace, cx);
+        workspace.update(cx, |workspace, _| {
+            let writer = workspace.roles.add("Writer").unwrap();
+            workspace.roles.update(&writer, |role| {
+                role.use_for = "drafting prose".into();
+                role.model = Some("claude-haiku-4-5".into());
+                role.effort = Some("high".into());
+                role.access = Some(PermissionMode::Plan);
+                role.instructions = "Write plainly.".into();
+            });
+            // Held, so the new thread queues its message instead of starting
+            // a real provider turn.
+            workspace.permission_mode = PermissionMode::AcceptEdits;
+        });
+
+        // The list names each thread's model and role, and the roles on offer.
+        let listed = now(ask(&workspace, &sender, ThreadOperation::List, cx));
+        assert!(listed.text.contains(" · no role\n"));
+        assert!(listed
+            .text
+            .contains("Writer · Claude Haiku 4.5 · drafting prose\n"));
+
+        // A role only fits a new thread, and must exist.
+        let unknown = now(ask(
+            &workspace,
+            &sender,
+            ThreadOperation::Message {
+                thread_id: None,
+                title: Some("Draft".into()),
+                message: "Write the intro.".into(),
+                wait: false,
+                role: Some("Reviewer".into()),
+            },
+            cx,
+        ));
+        assert!(!unknown.ok && unknown.text.contains("no role named \"Reviewer\""));
+        assert!(unknown.text.contains("Writer · Claude Haiku 4.5"));
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.threads.len()),
+            2
+        );
+        let _ = (recipient, recipient_id);
+    }
+
+    #[gpui::test]
+    fn a_threads_role_sets_its_model_effort_access_and_instructions(cx: &mut TestAppContext) {
+        use bruhs_models::agent::PermissionMode;
+
+        let (workspace, cx) = fixture(cx);
+        let (sender, _sender_id, _recipient, _recipient_id) = two_threads(&workspace, cx);
+        let writer = workspace.update(cx, |workspace, cx| {
+            let writer = workspace.roles.add("Writer").unwrap();
+            workspace.roles.update(&writer, |role| {
+                role.effort = Some("high".into());
+                role.access = Some(PermissionMode::Plan);
+                role.instructions = "Write plainly.".into();
+            });
+            workspace.permission_mode = PermissionMode::AcceptEdits;
+            // An agent started this thread with the role.
+            workspace.threads[0].chat.update(cx, |chat, _| {
+                chat.role = Some(writer.clone());
+            });
+            workspace.stamp_run_prefs_on_threads(cx);
+            writer
+        });
+        sender.read_with(cx, |chat, _| {
+            let profile = chat.role_profile.as_ref().expect("the role is resolved");
+            assert_eq!(profile.name, "Writer");
+            assert_eq!(profile.effort.as_deref(), Some("high"));
+            assert_eq!(profile.instructions, "Write plainly.");
+            // The role narrows the user's Accept edits to Plan.
+            assert_eq!(
+                bruhs_models::roles::narrow_access(chat.permission_mode, profile.access),
+                PermissionMode::Plan
+            );
+        });
+
+        // Editing the role reaches the thread; deleting it frees the thread.
+        workspace.update(cx, |workspace, cx| {
+            workspace
+                .roles
+                .update(&writer, |role| role.instructions = "Be brief.".into());
+            workspace.stamp_run_prefs_on_threads(cx);
+        });
+        assert_eq!(
+            sender.read_with(cx, |chat, _| chat
+                .role_profile
+                .as_ref()
+                .map(|role| role.instructions.clone())),
+            Some("Be brief.".to_string())
+        );
+        workspace.update(cx, |workspace, cx| {
+            workspace.roles.remove(&writer);
+            workspace.stamp_run_prefs_on_threads(cx);
+        });
+        assert!(sender.read_with(cx, |chat, _| chat.role_profile.is_none()));
+
+        // Roles and task models are saved only once there is something to save.
+        workspace.read_with(cx, |workspace, cx| {
+            let saved = workspace.snapshot(cx);
+            assert!(saved.roles.is_none() && saved.task_models.is_none());
+        });
+        workspace.update(cx, |workspace, _| {
+            workspace.roles.add("Executor");
+            workspace.task_models.summary = Some("claude-haiku-4-5".into());
+        });
+        workspace.read_with(cx, |workspace, cx| {
+            let saved = workspace.snapshot(cx);
+            assert_eq!(saved.roles.as_ref().map(|book| book.roles.len()), Some(1));
+            assert_eq!(
+                saved.task_models.and_then(|models| models.summary),
+                Some("claude-haiku-4-5".to_string())
+            );
+        });
     }
 }

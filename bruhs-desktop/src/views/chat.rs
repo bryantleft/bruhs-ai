@@ -481,6 +481,8 @@ pub struct ComposerPrefs {
     pub compact_idle: IdleCompact,
     /// What agents may do with other threads.
     pub thread_access: bruhs_models::thread_link::ThreadAccess,
+    /// Models for second-opinion reviews and meeting summaries.
+    pub task_models: bruhs_models::roles::TaskModels,
 }
 
 pub struct ChatView {
@@ -594,6 +596,13 @@ pub struct ChatView {
     pub compact_idle: IdleCompact,
     /// What this thread's agent may do with other threads (Settings).
     pub thread_access: bruhs_models::thread_link::ThreadAccess,
+    /// Models for the jobs that are not threads (Settings).
+    pub task_models: bruhs_models::roles::TaskModels,
+    /// Id of this thread's role, when an agent started it with one. Saved.
+    pub role: Option<String>,
+    /// That role as it runs in this thread's project, kept current by the
+    /// workspace: its effort, access and instructions apply each turn.
+    pub role_profile: Option<bruhs_models::roles::ResolvedRole>,
     /// This message sends in full. The return chip sets it. Not saved.
     compact_full: bool,
     pub previous_worktree: Option<RememberedWorktree>,
@@ -933,6 +942,9 @@ impl ChatView {
             claude_autocompact: None,
             compact_idle: IdleCompact::Return,
             thread_access: bruhs_models::thread_link::ThreadAccess::default(),
+            task_models: bruhs_models::roles::TaskModels::default(),
+            role: None,
+            role_profile: None,
             compact_full: false,
             previous_worktree: None,
             base_branch: String::new(),
@@ -1092,6 +1104,7 @@ impl ChatView {
         self.claude_autocompact = composer.autocompact;
         self.compact_idle = composer.compact_idle;
         self.thread_access = composer.thread_access;
+        self.task_models = composer.task_models;
         if !self.effort_chip_visible() {
             self.effort_menu_open = false;
         }
@@ -1104,6 +1117,7 @@ impl ChatView {
             autocompact: self.claude_autocompact.clone(),
             compact_idle: self.compact_idle,
             thread_access: self.thread_access,
+            task_models: self.task_models.clone(),
         }
     }
 

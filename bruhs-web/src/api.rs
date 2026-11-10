@@ -686,10 +686,15 @@ pub async fn generate_meeting_summary(
     replace_observations: bool,
 ) -> Result<crate::state::MeetingSummary, ApiError> {
     let route = format!("/api/meetings/{}/summarize", segment(id));
+    // The user's model for summaries, if they chose one in Settings.
+    let model = crate::state::stored_task_models()
+        .summary
+        .and_then(|model| bruhs_models::agent::ModelId::try_from(model).ok());
     let body = bruhs_models::api::SummarizeRequest {
         request_id: Some(request_id.to_owned()),
         extract_observations,
         replace_observations,
+        model,
     };
     send_json(Method::POST, &route, Some(&body)).await
 }

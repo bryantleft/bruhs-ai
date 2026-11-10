@@ -172,6 +172,7 @@ impl Workspace {
             view.worktree_path = persisted.worktree_path.clone();
             view.effort = persisted.effort.clone();
             view.run_locked = persisted.run_locked;
+            view.role = persisted.role.clone();
             view.model_id = model_id;
             view.set_project_context(
                 project_path.clone(),
@@ -356,6 +357,7 @@ impl Workspace {
                     this.claude_autocompact = composer.autocompact.clone();
                     this.compact_idle = composer.compact_idle;
                     this.thread_access = composer.thread_access;
+                    this.task_models = composer.task_models.clone();
                     this.stamp_run_prefs_on_threads(cx);
                     this.persist_and_notify(cx);
                 }
@@ -423,8 +425,18 @@ impl Workspace {
             autocompact: self.claude_autocompact.clone(),
             compact_idle: self.compact_idle,
             thread_access: self.thread_access,
+            task_models: self.task_models.clone(),
+        };
+        // The thread's role as it runs in its project today: a role edited
+        // or deleted in Settings takes effect on the thread's next turn.
+        let role = {
+            let view = chat.read(cx);
+            view.role
+                .as_deref()
+                .and_then(|id| self.roles.resolve(id, &view.project_name))
         };
         chat.update(cx, |chat, cx| {
+            chat.role_profile = role;
             chat.apply_run_prefs(choice, effort, previous, base, composer, cx);
         });
     }
