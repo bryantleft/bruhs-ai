@@ -56,7 +56,36 @@ function selectTab(tab, options = {}) {
     const panel = document.getElementById(other.getAttribute("aria-controls") ?? "");
     if (panel) panel.hidden = !selected;
   }
-  if (options.focus) tab.focus();
+  revealTab(tab);
+  if (options.focus) tab.focus({ preventScroll: true });
+}
+
+/**
+ * On a narrow screen the tab row scrolls: center the selected tab in it, so
+ * the tour never highlights a tab you can't see. Scrolls only the row, never
+ * the page.
+ * @param {HTMLButtonElement} tab
+ */
+function revealTab(tab) {
+  const row = tab.parentElement;
+  if (!row || row.scrollWidth <= row.clientWidth) return;
+  const tabBox = tab.getBoundingClientRect();
+  const rowBox = row.getBoundingClientRect();
+  const delta = tabBox.left - rowBox.left - (rowBox.width - tabBox.width) / 2;
+  row.scrollBy({ left: delta, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+}
+
+// Mark which edges of the tab row have more tabs past them, for the fade.
+const tabRow = tabs[0]?.parentElement;
+if (tabRow instanceof HTMLElement) {
+  const markEdges = () => {
+    const more = [];
+    if (tabRow.scrollLeft > 2) more.push("left");
+    if (tabRow.scrollLeft + tabRow.clientWidth < tabRow.scrollWidth - 2) more.push("right");
+    tabRow.dataset.more = more.join(" ");
+  };
+  tabRow.addEventListener("scroll", markEdges, { passive: true });
+  new ResizeObserver(markEdges).observe(tabRow);
 }
 
 for (const tab of tabs) {
