@@ -67,12 +67,29 @@ describe("bruhDots", () => {
     assert.ok(dots.filter((d) => d.kind === FACE).length > 500);
   });
 
-  it("turns the features toward the pointer", () => {
+  it("turns the whole head: features ride the sphere and the ball leans", () => {
     const mouthX = (lookX: number) => {
       const row = bruhDots(400, 400, { ...face, lookX }).filter((d) => d.kind === MOUTH);
       return row.reduce((sum, d) => sum + d.x, 0) / row.length;
     };
-    assert.ok(mouthX(-1) < mouthX(0) - 20);
-    assert.ok(mouthX(1) > mouthX(0) + 20);
+    assert.ok(mouthX(-1) < mouthX(0) - 60);
+    assert.ok(mouthX(1) > mouthX(0) + 60);
+
+    // Turned right, both eye slits stay in one row as two gaps, and the right
+    // one, now nearer the rim, is foreshortened: narrower than the left.
+    const turned = bruhDots(400, 400, { ...face, lookX: 0.8 });
+    const byRow = new Map<number, number[]>();
+    for (const d of turned) byRow.set(d.row, [...(byRow.get(d.row) ?? []), d.x]);
+    const gapsIn = (xs: number[]) => {
+      const sorted = [...xs].sort((a, b) => a - b);
+      return sorted.slice(1).map((x, i) => x - (sorted[i] ?? x)).filter((gap) => gap > 1.5 * pitchFor(150));
+    };
+    const eyeRow = [...byRow.values()].map(gapsIn).find((gaps) => gaps.length === 2);
+    assert.ok(eyeRow, "a row with both eye slits");
+    assert.ok((eyeRow[1] ?? 0) < (eyeRow[0] ?? 0), `right slit ${eyeRow[1]} vs left ${eyeRow[0]}`);
+
+    // The ball itself moves toward the look.
+    const centroid = (list: { x: number }[]) => list.reduce((sum, d) => sum + d.x, 0) / list.length;
+    assert.ok(centroid(turned) > centroid(dots) + 3);
   });
 });

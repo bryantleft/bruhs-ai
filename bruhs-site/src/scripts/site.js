@@ -411,11 +411,14 @@ document.addEventListener("keydown", (event) => {
 // ---------------------------------------------------------------------------
 // Dot Bruh: the mascot as a halftone sphere of dots. The hero one resolves
 // out of noise once; the closing one peeks up from the bottom edge. Both turn
-// toward the pointer. Redraws happen only on resize, pointer moves and the reveal.
+// their head toward the pointer, easing there over a few frames. Redraws happen
+// only on resize, the reveal and while a head is still turning.
 
 const BRUH_COLORS = { face: "#fada5e", mouth: "#fc4141" };
-// How far the face turns at the pointer's farthest reach (1 = the logo's side variant).
-const LOOK_REACH = 0.6;
+// How far the head turns at the pointer's farthest reach (1 = its full turn).
+const LOOK_REACH = 0.7;
+// Share of the remaining turn covered each frame: about 150ms to settle at 60fps.
+const LOOK_EASE = 0.22;
 const REVEAL_MS = 700;
 
 /**
@@ -426,6 +429,7 @@ const REVEAL_MS = 700;
  * @property {number} width
  * @property {number} height
  * @property {import("./braille.js").Face} face
+ * @property {{ x: number, y: number }} target  Where the pointer asks the head to look.
  * @property {number} reveal
  * @property {boolean} visible
  */
@@ -442,6 +446,7 @@ for (const canvas of document.querySelectorAll("canvas[data-bruh]")) {
     width: 0,
     height: 0,
     face: { cx: 0, cy: 0, r: 1, lookX: 0, lookY: 0 },
+    target: { x: 0, y: 0 },
     reveal: reducedMotion.matches ? 1 : 0,
     visible: false,
   });
@@ -467,15 +472,6 @@ function layoutBruh(bruh) {
 function drawOne(bruh) {
   if (bruh.width === 0) return;
   drawBruh(bruh.ctx, bruh.width, bruh.height, bruh.face, { reveal: bruh.reveal, colors: BRUH_COLORS });
-}
-
-let bruhFrame = 0;
-function scheduleBruhs() {
-  if (bruhFrame) return;
-  bruhFrame = requestAnimationFrame(() => {
-    bruhFrame = 0;
-    for (const bruh of bruhs) if (bruh.visible) drawOne(bruh);
-  });
 }
 
 /** @param {Bruh} bruh */
@@ -516,15 +512,33 @@ for (const bruh of bruhs) {
   bruhResized.observe(bruh.canvas);
 }
 
+let lookFrame = 0;
+function turnHeads() {
+  lookFrame = 0;
+  let turning = false;
+  for (const bruh of bruhs) {
+    if (!bruh.visible) continue;
+    const dx = bruh.target.x - (bruh.face.lookX ?? 0);
+    const dy = bruh.target.y - (bruh.face.lookY ?? 0);
+    if (Math.abs(dx) < 0.002 && Math.abs(dy) < 0.002) continue;
+    bruh.face.lookX = (bruh.face.lookX ?? 0) + dx * LOOK_EASE;
+    bruh.face.lookY = (bruh.face.lookY ?? 0) + dy * LOOK_EASE;
+    drawOne(bruh);
+    turning = true;
+  }
+  if (turning) lookFrame = requestAnimationFrame(turnHeads);
+}
+
 document.addEventListener("pointermove", (event) => {
-  if (event.pointerType !== "mouse") return;
+  // A still face under reduced motion; touch has no hover to follow.
+  if (event.pointerType !== "mouse" || reducedMotion.matches) return;
   for (const bruh of bruhs) {
     if (!bruh.visible) continue;
     const rect = bruh.canvas.getBoundingClientRect();
     const dx = event.clientX - (rect.left + bruh.face.cx);
     const dy = event.clientY - (rect.top + bruh.face.cy);
-    bruh.face.lookX = Math.max(-1, Math.min(1, dx / 480)) * LOOK_REACH;
-    bruh.face.lookY = Math.max(-1, Math.min(1, dy / 360));
+    bruh.target.x = Math.max(-1, Math.min(1, dx / 480)) * LOOK_REACH;
+    bruh.target.y = Math.max(-1, Math.min(1, dy / 360)) * LOOK_REACH;
   }
-  scheduleBruhs();
+  lookFrame ||= requestAnimationFrame(turnHeads);
 }, { passive: true });
