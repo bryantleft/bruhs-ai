@@ -6,9 +6,10 @@
 //   node brand/logo.mjs
 //
 // One source for every copy of the mark, site and app:
-// - logo.svg / bruhs.svg: transparent, for dark surfaces (site nav, app sidebars)
-// - favicon.svg: on a longan-950 tile, so it holds up on light browser chrome;
-//   packaging/macos/make-icon.sh builds the app icon from bruhs-web's copy.
+// - logo.svg / bruhs.svg / favicon.svg: transparent dots (site nav, app
+//   sidebars, browser tabs on the site and the web app)
+// - packaging/macos/AppIcon.svg: on a longan-950 tile, since a Mac icon needs
+//   its own background; packaging/macos/make-icon.sh builds AppIcon.icns from it.
 
 import { writeFileSync } from "node:fs";
 
@@ -46,11 +47,13 @@ function svg(tile) {
 
 const site = new URL("../public/", import.meta.url);
 const app = new URL("../../bruhs-web/", import.meta.url);
+const mac = new URL("../../packaging/macos/", import.meta.url);
 const files = [
   [new URL("logo.svg", site), svg(false)],
-  [new URL("favicon.svg", site), svg(true)],
+  [new URL("favicon.svg", site), svg(false)],
   [new URL("bruhs.svg", app), svg(false)],
-  [new URL("favicon.svg", app), svg(true)],
+  [new URL("favicon.svg", app), svg(false)],
+  [new URL("AppIcon.svg", mac), svg(true)],
 ];
 for (const [url, text] of files) writeFileSync(url, text);
 console.log(`wrote ${files.map(([url]) => url.pathname.split("/").slice(-2).join("/")).join(", ")}`);

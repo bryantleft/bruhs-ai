@@ -1,7 +1,7 @@
 // Page behavior: the ⌘K dialog, the surface tour (with a dithered dissolve
 // between screenshots) and the dot mascot.
 
-import { drawBruh, threshold } from "./braille.js";
+import { drawBruh } from "./braille.js";
 import { COMMANDS, filterCommands } from "./palette.js";
 
 /** @typedef {import("./palette.js").Command} Command */
@@ -48,7 +48,7 @@ const tabs = /** @type {HTMLButtonElement[]} */ ([...document.querySelectorAll('
  */
 function selectTab(tab, options = {}) {
   const from = tabs.find((other) => other.getAttribute("aria-selected") === "true");
-  if (from && from !== tab) dissolveFrom(panelImage(from), panelFigure(tab));
+  if (from && from !== tab) dissolve(panelOf(from), panelOf(tab));
   for (const other of tabs) {
     const selected = other === tab;
     other.setAttribute("aria-selected", String(selected));
@@ -114,83 +114,36 @@ for (const tab of tabs) {
 function panelOf(tab) {
   return document.getElementById(tab.getAttribute("aria-controls") ?? "");
 }
-/** @param {HTMLButtonElement} tab */
-function panelImage(tab) {
-  const img = panelOf(tab)?.querySelector("img");
-  return img instanceof HTMLImageElement ? img : null;
-}
-/** @param {HTMLButtonElement} tab */
-function panelFigure(tab) {
-  const figure = panelOf(tab)?.querySelector("figure");
-  return figure instanceof HTMLElement ? figure : null;
-}
-
 // ---------------------------------------------------------------------------
-// Dissolve: the new screenshot shows at once; the old one sits on a canvas
-// above it and is eaten away in braille-sized dots, in Bayer order. Nothing
-// waits on it, and a second switch cuts the first one short.
+// Dissolve: the new screenshot opens through braille-sized dots over the old
+// one, the same 2×2 ordered-dither mask the page transitions use (site.css,
+// .revealing). It's all CSS: drawing the old screenshot onto a canvas each
+// switch cost a dropped frame on a phone-speed CPU. Nothing waits on it, and
+// a second switch cuts the first one short.
 
 const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
-const DISSOLVE_MS = 280;
-const DISSOLVE_PITCH = 7;
-let dissolveRun = 0;
 
 /**
- * @param {HTMLImageElement | null} img
- * @param {HTMLElement | null} figure
+ * @param {HTMLElement | null} from
+ * @param {HTMLElement | null} to
  */
-function dissolveFrom(img, figure) {
-  const run = ++dissolveRun;
-  for (const old of document.querySelectorAll("canvas.dissolve")) old.remove();
-  if (reducedMotion.matches || !img || !figure || !img.complete || img.naturalWidth === 0) return;
-
-  const width = figure.clientWidth;
-  const height = figure.clientHeight;
-  if (width === 0 || height === 0) return;
-  const scale = Math.min(devicePixelRatio || 1, 2);
-  const canvas = document.createElement("canvas");
-  canvas.className = "dissolve";
-  canvas.setAttribute("aria-hidden", "true");
-  canvas.width = Math.round(width * scale);
-  canvas.height = Math.round(height * scale);
-  const ctx = canvas.getContext("2d");
-  if (!ctx) return;
-  ctx.scale(scale, scale);
-  figure.append(canvas);
-
-  const cols = Math.ceil(width / DISSOLVE_PITCH);
-  const rows = Math.ceil(height / DISSOLVE_PITCH);
-  const start = performance.now();
-
-  /** @param {number} now */
-  function frame(now) {
-    if (run !== dissolveRun || !ctx) return;
-    const progress = (now - start) / DISSOLVE_MS;
-    if (progress >= 1) {
-      canvas.remove();
-      return;
-    }
-    ctx.globalCompositeOperation = "source-over";
-    ctx.clearRect(0, 0, width, height);
-    ctx.drawImage(/** @type {HTMLImageElement} */ (img), 0, 0, width, height);
-    ctx.globalCompositeOperation = "destination-out";
-    const holes = new Path2D();
-    for (let row = 0; row < rows; row++) {
-      for (let col = 0; col < cols; col++) {
-        // Each dot starts at its threshold and takes 40% of the run to open.
-        const local = Math.min(1, (progress - threshold(col, row) * 0.6) / 0.4);
-        if (local <= 0) continue;
-        const x = (col + 0.5) * DISSOLVE_PITCH;
-        const y = (row + 0.5) * DISSOLVE_PITCH;
-        const radius = local * DISSOLVE_PITCH * 0.75;
-        holes.moveTo(x + radius, y);
-        holes.arc(x, y, radius, 0, Math.PI * 2);
-      }
-    }
-    ctx.fill(holes);
-    requestAnimationFrame(frame);
-  }
-  requestAnimationFrame(frame);
+function dissolve(from, to) {
+  for (const panel of document.querySelectorAll(".panel.leaving")) panel.classList.remove("leaving");
+  const figure = to?.querySelector("figure");
+  if (!(figure instanceof HTMLElement)) return;
+  figure.classList.remove("revealing");
+  const img = to?.querySelector("img");
+  if (reducedMotion.matches || !from || !(img instanceof HTMLImageElement) || !img.complete || img.naturalWidth === 0) return;
+  // The old screenshot stays put underneath until the new one has fully opened.
+  from.classList.add("leaving");
+  void figure.offsetWidth; // restart the mask animation
+  figure.classList.add("revealing");
+  figure.addEventListener("animationend", function done(event) {
+    if (event.animationName !== "dot-d") return;
+    figure.removeEventListener("animationend", done);
+    figure.classList.remove("revealing");
+    from.classList.remove("leaving");
+  });
 }
 
 // ---------------------------------------------------------------------------
