@@ -1,7 +1,7 @@
 //! Only the current activation may publish a saved conversation snapshot.
 use leptos::prelude::*;
 
-use crate::state::{AgentMessage, StreamBuffer};
+use crate::state::{AgentMessage, Turns};
 pub(crate) mod focus;
 
 #[derive(Clone, Debug, PartialEq)]
@@ -59,7 +59,7 @@ impl ThreadHistory {
         id: String,
         active: ReadSignal<Option<String>>,
         messages: WriteSignal<Vec<AgentMessage>>,
-        buffer: RwSignal<StreamBuffer>,
+        turns: Turns,
     ) {
         // Invalidates older requests even when returning to the same thread.
         let request = Request {
@@ -67,10 +67,8 @@ impl ThreadHistory {
             token: uuid::Uuid::new_v4(),
         };
         self.0.set(State::Loading(request.clone()));
-        let buffered = buffer.with_untracked(|buffer| {
-            (buffer.thread_id.as_deref() == Some(id.as_str())).then(|| buffer.messages.clone())
-        });
-        if let Some(buffered) = buffered {
+        // A running turn holds the newest copy of its thread.
+        if let Some(buffered) = turns.messages(&id) {
             messages.set(buffered);
             self.0.set(State::Ready);
             return;
@@ -111,7 +109,7 @@ pub fn ThreadHistoryStatus() -> impl IntoView {
     let active = expect_context::<crate::state::ActiveThreadId>().0;
     let set_active = expect_context::<crate::state::SetActiveThreadId>().0;
     let messages = expect_context::<crate::state::SetMessagesSignal>().0;
-    let crate::state::StreamBufferSignal(buffer) = expect_context();
+    let turns = expect_context::<Turns>();
     let crate::state::UnreadThreads(unread) = expect_context();
     view! {
         {move || active.with(|id| history.reason(id.as_deref())).map(|reason| view! {
@@ -122,7 +120,7 @@ pub fn ThreadHistoryStatus() -> impl IntoView {
                     <button type="button" class="min-h-11 rounded-grape px-2 text-label-sm text-persimmon-300 hover:bg-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
                         on:click=move |_| {
                             if let Some(id) = active.get_untracked() {
-                                crate::state::activate_thread(history, active, id, set_active, messages, buffer, unread);
+                                crate::state::activate_thread(history, active, id, set_active, messages, turns, unread);
                             }
                         }>"Retry loading conversation"</button>
                 </Show>

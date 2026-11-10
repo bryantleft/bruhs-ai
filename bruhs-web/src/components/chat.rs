@@ -1,8 +1,9 @@
 //! Chat thread page: owns the turn lifecycle (submit → stream → persist) and
 //! hosts the transcript and composer.
 //!
-//! A turn's prompt goes into a per-thread `StreamBuffer` and the visible
-//! `messages`; the reply streams into its own `LiveMessageSignal`, patched in
+//! A turn's prompt goes into its thread's running turn (`Turns`) and, when
+//! that thread is on screen, the visible `messages`; the reply streams into
+//! the turn's own signal, patched in
 //! place per token, and joins both lists when the turn ends. So a running
 //! turn survives switching threads and finishes in the background, and a
 //! token re-renders only the running turn.
@@ -39,10 +40,9 @@ use crate::state::{
     auto_title, ActiveProjectSignal, AgentMessage, BaseBranchSignal, ChipRetargetGuard,
     ClaudeAutoCompactSignal, ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal,
     ComposerChips, ComposerDraft, DiffFocusPath, DiffScope, DiffScopeSignal, FollowUpSteerSignal,
-    GitStatusSignal, LiveMessageSignal, MessageStatus, OpenFileSignal, PanelSurface,
-    PendingPermissions, PendingPermissionsSignal, PermissionModeSignal, PreviousWorktreeSignal,
-    PromptQueueSignal, QueueHeldSignal, RightPanelSignal, RunChoiceSignal, StreamBuffer,
-    StreamBufferSignal, ThreadNotice, UnreadThreads,
+    GitStatusSignal, MessageStatus, OpenFileSignal, PanelSurface, PendingPermissionsSignal,
+    PermissionModeSignal, PreviousWorktreeSignal, PromptQueueSignal, QueueHeldSignal,
+    RightPanelSignal, RunChoiceSignal, ThreadNotice, Turns, UnreadThreads,
 };
 use crate::stream::{apply_message, StreamEffect, UnknownEvents};
 use crate::ui::Icon;
@@ -92,6 +92,10 @@ fn follow_after_scroll(following: bool, bottom: bool, moved_up: bool) -> (bool, 
 /// turn (409) is retried, and the base wait between tries.
 const BUSY_RETRIES: u8 = 3;
 const BUSY_RETRY_MS: u32 = 1_500;
+
+/// Shown when a send has to wait for one of the running turns to end.
+const LANES_FULL: &str =
+    "Three turns are already running. This one is queued and starts when one of them ends.";
 
 /// Shown when the thread stayed busy through every retry.
 const STILL_BUSY: &str = "This thread is still finishing its previous turn. Try again in a moment.";
@@ -254,7 +258,6 @@ pub fn ChatPage() -> impl IntoView {
     let set_threads = expect_context::<crate::state::SetThreadsSignal>().0;
     let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
     let is_streaming = expect_context::<crate::state::IsStreaming>().0;
-    let set_is_streaming = expect_context::<crate::state::SetIsStreaming>().0;
     let PendingPermissionsSignal(pending_permissions) =
         expect_context::<PendingPermissionsSignal>();
     let crate::state::PendingSecretsSignal(pending_secrets) =
@@ -262,8 +265,8 @@ pub fn ChatPage() -> impl IntoView {
     let current_model = expect_context::<crate::state::CurrentModel>().0;
     let PermissionModeSignal(permission_mode) = expect_context::<PermissionModeSignal>();
     let ActiveProjectSignal(active_project) = expect_context::<ActiveProjectSignal>();
-    let StreamBufferSignal(stream_buffer) = expect_context::<StreamBufferSignal>();
-    let LiveMessageSignal(live) = expect_context::<LiveMessageSignal>();
+    let turns = expect_context::<Turns>();
+    let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
     let history = expect_context::<crate::thread_history::ThreadHistory>();
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
@@ -343,9 +346,6 @@ pub fn ChatPage() -> impl IntoView {
         file_generation.update_value(|generation| *generation = generation.wrapping_add(1));
         link_listener.remove();
     });
-    // Current-stream abort controller, stored so the Stop button can trigger
-    // it. StoredValue because AbortController is !Send/!Sync.
-    let abort_controller = StoredValue::new(None::<web_sys::AbortController>);
     // Debounced IndexedDB flush while a turn streams.
     let persist_timer = StoredValue::new_local(None::<gloo_timers::callback::Timeout>);
 
@@ -361,15 +361,31 @@ pub fn ChatPage() -> impl IntoView {
             .and_then(|t| t.project_path)
             .or_else(|| active_project.get().map(|p| p.path))
     });
-    // Whether the running turn belongs to the thread on screen.
-    let live_here = crate::state::live_turn_here(active_thread_id, stream_buffer);
-    // Its message id; changes when a turn starts or ends, not per token.
-    let live_id = Memo::new(move |_| {
+    // Whether the thread on screen has a running turn. Other threads may be
+    // running too; each has its own turn in `turns`.
+    let live_here = turns.here(active_thread_id);
+    // The reply that turn is writing.
+    let live_reply = move || {
         if !live_here.get() {
             return None;
         }
-        live.with(|m| m.as_ref().map(|m| m.id.clone()))
-    });
+        active_thread_id.with(|id| turns.reply(id.as_deref()?))
+    };
+    // The same answers for handlers, read now: `is_streaming` and the memo
+    // above settle a tick after a turn starts or ends.
+    let running_here = move || {
+        active_thread_id.with_untracked(|id| {
+            id.as_deref()
+                .is_some_and(|id| turns.is_running_untracked(id))
+        })
+    };
+    let stop_here = move || {
+        if let Some(id) = active_thread_id.get_untracked() {
+            turns.abort(&id);
+        }
+    };
+    // Its message id; changes when a turn starts or ends, not per token.
+    let live_id = Memo::new(move |_| live_reply()?.with(|m| m.as_ref().map(|m| m.id.clone())));
     // The settled transcript, built when it changes (a turn starts or ends,
     // a thread loads), never per token.
     let settled_turns = Memo::new(move |_| {
@@ -389,7 +405,7 @@ pub fn ChatPage() -> impl IntoView {
                 owned.push((message.id.clone(), searchable_text(message)));
             }
         });
-        if live_here.get() {
+        if let Some(live) = live_reply() {
             live.with(|current| {
                 if let Some(message) = current {
                     if !owned.iter().any(|(id, _)| id == &message.id) {
@@ -418,9 +434,7 @@ pub fn ChatPage() -> impl IntoView {
 
     // The running turn, rebuilt per token from its message alone.
     let live_turn = Memo::new(move |_| {
-        if !live_here.get() {
-            return None;
-        }
+        let live = live_reply()?;
         let root = project_root.get();
         live.with(|m| {
             let m = m.as_ref()?;
@@ -516,13 +530,14 @@ pub fn ChatPage() -> impl IntoView {
 
     install_render_pass(messages, is_streaming);
 
-    // ── Stream buffer helpers ────────────────────────────────────────────────
-    let persist_buffer_now = move || {
-        let buf = stream_buffer.get_untracked();
-        if let Some(tid) = buf.thread_id {
-            let mut messages = buf.messages;
-            messages.extend(live.get_untracked());
-            saves.edit_conversation(tid, messages);
+    // ── Running turn helpers ─────────────────────────────────────────────────
+    // Save every running turn as it stands: its settled messages plus the
+    // reply so far.
+    let persist_running_now = move || {
+        for tid in turns.running_untracked() {
+            if let Some(messages) = turns.snapshot(&tid) {
+                saves.edit_conversation(tid, messages);
+            }
         }
     };
     let flush_persist = move || {
@@ -531,7 +546,7 @@ pub fn ChatPage() -> impl IntoView {
                 t.cancel();
             }
         });
-        persist_buffer_now();
+        persist_running_now();
     };
     let schedule_persist = move || {
         persist_timer.update_value(|slot| {
@@ -540,29 +555,18 @@ pub fn ChatPage() -> impl IntoView {
             }
         });
         let timeout = gloo_timers::callback::Timeout::new(1000, move || {
-            persist_buffer_now();
+            persist_running_now();
             persist_timer.set_value(None);
         });
         persist_timer.set_value(Some(timeout));
     };
-    // Copy the buffer into the visible transcript when its thread is active
-    // (once, when a turn ends).
-    let mirror_if_active = move || {
-        let buf = stream_buffer.get_untracked();
-        if buf.thread_id.is_some() && active_thread_id.get_untracked() == buf.thread_id {
-            set_messages.set(buf.messages);
-        }
-    };
 
     // ── Turn lifecycle ───────────────────────────────────────────────────────
-    let apply_goal = move |write: GoalWrite| {
+    let apply_goal_to = move |tid: &str, write: GoalWrite| {
         let next = match write {
             GoalWrite::Keep => return,
             GoalWrite::Set(goal) => Some(goal),
             GoalWrite::Remove => None,
-        };
-        let Some(tid) = active_thread_id.get_untracked() else {
-            return;
         };
         set_threads.update(|threads| {
             let Some(thread) = threads.iter_mut().find(|thread| thread.id == tid) else {
@@ -576,10 +580,22 @@ pub fn ChatPage() -> impl IntoView {
             catalog.persist(Some(original), thread.clone());
         });
     };
-    let start_turn = move |raw: String,
+    let apply_goal = move |write: GoalWrite| {
+        if let Some(tid) = active_thread_id.get_untracked() {
+            apply_goal_to(&tid, write);
+        }
+    };
+    // Start a turn in `thread_id`. `prior` is that thread's settled
+    // transcript when it is not the one on screen; `None` reads the visible
+    // one. Returns whether a turn started (or, with no lane free, was queued).
+    let begin_turn = move |thread_id: String,
+                           prior: Option<Vec<AgentMessage>>,
+                           raw: String,
                            include_attachments: bool,
                            queued_chips: Option<Vec<ContextChip>>,
-                           keep_composer: bool| {
+                           keep_composer: bool|
+          -> bool {
+        let here = active_thread_id.get_untracked().as_deref() == Some(thread_id.as_str());
         let pending = if let Some(chips) = &queued_chips {
             chips.clone()
         } else if include_attachments {
@@ -588,7 +604,7 @@ pub fn ChatPage() -> impl IntoView {
             Vec::new()
         };
         if exceeds_message_limit_with(&raw, extra_limit_chars(&pending)) {
-            return;
+            return false;
         }
         let typed = raw.trim().to_string();
         let attachment_count = if include_attachments {
@@ -603,27 +619,35 @@ pub fn ChatPage() -> impl IntoView {
         };
         if include_attachments && file_offers.with_untracked(|items| offers_block_send(items)) {
             thread_notice.flash(SEND_WAITS);
-            return;
+            return false;
         }
         if typed.is_empty() && attachment_count == 0 && file_count == 0 {
-            return;
+            return false;
         }
-        if is_streaming.get_untracked() {
+        if turns.is_running_untracked(&thread_id) {
             // `submit` queues instead; a stray call while streaming is a no-op.
-            return;
+            return false;
         }
-        let Some(thread_id) = active_thread_id.get_untracked() else {
-            return;
-        };
-        if history.blocked(&thread_id) {
-            return;
+        if here && prior.is_none() && history.blocked(&thread_id) {
+            return false;
         }
         let Some(thread) =
             threads.with_untracked(|ts| ts.iter().find(|t| t.id == thread_id).cloned())
         else {
-            return;
+            return false;
         };
-        let provider = AgentProvider::for_model(&current_model.get_untracked());
+        // The composer shows the model of the thread on screen; any other
+        // thread runs on the model it last used.
+        let model = if here {
+            current_model.get_untracked()
+        } else {
+            thread
+                .model
+                .clone()
+                .filter(|model| !model.is_empty())
+                .unwrap_or_else(|| default_model.get_untracked())
+        };
+        let provider = AgentProvider::for_model(&model);
         // A handoff turn asks for a brief; when it lands, a fresh thread in
         // the same project opens with the brief as its draft.
         let handoff = match classify_command(&typed, provider) {
@@ -634,14 +658,34 @@ pub fn ChatPage() -> impl IntoView {
             .is_some()
             .then(|| (thread.project_name.clone(), thread.project_path.clone()));
         let prepared = prepare_command(&typed, provider, thread.goal.as_ref(), false);
-        apply_goal(prepared.write);
+        apply_goal_to(&thread_id, prepared.write);
         if let Some(notice) = prepared.notice {
             thread_notice.flash(notice);
         }
         if !prepared.send {
-            return;
+            return false;
         }
-        thread_notice.set(None);
+        // Every lane is taken: the prompt waits in this thread's queue and
+        // starts when a turn ends. A turn prepared in the background already
+        // holds its lane.
+        if !turns.is_busy_untracked(&thread_id) && !turns.has_room_untracked() {
+            prompt_queue.update(|queue| {
+                queue.push_with_chips(&thread_id, &raw, &pending, js_sys::Date::now());
+            });
+            if here {
+                thread_notice.flash(LANES_FULL);
+                if !keep_composer {
+                    set_input_value.set(String::new());
+                    context_chips.set(Vec::new());
+                }
+            }
+            return true;
+        }
+        if here {
+            thread_notice.set(None);
+        }
+        // This thread's settled messages before the turn.
+        let transcript = prior.unwrap_or_else(|| messages.get_untracked());
         let attachments = if include_attachments {
             text_attachments
                 .try_update(std::mem::take)
@@ -697,9 +741,10 @@ pub fn ChatPage() -> impl IntoView {
         let carried = if handoff.is_some() {
             None
         } else if other_provider {
-            messages.with_untracked(|ms| {
-                thread_context(&thread.title, &import_thread_dialog::portable_messages(ms))
-            })
+            thread_context(
+                &thread.title,
+                &import_thread_dialog::portable_messages(&transcript),
+            )
         } else if thread.session_id.is_none() {
             thread.import_context.clone()
         } else {
@@ -716,21 +761,22 @@ pub fn ChatPage() -> impl IntoView {
         );
 
         let now_ms = js_sys::Date::now();
-        let model = current_model.get_untracked();
         let assistant = AgentMessage::assistant_placeholder(model.clone(), now_ms);
         let assistant_id = assistant.id.clone();
 
-        // Seed the stream buffer from the visible transcript plus the prompt;
-        // the reply streams into `live`.
+        // The turn holds the thread's transcript plus the prompt; the reply
+        // streams into the turn's own signal, `live`.
         let prompt = AgentMessage::user_with_files(text.clone(), now_ms, files.clone());
         let prompt_id = prompt.id.clone();
         let existing_worktree = thread.worktree_path.clone();
-        set_messages.update(|ms| ms.push(prompt));
-        stream_buffer.set(StreamBuffer {
-            thread_id: Some(thread_id.clone()),
-            messages: messages.get_untracked(),
-        });
-        live.set(Some(assistant));
+        let mut settled = transcript;
+        settled.push(prompt);
+        if here {
+            set_messages.set(settled.clone());
+        }
+        let controller = web_sys::AbortController::new().ok();
+        let signal = controller.as_ref().map(|c| c.signal());
+        let live = turns.begin(&thread_id, settled, assistant, controller);
 
         // Stamp activity, remember model + branch for the sidebar, and name
         // the thread after its first prompt.
@@ -746,7 +792,11 @@ pub fn ChatPage() -> impl IntoView {
             });
             let title = crate::state::titled(&auto_title(&text), Some(&text), &instructions);
             let model_now = model.clone();
-            let branch_now = if thread.project_path.is_some() {
+            // Git status is the project on screen's; another thread keeps
+            // the branch it last ran on.
+            let branch_now = if !here {
+                thread.branch.clone()
+            } else if thread.project_path.is_some() {
                 git.get_untracked().branch
             } else {
                 None
@@ -769,27 +819,32 @@ pub fn ChatPage() -> impl IntoView {
             });
         }
 
-        if !keep_composer {
+        if here && !keep_composer {
             set_input_value.set(String::new());
             compact_full.set(false);
         }
-        set_is_streaming.set(true);
-        at_bottom.set(true);
+        if here {
+            at_bottom.set(true);
+        }
         flush_persist();
 
         let perm_mode = permission_mode.get_untracked();
         // A chat without a project sends no path; the server runs it in the
         // home directory.
-        let project_path = thread
-            .project_path
-            .clone()
-            .or_else(|| active_project.get_untracked().map(|p| p.path));
+        let project_path = thread.project_path.clone().or_else(|| {
+            here.then(|| active_project.get_untracked().map(|p| p.path))
+                .flatten()
+        });
         let session_id = thread.session_id.filter(|_| !other_provider);
         let fresh_session = thread.fresh_session || other_provider;
         let choice = run_choice.get_untracked();
         let base = base_branch.get_untracked();
         let previous = previous_worktree.get_untracked();
-        let git_branch = git.get_untracked().branch;
+        let git_branch = if here {
+            git.get_untracked().branch
+        } else {
+            thread.branch.clone()
+        };
         let project_label = thread.project_name.clone();
         let effort = (provider == AgentProvider::Claude)
             .then(|| claude_effort_pref.get_untracked())
@@ -798,15 +853,12 @@ pub fn ChatPage() -> impl IntoView {
             .and_then(claude_effort)
             .map(str::to_string);
 
-        let controller = web_sys::AbortController::new().ok();
-        let signal = controller.as_ref().map(|c| c.signal());
-        abort_controller.set_value(controller);
-
         wasm_bindgen_futures::spawn_local(async move {
             let finished_id = assistant_id.clone();
+            let finishing = live.clone();
             let finish_message = move |error: Option<String>| {
                 let now = js_sys::Date::now();
-                live.update(|m| {
+                finishing.update(|m| {
                     if let Some(m) = m.as_mut().filter(|m| m.id == finished_id) {
                         m.status = MessageStatus::Finished { at_ms: Some(now) };
                         if m.error.is_none() {
@@ -829,6 +881,9 @@ pub fn ChatPage() -> impl IntoView {
             // Only a turn that ran to its end yields a handoff brief; a
             // stopped one has a cut-off reply.
             let mut completed = false;
+            // The user stopped it: another thread waiting on this reply is
+            // told so, not handed a cut-off answer.
+            let mut stopped = false;
             // One per turn, so a new event kind is logged once, not per token.
             let unknown = Rc::new(RefCell::new(UnknownEvents::default()));
             let mut project_path = project_path;
@@ -904,11 +959,9 @@ pub fn ChatPage() -> impl IntoView {
                                 message.checkpoint = Some(stamped);
                             }
                         });
-                        stream_buffer.update(|buf| {
-                            if let Some(message) = buf
-                                .messages
-                                .iter_mut()
-                                .find(|message| message.id == prompt_id)
+                        turns.update_messages(&thread_id, |messages| {
+                            if let Some(message) =
+                                messages.iter_mut().find(|message| message.id == prompt_id)
                             {
                                 message.checkpoint = Some(tree);
                             }
@@ -946,13 +999,14 @@ pub fn ChatPage() -> impl IntoView {
                     let aid = assistant_id.clone();
                     let tid = thread_id.clone();
                     let unknown_cb = Rc::clone(&unknown);
+                    let streaming = live.clone();
 
                     let result =
                         send_agent_message_streaming(&request, signal.as_ref(), move |message| {
                             let now = js_sys::Date::now();
                             let mut effect = StreamEffect::None;
                             // Patched in place: no copy of the transcript per token.
-                            live.update(|m| {
+                            streaming.update(|m| {
                                 if let Some(m) = m.as_mut().filter(|m| m.id == aid) {
                                     effect = apply_message(
                                         m,
@@ -998,7 +1052,10 @@ pub fn ChatPage() -> impl IntoView {
                                         }
                                     });
                                 }
-                                StreamEffect::PermissionRequest(req) => {
+                                StreamEffect::PermissionRequest(mut req) => {
+                                    // So only this thread asks, and only its
+                                    // own requests go when its turn ends.
+                                    req.thread_id.clone_from(&tid);
                                     pending_permissions.update(|p| p.insert(req));
                                 }
                                 StreamEffect::PermissionCancelled(id) => {
@@ -1031,10 +1088,9 @@ pub fn ChatPage() -> impl IntoView {
                             fresh = true;
                             resume = None;
                             if carry_on_retry {
-                                let context = stream_buffer.with_untracked(|buf| {
+                                let context = turns.messages(&thread_id).and_then(|settled| {
                                     // All but the prompt this turn sends.
-                                    let earlier =
-                                        &buf.messages[..buf.messages.len().saturating_sub(1)];
+                                    let earlier = &settled[..settled.len().saturating_sub(1)];
                                     thread_context(
                                         &context_title,
                                         &import_thread_dialog::portable_messages(earlier),
@@ -1072,6 +1128,7 @@ pub fn ChatPage() -> impl IntoView {
                         }
                         NextStep::Finish => {
                             completed = result.is_ok();
+                            stopped = matches!(result, Err(StreamError::Stopped));
                             finish_message(match result {
                                 Err(StreamError::Stopped) | Ok(()) => None,
                                 Err(error) => Some(error.to_string()),
@@ -1082,31 +1139,33 @@ pub fn ChatPage() -> impl IntoView {
                 }
             }
 
-            // The reply joins the transcript.
-            let mut brief = None;
-            if let Some(reply) = live.try_update(Option::take).flatten() {
-                if handoff_place.is_some() && completed && reply.error.is_none() {
-                    brief = Some(reply.text()).filter(|text| !text.trim().is_empty());
-                }
-                stream_buffer.update(|b| b.messages.push(reply));
-            }
-            set_is_streaming.set(false);
-            pending_permissions.update(PendingPermissions::clear);
+            // The reply joins the transcript, and the turn is over.
+            let settled = turns.end(&thread_id).unwrap_or_default();
+            let brief = settled
+                .last()
+                .filter(|reply| {
+                    reply.id == assistant_id
+                        && handoff_place.is_some()
+                        && completed
+                        && reply.error.is_none()
+                })
+                .map(AgentMessage::text)
+                .filter(|text| !text.trim().is_empty());
+            pending_permissions.update(|p| p.clear_thread(&thread_id));
             pending_secrets
                 .update(|items| items.retain(|item| item.thread_id.as_str() != thread_id));
-            abort_controller.set_value(None);
-            mirror_if_active();
-            flush_persist();
-
-            // Finished while the user was elsewhere → mark as ready/unread.
-            let buffered = stream_buffer.with_untracked(|b| b.thread_id.clone());
-            if let Some(tid) = buffered {
-                if active_thread_id.get_untracked().as_deref() != Some(tid.as_str()) {
-                    unread_threads.update(|set| {
-                        set.insert(tid);
-                    });
-                }
+            if active_thread_id.get_untracked().as_deref() == Some(thread_id.as_str()) {
+                set_messages.set(settled.clone());
+            } else {
+                // Finished while the user was elsewhere → mark as ready/unread.
+                unread_threads.update(|set| {
+                    set.insert(thread_id.clone());
+                });
             }
+            // Another thread's agent may be waiting on this reply.
+            thread_link.turn_ended(&thread_id, &settled, stopped);
+            saves.edit_conversation(thread_id.clone(), settled);
+            flush_persist();
 
             if let (Some((project_name, project_path)), Some(brief)) = (handoff_place, brief) {
                 // Never pull the user away from another thread or over a
@@ -1129,30 +1188,23 @@ pub fn ChatPage() -> impl IntoView {
                     );
                 }
             }
-
-            // The agent wrote to another thread: its message is queued there
-            // and one turn runs at a time, so the view follows it. Never away
-            // from another thread, a draft, or this thread's own queue.
-            if let Some(next) = thread_link.follow(&thread_id) {
-                let here = active_thread_id.get_untracked().as_deref() == Some(thread_id.as_str());
-                if here
-                    && input_value.get_untracked().trim().is_empty()
-                    && !prompt_queue.with_untracked(|queue| queue.has_for(&thread_id))
-                {
-                    crate::state::activate_thread(
-                        history,
-                        active_thread_id,
-                        next,
-                        set_active_thread_id,
-                        set_messages,
-                        stream_buffer,
-                        unread_threads,
-                    );
-                } else {
-                    thread_notice.flash(crate::thread_link::QUEUED_ELSEWHERE);
-                }
-            }
         });
+        true
+    };
+    let start_turn = move |raw: String,
+                           include_attachments: bool,
+                           queued_chips: Option<Vec<ContextChip>>,
+                           keep_composer: bool| {
+        if let Some(thread_id) = active_thread_id.get_untracked() {
+            begin_turn(
+                thread_id,
+                None,
+                raw,
+                include_attachments,
+                queued_chips,
+                keep_composer,
+            );
+        }
     };
 
     // `/second-opinion`: the other provider reviews the last answer
@@ -1279,11 +1331,7 @@ pub fn ChatPage() -> impl IntoView {
         let message = AgentMessage::user(visible, now_ms);
         let message_id = message.id.clone();
         set_messages.update(|rows| rows.push(message.clone()));
-        stream_buffer.update(|buf| {
-            if buf.thread_id.as_deref() == Some(thread_id.as_str()) {
-                buf.messages.push(message);
-            }
-        });
+        turns.update_messages(&thread_id, |messages| messages.push(message));
         chip_guard.set_value(true);
         set_input_value.set(String::new());
         schedule_persist();
@@ -1293,8 +1341,8 @@ pub fn ChatPage() -> impl IntoView {
             if let Err(error) = result {
                 thread_notice.flash(error.to_string());
                 set_messages.update(|rows| rows.retain(|message| message.id != message_id));
-                stream_buffer.update(|buf| {
-                    buf.messages.retain(|message| message.id != message_id);
+                turns.update_messages(&thread_id, |messages| {
+                    messages.retain(|message| message.id != message_id);
                 });
                 if input_value.get_untracked().is_empty() {
                     set_input_value.set(draft);
@@ -1311,9 +1359,7 @@ pub fn ChatPage() -> impl IntoView {
     // that turn instead. Cmd+Enter asks for the other one. An empty
     // composer interrupts a running turn, or resumes a held queue.
     let submit = move |raw: String, opposite: bool| {
-        if !is_streaming.get_untracked()
-            && file_offers.with_untracked(|items| offers_block_send(items))
-        {
+        if !running_here() && file_offers.with_untracked(|items| offers_block_send(items)) {
             thread_notice.flash(SEND_WAITS);
             return;
         }
@@ -1327,7 +1373,7 @@ pub fn ChatPage() -> impl IntoView {
             &text,
             AgentProvider::for_model(&current_model.get_untracked()),
         ) {
-            if is_streaming.get_untracked() {
+            if running_here() {
                 thread_notice.flash(SECOND_OPINION_WAIT);
                 return;
             }
@@ -1341,12 +1387,9 @@ pub fn ChatPage() -> impl IntoView {
             || file_offers
                 .with_untracked(|items| items.iter().any(|item| item.ready_path().is_some()));
         if text.is_empty() {
-            if is_streaming.get_untracked() {
+            if running_here() {
                 queue_held.set(true);
-                if let Some(controller) = abort_controller.get_value() {
-                    controller.abort();
-                    abort_controller.set_value(None);
-                }
+                stop_here();
                 return;
             }
             if has_attachments {
@@ -1364,9 +1407,7 @@ pub fn ChatPage() -> impl IntoView {
             return;
         }
         let provider = AgentProvider::for_model(&current_model.get_untracked());
-        let streaming_here = is_streaming.get_untracked()
-            && stream_buffer.with_untracked(|buf| buf.thread_id.clone())
-                == active_thread_id.get_untracked();
+        let streaming_here = running_here();
         if streaming_here {
             let follow = FollowUp {
                 wants_steer: follow_up_steer.get_untracked(),
@@ -1392,8 +1433,7 @@ pub fn ChatPage() -> impl IntoView {
                     .and_then(|thread| thread.goal.clone())
             })
         });
-        let prepared =
-            prepare_command(&text, provider, goal.as_ref(), is_streaming.get_untracked());
+        let prepared = prepare_command(&text, provider, goal.as_ref(), running_here());
         if !prepared.send {
             apply_goal(prepared.write);
             if let Some(notice) = prepared.notice {
@@ -1401,10 +1441,7 @@ pub fn ChatPage() -> impl IntoView {
             }
             if prepared.stop {
                 queue_held.set(true);
-                if let Some(controller) = abort_controller.get_value() {
-                    controller.abort();
-                    abort_controller.set_value(None);
-                }
+                stop_here();
             }
             if prepared.queue {
                 if let Some(tid) = active_thread_id.get_untracked() {
@@ -1457,7 +1494,7 @@ pub fn ChatPage() -> impl IntoView {
     let on_slash = Callback::new(move |name: &'static str| {
         let provider = AgentProvider::for_model(&current_model.get_untracked());
         if let CommandKind::SecondOpinion(focus) = classify_command(name, provider) {
-            if is_streaming.get_untracked() {
+            if running_here() {
                 thread_notice.flash(SECOND_OPINION_WAIT);
             } else {
                 run_second_opinion(focus);
@@ -1472,17 +1509,14 @@ pub fn ChatPage() -> impl IntoView {
                     .and_then(|thread| thread.goal.clone())
             })
         });
-        let prepared = prepare_command(name, provider, goal.as_ref(), is_streaming.get_untracked());
+        let prepared = prepare_command(name, provider, goal.as_ref(), running_here());
         apply_goal(prepared.write);
         if let Some(notice) = prepared.notice {
             thread_notice.flash(notice);
         }
         if prepared.stop {
             queue_held.set(true);
-            if let Some(controller) = abort_controller.get_value() {
-                controller.abort();
-                abort_controller.set_value(None);
-            }
+            stop_here();
         }
         if prepared.queue {
             if let Some(tid) = active_thread_id.get_untracked() {
@@ -1499,13 +1533,19 @@ pub fn ChatPage() -> impl IntoView {
     // Drain when the thread is idle and the queue is not held. Interrupt and
     // a reload hold the rows until Resume or the next send.
     Effect::new(move |_| {
-        if is_streaming.get() || queue_held.get() {
+        // A turn ending anywhere frees a lane.
+        turns.track();
+        if live_here.get() || queue_held.get() {
             return;
         }
         let Some(tid) = active_thread_id.get() else {
             return;
         };
         if history.reason(Some(&tid)).is_some() {
+            return;
+        }
+        // Being prepared in the background, or no lane is free.
+        if turns.is_busy_untracked(&tid) || !turns.has_room_untracked() {
             return;
         }
         let has_queued = prompt_queue.with(|q| !q.for_thread(&tid).is_empty());
@@ -1517,8 +1557,78 @@ pub fn ChatPage() -> impl IntoView {
             start_turn(p.text, false, Some(p.chips), false);
         }
     });
+    // Threads that are not on screen drain too: a prompt queued there (by the
+    // user earlier, or by another thread's agent) starts as soon as its
+    // thread is idle and a lane is free. Its saved messages load first.
+    Effect::new(move |_| {
+        turns.track();
+        if queue_held.get() {
+            return;
+        }
+        let active = active_thread_id.get();
+        let waiting: Vec<String> = prompt_queue.with(|queue| {
+            queue
+                .thread_ids()
+                .into_iter()
+                .filter(|id| active.as_deref() != Some(*id))
+                .map(str::to_string)
+                .collect()
+        });
+        for thread_id in waiting {
+            if !threads.with_untracked(|rows| rows.iter().any(|row| row.id == thread_id)) {
+                continue;
+            }
+            if !turns.has_room_untracked() {
+                break;
+            }
+            // False when it is running, or already being prepared.
+            if !turns.reserve(&thread_id) {
+                continue;
+            }
+            wasm_bindgen_futures::spawn_local(async move {
+                let prior = match crate::storage::load_messages(&thread_id).await {
+                    Ok(loaded) => saves.loaded_conversation(&thread_id, loaded),
+                    Err(error) => {
+                        // Hold the queue: retrying would fail the same way.
+                        log::warn!("a queued prompt could not start: {error:?}");
+                        queue_held.set(true);
+                        thread_notice.flash(
+                            "A queued prompt could not start: its thread's saved messages did not load.",
+                        );
+                        turns.release(&thread_id);
+                        return;
+                    }
+                };
+                // Held, removed, or sent from the thread itself meanwhile.
+                let next = (!queue_held.get_untracked())
+                    .then(|| {
+                        prompt_queue
+                            .try_update(|q| q.next_for(&thread_id))
+                            .flatten()
+                    })
+                    .flatten();
+                let started = next.is_some_and(|next| {
+                    begin_turn(
+                        thread_id.clone(),
+                        Some(prior),
+                        next.text,
+                        false,
+                        Some(next.chips),
+                        true,
+                    )
+                });
+                if !started {
+                    turns.release(&thread_id);
+                }
+            });
+        }
+    });
+    // A message between threads can start right away only while this page
+    // is mounted: it owns the turn lifecycle.
+    thread_link.set_chat_mounted(true);
+    on_cleanup(move || thread_link.set_chat_mounted(false));
     let compact_idle_if_due = move || {
-        if is_streaming.get_untracked() || queue_held.get_untracked() {
+        if running_here() || queue_held.get_untracked() {
             return;
         }
         if compact_idle.get_untracked() != IdleCompact::Before {
@@ -1553,11 +1663,10 @@ pub fn ChatPage() -> impl IntoView {
 
     let on_stop_cb = Callback::new(move |_: ()| {
         queue_held.set(true);
-        pending_secrets.set(Vec::new());
-        if let Some(controller) = abort_controller.get_value() {
-            controller.abort();
-            abort_controller.set_value(None);
+        if let Some(thread) = active_thread_id.get_untracked() {
+            pending_secrets.update(|items| items.retain(|item| item.thread_id.as_str() != thread));
         }
+        stop_here();
     });
 
     // Edit from here: drop the selected prompt and everything after it.
@@ -1566,7 +1675,7 @@ pub fn ChatPage() -> impl IntoView {
     // back to the checkpoint from before that message.
     let reverting_files = StoredValue::new(false);
     let rewind_to = move |message_id: String| {
-        if is_streaming.get_untracked() {
+        if running_here() {
             return;
         }
         let Some(tid) = active_thread_id.get_untracked() else {
@@ -1624,7 +1733,7 @@ pub fn ChatPage() -> impl IntoView {
         });
     };
     let on_edit_from_here = Callback::new(move |(message_id, revert_files): (String, bool)| {
-        if is_streaming.get_untracked() {
+        if running_here() {
             return;
         }
         let Some(tid) = active_thread_id.get_untracked() else {
@@ -1681,7 +1790,7 @@ pub fn ChatPage() -> impl IntoView {
             }
         });
     });
-    let can_rewind = Signal::derive(move || !is_streaming.get());
+    let can_rewind = Signal::derive(move || !live_here.get());
     let in_worktree = Signal::derive(move || {
         active_thread().is_some_and(|thread| {
             thread
@@ -1694,7 +1803,7 @@ pub fn ChatPage() -> impl IntoView {
     // Retry a failed turn: drop the failed assistant message and the prompt
     // that produced it, then resend the prompt so the pair is re-added.
     let on_retry = Callback::new(move |(message_id, prompt): (String, String)| {
-        if is_streaming.get_untracked() {
+        if running_here() {
             return;
         }
         if active_thread_id.with_untracked(|id| id.as_deref().is_some_and(|id| history.blocked(id)))
@@ -1733,8 +1842,12 @@ pub fn ChatPage() -> impl IntoView {
             .filter(|p| !p.is_empty())
     });
     let awaiting_approval = Signal::derive(move || {
-        pending_permissions.with(|p| !p.is_empty())
-            || pending_secrets.with(|items| !items.is_empty())
+        let Some(thread) = active_thread_id.get() else {
+            return false;
+        };
+        pending_permissions.with(|p| p.has_for(&thread))
+            || pending_secrets
+                .with(|items| items.iter().any(|item| item.thread_id.as_str() == thread))
     });
     // `(name, path)` the terminal drawer offers first.
     let composer_context_project =
@@ -1750,11 +1863,7 @@ pub fn ChatPage() -> impl IntoView {
                 .clone()
                 .map(|u| (u, m.model.clone().unwrap_or_default()))
         };
-        let running = if live_here.get() {
-            live.with(|m| m.as_ref().and_then(usage_of))
-        } else {
-            None
-        };
+        let running = live_reply().and_then(|live| live.with(|m| m.as_ref().and_then(usage_of)));
         running.or_else(|| {
             messages.with(|ms| {
                 ms.iter()
@@ -1793,7 +1902,7 @@ pub fn ChatPage() -> impl IntoView {
                         <crate::thread_history::ThreadHistoryStatus />
 
                         {move || {
-                            let empty = messages.with(|m| m.is_empty()) && !is_streaming.get();
+                            let empty = messages.with(|m| m.is_empty()) && !live_here.get();
                             if empty {
                                 // Empty thread: the draft hero — headline +
                                 // composer centered in the column.
@@ -1846,7 +1955,7 @@ pub fn ChatPage() -> impl IntoView {
                                             <Timeline
                                                 settled=settled_turns
                                                 live=live_turn
-                                                is_streaming=is_streaming
+                                                is_streaming=live_here
                                                 awaiting_approval=awaiting_approval
                                                 on_retry=on_retry
                                                 on_open_diff=on_open_diff

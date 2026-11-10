@@ -16,8 +16,7 @@ use crate::components::timeline_view::split_path;
 use crate::format::truncate_chars;
 use crate::state::{
     load_json_pref, save_json_pref, ActiveProjectSignal, AgentMessage, DiffFocusPath, DiffScope,
-    DiffScopeSignal, EditorSignal, GitStatusSignal, LiveMessageSignal, StreamBufferSignal,
-    ThreadNotice,
+    DiffScopeSignal, EditorSignal, GitStatusSignal, ThreadNotice, Turns,
 };
 use crate::ui::{Checkbox, CopyButton, Icon, Menu, MenuAlign, MenuItem};
 use bruhs_models::logic::diff::{lcs_diff, parse_unified, DiffStats, Hunk};
@@ -278,16 +277,17 @@ pub fn DiffPanel() -> impl IntoView {
         });
     });
     // The running turn's message counts too, so its edits show as they land.
-    let LiveMessageSignal(live) = expect_context::<LiveMessageSignal>();
-    let StreamBufferSignal(buffer) = expect_context::<StreamBufferSignal>();
-    let live_here = crate::state::live_turn_here(active_thread_id, buffer);
+    let turns = expect_context::<Turns>();
+    let live_here = turns.here(active_thread_id);
     let with_transcript = move |f: &mut dyn FnMut(&mut dyn Iterator<Item = &AgentMessage>)| {
-        messages.with(|ms| {
-            if live_here.get() {
-                live.with(|m| f(&mut ms.iter().chain(m.as_ref())));
-            } else {
-                f(&mut ms.iter());
-            }
+        // The reply of the turn running on screen, if there is one.
+        let live = live_here
+            .get()
+            .then(|| active_thread_id.with_untracked(|id| turns.reply(id.as_deref()?)))
+            .flatten();
+        messages.with(|ms| match &live {
+            Some(live) => live.with(|m| f(&mut ms.iter().chain(m.as_ref()))),
+            None => f(&mut ms.iter()),
         });
     };
     let scopes = Memo::new(move |_| {

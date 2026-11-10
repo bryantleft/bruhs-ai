@@ -130,6 +130,17 @@ impl PromptQueue {
             .cloned()
     }
 
+    /// Threads with a prompt waiting, in the order their oldest was queued.
+    pub fn thread_ids(&self) -> Vec<&str> {
+        let mut ids: Vec<&str> = Vec::new();
+        for item in &self.0 {
+            if !ids.contains(&item.thread_id.as_str()) {
+                ids.push(&item.thread_id);
+            }
+        }
+        ids
+    }
+
     pub fn has_for(&self, thread_id: &str) -> bool {
         self.0.iter().any(|prompt| prompt.thread_id == thread_id)
     }
@@ -205,6 +216,19 @@ mod tests {
         queue.push("one", "Pending", 1.0);
         assert!(queue.has_for("one"));
         assert!(!queue.has_for("two"));
+    }
+
+    #[test]
+    fn thread_ids_name_each_waiting_thread_once_oldest_first() {
+        let mut queue = PromptQueue::default();
+        assert!(queue.thread_ids().is_empty());
+        queue.push("two", "first", 1.0);
+        queue.push("one", "second", 2.0);
+        queue.push("two", "third", 3.0);
+        assert_eq!(queue.thread_ids(), ["two", "one"]);
+        queue.next_for("two");
+        queue.next_for("two");
+        assert_eq!(queue.thread_ids(), ["one"]);
     }
 
     #[test]

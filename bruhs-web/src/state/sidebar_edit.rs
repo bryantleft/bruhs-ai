@@ -40,8 +40,10 @@ pub fn thread_facts<'a>(
 pub struct ShelfClock<'a> {
     pub now_ms: i64,
     pub active: Option<&'a str>,
-    pub working: Option<&'a str>,
-    pub needs_you: Option<&'a str>,
+    /// Threads with a running turn.
+    pub working: &'a [String],
+    /// Threads whose turn waits on an approval.
+    pub needs_you: &'a [String],
     pub unread: &'a HashSet<String>,
     pub working_section: bool,
 }
@@ -54,8 +56,8 @@ fn facts_for<'a>(threads: &'a [Thread], clock: &ShelfClock<'_>) -> Vec<SidebarFa
                 thread,
                 clock.now_ms,
                 clock.active == Some(thread.id.as_str()),
-                clock.working == Some(thread.id.as_str()),
-                clock.needs_you == Some(thread.id.as_str()),
+                clock.working.contains(&thread.id),
+                clock.needs_you.contains(&thread.id),
                 clock.unread.contains(&thread.id),
             )
         })
@@ -233,8 +235,8 @@ mod tests {
         ShelfClock {
             now_ms,
             active: None,
-            working: None,
-            needs_you: None,
+            working: &[],
+            needs_you: &[],
             unread,
             working_section,
         }

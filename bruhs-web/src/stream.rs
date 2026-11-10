@@ -172,7 +172,9 @@ pub fn apply_event(msg: &mut AgentMessage, event: &AgentStreamEvent, now_ms: f64
         AgentStreamEvent::PermissionRequest {
             id, tool, input, ..
         } => match present(id) {
+            // The turn that receives it stamps its thread.
             Some(id) => StreamEffect::PermissionRequest(PermissionRequest {
+                thread_id: String::new(),
                 id: id.to_owned(),
                 tool: tool.clone(),
                 input: input.clone(),

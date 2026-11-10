@@ -1,7 +1,7 @@
 //! Initial thread loading must not replace work started before storage is ready.
 use leptos::prelude::*;
 
-use crate::state::{AgentMessage, StreamBufferSignal, Thread, WorkspaceMode};
+use crate::state::{AgentMessage, Thread, Turns, WorkspaceMode};
 use crate::task_saves::InitialEdits;
 #[cfg(test)]
 mod tests;
@@ -35,7 +35,7 @@ pub struct ThreadCatalog {
     active: ReadSignal<Option<String>>,
     set_active: WriteSignal<Option<String>>,
     messages: WriteSignal<Vec<AgentMessage>>,
-    buffer: StreamBufferSignal,
+    turns: Turns,
     mode: WorkspaceMode,
     history: crate::thread_history::ThreadHistory,
     workflow_ready: RwSignal<bool>,
@@ -57,7 +57,7 @@ impl ThreadCatalog {
             active: expect_context::<crate::state::ActiveThreadId>().0,
             set_active: expect_context::<crate::state::SetActiveThreadId>().0,
             messages: expect_context::<crate::state::SetMessagesSignal>().0,
-            buffer: expect_context(),
+            turns: expect_context(),
             mode: expect_context(),
             history: expect_context(),
             workflow_ready: expect_context::<crate::workflow_executor::WorkflowExecutor>()
@@ -133,7 +133,7 @@ impl ThreadCatalog {
             }
             self.set_active.set(Some(id.clone()));
             self.history
-                .load(id, self.active, self.messages, self.buffer.0);
+                .load(id, self.active, self.messages, self.turns);
         } else if !self.touched.get_value() {
             // Only a successfully decoded, committed empty snapshot may create
             // a default. Failure and intentional local deletion stay distinct.

@@ -13,7 +13,7 @@ use crate::components::preview_panel::PreviewPanel;
 use crate::components::tasks_panel::TasksSurface;
 use crate::state::{
     clamp_panel_width, ActiveThreadId, BranchPullSignal, OpenFileSignal, PanelSurface,
-    RightPanelSignal, RightPanelWidth, ShownBranchPull, StreamingThreadId, ThreadsSignal,
+    RightPanelSignal, RightPanelWidth, ShownBranchPull, ThreadsSignal, Turns,
 };
 use crate::ui::{Icon, Kbd};
 use bruhs_models::logic::branch_pull::{
@@ -328,7 +328,7 @@ fn active_branch() -> Option<(String, String, String)> {
 pub fn BranchPullWatch() -> impl IntoView {
     let threads = expect_context::<ThreadsSignal>().0;
     let active = expect_context::<ActiveThreadId>().0;
-    let streaming = expect_context::<StreamingThreadId>().0;
+    let turns = expect_context::<Turns>();
     let panel = expect_context::<RightPanelSignal>().0;
     let BranchPullSignal(shown) = expect_context::<BranchPullSignal>();
     let opened = StoredValue::new(None::<String>);
@@ -337,7 +337,8 @@ pub fn BranchPullWatch() -> impl IntoView {
     Effect::new(move |_| {
         let _ = threads.get();
         let _ = active.get();
-        let _ = streaming.get();
+        // A turn starting or ending may have changed the branch.
+        turns.track();
         let mine = ticket.with_value(|ticket| ticket.wrapping_add(1));
         ticket.set_value(mine);
         let Some((thread_id, path, branch)) = active_branch() else {

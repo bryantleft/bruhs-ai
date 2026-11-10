@@ -50,7 +50,12 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let store =
         bruhs_core::SqliteMeetingStore::open(bruhs_core::SqliteMeetingStore::default_path()?)
             .await?;
-    let state = AppState::builder().meetings(Arc::new(store)).build();
+    // The web runs threads side by side, so an agent may wait for another
+    // thread's reply inside one tool call.
+    let state = AppState::builder()
+        .thread_waits(true)
+        .meetings(Arc::new(store))
+        .build();
     let state = Arc::new(state);
     // Google Calendar sync (when BRUHS_GOOGLE_* is configured).
     state.start_background(&tokio::runtime::Handle::current());
