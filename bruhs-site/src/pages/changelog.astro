@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
 import CHANGELOG from "../../../CHANGELOG.md?raw";
 import { inline, longDate, parseChangelog } from "../lib/changelog.js";
 
@@ -50,7 +51,7 @@ if (releases.length === 0) throw new Error("CHANGELOG.md has no released version
               })}
               <p class="release-links">
                 {index === 0 && <a href="/#get">Download latest</a>}
-                <a href={`${REPO}/releases/tag/${id}`}>Release details <span aria-hidden="true">→</span></a>
+                <a href={`${REPO}/releases/tag/${id}`}><Icon name="github" size={14} />Release details</a>
               </p>
             </div>
           </article>
@@ -60,8 +61,8 @@ if (releases.length === 0) throw new Error("CHANGELOG.md has no released version
       <section class="changelog-join" aria-labelledby="changelog-join-title">
         <h2 class="h2" id="changelog-join-title">Try the latest build</h2>
         <div class="get-row">
-          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg">Download for macOS</a>
-          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai">View on GitHub</a>
+          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg"><Icon name="apple" />Download for macOS</a>
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />View on GitHub</a>
         </div>
       </section>
     </div>

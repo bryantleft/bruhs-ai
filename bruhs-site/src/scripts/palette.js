@@ -96,14 +96,6 @@ export const COMMANDS = [
     target: "#privacy",
   },
   {
-    id: "keys",
-    tag: "page",
-    label: "Keyboard map",
-    detail: "the app's default shortcuts",
-    keywords: "keyboard shortcuts hotkeys keys",
-    target: "#keys",
-  },
-  {
     id: "shipping",
     tag: "page",
     label: "Changelog",

@@ -1,5 +1,6 @@
 ---
 import Base from "../layouts/Base.astro";
+import Icon from "../components/Icon.astro";
 ---
 
 <Base
@@ -12,17 +13,14 @@ import Base from "../layouts/Base.astro";
 >
   <main id="main">
     <section class="hero">
-      <div class="wrap hero-grid">
-        <div class="hero-copy">
-          <h1 class="display">One window for your whole day.</h1>
-          <p class="lede">Coding agents, tasks, calendar and meetings, a keystroke apart. On your Mac, not our cloud.</p>
-          <div class="get-row">
-            <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-download>Download for macOS</a>
-            <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai">GitHub</a>
-          </div>
-          <p class="fine">Free, MIT licensed. macOS 13+ on Apple silicon.</p>
-        </div>
+      <div class="wrap hero-stack">
         <canvas class="bruh bruh-hero" data-bruh="hero" aria-hidden="true"></canvas>
+        <h1 class="display">One window for your whole day.</h1>
+        <p class="lede">Coding agents, tasks, calendar and meetings, a keystroke apart. On your Mac, not our cloud.</p>
+        <div class="get-row">
+          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-download><Icon name="apple" />Download for macOS</a>
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />GitHub</a>
+        </div>
       </div>
     </section>
 
@@ -119,27 +117,12 @@ import Base from "../layouts/Base.astro";
       </div>
     </section>
 
-    <section class="section" id="keys" aria-labelledby="keys-title">
-      <div class="wrap keys">
-        <div class="keys-head">
-          <h2 class="h2" id="keys-title" tabindex="-1">Built for the keyboard.</h2>
-          <p class="muted hint-key">Press one.</p>
-        </div>
-        <div class="keys-top">
-          <div class="bigkey" data-keys="mod+k"><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>K</kbd></span><span>Command bar</span></div>
-          <div class="bigkey" data-keys="mod+n"><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>N</kbd></span><span>New thread</span></div>
-          <div class="bigkey" data-keys="mod+shift+y"><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>⇧</kbd><kbd>Y</kbd></span><span>Today</span></div>
-          <div class="bigkey" data-keys="mod+shift+space"><span class="combo"><kbd><span class="mod">⌘</span></kbd><kbd>⇧</kbd><kbd>Space</kbd></span><span>Capture</span></div>
-        </div>
-      </div>
-    </section>
-
     <section class="section closing" id="get" aria-labelledby="get-title">
       <div class="wrap">
         <h2 class="display display-sm" id="get-title" tabindex="-1">Close the other twelve tabs.</h2>
         <div class="get-row">
-          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-download>Download for macOS</a>
-          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/releases">All releases</a>
+          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-download><Icon name="apple" />Download for macOS</a>
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/releases"><Icon name="github" />All releases</a>
         </div>
         <p class="source" tabindex="0" aria-label="Run it from source"><span class="p">$</span> git clone https://github.com/bryantleft/bruhs-ai &amp;&amp; cd bruhs-ai &amp;&amp; scripts/dev.sh</p>
       </div>

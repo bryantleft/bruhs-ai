@@ -1,5 +1,5 @@
 // Page behavior: the ⌘K dialog, the surface tour (with a dithered dissolve
-// between screenshots), the braille mascot, and key tiles that light up.
+// between screenshots) and the dot mascot.
 
 import { drawBruh, threshold } from "./braille.js";
 import { COMMANDS, filterCommands } from "./palette.js";
@@ -409,24 +409,10 @@ for (const button of document.querySelectorAll("[data-open-palette]")) {
 }
 
 // ---------------------------------------------------------------------------
-// Global keys: ⌘K opens the bar, "/" too when not typing; key tiles light up.
-
-const tilesByChord = new Map(
-  [...document.querySelectorAll("[data-keys]")].map((tile) => [tile.getAttribute("data-keys") ?? "", tile]),
-);
-/** @type {WeakMap<Element, number>} */
-const tileTimers = new WeakMap();
+// Global keys: ⌘K opens the bar, "/" too when not typing.
 
 document.addEventListener("keydown", (event) => {
   const chord = chordOf(event);
-
-  const tile = tilesByChord.get(chord);
-  if (tile) {
-    tile.classList.add("is-pressed");
-    clearTimeout(tileTimers.get(tile));
-    tileTimers.set(tile, window.setTimeout(() => tile.classList.remove("is-pressed"), 700));
-  }
-
   if (chord === "mod+k") {
     event.preventDefault();
     if (dialog.open) dialog.close();
