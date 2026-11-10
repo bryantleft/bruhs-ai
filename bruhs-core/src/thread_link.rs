@@ -11,7 +11,7 @@
 //!
 //! A `message_thread` call may wait for the recipient's reply where the app
 //! runs threads side by side ([`ThreadLinks::with_waits`]). The app then
-//! answers when that reply exists, up to [`WAIT`] later.
+//! answers when that reply exists, up to an hour later.
 
 use crate::agent::ProviderQueryOptions;
 use crate::{OrchestratorEvent, QueryEvent};
