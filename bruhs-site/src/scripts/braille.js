@@ -1,7 +1,7 @@
 // The Bruh mascot as a halftone of dots: a hex grid over the face, each dot
 // sized by the light on a sphere (dot area tracks brightness) and shrunk a
 // little toward the rim, so the silhouette stays round and the face reads as
-// a lit ball. The eyes are holes and the mouth is one row of red. Geometry
+// a lit ball. The eyes are one-row slits and the mouth is one row of red. Geometry
 // from bruhs.svg; `lookX` turns toward its `left` and `right` variants.
 // The same algorithm lives in @bruhs/theme/dither and bruhs-models
 // logic/dither.rs. No DOM here: tests run it in Node.
@@ -38,13 +38,14 @@ const RIM = 0.35;
 /** @param {number} x @param {number} y */
 const unit = (x, y) => ({ x: (x - 300) / 300, y: (y - 300) / 300 });
 const FACES = {
-  original: { leftEye: unit(198, 223), rightEye: unit(401, 223), mouth: unit(307, 378) },
+  // Eyes mirrored about the center (the logo has them 102 and 101 units out):
+  // the hex grid is symmetric, so mirrored eyes cut identical slits.
+  original: { leftEye: unit(198.5, 223), rightEye: unit(401.5, 223), mouth: unit(307, 378) },
   left: { leftEye: unit(97, 209), rightEye: unit(300, 209), mouth: unit(191, 364) },
   right: { leftEye: unit(300, 209), rightEye: unit(503, 209), mouth: unit(409, 364) },
 };
 const EYE_RX = 40 / 300;
 const MOUTH_RX = 120 / 300;
-const FEATURE_RY = 10 / 300;
 
 export const FACE = 1;
 export const MOUTH = 2;
@@ -110,8 +111,9 @@ export function bruhDots(width, height, face) {
   const toward = (a, b) => ({ x: a.x + (b.x - a.x) * t, y: a.y + (b.y - a.y) * t + nudge });
   const eyes = [toward(FACES.original.leftEye, turned.leftEye), toward(FACES.original.rightEye, turned.rightEye)];
   const mouth = toward(FACES.original.mouth, turned.mouth);
-  const eyeRy = Math.max(FEATURE_RY, (pitch * 0.9) / r);
-  // The mouth is exactly one row: the one nearest its line.
+  // Eyes and mouth are exactly one row each: the row nearest their line. An
+  // oval hole cut across staggered rows comes out ▽ on one eye and △ on the other.
+  const eyeRows = eyes.map((e) => Math.round((e.y * r) / rowH));
   const mouthRow = Math.round((mouth.y * r) / rowH);
 
   /** @type {Dot[]} */
@@ -121,15 +123,17 @@ export function bruhDots(width, height, face) {
   for (let row = -rows; row <= rows; row++) {
     const y = cy + row * rowH;
     if (y < -pitch || y > height + pitch) continue;
-    const offset = row & 1 ? pitch / 2 : 0;
     for (let col = -cols; col <= cols; col++) {
-      const x = cx + col * pitch + offset;
+      // Offsets in whole half-steps, so a dot and its mirror twin get exactly
+      // negated positions and the face stays symmetric.
+      const halfSteps = 2 * col + (row & 1);
+      const x = cx + (halfSteps * pitch) / 2;
       if (x < -pitch || x > width + pitch) continue;
-      const dx = (x - cx) / r;
+      const dx = (halfSteps * pitch) / (2 * r);
       const dy = (y - cy) / r;
       let value = shade(dx, dy);
       if (value === null) continue;
-      if (eyes.some((e) => ((dx - e.x) / EYE_RX) ** 2 + ((dy - e.y) / eyeRy) ** 2 <= 1)) continue;
+      if (eyes.some((e, i) => row === eyeRows[i] && Math.abs((dx - e.x) / EYE_RX) <= 1)) continue;
       const isMouth = row === mouthRow && Math.abs((dx - mouth.x) / MOUTH_RX) <= 1;
       if (isMouth) value = Math.max(value, 0.75);
       const radius = (pitch / 2) * 0.92 * Math.sqrt(value);

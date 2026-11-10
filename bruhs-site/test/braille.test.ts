@@ -44,10 +44,23 @@ describe("bruhDots", () => {
     assert.ok(near(140, 120).radius > near(280, 300).radius);
   });
 
-  it("leaves holes for the eyes and draws the mouth as one red row", () => {
-    const at = (x: number, y: number) => dots.some((d) => Math.hypot(d.x - x, d.y - y) < 4);
-    assert.equal(at(200 - 0.34 * 150, 200 - 0.257 * 150), false);
-    assert.equal(at(200 + 0.337 * 150, 200 - 0.257 * 150), false);
+  it("cuts the eyes as one-row slits that mirror each other", () => {
+    const eyeRow = Math.round((-0.257 * 150) / ((pitchFor(150) * Math.sqrt(3)) / 2));
+    const inSlit = (d: { x: number; row: number }, side: number) =>
+      d.row === eyeRow && Math.abs(d.x - (200 + side * 0.3383 * 150)) <= (40 / 300) * 150;
+    assert.equal(dots.filter((d) => inSlit(d, -1) || inSlit(d, 1)).length, 0);
+    // The rows above and below keep their dots at the eye: a slit, not a hole.
+    for (const row of [eyeRow - 1, eyeRow + 1]) {
+      assert.ok(dots.some((d) => d.row === row && Math.abs(d.x - (200 - 0.3383 * 150)) < pitchFor(150)));
+    }
+    // Every face dot has a mirror twin, so both eyes are the same shape.
+    const key = (x: number, y: number) => `${Math.round(x * 10)},${Math.round(y * 10)}`;
+    const face_ = new Set(dots.filter((d) => d.kind === FACE).map((d) => key(d.x, d.y)));
+    const unmatched = dots.filter((d) => d.kind === FACE && Math.abs(d.y - (200 + 0.26 * 150)) > 6 && !face_.has(key(400 - d.x, d.y)));
+    assert.equal(unmatched.length, 0);
+  });
+
+  it("draws the mouth as one red row", () => {
     const mouth = dots.filter((d) => d.kind === MOUTH);
     assert.ok(mouth.length >= 8);
     assert.equal(new Set(mouth.map((d) => d.row)).size, 1);
