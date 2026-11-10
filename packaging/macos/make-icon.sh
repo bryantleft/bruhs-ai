@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
-# Regenerate packaging/macos/AppIcon.icns from bruhs-web/favicon.svg (the
-# bruhs.ai dot mark on its longan tile; bruhs-site/brand/logo.mjs writes it).
+# Regenerate packaging/macos/AppIcon.icns from packaging/macos/AppIcon.svg
+# (the bruhs.ai dot mark on its longan tile; bruhs-site/brand/logo.mjs writes it).
 # macOS icons draw their art inside ~80% of the canvas (824 of 1024), so each
 # size is rendered smaller and centered. Needs rsvg-convert and
 # ImageMagick (`brew install librsvg imagemagick`).
 set -euo pipefail
 cd "$(dirname "$0")/../.."
-svg=bruhs-web/favicon.svg
+svg=packaging/macos/AppIcon.svg
 out=packaging/macos/AppIcon.icns
 work=$(mktemp -d)
 trap 'rm -rf "$work"' EXIT
