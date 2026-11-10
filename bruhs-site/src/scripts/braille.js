@@ -70,7 +70,8 @@ export const MOUTH = 2;
  * @property {number} x
  * @property {number} y
  * @property {number} radius
- * @property {1 | 2} kind  FACE or MOUTH.
+ * @property {1 | 2} kind  MOUTH once the dot is at least half mouth, else FACE.
+ * @property {number} mix  How much of the mouth's red it takes, 0 to 1.
  * @property {number} col  Grid position, for the reveal order.
  * @property {number} row
  */
@@ -115,25 +116,41 @@ export function bruhDots(width, height, face) {
   const rowH = (pitch * Math.sqrt(3)) / 2;
   const head = rotation(lookX * MAX_YAW, lookY * MAX_PITCH);
 
-  // Where each feature lands once the head turns. Eyes and mouth are exactly
-  // one row each, the row nearest where they land: an oval hole cut across
-  // staggered rows comes out ▽ on one eye and △ on the other.
-  /** @param {{ x: number, y: number }} at */
-  const land = (at) => {
+  // Features are anti-aliased: each dot shrinks (eyes) or reddens (mouth) by
+  // how much of the feature covers it, so a turning face glides through the
+  // grid instead of jumping a dot at a time. Vertically a feature is a line
+  // shared between the two rows around it; at rest that line sits exactly on
+  // a row, so a face looking ahead keeps crisp one-row slits. (A hard oval
+  // cut across staggered rows came out ▽ on one eye and △ on the other.)
+  const soft = (pitch * 0.6) / r;
+  /** @param {{ x: number, y: number }} at @param {number} rx */
+  const land = (at, rx) => {
     const seen = head.toScreen(lift(at));
-    return { at, row: Math.round((seen.y * r) / rowH), visible: seen.z > 0.15 };
+    const restLine = (Math.round((at.y * r) / rowH) * rowH) / r;
+    return {
+      at,
+      rx,
+      line: seen.y + restLine - at.y,
+      // Fade a feature out as it turns round the rim rather than popping.
+      fade: smoothstep(0.05, 0.3, seen.z),
+    };
   };
-  const leftEye = land(LEFT_EYE);
-  const rightEye = land(RIGHT_EYE);
-  const mouth = land(MOUTH_AT);
+  const leftEye = land(LEFT_EYE, EYE_RX);
+  const rightEye = land(RIGHT_EYE, EYE_RX);
+  const mouth = land(MOUTH_AT, MOUTH_RX);
   /**
-   * @param {{ at: { x: number, y: number }, row: number, visible: boolean }} feature
-   * @param {number} row
+   * How much of a feature covers the dot at screen height `dy` whose point on
+   * the head is `local`, 0 to 1.
+   * @param {{ at: { x: number, y: number }, rx: number, line: number, fade: number }} f
+   * @param {number} dy
    * @param {{ x: number, y: number }} local
-   * @param {number} rx
    */
-  const on = (feature, row, local, rx) =>
-    feature.visible && row === feature.row && Math.abs(local.x - feature.at.x) <= rx && Math.abs(local.y - feature.at.y) < 0.2;
+  const cover = (f, dy, local) => {
+    const across = Math.max(0, 1 - (Math.abs(dy - f.line) * r) / rowH);
+    if (across === 0 || Math.abs(local.y - f.at.y) > 0.2) return 0;
+    const along = 1 - smoothstep(f.rx, f.rx + soft, Math.abs(local.x - f.at.x));
+    return across * along * f.fade;
+  };
 
   /** @type {Dot[]} */
   const dots = [];
@@ -154,12 +171,12 @@ export function bruhDots(width, height, face) {
       if (value === null) continue;
       // The point of the head's own (unturned) surface now under this dot.
       const local = head.toLocal(dx, dy, Math.sqrt(Math.max(0, 1 - dx * dx - dy * dy)));
-      if (on(leftEye, row, local, EYE_RX) || on(rightEye, row, local, EYE_RX)) continue;
-      const isMouth = on(mouth, row, local, MOUTH_RX);
-      if (isMouth) value = Math.max(value, 0.75);
-      const radius = (pitch / 2) * 0.92 * Math.sqrt(value);
+      const eye = Math.max(cover(leftEye, dy, local), cover(rightEye, dy, local));
+      const mix = cover(mouth, dy, local);
+      value += (Math.max(value, 0.75) - value) * mix;
+      const radius = (pitch / 2) * 0.92 * Math.sqrt(value) * (1 - eye);
       if (radius < pitch * 0.07) continue;
-      dots.push({ x, y, radius, kind: isMouth ? MOUTH : FACE, col, row });
+      dots.push({ x, y, radius, kind: mix >= 0.5 ? MOUTH : FACE, mix, col, row });
     }
   }
   return dots;
@@ -176,18 +193,46 @@ export function bruhDots(width, height, face) {
  */
 export function drawBruh(ctx, width, height, face, style) {
   const reveal = style.reveal ?? 1;
-  const paths = { [FACE]: new Path2D(), [MOUTH]: new Path2D() };
+  // Mouth blends in five steps from face yellow to mouth red: one path each.
+  const steps = [0, 0.25, 0.5, 0.75, 1];
+  const paths = steps.map(() => new Path2D());
   for (const dot of bruhDots(width, height, face)) {
     if (reveal < 1 && noise(dot.col, dot.row) > reveal) continue;
-    const path = paths[dot.kind];
+    const path = paths[Math.round(dot.mix * 4)];
+    if (!path) continue;
     path.moveTo(dot.x + dot.radius, dot.y);
     path.arc(dot.x, dot.y, dot.radius, 0, Math.PI * 2);
   }
   ctx.clearRect(0, 0, width, height);
-  ctx.fillStyle = style.colors.face;
-  ctx.fill(paths[FACE]);
-  ctx.fillStyle = style.colors.mouth;
-  ctx.fill(paths[MOUTH]);
+  steps.forEach((step, i) => {
+    const path = paths[i];
+    if (!path) return;
+    ctx.fillStyle = mixHex(style.colors.face, style.colors.mouth, step);
+    ctx.fill(path);
+  });
+}
+
+/**
+ * 0 below `a`, 1 above `b`, eased between.
+ * @param {number} a @param {number} b @param {number} x
+ */
+function smoothstep(a, b, x) {
+  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
+  return t * t * (3 - 2 * t);
+}
+
+/**
+ * `#rrggbb` between `from` and `to`, `t` of the way.
+ * @param {string} from @param {string} to @param {number} t
+ */
+function mixHex(from, to, t) {
+  if (t <= 0) return from;
+  if (t >= 1) return to;
+  const a = Number.parseInt(from.slice(1), 16);
+  const b = Number.parseInt(to.slice(1), 16);
+  /** @param {number} shift */
+  const channel = (shift) => Math.round(((a >> shift) & 255) + (((b >> shift) & 255) - ((a >> shift) & 255)) * t);
+  return `#${((channel(16) << 16) | (channel(8) << 8) | channel(0)).toString(16).padStart(6, "0")}`;
 }
 
 /**

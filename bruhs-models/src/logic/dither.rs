@@ -40,7 +40,24 @@ pub struct Dot {
     pub x: f32,
     pub y: f32,
     pub radius: f32,
+    /// `Mouth` once the dot is at least half mouth.
     pub kind: DotKind,
+    /// How much of the mouth's red it takes, 0 to 1.
+    pub mix: f32,
+}
+
+impl Dot {
+    /// The dot's `0xRRGGBB` color: face yellow blended toward mouth red in
+    /// five steps (as bruhs.ai and `@bruhs/theme/dither` draw it).
+    pub fn rgb(&self) -> u32 {
+        let step = (self.mix.clamp(0.0, 1.0) * 4.0).round() / 4.0;
+        let channel = |shift: u32| {
+            let a = f32::from(u8::try_from((BRUH_FACE_RGB >> shift) & 0xff).unwrap_or(0));
+            let b = f32::from(u8::try_from((BRUH_MOUTH_RGB >> shift) & 0xff).unwrap_or(0));
+            u32::from((a + (b - a) * step).round().to_u8_saturating()) << shift
+        };
+        channel(16) | channel(8) | channel(0)
+    }
 }
 
 /// Grid spacing for a face radius `r`: about 15 dots per radius on a large
@@ -64,8 +81,10 @@ pub fn shade(dx: f32, dy: f32) -> Option<f32> {
 
 /// Every dot of a static Bruh filling a `size` × `size` box (face radius
 /// 0.42 × size): a hex grid anchored on the face's center, each dot's area
-/// tracking the light. The eyes and mouth are one row each: an oval hole cut
-/// across staggered rows comes out ▽ on one eye and △ on the other.
+/// tracking the light. The eyes and mouth are one row each (an oval hole cut
+/// across staggered rows comes out ▽ on one eye and △ on the other), with
+/// softened ends: dots just past a feature's end shrink or redden partway, as
+/// the turning faces on bruhs.ai do.
 pub fn bruh_dots(size: f32) -> Vec<Dot> {
     if size.is_nan() || size <= 0.0 {
         return Vec::new();
@@ -77,6 +96,7 @@ pub fn bruh_dots(size: f32) -> Vec<Dot> {
     let mouth_row = (MOUTH.1 * r / row_h).round().to_i32_saturating();
     let rows = (r / row_h).ceil().to_i32_saturating() + 1;
     let cols = (r / pitch).ceil().to_i32_saturating() + 1;
+    let soft = pitch * 0.6 / r;
 
     let mut dots = Vec::new();
     for row in -rows..=rows {
@@ -90,26 +110,42 @@ pub fn bruh_dots(size: f32) -> Vec<Dot> {
             let Some(mut value) = shade(dx, dy) else {
                 continue;
             };
-            if row == eye_row && ((dx.abs() - EYE_X) / EYE_RX).abs() <= 1.0 {
-                continue;
-            }
-            let is_mouth = row == mouth_row && ((dx - MOUTH.0) / MOUTH_RX).abs() <= 1.0;
-            if is_mouth {
-                value = value.max(0.75);
-            }
-            let radius = pitch / 2.0 * 0.92 * value.sqrt();
+            let eye = if row == eye_row {
+                1.0 - smoothstep(EYE_RX, EYE_RX + soft, (dx.abs() - EYE_X).abs())
+            } else {
+                0.0
+            };
+            let mix = if row == mouth_row {
+                1.0 - smoothstep(MOUTH_RX, MOUTH_RX + soft, (dx - MOUTH.0).abs())
+            } else {
+                0.0
+            };
+            value += (value.max(0.75) - value) * mix;
+            let radius = pitch / 2.0 * 0.92 * value.sqrt() * (1.0 - eye);
             if radius < pitch * 0.07 {
                 continue;
             }
-            let kind = if is_mouth {
+            let kind = if mix >= 0.5 {
                 DotKind::Mouth
             } else {
                 DotKind::Face
             };
-            dots.push(Dot { x, y, radius, kind });
+            dots.push(Dot {
+                x,
+                y,
+                radius,
+                kind,
+                mix,
+            });
         }
     }
     dots
+}
+
+/// 0 below `a`, 1 above `b`, eased between.
+fn smoothstep(a: f32, b: f32, x: f32) -> f32 {
+    let t = ((x - a) / (b - a)).clamp(0.0, 1.0);
+    t * t * (3.0 - 2.0 * t)
 }
 
 /// Lit dots (0 to 4) in one column of a braille level meter, for a level in
@@ -192,6 +228,22 @@ mod tests {
         assert!(mouth.len() >= 6);
         assert!(mouth.iter().all(|d| (d.y - mouth[0].y).abs() < 1e-3));
         assert!(bruh_dots(0.0).is_empty());
+    }
+
+    #[test]
+    fn mouth_dots_blend_from_face_yellow_to_mouth_red() {
+        let dot = |mix: f32| Dot {
+            x: 0.0,
+            y: 0.0,
+            radius: 1.0,
+            kind: DotKind::Face,
+            mix,
+        };
+        assert_eq!(dot(0.0).rgb(), BRUH_FACE_RGB);
+        assert_eq!(dot(1.0).rgb(), BRUH_MOUTH_RGB);
+        let half = dot(0.5).rgb();
+        assert!(half != BRUH_FACE_RGB && half != BRUH_MOUTH_RGB);
+        assert_eq!(dot(0.49).rgb(), half);
     }
 
     #[test]
