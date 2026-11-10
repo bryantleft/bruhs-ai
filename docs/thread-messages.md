@@ -119,8 +119,12 @@ that reply. Three things are specific to the web:
   when a turn ends.
 - **Queues drain off screen.** A prompt queued in a thread starts when that
   thread is idle and a lane is free, whether or not the thread is open. Its
-  saved messages load first. Stop and a reload still pause every queue until
-  Resume or the next send.
+  saved messages load first.
+- **Each thread's queue pauses on its own.** Stop pauses the queue of the
+  thread it stops, and a reload pauses every thread that has prompts queued.
+  A paused thread waits for Resume or the next send in that thread; a send
+  elsewhere leaves it paused, and the other threads keep draining. The desktop
+  has always held each thread's queue separately.
 - **The chat page starts turns.** It owns the turn lifecycle, so while another
   view is open a queued message waits, and a call that asked to wait is not
   held. A turn that is already running keeps running.
@@ -142,14 +146,16 @@ Two live checks spend real tokens and are not in the gate:
 
 ```sh
 # Web: both settings, a round trip between two threads run in the background,
-# a call that waits for a reply, a read, a new thread, and queue and Stop.
+# a call that waits for a reply, a read, a new thread, queue and Stop, a
+# paused queue that leaves other threads running, and roles.
 cargo build -p bruhs-server
 (cd bruhs-web && BRUHS_API_URL=http://127.0.0.1:43021 trunk build --dist /tmp/bruhs-thread-link-dist)
 BRUHS_PLAYWRIGHT_PATH=/path/to/playwright \
   node scripts/verify-thread-link.playwright.mjs "$PWD" /tmp/bruhs-thread-link-dist --live
 
 # Desktop (debug build): one thread starts another and gets a message back,
-# then starts a third and waits for its reply inside the call.
+# starts a third and waits for its reply inside the call, starts one with a
+# role, then sets and removes a role on itself with /role.
 BRUHS_DESKTOP_THREADS_SMOKE=1 BRUHS_DESKTOP_STATE_FILE=/tmp/bruhs-threads-smoke.json \
   cargo run -p bruhs-desktop
 ```

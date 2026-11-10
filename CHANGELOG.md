@@ -27,6 +27,11 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   it. See `docs/model-roles.md`.
 - Added models by task under General: choose the model for meeting summaries
   and for each provider's second opinion.
+- Added `/role`. `/role <name>` gives the thread you are in a role, `/role
+  none` removes it, and `/role` alone shows it. A thread's role is named in
+  its header and on its sidebar card. When a thread's role instructions
+  change, its next turn starts a new session that carries the conversation,
+  because a running session keeps the instructions it started with.
 
 ### Changed
 
@@ -34,6 +39,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   one thread no longer waits for another thread's turn to end, a queued prompt
   starts when its thread is free even if that thread is not open, and each
   thread asks for its own approvals.
+- Stopping a turn on the web now pauses only that thread's queued prompts.
+  Other threads keep running theirs, and a send in another thread no longer
+  resumes the paused one.
+- The desktop role editor now matches the web's: the role's fields sit under
+  the Roles row, a project override is picked from a list, and roles come
+  before the title instructions.
 
 ## [0.1.1] - 2026-11-09
 

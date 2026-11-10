@@ -2,9 +2,10 @@
 // Claude turn in one thread messages another thread, which runs it in the
 // background and answers back; a turn waits for another thread's reply
 // inside one tool call; a turn starts a new thread, and another starts one
-// with a role set up in Settings; the Settings rows take effect; and one
-// thread still stops and queues as before. Spends real tokens, so it is not
-// in the gate.
+// with a role set up in Settings; the user sets and removes a role with
+// /role; the Settings rows take effect; and one thread still stops and
+// queues as before, pausing only its own queue. Spends real tokens, so it is
+// not in the gate.
 //
 //   cargo build -p bruhs-server
 //   (cd bruhs-web && BRUHS_API_URL=http://127.0.0.1:43021 trunk build --dist /tmp/bruhs-thread-link-dist)
@@ -110,7 +111,7 @@ try {
     }
   });
   await context.exposeBinding('__threadLinkTurn', (_source, body) => {
-    report.turns.push({ thread_id: body.thread_id, prompt: body.prompt, permission_mode: body.permission_mode, thread_access: body.thread_access, model: body.model, instructions: body.instructions, events: [], startedAt: Date.now(), endedAt: null });
+    report.turns.push({ thread_id: body.thread_id, prompt: body.prompt, permission_mode: body.permission_mode, thread_access: body.thread_access, model: body.model, instructions: body.instructions, session_id: body.session_id, fresh_session: body.fresh_session, events: [], startedAt: Date.now(), endedAt: null });
     return report.turns.length - 1;
   });
   await context.addInitScript(() => {
@@ -331,6 +332,39 @@ try {
   await waitFor(async () => (await transcript()).includes('AFTER-STOP'), 'the reply after Stop', 20000);
   check('stop-ended-the-turn-and-the-thread-still-runs');
 
+  // 6b. Stop pauses that thread's queue only. A prompt left queued in Sender
+  // stays put while Research runs a turn, until Sender is resumed.
+  await idle();
+  const beforeHold = report.turns.length;
+  await page.locator('#chat-input').fill('Harness check of a paused queue. Write the numbers from 1 to 2000, one per line. Do not call any tool.');
+  await page.locator('#chat-input').press('Enter');
+  await waitFor(() => report.turns.length === beforeHold + 1 && report.turns[beforeHold].events.some(event => event.type === 'text'), 'the turn to pause to start writing');
+  await page.locator('#chat-input').fill('Reply with the single word HELD-OK. Do not call any tool.');
+  await page.locator('#chat-input').press('Enter');
+  await stopButton().click();
+  await idle();
+  const queuedFor = async () => JSON.parse(await page.evaluate(() => localStorage.getItem('bruhs.promptQueue')) || '[]').map(item => item.thread_id);
+  assert.deepEqual(await queuedFor(), [sender], 'The prompt was not left queued in Sender');
+  await page.locator(`button[data-thread-id="${research}"]`).click();
+  await settle();
+  await page.locator('#chat-input').fill('Reply with the single word OTHER-OK. Do not call any tool.');
+  await page.locator('#chat-input').press('Enter');
+  await waitFor(() => report.turns.length === beforeHold + 2 && finished(report.turns[beforeHold + 1]), 'a turn in Research while Sender is paused');
+  assert.equal(report.turns[beforeHold + 1].thread_id, research, 'The turn did not run in Research');
+  await idle();
+  assert.deepEqual(await queuedFor(), [sender], 'A send in another thread resumed the paused queue');
+  assert.equal(report.turns.length, beforeHold + 2, 'The paused prompt ran');
+  // Resume, from Sender: Enter in its empty composer.
+  await page.locator(`button[data-thread-id="${sender}"]`).click();
+  await settle();
+  assert.equal(report.turns.length, beforeHold + 2, 'Opening the paused thread resumed it');
+  await page.locator('#chat-input').press('Enter');
+  await waitFor(() => report.turns.length === beforeHold + 3 && finished(report.turns[beforeHold + 2]), 'the paused prompt to run after Resume');
+  assert.equal(report.turns[beforeHold + 2].thread_id, sender, 'The resumed prompt ran elsewhere');
+  await waitFor(async () => (await transcript()).includes('HELD-OK'), 'the resumed reply', 20000);
+  assert.deepEqual(await queuedFor(), []);
+  check('stop-paused-one-thread-and-left-the-others-running');
+
   // 7. A role: set one up in Settings, then have the agent start a thread
   // with it. The new thread runs on the role's model with its instructions.
   await idle();
@@ -387,6 +421,61 @@ try {
   assert(said.includes(mark), `The role instructions did not reach the model: ${said.slice(0, 200)}`);
   check('agent-started-a-thread-with-a-role', { model: drafted.model, access: drafted.permission_mode, said: said.replace(/\s+/g, ' ').slice(0, 80) });
 
+  // 7b. The user gives a thread a role by hand: /role in Research. Its next
+  // turn runs on the role's model, access and instructions.
+  await idle();
+  await page.locator(`button[data-thread-id="${research}"]`).click();
+  await settle();
+  const headerRole = page.locator('header [data-thread-role]');
+  assert.equal(await headerRole.count(), 0, 'A thread without a role shows one');
+  const typeCommand = async text => {
+    await page.locator('#chat-input').fill(text);
+    await page.locator('#chat-input').press('Enter');
+  };
+  await typeCommand('/role writer');
+  await page.getByText('Role: Writer. Model: Claude Sonnet 4.6.', { exact: true }).waitFor();
+  await headerRole.waitFor();
+  assert.equal((await headerRole.innerText()).trim(), 'Writer');
+  assert.equal((await page.locator(`button[data-thread-id="${research}"] [data-thread-role]`).innerText()).trim(), 'Writer');
+  assert.equal(await page.locator(`button[data-thread-id="${sender}"] [data-thread-role]`).count(), 0, 'Another thread shows the role');
+  await page.screenshot({ path: join(artifacts, 'role-by-hand.png') });
+  const beforeHand = report.turns.length;
+  await typeCommand('Harness check of a role set by hand. Reply with one short sentence about rain. Do not call any tool.');
+  await waitFor(() => report.turns.length === beforeHand + 1 && finished(report.turns[beforeHand]), 'the turn with a role set by hand');
+  const byHand = report.turns[beforeHand];
+  assert.equal(byHand.thread_id, research);
+  assert.equal(byHand.model, 'claude-sonnet-4-6', 'The thread did not move to the role model');
+  assert.equal(byHand.permission_mode, 'plan', 'The role did not narrow the access mode');
+  assert(byHand.instructions?.includes(mark), 'The turn was not sent the role instructions');
+  // The session Research had started without these instructions and would
+  // keep ignoring them, so this turn starts a new one with the conversation.
+  assert(byHand.fresh_session && !byHand.session_id, 'The turn resumed a session that does not hold the role instructions');
+  assert(byHand.prompt.startsWith('This thread continues an earlier conversation'), `The new session was not given the conversation: ${byHand.prompt.slice(0, 120)}`);
+  const saidByHand = byHand.events.filter(event => event.type === 'text').map(event => event.text).join('');
+  assert(saidByHand.includes(mark), `The role instructions did not reach the model: ${saidByHand.slice(0, 200)}`);
+  // /role none removes it: the next turn is the user's own again.
+  await idle();
+  await typeCommand('/role none');
+  await page.getByText('Role removed.', { exact: true }).waitFor();
+  await waitFor(async () => (await headerRole.count()) === 0, 'the role tag to go', 10000);
+  await typeCommand('Reply with the single word PLAIN-OK. Do not call any tool.');
+  await waitFor(() => report.turns.length === beforeHand + 2 && finished(report.turns[beforeHand + 1]), 'the turn after the role was removed');
+  const plain = report.turns[beforeHand + 1];
+  assert.equal(plain.instructions, undefined, 'A removed role still sent instructions');
+  assert(plain.fresh_session && !plain.session_id, 'The turn resumed the session that holds the removed role');
+  const saidPlain = plain.events.filter(event => event.type === 'text').map(event => event.text).join('');
+  assert(saidPlain.includes('PLAIN-OK') && !saidPlain.includes(mark), `The removed role was still followed: ${saidPlain.slice(0, 200)}`);
+  // With nothing changed, the next turn resumes that session.
+  await idle();
+  await typeCommand('Reply with the single word RESUMED-OK. Do not call any tool.');
+  await waitFor(() => report.turns.length === beforeHand + 3 && finished(report.turns[beforeHand + 2]), 'a turn that resumes the new session');
+  const resumedTurn = report.turns[beforeHand + 2];
+  assert(resumedTurn.session_id && !resumedTurn.fresh_session, 'An unchanged thread started another new session');
+  assert(!resumedTurn.prompt.startsWith('This thread continues'), 'An unchanged thread carried its conversation again');
+  assert.equal(plain.permission_mode, 'bypassPermissions', 'A removed role still narrowed access');
+  assert.equal(plain.model, 'claude-sonnet-4-6', 'Removing the role changed the model');
+  check('user-set-and-removed-a-role-by-hand', { model: byHand.model, access: byHand.permission_mode, said: saidByHand.replace(/\s+/g, ' ').slice(0, 80) });
+
   // 8. Read only in Settings: the next turn is sent with that access and is
   // offered the two read tools, not message_thread.
   await idle();
@@ -421,7 +510,15 @@ try {
     if (server.exitCode === null) server.kill('SIGKILL');
   }
   if (process.exitCode) report.serverLog = serverLog.slice(-2000);
-  report.turns = report.turns.map(turn => ({ thread_id: turn.thread_id, prompt: turn.prompt.slice(0, 240), events: turn.events.map(event => event.type).join(',').slice(0, 400) }));
+  // Enough of each turn to see what a failed step did: the event kinds, and
+  // each tool call with the start of its result.
+  const brief = event => JSON.stringify(event).slice(0, 220);
+  report.turns = report.turns.map(turn => ({
+    thread_id: turn.thread_id,
+    prompt: turn.prompt.slice(0, 240),
+    events: turn.events.map(event => event.type).join(',').slice(0, 400),
+    tools: turn.events.filter(event => ['tool_call', 'tool_result', 'error'].includes(event.type)).map(brief).slice(0, 12),
+  }));
   await writeFile(join(artifacts, 'report.json'), JSON.stringify(report, null, 2));
   console.log(JSON.stringify(report, null, 2));
 }
