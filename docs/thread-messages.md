@@ -32,7 +32,7 @@ A turn gets a private MCP server, `bruhs_threads` (the host executable in
 | --- | --- |
 | `list_threads` | Names up to 30 threads, most recent first: short id, title, project, and whether each is running or has prompts queued. |
 | `read_thread` | Returns the last messages of one thread (6 by default, 20 at most), each clipped, inside a fixed size budget. |
-| `message_thread` | Sends a message to a thread. Without `thread_id` it starts a new thread where the sender runs: same project, worktree and model. On desktop, `wait: true` holds the call until that thread has replied and returns its reply. |
+| `message_thread` | Sends a message to a thread. Without `thread_id` it starts a new thread where the sender runs: same project, worktree and model. `wait: true` holds the call until that thread has replied and returns its reply. |
 
 Thread ids are accepted whole or as a unique prefix. Replies print the
 shortest prefix that is unique.
@@ -76,17 +76,15 @@ they differ from the defaults.
   the message is handed over. An answer is a second message, sent by the
   recipient's agent with the same tool, that arrives as a new turn in the
   sender.
-- **Waiting is a desktop feature.** With `wait: true` the call is held, for up
-  to an hour, until the recipient's turn for that message ends; the tool
-  result is that turn's reply, or why there is none (stopped, failed, removed
-  from the queue, thread deleted). The delivered header tells the recipient
-  its reply is returned and not to message back. The desktop refuses to wait
-  on a thread that is itself waiting on another, which is what a deadlock
-  would need, and does not wait on a thread whose queue is paused. The web
-  runs one turn at a time, so the recipient could never answer while the
-  sender's call is held: the server does not offer `wait` there
-  (`AppStateBuilder::thread_waits`), and a request that asks anyway is
-  delivered without waiting.
+- **A sender may wait.** With `wait: true` the call is held, for up to an
+  hour, until the recipient's turn for that message ends; the tool result is
+  that turn's reply, or why there is none (stopped, failed, removed from the
+  queue, thread deleted). The delivered header tells the recipient its reply
+  is returned and not to message back. Both apps refuse to wait on a thread
+  that is itself waiting on another, which is what a deadlock would need, and
+  do not hold a call nothing could answer soon: the recipient's queue is
+  paused, or (on the web) no lane is free or the chat page is not mounted.
+  The message is then delivered without waiting and the reply says so.
 - **Chains stop at the user's limit.** A delivered message opens with a header
   line that names the sender and a hop count
   (`[Message from thread "Title" (id 1a2b3c4d), hop 2/6. …]`). The count is
@@ -106,18 +104,29 @@ they differ from the defaults.
   the sender waits. Copy and Edit from here keep the whole prompt, and
   `read_thread` shows it whole to other agents.
 
-## Web and desktop differ in one way
+## Threads run side by side
 
-The desktop runs threads side by side, so a message to a free thread starts
-its turn at once, the view stays where it is, and a sender may wait.
+Both apps run several threads at once, so a message to a free thread starts
+its turn right away, the view stays where it is, and a sender may wait.
 
-The web runs one turn at a time. A message waits in the recipient's queue
-until the sender's turn ends; the view then follows the message to the
-recipient, whose queue drains as usual. It does not follow when the user has
-moved to another thread, has a draft in the composer, or the sender has its
-own prompts queued. The message then stays queued in the recipient until that
-thread is opened, and a notice says so. Waiting on the web needs the web to
-run two turns at once, which it does not do yet.
+On the web each thread's turn lives in `state::Turns`: its settled messages
+and, apart from them, the reply it is writing, so a token re-renders only
+that reply. Three things are specific to the web:
+
+- **Three lanes.** At most three turns run at once (`MAX_RUNNING_TURNS`). A
+  turn holds one connection to the server while it streams, and a browser
+  allows a host six. A fourth prompt waits in its thread's queue and starts
+  when a turn ends.
+- **Queues drain off screen.** A prompt queued in a thread starts when that
+  thread is idle and a lane is free, whether or not the thread is open. Its
+  saved messages load first. Stop and a reload still pause every queue until
+  Resume or the next send.
+- **The chat page starts turns.** It owns the turn lifecycle, so while another
+  view is open a queued message waits, and a call that asked to wait is not
+  held. A turn that is already running keeps running.
+
+Approvals belong to the thread that asked: each thread shows only its own,
+and the sidebar marks every thread that is working or waiting on you.
 
 ## Verification
 
@@ -132,7 +141,8 @@ cargo test -p bruhs-desktop thread_link
 Two live checks spend real tokens and are not in the gate:
 
 ```sh
-# Web: both settings, a round trip between two threads, a read, a new thread.
+# Web: both settings, a round trip between two threads run in the background,
+# a call that waits for a reply, a read, a new thread, and queue and Stop.
 cargo build -p bruhs-server
 (cd bruhs-web && BRUHS_API_URL=http://127.0.0.1:43021 trunk build --dist /tmp/bruhs-thread-link-dist)
 BRUHS_PLAYWRIGHT_PATH=/path/to/playwright \
