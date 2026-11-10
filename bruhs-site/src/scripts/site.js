@@ -571,3 +571,24 @@ document.documentElement.addEventListener("mouseleave", () => {
   for (const bruh of bruhs) bruh.target = { x: 0, y: 0 };
   lookFrame ||= requestAnimationFrame(turnHeads);
 });
+
+// ---------------------------------------------------------------------------
+// Copy buttons: `data-copy` names the element whose text goes to the clipboard.
+
+for (const button of document.querySelectorAll("button[data-copy]")) {
+  const label = button.textContent;
+  button.addEventListener("click", async () => {
+    const source = document.getElementById(button.getAttribute("data-copy") ?? "");
+    // Copy the command itself, without the "$ " prompt.
+    const text = (source?.textContent ?? "").replace(/^\s*\$\s*/, "").trim();
+    try {
+      await navigator.clipboard.writeText(text);
+      button.textContent = "Copied";
+    } catch {
+      button.textContent = "Select and copy";
+    }
+    setTimeout(() => {
+      button.textContent = label;
+    }, 1600);
+  });
+}

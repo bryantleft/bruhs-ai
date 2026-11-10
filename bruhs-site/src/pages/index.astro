@@ -1,6 +1,13 @@
 ---
 import Base from "../layouts/Base.astro";
 import Icon from "../components/Icon.astro";
+import CHANGELOG from "../../../CHANGELOG.md?raw";
+import { inline, longDate, parseChangelog } from "../lib/changelog.js";
+
+const latest = parseChangelog(CHANGELOG)[0];
+if (!latest) throw new Error("CHANGELOG.md has no released version for the What's new section");
+// The first three changes, Added first, as a preview of the full entry.
+const highlights = latest.sections.flatMap((section) => section.items).slice(0, 3);
 ---
 
 <Base
@@ -21,17 +28,35 @@ import Icon from "../components/Icon.astro";
           <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-download><Icon name="apple" />Download for macOS</a>
           <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />GitHub</a>
         </div>
+        <p class="works-with">Works with <span><img src="/logos/claude.svg" alt="" width="18" height="18" />Claude Code</span> and <span><img src="/logos/openai.svg" alt="" width="18" height="18" />Codex</span></p>
       </div>
+    </section>
+
+    <section class="section promises" aria-label="What stays yours">
+      <ul class="wrap promise-list" role="list">
+        <li id="privacy">
+          <h2 class="h3" tabindex="-1">No bruhs cloud.</h2>
+          <p>Threads, tasks, notes and people live on your Mac.</p>
+        </li>
+        <li>
+          <h2 class="h3">No bot in your meetings.</h2>
+          <p>Whisper transcribes on your Mac while the call happens.</p>
+        </li>
+        <li id="subs">
+          <h2 class="h3" tabindex="-1">Your own login.</h2>
+          <p>Runs the Claude Code and Codex you already pay for. No API keys, no resold tokens.</p>
+        </li>
+      </ul>
     </section>
 
     <section class="section tour" id="surfaces" aria-label="What's inside">
       <div class="surfaces" data-surfaces>
         <div class="wrap tabs-row">
           <div class="tabs" role="tablist" aria-label="Surfaces">
-            <button class="tab" role="tab" id="tab-agents" aria-controls="agents" aria-selected="true" type="button"><span class="dot dot-agent" aria-hidden="true"></span>Agents</button>
-            <button class="tab" role="tab" id="tab-tasks" aria-controls="tasks" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-tasks" aria-hidden="true"></span>Tasks</button>
-            <button class="tab" role="tab" id="tab-calendar" aria-controls="calendar" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-calendar" aria-hidden="true"></span>Calendar</button>
+            <button class="tab" role="tab" id="tab-tasks" aria-controls="tasks" aria-selected="true" type="button"><span class="dot dot-tasks" aria-hidden="true"></span>Today</button>
             <button class="tab" role="tab" id="tab-meetings" aria-controls="meetings" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-meetings" aria-hidden="true"></span>Meetings</button>
+            <button class="tab" role="tab" id="tab-agents" aria-controls="agents" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-agent" aria-hidden="true"></span>Agents</button>
+            <button class="tab" role="tab" id="tab-calendar" aria-controls="calendar" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-calendar" aria-hidden="true"></span>Calendar</button>
             <button class="tab" role="tab" id="tab-people" aria-controls="people" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-people" aria-hidden="true"></span>People</button>
             <button class="tab" role="tab" id="tab-notes" aria-controls="notes" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-notes" aria-hidden="true"></span>Notes</button>
             <button class="tab" role="tab" id="tab-life" aria-controls="life" aria-selected="false" tabindex="-1" type="button"><span class="dot dot-life" aria-hidden="true"></span>Life</button>
@@ -40,28 +65,13 @@ import Icon from "../components/Icon.astro";
         </div>
 
         <div class="stage panels">
-          <div class="panel" role="tabpanel" id="agents" aria-labelledby="tab-agents" tabindex="0">
-            <figure class="window">
-              <img src="/shots/hero-1440.webp" srcset="/shots/hero-1440.webp 1440w, /shots/hero-2880.webp 2880w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1440" height="900" decoding="async"
-                alt="The bruhs app: a sidebar of Claude and Codex threads across several projects, and an open thread where Claude reads session.rs, runs cargo test, explains a race on a shared test clock, and shows a two-file diff.">
-            </figure>
-            <p class="caption">Claude Code and Codex threads, with every tool call, diff and a terminal.</p>
-          </div>
 
-          <div class="panel" role="tabpanel" id="tasks" aria-labelledby="tab-tasks" tabindex="0" hidden>
+          <div class="panel" role="tabpanel" id="tasks" aria-labelledby="tab-tasks" tabindex="0">
             <figure class="window">
-              <img src="/shots/tasks-1168.webp" srcset="/shots/tasks-1168.webp 1168w, /shots/tasks-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+              <img src="/shots/tasks-1168.webp" srcset="/shots/tasks-1168.webp 1168w, /shots/tasks-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" decoding="async"
                 alt="The Today view: a briefing, the current focus block and the rest of the day's schedule, a ranked focus queue with priorities and estimates, and columns for overdue work, waiting on, follow-ups and decisions.">
             </figure>
             <p class="caption">Today: what's due, what's blocked, and who you're waiting on.</p>
-          </div>
-
-          <div class="panel" role="tabpanel" id="calendar" aria-labelledby="tab-calendar" tabindex="0" hidden>
-            <figure class="window">
-              <img src="/shots/calendar-1168.webp" srcset="/shots/calendar-1168.webp 1168w, /shots/calendar-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
-                alt="A week in the bruhs calendar: meetings, blue focus blocks for tasks like the flaky auth test and the launch post, green workouts, and evening plans, with a line marking the current time on Wednesday.">
-            </figure>
-            <p class="caption">“Plan my day” turns estimates into focus blocks around your meetings.</p>
           </div>
 
           <div class="panel" role="tabpanel" id="meetings" aria-labelledby="tab-meetings" tabindex="0" hidden>
@@ -70,6 +80,21 @@ import Icon from "../components/Icon.astro";
                 alt="A recorded meeting: the end of a speaker-labeled transcript, then a summary, four action items with due dates, the decisions made, and topics.">
             </figure>
             <p class="caption">Meeting notes without a bot in the call, transcribed on your Mac.</p>
+          </div>
+          <div class="panel" role="tabpanel" id="agents" aria-labelledby="tab-agents" tabindex="0" hidden>
+            <figure class="window">
+              <img src="/shots/hero-1440.webp" srcset="/shots/hero-1440.webp 1440w, /shots/hero-2880.webp 2880w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1440" height="900" loading="lazy" decoding="async"
+                alt="The bruhs app: a sidebar of Claude and Codex threads across several projects, and an open thread where Claude reads session.rs, runs cargo test, explains a race on a shared test clock, and shows a two-file diff.">
+            </figure>
+            <p class="caption">Claude Code and Codex threads, with every tool call, diff and a terminal.</p>
+          </div>
+
+          <div class="panel" role="tabpanel" id="calendar" aria-labelledby="tab-calendar" tabindex="0" hidden>
+            <figure class="window">
+              <img src="/shots/calendar-1168.webp" srcset="/shots/calendar-1168.webp 1168w, /shots/calendar-2336.webp 2336w" sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)" width="1168" height="730" loading="lazy" decoding="async"
+                alt="A week in the bruhs calendar: meetings, blue focus blocks for tasks like the flaky auth test and the launch post, green workouts, and evening plans, with a line marking the current time on Wednesday.">
+            </figure>
+            <p class="caption">“Plan my day” turns estimates into focus blocks around your meetings.</p>
           </div>
 
           <div class="panel" role="tabpanel" id="people" aria-labelledby="tab-people" tabindex="0" hidden>
@@ -99,20 +124,67 @@ import Icon from "../components/Icon.astro";
       </div>
     </section>
 
-    <section class="section" aria-label="Providers and privacy">
-      <div class="wrap duo">
-        <div id="subs" class="duo-col">
-          <h2 class="h2" tabindex="-1">Bring your own sub.</h2>
-          <ul class="logins">
-            <li><img src="/logos/claude.svg" alt="" width="20" height="20"><code><span class="p">$</span> claude auth login</code></li>
-            <li><img src="/logos/openai.svg" alt="" width="20" height="20"><code><span class="p">$</span> codex login</code></li>
-          </ul>
-          <p class="muted">No API keys, no resold tokens.</p>
-        </div>
+    <section class="section flow-section" id="flow" aria-labelledby="flow-title">
+      <div class="wrap">
+        <h2 class="h2" id="flow-title" tabindex="-1">One thing leads to the next.</h2>
+        <ol class="flow" role="list">
+          <li><span class="flow-dot dot-meetings" aria-hidden="true"></span><b>A meeting ends</b><span>and its action items land in Today.</span></li>
+          <li><span class="flow-dot dot-agent" aria-hidden="true"></span><b>A task goes to Claude</b><span>and runs in its own thread, with a diff to review.</span></li>
+          <li><span class="flow-dot dot-calendar" aria-hidden="true"></span><b>Your calendar makes room</b><span>to review what it did.</span></li>
+        </ol>
+      </div>
+    </section>
 
-        <div id="privacy" class="duo-col">
-          <h2 class="h2" tabindex="-1">Stays on your Mac.</h2>
-          <p class="muted">No bruhs cloud. Only your messages to Claude or Codex leave, plus Google Calendar if you connect it and update checks you can turn off.</p>
+    <section class="section" id="new" aria-labelledby="new-title">
+      <div class="wrap news">
+        <h2 class="h2" id="new-title" tabindex="-1">What's new in v{latest.version}</h2>
+        <p class="muted"><time datetime={latest.date}>{longDate(latest.date)}</time></p>
+        {latest.summary && <p class="news-summary" set:html={inline(latest.summary)} />}
+        <ul class="news-list" role="list">
+          {/* One <span> per item: the <li> is a two-column grid (dash, text). */}
+          {highlights.map((item) => <li><span set:html={inline(item)} /></li>)}
+        </ul>
+        <a class="btn btn-ghost" href={`/changelog#v${latest.version}`}>Read the changelog</a>
+      </div>
+    </section>
+
+    <section class="section" id="faq" aria-labelledby="faq-title">
+      <div class="wrap faq">
+        <h2 class="h2" id="faq-title" tabindex="-1">Questions</h2>
+        <details>
+          <summary>Is it free?</summary>
+          <p>Yes. bruhs is MIT licensed and has no paid tier. Agents run on your own Claude or ChatGPT subscription.</p>
+        </details>
+        <details>
+          <summary>What leaves my Mac?</summary>
+          <p>Only what you send: messages to Claude or Codex through your own login, Google Calendar if you connect it, and update checks you can turn off. Meeting audio stays on your Mac unless you point transcription at your own server.</p>
+        </details>
+        <details>
+          <summary>Do I need Claude Code or Codex?</summary>
+          <p>For agents, yes: bruhs runs the CLI you already have, signed in with <code>claude auth login</code> or <code>codex login</code>. Meeting summaries use Claude. Tasks, calendar, notes and transcription work without either.</p>
+        </details>
+        <details>
+          <summary>What Mac do I need?</summary>
+          <p>macOS 13 or later on Apple silicon.</p>
+        </details>
+        <details>
+          <summary>Windows or Linux?</summary>
+          <p>There's no download yet. bruhs runs from source in the browser there, and meetings record the microphone only.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="section" id="source" aria-labelledby="source-title">
+      <div class="wrap open-source">
+        <h2 class="h2" id="source-title" tabindex="-1">Open source, all of it.</h2>
+        <p class="muted">MIT licensed. Read it, fork it, run it from source.</p>
+        <div class="source-row">
+          <p class="source" id="source-command" tabindex="0" aria-label="Run it from source"><span class="p">$</span> git clone https://github.com/bryantleft/bruhs-ai &amp;&amp; cd bruhs-ai &amp;&amp; scripts/dev.sh</p>
+          <button class="btn btn-quiet copy" type="button" data-copy="source-command" aria-live="polite">Copy</button>
+        </div>
+        <div class="get-row">
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />Read the source</a>
+          <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/blob/main/CONTRIBUTING.md">Contribute</a>
         </div>
       </div>
     </section>
@@ -124,7 +196,6 @@ import Icon from "../components/Icon.astro";
           <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-download><Icon name="apple" />Download for macOS</a>
           <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/releases"><Icon name="github" />All releases</a>
         </div>
-        <p class="source" tabindex="0" aria-label="Run it from source"><span class="p">$</span> git clone https://github.com/bryantleft/bruhs-ai &amp;&amp; cd bruhs-ai &amp;&amp; scripts/dev.sh</p>
       </div>
       <canvas class="bruh bruh-peek" data-bruh="peek" aria-hidden="true"></canvas>
     </section>
