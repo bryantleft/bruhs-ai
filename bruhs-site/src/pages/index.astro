@@ -1,6 +1,7 @@
 ---
 import Base from "../layouts/Base.astro";
 import Icon from "../components/Icon.astro";
+import GetButton from "../components/GetButton.astro";
 import CHANGELOG from "../../../CHANGELOG.md?raw";
 import { inline, longDate, parseChangelog } from "../lib/changelog.js";
 
@@ -25,9 +26,11 @@ const highlights = latest.sections.flatMap((section) => section.items).slice(0, 
         <h1 class="display">One window for your whole day.</h1>
         <p class="lede">Coding agents, tasks, calendar and meetings, a keystroke apart. On your Mac, not our cloud.</p>
         <div class="get-row">
-          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-download><Icon name="apple" />Download for macOS</a>
+          <GetButton />
           <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />GitHub</a>
         </div>
+        <p class="os-note for-phone">bruhs is a Mac app. Send yourself the link and download it there.</p>
+        <p class="os-note for-pc">The app is for Macs with Apple silicon. On Windows and Linux, bruhs runs from source in your browser.</p>
         <p class="works-with">Works with <span><img src="/logos/claude.svg" alt="" width="18" height="18" />Claude Code</span> and <span><img src="/logos/openai.svg" alt="" width="18" height="18" />Codex</span></p>
       </div>
     </section>
@@ -209,7 +212,7 @@ const highlights = latest.sections.flatMap((section) => section.items).slice(0, 
       <div class="wrap">
         <h2 class="display display-sm" id="get-title" tabindex="-1">Close the other twelve tabs.</h2>
         <div class="get-row">
-          <a class="btn btn-primary" href="https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg" data-download><Icon name="apple" />Download for macOS</a>
+          <GetButton />
           <a class="btn btn-ghost" href="https://github.com/bryantleft/bruhs-ai/releases"><Icon name="github" />All releases</a>
         </div>
       </div>

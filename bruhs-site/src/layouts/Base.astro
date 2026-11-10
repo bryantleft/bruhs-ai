@@ -52,6 +52,8 @@ const here = (page: Props["current"]) => (page === current ? "page" : undefined)
     <meta property="og:image:alt" content="bruhs.ai: One window for your whole day. A dithered Bruh beside the headline." />
     <meta name="twitter:card" content="summary_large_image" />
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    {/* Sets <html data-os> before the first paint: see public/os.js. */}
+    <script is:inline src="/os.js"></script>
     <link rel="apple-touch-icon" href="/apple-touch-icon.png" />
     {fonts.map((font) => <link rel="preload" href={`/fonts/Monaspace${font}Variable.woff2`} as="font" type="font/woff2" crossorigin />)}
   </head>
@@ -69,7 +71,7 @@ const here = (page: Props["current"]) => (page === current ? "page" : undefined)
               <kbd><span class="mod">⌘</span>K</kbd>
             </button>
           )}
-          <a class="btn btn-primary" href={download}><Icon name="apple" />Download</a>
+          <a class="btn btn-primary" href={download}><span class="for-mac"><Icon name="apple" />Download</span><span class="for-phone for-pc">Get bruhs</span></a>
         </div>
       </div>
     </header>

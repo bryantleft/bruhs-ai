@@ -1,0 +1,12 @@
+---
+// The primary "get bruhs" button, in the version this device can use.
+// public/os.js sets <html data-os> before the first paint and site.css shows
+// one of these; with no script, the Mac download shows.
+import Icon from "./Icon.astro";
+
+const DMG = "https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg";
+---
+
+<a class="btn btn-primary for-mac" href={DMG} data-download><Icon name="apple" />Download for macOS</a>
+<button class="btn btn-primary for-phone" type="button" data-share><Icon name="apple" /><span data-label>Send to your Mac</span></button>
+<a class="btn btn-primary for-pc" href="#source">Run from source</a>
