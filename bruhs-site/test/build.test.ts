@@ -31,3 +31,23 @@ describe("built pages", () => {
     });
   }
 });
+
+// Pages prerender on hover so a link opens without waiting on the network.
+// The CSP blocks inline <script type="speculationrules">, so the rules come
+// from a file the Speculation-Rules header names.
+describe("speculation rules", () => {
+  type Vercel = { headers: { source: string; headers: { key: string; value: string }[] }[] };
+  const vercel: Vercel = JSON.parse(readFileSync(new URL("../vercel.json", import.meta.url), "utf8"));
+  const header = (source: string, key: string) =>
+    vercel.headers.find((rule) => rule.source === source)?.headers.find((h) => h.key === key)?.value;
+
+  it("are named by a header on every page and served as speculation rules", () => {
+    const value = header("/(.*)", "Speculation-Rules");
+    assert.ok(value, "no Speculation-Rules header");
+    const path = value.replace(/^"|"$/g, "");
+    assert.equal(header(path, "Content-Type"), "application/speculationrules+json");
+    const rules = JSON.parse(readFileSync(new URL(`.${path}`, DIST), "utf8"));
+    assert.ok(rules.prerender?.length, "no prerender rule");
+    for (const rule of rules.prerender) assert.equal(rule.eagerness, "moderate", "prerender on hover, not on page load");
+  });
+});
