@@ -353,7 +353,7 @@ fn clip(text: &str, max: usize) -> String {
     }
 }
 
-/// The shortest prefix of `id` (at least [`SHORT_ID_CHARS`] characters) that
+/// The shortest prefix of `id` (at least eight characters) that
 /// no other id in `ids` starts with.
 pub fn short_id<'a>(id: &'a str, ids: &[&str]) -> &'a str {
     let mut end = id
