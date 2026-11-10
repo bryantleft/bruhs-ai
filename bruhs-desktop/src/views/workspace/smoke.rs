@@ -32,6 +32,24 @@ impl Workspace {
         self.set_permission_mode(PermissionMode::BypassPermissions, cx);
     }
 
+    /// `BRUHS_DESKTOP_THREADS_SMOKE`: a role for the agent to start a thread
+    /// with, as Settings would save it.
+    pub fn smoke_add_role(
+        &mut self,
+        name: &str,
+        model: &str,
+        instructions: &str,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(id) = self.roles.add(name) {
+            self.roles.update(&id, |role| {
+                role.model = Some(model.to_string());
+                role.instructions = instructions.to_string();
+            });
+            self.stamp_run_prefs_on_threads(cx);
+        }
+    }
+
     /// `BRUHS_DESKTOP_THREADS_SMOKE`: the chat of the thread titled `title`.
     pub fn smoke_chat_titled(&self, title: &str, cx: &App) -> Option<Entity<ChatView>> {
         self.threads

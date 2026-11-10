@@ -22,6 +22,14 @@ impl ChatView {
         self.input_state.read(cx).value().to_string()
     }
 
+    /// The model this thread runs on, and the name of its role if it has one.
+    pub(crate) fn smoke_model_and_role(&self) -> (String, Option<String>) {
+        (
+            self.model_id.clone(),
+            self.role_profile.as_ref().map(|role| role.name.clone()),
+        )
+    }
+
     /// The latest prompt's text.
     pub(crate) fn smoke_last_prompt(&self) -> String {
         self.messages

@@ -12,7 +12,8 @@
 //!
 //! - `BRUHS_DESKTOP_THREADS_SMOKE=1`: in a new project-less chat, have the
 //!   agent start a thread with `message_thread` and wait for that thread's
-//!   agent to answer back, print what each thread received, then quit.
+//!   agent to answer back, then start threads with `wait` and with a role,
+//!   print what each thread received, then quit.
 //!   Spends real tokens; use a scratch `BRUHS_DESKTOP_STATE_FILE`.
 //!
 //! None of this is compiled into a release build: a shipped app must not be
@@ -285,6 +286,9 @@ pub(crate) fn schedule_desktop_commands_smoke(
 const DESKTOP_THREADS_SMOKE_ENV: &str = "BRUHS_DESKTOP_THREADS_SMOKE";
 /// The word the second thread must send back.
 const DESKTOP_THREADS_SMOKE_WORD: &str = "SCOUT-OK";
+/// The model of the role the smoke adds: not the default, so a thread that
+/// runs on it shows the role was applied.
+const DESKTOP_THREADS_SMOKE_ROLE_MODEL: &str = "claude-haiku-4-5";
 /// The word the third thread must answer inside the waiting call.
 const DESKTOP_THREADS_SMOKE_WAIT_WORD: &str = "RELAY-OK";
 
@@ -411,6 +415,44 @@ pub(crate) fn schedule_desktop_threads_smoke(
             bruhs_models::thread_link::parse_delivery(&relay_prompt)
                 .is_some_and(|delivery| delivery.awaited),
             last_prompt.starts_with("Second harness check"),
+        );
+        // A role: the agent starts a thread with it and waits. The thread
+        // runs on the role's model and follows the role's instructions.
+        let roles_workspace = workspace.clone();
+        cx.update(|cx| {
+            roles_workspace.update(cx, |workspace, cx| {
+                workspace.smoke_add_role(
+                    "Echo",
+                    DESKTOP_THREADS_SMOKE_ROLE_MODEL,
+                    "End every reply with the token ROLE-OK.",
+                    cx,
+                );
+            });
+        });
+        enter(
+            "Third harness check. Call message_thread once with no thread_id, the title \"Echoer\", the role \"Echo\", wait set to true, and exactly this message: \"Harness check. Reply with one short sentence about tea. Do not call any tool.\" Do not use any other tool. Then tell me, in one short line, the exact text that tool call returned.",
+            cx,
+        );
+        let watched = chat.clone();
+        let role_done = wait(cx, move |cx| {
+            cx.update(|cx| {
+                let chat = watched.read(cx);
+                !chat.is_streaming && chat.smoke_last_prompt().starts_with("Third harness check")
+            })
+        })
+        .await;
+        let (_, echo_reply) = last("Echoer", cx);
+        let (echo_model, echo_role) = cx.update(|cx| {
+            workspace
+                .read(cx)
+                .smoke_chat_titled("Echoer", cx)
+                .map(|chat| chat.read(cx).smoke_model_and_role())
+                .unwrap_or_default()
+        });
+        let sender_model = cx.update(|cx| chat.read(cx).smoke_model_and_role().0);
+        eprintln!(
+            "{tag} role_done={role_done} role={echo_role:?} role_model={echo_model:?} sender_model={sender_model:?} followed_instructions={} echo_reply={echo_reply:?}",
+            echo_reply.contains("ROLE-OK"),
         );
         eprintln!("{tag} done");
         cx.update(|cx| cx.quit());
