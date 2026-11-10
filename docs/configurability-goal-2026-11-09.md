@@ -58,6 +58,10 @@ effective selection through the real execution path and record which model ran.
 Explain capability limits and unavailable models. Failures must not silently
 switch providers, billing mode, or data destination.
 
+Status: meeting summaries and second-opinion reviews have their own model
+settings, and roles let an agent start threads on other models
+(`docs/model-roles.md`). Effort controls for those two jobs are not built.
+
 ### 2. Project profiles
 
 Provide named profiles for model, effort, instructions, access mode, and

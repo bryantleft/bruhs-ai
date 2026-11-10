@@ -30,9 +30,9 @@ A turn gets a private MCP server, `bruhs_threads` (the host executable in
 
 | Tool | What it does |
 | --- | --- |
-| `list_threads` | Names up to 30 threads, most recent first: short id, title, project, and whether each is running or has prompts queued. |
+| `list_threads` | Names up to 30 threads, most recent first: short id, title, project, whether each is running or has prompts queued, its model and its role. Then the roles a new thread can start with. |
 | `read_thread` | Returns the last messages of one thread (6 by default, 20 at most), each clipped, inside a fixed size budget. |
-| `message_thread` | Sends a message to a thread. Without `thread_id` it starts a new thread where the sender runs: same project, worktree and model. `wait: true` holds the call until that thread has replied and returns its reply. |
+| `message_thread` | Sends a message to a thread. Without `thread_id` it starts a new thread where the sender runs: same project, worktree and model. `wait: true` holds the call until that thread has replied and returns its reply. `role` starts a new thread on a role's model and instructions (see `docs/model-roles.md`). |
 
 Thread ids are accepted whole or as a unique prefix. Replies print the
 shortest prefix that is unique.

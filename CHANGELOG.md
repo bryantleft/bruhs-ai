@@ -20,6 +20,14 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   message, Read only, or Off) and Agent message limit, which stops a chain of
   agent messages after 2, 4, 6 or 10 and hands back to you.
 
+- Added roles under General: a named model, effort, access mode and
+  instructions that an agent can start a thread with, so one thread can
+  orchestrate while others write or run on the models you chose. A project
+  can override a role, and a role can narrow your access mode but never widen
+  it. See `docs/model-roles.md`.
+- Added models by task under General: choose the model for meeting summaries
+  and for each provider's second opinion.
+
 ### Changed
 
 - The web app now runs threads side by side, up to three at once. Sending in
