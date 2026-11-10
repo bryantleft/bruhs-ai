@@ -144,10 +144,12 @@ kbd, .kbd {
    capitals (Monaspace keeps room for descenders): lift it onto the caps. */
 /* Per-device versions (public/os.js sets <html data-os>): the Mac download
    by default, "Send to your Mac" on phones and tablets, run-from-source on
-   Windows and Linux. */
-:root:not([data-os="phone"], [data-os="pc"]) :is(.for-phone, .for-pc):not(.for-mac),
-:root[data-os="phone"] :is(.for-mac, .for-pc):not(.for-phone),
-:root[data-os="pc"] :is(.for-mac, .for-phone):not(.for-pc) { display: none; }
+   Windows and Linux, and on a Mac that chip.js finds is Intel. */
+:root:not([data-os="phone"], [data-os="pc"], [data-os="intel"]) :is(.for-phone, .for-pc, .for-intel):not(.for-mac),
+:root[data-os="phone"] :is(.for-mac, .for-pc, .for-intel):not(.for-phone),
+:root[data-os="pc"] :is(.for-mac, .for-phone, .for-intel):not(.for-pc),
+:root[data-os="intel"] :is(.for-mac, .for-phone, .for-pc):not(.for-intel) { display: none; }
+.os-note a { color: var(--rambutan-200); }
 .nav .btn-primary > span { display: inline-flex; align-items: center; gap: inherit; }
 .os-note { margin: -8px 0 0; max-width: 44ch; font-size: .875rem; color: var(--rambutan-400); text-wrap: balance; }
 
