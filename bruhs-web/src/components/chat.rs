@@ -41,8 +41,8 @@ use crate::state::{
     ClaudeAutoCompactSignal, ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal,
     ComposerChips, ComposerDraft, DiffFocusPath, DiffScope, DiffScopeSignal, FollowUpSteerSignal,
     GitStatusSignal, MessageStatus, OpenFileSignal, PanelSurface, PendingPermissionsSignal,
-    PermissionModeSignal, PreviousWorktreeSignal, PromptQueueSignal, QueueHeldSignal,
-    RightPanelSignal, RunChoiceSignal, ThreadNotice, Turns, UnreadThreads,
+    PermissionModeSignal, PreviousWorktreeSignal, PromptQueueSignal, QueueHolds, RightPanelSignal,
+    RunChoiceSignal, ThreadNotice, Turns, UnreadThreads,
 };
 use crate::stream::{apply_message, StreamEffect, UnknownEvents};
 use crate::ui::Icon;
@@ -71,6 +71,7 @@ use bruhs_models::logic::portable::{thread_context, with_import_context};
 use bruhs_models::logic::recall::{compose_after_rewind, rewind_keep_end, RecallCursor};
 use bruhs_models::logic::rewind::file_revert_block;
 use bruhs_models::logic::run_place::{claude_effort, first_send, FirstSend, RememberedWorktree};
+use bruhs_models::roles::{instructions_stamp, role_command, RoleWrite, ROLE_NEEDS_THREAD};
 
 /// Distance from the bottom (px) within which the transcript still follows
 /// new content.
@@ -274,7 +275,24 @@ pub fn ChatPage() -> impl IntoView {
     let saves = expect_context::<crate::task_saves::TaskSaves>();
     let thread_notice = expect_context::<ThreadNotice>();
     let PromptQueueSignal(prompt_queue) = expect_context::<PromptQueueSignal>();
-    let QueueHeldSignal(queue_held) = expect_context::<QueueHeldSignal>();
+    let queue_holds = expect_context::<QueueHolds>();
+    // The queue of the thread on screen. Each thread is held on its own.
+    let hold_here = move || {
+        if let Some(id) = active_thread_id.get_untracked() {
+            queue_holds.hold(&id);
+        }
+    };
+    let resume_here = move || {
+        if let Some(id) = active_thread_id.get_untracked() {
+            queue_holds.resume(&id);
+        }
+    };
+    let held_here = move || {
+        active_thread_id.with_untracked(|id| {
+            id.as_deref()
+                .is_some_and(|id| queue_holds.is_held_untracked(id))
+        })
+    };
     let DiffScopeSignal(diff_scope) = expect_context::<DiffScopeSignal>();
     let DiffFocusPath(diff_focus) = expect_context::<DiffFocusPath>();
     let GitStatusSignal(git) = expect_context::<GitStatusSignal>();
@@ -287,6 +305,7 @@ pub fn ChatPage() -> impl IntoView {
     let crate::state::ThreadAccessSignal(thread_access) =
         expect_context::<crate::state::ThreadAccessSignal>();
     let crate::state::RolesSignal(roles) = expect_context::<crate::state::RolesSignal>();
+    let set_current_model = expect_context::<crate::state::SetCurrentModel>().0;
     let crate::state::TaskModelsSignal(task_models) =
         expect_context::<crate::state::TaskModelsSignal>();
     let BaseBranchSignal(base_branch) = expect_context::<BaseBranchSignal>();
@@ -588,6 +607,50 @@ pub fn ChatPage() -> impl IntoView {
             apply_goal_to(&tid, write);
         }
     };
+    // `/role [name]`: show, set or remove the role of the thread on screen.
+    // A role's model becomes the thread's; its effort, access and
+    // instructions are read each turn, so a running turn keeps what it has.
+    let apply_role = move |argument: String| {
+        let Some(tid) = active_thread_id.get_untracked() else {
+            thread_notice.flash(ROLE_NEEDS_THREAD);
+            return;
+        };
+        let Some((project, current)) = threads.with_untracked(|rows| {
+            rows.iter()
+                .find(|thread| thread.id == tid)
+                .map(|thread| (thread.project_name.clone(), thread.role.clone()))
+        }) else {
+            return;
+        };
+        let command = roles
+            .with_untracked(|book| role_command(book, &project, current.as_deref(), &argument));
+        let (role, model) = match command.write {
+            RoleWrite::Keep => {
+                thread_notice.flash(command.notice);
+                return;
+            }
+            RoleWrite::Set(role) => (Some(role.id), role.model),
+            RoleWrite::Remove => (None, None),
+        };
+        set_threads.update(|rows| {
+            let Some(thread) = rows.iter_mut().find(|thread| thread.id == tid) else {
+                return;
+            };
+            let original = thread.clone();
+            thread.role = role;
+            if let Some(model) = &model {
+                thread.model = Some(model.clone());
+            }
+            if *thread != original {
+                catalog.persist(Some(original), thread.clone());
+            }
+        });
+        // The composer may hold a pick that differs from the thread's model.
+        if let Some(model) = model {
+            set_current_model.set(model);
+        }
+        thread_notice.flash(command.notice);
+    };
     // Start a turn in `thread_id`. `prior` is that thread's settled
     // transcript when it is not the one on screen; `None` reads the visible
     // one. Returns whether a turn started (or, with no lane free, was queued).
@@ -735,15 +798,36 @@ pub fn ChatPage() -> impl IntoView {
         // conversation along, until a turn gives it a session. So does a
         // thread whose session belongs to the other provider (its model
         // changed): that turn starts a new session.
+        // The thread's role, as it runs in this project. It sets the effort
+        // and instructions, and can narrow the access mode, never widen it.
+        let role = thread
+            .role
+            .as_deref()
+            .and_then(|id| roles.with_untracked(|book| book.resolve(id, &thread.project_name)));
+        let perm_mode = bruhs_models::roles::narrow_access(
+            permission_mode.get_untracked(),
+            role.as_ref().and_then(|role| role.access),
+        );
+        let role_effort = role.as_ref().and_then(|role| role.effort.clone());
+        let role_instructions = role
+            .map(|role| role.instructions)
+            .filter(|text| !text.trim().is_empty());
         let other_provider = thread.session_id.is_some()
             && thread
                 .model
                 .as_deref()
                 .map(AgentProvider::for_model)
                 .is_some_and(|owner| owner != provider);
+        // A session keeps the instructions it started with, so a role set,
+        // removed or edited since then needs a new session as well. A
+        // handoff only writes a brief; it keeps the session it has.
+        let stamp = instructions_stamp(role_instructions.as_deref());
+        let other_instructions =
+            handoff.is_none() && thread.session_id.is_some() && thread.instructions_stamp != stamp;
+        let restart = other_provider || other_instructions;
         let carried = if handoff.is_some() {
             None
-        } else if other_provider {
+        } else if restart {
             thread_context(
                 &thread.title,
                 &import_thread_dialog::portable_messages(&transcript),
@@ -831,28 +915,14 @@ pub fn ChatPage() -> impl IntoView {
         }
         flush_persist();
 
-        // The thread's role, as it runs in this project. It sets the effort
-        // and instructions, and can narrow the access mode, never widen it.
-        let role = thread
-            .role
-            .as_deref()
-            .and_then(|id| roles.with_untracked(|book| book.resolve(id, &thread.project_name)));
-        let perm_mode = bruhs_models::roles::narrow_access(
-            permission_mode.get_untracked(),
-            role.as_ref().and_then(|role| role.access),
-        );
-        let role_effort = role.as_ref().and_then(|role| role.effort.clone());
-        let role_instructions = role
-            .map(|role| role.instructions)
-            .filter(|text| !text.trim().is_empty());
         // A chat without a project sends no path; the server runs it in the
         // home directory.
         let project_path = thread.project_path.clone().or_else(|| {
             here.then(|| active_project.get_untracked().map(|p| p.path))
                 .flatten()
         });
-        let session_id = thread.session_id.filter(|_| !other_provider);
-        let fresh_session = thread.fresh_session || other_provider;
+        let session_id = thread.session_id.filter(|_| !restart);
+        let fresh_session = thread.fresh_session || restart;
         let choice = run_choice.get_untracked();
         let base = base_branch.get_untracked();
         let previous = previous_worktree.get_untracked();
@@ -1013,6 +1083,7 @@ pub fn ChatPage() -> impl IntoView {
                     };
                     let saw_init = Rc::new(Cell::new(false));
                     let saw_init_cb = Rc::clone(&saw_init);
+                    let session_stamp = stamp.clone();
                     let aid = assistant_id.clone();
                     let tid = thread_id.clone();
                     let unknown_cb = Rc::clone(&unknown);
@@ -1052,15 +1123,26 @@ pub fn ChatPage() -> impl IntoView {
                                 StreamEffect::SessionId(sess) => {
                                     saw_init_cb.set(true);
                                     let tid2 = tid.clone();
+                                    // A session that just started holds this
+                                    // turn's instructions; a resumed one
+                                    // keeps the ones it has.
+                                    let started = (!resumed).then(|| session_stamp.clone());
                                     set_threads.update(move |ts| {
                                         if let Some(t) = ts.iter_mut().find(|t| t.id == tid2) {
+                                            let restamp = started.as_ref().is_some_and(|stamp| {
+                                                t.instructions_stamp != *stamp
+                                            });
                                             if t.session_id.as_deref() != Some(sess.as_str())
                                                 || t.fresh_session
                                                 || t.import_context.is_some()
+                                                || restamp
                                             {
                                                 let original = t.clone();
                                                 t.session_id = Some(sess);
                                                 t.fresh_session = false;
+                                                if let Some(stamp) = started {
+                                                    t.instructions_stamp = stamp;
+                                                }
                                                 // The session now holds the
                                                 // imported conversation.
                                                 t.import_context = None;
@@ -1404,23 +1486,30 @@ pub fn ChatPage() -> impl IntoView {
             run_second_opinion(focus);
             return;
         }
+        // A role is set on the thread, also while its turn runs.
+        if let CommandKind::Role(name) = classify_command(
+            &text,
+            AgentProvider::for_model(&current_model.get_untracked()),
+        ) {
+            apply_role(name);
+            set_input_value.set(String::new());
+            return;
+        }
         let has_attachments = !text_attachments.with_untracked(|items| items.is_empty())
             || file_offers
                 .with_untracked(|items| items.iter().any(|item| item.ready_path().is_some()));
         if text.is_empty() {
             if running_here() {
-                queue_held.set(true);
+                hold_here();
                 stop_here();
                 return;
             }
             if has_attachments {
-                queue_held.set(false);
+                resume_here();
                 start_turn(raw, true, None, false);
                 return;
             }
-            if queue_held.get_untracked() {
-                queue_held.set(false);
-            }
+            resume_here();
             return;
         }
         if active_thread_id.with_untracked(|id| id.as_deref().is_some_and(|id| history.blocked(id)))
@@ -1461,7 +1550,7 @@ pub fn ChatPage() -> impl IntoView {
                 thread_notice.flash(notice);
             }
             if prepared.stop {
-                queue_held.set(true);
+                hold_here();
                 stop_here();
             }
             if prepared.queue {
@@ -1494,7 +1583,7 @@ pub fn ChatPage() -> impl IntoView {
                 })
             });
         if summarize {
-            queue_held.set(true);
+            hold_here();
             if let Some(tid) = active_thread_id.get_untracked() {
                 let chips = context_chips.get_untracked();
                 prompt_queue.update(|q| {
@@ -1506,10 +1595,10 @@ pub fn ChatPage() -> impl IntoView {
             set_input_value.set(String::new());
             compact_full.set(false);
             start_turn("/compact".to_string(), false, None, true);
-            queue_held.set(false);
+            resume_here();
             return;
         }
-        queue_held.set(false);
+        resume_here();
         start_turn(raw, true, None, false);
     };
     let on_slash = Callback::new(move |name: &'static str| {
@@ -1520,6 +1609,10 @@ pub fn ChatPage() -> impl IntoView {
             } else {
                 run_second_opinion(focus);
             }
+            return;
+        }
+        if let CommandKind::Role(name) = classify_command(name, provider) {
+            apply_role(name);
             return;
         }
         let goal = active_thread_id.get_untracked().and_then(|id| {
@@ -1536,7 +1629,7 @@ pub fn ChatPage() -> impl IntoView {
             thread_notice.flash(notice);
         }
         if prepared.stop {
-            queue_held.set(true);
+            hold_here();
             stop_here();
         }
         if prepared.queue {
@@ -1547,21 +1640,24 @@ pub fn ChatPage() -> impl IntoView {
             }
         }
         if prepared.send {
-            queue_held.set(false);
+            resume_here();
             start_turn(name.to_string(), false, None, true);
         }
     });
-    // Drain when the thread is idle and the queue is not held. Interrupt and
-    // a reload hold the rows until Resume or the next send.
+    // Drain when the thread is idle and its queue is not held. Interrupt and
+    // a reload hold its rows until Resume or the next send here.
     Effect::new(move |_| {
         // A turn ending anywhere frees a lane.
         turns.track();
-        if live_here.get() || queue_held.get() {
+        if live_here.get() {
             return;
         }
         let Some(tid) = active_thread_id.get() else {
             return;
         };
+        if queue_holds.is_held(&tid) {
+            return;
+        }
         if history.reason(Some(&tid)).is_some() {
             return;
         }
@@ -1583,15 +1679,12 @@ pub fn ChatPage() -> impl IntoView {
     // thread is idle and a lane is free. Its saved messages load first.
     Effect::new(move |_| {
         turns.track();
-        if queue_held.get() {
-            return;
-        }
         let active = active_thread_id.get();
         let waiting: Vec<String> = prompt_queue.with(|queue| {
             queue
                 .thread_ids()
                 .into_iter()
-                .filter(|id| active.as_deref() != Some(*id))
+                .filter(|id| active.as_deref() != Some(*id) && !queue_holds.is_held(id))
                 .map(str::to_string)
                 .collect()
         });
@@ -1610,9 +1703,9 @@ pub fn ChatPage() -> impl IntoView {
                 let prior = match crate::storage::load_messages(&thread_id).await {
                     Ok(loaded) => saves.loaded_conversation(&thread_id, loaded),
                     Err(error) => {
-                        // Hold the queue: retrying would fail the same way.
+                        // Hold its queue: retrying would fail the same way.
                         log::warn!("a queued prompt could not start: {error:?}");
-                        queue_held.set(true);
+                        queue_holds.hold(&thread_id);
                         thread_notice.flash(
                             "A queued prompt could not start: its thread's saved messages did not load.",
                         );
@@ -1621,7 +1714,7 @@ pub fn ChatPage() -> impl IntoView {
                     }
                 };
                 // Held, removed, or sent from the thread itself meanwhile.
-                let next = (!queue_held.get_untracked())
+                let next = (!queue_holds.is_held_untracked(&thread_id))
                     .then(|| {
                         prompt_queue
                             .try_update(|q| q.next_for(&thread_id))
@@ -1649,7 +1742,7 @@ pub fn ChatPage() -> impl IntoView {
     thread_link.set_chat_mounted(true);
     on_cleanup(move || thread_link.set_chat_mounted(false));
     let compact_idle_if_due = move || {
-        if running_here() || queue_held.get_untracked() {
+        if running_here() || held_here() {
             return;
         }
         if compact_idle.get_untracked() != IdleCompact::Before {
@@ -1683,7 +1776,7 @@ pub fn ChatPage() -> impl IntoView {
     let on_opposite_cb = Callback::new(move |_: ()| submit(input_value.get_untracked(), true));
 
     let on_stop_cb = Callback::new(move |_: ()| {
-        queue_held.set(true);
+        hold_here();
         if let Some(thread) = active_thread_id.get_untracked() {
             pending_secrets.update(|items| items.retain(|item| item.thread_id.as_str() != thread));
         }

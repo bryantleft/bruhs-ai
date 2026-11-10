@@ -132,6 +132,7 @@ fn desktop_composer_hint_copy_should_match_web_reference() {
                 "/second-opinion",
                 "Ask the other provider to review the last answer"
             ),
+            ("/role", "Give this thread a role"),
         ]
     );
     assert_eq!(COMPOSER_HINT_EMPTY_LABEL, "No matches");

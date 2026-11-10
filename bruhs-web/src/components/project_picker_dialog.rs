@@ -136,6 +136,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
             effort: None,
             run_locked: false,
             role: None,
+            instructions_stamp: None,
             import_context: None,
         };
         set_threads.update(|ts| ts.push(thread.clone()));

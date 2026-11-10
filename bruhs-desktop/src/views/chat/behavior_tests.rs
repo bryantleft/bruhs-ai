@@ -703,3 +703,65 @@ fn an_import_context_rides_along_until_a_session_holds_it(cx: &mut TestAppContex
         assert_eq!(turn.session_id.as_deref(), Some("s-1"));
     });
 }
+
+#[gpui::test]
+fn a_changed_role_starts_a_new_session_that_carries_the_conversation(cx: &mut TestAppContext) {
+    use bruhs_models::agent::AgentProvider;
+    use bruhs_models::roles::{instructions_stamp, ResolvedRole};
+
+    let role = |instructions: &str| ResolvedRole {
+        id: "writer".into(),
+        name: "Writer".into(),
+        instructions: instructions.into(),
+        ..ResolvedRole::default()
+    };
+    let (chat, cx) = chat_window(cx);
+    chat.update(cx, |chat, cx| {
+        chat.model_id = "claude-sonnet-4-6".into();
+        chat.session_id = Some("s-1".into());
+        chat.session_provider = Some(AgentProvider::Claude);
+
+        // No role when the session started and none now: it resumes.
+        let turn = begin(chat, "one", cx);
+        assert_eq!(turn.session_id.as_deref(), Some("s-1"));
+        assert!(!turn.prompt.contains("This thread continues"));
+
+        // `/role` gave the thread instructions the session does not hold.
+        chat.role_profile = Some(role("Write plainly."));
+        let turn = begin(chat, "two", cx);
+        assert!(turn.fresh_session && turn.session_id.is_none());
+        assert_eq!(turn.instructions.as_deref(), Some("Write plainly."));
+        assert!(turn.prompt.starts_with("This thread continues"));
+        assert!(turn.prompt.contains("one") && turn.prompt.ends_with("two"));
+        chat.record_session("s-2".into());
+        assert_eq!(
+            chat.instructions_stamp,
+            instructions_stamp(Some("Write plainly."))
+        );
+
+        // The new session holds them: the next turn resumes it.
+        let turn = begin(chat, "three", cx);
+        assert_eq!(turn.session_id.as_deref(), Some("s-2"));
+        assert!(!turn.fresh_session && turn.prompt == "three");
+        chat.record_session("s-2".into());
+        assert!(chat.instructions_stamp.is_some(), "a resumed turn keeps it");
+
+        // A handoff only writes a brief, so it keeps the session it has.
+        chat.role_profile = Some(role("Be brief."));
+        let turn = begin(chat, "/handoff ship it", cx);
+        assert_eq!(turn.session_id.as_deref(), Some("s-2"));
+        chat.handoff_pending = false;
+
+        // Edited in Settings, then removed: each needs a new session.
+        let turn = begin(chat, "four", cx);
+        assert!(turn.fresh_session && turn.prompt.starts_with("This thread continues"));
+        chat.record_session("s-3".into());
+        chat.role_profile = None;
+        let turn = begin(chat, "five", cx);
+        assert!(turn.fresh_session && turn.instructions.is_none());
+        chat.record_session("s-4".into());
+        assert_eq!(chat.instructions_stamp, None);
+        let turn = begin(chat, "six", cx);
+        assert_eq!(turn.session_id.as_deref(), Some("s-4"));
+    });
+}

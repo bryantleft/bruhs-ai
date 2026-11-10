@@ -254,6 +254,7 @@ pub fn Sidebar() -> impl IntoView {
         expect_context::<PendingPermissionsSignal>();
     let turns = expect_context::<Turns>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
+    let roles = expect_context::<crate::state::RolesSignal>().0;
     let SidebarProjectFilter(project_filter) = expect_context::<SidebarProjectFilter>();
     let WorkspaceMode(mode) = expect_context::<WorkspaceMode>();
     let SetProjectPickerOpen(set_project_picker_open) = expect_context::<SetProjectPickerOpen>();
@@ -697,6 +698,13 @@ pub fn Sidebar() -> impl IntoView {
         });
         let branch = Signal::derive(move || live.get().and_then(|t| t.branch));
         let model = Signal::derive(move || live.get().and_then(|t| t.model));
+        // The role's id keeps the line; its current name fills it. A deleted
+        // role leaves the name out.
+        let has_role = Signal::derive(move || live.get().is_some_and(|t| t.role.is_some()));
+        let role = Signal::derive(move || {
+            let id = live.get()?.role?;
+            roles.with(|book| book.find(&id).map(|role| role.name.clone()))
+        });
         let suppress_click = StoredValue::new(false);
         let drag_id = id.clone();
         let drop_card_id = id.clone();
@@ -814,7 +822,8 @@ pub fn Sidebar() -> impl IntoView {
                     {move || {
                         let b = branch.get();
                         let m = model.get();
-                        (b.is_some() || m.is_some()).then(|| view! {
+                        let r = role.get();
+                        (b.is_some() || m.is_some() || has_role.get()).then(|| view! {
                             <span class="mt-1 flex h-4 items-center gap-1.5 text-label-sm text-rambutan-500">
                                 {match b {
                                     Some(b) => {
@@ -826,6 +835,12 @@ pub fn Sidebar() -> impl IntoView {
                                     }
                                     None => view! { <span class="flex-1"></span> }.into_any(),
                                 }}
+                                {r.map(|r| {
+                                    let title = format!("Role: {r}");
+                                    view! {
+                                        <span data-thread-role="" class="max-w-[6rem] shrink-0 truncate text-rambutan-400" title=title>{r}</span>
+                                    }
+                                })}
                                 {m.map(|m| view! {
                                     <img
                                         src=provider_logo_src_for_model(&m)
@@ -1394,6 +1409,7 @@ mod tests {
             effort: None,
             run_locked: false,
             role: None,
+            instructions_stamp: None,
             import_context: None,
         }
     }

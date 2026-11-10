@@ -545,7 +545,7 @@ pub fn MentionEditor(
                         ));
                     });
                 }
-                "/goal" | "/compact" | "/handoff" | "/second-opinion" => {
+                "/goal" | "/compact" | "/handoff" | "/second-opinion" | "/role" => {
                     if let Some(on_command) = on_command.as_ref() {
                         on_command.run(name);
                     }

@@ -1,6 +1,8 @@
 //! Settings rows for roles (named model setups an agent starts a thread
 //! with) and for the models of jobs that are not threads. Web:
-//! `components/role_settings.rs`. The rules live in `bruhs_models::roles`.
+//! `components/role_settings.rs`, whose layout this follows: the Roles row,
+//! then the open role's fields in a body under it. The rules live in
+//! `bruhs_models::roles`.
 
 use super::*;
 use bruhs_models::agent::{AgentProvider, MODEL_CATALOG};
@@ -12,6 +14,7 @@ pub(super) const SETTINGS_ROLE_DROPDOWN_ID: &str = "desktop-role";
 pub(super) const SETTINGS_ROLE_MODEL_DROPDOWN_ID: &str = "desktop-role-model";
 pub(super) const SETTINGS_ROLE_EFFORT_DROPDOWN_ID: &str = "desktop-role-effort";
 pub(super) const SETTINGS_ROLE_ACCESS_DROPDOWN_ID: &str = "desktop-role-access";
+pub(super) const SETTINGS_ROLE_PROJECT_DROPDOWN_ID: &str = "desktop-role-project";
 pub(super) const SETTINGS_ROLE_PROJECT_MODEL_DROPDOWN_ID: &str = "desktop-role-project-model";
 pub(super) const SETTINGS_ROLE_PROJECT_EFFORT_DROPDOWN_ID: &str = "desktop-role-project-effort";
 pub(super) const SETTINGS_ROLE_PROJECT_ACCESS_DROPDOWN_ID: &str = "desktop-role-project-access";
@@ -26,15 +29,115 @@ const INHERIT: &str = "inherit";
 const ROLE_SLOTS: [&str; MAX_ROLES] =
     ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];
 
+/// Web `BUTTON` and `TEXT_INPUT`: `h-8`, and `text-label-sm` on the button.
+const CONTROL_HEIGHT_PX: f32 = 32.0;
+const LABEL_TEXT_PX: f32 = 12.0;
+/// Web `text-body-sm` in a field, with `px-3`.
+const FIELD_TEXT_PX: f32 = 14.0;
+const FIELD_X_PADDING_PX: f32 = 12.0;
+/// Web `TEXT_AREA`: `min-h-[6rem]`.
+const TEXT_AREA_HEIGHT_PX: f32 = 96.0;
+/// Web `divide-longan-800/60` between a role's fields.
+const FIELD_DIVIDER_OPACITY: f32 = 0.6;
+/// Web `ps-4` on a project's overrides.
+const OVERRIDE_INDENT_PX: f32 = 16.0;
+
 /// The text fields of the role editor. One set, shared by whichever role
 /// is open.
 pub(super) struct RoleInputs {
     name: Entity<InputState>,
     use_for: Entity<InputState>,
     instructions: Entity<InputState>,
-    /// Name of the project whose override is shown.
-    project: Entity<InputState>,
+    /// Name of the project whose override is shown; empty for none.
+    project: String,
     project_instructions: Entity<InputState>,
+}
+
+/// A dropdown value is `'static` and a project's name is not, so each
+/// distinct name is kept once for the life of the app.
+fn project_value(name: &str) -> &'static str {
+    use std::collections::BTreeSet;
+    use std::sync::{Mutex, PoisonError};
+    static VALUES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+    let mut values = VALUES.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(known) = values.get(name) {
+        return known;
+    }
+    let kept: &'static str = Box::leak(name.to_string().into_boxed_str());
+    values.insert(kept);
+    kept
+}
+
+/// Web `FIELD_LABEL`: `text-label-sm text-rambutan-300`.
+fn field_label(text: &'static str) -> Div {
+    div()
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .text_size(px(LABEL_TEXT_PX))
+        .font_weight(FontWeight::MEDIUM)
+        .line_height(relative(1.5))
+        .text_color(theme::rambutan_300())
+        .child(text)
+}
+
+/// A hairline above every field but the first (web `divide-y`).
+fn divided(index: usize, row: Div) -> Div {
+    row.when(index > 0, |el| {
+        el.border_t_1()
+            .border_color(theme::longan_800().opacity(FIELD_DIVIDER_OPACITY))
+    })
+}
+
+/// Web `FIELD`: the label at the left, a row-width control at the right.
+fn field_row(index: usize, label: &'static str, control: AnyElement) -> AnyElement {
+    divided(
+        index,
+        div()
+            .py_2()
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .child(field_label(label))
+            .child(settings_ui::control_column(control)),
+    )
+    .into_any_element()
+}
+
+/// A label over a full-width text area (web: the instructions fields).
+fn text_area_row(
+    index: usize,
+    label: &'static str,
+    name: &'static str,
+    input: &Entity<InputState>,
+) -> AnyElement {
+    divided(
+        index,
+        div()
+            .py_2()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(field_label(label))
+            .child(
+                Input::new(input)
+                    .h(px(TEXT_AREA_HEIGHT_PX))
+                    .px(px(FIELD_X_PADDING_PX))
+                    .text_size(px(FIELD_TEXT_PX))
+                    .aria_label(name),
+            ),
+    )
+    .into_any_element()
+}
+
+/// Web `TEXT_INPUT`: one line, the height of a dropdown.
+fn text_field(input: &Entity<InputState>, name: &'static str) -> AnyElement {
+    // `Input::h` (inherent) only sizes multi-line inputs; the `Styled`
+    // height is refined last, so it sizes a single-line field.
+    Styled::h(Input::new(input), px(CONTROL_HEIGHT_PX))
+        .px(px(FIELD_X_PADDING_PX))
+        .text_size(px(FIELD_TEXT_PX))
+        .aria_label(name)
+        .into_any_element()
 }
 
 /// Writes one text field's value into a role.
@@ -47,6 +150,48 @@ const ROLE_ACCESS: [PermissionMode; 3] = [
     PermissionMode::Default,
     PermissionMode::AcceptEdits,
 ];
+
+impl Workspace {
+    /// `/role [name]` typed in `chat`: show, set or remove that thread's
+    /// role (web: `apply_role`). A role's model becomes the thread's; its
+    /// effort, access and instructions are read each turn, so a running turn
+    /// keeps what it has.
+    pub(super) fn apply_role_command(
+        &mut self,
+        chat: &Entity<ChatView>,
+        argument: &str,
+        cx: &mut Context<'_, Self>,
+    ) {
+        use bruhs_models::roles::{role_command, RoleWrite};
+        let (project, current) = {
+            let view = chat.read(cx);
+            (view.project_name.clone(), view.role.clone())
+        };
+        let command = role_command(&self.roles, &project, current.as_deref(), argument);
+        let notice = command.notice;
+        let role = match command.write {
+            RoleWrite::Keep => {
+                self.meetings_hub
+                    .update(cx, |hub, cx| hub.show_notice(notice, false, cx));
+                return;
+            }
+            RoleWrite::Set(role) => Some(role),
+            RoleWrite::Remove => None,
+        };
+        let model = role.as_ref().and_then(|role| role.model.clone());
+        chat.update(cx, |chat, cx| {
+            chat.role = role.as_ref().map(|role| role.id.clone());
+            chat.role_profile = role;
+            if let Some(model) = model {
+                chat.set_model(model, cx);
+            }
+            cx.notify();
+        });
+        self.meetings_hub
+            .update(cx, |hub, cx| hub.show_notice(notice, false, cx));
+        self.persist_and_notify(cx);
+    }
+}
 
 fn option(value: &'static str, label: impl Into<String>) -> DropdownOption {
     DropdownOption {
@@ -120,13 +265,16 @@ fn settings_button(
     div()
         .id(id)
         .debug_selector(move || id.to_string())
-        .h(px(40.0))
+        .h(px(CONTROL_HEIGHT_PX))
         .px(px(12.0))
         .rounded(px(8.0))
         .flex()
+        .flex_shrink_0()
         .items_center()
         .justify_center()
-        .text_size(px(14.0))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .text_size(px(LABEL_TEXT_PX))
+        .font_weight(FontWeight::MEDIUM)
         .border_1()
         .border_color(gpui::white().opacity(0.1))
         .text_color(theme::rambutan_200())
@@ -171,12 +319,7 @@ impl Workspace {
                 .multi_line(true)
                 .placeholder("You write user-facing docs. Keep sentences short.")
         });
-        let project = cx.new(|cx| InputState::new(window, cx).placeholder("Project name"));
-        let project_instructions = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
-                .placeholder("Empty keeps the role's instructions")
-        });
+        let project_instructions = cx.new(|cx| InputState::new(window, cx).multi_line(true));
         let edits: [(&Entity<InputState>, RoleWrite); 3] = [
             (&name, |role, value| role.name = value),
             (&use_for, |role, value| role.use_for = value),
@@ -195,16 +338,6 @@ impl Workspace {
             ));
         }
         subscriptions.push(cx.subscribe_in(
-            &project,
-            window,
-            |this, _input, event: &InputEvent, window, cx| {
-                if matches!(event, InputEvent::Change) {
-                    this.load_role_project_instructions(window, cx);
-                    cx.notify();
-                }
-            },
-        ));
-        subscriptions.push(cx.subscribe_in(
             &project_instructions,
             window,
             |this, input, event: &InputEvent, _window, cx| {
@@ -218,7 +351,7 @@ impl Workspace {
             name,
             use_for,
             instructions,
-            project,
+            project: String::new(),
             project_instructions,
         }
     }
@@ -230,8 +363,22 @@ impl Workspace {
     }
 
     /// The project whose override the editor shows; empty for none.
-    fn role_project(&self, cx: &App) -> String {
-        self.role_inputs.project.read(cx).value().trim().to_string()
+    fn role_project(&self) -> String {
+        self.role_inputs.project.clone()
+    }
+
+    /// The projects a role can be overridden in: every project a thread is
+    /// in, by name (web: the same list).
+    fn role_project_names(&self) -> Vec<String> {
+        let mut names: Vec<String> = self
+            .threads
+            .iter()
+            .filter(|thread| !thread.project_name.is_empty())
+            .map(|thread| thread.project_name.clone())
+            .collect();
+        names.sort();
+        names.dedup();
+        names
     }
 
     /// Roles or task models changed: every thread picks up its role as it
@@ -264,7 +411,7 @@ impl Workspace {
         let Some(id) = self.role_selected.clone() else {
             return;
         };
-        let project = self.role_project(cx);
+        let project = self.role_project();
         let before = self.roles.clone();
         self.roles.update_override(&project, &id, change);
         if self.roles != before {
@@ -273,7 +420,12 @@ impl Workspace {
     }
 
     /// Open `id` in the editor, or close the editor.
-    fn select_role(&mut self, id: Option<String>, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn select_role(
+        &mut self,
+        id: Option<String>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.role_selected = id;
         let role = self.selected_role().cloned().unwrap_or_default();
         let fields = [
@@ -290,7 +442,7 @@ impl Workspace {
 
     /// Show the open role's instructions in the shown project.
     fn load_role_project_instructions(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let project = self.role_project(cx);
+        let project = self.role_project();
         let text = self
             .role_selected
             .as_deref()
@@ -345,6 +497,11 @@ impl Workspace {
             }
             SETTINGS_ROLE_ACCESS_DROPDOWN_ID => {
                 self.edit_role(cx, |role| role.access = chosen_access(value));
+            }
+            SETTINGS_ROLE_PROJECT_DROPDOWN_ID => {
+                self.role_inputs.project = chosen(value).unwrap_or_default();
+                self.load_role_project_instructions(window, cx);
+                cx.notify();
             }
             SETTINGS_ROLE_PROJECT_MODEL_DROPDOWN_ID => {
                 self.edit_role_override(cx, |change| change.model = chosen(value));
@@ -429,153 +586,177 @@ impl Workspace {
             "desktop-settings-row-roles",
             "Roles",
             "Named setups an agent can start a thread with: a model, an effort, an access mode and instructions. An agent picks one by name when it messages a new thread, so one thread can orchestrate while others write or run on the models you chose.",
-            settings_ui::control_column(
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(self.role_dropdown(
-                        SETTINGS_ROLE_DROPDOWN_ID,
-                        "Role to edit",
-                        selected_slot,
-                        role_groups,
-                        cx,
-                    ))
-                    .child(settings_button(
-                        "desktop-settings-role-new",
-                        "New role",
-                        self.roles.roles.len() >= MAX_ROLES,
-                        cx,
-                        Self::add_role,
-                    ))
-                    .into_any_element(),
-            ),
+            div()
+                .flex()
+                .items_center()
+                .gap_2()
+                .child(settings_ui::control_column(self.role_dropdown(
+                    SETTINGS_ROLE_DROPDOWN_ID,
+                    "Role to edit",
+                    selected_slot,
+                    role_groups,
+                    cx,
+                )))
+                .child(settings_button(
+                    "desktop-settings-role-new",
+                    "New role",
+                    self.roles.roles.len() >= MAX_ROLES,
+                    cx,
+                    Self::add_role,
+                ))
+                .into_any_element(),
         )];
         let Some(role) = self.selected_role() else {
             return rows;
         };
-        let field = |input: &Entity<InputState>, height: f32| {
-            div()
-                .h(px(height))
-                .child(Input::new(input))
-                .into_any_element()
-        };
-        rows.push(self.settings_row(
-            "desktop-settings-row-role-name",
-            "Role name",
-            "Agents ask for the role by this name.",
-            settings_ui::control_column(field(&self.role_inputs.name, 40.0)),
-        ));
-        rows.push(self.settings_row(
-            "desktop-settings-row-role-use-for",
-            "Use for",
-            "One line shown to agents, so they know what to hand this role.",
-            settings_ui::control_column(field(&self.role_inputs.use_for, 40.0)),
-        ));
-        rows.push(self.settings_row(
-            "desktop-settings-row-role-model",
-            "Role model",
-            "The model a thread with this role starts on.",
-            settings_ui::control_column(self.role_dropdown(
-                SETTINGS_ROLE_MODEL_DROPDOWN_ID,
-                "Role model",
-                role.model.as_deref().unwrap_or(INHERIT),
-                model_groups("The sender's model", None),
-                cx,
-            )),
-        ));
-        rows.push(self.settings_row(
-            "desktop-settings-row-role-effort",
-            "Role effort",
-            "Claude effort for this role's threads. Codex ignores it.",
-            settings_ui::control_column(self.role_dropdown(
-                SETTINGS_ROLE_EFFORT_DROPDOWN_ID,
-                "Role effort",
-                role.effort.as_deref().unwrap_or(INHERIT),
-                effort_groups("Your default"),
-                cx,
-            )),
-        ));
-        rows.push(self.settings_row(
-            "desktop-settings-row-role-access",
-            "Role access",
-            "A role can only narrow your access mode, never widen it.",
-            settings_ui::control_column(self.role_dropdown(
-                SETTINGS_ROLE_ACCESS_DROPDOWN_ID,
-                "Role access",
-                role.access.map_or(INHERIT, |mode| mode.as_str()),
-                access_groups("Your access mode"),
-                cx,
-            )),
-        ));
-        rows.push(
-            self.settings_row(
-                "desktop-settings-row-role-instructions",
-                "Role instructions",
-                "Added to every turn of a thread with this role.",
-                settings_ui::control_column(
-                    div()
-                        .w(px(288.0))
-                        .child(field(&self.role_inputs.instructions, 96.0))
-                        .into_any_element(),
-                ),
-            ),
+        let project = self.role_project();
+        let project_groups = flat(
+            std::iter::once(option(INHERIT, "No project"))
+                .chain(
+                    self.role_project_names()
+                        .into_iter()
+                        .map(|name| option(project_value(&name), name)),
+                )
+                .collect(),
         );
-        let project = self.role_project(cx);
-        let change = self
-            .roles
-            .override_for(&project, &role.id)
-            .cloned()
-            .unwrap_or_default();
-        let mut override_column = div()
-            .w(px(288.0))
+        let mut editor = div()
+            .debug_selector(|| "desktop-settings-role-editor".to_string())
+            .px(px(SETTINGS_ROW_X_PADDING_PX))
+            .pb_4()
             .flex()
             .flex_col()
-            .gap_2()
-            .child(field(&self.role_inputs.project, 40.0));
+            .child(field_row(
+                0,
+                "Name",
+                text_field(&self.role_inputs.name, "Role name"),
+            ))
+            .child(field_row(
+                1,
+                "Use for (shown to agents)",
+                text_field(&self.role_inputs.use_for, "What to use this role for"),
+            ))
+            .child(field_row(
+                2,
+                "Model",
+                self.role_dropdown(
+                    SETTINGS_ROLE_MODEL_DROPDOWN_ID,
+                    "Role model",
+                    role.model.as_deref().unwrap_or(INHERIT),
+                    model_groups("The sender's model", None),
+                    cx,
+                ),
+            ))
+            .child(field_row(
+                3,
+                "Effort (Claude)",
+                self.role_dropdown(
+                    SETTINGS_ROLE_EFFORT_DROPDOWN_ID,
+                    "Role effort",
+                    role.effort.as_deref().unwrap_or(INHERIT),
+                    effort_groups("Your default"),
+                    cx,
+                ),
+            ))
+            .child(field_row(
+                4,
+                "Access (can only narrow yours)",
+                self.role_dropdown(
+                    SETTINGS_ROLE_ACCESS_DROPDOWN_ID,
+                    "Role access",
+                    role.access.map_or(INHERIT, |mode| mode.as_str()),
+                    access_groups("Your access mode"),
+                    cx,
+                ),
+            ))
+            .child(text_area_row(
+                5,
+                "Instructions (added to every turn of the thread)",
+                "Role instructions",
+                &self.role_inputs.instructions,
+            ))
+            .child(field_row(
+                6,
+                "Project override",
+                self.role_dropdown(
+                    SETTINGS_ROLE_PROJECT_DROPDOWN_ID,
+                    "Project that overrides this role",
+                    if project.is_empty() {
+                        INHERIT
+                    } else {
+                        project_value(&project)
+                    },
+                    project_groups,
+                    cx,
+                ),
+            ));
         if !project.is_empty() {
-            override_column = override_column
-                .child(self.role_dropdown(
-                    SETTINGS_ROLE_PROJECT_MODEL_DROPDOWN_ID,
-                    "Role model in this project",
-                    change.model.as_deref().unwrap_or(INHERIT),
-                    model_groups("Model: same as the role", None),
-                    cx,
-                ))
-                .child(self.role_dropdown(
-                    SETTINGS_ROLE_PROJECT_EFFORT_DROPDOWN_ID,
-                    "Role effort in this project",
-                    change.effort.as_deref().unwrap_or(INHERIT),
-                    effort_groups("Effort: same as the role"),
-                    cx,
-                ))
-                .child(self.role_dropdown(
-                    SETTINGS_ROLE_PROJECT_ACCESS_DROPDOWN_ID,
-                    "Role access in this project",
-                    change.access.map_or(INHERIT, |mode| mode.as_str()),
-                    access_groups("Access: same as the role"),
-                    cx,
-                ))
-                .child(field(&self.role_inputs.project_instructions, 80.0));
+            let change = self
+                .roles
+                .override_for(&project, &role.id)
+                .cloned()
+                .unwrap_or_default();
+            editor = editor.child(divided(
+                7,
+                div()
+                    .debug_selector(|| "desktop-settings-role-override".to_string())
+                    .pl(px(OVERRIDE_INDENT_PX))
+                    .flex()
+                    .flex_col()
+                    .child(field_row(
+                        0,
+                        "Model in this project",
+                        self.role_dropdown(
+                            SETTINGS_ROLE_PROJECT_MODEL_DROPDOWN_ID,
+                            "Role model in this project",
+                            change.model.as_deref().unwrap_or(INHERIT),
+                            model_groups("Same as the role", None),
+                            cx,
+                        ),
+                    ))
+                    .child(field_row(
+                        1,
+                        "Effort in this project",
+                        self.role_dropdown(
+                            SETTINGS_ROLE_PROJECT_EFFORT_DROPDOWN_ID,
+                            "Role effort in this project",
+                            change.effort.as_deref().unwrap_or(INHERIT),
+                            effort_groups("Same as the role"),
+                            cx,
+                        ),
+                    ))
+                    .child(field_row(
+                        2,
+                        "Access in this project",
+                        self.role_dropdown(
+                            SETTINGS_ROLE_PROJECT_ACCESS_DROPDOWN_ID,
+                            "Role access in this project",
+                            change.access.map_or(INHERIT, |mode| mode.as_str()),
+                            access_groups("Same as the role"),
+                            cx,
+                        ),
+                    ))
+                    .child(text_area_row(
+                        3,
+                        "Instructions in this project (empty keeps the role's)",
+                        "Role instructions in this project",
+                        &self.role_inputs.project_instructions,
+                    )),
+            ));
         }
-        rows.push(self.settings_row(
-            "desktop-settings-row-role-project",
-            "Project override",
-            "Type a project's name to change this role there. What you leave alone keeps the role's value.",
-            settings_ui::control_column(override_column.into_any_element()),
-        ));
-        rows.push(self.settings_row(
-            "desktop-settings-row-role-delete",
-            "Delete role",
-            "Threads that had it keep their model and lose its instructions.",
-            settings_ui::control_column(settings_button(
-                "desktop-settings-role-delete",
-                "Delete role",
-                false,
-                cx,
-                Self::delete_role,
-            )),
-        ));
+        rows.push(
+            editor
+                .child(divided(
+                    8,
+                    div().py_2().flex().justify_end().child(settings_button(
+                        "desktop-settings-role-delete",
+                        "Delete role",
+                        false,
+                        cx,
+                        Self::delete_role,
+                    )),
+                ))
+                .into_any_element(),
+        );
         rows
     }
 

@@ -57,6 +57,8 @@ const SIDEBAR_CARD_Y_PADDING_PX: f32 = 10.0;
 const SIDEBAR_CARD_LINE_HEIGHT_PX: f32 = 20.0;
 const SIDEBAR_CARD_LINE_GAP_PX: f32 = 4.0;
 const SIDEBAR_CARD_META_HEIGHT_PX: f32 = 16.0;
+/// Web: `max-w-24` on the role name.
+const SIDEBAR_CARD_ROLE_MAX_WIDTH_PX: f32 = 96.0;
 const SIDEBAR_CARD_TITLE_TEXT_PX: f32 = 14.0;
 const SIDEBAR_CARD_ROW_GAP_PX: f32 = 6.0;
 const SIDEBAR_CARD_DOT_PX: f32 = 9.0;
@@ -783,7 +785,10 @@ impl Workspace {
         // Web: the third line exists once the thread has a branch or a turn
         // (its model is recorded on the first send).
         let has_turns = !chat.messages.is_empty();
-        let has_meta = branch.is_some() || has_turns;
+        // The role's id keeps the line; its current name fills it. A deleted
+        // role leaves the name out (web).
+        let role = chat.role_profile.as_ref().map(|role| role.name.clone());
+        let has_meta = branch.is_some() || has_turns || chat.role.is_some();
         let meta_line = has_meta.then(|| {
             div()
                 .mt(px(SIDEBAR_CARD_LINE_GAP_PX))
@@ -812,6 +817,17 @@ impl Workspace {
                     )
                 })
                 .when(branch.is_none(), |el| el.child(div().flex_1()))
+                .when_some(role, |el, role| {
+                    el.child(
+                        div()
+                            .debug_selector(move || format!("desktop-thread-card-role-{debug_key}"))
+                            .flex_shrink_0()
+                            .max_w(px(SIDEBAR_CARD_ROLE_MAX_WIDTH_PX))
+                            .truncate()
+                            .text_color(theme::rambutan_400())
+                            .child(role),
+                    )
+                })
                 .when(has_turns, |el| el.child(provider_mark(provider, cx)))
         });
 

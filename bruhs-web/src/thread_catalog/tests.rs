@@ -39,6 +39,7 @@ fn thread(id: &str, project: &str) -> Thread {
         effort: None,
         run_locked: false,
         role: None,
+        instructions_stamp: None,
         import_context: None,
     }
 }

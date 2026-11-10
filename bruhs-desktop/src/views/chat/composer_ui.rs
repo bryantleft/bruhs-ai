@@ -36,6 +36,10 @@ pub const CHAT_HEADER_X_PADDING_PX: f32 = 20.0;
 pub const CHAT_HEADER_GAP_PX: f32 = 12.0;
 pub const CHAT_HEADER_TEXT_SIZE_PX: f32 = 14.0;
 pub const CHAT_HEADER_CRUMB_MAX_WIDTH_PX: f32 = 160.0;
+/// Web: the role tag is `max-w-32 text-label-sm` on `bg-longan-800/60`.
+pub const CHAT_HEADER_ROLE_MAX_WIDTH_PX: f32 = 128.0;
+pub const CHAT_HEADER_ROLE_TEXT_SIZE_PX: f32 = 12.0;
+const CHAT_HEADER_ROLE_BG_OPACITY: f32 = 0.60;
 pub const CHAT_HEADER_TOGGLE_HEIGHT_PX: f32 = 28.0;
 pub const CHAT_HEADER_TOGGLE_X_PADDING_PX: f32 = 8.0;
 pub const CHAT_HEADER_TOGGLE_GAP_PX: f32 = 4.0;
@@ -195,6 +199,8 @@ impl ChatView {
     pub(super) fn render_header(&self, cx: &Context<'_, Self>) -> AnyElement {
         let project = self.breadcrumb_project();
         let running = self.running_tasks_count;
+        // The thread's role, by its current name. A deleted role shows nothing.
+        let role = self.role_profile.as_ref().map(|role| role.name.clone());
         div()
             .id("chat-header")
             .debug_selector(|| "desktop-chat-header".to_string())
@@ -269,14 +275,38 @@ impl ChatView {
                         div()
                             .debug_selector(|| "desktop-chat-header-title".to_string())
                             .min_w_0()
-                            .flex_1()
+                            // With a role the tag sits right after the title
+                            // (web), so the title takes only its own width.
+                            .when(role.is_none(), |el| el.flex_1())
                             .truncate()
                             .text_color(theme::rambutan_100())
                             .child(
                                 bruhs_models::logic::text::plain_title(&self.thread_title)
                                     .into_owned(),
                             ),
-                    ),
+                    )
+                    .when_some(role, |el, role| {
+                        let hint = format!("Role: {role}. /role changes it.");
+                        el.child(
+                            div()
+                                .id("chat-header-role")
+                                .debug_selector(|| "desktop-chat-header-role".to_string())
+                                .flex_shrink_0()
+                                .max_w(px(CHAT_HEADER_ROLE_MAX_WIDTH_PX))
+                                .truncate()
+                                .rounded(px(4.0))
+                                .bg(theme::longan_800().opacity(CHAT_HEADER_ROLE_BG_OPACITY))
+                                .px(px(6.0))
+                                .text_size(px(CHAT_HEADER_ROLE_TEXT_SIZE_PX))
+                                .text_color(theme::rambutan_300())
+                                .tooltip(move |window, cx| {
+                                    Tooltip::new(hint.clone()).build(window, cx)
+                                })
+                                .child(role),
+                        )
+                        // Keeps the title and its tag at the left.
+                        .child(div().flex_1())
+                    }),
             )
             .child(
                 div()

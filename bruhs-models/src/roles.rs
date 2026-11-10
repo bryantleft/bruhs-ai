@@ -16,7 +16,7 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{model_info, AgentProvider, PermissionMode};
+use crate::agent::{model_info, model_label, AgentProvider, PermissionMode};
 use crate::logic::run_place::claude_effort;
 
 /// Most roles one user keeps.
@@ -348,6 +348,136 @@ pub fn narrow_access(current: PermissionMode, role: Option<PermissionMode>) -> P
     }
 }
 
+/// A stamp of the role instructions a provider session was started with;
+/// `None` for no instructions.
+///
+/// A session keeps the instructions it started with: the Claude CLI ignores
+/// a new appended system prompt when it resumes a session, and Codex reads a
+/// thread's context only when a session opens. A thread saves this stamp
+/// with its session, and [`instructions_changed`] says when the session can
+/// no longer be resumed as it is.
+pub fn instructions_stamp(instructions: Option<&str>) -> Option<String> {
+    let text = instructions
+        .map(str::trim)
+        .filter(|text| !text.is_empty())?;
+    // FNV-1a, written out: a saved stamp must mean the same in every build.
+    let mut hash: u64 = 0xcbf2_9ce4_8422_2325;
+    for byte in text.bytes() {
+        hash ^= u64::from(byte);
+        hash = hash.wrapping_mul(0x0000_0100_0000_01b3);
+    }
+    Some(format!("{hash:016x}"))
+}
+
+/// Whether a thread's saved session holds other instructions than the ones
+/// it runs with now: its role was set or removed with `/role`, or edited in
+/// Settings. Its next turn then starts a new session that carries the
+/// conversation so far, the way a change of provider does.
+pub fn instructions_changed(session_stamp: Option<&str>, instructions: Option<&str>) -> bool {
+    session_stamp != instructions_stamp(instructions).as_deref()
+}
+
+/// What `/role` does to a thread's role.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum RoleWrite {
+    Keep,
+    /// Give the thread this role. Its model, when it names one, becomes the
+    /// thread's model.
+    Set(ResolvedRole),
+    Remove,
+}
+
+/// The outcome of `/role [name]`: the write, and the line to show the user.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoleCommand {
+    pub write: RoleWrite,
+    pub notice: String,
+}
+
+/// Shown when there is no thread to give a role to.
+pub const ROLE_NEEDS_THREAD: &str = "Send a message first: a role belongs to a thread.";
+
+/// `/role none` and friends remove the role. A role with one of these names
+/// is still found first.
+const REMOVE_WORDS: [&str; 3] = ["none", "off", "clear"];
+
+/// The roles by name, for a notice.
+fn role_names(roles: &[ResolvedRole]) -> String {
+    roles
+        .iter()
+        .map(|role| role.name.as_str())
+        .collect::<Vec<_>>()
+        .join(", ")
+}
+
+/// `/role [name]` typed in a thread of `project` whose role id is `current`.
+///
+/// No argument shows the role and the roles there are. A role's name (in
+/// any case) gives the thread that role. `none`, `off` or `clear` removes
+/// it. The user sets their own thread's role, so nothing is refused here;
+/// the role's access still only narrows theirs each turn
+/// ([`narrow_access`]).
+pub fn role_command(
+    book: &RoleBook,
+    project: &str,
+    current: Option<&str>,
+    argument: &str,
+) -> RoleCommand {
+    let keep = |notice: String| RoleCommand {
+        write: RoleWrite::Keep,
+        notice,
+    };
+    let argument = argument.trim();
+    // A role that was deleted reads as no role.
+    let current = current.and_then(|id| book.resolve(id, project));
+    let roles = book.resolved(project);
+    if argument.is_empty() {
+        return keep(match (&current, roles.is_empty()) {
+            (Some(role), _) => match &role.model {
+                Some(model) => format!(
+                    "Role: {} ({}). /role none removes it.",
+                    role.name,
+                    model_label(model)
+                ),
+                None => format!("Role: {}. /role none removes it.", role.name),
+            },
+            (None, true) => "No roles yet. Add one in Settings → General.".to_string(),
+            (None, false) => format!(
+                "No role. Set one with /role <name>: {}.",
+                role_names(&roles)
+            ),
+        });
+    }
+    if let Some(role) = book.resolve(argument, project) {
+        let notice = match &role.model {
+            Some(model) => format!("Role: {}. Model: {}.", role.name, model_label(model)),
+            None => format!("Role: {}.", role.name),
+        };
+        return RoleCommand {
+            write: RoleWrite::Set(role),
+            notice,
+        };
+    }
+    if REMOVE_WORDS
+        .iter()
+        .any(|word| argument.eq_ignore_ascii_case(word))
+    {
+        return match current {
+            Some(_) => RoleCommand {
+                write: RoleWrite::Remove,
+                notice: "Role removed.".to_string(),
+            },
+            None => keep("No role is set.".to_string()),
+        };
+    }
+    let wanted = one_line(argument, MAX_NAME_CHARS);
+    keep(if roles.is_empty() {
+        format!("No role named “{wanted}”. Add one in Settings → General.")
+    } else {
+        format!("No role named “{wanted}”. Roles: {}.", role_names(&roles))
+    })
+}
+
 /// Models for the jobs that are not threads. `None` keeps the built-in
 /// default for that job.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -550,6 +680,94 @@ mod tests {
         assert_eq!(narrow_access(Plan, Some(AcceptEdits)), Plan);
         assert_eq!(narrow_access(AcceptEdits, Some(AcceptEdits)), AcceptEdits);
         assert_eq!(narrow_access(AcceptEdits, None), AcceptEdits);
+    }
+
+    #[test]
+    fn the_role_command_shows_sets_and_removes_a_threads_role() {
+        let (mut book, writer, executor) = book();
+        let none = RoleBook::default();
+        let keep = |command: RoleCommand| {
+            assert_eq!(command.write, RoleWrite::Keep);
+            command.notice
+        };
+        // No argument shows the role, or the roles there are.
+        assert_eq!(
+            keep(role_command(&none, "", None, "")),
+            "No roles yet. Add one in Settings → General."
+        );
+        assert_eq!(
+            keep(role_command(&book, "", None, "  ")),
+            "No role. Set one with /role <name>: Writer, Executor."
+        );
+        assert_eq!(
+            keep(role_command(&book, "", Some(&writer), "")),
+            "Role: Writer (Claude Sonnet 4.6). /role none removes it."
+        );
+        // A deleted role reads as no role.
+        assert!(keep(role_command(&book, "", Some("gone"), "")).starts_with("No role."));
+
+        // A name, in any case, sets the role as it runs in the project.
+        book.update_override("p", &writer, |change| {
+            change.model = Some("claude-haiku-4-5".into());
+        });
+        let set = role_command(&book, "p", None, " WRITER ");
+        let RoleWrite::Set(role) = &set.write else {
+            panic!("expected a role, got {set:?}");
+        };
+        assert_eq!(
+            (role.id.as_str(), role.model.as_deref()),
+            (writer.as_str(), Some("claude-haiku-4-5"))
+        );
+        assert_eq!(set.notice, "Role: Writer. Model: Claude Haiku 4.5.");
+        book.update(&executor, |role| role.model = None);
+        assert_eq!(
+            role_command(&book, "", Some(&writer), "executor").notice,
+            "Role: Executor."
+        );
+
+        // An unknown name changes nothing and lists the roles.
+        assert_eq!(
+            keep(role_command(&book, "", Some(&writer), "Reviewer")),
+            "No role named “Reviewer”. Roles: Writer, Executor."
+        );
+        assert_eq!(
+            keep(role_command(&none, "", None, "Reviewer")),
+            "No role named “Reviewer”. Add one in Settings → General."
+        );
+
+        // none, off and clear remove it; a role with such a name is set.
+        for word in ["none", "OFF", "clear"] {
+            let removed = role_command(&book, "", Some(&writer), word);
+            assert_eq!(removed.write, RoleWrite::Remove);
+            assert_eq!(removed.notice, "Role removed.");
+        }
+        assert_eq!(
+            keep(role_command(&book, "", None, "none")),
+            "No role is set."
+        );
+        let odd = book.add("None").unwrap();
+        let named = role_command(&book, "", Some(&writer), "none");
+        assert!(matches!(named.write, RoleWrite::Set(role) if role.id == odd));
+    }
+
+    #[test]
+    fn a_session_is_restarted_when_its_instructions_change() {
+        // No instructions, before and after: the session resumes.
+        assert_eq!(instructions_stamp(None), None);
+        assert_eq!(instructions_stamp(Some("  \n")), None);
+        assert!(!instructions_changed(None, None));
+        // A stamp is the same in every build, and ignores outer whitespace.
+        let stamp = instructions_stamp(Some("Write plainly.")).unwrap();
+        assert_eq!(stamp, "81ff4a13c3429acb");
+        assert_eq!(
+            instructions_stamp(Some(" Write plainly.\n")),
+            Some(stamp.clone())
+        );
+        assert!(!instructions_changed(Some(&stamp), Some("Write plainly.")));
+        // Set, edited or removed since the session started: restart.
+        assert!(instructions_changed(None, Some("Write plainly.")));
+        assert!(instructions_changed(Some(&stamp), Some("Be brief.")));
+        assert!(instructions_changed(Some(&stamp), None));
     }
 
     #[test]

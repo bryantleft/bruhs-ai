@@ -86,6 +86,10 @@ impl ChatView {
         self.session_provider = Some(self.turn_provider);
         self.fresh_session = false;
         self.import_context = None;
+        // A session that just started holds this turn's instructions.
+        if let Some(stamp) = self.turn_stamp.take() {
+            self.instructions_stamp = stamp;
+        }
     }
 }
 
@@ -427,6 +431,12 @@ impl ChatView {
             self.chip_draft.clear();
             self.write_composer("", window, cx);
             self.run_second_opinion(focus, cx);
+            return;
+        }
+        // A role is set on the thread, also while its turn runs.
+        if let CommandKind::Role(name) = classify_command(&trimmed, provider) {
+            self.write_composer("", window, cx);
+            cx.emit(ChatViewEvent::RoleCommand(name));
             return;
         }
         let typed_empty = trimmed.is_empty();
@@ -1557,9 +1567,24 @@ impl ChatView {
         let other_provider = !self.fresh_session
             && self.session_id.is_some()
             && self.session_provider != Some(provider);
+        // A session keeps the instructions it started with, so a role set,
+        // removed or edited since then needs a new session as well. A
+        // handoff only writes a brief; it keeps the session it has.
+        let stamp = bruhs_models::roles::instructions_stamp(instructions.as_deref());
+        let other_instructions = !self.handoff_pending
+            && !self.fresh_session
+            && self.session_id.is_some()
+            && self.instructions_stamp != stamp;
+        let fresh = self.fresh_session || other_instructions;
+        let resume = if fresh {
+            None
+        } else {
+            session_for_provider(self.session_id.as_deref(), self.session_provider, provider)
+        };
+        self.turn_stamp = resume.is_none().then_some(stamp);
         let carried = if self.handoff_pending {
             None
-        } else if other_provider {
+        } else if other_provider || other_instructions {
             self.conversation_context(&self.messages)
         } else {
             self.import_context.clone()
@@ -1608,14 +1633,10 @@ impl ChatView {
             .instructions(instructions)
             // A chat with no project needs no coding plugins (web: no `project_path`).
             .lean(!project_scoped);
-            if self.fresh_session {
+            if fresh {
                 turn.fresh()
             } else {
-                turn.resume(session_for_provider(
-                    self.session_id.as_deref(),
-                    self.session_provider,
-                    provider,
-                ))
+                turn.resume(resume)
             }
         })
     }
@@ -1737,6 +1758,10 @@ impl ChatView {
             } else {
                 self.run_second_opinion(focus, cx);
             }
+            return;
+        }
+        if let CommandKind::Role(name) = classify_command(command, provider) {
+            cx.emit(ChatViewEvent::RoleCommand(name));
             return;
         }
         let prepared = prepare_command(command, provider, self.goal.as_ref(), self.is_streaming);

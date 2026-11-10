@@ -434,6 +434,9 @@ pub enum ChatViewEvent {
     /// This thread's agent asks about, or writes to, another thread. The
     /// workspace owns the threads, so it answers.
     ThreadRequest(bruhs_models::thread_link::ThreadRequest),
+    /// `/role [name]`: show, set or remove this thread's role. The workspace
+    /// owns the roles, so it applies the command.
+    RoleCommand(String),
     /// Something the user should know about failed (shown as a banner).
     Notice(String),
     /// Saved chat content (messages or title) changed outside a turn's start
@@ -598,8 +601,16 @@ pub struct ChatView {
     pub thread_access: bruhs_models::thread_link::ThreadAccess,
     /// Models for the jobs that are not threads (Settings).
     pub task_models: bruhs_models::roles::TaskModels,
-    /// Id of this thread's role, when an agent started it with one. Saved.
+    /// Id of this thread's role: an agent started it with one, or the user
+    /// set it with `/role`. Saved.
     pub role: Option<String>,
+    /// Stamp of the role instructions this thread's session started with
+    /// (`roles::instructions_stamp`). A session keeps those, so when they
+    /// differ from the role's now, the next turn starts a new session. Saved.
+    pub instructions_stamp: Option<String>,
+    /// The stamp to keep once the running turn's session is announced.
+    /// `None` while the turn resumes a session, which keeps what it holds.
+    turn_stamp: Option<Option<String>>,
     /// That role as it runs in this thread's project, kept current by the
     /// workspace: its effort, access and instructions apply each turn.
     pub role_profile: Option<bruhs_models::roles::ResolvedRole>,
@@ -944,6 +955,8 @@ impl ChatView {
             thread_access: bruhs_models::thread_link::ThreadAccess::default(),
             task_models: bruhs_models::roles::TaskModels::default(),
             role: None,
+            instructions_stamp: None,
+            turn_stamp: None,
             role_profile: None,
             compact_full: false,
             previous_worktree: None,

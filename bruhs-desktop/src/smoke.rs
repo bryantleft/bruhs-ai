@@ -13,7 +13,8 @@
 //! - `BRUHS_DESKTOP_THREADS_SMOKE=1`: in a new project-less chat, have the
 //!   agent start a thread with `message_thread` and wait for that thread's
 //!   agent to answer back, then start threads with `wait` and with a role,
-//!   print what each thread received, then quit.
+//!   then set and remove a role on the first thread with `/role`, print
+//!   what each thread received, then quit.
 //!   Spends real tokens; use a scratch `BRUHS_DESKTOP_STATE_FILE`.
 //!
 //! None of this is compiled into a release build: a shipped app must not be
@@ -453,6 +454,56 @@ pub(crate) fn schedule_desktop_threads_smoke(
         eprintln!(
             "{tag} role_done={role_done} role={echo_role:?} role_model={echo_model:?} sender_model={sender_model:?} followed_instructions={} echo_reply={echo_reply:?}",
             echo_reply.contains("ROLE-OK"),
+        );
+
+        // `/role` by hand: this thread's session started without the role's
+        // instructions, so its next turn starts a new session that holds
+        // them. `/role none` then drops them again.
+        enter("/role echo", cx);
+        enter(
+            "Fourth harness check. Reply with one short sentence about rain. Do not call any tool.",
+            cx,
+        );
+        let watched = chat.clone();
+        let own_done = wait(cx, move |cx| {
+            cx.update(|cx| {
+                let chat = watched.read(cx);
+                !chat.is_streaming
+                    && chat.smoke_last_prompt().starts_with("Fourth harness check")
+                    && !chat.smoke_last_reply().trim().is_empty()
+            })
+        })
+        .await;
+        let ((own_model, own_role), own_reply) = cx.update(|cx| {
+            let chat = chat.read(cx);
+            (chat.smoke_model_and_role(), chat.smoke_last_reply())
+        });
+        eprintln!(
+            "{tag} own_role_done={own_done} own_role={own_role:?} own_model={own_model:?} followed_instructions={} own_reply={own_reply:?}",
+            own_reply.contains("ROLE-OK"),
+        );
+        enter("/role none", cx);
+        enter(
+            "Fifth harness check. Reply with the single word PLAIN-OK. Do not call any tool.",
+            cx,
+        );
+        let watched = chat.clone();
+        let plain_done = wait(cx, move |cx| {
+            cx.update(|cx| {
+                let chat = watched.read(cx);
+                !chat.is_streaming
+                    && chat.smoke_last_prompt().starts_with("Fifth harness check")
+                    && !chat.smoke_last_reply().trim().is_empty()
+            })
+        })
+        .await;
+        let ((_, plain_role), plain_reply) = cx.update(|cx| {
+            let chat = chat.read(cx);
+            (chat.smoke_model_and_role(), chat.smoke_last_reply())
+        });
+        eprintln!(
+            "{tag} role_removed_done={plain_done} role={plain_role:?} still_followed={} reply={plain_reply:?}",
+            plain_reply.contains("ROLE-OK"),
         );
         eprintln!("{tag} done");
         cx.update(|cx| cx.quit());

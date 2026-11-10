@@ -24,12 +24,13 @@ pub const COMPOSER_PLACEHOLDER: &str =
     "Ask anything, @ threads or files, # pull requests, $ skills, or / for commands";
 
 pub const COMMAND_HELP: &str = "\
-Available commands: /clear, /help, /model, /settings, /goal, /compact, /handoff, /second-opinion.\n\
+Available commands: /clear, /help, /model, /settings, /goal, /compact, /handoff, /second-opinion, /role.\n\
 Keyboard: ⌘K command bar, ⌘B sidebar, ⌘⇧T tasks panel, / focus chat, c new task (in tasks view).\n\
 /goal sets a goal for this thread. /goal clear removes it. Pause and resume are Codex goals. \
 /compact summarizes a Claude thread. Codex still waits. \
 /handoff <goal> writes a brief and opens a fresh thread with it. \
-/second-opinion [focus] asks the other provider to review the last answer.";
+/second-opinion [focus] asks the other provider to review the last answer. \
+/role <name> gives this thread a role from Settings. /role none removes it.";
 
 /// `/` menu. Skills stay on `$`.
 pub const SLASH_COMMANDS: &[SlashCommand] = &[
@@ -64,6 +65,10 @@ pub const SLASH_COMMANDS: &[SlashCommand] = &[
     SlashCommand {
         name: "/second-opinion",
         description: "Ask the other provider to review the last answer",
+    },
+    SlashCommand {
+        name: "/role",
+        description: "Give this thread a role",
     },
 ];
 
@@ -133,6 +138,9 @@ pub fn classify_command(text: &str, provider: AgentProvider) -> CommandKind {
     if let Some(focus) = command_argument(text, "/second-opinion") {
         return CommandKind::SecondOpinion(focus.to_string());
     }
+    if let Some(name) = command_argument(text, "/role") {
+        return CommandKind::Role(name.to_string());
+    }
     let Some(argument) = command_argument(text, "/goal") else {
         return CommandKind::Send;
     };
@@ -163,6 +171,9 @@ pub enum CommandKind {
     /// `/second-opinion [focus]`: a read-only review by the other provider.
     /// Never a turn of this thread; the surface starts the review.
     SecondOpinion(String),
+    /// `/role [name]`: show, set or remove this thread's role. Never a turn;
+    /// the surface applies `roles::role_command`.
+    Role(String),
 }
 
 /// Decide the goal write, the notice, and whether this message sends.
@@ -256,7 +267,7 @@ pub fn prepare_command(
             queue: streaming,
             stop: false,
         },
-        CommandKind::SecondOpinion(_) => PreparedCommand {
+        CommandKind::SecondOpinion(_) | CommandKind::Role(_) => PreparedCommand {
             write: GoalWrite::Keep,
             notice: None,
             send: false,
@@ -425,6 +436,19 @@ mod tests {
         );
         let review = prepare_command("/second-opinion", AgentProvider::Claude, None, false);
         assert!(!review.send && !review.queue, "a review is never a turn");
+        assert_eq!(
+            classify_command("/role  Writer ", AgentProvider::Codex),
+            CommandKind::Role("Writer".into())
+        );
+        assert_eq!(
+            classify_command("/roles", AgentProvider::Claude),
+            CommandKind::Send
+        );
+        let role = prepare_command("/role Writer", AgentProvider::Claude, None, true);
+        assert!(
+            !role.send && !role.queue && role.notice.is_none(),
+            "the surface applies a role"
+        );
         let handoff = prepare_command("/handoff x", AgentProvider::Claude, None, true);
         assert!(handoff.queue && !handoff.send, "waits for the running turn");
     }

@@ -29,7 +29,7 @@ use crate::state::{
     ChipRetargetGuard, ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal, ComposerChips,
     EffortMenuOpen, FollowUpSteerSignal, GitStatusSignal, ModelSelectOpen, PendingPermissions,
     PendingPermissionsSignal, PermissionModeSignal, PermissionRequest, PreviousWorktreeSignal,
-    PromptQueueSignal, PromptStashSignal, QueueHeldSignal, RunChoiceSignal, SetActiveThreadId,
+    PromptQueueSignal, PromptStashSignal, QueueHolds, RunChoiceSignal, SetActiveThreadId,
     SetActiveView, SetMessagesSignal, SetModelSelectOpen, SetPermissionModeSignal,
     SetProjectPickerOpen, StashMenuOpen, ThreadNotice, ThreadsSignal, Turns, UnreadThreads,
     UsageInfo, WorkspaceMenuOpen,
@@ -252,7 +252,7 @@ pub fn Composer(
     let ModelSelectOpen(model_select_open) = expect_context::<ModelSelectOpen>();
     let SetProjectPickerOpen(set_project_picker_open) = expect_context::<SetProjectPickerOpen>();
     let PromptQueueSignal(queue) = expect_context::<PromptQueueSignal>();
-    let QueueHeldSignal(queue_held) = expect_context::<QueueHeldSignal>();
+    let queue_holds = expect_context::<QueueHolds>();
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
     let editing_id = RwSignal::new(None::<String>);
     let prior_draft = RwSignal::new(String::new());
@@ -1135,9 +1135,11 @@ pub fn Composer(
                                     && attachments.with(|items| items.is_empty())
                                     && !ready_files
                             };
-                            let held = queue_held.get();
-                            let has_queued = active_thread_id
-                                .get()
+                            let thread_here = active_thread_id.get();
+                            let held = thread_here
+                                .as_deref()
+                                .is_some_and(|tid| queue_holds.is_held(tid));
+                            let has_queued = thread_here
                                 .is_some_and(|tid| queue.with(|items| items.has_for(&tid)));
                             let follow = FollowUp {
                                 wants_steer: follow_up_steer.get(),
