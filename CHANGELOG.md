@@ -45,6 +45,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - The desktop role editor now matches the web's: the role's fields sit under
   the Roles row, a project override is picked from a list, and roles come
   before the title instructions.
+- The dot Bruh in Settings → About now places its eyes and mouth exactly
+  where the logo has them, at every size.
 
 ## [0.1.1] - 2026-11-09
 

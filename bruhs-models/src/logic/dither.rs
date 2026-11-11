@@ -22,8 +22,8 @@ const RIM: f32 = 0.35;
 // center (the logo has them 102 and 101 units out): the hex grid is
 // symmetric, so mirrored eyes cut identical slits.
 const EYE_X: f32 = 101.5 / 300.0;
-const EYE_Y: f32 = -0.257;
-const MOUTH: (f32, f32) = (0.023, 0.26);
+const EYE_Y: f32 = (223.0 - 300.0) / 300.0;
+const MOUTH: (f32, f32) = ((307.0 - 300.0) / 300.0, (378.0 - 300.0) / 300.0);
 const EYE_RX: f32 = 40.0 / 300.0;
 const MOUTH_RX: f32 = 120.0 / 300.0;
 
@@ -60,10 +60,38 @@ impl Dot {
     }
 }
 
-/// Grid spacing for a face radius `r`: about 15 dots per radius on a large
-/// face, down to 9 on a small one (fewer turns the outline into a hexagon).
+/// Target grid spacing for a face radius `r`: about 15 dots per radius on a
+/// large face, down to 9 on a small one (fewer turns the outline into a
+/// hexagon). [`grid_for`] tightens it a little so the features land exactly.
 pub fn pitch_for(r: f32) -> f32 {
     r / (r / 10.0).clamp(9.0, 15.0)
+}
+
+/// The hex grid for one face size: dot spacing, row spacing, and where row 0
+/// sits below the center (row `n` is at `cy + phase + n * row_h`).
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Grid {
+    pub pitch: f32,
+    pub row_h: f32,
+    pub phase: f32,
+}
+
+/// The hex grid for a face radius, fitted to the mascot: the eye line and
+/// the mouth line both fall exactly on a row, where `bruhs.svg` puts them, at
+/// every size. The rows between them are a whole number (rounded up from
+/// [`pitch_for`]'s density, so the grid only gets finer), and the rows are
+/// anchored on the eye line instead of the ball's center. Columns still start
+/// at the center, so the face stays mirror-symmetric.
+pub fn grid_for(r: f32) -> Grid {
+    let gap = (MOUTH.1 - EYE_Y) * r;
+    let target = pitch_for(r) * 3.0_f32.sqrt() / 2.0;
+    let row_h = gap / (gap / target - 1e-6).ceil().max(1.0);
+    let eye_y = EYE_Y * r;
+    Grid {
+        pitch: 2.0 * row_h / 3.0_f32.sqrt(),
+        row_h,
+        phase: eye_y - (eye_y / row_h).round() * row_h,
+    }
 }
 
 /// Brightness (0 to 1) of the sphere at a point in face radii, or `None`
@@ -80,7 +108,7 @@ pub fn shade(dx: f32, dy: f32) -> Option<f32> {
 }
 
 /// Every dot of a static Bruh filling a `size` × `size` box (face radius
-/// 0.42 × size): a hex grid anchored on the face's center, each dot's area
+/// 0.42 × size), on the grid [`grid_for`] fits to the face, each dot's area
 /// tracking the light. The eyes and mouth are one row each (an oval hole cut
 /// across staggered rows comes out ▽ on one eye and △ on the other), with
 /// softened ends: dots just past a feature's end shrink or redden partway, as
@@ -90,17 +118,20 @@ pub fn bruh_dots(size: f32) -> Vec<Dot> {
         return Vec::new();
     }
     let (cx, cy, r) = (size / 2.0, size / 2.0, size * 0.42);
-    let pitch = pitch_for(r);
-    let row_h = pitch * 3.0_f32.sqrt() / 2.0;
-    let eye_row = (EYE_Y * r / row_h).round().to_i32_saturating();
-    let mouth_row = (MOUTH.1 * r / row_h).round().to_i32_saturating();
-    let rows = (r / row_h).ceil().to_i32_saturating() + 1;
+    let Grid {
+        pitch,
+        row_h,
+        phase,
+    } = grid_for(r);
+    let eye_row = ((EYE_Y * r - phase) / row_h).round().to_i32_saturating();
+    let mouth_row = ((MOUTH.1 * r - phase) / row_h).round().to_i32_saturating();
+    let rows = (r / row_h).ceil().to_i32_saturating() + 2;
     let cols = (r / pitch).ceil().to_i32_saturating() + 1;
     let soft = pitch * 0.6 / r;
 
     let mut dots = Vec::new();
     for row in -rows..=rows {
-        let y = cy + row.to_f32_lossy() * row_h;
+        let y = cy + phase + row.to_f32_lossy() * row_h;
         for col in -cols..=cols {
             // Offsets in whole half-steps, so a dot and its mirror twin get
             // exactly negated positions and the face stays symmetric.
@@ -210,13 +241,12 @@ mod tests {
                 > nearest(&dots, c + 0.5 * r, c + 0.6 * r).radius
         );
         // Eye slits: one row, mirror images (every face dot has a twin).
-        let row_h = pitch_for(r) * 3.0_f32.sqrt() / 2.0;
-        let eye_y = c + (EYE_Y * r / row_h).round() * row_h;
+        let eye_y = c + EYE_Y * r;
         let in_slit = |d: &&Dot, side: f32| {
             (d.y - eye_y).abs() < 1e-3 && (d.x - (c + side * EYE_X * r)).abs() <= EYE_RX * r
         };
         assert!(!dots.iter().any(|d| in_slit(&d, -1.0) || in_slit(&d, 1.0)));
-        let mouth_y = c + (MOUTH.1 * r / row_h).round() * row_h;
+        let mouth_y = c + MOUTH.1 * r;
         let face: Vec<&Dot> = dots
             .iter()
             .filter(|d| d.kind == DotKind::Face && (d.y - mouth_y).abs() > 1e-3)
@@ -228,6 +258,25 @@ mod tests {
         assert!(mouth.len() >= 6);
         assert!(mouth.iter().all(|d| (d.y - mouth[0].y).abs() < 1e-3));
         assert!(bruh_dots(0.0).is_empty());
+    }
+
+    #[test]
+    fn the_eye_and_mouth_lines_land_exactly_where_the_logo_has_them() {
+        for size in [48.0, 96.0, 180.0, 360.0, 720.0] {
+            let (c, r) = (size / 2.0, size * 0.42);
+            let grid = grid_for(r);
+            assert!(grid.pitch <= pitch_for(r) + 1e-4, "{size}: never coarser");
+            let dots = bruh_dots(size);
+            let on_row = |y: f32| dots.iter().any(|d| (d.y - y).abs() < 1e-3);
+            assert!(on_row(c + EYE_Y * r), "{size}: a row on the eye line");
+            assert!(on_row(c + MOUTH.1 * r), "{size}: a row on the mouth line");
+            let mouth: Vec<&Dot> = dots.iter().filter(|d| d.kind == DotKind::Mouth).collect();
+            assert!(!mouth.is_empty(), "{size}: a mouth");
+            assert!(
+                mouth.iter().all(|d| (d.y - (c + MOUTH.1 * r)).abs() < 1e-3),
+                "{size}: red off the mouth line"
+            );
+        }
     }
 
     #[test]

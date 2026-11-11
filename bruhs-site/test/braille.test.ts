@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
-import { FACE, MOUTH, bruhDots, pitchFor, shade, threshold } from "../src/scripts/braille.js";
+import { FACE, MOUTH, bruhDots, gridFor, pitchFor, shade, threshold } from "../src/scripts/braille.js";
+
+// bruhs.svg, in face radii (r = 300, center 300,300).
+const EYE_Y = -77 / 300;
+const MOUTH_Y = 78 / 300;
 
 const face = { cx: 200, cy: 200, r: 150 };
 const dots = bruhDots(400, 400, face);
@@ -44,19 +48,35 @@ describe("bruhDots", () => {
     assert.ok(near(140, 120).radius > near(280, 300).radius);
   });
 
+  it("lands the eye and mouth lines exactly where bruhs.svg puts them, at every size", () => {
+    for (const r of [20, 40, 96 * 0.42, 75, 150, 208, 300]) {
+      const size = Math.ceil(r * 2.5);
+      const c = size / 2;
+      const grid = gridFor(r);
+      assert.ok(grid.pitch <= pitchFor(r) + 1e-9, `r ${r}: the fitted grid is never coarser`);
+      const all = bruhDots(size, size, { cx: c, cy: c, r });
+      const rowYs = new Set(all.map((d) => d.y));
+      const onRow = (y: number) => [...rowYs].some((rowY) => Math.abs(rowY - y) < 1e-9);
+      assert.ok(onRow(c + EYE_Y * r), `r ${r}: a row on the eye line`);
+      assert.ok(onRow(c + MOUTH_Y * r), `r ${r}: a row on the mouth line`);
+      for (const d of all.filter((dot) => dot.kind === MOUTH)) assert.ok(Math.abs(d.y - (c + MOUTH_Y * r)) < 1e-9, `r ${r}: red dot off the mouth line`);
+    }
+  });
+
   it("cuts the eyes as one-row slits that mirror each other", () => {
-    const eyeRow = Math.round((-0.257 * 150) / ((pitchFor(150) * Math.sqrt(3)) / 2));
-    const inSlit = (d: { x: number; row: number }, side: number) =>
-      d.row === eyeRow && Math.abs(d.x - (200 + side * 0.3383 * 150)) <= (40 / 300) * 150;
+    const { pitch, rowH } = gridFor(150);
+    const eyeY = 200 + EYE_Y * 150;
+    const inSlit = (d: { x: number; y: number }, side: number) =>
+      Math.abs(d.y - eyeY) < 1e-9 && Math.abs(d.x - (200 + side * 0.3383 * 150)) <= (40 / 300) * 150;
     assert.equal(dots.filter((d) => inSlit(d, -1) || inSlit(d, 1)).length, 0);
     // The rows above and below keep their dots at the eye: a slit, not a hole.
-    for (const row of [eyeRow - 1, eyeRow + 1]) {
-      assert.ok(dots.some((d) => d.row === row && Math.abs(d.x - (200 - 0.3383 * 150)) < pitchFor(150)));
+    for (const y of [eyeY - rowH, eyeY + rowH]) {
+      assert.ok(dots.some((d) => Math.abs(d.y - y) < 1e-6 && Math.abs(d.x - (200 - 0.3383 * 150)) < pitch));
     }
     // Every face dot has a mirror twin, so both eyes are the same shape.
     const key = (x: number, y: number) => `${Math.round(x * 10)},${Math.round(y * 10)}`;
     const face_ = new Set(dots.filter((d) => d.kind === FACE).map((d) => key(d.x, d.y)));
-    const unmatched = dots.filter((d) => d.kind === FACE && Math.abs(d.y - (200 + 0.26 * 150)) > 6 && !face_.has(key(400 - d.x, d.y)));
+    const unmatched = dots.filter((d) => d.kind === FACE && Math.abs(d.y - (200 + MOUTH_Y * 150)) > 6 && !face_.has(key(400 - d.x, d.y)));
     assert.equal(unmatched.length, 0);
   });
 
