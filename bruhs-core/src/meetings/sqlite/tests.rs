@@ -30,6 +30,98 @@ async fn pair(store: &SqliteMeetingStore) -> (PersonProfile, PersonProfile) {
 }
 
 #[tokio::test]
+async fn repeated_contact_references_preserve_relations_retargeting_and_missing_contact_rollback() {
+    let (directory, store) = fixture().await;
+    let (source, target) = pair(&store).await;
+    let mut meeting = Meeting::new("Repeated assignments", 1.0);
+    meeting.updated_at = 4_000_000_000_000;
+    for speaker in &mut meeting.speakers {
+        speaker.person_id = Some(source.id.clone());
+        speaker.label.clone_from(&source.display_name);
+    }
+    meeting.summary = Some(bruhs_models::MeetingSummary {
+        tldr: "Preserve every reference".into(),
+        action_items: [&source.id, &source.id, &target.id]
+            .into_iter()
+            .map(|id| bruhs_models::ActionItem {
+                text: "Assigned action".into(),
+                assignee_person_id: Some(id.clone()),
+                due_hint: None,
+            })
+            .collect(),
+        decisions: Vec::new(),
+        topics: Vec::new(),
+        generated_by: "fixture".into(),
+        generated_at: 1,
+    });
+    assert_eq!(
+        store.create_meeting(meeting.clone()).await.unwrap(),
+        meeting
+    );
+    let mut expected_ids = vec![source.id.clone(), target.id.clone()];
+    expected_ids.sort();
+    assert_eq!(relation_ids(&store, &meeting.id).await, expected_ids);
+
+    let mut invalid = meeting.clone();
+    invalid.id = "missing-contact-rollback".into();
+    invalid
+        .summary
+        .as_mut()
+        .unwrap()
+        .action_items
+        .push(bruhs_models::ActionItem {
+            text: "Missing assignment".into(),
+            assignee_person_id: Some("missing".into()),
+            due_hint: None,
+        });
+    assert!(matches!(
+        store.create_meeting(invalid.clone()).await,
+        Err(MeetingStoreError::PersonNotFound { id }) if id == "missing"
+    ));
+    assert!(store.get_meeting(&invalid.id).await.unwrap().is_none());
+    assert!(relation_ids(&store, &invalid.id).await.is_empty());
+    assert_eq!(relation_ids(&store, &meeting.id).await, expected_ids);
+
+    store
+        .merge_person_into(&source.id.parse().unwrap(), &target.id.parse().unwrap())
+        .await
+        .unwrap();
+    for speaker in &mut meeting.speakers {
+        speaker.person_id = Some(target.id.clone());
+        speaker.label.clone_from(&target.display_name);
+    }
+    for action in &mut meeting.summary.as_mut().unwrap().action_items {
+        action.assignee_person_id = Some(target.id.clone());
+    }
+    meeting.updated_at += 1;
+    drop(store);
+    let reopened = SqliteMeetingStore::open(directory.path().join("meetings.sqlite3"))
+        .await
+        .unwrap();
+    assert_eq!(
+        reopened.get_meeting(&meeting.id).await.unwrap(),
+        Some(meeting.clone())
+    );
+    assert_eq!(relation_ids(&reopened, &meeting.id).await, vec![target.id]);
+}
+
+async fn relation_ids(store: &SqliteMeetingStore, meeting_id: &str) -> Vec<String> {
+    let id = meeting_id.to_owned();
+    store
+        .call(move |connection| {
+            connection
+                .prepare(
+                    "SELECT person_id FROM meeting_people WHERE meeting_id=?1 ORDER BY person_id",
+                )?
+                .query_map([id], |row| row.get(0))?
+                .collect::<Result<Vec<String>, _>>()
+                .map_err(MeetingStoreError::from)
+        })
+        .await
+        .unwrap()
+}
+
+#[tokio::test]
 async fn restart_preserves_contacts_merge_receipt_originals_and_linked_meetings() {
     let (directory, store) = fixture().await;
     let (source, target) = pair(&store).await;

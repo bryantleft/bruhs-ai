@@ -36,6 +36,8 @@ pub(super) fn save_meeting(connection: &Connection, value: &Meeting) -> MeetingS
         "DELETE FROM meeting_people WHERE meeting_id=?1",
         [&value.id],
     )?;
+    let mut referenced_people = std::collections::HashSet::new();
+    let mut insert_reference = None;
     for id in value
         .speakers
         .iter()
@@ -47,13 +49,19 @@ pub(super) fn save_meeting(connection: &Connection, value: &Meeting) -> MeetingS
                 .filter_map(|item| item.assignee_person_id.as_ref())
         }))
     {
+        if !referenced_people.insert(id) {
+            continue;
+        }
         if contacts::person(connection, id)?.is_none() {
             return Err(MeetingStoreError::PersonNotFound { id: id.clone() });
         }
-        connection.execute(
-            "INSERT OR IGNORE INTO meeting_people(meeting_id,person_id) VALUES(?1,?2)",
-            [&value.id, id],
-        )?;
+        let insert = match insert_reference.as_mut() {
+            Some(insert) => insert,
+            None => insert_reference.insert(connection.prepare(
+                "INSERT OR IGNORE INTO meeting_people(meeting_id,person_id) VALUES(?1,?2)",
+            )?),
+        };
+        insert.execute([&value.id, id])?;
     }
     Ok(())
 }
