@@ -21,6 +21,7 @@ use wasm_bindgen::JsValue;
 
 pub mod meeting_generations;
 pub mod meeting_notes;
+mod messages;
 pub mod metadata;
 pub mod people;
 pub mod relationships;
@@ -35,7 +36,9 @@ use crate::state::{
 };
 
 const DB_NAME: &str = "bruhs";
-const DB_VERSION: u32 = 11;
+// v12 also gates the conversation envelope format. Older tabs must close
+// before a writer can replace a structured record with a JSON envelope.
+const DB_VERSION: u32 = 12;
 const STORE_MEETING_GENERATIONS: &str = "meeting_generations";
 const STORE_METADATA: &str = "metadata";
 const STORE_THREADS: &str = "threads";
@@ -266,8 +269,7 @@ pub(crate) async fn load_messages(
         let store = tx.object_store(STORE_MESSAGES)?;
         match store.get(JsValue::from_str(thread_id))?.await? {
             Some(raw) => {
-                let record: MessagesRecord =
-                    from_js(raw).map_err(|_| metadata::SaveError::Corrupt)?;
+                let record = messages::decode(raw)?;
                 if record.thread_id != thread_id {
                     return Err(metadata::SaveError::Corrupt);
                 }

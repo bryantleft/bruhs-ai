@@ -12,12 +12,15 @@ extern "C" {
     fn stringify_metadata(value: &JsValue) -> Result<JsValue, JsValue>;
 }
 
+pub(in crate::storage) fn json_string<T: Serialize>(value: &T) -> Option<String> {
+    value.serialize(JsonSafe).ok()?;
+    serde_json::to_string(value).ok()
+}
+
 pub(in crate::storage) fn encode<T: Serialize>(value: &T) -> Result<JsValue, idb::Error> {
-    if value.serialize(JsonSafe).is_ok() {
-        if let Ok(json) = serde_json::to_string(value) {
-            if let Ok(encoded) = js_sys::JSON::parse(&json) {
-                return Ok(encoded);
-            }
+    if let Some(json) = json_string(value) {
+        if let Ok(encoded) = js_sys::JSON::parse(&json) {
+            return Ok(encoded);
         }
     }
     // Big integers, non-finite floats and other special serde representations

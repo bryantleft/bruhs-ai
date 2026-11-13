@@ -240,8 +240,8 @@ fn is_false(value: &bool) -> bool {
 }
 
 /// One chat message. `parts` is the only copy of its content; the flat
-/// `content` / `thinking` / `tool_calls` fields of the stored record are
-/// derived from it when saving (see [`MessageRecord`]).
+/// `content` / `thinking` / `tool_calls` fields of legacy structured records
+/// and recovery exports are derived from it (see [`MessageRecord`]).
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(from = "MessageRecord", into = "MessageRecord")]
 pub struct AgentMessage {
@@ -266,10 +266,11 @@ pub struct AgentMessage {
     pub checkpoint: Option<String>,
 }
 
-/// The IndexedDB shape of an [`AgentMessage`], unchanged from before the
+/// The legacy structured shape of an [`AgentMessage`], unchanged from before the
 /// message had a status and a single copy of its content: `is_streaming` +
 /// `completed_at_ms`, and flat `content` / `thinking` / `tool_calls` next to
-/// `parts`. Saving writes all of them so older builds still read the record.
+/// `parts`. Recovery and the structured fallback retain that compatibility.
+/// Versioned JSON storage envelopes write ordered parts once instead.
 /// Loading accepts records without `parts` (the oldest ones), whose parts
 /// are rebuilt in the order the old renderer showed them: thinking, text,
 /// tools.

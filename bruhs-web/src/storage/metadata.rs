@@ -9,7 +9,7 @@ use super::{open_db, STORE_METADATA};
 mod codec;
 mod json_safe;
 mod save_scheduler;
-pub(super) use codec::encode;
+pub(super) use codec::{encode, json_string};
 pub use save_scheduler::yield_before_save;
 
 #[derive(Debug)]
