@@ -85,6 +85,15 @@ where
                         continue;
                     }
                 };
+                if let MeetingEvent::TranscriptionCompleted { meeting_id } = &event {
+                    if let Some(runtime) = state.reactive() {
+                        if let Err(error) = runtime.record_app_completion("meeting.transcribed", meeting_id).await {
+                            tracing::warn!("Transcription completion could not be saved for reactive agents: {error}");
+                            // Capture's recovery feed will retry the completion
+                            // receipt before acknowledging it, independent of SSE.
+                        }
+                    }
+                }
                 if let MeetingEvent::Segment { meeting_id, segment } = &event {
                     match state
                         .meetings()

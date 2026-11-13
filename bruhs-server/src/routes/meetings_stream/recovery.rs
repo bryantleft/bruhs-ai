@@ -56,6 +56,12 @@ impl pager::Feed for Completions {
         receipt: &CaptureRecoveryReceipt,
     ) -> Result<bool, MeetingStoreError> {
         state.meetings().enqueue_capture_receipt(receipt).await?;
+        if let Some(runtime) = state.reactive() {
+            runtime
+                .record_app_completion("meeting.transcribed", &receipt.meeting_id)
+                .await
+                .map_err(|error| MeetingStoreError::PersistenceFailed(error.to_string()))?;
+        }
         Ok(true)
     }
 

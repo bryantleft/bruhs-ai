@@ -2,6 +2,7 @@ mod config;
 mod error;
 mod local_access;
 mod parent_watch;
+mod reactive_events;
 mod routes;
 mod static_assets;
 
@@ -33,6 +34,10 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if bruhs_core::reactive_tools::is_mcp_helper() {
+        bruhs_core::reactive_tools::run_mcp_helper().await?;
+        return Ok(());
+    }
     if bruhs_core::secrets::is_mcp_helper() {
         bruhs_core::secrets::run_mcp_helper().await?;
         return Ok(());
@@ -58,6 +63,16 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .meetings(Arc::new(store))
         .build();
     let state = Arc::new(state);
+    let reactive = bruhs_core::reactive::ReactiveRuntime::open(
+        bruhs_core::reactive::ReactiveRuntime::default_path()?,
+    )
+    .await?;
+    state.attach_reactive(reactive.clone())?;
+    // Claim the port before any configured source command or agent can run.
+    let addr = format!("127.0.0.1:{}", config.port);
+    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    let _reactive_worker = reactive.start(Arc::clone(&state))?;
+    let _reactive_events = reactive_events::start(reactive.clone(), Arc::clone(&state));
     // Google Calendar sync (when BRUHS_GOOGLE_* is configured).
     state.start_background(&tokio::runtime::Handle::current());
     // One upstream subscription and bounded linking worker for the process,
@@ -96,10 +111,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             )
             .with_release(env!("BRUHS_RELEASE_VERSION")),
         ),
-    });
-
-    let addr = format!("127.0.0.1:{}", config.port);
-    let listener = tokio::net::TcpListener::bind(&addr).await?;
+    })
+    .layer(axum::Extension(reactive));
     tracing::info!("bruhs-server listening on http://{addr}");
     serve(listener, app).await?;
     Ok(())
@@ -189,6 +202,18 @@ fn router(state: ServerState) -> Router {
     let spa = static_assets::service(&state.config.spa_dir);
 
     Router::new()
+        .route("/api/reactive", get(routes::reactive::snapshot))
+        .route("/api/reactive/commands", post(routes::reactive::command))
+        .route(
+            "/api/reactive/sources/{id}/token",
+            get(routes::reactive::token),
+        )
+        .route(
+            "/api/reactive/hooks/{id}",
+            post(routes::reactive::hook).layer(DefaultBodyLimit::max(
+                bruhs_models::reactive::MAX_PAYLOAD_BYTES,
+            )),
+        )
         .route("/api/agent", post(routes::agent::post_agent))
         .route("/api/agent/steer", post(routes::agent::post_steer))
         .route(
