@@ -1469,6 +1469,7 @@ name = "claude-sdk-rs"
 version = "0.3.0"
 dependencies = [
  "futures-core",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",
@@ -1573,6 +1574,7 @@ name = "codex-sdk-rs"
 version = "0.1.0"
 dependencies = [
  "futures-core",
+ "libc",
  "serde",
  "serde_json",
  "tempfile",

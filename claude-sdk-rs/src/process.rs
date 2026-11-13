@@ -88,6 +88,29 @@ pub(crate) struct CliProcess {
     child: Child,
     stdout: BufReader<ChildStdout>,
     stderr: StderrTail,
+    #[cfg(unix)]
+    group: ProcessGroup,
+}
+
+#[cfg(unix)]
+struct ProcessGroup(Option<i32>);
+
+#[cfg(unix)]
+impl ProcessGroup {
+    fn terminate(&mut self) {
+        if let Some(id) = self.0.take() {
+            // SAFETY: spawn creates a new process group whose positive id is
+            // the child pid. Negating it targets only that owned group.
+            let _ = unsafe { libc::kill(-id, libc::SIGKILL) };
+        }
+    }
+}
+
+#[cfg(unix)]
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        self.terminate();
+    }
 }
 
 impl CliProcess {
@@ -101,7 +124,16 @@ impl CliProcess {
         cmd.stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        #[cfg(unix)]
+        cmd.process_group(0);
         let mut child = cmd.spawn()?;
+        #[cfg(unix)]
+        let group = ProcessGroup(
+            child
+                .id()
+                .and_then(|id| i32::try_from(id).ok())
+                .filter(|id| *id > 0),
+        );
         let stdout = child
             .stdout
             .take()
@@ -115,6 +147,8 @@ impl CliProcess {
             child,
             stdout: BufReader::new(stdout),
             stderr: StderrTail::drain(stderr),
+            #[cfg(unix)]
+            group,
         })
     }
 
@@ -187,6 +221,11 @@ impl CliProcess {
             },
         };
         if status.success() {
+            // A completed turn may intentionally have started a background task.
+            #[cfg(unix)]
+            {
+                self.group.0 = None;
+            }
             self.stderr.abort();
             return None;
         }
@@ -195,6 +234,8 @@ impl CliProcess {
     }
 
     async fn kill_and_reap(&mut self) -> Option<ExitStatus> {
+        #[cfg(unix)]
+        self.group.terminate();
         // An error here means the process already exited; `wait` below still
         // reaps it and returns its status.
         let _ = self.child.start_kill();
@@ -204,6 +245,11 @@ impl CliProcess {
     }
 
     async fn failure(self, message: String, exit_code: Option<i32>) -> ProcessFailure {
+        #[cfg(unix)]
+        {
+            let mut group = self.group;
+            group.terminate();
+        }
         ProcessFailure {
             message,
             exit_code,
@@ -297,5 +343,36 @@ mod process_tests {
             quiet.to_string(),
             "cli exited unsuccessfully (exit status: 3)"
         );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancelling_a_turn_terminates_its_shell_descendants() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "sleep 30 & echo $!; wait"]);
+        let mut process = CliProcess::spawn("fixture", &mut command).unwrap();
+        let (tx, rx) = mpsc::channel::<()>(1);
+        let pid = process
+            .next_line(&tx)
+            .await
+            .unwrap_or_else(|_| panic!("missing child pid"));
+        let pid: u32 = pid.trim().parse().unwrap();
+        drop(rx);
+        assert!(process.finish(Ending::ConsumerGone).await.is_none());
+        let status = Command::new("ps")
+            .args(["-o", "stat=", "-p", &pid.to_string()])
+            .output()
+            .await
+            .unwrap();
+        let state = String::from_utf8_lossy(&status.stdout);
+        let stopped = state.trim().is_empty() || state.trim_start().starts_with('Z');
+        if !stopped {
+            // Clean up the fixture even when the cancellation assertion fails.
+            let _ = Command::new("kill")
+                .args(["-KILL", &pid.to_string()])
+                .status()
+                .await;
+        }
+        assert!(stopped, "cancelled CLI left child {pid} running: {state}");
     }
 }
