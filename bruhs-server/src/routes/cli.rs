@@ -24,10 +24,7 @@ pub enum CliError {
 
 /// Human name of `provider`'s CLI.
 pub fn cli_name(provider: AgentProvider) -> &'static str {
-    match provider {
-        AgentProvider::Claude => "Claude Code",
-        AgentProvider::Codex => "Codex",
-    }
+    provider.label()
 }
 
 /// Run `program args` to completion with stdin closed, killing it if it
@@ -53,8 +50,20 @@ pub async fn run(
     }
 }
 
-/// The `{provider}` path segment; anything but `claude`/`codex` is a 400
-/// with the usual JSON error body.
+/// Sign-in instructions for runtimes that own their interactive setup.
+pub fn setup_hint(provider: AgentProvider) -> Option<&'static str> {
+    match provider {
+        AgentProvider::Claude | AgentProvider::Codex => None,
+        AgentProvider::Cursor => Some("Run `cursor-agent login` in a terminal."),
+        AgentProvider::Antigravity => Some("Run `agy` in a terminal and complete sign-in."),
+        AgentProvider::Grok => Some("Run `~/.grok/bin/agent login` in a terminal."),
+        AgentProvider::OpenCode => {
+            Some("Run `opencode auth login` in a terminal and configure your provider.")
+        }
+    }
+}
+
+/// The `{provider}` path segment; unknown names are a 400 with the usual JSON error body.
 pub fn provider(
     path: Result<Path<AgentProvider>, PathRejection>,
 ) -> Result<AgentProvider, AppError> {

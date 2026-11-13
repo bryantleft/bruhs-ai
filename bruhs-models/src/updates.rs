@@ -31,11 +31,20 @@ pub const LAST_LINE_LIMIT: usize = 200;
 /// How long a successful run stays in the sidebar.
 pub const SUCCESS_VISIBLE_MS: i64 = 3_000;
 
-/// The npm package that ships `provider`'s CLI.
-pub fn npm_package(provider: AgentProvider) -> &'static str {
+/// Whether bruhs owns CLI compatibility checks and update commands.
+pub fn managed_provider(provider: AgentProvider) -> bool {
+    matches!(provider, AgentProvider::Claude | AgentProvider::Codex)
+}
+
+/// The npm package for a managed CLI. External runtimes update through their own installer.
+pub fn npm_package(provider: AgentProvider) -> Option<&'static str> {
     match provider {
-        AgentProvider::Claude => "@anthropic-ai/claude-code",
-        AgentProvider::Codex => "@openai/codex",
+        AgentProvider::Claude => Some("@anthropic-ai/claude-code"),
+        AgentProvider::Codex => Some("@openai/codex"),
+        AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => None,
     }
 }
 
@@ -44,15 +53,16 @@ pub fn binary_name(provider: AgentProvider) -> &'static str {
     match provider {
         AgentProvider::Claude => "claude",
         AgentProvider::Codex => "codex",
+        AgentProvider::Cursor => "cursor-agent",
+        AgentProvider::Antigravity => "agy",
+        AgentProvider::Grok => "grok",
+        AgentProvider::OpenCode => "opencode",
     }
 }
 
 /// The name people know the CLI by.
 pub fn provider_cli_label(provider: AgentProvider) -> &'static str {
-    match provider {
-        AgentProvider::Claude => "Claude Code",
-        AgentProvider::Codex => "Codex",
-    }
+    provider.label()
 }
 
 // ---------------------------------------------------------------------------
@@ -237,6 +247,13 @@ fn policy(provider: AgentProvider) -> &'static CompatPolicy {
     match provider {
         AgentProvider::Claude => &CLAUDE,
         AgentProvider::Codex => &CODEX,
+        AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => &CompatPolicy {
+            recommended: "Managed externally",
+            ranges: &[],
+        },
     }
 }
 
@@ -361,8 +378,15 @@ pub fn detect_install(provider: AgentProvider, on_path: &str, resolved: &str) ->
     let lower_on = on_path.to_lowercase();
     let lower = resolved.to_lowercase();
     let either = |needle: &str| lower_on.contains(needle) || lower.contains(needle);
-    let npm = npm_package(provider);
     let tool = binary_name(provider);
+    let Some(npm) = npm_package(provider) else {
+        return Install {
+            manager: InstallManager::Unknown,
+            package: tool.into(),
+            prefix: None,
+            tracks_latest: false,
+        };
+    };
     let install = |manager, package: &str, prefix: Option<String>| Install {
         manager,
         package: package.to_string(),
@@ -388,7 +412,11 @@ pub fn detect_install(provider: AgentProvider, on_path: &str, resolved: &str) ->
                 return install(InstallManager::Native, npm, Some(home.to_string()));
             }
         }
-        AgentProvider::Claude => {}
+        AgentProvider::Claude
+        | AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => {}
     }
     if either("/.vite-plus/bin/") || either("/.local/share/vite-plus/bin/") {
         return install(InstallManager::VitePlus, npm, None);

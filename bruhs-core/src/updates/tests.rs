@@ -384,3 +384,24 @@ fn tail_keeps_the_end() {
     assert!(tail.len() <= RUN_OUTPUT_LIMIT + '…'.len_utf8());
     assert_eq!(super::tail("  ok \n", 10), "ok");
 }
+
+#[tokio::test]
+async fn external_runtime_updates_are_manual_and_never_start_an_installer() {
+    let checker = UpdateChecker::with_env(BuildInfo::default(), None, None);
+    for provider in [
+        AgentProvider::Cursor,
+        AgentProvider::Antigravity,
+        AgentProvider::Grok,
+        AgentProvider::OpenCode,
+    ] {
+        assert!(matches!(
+            checker.start_update(provider),
+            Err(StartError::UnmanagedProvider)
+        ));
+        let status = check_provider_on(provider, None, true).await;
+        assert_eq!(status.state, ProviderUpdateState::Unknown);
+        assert_eq!(status.update_command, None);
+        assert!(status.manual_hint.is_some());
+    }
+    assert!(checker.runs().is_empty());
+}

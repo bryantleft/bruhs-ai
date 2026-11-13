@@ -207,6 +207,14 @@ async fn check_provider_on(
         compat: None,
         error: None,
     };
+    if !bruhs_models::updates::managed_provider(provider) {
+        update.state = ProviderUpdateState::Unknown;
+        update.manual_hint = Some(format!(
+            "Update {} using its own installer.",
+            provider_cli_label(provider)
+        ));
+        return update;
+    }
     let Some(on_path) = find_on_path(binary_name(provider), path) else {
         return update.settle();
     };
@@ -291,7 +299,12 @@ async fn latest_version(
     install: &Install,
     path: Option<&OsString>,
 ) -> Result<String, String> {
-    let package = npm_package(provider);
+    let package = npm_package(provider).ok_or_else(|| {
+        format!(
+            "{} updates are managed by its own installer.",
+            provider_cli_label(provider)
+        )
+    })?;
     match install.manager {
         InstallManager::Homebrew | InstallManager::HomebrewCask => {
             return homebrew_latest(install, path).await;
@@ -622,6 +635,8 @@ pub struct UpdateChecker {
 pub enum StartError {
     #[error("An update is already running for this provider.")]
     AlreadyRunning,
+    #[error("This runtime updates through its own installer.")]
+    UnmanagedProvider,
 }
 
 impl UpdateChecker {
@@ -684,6 +699,9 @@ impl UpdateChecker {
     /// Must be called inside a tokio runtime. The run outlives the caller:
     /// a dropped request or closed window does not stop the installer.
     pub fn start_update(&self, provider: AgentProvider) -> Result<ProviderRun, StartError> {
+        if !bruhs_models::updates::managed_provider(provider) {
+            return Err(StartError::UnmanagedProvider);
+        }
         let run = {
             let mut runs = self
                 .inner

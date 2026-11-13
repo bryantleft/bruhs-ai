@@ -63,10 +63,17 @@ fn run(binary: &Path, args: &[&str], stdin: Option<&str>) -> Result<String, Stri
 }
 
 /// T3's provider instance id for `provider`.
-fn t3_provider(provider: AgentProvider) -> &'static str {
+fn t3_provider(provider: AgentProvider) -> Result<&'static str, String> {
     match provider {
-        AgentProvider::Claude => "claudeAgent",
-        AgentProvider::Codex => "codex",
+        AgentProvider::Claude => Ok("claudeAgent"),
+        AgentProvider::Codex => Ok("codex"),
+        AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => Err(format!(
+            "T3 export does not yet support the {} runtime. Export the transcript instead.",
+            provider.label()
+        )),
     }
 }
 
@@ -85,6 +92,9 @@ pub fn export_to_t3(
     markdown: &str,
 ) -> Result<String, ImportError> {
     let failed = |message: String| ImportError::Database("T3 Code", message);
+    let runtime = AgentProvider::for_model(model);
+    let provider = t3_provider(runtime).map_err(failed)?;
+    let model = runtime.model_id(model);
     let binary = t3_binary().ok_or_else(|| failed("the t3 CLI is not installed".into()))?;
     let project = project.to_string_lossy();
     // A title starting with `-` would read as an option.
@@ -92,7 +102,6 @@ pub fn export_to_t3(
         .filter(|title| !title.is_empty())
         .unwrap_or("bruhs thread");
     let message = t3_export_prompt(markdown);
-    let provider = t3_provider(AgentProvider::for_model(model));
     let start = || {
         run(
             &binary,

@@ -16,7 +16,9 @@ use std::collections::BTreeMap;
 
 use serde::{Deserialize, Serialize};
 
-use crate::agent::{model_info, model_label, AgentProvider, PermissionMode};
+use crate::agent::{
+    custom_model_selection, model_info, model_label, AgentProvider, PermissionMode,
+};
 use crate::logic::run_place::claude_effort;
 
 /// Most roles one user keeps.
@@ -104,9 +106,15 @@ fn clip(text: &str, max: usize) -> String {
     text.chars().take(max).collect()
 }
 
-/// A model id the pickers offer, or `None`.
+/// A built-in or explicitly routed custom model, or `None`.
 fn known_model(model: Option<String>) -> Option<String> {
-    model.filter(|id| model_info(id).is_some())
+    model.and_then(|id| {
+        if model_info(&id).is_some() {
+            Some(id)
+        } else {
+            custom_model_selection(&id).map(|model| model.into_inner())
+        }
+    })
 }
 
 /// A Claude effort level, or `None`.
@@ -508,6 +516,10 @@ impl TaskModels {
         match reviewer {
             AgentProvider::Claude => self.review_claude.as_deref(),
             AgentProvider::Codex => self.review_codex.as_deref(),
+            AgentProvider::Cursor
+            | AgentProvider::Antigravity
+            | AgentProvider::Grok
+            | AgentProvider::OpenCode => None,
         }
     }
 
@@ -526,6 +538,38 @@ impl TaskModels {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_runtime_models_survive_role_storage_without_enabling_unsupported_task_jobs() {
+        for model in [
+            "cursor/sonnet-4",
+            "antigravity/gemini-3.1-pro",
+            "grok/grok-4",
+            "opencode/custom/local-model",
+        ] {
+            let mut book = RoleBook::default();
+            let role = book.add("Custom model").unwrap();
+            book.update(&role, |entry| entry.model = Some(model.into()));
+            let stored = serde_json::to_string(&book).unwrap();
+            let restored = serde_json::from_str::<RoleBook>(&stored)
+                .unwrap()
+                .sanitized();
+            assert_eq!(
+                restored.resolve(&role, "").unwrap().model.as_deref(),
+                Some(model)
+            );
+            let tasks = TaskModels {
+                summary: Some(model.into()),
+                review_claude: Some(model.into()),
+                review_codex: Some(model.into()),
+            }
+            .sanitized();
+            assert_eq!(tasks.summary, None);
+            assert_eq!(tasks.review_claude, None);
+            assert_eq!(tasks.review_codex, None);
+        }
+        assert_eq!(known_model(Some("opencode/bad model".into())), None);
+    }
 
     const CLAUDE: &str = "claude-sonnet-4-6";
     const CODEX: &str = "gpt-6.1-sol";

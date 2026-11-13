@@ -369,11 +369,15 @@ pub fn resume_command(provider: AgentProvider, session_id: &str, cwd: Option<&st
     let resume = match provider {
         AgentProvider::Claude => format!("claude --resume {}", shell_quote(session_id)),
         AgentProvider::Codex => format!("codex resume {}", shell_quote(session_id)),
+        AgentProvider::Cursor => format!("cursor-agent --resume {}", shell_quote(session_id)),
+        AgentProvider::Antigravity => format!("agy --conversation {}", shell_quote(session_id)),
+        AgentProvider::Grok => format!("~/.grok/bin/agent --resume {}", shell_quote(session_id)),
+        AgentProvider::OpenCode => format!("opencode --session {}", shell_quote(session_id)),
     };
     match (cwd.filter(|dir| !dir.is_empty()), provider) {
         (Some(dir), _) => format!("cd {} && {resume}", shell_quote(dir)),
         (None, AgentProvider::Claude) => format!("cd ~ && {resume}"),
-        (None, AgentProvider::Codex) => resume,
+        (None, _) => resume,
     }
 }
 
