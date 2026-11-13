@@ -10,6 +10,9 @@
     "types": [
       "node"
     ],
+    "typeRoots": [
+      "./node_modules/@types"
+    ],
     "strict": true,
     "noUncheckedIndexedAccess": true,
     "exactOptionalPropertyTypes": true,
@@ -22,6 +25,7 @@
     "allowJs": true
   },
   "include": [
+    "api/**/*.ts",
     "test",
     "src/**/*.js",
     "src/**/*.ts"

@@ -18,5 +18,9 @@
     "@types/node": "24.19.2",
     "astro": "7.4.4",
     "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "postal-mime": "4.2.1",
+    "resend": "6.38.0"
   }
 }

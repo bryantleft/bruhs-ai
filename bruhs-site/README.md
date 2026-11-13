@@ -1,7 +1,7 @@
 # bruhs-site
 
 The landing page at https://bruhs.ai (www redirects with a 308). An Astro
-site with static output and no functions: one layout (`src/layouts/Base.astro`)
+site with static output and an inbound email function: one layout (`src/layouts/Base.astro`)
 for the head, nav and footer, three pages in `src/pages/`, plain modules in
 `src/scripts/`, and fonts, logos and screenshots in `public/`.
 
@@ -39,10 +39,46 @@ there).
 
 ## Downloads
 
-There is no backend. The Download buttons link to
+The Download buttons link to
 `https://github.com/bryantleft/bruhs-ai/releases/latest/download/Bruhs-macOS-arm64.dmg`,
 which GitHub resolves to the newest release. Releases are published with
 `scripts/release.sh` (see the main repo's CONTRIBUTING.md).
+
+## Email
+
+`api/inbound.ts` accepts Resend's signed `email.received` webhook at
+`https://bruhs.ai/api/inbound`. It forwards mail addressed to `support@bruhs.ai`
+or `privacy@bruhs.ai` to the single `MAIL_FORWARD_TO` address. It uses the SMTP
+envelope recipients, including Bcc, rather than trusting To/Cc headers.
+Attachments and inline images are parsed from the original message; Reply-To
+uses the original Reply-To or sender. Other recipients and forwarding loops
+are acknowledged without forwarding.
+
+Set these **production** Vercel environment variables before deploying:
+
+| Variable | Value |
+| --- | --- |
+| `RESEND_API_KEY` | Full-access key from the bruhs Resend account; sending-only keys cannot retrieve mail |
+| `RESEND_WEBHOOK_SECRET` | Signing secret returned when creating the webhook |
+| `MAIL_FORWARD_TO` | Owner's inbox, currently `bryantleft@gmail.com` |
+
+Add `bruhs.ai` in Resend with sending and receiving enabled, copy the exact
+DNS records returned by Resend into Vercel DNS, and verify the domain. Create
+one webhook for `email.received` pointing to `/api/inbound`. Keep production
+credentials out of preview deployments. `.env.example` lists the configuration;
+`.env.local` and all other environment files remain ignored.
+
+Failures return a non-2xx response so Resend retries. Sends use
+`inbound-forward/<email-id>` as their idempotency key, which Resend retains for
+24 hours (longer than its automatic webhook retry schedule). A manual replay
+after that window can send another copy. Mail remains available in Resend's
+Receiving dashboard if forwarding fails; check there and the function logs
+for oversized or otherwise rejected messages.
+
+`npm test` covers real webhook signature verification, envelope routing,
+attachment content, Reply-To, retry idempotency and failures without sending
+real emails. After setup, send a real message to each address and confirm
+that the forwarded copies reach the owner's inbox.
 
 ## Screenshots
 
