@@ -5,15 +5,16 @@
 //! - `DELETE /api/terminal/sessions/{id}`   — kill it
 //! - `GET    /api/terminal/ws?session=<id>` — attach: replay, then live bytes
 //!
-//! Frames on the socket: binary = raw bytes both ways; text = JSON control
-//! messages from the client (`{"type":"resize","cols":n,"rows":n}`). Closing
+//! Binary input is raw bytes; text input is JSON control
+//! (`{"type":"resize","cols":n,"rows":n}`). Server binary output is raw
+//! unless `replay=gzip-v1` is requested and acknowledged (see [`ENCODING_ACK`]). Closing
 //! the socket only detaches; the shell keeps running in
 //! [`bruhs_core::terminal::TerminalManager`] until it exits or is deleted.
 //!
 //! WebSockets are not covered by CORS, so the upgrade checks `Origin`
 //! against loopback origins (and `BRUHS_API_URL`) before attaching.
 
-use std::sync::Arc;
+use std::{io::Write as _, sync::Arc};
 
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
@@ -22,6 +23,7 @@ use axum::response::Response;
 use axum::Json;
 use bruhs_core::terminal::{TerminalError, TerminalInfo, TerminalManager, TerminalSpec};
 use bruhs_core::AppState;
+use flate2::{write::GzEncoder, Compression};
 use futures_util::{SinkExt, StreamExt};
 use serde::{Deserialize, Serialize};
 use tokio::sync::broadcast::{self, error::RecvError};
@@ -135,6 +137,7 @@ pub async fn delete_session(
 #[derive(Deserialize)]
 pub struct AttachQuery {
     pub session: Option<String>,
+    pub replay: Option<String>,
 }
 
 pub async fn ws_terminal(
@@ -156,10 +159,58 @@ pub async fn ws_terminal(
         return Err(AppError::NotFound(format!("no terminal session {id}")));
     }
     let manager = state.terminals().clone();
-    Ok(ws.on_upgrade(move |socket| run_attached(socket, manager, id)))
+    let encoded = q.replay.as_deref() == Some("gzip-v1");
+    Ok(ws.on_upgrade(move |socket| run_attached(socket, manager, id, encoded)))
 }
 
-async fn run_attached(socket: WebSocket, manager: TerminalManager, id: String) {
+/// A query request and explicit acknowledgement keep older clients/servers raw.
+/// A WebSocket subprotocol cannot provide that fallback: browsers reject an
+/// older server that does not acknowledge an offered subprotocol.
+/// Server binary messages start with 0 (raw) or 1 (a complete gzip member).
+/// Only snapshots are compressed; interactive output never waits for a compressor.
+const ENCODING_ACK: &str = r#"{"type":"terminal-replay","encoding":"gzip-v1"}"#;
+
+#[derive(Debug, PartialEq, Eq)]
+enum OutputFrame {
+    Live(Arc<[u8]>),
+    Replay(Vec<u8>),
+}
+
+fn framed_raw(bytes: &[u8]) -> Vec<u8> {
+    let mut framed = Vec::with_capacity(bytes.len() + 1);
+    framed.push(0);
+    framed.extend_from_slice(bytes);
+    framed
+}
+
+fn compress_replay(bytes: Vec<u8>) -> std::io::Result<Vec<u8>> {
+    let mut encoder = GzEncoder::new(Vec::new(), Compression::fast());
+    encoder.write_all(&bytes)?;
+    let compressed = encoder.finish()?;
+    if compressed.len() >= bytes.len() {
+        return Ok(framed_raw(&bytes));
+    }
+    let mut framed = Vec::with_capacity(compressed.len() + 1);
+    framed.push(1);
+    framed.extend(compressed);
+    Ok(framed)
+}
+
+async fn output_message(frame: OutputFrame, encoded: bool) -> std::io::Result<Message> {
+    let bytes = match (frame, encoded) {
+        (OutputFrame::Replay(bytes), false) => bytes,
+        (OutputFrame::Live(bytes), false) => bytes.to_vec(),
+        (OutputFrame::Live(bytes), true) => framed_raw(&bytes),
+        (OutputFrame::Replay(bytes), true) => {
+            tokio::task::spawn_blocking(move || compress_replay(bytes))
+                .await
+                .map_err(std::io::Error::other)??
+        }
+    };
+    Ok(Message::Binary(bytes.into()))
+}
+
+async fn run_attached(socket: WebSocket, manager: TerminalManager, id: String, encoded: bool) {
     let (mut sink, mut stream) = socket.split();
 
     let attachment = match manager.attach(&id) {
@@ -180,13 +231,22 @@ async fn run_attached(socket: WebSocket, manager: TerminalManager, id: String) {
         }
     };
     let output = attachment.output;
-    if !attachment.replay.is_empty()
-        && sink
-            .send(Message::Binary(attachment.replay.into()))
-            .await
-            .is_err()
-    {
+    if encoded && sink.send(Message::Text(ENCODING_ACK.into())).await.is_err() {
         return;
+    }
+    if !attachment.replay.is_empty() {
+        match output_message(OutputFrame::Replay(attachment.replay), encoded).await {
+            Ok(message) => {
+                if sink.send(message).await.is_err() {
+                    return;
+                }
+            }
+            Err(error) => {
+                tracing::warn!("terminal {id}: replay encoding failed: {error}");
+                let _ = sink.close().await;
+                return;
+            }
+        }
     }
 
     // Session → socket. Ends when the shell exits (channel closed) or the
@@ -204,9 +264,17 @@ async fn run_attached(socket: WebSocket, manager: TerminalManager, id: String) {
         };
         let frames = output_frames(output, resync);
         tokio::pin!(frames);
-        while let Some(bytes) = frames.next().await {
-            if sink.send(Message::Binary(bytes.into())).await.is_err() {
-                break;
+        while let Some(frame) = frames.next().await {
+            match output_message(frame, encoded).await {
+                Ok(message) => {
+                    if sink.send(message).await.is_err() {
+                        break;
+                    }
+                }
+                Err(error) => {
+                    tracing::warn!("terminal {resync_id}: replay encoding failed: {error}");
+                    break;
+                }
             }
         }
         if let Err(error) = sink.close().await {
@@ -255,21 +323,21 @@ const RESET_TERMINAL: &[u8] = b"\x1bc";
 fn output_frames<R>(
     mut output: broadcast::Receiver<Arc<[u8]>>,
     resync: R,
-) -> impl futures_core::Stream<Item = Vec<u8>>
+) -> impl futures_core::Stream<Item = OutputFrame>
 where
     R: Fn() -> Option<(Vec<u8>, broadcast::Receiver<Arc<[u8]>>)>,
 {
     async_stream::stream! {
         loop {
             match output.recv().await {
-                Ok(chunk) => yield chunk.to_vec(),
+                Ok(chunk) => yield OutputFrame::Live(chunk),
                 Err(RecvError::Lagged(skipped)) => {
                     tracing::debug!("terminal client lagged by {skipped} chunks; resending scrollback");
                     let Some((replay, fresh)) = resync() else {
                         break;
                     };
                     output = fresh;
-                    yield [RESET_TERMINAL, &replay].concat();
+                    yield OutputFrame::Replay([RESET_TERMINAL, &replay].concat());
                 }
                 Err(RecvError::Closed) => break,
             }
@@ -301,12 +369,65 @@ mod tests {
         };
         let frames = output_frames(lagging, resync);
         tokio::pin!(frames);
-        assert_eq!(frames.next().await.unwrap(), b"\x1bcSCREEN");
+        assert_eq!(
+            frames.next().await.unwrap(),
+            OutputFrame::Replay(b"\x1bcSCREEN".to_vec())
+        );
         // Live output continues on the fresh subscription.
         tx.send(Arc::from(&b"e"[..])).unwrap();
-        assert_eq!(frames.next().await.unwrap(), b"e");
+        assert_eq!(
+            frames.next().await.unwrap(),
+            OutputFrame::Live(Arc::from(&b"e"[..]))
+        );
         drop(tx);
         assert!(frames.next().await.is_none(), "ends with the shell");
+    }
+
+    #[tokio::test]
+    async fn legacy_clients_receive_identical_unframed_bytes() {
+        let bytes: Vec<u8> = (0..=255).collect();
+        for frame in [
+            OutputFrame::Live(bytes.clone().into()),
+            OutputFrame::Replay(bytes.clone()),
+        ] {
+            assert_eq!(
+                output_message(frame, false).await.unwrap(),
+                Message::Binary(bytes.clone().into())
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn encoded_replay_preserves_reset_and_every_byte() {
+        use std::io::Read as _;
+        let bytes = [RESET_TERMINAL, &vec![b'x'; 512 * 1024]].concat();
+        let Message::Binary(message) = output_message(OutputFrame::Replay(bytes.clone()), true)
+            .await
+            .unwrap()
+        else {
+            panic!("binary replay")
+        };
+        assert_eq!(message[0], 1);
+        let mut decoded = Vec::new();
+        flate2::read::GzDecoder::new(&message[1..])
+            .read_to_end(&mut decoded)
+            .unwrap();
+        assert_eq!(decoded, bytes);
+    }
+
+    #[tokio::test]
+    async fn live_and_incompressible_frames_stay_raw_in_the_negotiated_protocol() {
+        let bytes: Vec<u8> = (0..16).collect();
+        for frame in [
+            OutputFrame::Live(bytes.clone().into()),
+            OutputFrame::Replay(bytes.clone()),
+        ] {
+            let Message::Binary(message) = output_message(frame, true).await.unwrap() else {
+                panic!("binary output")
+            };
+            assert_eq!(message[0], 0);
+            assert_eq!(&message[1..], bytes);
+        }
     }
 
     #[test]
