@@ -1,0 +1,767 @@
+{
+  "version": 1,
+  "base": "0c140e8db1fef716c4ebb10276d91cbe6c322ae5",
+  "browser": {
+    "browser": "157.0.8103.52",
+    "platform": "Darwin arm64",
+    "cpu": "Apple M2 Max",
+    "memory_bytes": 34359738368,
+    "limitation": "Fresh browser profiles, warm OS filesystem; no physical mobile CPU, DNS/TLS, packet loss or radio simulation. Other user/system activity and three read-only source reviewers were present; no owned build/test/other benchmark overlapped the timed run."
+  },
+  "protocol": {
+    "intervals": 48,
+    "retained": 36,
+    "samples_per_cell": 3,
+    "order": "One warmup and three retained blocks; rotating strategy order and alternating link order. Fresh browser process per strategy/link pair; reload in same browser context.",
+    "viewport": "1280x800; 390x844 checked separately for functionality",
+    "clock": "Navigation time origin through release WASM mount, chat composer, six successful startup HTTP replies, three production SSE handshakes, loaded fonts, visible command menu and two animation frames. Fixed empty services; not physical mobile/cold disk or T3 acceptance.",
+    "link": "CDP 1.6 Mbit/s download,0.8 Mbit/s upload,300ms latency; loopback HTTP origin",
+    "scope": "Frozen ordinary release SPA with private production-router fixture, fixed empty external services, real in-memory terminal handler and combined SSE; API base remapped from baked loopback address to owned private origin. Browser launch and physical cold disk excluded.",
+    "quantiles": "Median and nearest-rank sample p95/p99; n=3 retained observations per cell, tails equal sample maximum, not population tail estimates.",
+    "wire_scope": "WASM CDP loadingFinished encodedDataLength includes response headers when transferred, zero for cached responses. Representation encodedBodySize is not wire transfer on cache hits. Completed-response aggregate extends through post-boundary validation and excludes open SSE; not total traffic through the action clock.",
+    "whole_action_acceptance": false,
+    "t3_comparable": false
+  },
+  "rows": [
+    {
+      "variant": "raw",
+      "link": "loopback",
+      "cache": "fresh browser",
+      "samples_ms": [
+        225.09999990463257,
+        223.60000002384186,
+        222.60000002384186
+      ],
+      "summary_ms": {
+        "p50": 223.60000002384186,
+        "p95": 225.09999990463257,
+        "p99": 225.09999990463257
+      },
+      "min_ms": 222.60000002384186,
+      "max_ms": 225.09999990463257,
+      "warmups": 1,
+      "raw_run_indices": [
+        22,
+        26,
+        42
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        },
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        },
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        }
+      ],
+      "completed_response_wire_bytes": [
+        13586197,
+        13586197,
+        13586197
+      ]
+    },
+    {
+      "variant": "raw",
+      "link": "loopback",
+      "cache": "warm reload",
+      "samples_ms": [
+        110,
+        108.30000007152557,
+        105.5
+      ],
+      "summary_ms": {
+        "p50": 108.30000007152557,
+        "p95": 110,
+        "p99": 110
+      },
+      "min_ms": 105.5,
+      "max_ms": 110,
+      "warmups": 1,
+      "raw_run_indices": [
+        23,
+        27,
+        43
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        },
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        },
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        }
+      ],
+      "completed_response_wire_bytes": [
+        12873294,
+        12873294,
+        12873294
+      ]
+    },
+    {
+      "variant": "raw",
+      "link": "emulated1.6mbps300ms",
+      "cache": "fresh browser",
+      "samples_ms": [
+        69330.19999992847,
+        69327.39999997616,
+        69311.29999995232
+      ],
+      "summary_ms": {
+        "p50": 69327.39999997616,
+        "p95": 69330.19999992847,
+        "p99": 69330.19999992847
+      },
+      "min_ms": 69311.29999995232,
+      "max_ms": 69330.19999992847,
+      "warmups": 1,
+      "raw_run_indices": [
+        16,
+        32,
+        36
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        },
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        },
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        }
+      ],
+      "completed_response_wire_bytes": [
+        13586362,
+        13586362,
+        13586362
+      ]
+    },
+    {
+      "variant": "raw",
+      "link": "emulated1.6mbps300ms",
+      "cache": "warm reload",
+      "samples_ms": [
+        65773.30000007153,
+        65770.39999997616,
+        65801.59999990463
+      ],
+      "summary_ms": {
+        "p50": 65773.30000007153,
+        "p95": 65801.59999990463,
+        "p99": 65801.59999990463
+      },
+      "min_ms": 65770.39999997616,
+      "max_ms": 65801.59999990463,
+      "warmups": 1,
+      "raw_run_indices": [
+        17,
+        33,
+        37
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        },
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        },
+        {
+          "wire_encoded_data_length": 12871787,
+          "representation_body_bytes": 12871334,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": null
+        }
+      ],
+      "completed_response_wire_bytes": [
+        12873459,
+        12873459,
+        12873459
+      ]
+    },
+    {
+      "variant": "dynamic",
+      "link": "loopback",
+      "cache": "fresh browser",
+      "samples_ms": [
+        531.3999999761581,
+        552.2999999523163,
+        547.5
+      ],
+      "summary_ms": {
+        "p50": 547.5,
+        "p95": 552.2999999523163,
+        "p99": 552.2999999523163
+      },
+      "min_ms": 531.3999999761581,
+      "max_ms": 552.2999999523163,
+      "warmups": 1,
+      "raw_run_indices": [
+        18,
+        28,
+        44
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 4068760,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 4068766,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 4068760,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        }
+      ],
+      "completed_response_wire_bytes": [
+        4552020,
+        4551997,
+        4551994
+      ]
+    },
+    {
+      "variant": "dynamic",
+      "link": "loopback",
+      "cache": "warm reload",
+      "samples_ms": [
+        125.29999995231628,
+        125.80000007152557,
+        122.39999997615814
+      ],
+      "summary_ms": {
+        "p50": 125.29999995231628,
+        "p95": 125.80000007152557,
+        "p99": 125.80000007152557
+      },
+      "min_ms": 122.39999997615814,
+      "max_ms": 125.80000007152557,
+      "warmups": 1,
+      "raw_run_indices": [
+        19,
+        29,
+        45
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        }
+      ],
+      "completed_response_wire_bytes": [
+        1507,
+        1507,
+        1507
+      ]
+    },
+    {
+      "variant": "dynamic",
+      "link": "emulated1.6mbps300ms",
+      "cache": "fresh browser",
+      "samples_ms": [
+        24175.300000071526,
+        24168.600000023842,
+        24164.299999952316
+      ],
+      "summary_ms": {
+        "p50": 24168.600000023842,
+        "p95": 24175.300000071526,
+        "p99": 24175.300000071526
+      },
+      "min_ms": 24164.299999952316,
+      "max_ms": 24175.300000071526,
+      "warmups": 1,
+      "raw_run_indices": [
+        12,
+        34,
+        38
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 4068778,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 4068748,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 4068837,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        }
+      ],
+      "completed_response_wire_bytes": [
+        4552203,
+        4552173,
+        4552288
+      ]
+    },
+    {
+      "variant": "dynamic",
+      "link": "emulated1.6mbps300ms",
+      "cache": "warm reload",
+      "samples_ms": [
+        1074.5,
+        1090.2000000476837,
+        1086.7999999523163
+      ],
+      "summary_ms": {
+        "p50": 1086.7999999523163,
+        "p95": 1090.2000000476837,
+        "p99": 1090.2000000476837
+      },
+      "min_ms": 1074.5,
+      "max_ms": 1090.2000000476837,
+      "warmups": 1,
+      "raw_run_indices": [
+        13,
+        35,
+        39
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4060316,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        }
+      ],
+      "completed_response_wire_bytes": [
+        1672,
+        1672,
+        1672
+      ]
+    },
+    {
+      "variant": "precompressed",
+      "link": "loopback",
+      "cache": "fresh browser",
+      "samples_ms": [
+        239.39999997615814,
+        216.60000002384186,
+        235.69999992847443
+      ],
+      "summary_ms": {
+        "p50": 235.69999992847443,
+        "p95": 239.39999997615814,
+        "p99": 239.39999997615814
+      },
+      "min_ms": 216.60000002384186,
+      "max_ms": 239.39999997615814,
+      "warmups": 1,
+      "raw_run_indices": [
+        20,
+        24,
+        46
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 4039090,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 4039090,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 4039090,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        }
+      ],
+      "completed_response_wire_bytes": [
+        4520800,
+        4520800,
+        4520800
+      ]
+    },
+    {
+      "variant": "precompressed",
+      "link": "loopback",
+      "cache": "warm reload",
+      "samples_ms": [
+        122.30000007152557,
+        124.5,
+        121.60000002384186
+      ],
+      "summary_ms": {
+        "p50": 122.30000007152557,
+        "p95": 124.5,
+        "p99": 124.5
+      },
+      "min_ms": 121.60000002384186,
+      "max_ms": 124.5,
+      "warmups": 1,
+      "raw_run_indices": [
+        21,
+        25,
+        47
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        }
+      ],
+      "completed_response_wire_bytes": [
+        1530,
+        1530,
+        1530
+      ]
+    },
+    {
+      "variant": "precompressed",
+      "link": "emulated1.6mbps300ms",
+      "cache": "fresh browser",
+      "samples_ms": [
+        24046.700000047684,
+        24031.5,
+        24046.399999976158
+      ],
+      "summary_ms": {
+        "p50": 24046.399999976158,
+        "p95": 24046.700000047684,
+        "p99": 24046.700000047684
+      },
+      "min_ms": 24031.5,
+      "max_ms": 24046.700000047684,
+      "warmups": 1,
+      "raw_run_indices": [
+        14,
+        30,
+        40
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 4039090,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 4039090,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 4039090,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": false,
+          "wire_status": 200,
+          "content_encoding": "gzip"
+        }
+      ],
+      "completed_response_wire_bytes": [
+        4520965,
+        4520965,
+        4520965
+      ]
+    },
+    {
+      "variant": "precompressed",
+      "link": "emulated1.6mbps300ms",
+      "cache": "warm reload",
+      "samples_ms": [
+        1075.4000000953674,
+        1090.8999999761581,
+        1072.3000000715256
+      ],
+      "summary_ms": {
+        "p50": 1075.4000000953674,
+        "p95": 1090.8999999761581,
+        "p99": 1090.8999999761581
+      },
+      "min_ms": 1072.3000000715256,
+      "max_ms": 1090.8999999761581,
+      "warmups": 1,
+      "raw_run_indices": [
+        15,
+        31,
+        41
+      ],
+      "wasm": [
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        },
+        {
+          "wire_encoded_data_length": 0,
+          "representation_body_bytes": 4038591,
+          "decoded_body_bytes": 12871334,
+          "from_disk_cache": true,
+          "wire_status": null,
+          "content_encoding": "gzip"
+        }
+      ],
+      "completed_response_wire_bytes": [
+        1695,
+        1695,
+        1695
+      ]
+    }
+  ],
+  "web_resource_zip_model": {
+    "scope": "Fixed ZIP-deflate6 of final gate-generated web resources only; counterfactual without sidecars versus with sidecars. Not full/signed app or update latency.",
+    "archives": [
+      {
+        "variant": "raw",
+        "bytes": 6383604,
+        "sha256": "ae571fb5449ea4ef3774385f24b52bead0aa2ca7a08f8a2c3ea4500a700c0e9c",
+        "path": "target/performance-network-boot1-release-resources-raw.zip"
+      },
+      {
+        "variant": "sidecars",
+        "bytes": 11693629,
+        "sha256": "0ae22f8837a71045ec8c29bfcc6b88f86fb0d9f0248b5e6291db5cab35863982",
+        "path": "target/performance-network-boot1-release-resources-sidecars.zip"
+      }
+    ],
+    "added_bytes": 5310025
+  },
+  "raw_receipt_sha256": {
+    "target/performance-network-boot1-browser-run.json": "3f2e371b9f39d5ef701014a05667b613133b7e982a011b338fc3e3cad4b22eff",
+    "target/performance-network-boot1-protocol.json": "c7578e4891b84e6a6f477331f4e2abb5e915a993d2a98ae9ba72977ea7cadf20",
+    "target/performance-network-boot1-strategy-final-build-input.json": "4b199a89ff125fab6041acd41e287cab7098714dddbd3a0595c1ff3c18270a71",
+    "target/performance-network-boot1-run.cjs": "b3ea8ac9ad3b1d6ef6570abad880061dcdd44c6d36f68246f4bcbc6638c77d47",
+    "target/performance-network-boot1-browser.cjs": "7d4bef70ae107f861f1a56b9dba89f034ca1b194cbda6c95c51bfbcba8e6b34f",
+    "target/performance-network-boot1-responsive.json": "bb919143f662da6c41178ad40b4689908d40170c79dcbeb60f4ab4a9bcd2d569"
+  },
+  "gzip_build_bridge": "All131 regenerated sidecars have identical encoded lengths and compressed payloads to the measured prototype; only gzip OS metadata differs (prototype19, candidate255). Both decompress to exact originals.",
+  "validation_status": {
+    "gate_steps": 11,
+    "rust_tests": {
+      "passed": 2331,
+      "failed": 0,
+      "ignored": 6
+    },
+    "python_tests": 5,
+    "final_release_browser_flows": 4,
+    "all_final_release_sidecars_exact": true,
+    "final_release_sidecars": 130,
+    "scope": "Untimed functional checks of actual gate-generated release assets through the measured precompressed fixture. Frozen fixture binary and fixed startup services; production candidate native router contract tested separately by gate. Does not add retained performance samples."
+  },
+  "frozen_web_resource_zip_model": {
+    "scope": "Fixed ZIP-deflate6 of frozen web resources only, not full/signed app, update or installer latency.",
+    "archives": [
+      {
+        "variant": "raw",
+        "bytes": 6384652,
+        "sha256": "f6c55dfb0b3be337475a3af33e5f8e6394766bc7b38c1335afdd6b255aa65a6c",
+        "path": "target/performance-network-boot1-builder-resources-raw.zip"
+      },
+      {
+        "variant": "sidecars",
+        "bytes": 11695754,
+        "sha256": "e6bbf5108e7882916af2dffd28cd1a2545b2fc01e947654e3efc359c73b27b30",
+        "path": "target/performance-network-boot1-builder-resources-sidecars.zip"
+      }
+    ],
+    "added_bytes": 5311102
+  },
+  "final_distribution_bridge": {
+    "at": "2026-11-13T15:53:25.022857+00:00",
+    "changed_originals": {
+      "index.html": {
+        "frozen": "20eceec7c7ce52ef348f6882153e0a298298767b0a55ead1c1f5922f7e657cd1",
+        "gate_release": "d2838ecd9ef87a6d9e070b29a0712e004ca8c1820d9545e6cfe3ca0b58502d76"
+      },
+      "snippets/bruhs-web-d67b8774d5c7b345/src/markdown/dom.js": {
+        "frozen": "7d9bc34a8b02f166518b994b34e9869c4327d9c46563fba073731bfdbc9770e9",
+        "gate_release": null
+      }
+    },
+    "interpretation": "Retained cohort used prior release assets with one stale unreferenced2318byte markdown helper and its modulepreload; final HTML removes it and reorders two remaining preloads. Actual WASM and generated JS binding bytes are identical. All strategies used the same frozen cohort; latency results are controlled strategy comparisons, not exact final whole-action timings.",
+    "wasm_exact": true,
+    "final_generated_assets_browser_pass": true,
+    "final_resource_zip_model": {
+      "scope": "Fixed ZIP-deflate6 of final gate-generated web resources only; counterfactual without sidecars versus with sidecars. Not full/signed app or update latency.",
+      "archives": [
+        {
+          "variant": "raw",
+          "bytes": 6383604,
+          "sha256": "ae571fb5449ea4ef3774385f24b52bead0aa2ca7a08f8a2c3ea4500a700c0e9c",
+          "path": "target/performance-network-boot1-release-resources-raw.zip"
+        },
+        {
+          "variant": "sidecars",
+          "bytes": 11693629,
+          "sha256": "0ae22f8837a71045ec8c29bfcc6b88f86fb0d9f0248b5e6291db5cab35863982",
+          "path": "target/performance-network-boot1-release-resources-sidecars.zip"
+        }
+      ],
+      "added_bytes": 5310025
+    }
+  }
+}

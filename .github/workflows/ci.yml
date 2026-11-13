@@ -122,6 +122,9 @@ jobs:
         with:
           version: v0.21.14
 
+      - name: Release asset tests
+        run: python3 -m unittest discover -s bruhs-web/tests -p 'test_precompress.py'
+
       - name: Build production WASM bundle
         working-directory: bruhs-web
         env:
