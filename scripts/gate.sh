@@ -38,6 +38,7 @@ step fmt cargo fmt --all --check
 step clippy cargo clippy --workspace --all-targets --all-features --locked -- -D warnings
 step clippy-wasm cargo clippy -p bruhs-web --target wasm32-unknown-unknown --locked -- -D warnings
 step test cargo test --workspace --locked
+step web-assets python3 -m unittest discover -s bruhs-web/tests -p 'test_precompress.py'
 
 # Harness benchmark fixtures: each hidden check fails on the starting repo
 # and passes on its reference solution. No agent runs, so no tokens.
