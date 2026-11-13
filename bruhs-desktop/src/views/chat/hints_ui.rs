@@ -5,13 +5,13 @@ use super::*;
 pub(super) use bruhs_models::logic::commands::SLASH_COMMANDS as DESKTOP_SLASH_COMMANDS;
 pub(super) const COMPOSER_HINT_EMPTY_LABEL: &str = "No matches";
 pub(super) const COMPOSER_SLASH_ICON: &str = "/";
-pub(super) const COMPOSER_DIRECTORY_ICON: &str = "▸";
-pub(super) const COMPOSER_FILE_ICON: &str = "·";
+pub(super) const COMPOSER_DIRECTORY_ICON: &str = assets::FOLDER_ICON_PATH;
+pub(super) const COMPOSER_FILE_ICON: &str = assets::TOOL_FILE_ICON_PATH;
 pub(super) const COMPOSER_HINT_POPOVER_OFFSET_PX: f32 = 4.0;
 pub(super) const COMPOSER_HINT_POPOVER_RADIUS_PX: f32 = 8.0;
 pub(super) const COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX: f32 = 288.0;
 pub(super) const COMPOSER_HINT_ICON_SLOT_WIDTH_PX: f32 = 12.0;
-pub(super) const COMPOSER_HINT_ROW_TEXT_SIZE_PX: f32 = 14.0;
+pub(super) const COMPOSER_HINT_ROW_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const COMPOSER_HINT_SUB_TEXT_SIZE_PX: f32 = 12.0;
 /// Quiet time after a keystroke before the `@` search runs.
 pub(super) const MENTION_SEARCH_DEBOUNCE: Duration = Duration::from_millis(40);
@@ -349,7 +349,8 @@ impl ChatView {
         let matches = self.slash_command_matches(cx);
         let selected_index =
             clamp_composer_hint_index(self.composer_hint_selected_index, matches.len());
-        let rows = if matches.is_empty() {
+        let no_matches = matches.is_empty();
+        let rows = if no_matches {
             vec![div()
                 .px_3()
                 .py_2()
@@ -370,6 +371,10 @@ impl ChatView {
                     div()
                         .id(("desktop-slash-command-row", element_key(name)))
                         .debug_selector(move || format!("desktop-slash-command-row-{debug_name}"))
+                        .role(Role::ListBoxOption)
+                        .aria_label(format!("{}: {}", command.name, command.description))
+                        .aria_selected(is_selected)
+                        .flex_shrink_0()
                         .w_full()
                         .flex()
                         .items_center()
@@ -439,6 +444,17 @@ impl ChatView {
         };
 
         div()
+            .id("desktop-slash-command-hints")
+            .role(if no_matches {
+                Role::Status
+            } else {
+                Role::ListBox
+            })
+            .aria_label(if no_matches {
+                COMPOSER_HINT_EMPTY_LABEL
+            } else {
+                "Commands"
+            })
             .debug_selector(|| "desktop-slash-command-hints".to_string())
             .mb(px(COMPOSER_HINT_POPOVER_OFFSET_PX))
             .rounded(px(COMPOSER_HINT_POPOVER_RADIUS_PX))
@@ -447,8 +463,12 @@ impl ChatView {
             .bg(theme::longan_700())
             .py_1()
             .max_h(px(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX))
-            .overflow_y_scrollbar()
+            .flex()
+            .flex_col()
+            .track_scroll(&self.composer_hint_scroll)
+            .overflow_y_scroll()
             .children(rows)
+            .vertical_scrollbar(&self.composer_hint_scroll)
             .into_any_element()
     }
 
@@ -520,6 +540,8 @@ impl ChatView {
                         count,
                         direction,
                     );
+                    self.composer_hint_scroll
+                        .scroll_to_item(self.composer_hint_selected_index);
                     cx.notify();
                 }
                 true
@@ -999,6 +1021,10 @@ impl ChatView {
                     let is_selected = index == selected_index;
                     div()
                         .id(("desktop-thread-mention-row", element_key(&id)))
+                        .role(Role::ListBoxOption)
+                        .aria_label(format!("Thread {title}"))
+                        .aria_selected(is_selected)
+                        .flex_shrink_0()
                         .w_full()
                         .flex()
                         .items_center()
@@ -1065,6 +1091,14 @@ impl ChatView {
                     .debug_selector(move || {
                         format!("desktop-file-mention-row-{}", element_key(&debug_path))
                     })
+                    .role(Role::ListBoxOption)
+                    .aria_label(format!(
+                        "{} {}",
+                        if item.is_dir { "Folder" } else { "File" },
+                        item.path
+                    ))
+                    .aria_selected(is_selected)
+                    .flex_shrink_0()
                     .w_full()
                     .flex()
                     .items_center()
@@ -1096,9 +1130,11 @@ impl ChatView {
                         div()
                             .w(px(COMPOSER_HINT_ICON_SLOT_WIDTH_PX))
                             .flex_shrink_0()
-                            .text_align(TextAlign::Center)
+                            .flex()
+                            .items_center()
+                            .justify_center()
                             .text_color(theme::rambutan_500())
-                            .child(icon),
+                            .child(svg().path(icon).size(px(COMPOSER_HINT_ICON_SLOT_WIDTH_PX))),
                     )
                     .child(
                         div()
@@ -1132,6 +1168,21 @@ impl ChatView {
         };
 
         div()
+            .id("desktop-file-mention-hints")
+            .role(
+                if self.thread_hits.is_empty() && self.mention_items.is_empty() {
+                    Role::Status
+                } else {
+                    Role::ListBox
+                },
+            )
+            .aria_label(
+                if self.thread_hits.is_empty() && self.mention_items.is_empty() {
+                    COMPOSER_HINT_EMPTY_LABEL
+                } else {
+                    "Threads and files"
+                },
+            )
             .debug_selector(|| "desktop-file-mention-hints".to_string())
             .mb(px(COMPOSER_HINT_POPOVER_OFFSET_PX))
             .rounded(px(COMPOSER_HINT_POPOVER_RADIUS_PX))
@@ -1140,8 +1191,12 @@ impl ChatView {
             .bg(theme::longan_700())
             .py_1()
             .max_h(px(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX))
-            .overflow_y_scrollbar()
+            .flex()
+            .flex_col()
+            .track_scroll(&self.composer_hint_scroll)
+            .overflow_y_scroll()
             .children(rows)
+            .vertical_scrollbar(&self.composer_hint_scroll)
             .into_any_element()
     }
 
@@ -1183,6 +1238,10 @@ impl ChatView {
                     let description = skill.description.clone();
                     div()
                         .id(("desktop-skill-row", element_key(&skill.name)))
+                        .role(Role::ListBoxOption)
+                        .aria_label(format!("{label}: {description}"))
+                        .aria_selected(is_selected)
+                        .flex_shrink_0()
                         .w_full()
                         .flex()
                         .items_center()
@@ -1239,6 +1298,19 @@ impl ChatView {
                 .collect::<Vec<_>>()
         };
         div()
+            .id("desktop-skill-hints")
+            .role(if self.skill_items.is_empty() {
+                Role::Status
+            } else {
+                Role::ListBox
+            })
+            .aria_label(if self.skill_items.is_empty() {
+                self.skill_error
+                    .clone()
+                    .unwrap_or_else(|| COMPOSER_HINT_EMPTY_LABEL.to_string())
+            } else {
+                "Skills".to_string()
+            })
             .debug_selector(|| "desktop-skill-hints".to_string())
             .mb(px(COMPOSER_HINT_POPOVER_OFFSET_PX))
             .rounded(px(COMPOSER_HINT_POPOVER_RADIUS_PX))
@@ -1247,8 +1319,12 @@ impl ChatView {
             .bg(theme::longan_700())
             .py_1()
             .max_h(px(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX))
-            .overflow_y_scrollbar()
+            .flex()
+            .flex_col()
+            .track_scroll(&self.composer_hint_scroll)
+            .overflow_y_scroll()
             .children(rows)
+            .vertical_scrollbar(&self.composer_hint_scroll)
             .into_any_element()
     }
 
@@ -1287,6 +1363,10 @@ impl ChatView {
                     let label = format!("#{} {}", pull.number, pull.title);
                     div()
                         .id(("desktop-pull-row", element_key(&pull.number.to_string())))
+                        .role(Role::ListBoxOption)
+                        .aria_label(label.clone())
+                        .aria_selected(is_selected)
+                        .flex_shrink_0()
                         .w_full()
                         .flex()
                         .items_center()
@@ -1336,6 +1416,19 @@ impl ChatView {
                 .collect::<Vec<_>>()
         };
         div()
+            .id("desktop-pull-hints")
+            .role(if self.pull_items.is_empty() {
+                Role::Status
+            } else {
+                Role::ListBox
+            })
+            .aria_label(if self.pull_items.is_empty() {
+                self.pull_error
+                    .clone()
+                    .unwrap_or_else(|| COMPOSER_HINT_EMPTY_LABEL.to_string())
+            } else {
+                "Pull requests".to_string()
+            })
             .debug_selector(|| "desktop-pull-hints".to_string())
             .mb(px(COMPOSER_HINT_POPOVER_OFFSET_PX))
             .rounded(px(COMPOSER_HINT_POPOVER_RADIUS_PX))
@@ -1344,8 +1437,12 @@ impl ChatView {
             .bg(theme::longan_700())
             .py_1()
             .max_h(px(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX))
-            .overflow_y_scrollbar()
+            .flex()
+            .flex_col()
+            .track_scroll(&self.composer_hint_scroll)
+            .overflow_y_scroll()
             .children(rows)
+            .vertical_scrollbar(&self.composer_hint_scroll)
             .into_any_element()
     }
 }

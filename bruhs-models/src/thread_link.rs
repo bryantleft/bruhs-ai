@@ -348,7 +348,7 @@ impl DeliveryView<'_> {
     /// The line both apps show above the message.
     pub fn caption(&self) -> String {
         if self.awaited {
-            format!("From thread “{}” · waiting for this reply", self.from_title)
+            format!("From thread “{}”. Waiting for this reply", self.from_title)
         } else {
             format!("From thread “{}”", self.from_title)
         }
@@ -1084,7 +1084,7 @@ mod tests {
         assert!(!awaited.contains("Answer it with message_thread"));
         assert_eq!(
             view.caption(),
-            "From thread “Sender” · waiting for this reply"
+            "From thread “Sender”. Waiting for this reply"
         );
 
         let plain = delivery_prompt("Sender", "11111111", 1, 6, false, "fyi");

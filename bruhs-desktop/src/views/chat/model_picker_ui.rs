@@ -6,7 +6,7 @@ pub(super) const MODEL_PICKER_WIDTH_PX: f32 = 352.0;
 pub(super) const MODEL_PICKER_LIST_MAX_HEIGHT_PX: f32 = 288.0;
 pub(super) const MODEL_PICKER_RADIUS_PX: f32 = 8.0;
 pub(super) const MODEL_PICKER_ROW_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const MODEL_PICKER_LABEL_TEXT_SIZE_PX: f32 = 14.0;
+pub(super) const MODEL_PICKER_LABEL_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const MODEL_PICKER_GROUP_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const MODEL_PICKER_KBD_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const MODEL_PICKER_SEARCH_PLACEHOLDER: &str = "Search models…";
@@ -20,7 +20,7 @@ pub(super) fn model_picker_claude_line(authenticated: bool, user: Option<&str>) 
             _ => "Claude Code signed in".to_string(),
         }
     } else {
-        "Claude Code not signed in — run `claude login`".to_string()
+        "Claude Code not signed in. Run `claude login`".to_string()
     }
 }
 
@@ -61,6 +61,22 @@ pub fn group_models_like_web(
     groups
 }
 
+fn model_picker_row_index(models: &[&'static ModelInfo], selected: usize) -> usize {
+    let mut option = 0;
+    let mut row = 0;
+    for (_, models) in group_models_like_web(models) {
+        row += 1; // Provider heading is a direct child of the scroll area.
+        for _ in models {
+            if option == selected {
+                return row;
+            }
+            option += 1;
+            row += 1;
+        }
+    }
+    0
+}
+
 impl ChatView {
     // ── Model picker (⌘⇧M popover) ─────────────────────────────────────────
 
@@ -74,10 +90,13 @@ impl ChatView {
 
     pub(super) fn open_model_picker(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.model_picker_open = true;
+        self.composer_options_open = false;
+        self.stash_open = false;
         self.branch_menu_open = false;
         self.workspace_menu_open = false;
         self.effort_menu_open = false;
         self.model_picker_index = 0;
+        self.model_picker_scroll.set_offset(Point::default());
         self.model_picker_query.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
@@ -151,6 +170,11 @@ impl ChatView {
                     } else {
                         (current + 1) % count
                     };
+                    self.model_picker_scroll
+                        .scroll_to_item(model_picker_row_index(
+                            &self.model_picker_matches(cx),
+                            self.model_picker_index,
+                        ));
                     cx.notify();
                 }
                 true
@@ -167,15 +191,24 @@ impl ChatView {
     /// ring) — search row with an `esc` chip, grouped rows (label over
     /// provider glyph + id, `⌘n` chip, check on the current one), and the
     /// provider's sign-in line in the footer.
-    pub(super) fn render_model_picker(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_model_picker(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let matches = self.model_picker_matches(cx);
         let highlighted = self.model_picker_index.min(matches.len().saturating_sub(1));
+        let selected_row = model_picker_row_index(&matches, highlighted);
+        let scroll = self.model_picker_scroll.clone();
+        let previous_viewport = scroll.bounds().size;
+        let view_id = cx.entity_id();
         let groups = group_models_like_web(&matches);
         let mut rows: Vec<AnyElement> = Vec::new();
         let mut flat_index = 0usize;
         for (provider, models) in groups {
             rows.push(
                 div()
+                    .flex_shrink_0()
                     .px_2()
                     .pt_2()
                     .pb_1()
@@ -197,6 +230,7 @@ impl ChatView {
                     div()
                         .id(("desktop-model-picker-option", key))
                         .debug_selector(move || format!("desktop-model-picker-option-{key}"))
+                        .flex_shrink_0()
                         .px_2()
                         .py_2()
                         .rounded(px(MODEL_PICKER_RADIUS_PX))
@@ -207,8 +241,10 @@ impl ChatView {
                         .tab_index(0)
                         .role(Role::ListBoxOption)
                         .aria_label(format!("Select model {}", model.label))
-                        .aria_selected(is_current)
-                        .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                        .aria_selected(is_highlighted)
+                        .border_1()
+                        .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .cursor_pointer()
                         .hover(|el| el.bg(gpui::white().opacity(0.06)))
                         .on_click(cx.listener(move |this, _ev, window, cx| {
@@ -295,6 +331,11 @@ impl ChatView {
             .role(Role::Dialog)
             .aria_label(STATUS_CHANGE_MODEL_LABEL)
             .w(px(MODEL_PICKER_WIDTH_PX))
+            .max_w(px(f32::from(window.viewport_size().width) - 18.0))
+            .max_h(super::composer_ui::composer_popover_max_height(
+                window,
+                self.composer_options_trigger_bounds.get(),
+            ))
             .rounded(px(MODEL_PICKER_RADIUS_PX))
             .border_1()
             .border_color(gpui::white().opacity(0.15))
@@ -304,6 +345,8 @@ impl ChatView {
             .flex_col()
             .child(
                 div()
+                    .debug_selector(|| "desktop-model-picker-search-row".to_string())
+                    .flex_shrink_0()
                     .flex()
                     .items_center()
                     .gap_2()
@@ -322,7 +365,18 @@ impl ChatView {
                         div().flex_1().min_w_0().child(
                             Input::new(&self.model_picker_query)
                                 .appearance(false)
-                                .aria_label("Search models"),
+                                .role(Role::EditableComboBox)
+                                .aria_label(matches.get(highlighted).map_or_else(
+                                    || "Search models. No models match.".to_string(),
+                                    |model| {
+                                        format!(
+                                            "Search models. {} selected, {} of {}",
+                                            model.label,
+                                            highlighted + 1,
+                                            matches.len()
+                                        )
+                                    },
+                                )),
                         ),
                     )
                     .child(
@@ -339,18 +393,38 @@ impl ChatView {
             )
             .child(
                 div()
+                    .on_children_prepainted(move |_, _, cx| {
+                        // Reveal the highlight after resizing, without pulling
+                        // pointer scrolling back to the selected row.
+                        if scroll.bounds().size != previous_viewport {
+                            let scroll = scroll.clone();
+                            cx.defer(move |cx| {
+                                scroll.scroll_to_item(selected_row);
+                                cx.notify(view_id);
+                            });
+                        }
+                    })
                     .id("desktop-model-picker-list")
+                    .debug_selector(|| "desktop-model-picker-list".to_string())
                     .role(Role::ListBox)
+                    .aria_label("Models")
+                    .min_h_0()
                     .max_h(px(MODEL_PICKER_LIST_MAX_HEIGHT_PX))
-                    .overflow_y_scrollbar()
+                    .flex()
+                    .flex_col()
+                    .track_scroll(&self.model_picker_scroll)
+                    .overflow_y_scroll()
                     .p_1()
-                    .children(rows),
+                    .children(rows)
+                    .vertical_scrollbar(&self.model_picker_scroll),
             )
             .child(
                 div()
+                    .flex_shrink_0()
                     .px_3()
                     .py_2()
                     .border_t_1()
+                    .debug_selector(|| "desktop-model-picker-auth-status".to_string())
                     .border_color(gpui::white().opacity(0.10))
                     .text_size(px(MODEL_PICKER_ROW_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)

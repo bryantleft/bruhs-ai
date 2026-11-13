@@ -1,4 +1,4 @@
-use bruhs_models::agent::{AgentProvider, PermissionMode};
+use bruhs_models::agent::AgentProvider;
 use gpui::{AssetSource, SharedString};
 use std::borrow::Cow;
 
@@ -48,6 +48,7 @@ pub const KEYBOARD_ICON_PATH: &str = "icons/keyboard.svg";
 pub const EYE_ICON_PATH: &str = "icons/eye.svg";
 pub const WRENCH_ICON_PATH: &str = "icons/wrench.svg";
 pub const HAMMER_ICON_PATH: &str = "icons/hammer.svg";
+pub const CHEVRON_LEFT_ICON_PATH: &str = "icons/chevron-left.svg";
 pub const CHEVRON_RIGHT_ICON_PATH: &str = "icons/chevron-right.svg";
 pub const CIRCLE_ALERT_ICON_PATH: &str = "icons/circle-alert.svg";
 pub const ROTATE_CCW_ICON_PATH: &str = "icons/rotate-ccw.svg";
@@ -91,6 +92,8 @@ const ARCHIVE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" 
 const EYE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>"#;
 const WRENCH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>"#;
 const HAMMER_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m15 12-8.373 8.373a1 1 0 1 1-3-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172V7l-2.26-2.26a6 6 0 0 0-4.202-1.756L9 2.96l.92.82A6.18 6.18 0 0 1 12 8.4V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/></svg>"#;
+const CHEVRON_LEFT_ICON: &[u8] =
+    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/chevron-left.svg");
 const CHEVRON_RIGHT_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m9 18 6-6-6-6"/></svg>"#;
 const CIRCLE_ALERT_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>"#;
 const ROTATE_CCW_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>"#;
@@ -216,6 +219,7 @@ impl AssetSource for DesktopAssets {
             EYE_ICON_PATH => Ok(Some(Cow::Borrowed(EYE_ICON))),
             WRENCH_ICON_PATH => Ok(Some(Cow::Borrowed(WRENCH_ICON))),
             HAMMER_ICON_PATH => Ok(Some(Cow::Borrowed(HAMMER_ICON))),
+            CHEVRON_LEFT_ICON_PATH => Ok(Some(Cow::Borrowed(CHEVRON_LEFT_ICON))),
             CHEVRON_RIGHT_ICON_PATH => Ok(Some(Cow::Borrowed(CHEVRON_RIGHT_ICON))),
             CIRCLE_ALERT_ICON_PATH => Ok(Some(Cow::Borrowed(CIRCLE_ALERT_ICON))),
             ROTATE_CCW_ICON_PATH => Ok(Some(Cow::Borrowed(ROTATE_CCW_ICON))),
@@ -245,6 +249,8 @@ impl AssetSource for DesktopAssets {
                 "sun.svg".into(),
                 "inbox.svg".into(),
                 "arrow-up.svg".into(),
+                "chevron-left.svg".into(),
+                "chevron-right.svg".into(),
                 "x.svg".into(),
                 "check.svg".into(),
                 "alert-triangle.svg".into(),
@@ -284,21 +290,12 @@ pub fn provider_logo_path(provider: AgentProvider) -> &'static str {
     }
 }
 
-pub fn permission_mode_icon_path(mode: PermissionMode) -> &'static str {
-    match mode {
-        PermissionMode::Default => "icons/shield.svg",
-        PermissionMode::AcceptEdits => "icons/shield-check.svg",
-        PermissionMode::Plan => "icons/clipboard-list.svg",
-        PermissionMode::BypassPermissions => "icons/hand-metal.svg",
-    }
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        permission_mode_icon_path, provider_logo_path, AgentProvider, DesktopAssets,
-        PermissionMode, ALERT_TRIANGLE_ICON_PATH, CHECK_ICON_PATH, CLOSE_ICON_PATH,
-        FOLDER_ICON_PATH, GIT_BRANCH_ICON_PATH, PROVIDER_LOGO_OPACITY, PROVIDER_LOGO_SIZE_PX,
+        provider_logo_path, AgentProvider, DesktopAssets, ALERT_TRIANGLE_ICON_PATH,
+        CHECK_ICON_PATH, CLOSE_ICON_PATH, FOLDER_ICON_PATH, GIT_BRANCH_ICON_PATH,
+        PROVIDER_LOGO_OPACITY, PROVIDER_LOGO_SIZE_PX,
     };
     use gpui::AssetSource as _;
 
@@ -381,26 +378,6 @@ mod tests {
     #[test]
     fn provider_logo_opacity_should_match_web_provider_logo_class() {
         assert_eq!(PROVIDER_LOGO_OPACITY, 0.6);
-    }
-
-    #[test]
-    fn permission_mode_icon_path_should_match_web_icons() {
-        assert_eq!(
-            permission_mode_icon_path(PermissionMode::Default),
-            "icons/shield.svg"
-        );
-        assert_eq!(
-            permission_mode_icon_path(PermissionMode::AcceptEdits),
-            "icons/shield-check.svg"
-        );
-        assert_eq!(
-            permission_mode_icon_path(PermissionMode::Plan),
-            "icons/clipboard-list.svg"
-        );
-        assert_eq!(
-            permission_mode_icon_path(PermissionMode::BypassPermissions),
-            "icons/hand-metal.svg"
-        );
     }
 
     #[test]

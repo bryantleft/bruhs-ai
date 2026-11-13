@@ -6,9 +6,9 @@ use crate::{ActiveTheme, AxisExt};
 use gpui::{
     Anchor, App, Axis, Background, BorderStyle, Bounds, ContentMask, CursorStyle, Edges, Element,
     ElementId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement,
-    IsZero, LayoutId, ListState, MouseDownEvent, MouseMoveEvent, MouseUpEvent, PaintQuad, Pixels,
-    Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style, UniformListScrollHandle, Window,
-    fill, point, px, relative, size,
+    IsZero, LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
+    PaintQuad, Pixels, Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style,
+    UniformListScrollHandle, Window, fill, point, px, relative, size,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
@@ -831,7 +831,10 @@ impl Element for Scrollbar {
                             let scroll_handle = self.scroll_handle.clone();
 
                             move |event: &MouseDownEvent, phase, _, cx| {
-                                if phase.bubble() && bounds.contains(&event.position) {
+                                if phase.bubble()
+                                    && event.button == MouseButton::Left
+                                    && bounds.contains(&event.position)
+                                {
                                     cx.stop_propagation();
 
                                     if thumb_bounds.contains(&event.position) {
@@ -873,6 +876,27 @@ impl Element for Scrollbar {
                             }
                         });
                     }
+
+                    let offset_for_drag =
+                        move |position: Point<Pixels>,
+                              drag_pos: Point<Pixels>,
+                              current: Point<Pixels>| {
+                            let percentage = (if is_vertical {
+                                (position.y - drag_pos.y - bounds.origin.y)
+                                    / (bounds.size.height - thumb_size)
+                            } else {
+                                (position.x - drag_pos.x - bounds.origin.x)
+                                    / (bounds.size.width - thumb_size - margin_end)
+                            })
+                            .clamp(0., 1.);
+                            let offset = (-(scroll_area_size - container_size) * percentage)
+                                .clamp(safe_range.start, safe_range.end);
+                            if is_vertical {
+                                point(current.x, offset)
+                            } else {
+                                point(offset, current.y)
+                            }
+                        };
 
                     window.on_mouse_event({
                         let scroll_handle = self.scroll_handle.clone();
@@ -922,28 +946,11 @@ impl Element for Scrollbar {
                                 // We need to keep the thumb bar still at the origin down position
                                 let drag_pos = state.get().drag_pos;
 
-                                let percentage = (if is_vertical {
-                                    (event.position.y - drag_pos.y - bounds.origin.y)
-                                        / (bounds.size.height - thumb_size)
-                                } else {
-                                    (event.position.x - drag_pos.x - bounds.origin.x)
-                                        / (bounds.size.width - thumb_size - margin_end)
-                                })
-                                .clamp(0., 1.);
-
-                                let offset = if is_vertical {
-                                    point(
-                                        scroll_handle.offset().x,
-                                        (-(scroll_area_size - container_size) * percentage)
-                                            .clamp(safe_range.start, safe_range.end),
-                                    )
-                                } else {
-                                    point(
-                                        (-(scroll_area_size - container_size) * percentage)
-                                            .clamp(safe_range.start, safe_range.end),
-                                        scroll_handle.offset().y,
-                                    )
-                                };
+                                let offset = offset_for_drag(
+                                    event.position,
+                                    drag_pos,
+                                    scroll_handle.offset(),
+                                );
 
                                 if (scroll_handle.offset().y - offset.y).abs() > px(1.)
                                     || (scroll_handle.offset().x - offset.x).abs() > px(1.)
@@ -967,8 +974,17 @@ impl Element for Scrollbar {
                         let state = scrollbar_state.clone();
                         let scroll_handle = self.scroll_handle.clone();
 
-                        move |_event: &MouseUpEvent, phase, _, cx| {
-                            if phase.bubble() {
+                        move |event: &MouseUpEvent, phase, _, cx| {
+                            if phase.bubble()
+                                && event.button == MouseButton::Left
+                                && state.get().dragged_axis == Some(axis)
+                            {
+                                // The final move may be inside the frame-rate gate.
+                                scroll_handle.set_offset(offset_for_drag(
+                                    event.position,
+                                    state.get().drag_pos,
+                                    scroll_handle.offset(),
+                                ));
                                 scroll_handle.end_drag();
                                 state.set(state.get().with_unset_drag_pos());
                                 cx.notify(view_id);

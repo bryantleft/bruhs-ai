@@ -122,6 +122,17 @@ where
         // caller's element as the actual scroll-tracked layout container.
         let root_style = root_style_from(&mut self.element);
 
+        // The viewport owns the size limit. Keeping it on the content would
+        // clip the scroll extent and make the final rows unreachable.
+        match self.axis {
+            ScrollbarAxis::Vertical => self.element.style().max_size.height = None,
+            ScrollbarAxis::Horizontal => self.element.style().max_size.width = None,
+            ScrollbarAxis::Both => {
+                self.element.style().max_size.height = None;
+                self.element.style().max_size.width = None;
+            }
+        }
+
         let root_id = self.id.clone();
         let area_id = (self.id.clone(), "area");
         let content_id = (self.id.clone(), "content");

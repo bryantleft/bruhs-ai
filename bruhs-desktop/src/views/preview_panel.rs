@@ -29,7 +29,7 @@ const EMPTY_HINT: &str = "Pages that refuse framing open in the browser instead.
 const SERVERS_LABEL: &str = "LOCAL SERVERS";
 const SERVERS_SCANNING: &str = "Scanning…";
 const SERVERS_NONE: &str = "Nothing is listening on localhost.";
-const NO_WEBVIEW_HINT: &str = "No embedded browser on this platform — use Open in browser.";
+const NO_WEBVIEW_HINT: &str = "No embedded browser on this platform. Use Open in browser.";
 const BORDER_OPACITY: f32 = 0.6;
 
 #[derive(Clone, Debug, PartialEq, Eq)]

@@ -125,7 +125,15 @@ pub(super) fn desktop_permission_summary(tool: &str, input: &serde_json::Value) 
         "Edit" | "Write" | "Read" => desktop_tool_pick_str(input, "file_path"),
         _ => None,
     };
-    raw.unwrap_or_default().to_string()
+    raw.map_or_else(
+        || serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string()),
+        str::to_string,
+    )
+}
+
+pub(super) fn permission_input_markdown(input: &serde_json::Value) -> String {
+    let json = serde_json::to_string_pretty(input).unwrap_or_else(|_| input.to_string());
+    format!("```json\n{json}\n```")
 }
 
 pub(super) fn desktop_diff_lines(old_text: &str, new_text: &str) -> Vec<DesktopDiffLine> {
@@ -252,7 +260,7 @@ pub(super) fn desktop_question_tool_body(input: &serde_json::Value, output: &str
     if !options.is_empty() {
         lines.push(String::new());
         lines.push("Options:".to_string());
-        lines.extend(options.into_iter().map(|option| format!("- {option}")));
+        lines.extend(options);
     }
     if !output.is_empty() {
         lines.push(String::new());
@@ -558,12 +566,6 @@ impl ChatView {
                                 .text_size(px(TOOL_QUESTION_OPTION_TEXT_SIZE_PX))
                                 .line_height(relative(TOOL_QUESTION_OPTION_LINE_HEIGHT))
                                 .text_color(theme::rambutan_300())
-                                .child(
-                                    div()
-                                        .flex_shrink_0()
-                                        .text_color(theme::rambutan_500())
-                                        .child("•"),
-                                )
                                 .child(div().min_w_0().child(option))
                         })),
                 )
@@ -606,7 +608,10 @@ impl ChatView {
             .my(px(PERMISSION_PROMPT_Y_MARGIN_PX))
             .child(
                 div()
+                    .id("desktop-permission-prompt")
                     .debug_selector(|| "desktop-permission-prompt".to_string())
+                    .role(Role::Group)
+                    .aria_label("Permission needed")
                     .overflow_hidden()
                     .rounded(px(PERMISSION_PROMPT_RADIUS_PX))
                     .border_1()
@@ -665,9 +670,32 @@ impl ChatView {
                                         .min_w_0()
                                         .truncate()
                                         .text_color(theme::rambutan_500())
-                                        .child(format!(" — {summary}")),
+                                        .child(format!(": {summary}")),
                                 )
                             }),
+                    )
+                    .child(
+                        div()
+                            .debug_selector(|| "desktop-permission-input".to_string())
+                            .child(
+                                div()
+                                    .id("desktop-permission-input")
+                                    .debug_selector(|| {
+                                        "desktop-permission-input-content".to_string()
+                                    })
+                                    .max_h(px(120.0))
+                                    .overflow_y_scrollbar()
+                                    .px(px(PERMISSION_PROMPT_X_PADDING_PX))
+                                    .py(px(PERMISSION_PROMPT_Y_PADDING_PX))
+                                    .child(
+                                        TextView::markdown(
+                                            "desktop-permission-input-text",
+                                            permission_input_markdown(&request.input),
+                                        )
+                                        .style(desktop_markdown_style(cx))
+                                        .selectable(true),
+                                    ),
+                            ),
                     )
                     .child(
                         div()
@@ -695,9 +723,9 @@ impl ChatView {
                                     .tab_index(0)
                                     .role(Role::Button)
                                     .aria_label("Deny permission")
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
+                                    .border_1()
+                                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| {
                                         el.bg(theme::lychee_400()
@@ -753,9 +781,9 @@ impl ChatView {
                                     .tab_index(0)
                                     .role(Role::Button)
                                     .aria_label("Approve permission")
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
+                                    .border_1()
+                                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| {
                                         el.bg(theme::pandan_400()
@@ -824,7 +852,7 @@ impl ChatView {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(CHAT_SCROLL_TO_BOTTOM_LABEL)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_600()))
             .tooltip(|window, cx| Tooltip::new(CHAT_SCROLL_TO_BOTTOM_LABEL).build(window, cx))

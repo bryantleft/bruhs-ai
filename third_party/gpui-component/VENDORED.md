@@ -21,6 +21,10 @@ and `crates/assets` are kept.
 
 Changes relative to upstream `0775df3`:
 
+The UI scrollbar work is recorded in the `scroll/scrollbar.rs` and
+`scroll/scrollable.rs` entries. The remaining entries document other local
+adaptations.
+
 - `Cargo.toml` (workspace): `gpui`, `gpui_platform`, `gpui_web`, `gpui_macros`,
   `reqwest_client` point at the `bnleft/zed` fork pinned by `rev` instead of
   `zed-industries/zed` (see "gpui pins" below).
@@ -33,6 +37,15 @@ Changes relative to upstream `0775df3`:
   `TITLE_BAR_LEFT_PADDING` 80 -> 88, traffic-light position (9, 9) -> (12, 15).
 - `crates/ui/src/resizable/resize_handle.rs`: a 4px hover strip, matching
   the web app.
+- `scroll/scrollbar.rs`: during an active primary-button drag, applies the
+  release position before clearing drag state so frame throttling cannot
+  discard the final movement. Desktop tests
+  `themed_scrollbar_drag_reveals_the_last_row` and
+  `themed_scrollbar_drag_reveals_the_last_column` cover fast release on each axis.
+- `scroll/scrollable.rs`: maximum size constraints stay on the viewport and
+  are removed from content along the scrolling axis. Bounded dropdowns can
+  reveal their final rows. Native color-menu and permission-review tests
+  verify scrolling to the end.
 - The whole tree is formatted with the workspace's rustfmt settings.
 
 ## gpui pins

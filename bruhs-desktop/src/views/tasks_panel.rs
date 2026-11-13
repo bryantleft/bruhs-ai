@@ -229,7 +229,6 @@ impl TasksPanelView {
         let task_id_for_dismiss = task.id.clone();
         let task_id_for_dismiss_key = task.id.clone();
         let task_key = element_key(&task.id);
-        let hover_group: SharedString = format!("desktop-background-task-row-{task_key}").into();
         let timestamp = tasks_panel_timestamp_like_web(&task, EpochMs::now());
         let success = desktop_task_success_like_web(task.exit_code);
         let status = task.status.clone();
@@ -250,7 +249,6 @@ impl TasksPanelView {
             .gap_1()
             .child(
                 div()
-                    .group(hover_group.clone())
                     .debug_selector(move || format!("desktop-background-task-row-{task_key}"))
                     .flex()
                     .items_center()
@@ -272,7 +270,9 @@ impl TasksPanelView {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label(expand_label)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .on_click(cx.listener(move |this, _ev, _window, cx| {
                                 this.toggle_task_expansion(task_id_for_expand.clone(), cx);
@@ -311,46 +311,45 @@ impl TasksPanelView {
                     )
                     .when(dismissible, |el| {
                         el.child(
-                            div()
-                                .ml_2()
-                                .invisible()
-                                .group_hover(hover_group, |el| el.visible())
+                            div().ml_2().child(
+                                web_button(
+                                    ("desktop-task-dismiss", task_key),
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::IconDefault,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(move || {
+                                    format!("desktop-background-task-dismiss-{task_key}")
+                                })
+                                .aria_label(format!("Dismiss {}", task.label))
+                                .tooltip(|window, cx| {
+                                    Tooltip::new(TASKS_PANEL_DISMISS_TOOLTIP).build(window, cx)
+                                })
+                                .tab_index(0)
+                                .role(Role::Button)
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .on_click(cx.listener(move |this, _ev, _window, cx| {
+                                    cx.stop_propagation();
+                                    this.dismiss_task(&task_id_for_dismiss, cx);
+                                }))
+                                .on_key_down(cx.listener(
+                                    move |this, event: &KeyDownEvent, window, cx| {
+                                        if is_web_button_activation_key(
+                                            event.keystroke.key.as_str(),
+                                        ) {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                            this.dismiss_task(&task_id_for_dismiss_key, cx);
+                                        }
+                                    },
+                                ))
                                 .child(
-                                    web_button(
-                                        ("desktop-task-dismiss", task_key),
-                                        WebButtonVariant::Ghost,
-                                        WebButtonSize::IconDefault,
-                                        ButtonState::Enabled,
-                                    )
-                                    .debug_selector(move || {
-                                        format!("desktop-background-task-dismiss-{task_key}")
-                                    })
-                                    .aria_label(TASKS_PANEL_DISMISS_TOOLTIP)
-                                    .tooltip(|window, cx| {
-                                        Tooltip::new(TASKS_PANEL_DISMISS_TOOLTIP).build(window, cx)
-                                    })
-                                    .tab_index(0)
-                                    .role(Role::Button)
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
-                                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                        cx.stop_propagation();
-                                        this.dismiss_task(&task_id_for_dismiss, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        move |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.dismiss_task(&task_id_for_dismiss_key, cx);
-                                            }
-                                        },
-                                    ))
-                                    .child("✕"),
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(14.0))
+                                        .text_color(theme::rambutan_400()),
                                 ),
+                            ),
                         )
                     }),
             )
@@ -429,7 +428,9 @@ impl Render for TasksPanelView {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label(TASKS_PANEL_CLOSE_LABEL)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| {
                                 el.bg(theme::longan_800().opacity(TASKS_PANEL_HOVER_BG_OPACITY))

@@ -16,6 +16,13 @@ pub const CODE_FONT_FAMILY: &str = "Monaspace Neon";
 /// bruhs heading face (web: `text-h2` = `Monaspace Xenon`).
 pub const HEADING_FONT_FAMILY: &str = "Monaspace Xenon";
 
+pub const APP_UI_TEXT_SIZE_PX: f32 = 13.0;
+pub const APP_BODY_TEXT_SIZE_PX: f32 = 13.0;
+pub const APP_INPUT_TEXT_SIZE_PX: f32 = 14.0;
+pub const APP_HEADER_HEIGHT_PX: f32 = 44.0;
+pub const APP_CONTROL_HEIGHT_PX: f32 = 32.0;
+pub const APP_COMPACT_CONTROL_HEIGHT_PX: f32 = 28.0;
+
 /// System UI with OpenType tabular numerals, matching Tailwind `tabular-nums`.
 pub fn tabular_system_font() -> Font {
     let mut tabular = font(".SystemUIFont");
@@ -403,8 +410,8 @@ pub fn apply_bruhs_theme(cx: &mut App) {
     theme.skeleton = longan_800();
     theme.scrollbar_show = ScrollbarShow::Always;
     theme.scrollbar = hsla(0.0, 0.0, 0.0, 0.0);
-    theme.scrollbar_thumb = rambutan_400().opacity(0.32);
-    theme.scrollbar_thumb_hover = rambutan_400().opacity(0.55);
+    theme.scrollbar_thumb = rambutan_500();
+    theme.scrollbar_thumb_hover = rambutan_400();
     theme.overlay = hsla(0.0, 0.0, 0.0, 0.5);
     theme.drop_target = persimmon_400();
     theme.drag_border = persimmon_400();
@@ -429,6 +436,97 @@ pub fn apply_bruhs_theme(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use gpui::prelude::FluentBuilder;
+    use gpui::{
+        div, point, px, Context, InteractiveElement, IntoElement, Modifiers, MouseButton,
+        ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled, Window,
+    };
+    use gpui_component::scroll::ScrollableElement;
+
+    struct ScrollbarHarness {
+        scroll: ScrollHandle,
+        horizontal: bool,
+    }
+
+    impl Render for ScrollbarHarness {
+        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+            div()
+                .id("scrollbar-fixture")
+                .debug_selector(|| "scrollbar-fixture".to_string())
+                .w(px(160.0))
+                .h(px(120.0))
+                .flex()
+                .when(self.horizontal, |el| el.overflow_x_scroll())
+                .when(!self.horizontal, |el| el.flex_col().overflow_y_scroll())
+                .track_scroll(&self.scroll)
+                .children((0..20).map(|index| {
+                    div()
+                        .when(self.horizontal, |el| el.w(px(40.0)))
+                        .h(px(40.0))
+                        .flex_shrink_0()
+                        .when(index == 19, |row| {
+                            row.debug_selector(|| "scrollbar-last-row".to_string())
+                        })
+                        .child(index.to_string())
+                }))
+                .when(self.horizontal, |el| el.horizontal_scrollbar(&self.scroll))
+                .when(!self.horizontal, |el| el.vertical_scrollbar(&self.scroll))
+        }
+    }
+
+    #[gpui::test]
+    fn themed_scrollbar_drag_reveals_the_last_row(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            apply_bruhs_theme(cx);
+        });
+        let (view, cx) = cx.add_window_view(|_, _| ScrollbarHarness {
+            scroll: ScrollHandle::new(),
+            horizontal: false,
+        });
+        cx.run_until_parked();
+        let bounds = cx.debug_bounds("scrollbar-fixture").expect("scroll area");
+        let start = point(bounds.right() - px(8.0), bounds.top() + px(8.0));
+        let end = point(start.x, bounds.bottom() - px(8.0));
+        cx.simulate_mouse_move(start, None, Modifiers::default());
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        let last = cx.debug_bounds("scrollbar-last-row").expect("final row");
+        assert!(last.bottom() <= bounds.bottom());
+        assert!(last.top() >= bounds.top());
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.scroll.offset().y, -view.scroll.max_offset().y);
+        });
+    }
+
+    #[gpui::test]
+    fn themed_scrollbar_drag_reveals_the_last_column(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            apply_bruhs_theme(cx);
+        });
+        let (view, cx) = cx.add_window_view(|_, _| ScrollbarHarness {
+            scroll: ScrollHandle::new(),
+            horizontal: true,
+        });
+        cx.run_until_parked();
+        let bounds = cx.debug_bounds("scrollbar-fixture").expect("scroll area");
+        let start = point(bounds.left() + px(8.0), bounds.bottom() - px(8.0));
+        let end = point(bounds.right() - px(8.0), start.y);
+        cx.simulate_mouse_move(start, None, Modifiers::default());
+        cx.simulate_mouse_down(start, MouseButton::Left, Modifiers::default());
+        cx.simulate_mouse_move(end, Some(MouseButton::Left), Modifiers::default());
+        cx.simulate_mouse_up(end, MouseButton::Left, Modifiers::default());
+        cx.run_until_parked();
+        let last = cx.debug_bounds("scrollbar-last-row").expect("final column");
+        assert!(last.right() <= bounds.right());
+        assert!(last.left() >= bounds.left());
+        view.read_with(cx, |view, _| {
+            assert_eq!(view.scroll.offset().x, -view.scroll.max_offset().x);
+        });
+    }
 
     /// `Theme::tokens` is derived when the theme is built, so the bruhs
     /// colours have to be pushed into it after they are assigned — otherwise

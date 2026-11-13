@@ -141,12 +141,9 @@ fn desktop_composer_hint_copy_should_match_web_reference() {
     assert_eq!(COMPOSER_HINT_POPOVER_RADIUS_PX, 8.0);
     assert_eq!(COMPOSER_HINT_POPOVER_MAX_HEIGHT_PX, 288.0);
     assert_eq!(COMPOSER_HINT_ICON_SLOT_WIDTH_PX, 12.0);
-    assert_eq!(COMPOSER_HINT_ROW_TEXT_SIZE_PX, 14.0);
+    assert_eq!(COMPOSER_HINT_ROW_TEXT_SIZE_PX, 13.0);
     assert_eq!(COMPOSER_HINT_SUB_TEXT_SIZE_PX, 12.0);
-    assert_eq!(
-        CHAT_INPUT_PLACEHOLDER,
-        "Ask anything, @ threads or files, # pull requests, $ skills, or / for commands"
-    );
+    assert_eq!(CHAT_INPUT_PLACEHOLDER, "Ask anything");
 }
 
 #[test]
@@ -233,8 +230,8 @@ fn desktop_chat_shell_layout_should_match_web_reference() {
     assert_eq!(CHAT_MESSAGE_LIST_X_PADDING_PX, 16.0);
     assert_eq!(CHAT_MESSAGE_LIST_Y_PADDING_PX, 16.0);
     assert_eq!(CHAT_MESSAGE_LIST_GAP_PX, 0.0);
-    assert_eq!(CHAT_COMPOSER_BOTTOM_PADDING_PX, 16.0);
-    assert_eq!(CHAT_COMPOSER_MIN_ROWS, 3);
+    assert_eq!(CHAT_COMPOSER_BOTTOM_PADDING_PX, 12.0);
+    assert_eq!(CHAT_COMPOSER_MIN_ROWS, 2);
     assert_eq!(CHAT_COMPOSER_MAX_ROWS, 8);
 }
 
@@ -283,16 +280,16 @@ fn desktop_message_bubble_typography_should_match_web_reference() {
 
 #[test]
 fn desktop_composer_mention_icons_should_match_web_reference() {
-    assert_eq!(COMPOSER_DIRECTORY_ICON, "▸");
-    assert_eq!(COMPOSER_FILE_ICON, "·");
-    assert_eq!(desktop_mention_icon(true), "▸");
-    assert_eq!(desktop_mention_icon(false), "·");
+    assert_eq!(COMPOSER_DIRECTORY_ICON, "icons/folder.svg");
+    assert_eq!(COMPOSER_FILE_ICON, "icons/file.svg");
+    assert_eq!(desktop_mention_icon(true), "icons/folder.svg");
+    assert_eq!(desktop_mention_icon(false), "icons/file.svg");
 }
 
 #[test]
 fn desktop_git_branch_switcher_copy_should_match_web_reference() {
     assert_eq!(GIT_BRANCH_EMPTY_LABEL, "No branches");
-    assert_eq!(GIT_BRANCH_CURRENT_MARK, "●");
+    assert_eq!(GIT_BRANCH_CURRENT_MARK, "icons/check.svg");
     assert_eq!(GIT_BRANCH_SWITCH_LABEL, "Switch git branch");
     assert_eq!(GIT_BRANCH_MENU_MIN_WIDTH_PX, 200.0);
     assert_eq!(GIT_BRANCH_MENU_MAX_HEIGHT_PX, 256.0);
@@ -346,7 +343,7 @@ fn desktop_auth_banner_visibility_should_match_web_provider_condition() {
 #[test]
 fn desktop_auth_check_should_preserve_login_guidance_like_web_reference() {
     let previous = Some(
-        "Still not authenticated. Run `claude auth login` in a terminal, then click Re-check."
+        "Still not authenticated. Run `claude auth login` in a terminal, then click Check again."
             .to_string(),
     );
     let unauthenticated = parse_desktop_auth_status("Not logged in", "", None);
@@ -682,7 +679,7 @@ fn desktop_tool_toggle_label_should_match_web_aria_copy() {
 
 #[test]
 fn permission_mode_label_should_match_web_status_bar_copy() {
-    assert_eq!(PermissionMode::AcceptEdits.label(), "Auto-accept");
+    assert_eq!(PermissionMode::AcceptEdits.label(), "Accept edits");
     assert_eq!(STATUS_CHANGE_MODEL_LABEL, "Change model");
 }
 
@@ -718,7 +715,7 @@ fn desktop_permission_summary_should_match_web_supported_tools() {
     );
     assert_eq!(
         desktop_permission_summary("Glob", &json!({ "pattern": "*.rs" })),
-        ""
+        serde_json::to_string_pretty(&json!({ "pattern": "*.rs" })).unwrap()
     );
 }
 
@@ -1485,7 +1482,7 @@ fn desktop_composer_hints_and_git_branch_menu_should_match_web_flow(cx: &mut gpu
     assert_chat_rendered_bounds(cx, "desktop-composer-input");
     assert_chat_rendered_bounds(cx, "desktop-status-bar");
     assert_chat_rendered_bounds(cx, "desktop-model-status");
-    assert_chat_rendered_bounds(cx, "desktop-permission-mode");
+    assert_chat_rendered_bounds(cx, "desktop-composer-options");
     assert_chat_provider_logo_bounds(cx, "desktop-chat-provider-logo-codex");
 
     click_chat_debug_selector(cx, "desktop-composer-input");

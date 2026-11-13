@@ -32,7 +32,7 @@ pub const TRANSCRIPT_MAX_WIDTH_PX: f32 = 768.0;
 pub const TRANSCRIPT_X_PADDING_PX: f32 = 16.0;
 pub const TRANSCRIPT_TOP_PADDING_PX: f32 = 16.0;
 pub const TRANSCRIPT_BOTTOM_PADDING_PX: f32 = 24.0;
-pub const TRANSCRIPT_BODY_TEXT_SIZE_PX: f32 = 14.0;
+pub const TRANSCRIPT_BODY_TEXT_SIZE_PX: f32 = theme::APP_BODY_TEXT_SIZE_PX;
 pub const TRANSCRIPT_LABEL_TEXT_SIZE_PX: f32 = 12.0;
 pub const TRANSCRIPT_ROW_MIN_HEIGHT_PX: f32 = 24.0;
 pub const TRANSCRIPT_ICON_BOX_PX: f32 = 24.0;
@@ -41,8 +41,8 @@ pub const TRANSCRIPT_CHEVRON_PX: f32 = 12.0;
 pub const TRANSCRIPT_ROW_RADIUS_PX: f32 = 8.0;
 pub const TRANSCRIPT_CARD_RADIUS_PX: f32 = 14.0;
 pub const USER_BUBBLE_MAX_WIDTH: f32 = 0.85;
-pub const USER_BUBBLE_X_PADDING_PX: f32 = 14.0;
-pub const USER_BUBBLE_Y_PADDING_PX: f32 = 10.0;
+pub const USER_BUBBLE_X_PADDING_PX: f32 = 12.0;
+pub const USER_BUBBLE_Y_PADDING_PX: f32 = 8.0;
 pub const WORKING_DOT_PX: f32 = 6.0;
 
 const BODY_FONT_FAMILY: &str = "Monaspace Neon";
@@ -263,6 +263,8 @@ fn activity_row_button(id: impl Into<ElementId>) -> Stateful<Div> {
         .items_center()
         .gap(px(6.0))
         .rounded(px(TRANSCRIPT_ROW_RADIUS_PX))
+        .border_1()
+        .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
         .px(px(2.0))
         .py(px(2.0))
         .cursor_pointer()
@@ -316,9 +318,8 @@ impl ChatView {
     // ── User ────────────────────────────────────────────────────────────
 
     /// Web `UserRow`: a right-aligned longan-800 bubble at 85% max width,
-    /// with the copy button and clock revealed on hover.
+    /// with keyboard-reachable message actions beneath it.
     fn render_user_row(&self, index: usize, msg: &Message, cx: &Context<'_, Self>) -> AnyElement {
-        let group: SharedString = format!("desktop-user-turn-{index}").into();
         // A message another thread's agent sent shows who sent it, not the
         // header written for the model.
         let (caption, body) = match bruhs_models::thread_link::parse_delivery(&msg.content) {
@@ -328,7 +329,6 @@ impl ChatView {
         div()
             .id(("desktop-user-turn", index))
             .debug_selector(move || format!("desktop-user-message-{index}"))
-            .group(group.clone())
             .w_full()
             .flex()
             .flex_col()
@@ -365,7 +365,7 @@ impl ChatView {
                         bubble.child(self.render_sent_files(index, msg, cx))
                     }),
             )
-            .child(self.render_user_actions(index, msg, group, cx))
+            .child(self.render_user_actions(index, msg, cx))
             .into_any_element()
     }
 
@@ -392,8 +392,10 @@ impl ChatView {
                     .cursor_pointer()
                     .tab_index(0)
                     .role(Role::Button)
-                    .aria_label("Open file")
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .aria_label(format!("Open {}", file.name))
+                    .border_1()
+                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .hover(|el| el.text_color(theme::rambutan_100()))
                     .on_click(cx.listener(move |_this, _, _, cx| {
                         cx.stop_propagation();
@@ -410,13 +412,11 @@ impl ChatView {
         list.into_any_element()
     }
 
-    /// Copy, clock, and Edit from here. The confirm stays visible; the rest
-    /// of the row appears on hover, matching the web user row.
+    /// Copy, clock, and Edit from here stay reachable without pointer hover.
     fn render_user_actions(
         &self,
         index: usize,
         msg: &Message,
-        group: SharedString,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let confirming = self.rewind_confirm == Some(index) && !self.is_streaming;
@@ -435,9 +435,6 @@ impl ChatView {
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_500())
             .font(theme::tabular_system_font())
-            .when(!confirming, |row| {
-                row.invisible().group_hover(group, |row| row.visible())
-            })
             .when(confirming, |row| {
                 row.child(self.render_rewind_confirm(index, cx))
             })
@@ -554,7 +551,9 @@ impl ChatView {
             .aria_label(label)
             .tab_index(0)
             .cursor_pointer()
-            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .hover(|el| el.bg(theme::longan_700()).text_color(theme::rambutan_100()))
             .on_click(on_click)
             .child(text)
@@ -580,7 +579,9 @@ impl ChatView {
             .role(Role::Button)
             .aria_label(label)
             .tab_index(0)
-            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_800()).text_color(theme::rambutan_200()))
             .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
@@ -619,13 +620,11 @@ impl ChatView {
             })
             .collect();
         let latest = latest_assistant_index(&self.messages) == Some(index);
-        let group: SharedString = format!("desktop-turn-{index}").into();
         let has_text = !msg.content.trim().is_empty();
 
         let mut turn = div()
             .id(("desktop-turn", index))
             .debug_selector(move || format!("desktop-assistant-message-{index}"))
-            .group(group.clone())
             .w_full()
             .flex()
             .flex_col();
@@ -681,7 +680,7 @@ impl ChatView {
         if !files.is_empty() {
             turn = turn.child(self.render_changed_files_card(index, &files, latest, cx));
         }
-        turn = turn.child(self.render_assistant_meta_row(index, msg, group, cx));
+        turn = turn.child(self.render_assistant_meta_row(index, msg, cx));
         turn.into_any_element()
     }
 
@@ -747,7 +746,9 @@ impl ChatView {
                     .role(Role::Button)
                     .aria_expanded(expanded)
                     .aria_label(aria)
-                    .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.text_color(theme::rambutan_200()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -800,7 +801,7 @@ impl ChatView {
                     .role(Role::Button)
                     .aria_expanded(open)
                     .aria_label(label)
-                    .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
                         this.toggle_thinking_block(index, cx);
                     }))
@@ -893,7 +894,7 @@ impl ChatView {
                     .role(Role::Button)
                     .aria_expanded(open)
                     .aria_label(summary.clone())
-                    .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
                         this.toggle_row(key_for_click.clone(), default_open, cx);
                     }))
@@ -979,6 +980,8 @@ impl ChatView {
             .flex()
             .flex_col()
             .rounded(px(TRANSCRIPT_ROW_RADIUS_PX))
+            .border_1()
+            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
             .px(px(2.0))
             .py(px(2.0));
         if can_expand {
@@ -987,7 +990,7 @@ impl ChatView {
                 .role(Role::Button)
                 .aria_expanded(open)
                 .aria_label(title.clone())
-                .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
                 .hover(|el| el.bg(theme::longan_800().opacity(0.3)))
                 .tooltip(move |window, cx| Tooltip::new(title.clone()).build(window, cx))
@@ -1191,7 +1194,9 @@ impl ChatView {
                             .role(Role::Button)
                             .aria_expanded(open)
                             .aria_label(count_label.clone())
-                            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| el.bg(theme::longan_800().opacity(0.4)))
                             .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -1324,7 +1329,9 @@ impl ChatView {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label(format!("Open diff for {}", file.path))
-                            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| el.bg(theme::longan_800().opacity(0.4)))
                             .on_click(cx.listener(move |_, _, _, cx| {
@@ -1420,7 +1427,9 @@ impl ChatView {
                         .tab_index(0)
                         .role(Role::Button)
                         .aria_label("Retry")
-                        .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                        .border_1()
+                        .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .cursor_pointer()
                         .hover(|el| el.bg(theme::lychee_500().opacity(0.20)))
                         .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -1474,19 +1483,17 @@ impl ChatView {
 
     // ── Meta ─────────────────────────────────────────────────────────────
 
-    /// Web `AssistantMetaRow`: copy · model · duration · tokens · clock,
-    /// revealed when the turn is hovered.
+    /// Copy, citation and turn metadata remain reachable from the keyboard.
     fn render_assistant_meta_row(
         &self,
         index: usize,
         msg: &Message,
-        group: SharedString,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let duration = turn_duration_ms(msg).map(fold_duration_label);
         let tokens = msg.usage.as_ref().map(|u| {
             format!(
-                "{} in · {} out",
+                "{} in, {} out",
                 format_token_count(u.input_tokens),
                 format_token_count(u.output_tokens)
             )
@@ -1509,8 +1516,6 @@ impl ChatView {
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_500())
             .font(theme::tabular_system_font())
-            .invisible()
-            .group_hover(group, |el| el.visible())
             .when(has_text, |el| {
                 let quote = msg.content.clone();
                 el.child(
@@ -1526,6 +1531,10 @@ impl ChatView {
                         .hover(|el| el.bg(theme::longan_800().opacity(0.6)))
                         .role(Role::Button)
                         .aria_label("Cite in composer")
+                        .tab_index(0)
+                        .border_1()
+                        .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .on_click(cx.listener(move |this, _ev, window, cx| {
                             cx.stop_propagation();
                             this.insert_context_chip(

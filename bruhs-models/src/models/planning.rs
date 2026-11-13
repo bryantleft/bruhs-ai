@@ -354,10 +354,8 @@ fn briefing_text(
         |item| format!("Protect the next open block for “{}” first.", item.title),
     );
     let pressure = match (overdue, waiting, follow_ups) {
-        (0, 0, 0) => "No overdue work or follow-ups need triage.".to_string(),
-        _ => format!(
-            "Triage {overdue} overdue, {waiting} waiting, and {follow_ups} follow-up item(s)."
-        ),
+        (0, 0, 0) => "No overdue work or follow ups need triage.".to_string(),
+        _ => format!("Triage {overdue} overdue, {waiting} waiting, and {follow_ups} to follow up."),
     };
     format!("{opening} {focus} {pressure}")
 }

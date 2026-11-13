@@ -88,6 +88,11 @@ pub fn menu_projects(
             out.push(p.clone());
         }
     }
+    for (name, path) in &mut out {
+        if name.trim().is_empty() {
+            name.clone_from(path);
+        }
+    }
     out
 }
 
@@ -314,7 +319,9 @@ impl TerminalPanelView {
             .role(Role::Tab)
             .aria_label(format!("Terminal {title} ({cwd_hint})"))
             .aria_selected(active)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _ev, window, cx| {
                 cx.stop_propagation();
@@ -335,7 +342,9 @@ impl TerminalPanelView {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label("Close terminal")
-                    .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
                         cx.stop_propagation();
@@ -376,8 +385,10 @@ impl TerminalPanelView {
             .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY)))
             .tab_index(0)
             .role(Role::MenuItem)
-            .aria_label(format!("{label} — {hint}"))
-            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+            .aria_label(format!("{label}. {hint}"))
+            .border_1()
+            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _ev, window, cx| {
                 cx.stop_propagation();
@@ -532,7 +543,9 @@ impl TerminalPanelView {
                     .role(Role::Button)
                     .aria_label("New terminal")
                     .aria_expanded(self.new_menu_open)
-                    .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _ev, _window, cx| {
                         cx.stop_propagation();
@@ -566,7 +579,9 @@ impl TerminalPanelView {
                         .tab_index(0)
                         .role(Role::Button)
                         .aria_label("Cite in composer")
-                        .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                        .border_1()
+                        .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .cursor_pointer()
                         .on_click(cx.listener(|this, _ev, _window, cx| {
                             cx.stop_propagation();
@@ -615,7 +630,9 @@ impl TerminalPanelView {
                         .tab_index(0)
                         .role(Role::Button)
                         .aria_label("Hide terminal (⌘J)")
-                        .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                        .border_1()
+                        .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .cursor_pointer()
                         .on_click(cx.listener(|_this, _ev, _window, cx| {
                             cx.stop_propagation();
@@ -760,7 +777,9 @@ impl TerminalPanelView {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label("Choose a folder for a new terminal")
-                            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .text_center()
                             .on_click(cx.listener(|_this, _ev, _window, cx| {

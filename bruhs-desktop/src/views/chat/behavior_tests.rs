@@ -9,6 +9,8 @@ use std::rc::Rc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 
+mod ui_audit;
+
 fn chat_window(cx: &mut TestAppContext) -> (Entity<ChatView>, &mut VisualTestContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
