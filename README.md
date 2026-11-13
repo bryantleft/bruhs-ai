@@ -92,6 +92,11 @@ You need:
 - Rust (the pinned toolchain in `rust-toolchain.toml`, with the
   `wasm32-unknown-unknown` target) and [Trunk](https://trunkrs.dev)
   (`cargo install trunk`).
+- Python 3.9+ for Trunk's asset hook. Release builds keep
+  originals and add smaller gzip sidecars; debug builds skip compression. The
+  companion server negotiates those sidecars without compressing API or SSE
+  replies. Run `python3 -m unittest discover -s bruhs-web/tests -p 'test_precompress.py'`
+  to check the release artifact contract.
 - [portless](https://www.npmjs.com/package/portless) for the named-URL flow
   (`npm i -g portless`).
 - The `claude` CLI, signed in with `claude login`. Claude runs use that login:
