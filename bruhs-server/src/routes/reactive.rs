@@ -1,0 +1,99 @@
+//! Local control plane and separately authenticated event ingress.
+
+use axum::{
+    extract::Path,
+    http::{HeaderMap, StatusCode},
+    Extension, Json,
+};
+use bruhs_core::reactive::{ReactiveError, ReactiveRuntime};
+use bruhs_models::reactive::{ReactiveCommand, ReactiveEvent, ReactiveSnapshot, MAX_PAYLOAD_BYTES};
+use serde_json::{json, Value};
+
+use crate::error::AppError;
+
+fn runtime(value: Option<Extension<ReactiveRuntime>>) -> Result<ReactiveRuntime, AppError> {
+    value.map(|Extension(runtime)| runtime).ok_or_else(|| {
+        AppError::Unavailable(
+            "Reactive agents are not running in this server. Restart the companion server.".into(),
+        )
+    })
+}
+
+impl From<ReactiveError> for AppError {
+    fn from(error: ReactiveError) -> Self {
+        match error {
+            ReactiveError::Invalid(message) => Self::BadRequest(message),
+            ReactiveError::NotFound(message) => Self::NotFound(message),
+            ReactiveError::Conflict(message) => Self::Conflict(message),
+            ReactiveError::Unauthorized => {
+                Self::Forbidden("The event source credential was not accepted.".into())
+            }
+            error @ ReactiveError::Storage(_) => Self::internal(error),
+        }
+    }
+}
+
+pub async fn snapshot(
+    value: Option<Extension<ReactiveRuntime>>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let snapshot = runtime(value)?.snapshot().await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(snapshot),
+    ))
+}
+
+pub async fn command(
+    value: Option<Extension<ReactiveRuntime>>,
+    Json(command): Json<ReactiveCommand>,
+) -> Result<Json<ReactiveSnapshot>, AppError> {
+    Ok(Json(runtime(value)?.command(command).await?))
+}
+
+pub async fn token(
+    value: Option<Extension<ReactiveRuntime>>,
+    Path(id): Path<String>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let token = runtime(value)?.webhook_token(&id).await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(json!({"token":token,"path":format!("/api/reactive/hooks/{id}")})),
+    ))
+}
+
+pub async fn hook(
+    value: Option<Extension<ReactiveRuntime>>,
+    Path(id): Path<String>,
+    headers: HeaderMap,
+    body: axum::body::Bytes,
+) -> Result<(StatusCode, Json<ReactiveEvent>), AppError> {
+    if body.len() > MAX_PAYLOAD_BYTES {
+        return Err(AppError::BadRequest(
+            "Event payload exceeds the 64 KiB source budget.".into(),
+        ));
+    }
+    let token = headers
+        .get(axum::http::header::AUTHORIZATION)
+        .and_then(|header| header.to_str().ok())
+        .and_then(|value| value.strip_prefix("Bearer "))
+        .ok_or_else(|| AppError::Forbidden("A source-specific Bearer token is required.".into()))?;
+    // A stable delivery id makes retries idempotent. Without one, each HTTP
+    // delivery is distinct; producers that retry must supply the header.
+    let key = headers
+        .get("x-event-id")
+        .or_else(|| headers.get("x-github-delivery"))
+        .and_then(|value| value.to_str().ok())
+        .map_or_else(
+            || bruhs_models::ids::ThreadId::new_v4().to_string(),
+            str::to_string,
+        );
+    let payload: Value = serde_json::from_slice(&body)
+        .map_err(|_| AppError::BadRequest("Webhook body must be JSON.".into()))?;
+    let event = runtime(value)?
+        .publish_hook(&id, token, &key, payload)
+        .await?;
+    Ok((StatusCode::ACCEPTED, Json(event)))
+}
+
+#[cfg(test)]
+mod tests;

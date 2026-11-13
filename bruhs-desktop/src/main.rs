@@ -84,6 +84,17 @@ const DESKTOP_WINDOW_TITLE: &str = "bruhs.ai";
 actions!(bruhs, [Quit]);
 
 fn main() {
+    if bruhs_core::reactive_tools::is_mcp_helper() {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .and_then(|runtime| runtime.block_on(bruhs_core::reactive_tools::run_mcp_helper()));
+        if let Err(error) = result {
+            eprintln!("Reactive automation helper failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if bruhs_core::secrets::is_mcp_helper() {
         let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()

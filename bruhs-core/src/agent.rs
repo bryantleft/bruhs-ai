@@ -775,6 +775,18 @@ impl AgentOrchestrator {
                     }
                 }
             };
+            if !unattended && app_tools {
+                if let Err(error) = crate::reactive_tools::configure(
+                    &mut query_options,
+                    permission_mode == PermissionMode::Plan,
+                ) {
+                    turn.send_start_error(format!(
+                        "Could not configure reactive automation tools: {error}"
+                    ))
+                    .await;
+                    return;
+                }
+            }
             match query_options {
                 ProviderQueryOptions::Claude(options) => {
                     stream_claude(options, turn, permissions, steers).await;

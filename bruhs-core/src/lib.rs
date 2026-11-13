@@ -13,6 +13,7 @@ pub mod paste_files;
 pub mod preview;
 pub mod pulls;
 pub mod reactive;
+pub mod reactive_tools;
 pub mod registry;
 pub mod second_opinion;
 pub mod secrets;
