@@ -8,6 +8,9 @@
 //! turn survives switching threads and finishes in the background, and a
 //! token re-renders only the running turn.
 
+mod mount_state;
+use mount_state::ChatMount;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -1988,19 +1991,21 @@ pub fn ChatPage() -> impl IntoView {
         })
     });
 
+    let mounting = ChatMount::new(active_thread_id, threads, messages, live_here);
+
     // ── View ─────────────────────────────────────────────────────────────────
     view! {
         {move || {
-            match active_thread() {
+            match mounting.thread_id.get() {
                 None => view! {
                     <div class="flex flex-1 flex-col items-center justify-center h-full text-body-sm text-rambutan-500">
                         <p>"Pick a conversation, or start a new one."</p>
                     </div>
                 }.into_any(),
 
-                Some(thread) => view! {
+                Some(thread_id) => view! {
                     <div class="flex flex-col h-full">
-                        <ChatHeader thread_id=thread.id />
+                        <ChatHeader thread_id=thread_id />
                         {move || find_cmds.thread_open.get().then(|| view! {
                             <FindBar
                                 label="Find in thread"
@@ -2016,8 +2021,7 @@ pub fn ChatPage() -> impl IntoView {
                         <crate::thread_history::ThreadHistoryStatus />
 
                         {move || {
-                            let empty = messages.with(|m| m.is_empty()) && !live_here.get();
-                            if empty {
+                            if mounting.transcript_empty.get() {
                                 // Empty thread: the draft hero — headline +
                                 // composer centered in the column.
                                 view! {
