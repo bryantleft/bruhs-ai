@@ -29,7 +29,7 @@ pub(super) async fn validate_and_cascade(
             let key = JsValue::from_str(write.id);
             if let Some(raw) = store.get(key.clone())?.await? {
                 let messages = crate::storage::messages::decode(raw)?;
-                if messages.thread_id != write.id {
+                if messages.thread_id() != write.id {
                     return Err(SaveError::Conflict);
                 }
             }

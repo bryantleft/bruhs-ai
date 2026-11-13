@@ -30,7 +30,7 @@ pub mod transcripts;
 pub mod workflow;
 
 use crate::state::{
-    AgentMessage, Calendar, CalendarEvent, CaptureRecord, InboxConversation, KnowledgeAttachment,
+    Calendar, CalendarEvent, CaptureRecord, InboxConversation, KnowledgeAttachment,
     KnowledgeDocument, Meeting, PersonProfile, Project, SourceClip, Thread, TranscriptSegment,
     WorkItem,
 };
@@ -74,13 +74,8 @@ pub async fn load_meeting_notes() -> Result<Vec<bruhs_models::MeetingNote>, idb:
     Ok(notes)
 }
 
-/// Wrapper record so the messages store can be keyed by `thread_id` while
-/// holding an arbitrarily long list of messages.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
-pub(crate) struct MessagesRecord {
-    pub thread_id: String,
-    pub messages: Vec<AgentMessage>,
-}
+mod messages_record;
+pub(crate) use messages_record::MessagesRecord;
 
 fn store_params(key: &str) -> ObjectStoreParams {
     let mut params = ObjectStoreParams::new();
@@ -270,7 +265,7 @@ pub(crate) async fn load_messages(
         match store.get(JsValue::from_str(thread_id))?.await? {
             Some(raw) => {
                 let record = messages::decode(raw)?;
-                if record.thread_id != thread_id {
+                if record.thread_id() != thread_id {
                     return Err(metadata::SaveError::Corrupt);
                 }
                 // Preserve the raw baseline; normalize only the display copy.
