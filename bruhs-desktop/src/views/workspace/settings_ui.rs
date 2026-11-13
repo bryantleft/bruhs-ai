@@ -106,7 +106,8 @@ pub fn slider_value_at(x: f32, width: f32, min: f64, max: f64, step: f64) -> f64
 /// Web `GoogleCalendarSettings::status_text`.
 pub fn google_status_text(state: &GoogleCalendarSyncState, now: EpochMs) -> String {
     if !state.is_connected() {
-        return "Not connected. Connect to import events and enable auto-record.".to_string();
+        return "Not connected. Connect to import events and enable automatic recording."
+            .to_string();
     }
     let who = match state.email() {
         Some(email) => format!("Connected as {email}"),
@@ -189,7 +190,7 @@ impl SettingsSlider {
 }
 
 fn focus_ring(style: StyleRefinement) -> StyleRefinement {
-    style.border_2().border_color(theme::persimmon_400())
+    style.border_color(theme::persimmon_400())
 }
 
 fn label_text(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
@@ -243,8 +244,8 @@ pub(super) fn switch<F>(
 where
     F: Fn(&mut Workspace, &mut Window, &mut Context<'_, Workspace>) + Clone + 'static,
 {
-    // The off-state ring is a border in gpui, which the thumb sits inside.
-    let border = if checked { 0.0 } else { 1.0 };
+    // Reserve the focus border in both states; the thumb sits inside it.
+    let border = 1.0;
     let thumb_x = if checked {
         SWITCH_THUMB_ON_X_PX
     } else {
@@ -259,12 +260,13 @@ where
         .w(px(SWITCH_WIDTH_PX))
         .h(px(SWITCH_HEIGHT_PX))
         .rounded_full()
+        .border_1()
+        .border_color(gpui::transparent_black())
         .map(|el| {
             if checked {
                 el.bg(theme::persimmon_500())
             } else {
                 el.bg(theme::longan_700())
-                    .border_1()
                     .border_color(gpui::white().opacity(0.10))
             }
         })
@@ -376,6 +378,8 @@ where
         .flex()
         .items_center()
         .justify_center()
+        .border_1()
+        .border_color(gpui::transparent_black())
         .role(Role::Button)
         .aria_label(aria_label)
         .when(disabled, |el| {
@@ -661,8 +665,8 @@ impl Workspace {
         let fraction = slider_fraction(value, min, max).to_f32_lossy();
         let bounds_cell = self.settings_slider_bounds[kind.index()].clone();
         let selector = kind.selector();
-        let track_top = (SLIDER_HEIGHT_PX - SLIDER_TRACK_PX) / 2.0;
-        let thumb_top = (SLIDER_HEIGHT_PX - SLIDER_THUMB_PX) / 2.0;
+        let track_top = (SLIDER_HEIGHT_PX - SLIDER_TRACK_PX) / 2.0 - 1.0;
+        let thumb_top = (SLIDER_HEIGHT_PX - SLIDER_THUMB_PX) / 2.0 - 1.0;
         let half_thumb = SLIDER_THUMB_PX / 2.0;
         div()
             .id(selector)
@@ -670,6 +674,8 @@ impl Workspace {
             .relative()
             .w_full()
             .h(px(SLIDER_HEIGHT_PX))
+            .border_1()
+            .border_color(gpui::transparent_black())
             .cursor_pointer()
             .role(Role::Slider)
             .aria_label(kind.aria_label())
@@ -825,6 +831,7 @@ impl Workspace {
                         ButtonState::disabled_if(busy),
                     )
                     .debug_selector(|| "desktop-settings-google-refresh".to_string())
+                    .aria_label("Refresh Google Calendar")
                     .child("Refresh"),
                     cx,
                     |this, _window, cx| {
@@ -840,6 +847,7 @@ impl Workspace {
                         ButtonState::disabled_if(busy),
                     )
                     .debug_selector(|| "desktop-settings-google-disconnect".to_string())
+                    .aria_label("Disconnect Google Calendar")
                     .child("Disconnect"),
                     cx,
                     |this, _window, cx| {
@@ -857,6 +865,7 @@ impl Workspace {
                     ButtonState::disabled_if(busy),
                 )
                 .debug_selector(|| "desktop-settings-google-connect".to_string())
+                .aria_label("Connect Google Calendar")
                 .child(if busy { "Connecting…" } else { "Connect" }),
                 cx,
                 |this, _window, cx| {
@@ -929,7 +938,7 @@ impl Workspace {
         if calendars.is_empty() {
             body = body.child(
                 label_text(
-                    "No calendars yet — wait for the next sync.",
+                    "No calendars yet. Wait for the next sync.",
                     LABEL_PX,
                     theme::rambutan_500(),
                 )
@@ -989,13 +998,13 @@ impl Workspace {
         let mut rows = vec![
             self.settings_row(
                 "desktop-settings-row-auto-record",
-                "Auto-record calendar meetings",
+                "Auto record calendar meetings",
                 "Start recording when a Google Calendar event begins. Needs the bruhs-capture daemon running and a calendar connected.",
                 switch(
                     "desktop-settings-auto-record",
                     settings.enabled,
                     false,
-                    "Auto-record calendar meetings",
+                    "Auto record calendar meetings",
                     cx,
                     move |this, _window, cx| {
                         this.update_meeting_prefs(
@@ -1069,7 +1078,7 @@ impl Workspace {
             ),
             self.settings_row(
                 "desktop-settings-row-always-skip",
-                "Always-skip events",
+                "Always skip events",
                 "Events you told the prompt to never record.",
                 label_text(
                     if skipped.is_empty() {
@@ -1111,6 +1120,8 @@ impl Workspace {
                                 .flex_shrink_0()
                                 .rounded(px(SEED_RADIUS_PX))
                                 .px(px(6.0))
+                                .border_1()
+                                .border_color(gpui::transparent_black())
                                 .role(Role::Button)
                                 .aria_label("Remove")
                                 .tab_index(0)
@@ -1176,7 +1187,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-transcription-provider",
             "Transcription provider",
-            "Applies to the final transcript on your next recording. On-device Whisper keeps audio here. A compatible server receives recorded audio after Stop and may charge for usage. Live previews always stay on-device.",
+            "Applies to the final transcript on your next recording. Whisper keeps audio on this device. A compatible server receives recorded audio after Stop and may charge for usage. Live previews always stay on this device.",
             provider_control,
         )];
         if prefs.transcription.provider == bruhs_models::TranscriptionProvider::OpenAiCompatible {
@@ -1235,7 +1246,7 @@ impl Workspace {
             rows.push(self.settings_row(
                 "desktop-settings-row-whisper-model",
                 "Transcription model",
-                "Downloaded on first use to ~/Library/Application Support/dev.bruhs.bruhs-ai/models. Takes effect on the next recording.",
+                "Downloaded on first use. Applies to your next recording.",
                 final_control,
             ));
         }
@@ -1256,7 +1267,7 @@ impl Workspace {
         let mut rows = vec![self.settings_row(
             "desktop-settings-row-subspeaker",
             "Distinguish multiple speakers",
-            "Clusters voice embeddings on the system-audio channel so remote speakers become Speaker 1, Speaker 2, and so on. ~30 MB model, downloaded on first use.",
+            "Clusters voice embeddings on the system audio channel so remote speakers become Speaker 1, Speaker 2, and so on. ~30 MB model, downloaded on first use.",
             switch(
                 "desktop-settings-subspeaker",
                 diarize.subspeaker_enabled,
@@ -1285,15 +1296,15 @@ impl Workspace {
             ));
             rows.push(self.render_settings_slider_body(
                 SettingsSlider::MaxSpeakers,
-                "2 · faster",
-                "20 · more resolution",
+                "2, faster",
+                "20, more resolution",
                 cx,
             ));
         }
         rows.push(self.settings_row(
             "desktop-settings-row-video-ocr",
             "Read participant names from video",
-            "Reads on-screen name hints locally at 2 fps. Visible names do not prove who is speaking and will not rename transcript speakers. Frames stay in memory; name observations are saved on this device. Requires Screen Recording permission.",
+            "Reads name hints from the screen locally at 2 fps. Visible names do not prove who is speaking and will not rename transcript speakers. Frames stay in memory; name observations are saved on this device. Requires Screen Recording permission.",
             switch(
                 "desktop-settings-video-ocr",
                 diarize.video_ocr_enabled,
@@ -1316,7 +1327,7 @@ impl Workspace {
                 "desktop-settings-auto-link",
                 diarize.cross_meeting_linking_auto,
                 false,
-                "Auto-link voices across meetings",
+                "Link voices across meetings",
                 cx,
                 {
                     let enabled = diarize.cross_meeting_linking_auto;
@@ -1345,8 +1356,8 @@ impl Workspace {
             );
             rows.push(self.render_settings_slider_body(
                 SettingsSlider::LinkThreshold,
-                "0.50 · looser",
-                "0.95 · stricter",
+                "0.50, looser",
+                "0.95, stricter",
                 cx,
             ));
         }
@@ -1365,13 +1376,13 @@ impl Workspace {
             .extract_observations;
         vec![self.settings_row(
             "desktop-settings-row-observations",
-            "Per-person observations",
+            "Person observations",
             "Each meeting summary also captures topics, decisions, action items, tone and notable quotes per speaker. Profiles populate the People page.",
             switch(
                 "desktop-settings-observations",
                 extract,
                 false,
-                "Extract per-person observations during summarization",
+                "Extract observations about each person during summaries",
                 cx,
                 move |this, _window, cx| {
                     this.update_meeting_prefs(
@@ -1452,6 +1463,7 @@ mod tests {
         format_value, google_status_text, slider_fraction, slider_value_at, snap,
         whisper_model_for_key, whisper_options, EpochMs,
     };
+    use ::core::prelude::v1::test;
     use bruhs_models::{GoogleCalendarSyncState, GoogleConnection, WhisperModel};
 
     #[test]
@@ -1493,7 +1505,7 @@ mod tests {
         let mut state = GoogleCalendarSyncState::default();
         assert_eq!(
             google_status_text(&state, EpochMs::UNIX_EPOCH),
-            "Not connected. Connect to import events and enable auto-record."
+            "Not connected. Connect to import events and enable automatic recording."
         );
         state.connection = GoogleConnection::Connected { email: None };
         assert_eq!(google_status_text(&state, EpochMs::UNIX_EPOCH), "Connected");
@@ -1520,7 +1532,7 @@ mod tests {
             .iter()
             .find(|o| o.value == "base_en")
             .expect("base model");
-        assert_eq!(base.label, "Base (English) — balanced, default (150 MB)");
+        assert_eq!(base.label, "Base (English), balanced, default (150 MB)");
         assert_eq!(
             whisper_model_for_key("large_v3_turbo"),
             Some(WhisperModel::LargeV3Turbo)

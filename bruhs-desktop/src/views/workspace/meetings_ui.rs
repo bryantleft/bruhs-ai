@@ -61,10 +61,10 @@ const SEARCH_RESULT_PREVIEW_CHARS: usize = 120;
 
 pub const MERGE_DROPDOWN_ID: &str = "desktop-people-merge-target";
 const LOCAL_FOCUS_PRIVACY_NOTE: &str =
-    "Local app name + bundle ID only · sampled every 2s · not shared-screen evidence. No \
+    "Local app name + bundle ID only, sampled every 2s, not shared-screen evidence. No \
     images, titles, URLs or AI upload.";
 const SYSTEM_AUDIO_PERMISSION_HINT: &str =
-    "Grant Screen Recording permission to capture the other side of meetings — open System \
+    "Grant Screen Recording permission to capture the other side of meetings. Open System \
     Settings → Privacy & Security → Screen Recording and enable bruhs-capture.";
 
 /// Web `MergePanel`: the person row whose merge panel is open.
@@ -123,7 +123,7 @@ fn search_join(parts: impl IntoIterator<Item = String>) -> String {
         .into_iter()
         .filter(|part| !part.trim().is_empty())
         .collect::<Vec<_>>()
-        .join(" · ")
+        .join(", ")
 }
 
 fn search_preview(value: &str) -> String {
@@ -198,7 +198,9 @@ fn text_button(
         .tab_index(0)
         .role(Role::Button)
         .aria_label(text.clone())
-        .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
         .cursor_pointer()
         .hover(move |el| el.text_color(hover))
         .child(text)
@@ -442,17 +444,27 @@ impl Workspace {
             .justify_between()
             .px_6()
             .py_3()
-            .border_b_1()
-            .border_color(theme::longan_800())
+            .relative()
+            .border_1()
+            .border_color(gpui::transparent_black())
             .tab_index(0)
             .role(Role::Button)
             .aria_label(meeting.title.clone())
-            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_900().opacity(0.6)))
             .on_click(cx.listener(move |this, _ev, _window, cx| {
                 this.open_meeting_detail(id_for_click.clone(), cx);
             }))
+            .child(
+                div()
+                    .absolute()
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .h(px(1.0))
+                    .bg(theme::longan_800()),
+            )
             .child(
                 div()
                     .min_w_0()
@@ -636,7 +648,7 @@ impl Workspace {
             .when_some(rows.filter(|rows| !rows.is_empty()), |el, rows| {
                 el.child(label(
                     format!(
-                        "Latest {} of {} saved app changes · screenshot unavailable",
+                        "Latest {} of {} saved app changes, screenshot unavailable",
                         rows.len().min(10),
                         rows.len()
                     ),
@@ -646,7 +658,7 @@ impl Workspace {
                 .children(rows.iter().rev().take(10).map(|row| {
                     label(
                         format!(
-                            "{} · {}",
+                            "{}, {}",
                             format_started_at(
                                 EpochMs::saturating_from_i64(row.observed_at_ms).as_f64()
                             ),
@@ -708,7 +720,7 @@ impl Workspace {
         );
         if empty {
             transcript = transcript.child(self.render_muted_box(
-                "No transcript yet — segments appear after Stop while Whisper processes the audio.",
+                "No transcript yet. Segments appear after Stop while Whisper processes the audio.",
             ));
         }
         column.child(transcript).into_any_element()
@@ -798,12 +810,12 @@ impl Workspace {
                                             .font_family(LABEL_FONT)
                                             .text_size(px(LABEL_PX))
                                             .text_color(theme::rambutan_300())
-                                            .child(format!("• {}", a.text));
+                                            .child(a.text.clone());
                                         if let Some(due) = &a.due_hint {
                                             row = row.child(
                                                 div()
                                                     .text_color(theme::rambutan_500())
-                                                    .child(format!(" — {due}")),
+                                                    .child(format!(", {due}")),
                                             );
                                         }
                                         row
@@ -817,11 +829,13 @@ impl Workspace {
                                 .child(
                                     label("Decisions", LABEL_PX, theme::rambutan_500()).mb(px(2.0)),
                                 )
-                                .child(div().flex().flex_col().gap(px(2.0)).children(
-                                    s.decisions.iter().map(|d| {
-                                        label(format!("• {d}"), LABEL_PX, theme::rambutan_300())
-                                    }),
-                                )),
+                                .child(
+                                    div().flex().flex_col().gap(px(2.0)).children(
+                                        s.decisions.iter().map(|d| {
+                                            label(d.clone(), LABEL_PX, theme::rambutan_300())
+                                        }),
+                                    ),
+                                ),
                         );
                     }
                     if !s.topics.is_empty() {
@@ -840,7 +854,7 @@ impl Workspace {
                                             div().ml_2().flex().flex_col().gap(px(2.0)).children(
                                                 t.bullets.iter().map(|b| {
                                                     label(
-                                                        format!("– {b}"),
+                                                        b.clone(),
                                                         LABEL_SM_PX,
                                                         theme::rambutan_400(),
                                                     )
@@ -895,7 +909,7 @@ impl Workspace {
                 )
                 .child(self.meeting_action_button(
                     "desktop-meeting-reextract",
-                    "Re-extract observations",
+                    "Extract observations again",
                     meeting_id,
                     actions::MeetingButtonAction::Reextract,
                     reextract_disabled,
@@ -1087,7 +1101,9 @@ impl Workspace {
                         .text_color(text_color)
                         .opacity(0.6)
                         .tab_index(0)
-                        .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                        .border_1()
+                        .border_color(gpui::transparent_black())
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .role(Role::Button)
                         .aria_label("Link to person...")
                         .cursor_pointer()
@@ -1155,7 +1171,9 @@ impl Workspace {
                         .text_size(px(LABEL_PX))
                         .text_color(theme::rambutan_200())
                         .tab_index(0)
-                        .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                        .border_1()
+                        .border_color(gpui::transparent_black())
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .role(Role::Button)
                         .aria_label(format!("Link to {}", person.display_name))
                         .cursor_pointer()
@@ -1182,7 +1200,9 @@ impl Workspace {
                 .text_size(px(LABEL_PX))
                 .text_color(theme::rambutan_500())
                 .tab_index(0)
-                .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .role(Role::Button)
                 .aria_label("Cancel")
                 .cursor_pointer()
@@ -1448,7 +1468,7 @@ impl Workspace {
                 SearchKind::Event,
                 &event.title,
                 if event.all_day {
-                    "All-day event"
+                    "All day event"
                 } else {
                     "Calendar event"
                 },
@@ -1461,9 +1481,9 @@ impl Workspace {
                 &link.id,
                 SearchKind::SchedulingLink,
                 &link.title,
-                format!("{} minutes · #/book/{}", link.duration_minutes, link.slug),
+                format!("{} minutes, #/book/{}", link.duration_minutes, link.slug),
                 format!(
-                    "{} hour notice · {} day window",
+                    "{} hour notice, {} day window",
                     link.minimum_notice_hours, link.booking_window_days
                 ),
                 self.scheduling_preferences.updated_at_ms,
@@ -1670,7 +1690,7 @@ impl Workspace {
                 SearchKind::Conversation,
                 &conversation.subject,
                 format!(
-                    "{} · {}",
+                    "{}, {}",
                     conversation.source.label(),
                     conversation
                         .participants
@@ -1922,7 +1942,7 @@ impl Workspace {
                 .px_4()
                 .py_3()
                 .child(body(
-                    "Find anything local instantly. Results open the exact record—no extra navigation.",
+                    "Find local records instantly. Results open the exact record.",
                     BODY_SM_PX,
                     theme::rambutan_500(),
                 ))
@@ -1967,9 +1987,9 @@ impl Workspace {
                         .role(Role::ListBoxOption)
                         .aria_label(aria_label)
                         .cursor_pointer()
-                        .focus_visible(|element| {
-                            element.border_2().border_color(theme::persimmon_400())
-                        })
+                        .border_1()
+                        .border_color(gpui::transparent_black())
+                        .focus_visible(|element| element.border_color(theme::persimmon_400()))
                         .hover(|element| {
                             element
                                 .bg(theme::longan_900().opacity(0.7))
@@ -2099,16 +2119,13 @@ impl Workspace {
                             .h(px(40.0))
                             .rounded(px(8.0))
                             .bg(theme::control_surface())
-                            .map(|element| {
-                                if search_focused {
-                                    element
-                                        .border_2()
-                                        .border_color(theme::persimmon_400())
-                                        .px(px(11.0))
-                                } else {
-                                    element.border_1().border_color(theme::ring_card()).px_3()
-                                }
+                            .border_1()
+                            .border_color(if search_focused {
+                                theme::persimmon_400()
+                            } else {
+                                theme::ring_card()
                             })
+                            .px_3()
                             .flex()
                             .items_center()
                             .child(
@@ -2133,8 +2150,10 @@ impl Workspace {
                                         .role(Role::Button)
                                         .aria_label("Clear search")
                                         .tab_index(0)
+                                        .border_1()
+                                        .border_color(gpui::transparent_black())
                                         .focus_visible(|element| {
-                                            element.border_1().border_color(theme::persimmon_400())
+                                            element.border_color(theme::persimmon_400())
                                         })
                                         .on_click(cx.listener(|this, _event, window, cx| {
                                             this.search_query_input.update(cx, |input, cx| {
@@ -2403,7 +2422,10 @@ impl Workspace {
         let tracked = profile.tracked;
         let obs_count = profile.observations.len();
         let display_name = profile.display_name.clone();
-        let expand_label = format!("Expand {display_name}");
+        let expand_label = format!(
+            "{} {display_name}",
+            if expanded { "Collapse" } else { "Expand" }
+        );
 
         let id_toggle = id.clone();
         let (id_rename, name_rename) = (id.clone(), display_name.clone());
@@ -2445,7 +2467,6 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap_2()
-            .when(!tracked, |el| el.opacity(0.6))
             .child(
                 div()
                     .w_full()
@@ -2466,7 +2487,9 @@ impl Workspace {
                             .aria_label(expand_label)
                             .aria_expanded(expanded)
                             .tab_index(0)
-                            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .on_click(cx.listener(move |this, _ev, window, cx| {
                                 if this.renaming_person_id.is_some() {
@@ -2518,6 +2541,7 @@ impl Workspace {
                                     theme::rambutan_500(),
                                     theme::rambutan_300(),
                                 )
+                                .aria_label(format!("Rename {}", profile.display_name))
                                 .on_click(cx.listener(
                                     move |this, _ev, window, cx| {
                                         this.begin_person_rename(
@@ -2532,7 +2556,7 @@ impl Workspace {
                             .child(
                                 text_button(
                                     ("desktop-person-track", index),
-                                    if tracked { "track" } else { "untrack" },
+                                    if tracked { "Untrack" } else { "Track" },
                                     if tracked {
                                         theme::pandan_400()
                                     } else {
@@ -2544,6 +2568,11 @@ impl Workspace {
                                         theme::rambutan_400()
                                     },
                                 )
+                                .aria_label(format!(
+                                    "{} {}",
+                                    if tracked { "Untrack" } else { "Track" },
+                                    profile.display_name
+                                ))
                                 .on_click(cx.listener(
                                     move |this, _ev, _window, cx| {
                                         let pid = id_track.clone();
@@ -2560,6 +2589,11 @@ impl Workspace {
                                     theme::rambutan_500(),
                                     theme::rambutan_300(),
                                 )
+                                .aria_label(format!(
+                                    "Merge {} with another profile",
+                                    profile.display_name
+                                ))
+                                .aria_expanded(merge_open)
                                 .on_click(cx.listener(
                                     move |this, _ev, _window, cx| {
                                         this.merge = if this
@@ -2586,6 +2620,7 @@ impl Workspace {
                                     theme::rambutan_500(),
                                     theme::pandan_300(),
                                 )
+                                .aria_label(format!("Enroll voice for {}", profile.display_name))
                                 .on_click(cx.listener(
                                     move |this, _ev, _window, cx| {
                                         let pid = id_enroll.clone();
@@ -2636,9 +2671,9 @@ impl Workspace {
                     .px_2()
                     .py_1()
                     .hover(|element| element.bg(theme::longan_800().opacity(0.7)))
-                    .focus_visible(|element| {
-                        element.border_1().border_color(theme::persimmon_400())
-                    })
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|element| element.border_color(theme::persimmon_400()))
                     .on_click(cx.listener(move |this, _event, _window, cx| {
                         this.toggle_relationship_item(&person_id, &item_id, cx);
                     }))
@@ -2713,6 +2748,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("Save details")
                         .child("Save details")
                         .on_click(cx.listener(
                             move |this, _event, _window, cx| {
@@ -2768,6 +2804,7 @@ impl Workspace {
                                     .is_empty(),
                             ),
                         )
+                        .aria_label("Add")
                         .child("Add")
                         .on_click(cx.listener(
                             move |this, _event, window, cx| {
@@ -2922,8 +2959,7 @@ impl Workspace {
                         theme::rambutan_500(),
                     ))
                     .children(items.into_iter().map(|o| {
-                        label(format!("• {}", o.text), LABEL_PX, theme::rambutan_300())
-                            .line_height(relative(1.375))
+                        label(o.text, LABEL_PX, theme::rambutan_300()).line_height(relative(1.375))
                     }))
             }))
             .into_any_element()
@@ -3136,9 +3172,9 @@ impl Workspace {
                                         .text_size(px(LABEL_PX))
                                         .text_color(theme::rambutan_400())
                                         .tab_index(0)
-                                        .focus_visible(|el| {
-                                            el.border_1().border_color(theme::persimmon_400())
-                                        })
+                                        .border_1()
+                                        .border_color(gpui::transparent_black())
+                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                         .role(Role::Button)
                                         .aria_label("Cancel")
                                         .cursor_pointer()
@@ -3163,9 +3199,9 @@ impl Workspace {
                                         .text_size(px(LABEL_PX))
                                         .text_color(gpui::white())
                                         .tab_index(0)
-                                        .focus_visible(|el| {
-                                            el.border_1().border_color(theme::persimmon_400())
-                                        })
+                                        .border_1()
+                                        .border_color(gpui::transparent_black())
+                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                         .role(Role::Button)
                                         .aria_label("Record a 5 second sample")
                                         .cursor_pointer()
@@ -3189,9 +3225,9 @@ impl Workspace {
                                         .text_size(px(LABEL_PX))
                                         .text_color(theme::rambutan_200())
                                         .tab_index(0)
-                                        .focus_visible(|el| {
-                                            el.border_1().border_color(theme::persimmon_400())
-                                        })
+                                        .border_1()
+                                        .border_color(gpui::transparent_black())
+                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                         .role(Role::Button)
                                         .aria_label("Try again")
                                         .cursor_pointer()
@@ -3267,9 +3303,9 @@ impl Workspace {
                                 .child(
                                     label(
                                         if paused {
-                                            "Auto-record paused".to_string()
+                                            "Automatic recording paused".to_string()
                                         } else {
-                                            format!("Auto-record in {countdown}s")
+                                            format!("Automatic recording in {countdown}s")
                                         },
                                         LABEL_PX,
                                         theme::rambutan_400(),

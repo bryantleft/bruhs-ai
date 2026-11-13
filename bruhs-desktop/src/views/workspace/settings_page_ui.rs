@@ -15,12 +15,12 @@ fn follow_up_button(
 ) -> AnyElement {
     div()
         .id(id)
-        .h(px(40.0))
+        .h(px(theme::APP_CONTROL_HEIGHT_PX))
         .px(px(12.0))
         .rounded(px(8.0))
         .flex()
         .items_center()
-        .text_size(px(14.0))
+        .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
         .cursor_pointer()
         .tab_index(0)
         .role(Role::Button)
@@ -39,7 +39,9 @@ fn follow_up_button(
                     .text_color(theme::rambutan_100())
             })
         })
-        .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
         .on_click(cx.listener(move |this, _ev, _window, cx| {
             cx.stop_propagation();
             this.set_follow_up_steer(steer, cx);
@@ -137,12 +139,12 @@ impl SettingsSection {
             Self::General => "Defaults for new turns.",
             Self::Updates => "Provider CLIs and this build of bruhs.",
             Self::Beta => "Sidebar sections that are still settling in.",
-            Self::Calendar => "Google Calendar sync for the calendar view and meeting auto-record.",
+            Self::Calendar => "Google Calendar sync for the calendar view and automatic meeting recording.",
             Self::Recording => "When bruhs starts recording meetings on its own.",
-            Self::Transcription => "Provider and model for the final transcript, plus an on-device live preview.",
+            Self::Transcription => "Provider and model for the final transcript, plus a live preview on this device.",
             Self::Speakers => "Telling voices apart and remembering them across meetings.",
             Self::People => "What meeting summaries record about each person.",
-            Self::Keyboard => "Each shortcut is a key, a command id, and an optional when clause. A new default is added when its command is not already listed.",
+            Self::Keyboard => "Customize shortcuts and when they apply.",
             Self::About => "",
         }
     }
@@ -173,12 +175,12 @@ pub(super) fn active_settings_section(tops: &[f32], fold_px: f32) -> Option<usiz
 }
 
 /// Web settings nav column.
-pub(super) const SETTINGS_NAV_WIDTH_PX: f32 = 208.0;
+pub(super) const SETTINGS_NAV_WIDTH_PX: f32 = 184.0;
 pub(super) const SETTINGS_ROW_CONTROL_WIDTH_PX: f32 = 240.0;
 /// The rows that end `render_settings_general_rows`: thread and project
 /// title instructions.
 const GENERAL_TITLE_ROWS: usize = 2;
-pub(super) const SETTINGS_ROW_TITLE_TEXT_SIZE_PX: f32 = 14.0;
+pub(super) const SETTINGS_ROW_TITLE_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const SETTINGS_MODEL_DROPDOWN_ID: &str = "desktop-model";
 pub(super) const SETTINGS_ACCESS_MODE_DROPDOWN_ID: &str = "desktop-access-mode";
 pub(super) const SETTINGS_EDITOR_DROPDOWN_ID: &str = "desktop-editor";
@@ -196,10 +198,10 @@ pub(super) fn settings_cards_width(viewport_width: f32) -> f32 {
     )
 }
 
-/// Web settings page: `h-[52px]` breadcrumb header, 44rem card column.
-pub(super) const SETTINGS_PAGE_HEADER_HEIGHT_PX: f32 = 52.0;
+/// App breadcrumb header and 44rem card column.
+pub(super) const SETTINGS_PAGE_HEADER_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
 pub(super) const SETTINGS_PAGE_X_PADDING_PX: f32 = 20.0;
-pub(super) const SETTINGS_PAGE_TITLE_TEXT_SIZE_PX: f32 = 14.0;
+pub(super) const SETTINGS_PAGE_TITLE_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const SETTINGS_PAGE_CLOSE_ICON_PX: f32 = 14.0;
 pub(super) const SETTINGS_PAGE_CONTENT_MAX_WIDTH_PX: f32 = 704.0;
@@ -207,10 +209,10 @@ pub(super) const SETTINGS_PAGE_CONTENT_MIN_WIDTH_PX: f32 = 320.0;
 pub(super) const SETTINGS_CODE_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const SETTINGS_CLOSE_BUTTON_SIZE_PX: f32 = 32.0;
 pub(super) const SETTINGS_CONTROL_RADIUS_PX: f32 = 8.0;
-/// Web settings body: `px-8 py-6`, sections `gap-8`, `scroll-mt-4`, spy fold 96.
-pub(super) const SETTINGS_BODY_X_PADDING_PX: f32 = 32.0;
-pub(super) const SETTINGS_BODY_Y_PADDING_PX: f32 = 24.0;
-pub(super) const SETTINGS_BODY_GAP_PX: f32 = 32.0;
+/// Settings body spacing and scroll-spy fold.
+pub(super) const SETTINGS_BODY_X_PADDING_PX: f32 = 24.0;
+pub(super) const SETTINGS_BODY_Y_PADDING_PX: f32 = 20.0;
+pub(super) const SETTINGS_BODY_GAP_PX: f32 = 24.0;
 pub(super) const SETTINGS_SECTION_SCROLL_MARGIN_PX: f32 = 16.0;
 pub(super) const SETTINGS_SCROLL_SPY_FOLD_PX: f32 = 96.0;
 /// Web `SettingsRow`: `opacity-60` when disabled, text column `max-w-[60%]`.
@@ -224,11 +226,92 @@ pub(super) const SETTINGS_CLOSE_HOVER_BG_OPACITY: f32 = 0.50;
 pub(super) const SETTINGS_BODY_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const SETTINGS_META_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const SETTINGS_CODE_RADIUS_PX: f32 = 4.0;
-pub(super) const SETTINGS_MODEL_ROW_MIN_HEIGHT_PX: f32 = 48.0;
+pub(super) const SETTINGS_MODEL_ROW_MIN_HEIGHT_PX: f32 = 44.0;
 pub(super) const SETTINGS_MODEL_ID_GAP_PX: f32 = 2.0;
-pub(super) const SETTINGS_MODEL_LABEL_TEXT_SIZE_PX: f32 = 14.0;
+pub(super) const SETTINGS_MODEL_LABEL_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const SETTINGS_CLOSE_LABEL: &str = "Close settings";
 pub(super) const SETTINGS_DESIGN_SYSTEM_URL: &str = "https://design.bruhs.dev";
+
+fn settings_rows_stack(viewport_width: f32) -> bool {
+    // A 320px transcription control needs a readable 240px label beside it,
+    // plus the row's 12px gap, 15px side padding and 1px card borders.
+    let inline_width = 320.0 + 240.0 + 12.0 + 2.0 * (SETTINGS_ROW_X_PADDING_PX + 1.0);
+    settings_cards_width(viewport_width) < inline_width
+}
+
+#[derive(IntoElement)]
+struct SettingsRow {
+    selector: &'static str,
+    title: SharedString,
+    description: SharedString,
+    live_description: Option<SharedString>,
+    disabled: bool,
+    control: AnyElement,
+}
+
+impl RenderOnce for SettingsRow {
+    fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
+        let stacked = settings_rows_stack(f32::from(window.viewport_size().width));
+        let selector = self.selector;
+        let meta = |text: SharedString| {
+            div()
+                .mt(px(SETTINGS_MODEL_ID_GAP_PX))
+                .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .line_height(relative(1.625))
+                .text_color(theme::rambutan_500())
+                .child(text)
+        };
+        div()
+            .debug_selector(move || selector.to_string())
+            .min_h(px(SETTINGS_MODEL_ROW_MIN_HEIGHT_PX))
+            .px(px(SETTINGS_ROW_X_PADDING_PX))
+            .py(px(10.0))
+            .flex()
+            .when(stacked, |el| el.flex_col().items_start())
+            .when(!stacked, |el| el.items_center().justify_between())
+            .gap_3()
+            .when(self.disabled, |el| {
+                el.opacity(SETTINGS_ROW_DISABLED_OPACITY)
+            })
+            .child(
+                div()
+                    .debug_selector(move || format!("{selector}-label"))
+                    .min_w_0()
+                    .when(stacked, |el| el.w_full())
+                    .when(!stacked, |el| {
+                        el.flex_1().max_w(relative(SETTINGS_ROW_TEXT_MAX_FRACTION))
+                    })
+                    .flex()
+                    .flex_col()
+                    .child(
+                        div()
+                            .text_size(px(SETTINGS_ROW_TITLE_TEXT_SIZE_PX))
+                            .font_weight(FontWeight::MEDIUM)
+                            .line_height(relative(1.5))
+                            .text_color(theme::rambutan_100())
+                            .child(self.title),
+                    )
+                    .when(!self.description.is_empty(), |el| {
+                        el.child(meta(self.description))
+                    })
+                    .when_some(self.live_description, |el, live| el.child(meta(live))),
+            )
+            .child(
+                div()
+                    .debug_selector(move || format!("{selector}-control"))
+                    .min_w_0()
+                    .flex_shrink_0()
+                    .flex()
+                    .items_center()
+                    .when(stacked, |el| el.w_full().flex_wrap())
+                    .when(!stacked, |el| el.justify_end())
+                    .gap_2()
+                    .child(self.control),
+            )
+    }
+}
 
 impl Workspace {
     pub(super) fn open_settings(
@@ -298,7 +381,10 @@ impl Workspace {
             window.request_animation_frame();
             return;
         }
-        if let Some(ix) = active_settings_section(&tops, SETTINGS_SCROLL_SPY_FOLD_PX) {
+        let max_scroll = self.settings_scroll.max_offset().y;
+        if max_scroll > px(0.0) && self.settings_scroll.offset().y <= -max_scroll {
+            self.settings_section = SettingsSection::About;
+        } else if let Some(ix) = active_settings_section(&tops, SETTINGS_SCROLL_SPY_FOLD_PX) {
             self.settings_section = SettingsSection::ALL[ix];
         }
     }
@@ -375,9 +461,6 @@ impl Workspace {
             }
         }
         self.set_settings_open_dropdown(None);
-        // The clicked option unmounts with the list; keep focus in the dialog
-        // so Tab stays trapped.
-        self.focus_first_modal_tab_stop(window, cx);
         cx.notify();
     }
 
@@ -563,9 +646,7 @@ impl Workspace {
         self.settings_row_opts(selector, title, description, None, false, control)
     }
 
-    /// Web `SettingsRow`: title + description (+ a live status line) on the
-    /// left, capped at 60% of the row; controls right-aligned. `disabled`
-    /// dims the whole row (`opacity-60`).
+    /// Row labels and controls stack when the settings column cannot fit both.
     pub(super) fn settings_row_opts(
         &self,
         selector: &'static str,
@@ -575,55 +656,15 @@ impl Workspace {
         disabled: bool,
         control: AnyElement,
     ) -> AnyElement {
-        let description: SharedString = description.into();
-        let meta = |text: SharedString| {
-            div()
-                .mt(px(SETTINGS_MODEL_ID_GAP_PX))
-                .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .font_weight(FontWeight::MEDIUM)
-                .line_height(relative(1.625))
-                .text_color(theme::rambutan_500())
-                .child(text)
-        };
-        div()
-            .debug_selector(move || selector.to_string())
-            .min_h(px(SETTINGS_MODEL_ROW_MIN_HEIGHT_PX))
-            .px(px(SETTINGS_ROW_X_PADDING_PX))
-            .py_3()
-            .flex()
-            .items_center()
-            .justify_between()
-            .gap_3()
-            .when(disabled, |el| el.opacity(SETTINGS_ROW_DISABLED_OPACITY))
-            .child(
-                div()
-                    .min_w_0()
-                    .flex_1()
-                    .max_w(relative(SETTINGS_ROW_TEXT_MAX_FRACTION))
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .text_size(px(SETTINGS_ROW_TITLE_TEXT_SIZE_PX))
-                            .font_weight(FontWeight::MEDIUM)
-                            .line_height(relative(1.5))
-                            .text_color(theme::rambutan_100())
-                            .child(title.into()),
-                    )
-                    .when(!description.is_empty(), |el| el.child(meta(description)))
-                    .when_some(live_description, |el, live| el.child(meta(live))),
-            )
-            .child(
-                div()
-                    .flex_shrink_0()
-                    .flex()
-                    .items_center()
-                    .justify_end()
-                    .gap_2()
-                    .child(control),
-            )
-            .into_any_element()
+        SettingsRow {
+            selector,
+            title: title.into(),
+            description: description.into(),
+            live_description,
+            disabled,
+            control,
+        }
+        .into_any_element()
     }
 
     pub(super) fn settings_card(
@@ -702,7 +743,9 @@ impl Workspace {
                     .role(Role::Tab)
                     .aria_label(section.label())
                     .aria_selected(active)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
                         this.set_settings_section(section, cx);
@@ -808,7 +851,7 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-model",
                 "Model",
-                "Used for new turns. The composer chip changes it per thread.",
+                "Change it per thread in the composer.",
                 settings_ui::control_column(model_control),
             ),
             self.settings_row(
@@ -825,19 +868,19 @@ impl Workspace {
             ),
             self.settings_row(
                 "desktop-settings-row-follow-up",
-                "Follow-up behavior",
+                "Follow up behavior",
                 "Steer sends the next message into a running Claude turn. Codex always queues. The send button names the action. Hold Command or Control and press Enter for the other one.",
                 settings_ui::control_column(self.render_follow_up_control(cx)),
             ),
             self.settings_row(
                 "desktop-settings-row-autocompact",
-                "Auto-compact after",
-                "Claude compacts a long thread around this many tokens, from 100000 to 1000000. Empty uses Claude's own default. Codex has no auto-compact.",
+                "Automatically compact after",
+                "Claude compacts a long thread around this many tokens, from 100000 to 1000000. Empty uses Claude's own default. Codex has no automatic compaction.",
                 settings_ui::control_column(
                     div()
                         .w(px(240.0))
                         .h(px(40.0))
-                        .child(Input::new(&self.autocompact_input))
+                        .child(Input::new(&self.autocompact_input).aria_label("Automatic compaction token count"))
                         .into_any_element(),
                 ),
             ),
@@ -867,7 +910,7 @@ impl Workspace {
                     div()
                         .w(px(288.0))
                         .h(px(96.0))
-                        .child(Input::new(&self.title_instructions_input))
+                        .child(Input::new(&self.title_instructions_input).aria_label("Thread title instructions"))
                         .into_any_element(),
                 ),
             ),
@@ -884,12 +927,12 @@ impl Workspace {
                         .child(
                             div()
                                 .h(px(40.0))
-                                .child(Input::new(&self.title_project_input)),
+                                .child(Input::new(&self.title_project_input).aria_label("Project name for title instructions")),
                         )
                         .child(
                             div()
                                 .h(px(80.0))
-                                .child(Input::new(&self.title_project_instructions_input)),
+                                .child(Input::new(&self.title_project_instructions_input).aria_label("Project title instructions")),
                         )
                         .into_any_element(),
                 ),
@@ -997,16 +1040,7 @@ impl Workspace {
                                     .text_color(theme::rambutan_100())
                                     .child("bruhs"),
                             )
-                            .child(code(version))
-                            .child(
-                                div()
-                                    .text_size(px(SETTINGS_META_TEXT_SIZE_PX))
-                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                    .font_weight(FontWeight::MEDIUM)
-                                    .line_height(relative(1.625))
-                                    .text_color(theme::rambutan_500())
-                                    .child("bruhs-desktop, built from the workspace crate."),
-                            ),
+                            .child(code(version)),
                     )
                     .into_any_element(),
                 self.settings_row(
@@ -1018,7 +1052,7 @@ impl Workspace {
                 self.settings_row(
                     "desktop-settings-about-design",
                     "Design system",
-                    "Bruhs: fruit-named tokens, all-mono type, no shadows.",
+                    "Bruhs: fruit tokens, monospace type, no shadows.",
                     design_link,
                 ),
         ]
@@ -1082,6 +1116,10 @@ impl Workspace {
             .occlude()
             .id("desktop-settings-overlay")
             .debug_selector(|| "desktop-settings-overlay".to_string())
+            .w(window.viewport_size().width)
+            .h(window.viewport_size().height)
+            .flex()
+            .flex_col()
             .bg(theme::longan_950())
             .on_mouse_move(cx.listener(|this, event: &MouseMoveEvent, _window, cx| {
                 this.continue_settings_slider_drag(event, cx);
@@ -1096,7 +1134,10 @@ impl Workspace {
                     .role(Role::Dialog)
                     .aria_label("Settings")
                     .debug_selector(|| "desktop-settings-dialog".to_string())
-                    .size_full()
+                    .flex_1()
+                    .min_h_0()
+                    .min_w_0()
+                    .w_full()
                     .text_color(cx.theme().popover_foreground)
                     .font_family(theme::UI_FONT_FAMILY)
                     .flex()
@@ -1158,9 +1199,9 @@ impl Workspace {
                                     .tab_index(0)
                                     .role(Role::Button)
                                     .aria_label(SETTINGS_CLOSE_LABEL)
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
+                                    .border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| {
                                         el.bg(theme::longan_800()
@@ -1211,6 +1252,7 @@ impl Workspace {
                                     .child(
                                         div()
                                             .id("desktop-settings-scroll")
+                                            .relative()
                                             .size_full()
                                             .overflow_y_scroll()
                                             .track_scroll(&self.settings_scroll)
@@ -1226,9 +1268,9 @@ impl Workspace {
                                                     cards_width,
                                                     cx,
                                                 )
-                                            })),
-                                    )
-                                    .child(Scrollbar::vertical(&self.settings_scroll)),
+                                            }))
+                                            .vertical_scrollbar(&self.settings_scroll),
+                                    ),
                             ),
                     )
                     .child(self.render_modal_focus_sentinel()),
@@ -1257,5 +1299,86 @@ impl Workspace {
                         .child(description),
                 )
             })
+    }
+}
+
+#[cfg(test)]
+mod ui_audit_tests {
+    use super::{settings_rows_stack, SettingsSection, Workspace};
+    use crate::{app_state::DesktopState, theme};
+    use ::core::prelude::v1::test;
+    use gpui::{px, size, AppContext, TestAppContext};
+    use std::{cell::RefCell, rc::Rc};
+
+    #[test]
+    fn settings_rows_stack_when_labels_and_controls_cannot_fit() {
+        assert!(settings_rows_stack(640.0));
+        assert!(settings_rows_stack(768.0));
+        assert!(!settings_rows_stack(1024.0));
+        assert!(!settings_rows_stack(1920.0));
+    }
+
+    #[gpui::test]
+    fn desktop_settings_minimum_window_keeps_visible_stack_and_jump(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().expect("desktop state"));
+        });
+        let capture = Rc::new(RefCell::new(None));
+        let captured = capture.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| Workspace::new(window, cx));
+            *captured.borrow_mut() = Some(workspace.clone());
+            gpui_component::Root::new(workspace, window, cx)
+        });
+        let workspace = capture.borrow().clone().expect("workspace");
+        cx.simulate_resize(size(px(641.0), px(481.0)));
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_settings(&super::OpenSettings, window, cx);
+            workspace.set_settings_section(SettingsSection::Transcription, cx);
+        });
+        cx.run_until_parked();
+        let overlay = cx
+            .debug_bounds("desktop-settings-overlay")
+            .expect("settings overlay");
+        let dialog = cx
+            .debug_bounds("desktop-settings-dialog")
+            .expect("settings dialog");
+        assert_eq!(overlay.size, size(px(641.0), px(481.0)));
+        assert_eq!(dialog.size, overlay.size);
+        let label = cx
+            .debug_bounds("desktop-settings-row-transcription-provider-label")
+            .expect("provider label");
+        let control = cx
+            .debug_bounds("desktop-settings-row-transcription-provider-control")
+            .expect("provider control");
+        assert!(
+            label.size.width >= px(240.0),
+            "label must not become a glyph column"
+        );
+        assert!(control.top() >= label.bottom(), "narrow rows must stack");
+        assert!(
+            label.top() >= px(52.0) && label.top() < px(481.0),
+            "section jump must bring its label into view: {label:?}"
+        );
+
+        cx.simulate_resize(size(px(1280.0), px(800.0)));
+        cx.run_until_parked();
+        workspace.update(cx, |workspace, cx| {
+            workspace.set_settings_section(SettingsSection::Transcription, cx)
+        });
+        cx.run_until_parked();
+        let label = cx
+            .debug_bounds("desktop-settings-row-transcription-provider-label")
+            .expect("wide provider label");
+        let control = cx
+            .debug_bounds("desktop-settings-row-transcription-provider-control")
+            .expect("wide provider control");
+        assert!(control.left() > label.left(), "wide rows remain inline");
+        assert!(
+            control.top() < label.bottom(),
+            "wide row controls align beside their label"
+        );
     }
 }

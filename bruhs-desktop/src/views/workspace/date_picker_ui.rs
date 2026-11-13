@@ -8,6 +8,7 @@ use chrono::{Datelike, Local, NaiveDate};
 use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::tooltip::Tooltip;
 
 use super::{is_web_button_activation_key, Workspace};
 use crate::{assets, theme};
@@ -29,14 +30,11 @@ pub(crate) const MONTHS: [&str; 12] = [
 ];
 pub(crate) const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
-/// Web trigger: `gap-2 rounded-grape bg-white/5 px-3 py-2 text-body`
-/// with a 16px calendar icon; popover `w-64 rounded-grape p-3`, `size-8`
-/// cells on a `gap-0.5` grid, `size-7` month buttons, `w-14` time fields.
-const TRIGGER_TEXT_PX: f32 = 16.0;
+const TRIGGER_TEXT_PX: f32 = theme::APP_INPUT_TEXT_SIZE_PX;
 const TRIGGER_ICON_PX: f32 = 16.0;
 const POPOVER_WIDTH_PX: f32 = 256.0;
 const POPOVER_GAP_PX: f32 = 4.0;
-const CELL_PX: f32 = 32.0;
+const CELL_PX: f32 = theme::APP_COMPACT_CONTROL_HEIGHT_PX;
 const GRID_GAP_PX: f32 = 2.0;
 const MONTH_BUTTON_PX: f32 = 28.0;
 const TIME_FIELD_WIDTH_PX: f32 = 56.0;
@@ -138,7 +136,7 @@ pub fn step_month(year: i32, month: u32, delta: i32) -> (i32, u32) {
 }
 
 fn focus_ring(style: StyleRefinement) -> StyleRefinement {
-    style.border_2().border_color(theme::persimmon_400())
+    style.border_color(theme::persimmon_400())
 }
 
 fn label(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
@@ -313,12 +311,16 @@ impl Workspace {
     ) -> AnyElement {
         let value = self.date_picker_value(target, cx);
         let text = trigger_label(target.with_time(), &value);
+        let tooltip = text.clone();
         let selector = target.selector();
         let open = self.date_picker.filter(|open| open.target == target);
+        let align_right = target != DatePickerTarget::EventStart;
         let trigger = div()
             .id(selector)
             .debug_selector(move || selector.to_string())
-            .max_w_full()
+            .w_full()
+            .min_w_0()
+            .min_h(px(theme::APP_CONTROL_HEIGHT_PX))
             .flex()
             .items_center()
             .gap_2()
@@ -326,8 +328,8 @@ impl Workspace {
             .bg(gpui::white().opacity(0.05))
             .border_1()
             .border_color(gpui::white().opacity(0.10))
-            .px_3()
-            .py_2()
+            .px_2()
+            .py_1()
             .font_family(theme::CODE_FONT_FAMILY)
             .text_size(px(TRIGGER_TEXT_PX))
             .line_height(relative(1.5))
@@ -339,6 +341,7 @@ impl Workspace {
             .focus_visible(focus_ring)
             .cursor_pointer()
             .hover(|el| el.border_color(gpui::white().opacity(0.20)))
+            .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
             .on_click(cx.listener(move |this, _ev, window, cx| {
                 this.toggle_date_picker(target, window, cx);
             }))
@@ -356,7 +359,7 @@ impl Workspace {
                     .flex_shrink_0()
                     .text_color(theme::rambutan_100()),
             )
-            .child(div().min_w_0().child(text));
+            .child(div().min_w_0().flex_1().truncate().child(text));
         div()
             .relative()
             .flex()
@@ -364,12 +367,33 @@ impl Workspace {
             .items_start()
             .child(trigger)
             .when_some(open, |el, open| {
-                // A zero-height slot keeps the popover in flow right under the
-                // trigger (web `top-full mt-1`); deferred so it paints over the
-                // fields below it.
                 el.child(
                     div().relative().h_0().w_full().child(
-                        deferred(self.render_date_picker_popover(open, cx)).with_priority(1),
+                        div()
+                            .absolute()
+                            .top_0()
+                            .size_0()
+                            .when(align_right, |el| el.right_0())
+                            .when(!align_right, |el| el.left_0())
+                            .child(
+                                deferred(
+                                    anchored()
+                                        .anchor(if align_right {
+                                            Anchor::TopRight
+                                        } else {
+                                            Anchor::TopLeft
+                                        })
+                                        .offset(point(px(0.0), px(POPOVER_GAP_PX)))
+                                        .snap_to_window_with_margin(Edges {
+                                            top: px(theme::APP_HEADER_HEIGHT_PX + 8.0),
+                                            right: px(8.0),
+                                            bottom: px(8.0),
+                                            left: px(8.0),
+                                        })
+                                        .child(self.render_date_picker_popover(open, cx)),
+                                )
+                                .with_priority(1),
+                            ),
                     ),
                 )
             })
@@ -401,7 +425,7 @@ impl Workspace {
             cells.push(None);
         }
 
-        let month_button = |id: &'static str, glyph: &'static str, delta: i32| {
+        let month_button = |id: &'static str, path: &'static str, delta: i32| {
             div()
                 .id(id)
                 .debug_selector(move || id.to_string())
@@ -418,6 +442,8 @@ impl Workspace {
                     "Next month"
                 })
                 .tab_index(0)
+                .border_1()
+                .border_color(gpui::transparent_black())
                 .focus_visible(focus_ring)
                 .cursor_pointer()
                 .hover(|el| el.bg(theme::longan_800()))
@@ -431,7 +457,12 @@ impl Workspace {
                         this.step_date_picker_month(delta, cx);
                     }
                 }))
-                .child(glyph)
+                .child(
+                    svg()
+                        .path(path)
+                        .size(px(14.0))
+                        .text_color(theme::rambutan_300()),
+                )
         };
 
         let mut weekday_row = div().flex().gap(px(GRID_GAP_PX)).mb_1();
@@ -439,7 +470,7 @@ impl Workspace {
             weekday_row = weekday_row.child(
                 div()
                     .flex_1()
-                    .h(px(CELL_PX))
+                    .h(px(LABEL_SM_PX * 1.5))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -489,6 +520,8 @@ impl Workspace {
                             .role(Role::Button)
                             .aria_label(format!("{} {day}, {year}", MONTHS[(month - 1) as usize]))
                             .tab_index(0)
+                            .border_1()
+                            .border_color(gpui::transparent_black())
                             .focus_visible(focus_ring)
                             .cursor_pointer()
                             .on_click(cx.listener(move |this, _ev, window, cx| {
@@ -535,9 +568,6 @@ impl Workspace {
             .id(SharedString::from(format!("{}-popover", target.selector())))
             .debug_selector(|| "desktop-date-picker-popover".to_string())
             .occlude()
-            .absolute()
-            .left_0()
-            .top(px(POPOVER_GAP_PX))
             .w(px(POPOVER_WIDTH_PX))
             .rounded(px(GRAPE_RADIUS_PX))
             .bg(theme::longan_900())
@@ -546,6 +576,7 @@ impl Workspace {
             .p_3()
             .flex()
             .flex_col()
+            .child(self.blur_scrim.keep_clear())
             .on_mouse_down_out(cx.listener(|this, _ev, _window, cx| this.close_date_picker(cx)))
             .child(
                 div()
@@ -553,13 +584,21 @@ impl Workspace {
                     .items_center()
                     .justify_between()
                     .mb_2()
-                    .child(month_button("desktop-date-picker-prev", "‹", -1))
+                    .child(month_button(
+                        "desktop-date-picker-prev",
+                        assets::CHEVRON_LEFT_ICON_PATH,
+                        -1,
+                    ))
                     .child(label(
                         format!("{} {year}", MONTHS[(month - 1) as usize]),
                         LABEL_PX,
                         theme::rambutan_100(),
                     ))
-                    .child(month_button("desktop-date-picker-next", "›", 1)),
+                    .child(month_button(
+                        "desktop-date-picker-next",
+                        assets::CHEVRON_RIGHT_ICON_PATH,
+                        1,
+                    )),
             )
             .child(weekday_row)
             .child(grid)

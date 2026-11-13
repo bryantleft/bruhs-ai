@@ -201,6 +201,7 @@ impl Workspace {
     ) {
         match listing {
             Ok(listing) => {
+                self.project_picker_scroll.set_offset(Point::default());
                 self.project_picker_current_path = listing.current;
                 self.project_picker_current_name = listing.name;
                 self.project_picker_parent_path = listing.parent;
@@ -256,14 +257,19 @@ impl Workspace {
         self.project_picker_task = Some(cx.spawn_in(window, async move |this, cx| {
             let location = resolve.await;
             // The workspace may have closed meanwhile; nothing to open then.
-            let _closed = this.update_in(cx, |this, window, cx| match location {
-                Ok(project) if this.project_picker_for_terminal() => {
-                    this.open_terminal_in_project(project, window, cx)
+            let _closed = this.update_in(cx, |this, window, cx| {
+                if !this.project_picker_visible() {
+                    return;
                 }
-                Ok(project) => this.create_project_thread(project, window, cx),
-                Err(error) => {
-                    this.project_picker_error = Some(error);
-                    cx.notify();
+                match location {
+                    Ok(project) if this.project_picker_for_terminal() => {
+                        this.open_terminal_in_project(project, window, cx)
+                    }
+                    Ok(project) => this.create_project_thread(project, window, cx),
+                    Err(error) => {
+                        this.project_picker_error = Some(error);
+                        cx.notify();
+                    }
                 }
             });
         }));
@@ -286,7 +292,11 @@ impl Workspace {
         }
     }
 
-    pub(super) fn render_project_picker(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_project_picker(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let current_path = self.project_picker_current_path.clone();
         let current_name = self.project_picker_current_name.clone();
         let has_current_path = !current_path.is_empty();
@@ -321,7 +331,9 @@ impl Workspace {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label(format!("Open recent project {}", project.path))
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| {
                         el.bg(
@@ -384,7 +396,9 @@ impl Workspace {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label("Go to parent folder")
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| {
                         el.bg(theme::longan_800().opacity(PROJECT_PICKER_ROW_HOVER_BG_OPACITY))
@@ -432,7 +446,9 @@ impl Workspace {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label(format!("Open folder {}", dir.name))
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| {
                         el.bg(theme::longan_800().opacity(PROJECT_PICKER_ROW_HOVER_BG_OPACITY))
@@ -510,6 +526,7 @@ impl Workspace {
                     .debug_selector(|| "desktop-project-picker-dialog".to_string())
                     .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
                     .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
+                    .max_h(modal_ui::dialog_max_height(window))
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
                     .border_1()
                     .border_color(theme::ring_modal())
@@ -529,6 +546,7 @@ impl Workspace {
                     }))
                     .child(
                         div()
+                            .flex_shrink_0()
                             .px(px(PROJECT_PICKER_HEADER_X_PADDING_PX))
                             .py(px(PROJECT_PICKER_HEADER_Y_PADDING_PX))
                             .border_b_1()
@@ -585,9 +603,9 @@ impl Workspace {
                                         .tab_index(0)
                                         .role(Role::Button)
                                         .aria_label("Select this folder")
-                                        .focus_visible(|el| {
-                                            el.border_2().border_color(theme::persimmon_400())
-                                        })
+                                        .border_1()
+                                        .border_color(gpui::transparent_black())
+                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                         .cursor_pointer()
                                         .hover(|el| {
                                             el.bg(theme::rambutan_500()
@@ -648,8 +666,11 @@ impl Workspace {
                     })
                     .child(
                         div()
+                            .id("desktop-project-directory-list")
                             .max_h(px(PROJECT_PICKER_CONTENT_MAX_HEIGHT_PX))
-                            .overflow_y_scrollbar()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.project_picker_scroll)
                             .when_some(self.project_picker_error.clone(), |el, error| {
                                 el.child(
                                     div()
@@ -669,10 +690,12 @@ impl Workspace {
                                         .py(px(PROJECT_PICKER_LIST_Y_PADDING_PX))
                                         .children(directory_rows),
                                 )
-                            }),
+                            })
+                            .vertical_scrollbar(&self.project_picker_scroll),
                     )
                     .child(
                         div()
+                            .flex_shrink_0()
                             .border_t_1()
                             .border_color(
                                 theme::longan_800().opacity(PROJECT_PICKER_FOOTER_BORDER_OPACITY),
@@ -686,7 +709,7 @@ impl Workspace {
                             .font_family(PROJECT_PICKER_BODY_FONT_FAMILY)
                             .text_size(px(PROJECT_PICKER_FOOTER_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_500())
-                            .child("click to browse, double-click to select")
+                            .child("Click to browse, double click to select")
                             .child(
                                 div()
                                     .id("desktop-project-cancel")
@@ -696,9 +719,9 @@ impl Workspace {
                                     .tab_index(0)
                                     .role(Role::Button)
                                     .aria_label("Cancel")
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
+                                    .border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| el.text_color(theme::rambutan_300()))
                                     .on_click(cx.listener(|this, _ev, _window, cx| {

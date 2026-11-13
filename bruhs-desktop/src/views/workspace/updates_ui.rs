@@ -390,7 +390,7 @@ impl Workspace {
                     .aria_label(running_label(&active).unwrap_or_default())
                     .tab_index(0)
                     .cursor_pointer()
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         if is_web_button_activation_key(event.keystroke.key.as_str()) {
                             window.prevent_default();
@@ -436,7 +436,9 @@ impl Workspace {
                         .role(Role::Button)
                         .aria_label(run.pill_label())
                         .tab_index(0)
-                        .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                        .border_1()
+                        .border_color(gpui::transparent_black())
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                             if is_web_button_activation_key(event.keystroke.key.as_str()) {
                                 window.prevent_default();
@@ -468,7 +470,9 @@ impl Workspace {
                             .role(Role::Button)
                             .aria_label("Dismiss")
                             .tab_index(0)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .on_key_down(cx.listener(
                                 move |this, event: &KeyDownEvent, window, cx| {
                                     if is_web_button_activation_key(event.keystroke.key.as_str()) {
@@ -515,7 +519,7 @@ impl Workspace {
                         el.bg(theme::persimmon_500().opacity(0.15))
                             .text_color(theme::persimmon_100())
                     })
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
                     .on_click(cx.listener(|this, _, window, cx| {
                         cx.stop_propagation();
@@ -558,7 +562,7 @@ impl Workspace {
                         el.bg(theme::persimmon_500().opacity(0.15))
                             .text_color(theme::persimmon_100())
                     })
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         cx.stop_propagation();
@@ -645,7 +649,11 @@ impl Workspace {
     }
 
     /// T3's restart step: Later keeps working; the pill stays.
-    pub(super) fn render_restart_confirm(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_restart_confirm(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let version = match &self.updates.read(cx).install {
             AppInstall::Ready { version, .. } => version.clone(),
             _ => String::new(),
@@ -703,7 +711,7 @@ impl Workspace {
                         .on_click(cx.listener(|this, _, _, cx| this.restart_to_update(cx))),
                     ),
             );
-        self.render_modal_shell(RESTART_CONFIRM_LABEL, content, cx)
+        self.render_modal_shell(RESTART_CONFIRM_LABEL, content, None, window, cx)
     }
 
     pub(super) fn close_update_confirm(&mut self, cx: &mut Context<'_, Self>) {
@@ -712,7 +720,11 @@ impl Workspace {
     }
 
     /// Web `UpdateConfirmDialog`.
-    pub(super) fn render_update_confirm(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_update_confirm(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let report = self.updates.read(cx).report.clone();
         let targets = report
             .as_ref()
@@ -763,11 +775,11 @@ impl Workspace {
             });
         let mut skipped_lines: Vec<String> = skipped
             .iter()
-            .map(|(p, why)| format!("{} · {why}", provider_cli_label(*p)))
+            .map(|(p, why)| format!("{}, {why}", provider_cli_label(*p)))
             .collect();
         if app_behind {
             skipped_lines
-                .push("bruhs · needs a manual update (Settings → Updates has the command)".into());
+                .push("bruhs, needs a manual update (Settings → Updates has the command)".into());
         }
         let content = div()
             .debug_selector(|| "desktop-update-confirm".to_string())
@@ -797,44 +809,45 @@ impl Workspace {
                         .child(meta(format!("{skipped_count} skipped")))
                         .children(skipped_lines.into_iter().map(|line| meta(line).pl(px(16.0)))),
                 )
-            })
+            });
+        let footer = div()
+            .flex()
+            .justify_end()
+            .gap(px(8.0))
             .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap(px(8.0))
-                    .child(
-                        web_button(
-                            "update-confirm-cancel",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .debug_selector(|| "desktop-update-confirm-cancel".to_string())
-                        .tab_index(0)
-                        .role(Role::Button)
-                        .child("Cancel")
-                        .on_click(cx.listener(|this, _, _, cx| this.close_update_confirm(cx))),
-                    )
-                    .child(
-                        web_button(
-                            "update-confirm-run",
-                            WebButtonVariant::Primary,
-                            WebButtonSize::Small,
-                            ButtonState::disabled_if(targets.is_empty()),
-                        )
-                        .debug_selector(|| "desktop-update-confirm-run".to_string())
-                        .tab_index(0)
-                        .role(Role::Button)
-                        .child("Update")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.close_update_confirm(cx);
-                            this.updates
-                                .update(cx, |updates, cx| updates.update_all(cx));
-                        })),
-                    ),
+                web_button(
+                    "update-confirm-cancel",
+                    WebButtonVariant::Ghost,
+                    WebButtonSize::Small,
+                    ButtonState::Enabled,
+                )
+                .debug_selector(|| "desktop-update-confirm-cancel".to_string())
+                .aria_label("Cancel update")
+                .tab_index(0)
+                .role(Role::Button)
+                .child("Cancel")
+                .on_click(cx.listener(|this, _, _, cx| this.close_update_confirm(cx))),
+            )
+            .child(
+                web_button(
+                    "update-confirm-run",
+                    WebButtonVariant::Primary,
+                    WebButtonSize::Small,
+                    ButtonState::disabled_if(targets.is_empty()),
+                )
+                .debug_selector(|| "desktop-update-confirm-run".to_string())
+                .aria_label("Update providers")
+                .tab_index(0)
+                .role(Role::Button)
+                .child("Update")
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.close_update_confirm(cx);
+                    this.updates
+                        .update(cx, |updates, cx| updates.update_all(cx));
+                })),
             );
-        self.render_modal_shell(UPDATE_CONFIRM_LABEL, content, cx)
+
+        self.render_modal_shell(UPDATE_CONFIRM_LABEL, content, Some(footer), window, cx)
     }
 
     pub(super) fn render_settings_updates_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
@@ -883,6 +896,7 @@ impl Workspace {
             ButtonState::disabled_if(updates.checking),
         )
         .debug_selector(|| "desktop-settings-updates-check-now".to_string())
+        .aria_label("Check now")
         .gap(px(6.0))
         .child(icon_svg(
             assets::REFRESH_ICON_PATH,
@@ -909,6 +923,7 @@ impl Workspace {
                         ButtonState::Enabled,
                     )
                     .debug_selector(|| "desktop-settings-updates-update-all".to_string())
+                    .aria_label("Update providers")
                     .child(if updatable > 1 {
                         "Update all"
                     } else {
@@ -1127,6 +1142,7 @@ impl Workspace {
                         )
                         .debug_selector(move || id.to_string())
                         .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+                        .aria_label("Update now")
                         .child("Update now")
                         .on_click(cx.listener(move |this, _, _, cx| {
                             this.updates
@@ -1176,6 +1192,7 @@ impl Workspace {
                 ButtonState::Enabled,
             )
             .debug_selector(|| "desktop-settings-restart-update".to_string())
+            .aria_label("Restart to update")
             .child(RESTART_CONFIRM_LABEL)
             .on_click(cx.listener(|this, _, window, cx| this.open_restart_confirm(window, cx)))
             .into_any_element(),
@@ -1191,6 +1208,7 @@ impl Workspace {
                     ButtonState::Enabled,
                 )
                 .debug_selector(|| "desktop-settings-release-download".to_string())
+                .aria_label("Download update")
                 .child("Download")
                 .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url)))
                 .into_any_element()
@@ -1212,6 +1230,7 @@ impl Workspace {
                         ButtonState::Enabled,
                     )
                     .debug_selector(|| "desktop-settings-release-notes".to_string())
+                    .aria_label("Release notes")
                     .child("Release notes")
                     .on_click(cx.listener(move |_, _, _, cx| cx.open_url(&url))),
                 )

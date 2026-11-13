@@ -5,7 +5,7 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::resizable::{
     h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
 };
-use gpui_component::scroll::{ScrollableElement, Scrollbar};
+use gpui_component::scroll::ScrollableElement;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, Icon, IconName, WindowExt};
 use serde::{Deserialize, Serialize};
@@ -215,7 +215,7 @@ pub(crate) const DESKTOP_KEYMAP: &[(&str, &[&str])] = &[
     ("Mention a file", &["⌘P"]),
     ("Previous / next thread", &["⌘⇧[", "⌘⇧]"]),
     ("Back / forward", &["⌘[", "⌘]"]),
-    ("Jump to thread 1–9", &["⌘1", "⌘9"]),
+    ("Jump to thread 1 to 9", &["⌘1", "⌘9"]),
     ("Pin / unpin thread", &["⌘⇧P"]),
     ("Settle / unsettle thread", &["⌘⇧S"]),
     ("Copy thread link", &["⌘⇧C"]),
@@ -279,7 +279,7 @@ impl TaskGlyph for DesktopPriority {
             Self::High => "▲",
             Self::Medium => "◆",
             Self::Low => "▼",
-            Self::None => "—",
+            Self::None => "",
         }
     }
 }
@@ -383,10 +383,20 @@ enum Overlay {
     ProjectDeleteConfirm {
         project_id: String,
     },
+    RecordDeleteConfirm {
+        target: RecordDeleteTarget,
+    },
     /// The sidebar Update pill's "Update N providers?".
     UpdateConfirm,
     /// "Restart to update" for a downloaded release.
     RestartConfirm,
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+enum RecordDeleteTarget {
+    Document(String),
+    SourceClip(String),
+    Conversation(String),
 }
 
 /// The command bar or the project picker. Like the web, where both are
@@ -956,20 +966,14 @@ const DESKTOP_DIALOG_MD_WIDTH_PX: f32 = 448.0;
 const DESKTOP_DIALOG_LG_WIDTH_PX: f32 = 576.0;
 const DESKTOP_DIALOG_MAX_WIDTH_RATIO: f32 = 0.9;
 const DESKTOP_DIALOG_RADIUS_PX: f32 = 14.0;
-/// Web dialog headers: `h2.text-h4` (18px Xenon 500, line-height 1.5).
-const DESKTOP_MODAL_TITLE_TEXT_SIZE_PX: f32 = 18.0;
+const DESKTOP_MODAL_TITLE_TEXT_SIZE_PX: f32 = 16.0;
 const DESKTOP_MODAL_OVERLAY_OPACITY: f32 = 0.70;
 const DESKTOP_MODAL_HEADER_X_PADDING_PX: f32 = 16.0;
-const DESKTOP_MODAL_HEADER_Y_PADDING_PX: f32 = 12.0;
-const DESKTOP_DIALOG_TOP_PADDING_PX: f32 = 128.0;
+const DESKTOP_MODAL_HEADER_Y_PADDING_PX: f32 = 10.0;
+const DESKTOP_DIALOG_TOP_PADDING_PX: f32 = 80.0;
 const DESKTOP_DIALOG_BOTTOM_GAP_PX: f32 = 16.0;
 const DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX: f32 = 240.0;
 const FORM_DIALOG_PREFERRED_HEIGHT_PX: f32 = 650.0;
-/// Opaque: Settings behaves like a page, so the thread sidebar
-/// and chat never show behind it.
-/// Web settings page: the card column is `max-w-[44rem]`, shrinking with the
-/// window (nav + paddings taken off).
-/// Web `ui::Input`: 40px tall, 16px Neon, 12px side padding.
 fn form_text_input(input: Input) -> Input {
     // `Input::h` (inherent) only applies to multi-line inputs; the `Styled`
     // height is refined last, so it sizes single-line fields too.
@@ -980,7 +984,6 @@ fn form_text_input(input: Input) -> Input {
         .text_size(px(FORM_INPUT_TEXT_SIZE_PX))
 }
 
-/// Web `ui::Textarea`: the input's type on `rows` 24px lines.
 fn form_textarea(input: Input, height_px: f32) -> Input {
     input
         .h(px(height_px))
@@ -994,7 +997,6 @@ const WORKSPACE_LINE_HEIGHT: f32 = 1.5;
 const WORKSPACE_COMPACT_BREAKPOINT_PX: f32 = 960.0;
 const CHAT_NO_ACTIVE_THREAD_LABEL: &str = "Pick a conversation, or start a new one.";
 const CHAT_NO_ACTIVE_THREAD_TEXT_SIZE_PX: f32 = 13.0;
-/// Web sidebar `w-[272px]`.
 const WORKSPACE_SIDE_PANEL_WIDTH_PX: f32 = SIDEBAR_WIDTH_PX;
 const WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX: f32 = 208.0;
 /// Diff rows need more room than the tasks list.
@@ -1009,17 +1011,15 @@ const WORKSPACE_THREAD_ROW_HOVER_BG_OPACITY: f32 = 0.30;
 const FORM_FIELD_GAP_PX: f32 = 6.0;
 const FORM_CONTROL_RADIUS_PX: f32 = 8.0;
 const FORM_SELECT_BODY_FONT_FAMILY: &str = "Monaspace Neon";
-const FORM_SELECT_BODY_TEXT_SIZE_PX: f32 = 14.0;
+const FORM_SELECT_BODY_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const FORM_SELECT_HEIGHT_PX: f32 = 32.0;
 const FORM_SELECT_MENU_MAX_HEIGHT_PX: f32 = 184.0;
-/// Web `ui::Input` / `ui::Textarea`: `px-3 py-2 text-body` — 16px Neon on a
-/// 24px line, so 40px single-line and `rows × 24 + 16` for textareas.
-const FORM_INPUT_HEIGHT_PX: f32 = 40.0;
-const FORM_INPUT_TEXT_SIZE_PX: f32 = 16.0;
-const FORM_INPUT_X_PADDING_PX: f32 = 12.0;
-const FORM_INPUT_Y_PADDING_PX: f32 = 8.0;
-const FORM_THREE_ROW_TEXTAREA_HEIGHT_PX: f32 = 88.0;
-const FORM_FIVE_ROW_TEXTAREA_HEIGHT_PX: f32 = 136.0;
+const FORM_INPUT_HEIGHT_PX: f32 = theme::APP_CONTROL_HEIGHT_PX;
+const FORM_INPUT_TEXT_SIZE_PX: f32 = theme::APP_INPUT_TEXT_SIZE_PX;
+const FORM_INPUT_X_PADDING_PX: f32 = 10.0;
+const FORM_INPUT_Y_PADDING_PX: f32 = 6.0;
+const FORM_THREE_ROW_TEXTAREA_HEIGHT_PX: f32 = 76.0;
+const FORM_FIVE_ROW_TEXTAREA_HEIGHT_PX: f32 = 118.0;
 const FORM_DIALOG_SECTION_X_PADDING_PX: f32 = 16.0;
 const FORM_GRID_GAP_PX: f32 = 12.0;
 const FORM_SELECT_MENU_Y_PADDING_PX: f32 = 4.0;
@@ -1230,10 +1230,12 @@ pub struct Workspace {
     project_picker_error: Option<String>,
     /// Reading a directory or resolving a picked project off the UI thread.
     project_picker_task: Option<Task<()>>,
+    project_picker_scroll: ScrollHandle,
     workspace_focus_handle: FocusHandle,
     palette_return_focus: Option<(AppView, FocusHandle)>,
     modal_start_focus_handle: FocusHandle,
     modal_end_focus_handle: FocusHandle,
+    modal_scroll: ScrollHandle,
     /// The dialogs' backdrop blur, which lives in native views, not gpui's.
     blur_scrim: BlurScrimHandle,
 
@@ -1244,6 +1246,8 @@ pub struct Workspace {
     // Child views
     command_input: Entity<InputState>,
     capture_input: Entity<InputState>,
+    capture_cancel_focus: FocusHandle,
+    capture_submit_focus: FocusHandle,
     knowledge_title_input: Entity<InputState>,
     knowledge_body_input: Entity<InputState>,
     knowledge_tags_input: Entity<InputState>,
@@ -1270,10 +1274,13 @@ pub struct Workspace {
     relationship_item_input: Entity<InputState>,
     relationship_item_kind: RelationshipItemKind,
     scheduling_visible: bool,
+    scheduling_error: Option<String>,
+    scheduling_scroll: ScrollHandle,
     scheduling_link_title_input: Entity<InputState>,
     scheduling_link_duration_input: Entity<InputState>,
     scheduling_selected_task_id: Option<String>,
     life_tab: DesktopLifeTab,
+    life_error: Option<String>,
     life_name_input: Entity<InputState>,
     life_value_input: Entity<InputState>,
     life_category_input: Entity<InputState>,
@@ -1749,15 +1756,19 @@ impl Workspace {
             project_picker_dirs: Vec::new(),
             project_picker_error: None,
             project_picker_task: None,
+            project_picker_scroll: ScrollHandle::new(),
             workspace_focus_handle: cx.focus_handle().tab_stop(false),
             palette_return_focus: None,
             modal_start_focus_handle,
             blur_scrim: BlurScrimHandle::default(),
             modal_end_focus_handle,
+            modal_scroll: ScrollHandle::new(),
             import_picker: import_ui::ImportPicker::default(),
             import_input,
             command_input,
             capture_input,
+            capture_cancel_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            capture_submit_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             knowledge_title_input,
             knowledge_body_input,
             knowledge_tags_input,
@@ -1784,10 +1795,13 @@ impl Workspace {
             relationship_item_input,
             relationship_item_kind: RelationshipItemKind::Interaction,
             scheduling_visible: false,
+            scheduling_error: None,
+            scheduling_scroll: ScrollHandle::new(),
             scheduling_link_title_input,
             scheduling_link_duration_input,
             scheduling_selected_task_id: None,
             life_tab: DesktopLifeTab::Finance,
+            life_error: None,
             life_name_input,
             life_value_input,
             life_category_input,
@@ -2193,7 +2207,9 @@ impl Workspace {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label("Toggle sidebar (⌘B)")
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .on_click(cx.listener(|this, _ev, window, cx| {
                         cx.stop_propagation();
@@ -2318,10 +2334,12 @@ impl Workspace {
                     .child(self.render_meeting_detail(&id, cx))
             }
             AppView::MeetingNoteDetail { note_id } => self.render_local_meeting_note(note_id, cx),
-            AppView::DocumentDetail { document_id } => self.render_document_editor(document_id, cx),
+            AppView::DocumentDetail { document_id } => {
+                self.render_document_editor(document_id, compact, cx)
+            }
             AppView::ClipDetail { .. } => self.render_source_clip_editor(false, cx),
             AppView::ConversationDetail { conversation_id } => {
-                self.render_conversation_detail(conversation_id, cx)
+                self.render_conversation_detail(conversation_id, compact, cx)
             }
             AppView::Booking { .. } => self.render_calendar_page(cx),
             AppView::Settings => self.render_web_only_view(cx),
@@ -2342,7 +2360,7 @@ impl Workspace {
             .justify_center()
             .text_size(px(CHAT_NO_ACTIVE_THREAD_TEXT_SIZE_PX))
             .text_color(theme::rambutan_500())
-            .child("This view is web-only for now — open bruhs.ai in your browser.")
+            .child("Open this view at bruhs.ai in your browser.")
     }
 }
 
@@ -2524,7 +2542,34 @@ impl Render for Workspace {
 
         div()
             .key_context("Workspace")
+            .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
             .track_focus(&self.workspace_focus_handle)
+            .capture_action(cx.listener(
+                |this, _: &gpui_component::input::IndentInline, window, cx| {
+                    if this.overlay_open()
+                        && this.modal_start_focus_handle.contains_focused(window, cx)
+                    {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.step_modal_focus(false, window, cx);
+                    } else {
+                        cx.propagate();
+                    }
+                },
+            ))
+            .capture_action(cx.listener(
+                |this, _: &gpui_component::input::OutdentInline, window, cx| {
+                    if this.overlay_open()
+                        && this.modal_start_focus_handle.contains_focused(window, cx)
+                    {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.step_modal_focus(true, window, cx);
+                    } else {
+                        cx.propagate();
+                    }
+                },
+            ))
             // Every bruhs type role is `line-height: 1.5`; gpui defaults to φ
             // (1.618), which made every row ~2px taller than the web's.
             .line_height(relative(WORKSPACE_LINE_HEIGHT))
@@ -2593,21 +2638,26 @@ impl Render for Workspace {
             .child(body)
             .when_some(self.overlay.clone(), |el, overlay| {
                 el.child(match overlay {
-                    Overlay::Capture => self.render_capture_dialog(cx),
+                    Overlay::Capture => self.render_capture_dialog(window, cx),
                     Overlay::Settings { .. } => self.render_settings(window, cx),
                     Overlay::TaskCreate { .. } => self.render_task_create_dialog(window, cx),
                     Overlay::EventCreate { .. } => self.render_event_create_dialog(window, cx),
-                    Overlay::ProjectDeleteConfirm { .. } => self.render_project_delete_confirm(cx),
-                    Overlay::UpdateConfirm => self.render_update_confirm(cx),
-                    Overlay::RestartConfirm => self.render_restart_confirm(cx),
+                    Overlay::ProjectDeleteConfirm { .. } => {
+                        self.render_project_delete_confirm(window, cx)
+                    }
+                    Overlay::RecordDeleteConfirm { ref target } => {
+                        self.render_record_delete_confirm(target, window, cx)
+                    }
+                    Overlay::UpdateConfirm => self.render_update_confirm(window, cx),
+                    Overlay::RestartConfirm => self.render_restart_confirm(window, cx),
                 })
             })
             // Drawn after the form dialog so it sits on top of it.
             .when_some(self.top_layer, |el, top_layer| {
                 el.child(match top_layer {
-                    TopLayer::CommandBar => self.render_command_bar(cx),
-                    TopLayer::ProjectPicker { .. } => self.render_project_picker(cx),
-                    TopLayer::ImportThread => self.render_import_thread(cx),
+                    TopLayer::CommandBar => self.render_command_bar(window, cx),
+                    TopLayer::ProjectPicker { .. } => self.render_project_picker(window, cx),
+                    TopLayer::ImportThread => self.render_import_thread(window, cx),
                 })
             })
     }

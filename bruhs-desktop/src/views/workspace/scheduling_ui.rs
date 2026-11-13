@@ -3,9 +3,16 @@
 use super::*;
 
 impl Workspace {
-    pub(super) fn toggle_scheduling_panel(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn toggle_scheduling_panel(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.scheduling_visible = !self.scheduling_visible;
         self.close_transient_surfaces();
+        if !self.scheduling_visible {
+            self.workspace_focus_handle.focus(window, cx);
+        }
         cx.notify();
     }
 
@@ -43,22 +50,28 @@ impl Workspace {
             .trim()
             .to_string();
         if title.is_empty() {
-            self.persistence_error = Some("Give the scheduling link a title.".to_string());
+            self.scheduling_error = Some("Give the scheduling link a title.".to_string());
             cx.notify();
             return;
         }
-        let duration = self
-            .scheduling_link_duration_input
-            .read(cx)
-            .value()
-            .parse()
-            .unwrap_or(30);
+        let duration = self.scheduling_link_duration_input.read(cx).value();
+        let Ok(duration) = duration.trim().parse::<u16>() else {
+            self.scheduling_error = Some("Enter a duration from 15 to 480 minutes.".into());
+            cx.notify();
+            return;
+        };
+        if !(15..=480).contains(&duration) {
+            self.scheduling_error = Some("Enter a duration from 15 to 480 minutes.".into());
+            cx.notify();
+            return;
+        }
         self.scheduling_preferences.add_link(
             SchedulingLink::new(title, duration),
             EpochMs::now().as_millis(),
         );
         self.scheduling_link_title_input
             .update(cx, |input, cx| input.set_value("", window, cx));
+        self.scheduling_error = None;
         self.persist_and_notify(cx);
     }
 
@@ -145,7 +158,7 @@ impl Workspace {
 
     pub(super) fn schedule_selected_task(&mut self, cx: &mut Context<'_, Self>) {
         let Some(task_id) = self.scheduling_selected_task_id.clone() else {
-            self.persistence_error = Some("Choose an unscheduled task first.".to_string());
+            self.scheduling_error = Some("Choose an unscheduled task first.".to_string());
             cx.notify();
             return;
         };
@@ -166,7 +179,7 @@ impl Workspace {
             duration,
             offset,
         ) else {
-            self.persistence_error =
+            self.scheduling_error =
                 Some("No open slot matches your availability in the next 30 days.".to_string());
             cx.notify();
             return;
@@ -194,7 +207,7 @@ impl Workspace {
             notes: Some(format!("Time block for task {task_id}")),
         });
         self.scheduling_selected_task_id = None;
-        self.persistence_error = None;
+        self.scheduling_error = None;
         self.persist_and_notify(cx);
     }
 
@@ -209,7 +222,7 @@ impl Workspace {
             &self.planning_calendar_events(cx),
         );
         let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) else {
-            self.persistence_error =
+            self.scheduling_error =
                 Some("Start a chat before asking the agent to plan.".to_string());
             cx.notify();
             return;
@@ -227,7 +240,7 @@ impl Workspace {
             .and_then(|id| self.work_items.iter().find(|item| &item.id == id))
             .map_or("Choose an unscheduled task".to_string(), |item| {
                 format!(
-                    "{} · {} min",
+                    "{}, {} min",
                     item.title,
                     item.planning.estimate_minutes.unwrap_or(60)
                 )
@@ -250,7 +263,7 @@ impl Workspace {
                         div()
                             .text_size(px(12.0))
                             .text_color(theme::rambutan_300())
-                            .child(format!("{} · {} min", link.title, link.duration_minutes)),
+                            .child(format!("{}, {} min", link.title, link.duration_minutes)),
                     )
                     .child(
                         div()
@@ -265,7 +278,7 @@ impl Workspace {
             "No availability rule".to_string(),
             |rule| {
                 format!(
-                    "{} · weekdays · {:02}:{:02}–{:02}:{:02}",
+                    "{}, weekdays, {:02}:{:02} to {:02}:{:02}",
                     rule.label,
                     rule.start_minute / 60,
                     rule.start_minute % 60,
@@ -310,6 +323,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Keep local")
                                 .child("Keep local")
                                 .on_click(cx.listener(
                                     move |this, _event, _window, cx| {
@@ -328,6 +342,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Accept remote")
                                 .child("Accept remote")
                                 .on_click(cx.listener(
                                     move |this, _event, _window, cx| {
@@ -346,6 +361,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Keep both")
                                 .child("Keep both")
                                 .on_click(cx.listener(
                                     move |this, _event, _window, cx| {
@@ -372,20 +388,118 @@ impl Workspace {
             .bg(theme::longan_800())
             .border_l_1()
             .border_color(theme::longan_700())
-            .p_4()
-            .flex()
-            .flex_col()
-            .gap_3()
+            .id("desktop-scheduling-scroll")
+            .debug_selector(|| "desktop-scheduling-scroll".into())
+            .overflow_y_scroll()
+            .track_scroll(&self.scheduling_scroll)
             .child(
                 div()
+                    .p_4()
                     .flex()
-                    .justify_between()
+                    .flex_col()
+                    .gap_3()
                     .child(
                         div()
-                            .font_family(theme::HEADING_FONT_FAMILY)
-                            .text_size(px(16.0))
-                            .text_color(theme::rambutan_100())
-                            .child("Smart scheduling"),
+                            .flex()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .font_family(theme::HEADING_FONT_FAMILY)
+                                    .text_size(px(16.0))
+                                    .text_color(theme::rambutan_100())
+                                    .child("Smart scheduling"),
+                            )
+                            .child(
+                                div()
+                                    .flex()
+                                    .gap_1()
+                                    .child(
+                                        web_button(
+                                            "ask-agent-about-schedule",
+                                            WebButtonVariant::Outline,
+                                            WebButtonSize::Small,
+                                            ButtonState::Enabled,
+                                        )
+                                        .aria_label("Ask agent to plan")
+                                        .child("Ask agent to plan")
+                                        .on_click(
+                                            cx.listener(|this, _event, window, cx| {
+                                                this.ask_agent_about_schedule(window, cx)
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        web_button(
+                                            "close-scheduling",
+                                            WebButtonVariant::Ghost,
+                                            WebButtonSize::Small,
+                                            ButtonState::Enabled,
+                                        )
+                                        .aria_label("Close")
+                                        .child("Close")
+                                        .on_click(
+                                            cx.listener(|this, _event, window, cx| {
+                                                this.toggle_scheduling_panel(window, cx)
+                                            }),
+                                        ),
+                                    ),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .rounded(px(6.0))
+                            .bg(theme::longan_900().opacity(0.55))
+                            .p_3()
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(theme::rambutan_200())
+                                    .child("Focus protection"),
+                            )
+                            .child(
+                                div()
+                                    .mt_1()
+                                    .text_size(px(11.0))
+                                    .text_color(theme::rambutan_500())
+                                    .child(format!(
+                                        "{} min/day, minimum {} min",
+                                        self.scheduling_preferences.focus.daily_target_minutes,
+                                        self.scheduling_preferences.focus.minimum_block_minutes
+                                    )),
+                            )
+                            .child(
+                                web_button(
+                                    "toggle-focus-protection",
+                                    WebButtonVariant::Outline,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .aria_label(if self.scheduling_preferences.focus.enabled {
+                                    "Disable focus protection"
+                                } else {
+                                    "Enable focus protection"
+                                })
+                                .child(if self.scheduling_preferences.focus.enabled {
+                                    "Protected"
+                                } else {
+                                    "Off"
+                                })
+                                .on_click(cx.listener(
+                                    |this, _event, _window, cx| {
+                                        this.scheduling_preferences.focus.enabled =
+                                            !this.scheduling_preferences.focus.enabled;
+                                        this.scheduling_preferences.updated_at_ms =
+                                            EpochMs::now().as_millis();
+                                        this.persist_and_notify(cx);
+                                    },
+                                )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(11.0))
+                            .text_color(theme::rambutan_500())
+                            .child(availability),
                     )
                     .child(
                         div()
@@ -393,209 +507,151 @@ impl Workspace {
                             .gap_1()
                             .child(
                                 web_button(
-                                    "ask-agent-about-schedule",
-                                    WebButtonVariant::Outline,
+                                    "availability-start-minus",
+                                    WebButtonVariant::Ghost,
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
-                                .child("Ask agent to plan")
+                                .aria_label("Start −30m")
+                                .child("Start −30m")
                                 .on_click(cx.listener(
-                                    |this, _event, window, cx| {
-                                        this.ask_agent_about_schedule(window, cx)
+                                    |this, _event, _window, cx| {
+                                        this.adjust_availability(true, -30, cx)
                                     },
                                 )),
                             )
                             .child(
                                 web_button(
-                                    "close-scheduling",
+                                    "availability-start-plus",
                                     WebButtonVariant::Ghost,
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
-                                .child("Close")
+                                .aria_label("Start +30m")
+                                .child("Start +30m")
                                 .on_click(cx.listener(
-                                    |this, _event, _window, cx| this.toggle_scheduling_panel(cx),
+                                    |this, _event, _window, cx| {
+                                        this.adjust_availability(true, 30, cx)
+                                    },
+                                )),
+                            )
+                            .child(
+                                web_button(
+                                    "availability-end-minus",
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .aria_label("End −30m")
+                                .child("End −30m")
+                                .on_click(cx.listener(
+                                    |this, _event, _window, cx| {
+                                        this.adjust_availability(false, -30, cx)
+                                    },
+                                )),
+                            )
+                            .child(
+                                web_button(
+                                    "availability-end-plus",
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .aria_label("End +30m")
+                                .child("End +30m")
+                                .on_click(cx.listener(
+                                    |this, _event, _window, cx| {
+                                        this.adjust_availability(false, 30, cx)
+                                    },
                                 )),
                             ),
-                    ),
-            )
-            .child(
-                div()
-                    .rounded(px(6.0))
-                    .bg(theme::longan_900().opacity(0.55))
-                    .p_3()
+                    )
                     .child(
                         div()
                             .text_size(px(12.0))
                             .text_color(theme::rambutan_200())
-                            .child("Focus protection"),
+                            .child("Schedule a task"),
                     )
                     .child(
                         div()
-                            .mt_1()
-                            .text_size(px(11.0))
-                            .text_color(theme::rambutan_500())
-                            .child(format!(
-                                "{} min/day · minimum {} min",
-                                self.scheduling_preferences.focus.daily_target_minutes,
-                                self.scheduling_preferences.focus.minimum_block_minutes
-                            )),
+                            .flex()
+                            .gap_2()
+                            .child(
+                                web_button(
+                                    "cycle-scheduling-task",
+                                    WebButtonVariant::Outline,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .aria_label(format!("Choose task: {task_label}"))
+                                .child(task_label)
+                                .on_click(cx.listener(
+                                    |this, _event, _window, cx| this.cycle_scheduling_task(cx),
+                                )),
+                            )
+                            .child(
+                                web_button(
+                                    "schedule-task-now",
+                                    WebButtonVariant::Primary,
+                                    WebButtonSize::Small,
+                                    ButtonState::disabled_if(
+                                        self.scheduling_selected_task_id.is_none(),
+                                    ),
+                                )
+                                .aria_label("Find time")
+                                .child("Find time")
+                                .on_click(cx.listener(
+                                    |this, _event, _window, cx| this.schedule_selected_task(cx),
+                                )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .text_size(px(12.0))
+                            .text_color(theme::rambutan_200())
+                            .child("Scheduling links"),
+                    )
+                    .child(
+                        Input::new(&self.scheduling_link_title_input)
+                            .aria_label("Scheduling link title"),
+                    )
+                    .child(
+                        Input::new(&self.scheduling_link_duration_input)
+                            .aria_label("Scheduling duration in minutes, 15 to 480"),
                     )
                     .child(
                         web_button(
-                            "toggle-focus-protection",
-                            WebButtonVariant::Outline,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .child(if self.scheduling_preferences.focus.enabled {
-                            "Protected"
-                        } else {
-                            "Off"
-                        })
-                        .on_click(cx.listener(
-                            |this, _event, _window, cx| {
-                                this.scheduling_preferences.focus.enabled =
-                                    !this.scheduling_preferences.focus.enabled;
-                                this.scheduling_preferences.updated_at_ms =
-                                    EpochMs::now().as_millis();
-                                this.persist_and_notify(cx);
-                            },
-                        )),
-                    ),
-            )
-            .child(
-                div()
-                    .text_size(px(11.0))
-                    .text_color(theme::rambutan_500())
-                    .child(availability),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_1()
-                    .child(
-                        web_button(
-                            "availability-start-minus",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .child("Start −30m")
-                        .on_click(cx.listener(
-                            |this, _event, _window, cx| this.adjust_availability(true, -30, cx),
-                        )),
-                    )
-                    .child(
-                        web_button(
-                            "availability-start-plus",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .child("Start +30m")
-                        .on_click(cx.listener(
-                            |this, _event, _window, cx| this.adjust_availability(true, 30, cx),
-                        )),
-                    )
-                    .child(
-                        web_button(
-                            "availability-end-minus",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .child("End −30m")
-                        .on_click(cx.listener(
-                            |this, _event, _window, cx| this.adjust_availability(false, -30, cx),
-                        )),
-                    )
-                    .child(
-                        web_button(
-                            "availability-end-plus",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .child("End +30m")
-                        .on_click(cx.listener(
-                            |this, _event, _window, cx| this.adjust_availability(false, 30, cx),
-                        )),
-                    ),
-            )
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_200())
-                    .child("Schedule a task"),
-            )
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        web_button(
-                            "cycle-scheduling-task",
-                            WebButtonVariant::Outline,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .child(task_label)
-                        .on_click(
-                            cx.listener(|this, _event, _window, cx| this.cycle_scheduling_task(cx)),
-                        ),
-                    )
-                    .child(
-                        web_button(
-                            "schedule-task-now",
+                            "create-scheduling-link",
                             WebButtonVariant::Primary,
                             WebButtonSize::Small,
-                            ButtonState::disabled_if(self.scheduling_selected_task_id.is_none()),
+                            ButtonState::disabled_if(
+                                self.scheduling_link_title_input
+                                    .read(cx)
+                                    .value()
+                                    .trim()
+                                    .is_empty(),
+                            ),
                         )
-                        .child("Find time")
-                        .on_click(
-                            cx.listener(|this, _event, _window, cx| {
-                                this.schedule_selected_task(cx)
-                            }),
-                        ),
-                    ),
+                        .aria_label("Create link")
+                        .child("Create link")
+                        .on_click(cx.listener(
+                            |this, _event, window, cx| this.create_scheduling_link(window, cx),
+                        )),
+                    )
+                    .children(links)
+                    .children(conflicts)
+                    .when_some(self.scheduling_error.clone(), |panel, error| {
+                        panel.child(
+                            div()
+                                .id("scheduling-link-error")
+                                .role(Role::Alert)
+                                .text_size(px(11.0))
+                                .text_color(theme::lychee_300())
+                                .child(error),
+                        )
+                    }),
             )
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_200())
-                    .child("Scheduling links"),
-            )
-            .child(Input::new(&self.scheduling_link_title_input))
-            .child(Input::new(&self.scheduling_link_duration_input))
-            .child(
-                web_button(
-                    "create-scheduling-link",
-                    WebButtonVariant::Primary,
-                    WebButtonSize::Small,
-                    ButtonState::disabled_if(
-                        self.scheduling_link_title_input
-                            .read(cx)
-                            .value()
-                            .trim()
-                            .is_empty(),
-                    ),
-                )
-                .child("Create link")
-                .on_click(
-                    cx.listener(|this, _event, window, cx| this.create_scheduling_link(window, cx)),
-                ),
-            )
-            .children(links)
-            .children(conflicts)
-            .when_some(self.persistence_error.clone(), |panel, error| {
-                panel.child(
-                    div()
-                        .text_size(px(11.0))
-                        .text_color(theme::lychee_300())
-                        .child(error),
-                )
-            })
+            .vertical_scrollbar(&self.scheduling_scroll)
             .into_any_element()
     }
 }
@@ -624,5 +680,114 @@ impl Workspace {
             scheduling_link_title_input,
             scheduling_link_duration_input,
         }
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::{theme, DesktopState, Workspace};
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn scheduling_duration_rejects_invalid_drafts_without_creating_links(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().unwrap());
+        });
+        let (workspace, cx) = cx.add_window_view(Workspace::new);
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.scheduling_preferences.links.clear();
+            workspace.persistence_error = Some("Existing disk failure".into());
+            let before_saves = workspace.persist_requests;
+            for invalid in ["", "abc", "0", "14", "481", "-1", "15.5", "65536"] {
+                workspace
+                    .scheduling_link_title_input
+                    .update(cx, |input, cx| input.set_value("Review", window, cx));
+                workspace
+                    .scheduling_link_duration_input
+                    .update(cx, |input, cx| input.set_value(invalid, window, cx));
+                workspace.create_scheduling_link(window, cx);
+                assert!(
+                    workspace.scheduling_preferences.links.is_empty(),
+                    "{invalid}"
+                );
+                assert_eq!(
+                    workspace
+                        .scheduling_link_title_input
+                        .read(cx)
+                        .value()
+                        .as_str(),
+                    "Review"
+                );
+                assert_eq!(
+                    workspace
+                        .scheduling_link_duration_input
+                        .read(cx)
+                        .value()
+                        .as_str(),
+                    invalid
+                );
+                assert!(workspace
+                    .scheduling_error
+                    .as_deref()
+                    .unwrap()
+                    .contains("15 to 480"));
+                assert_eq!(
+                    workspace.persistence_error.as_deref(),
+                    Some("Existing disk failure")
+                );
+                assert_eq!(workspace.persist_requests, before_saves);
+            }
+            for duration in [15, 480] {
+                workspace
+                    .scheduling_link_title_input
+                    .update(cx, |input, cx| input.set_value("Review", window, cx));
+                workspace
+                    .scheduling_link_duration_input
+                    .update(cx, |input, cx| {
+                        input.set_value(duration.to_string(), window, cx)
+                    });
+                workspace.create_scheduling_link(window, cx);
+                assert!(workspace.scheduling_error.is_none());
+                assert_eq!(
+                    workspace.persistence_error.as_deref(),
+                    Some("Existing disk failure")
+                );
+                assert_eq!(
+                    workspace
+                        .scheduling_preferences
+                        .links
+                        .first()
+                        .unwrap()
+                        .duration_minutes,
+                    duration
+                );
+                assert!(workspace
+                    .scheduling_link_title_input
+                    .read(cx)
+                    .value()
+                    .is_empty());
+            }
+            assert_eq!(workspace.scheduling_preferences.links.len(), 2);
+        });
+    }
+
+    #[gpui::test]
+    fn closing_scheduling_restores_focus_after_its_control_disappears(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().unwrap());
+        });
+        let (workspace, cx) = cx.add_window_view(Workspace::new);
+        workspace.update_in(cx, |workspace, window, cx| {
+            let close_control = cx.focus_handle();
+            close_control.focus(window, cx);
+            workspace.scheduling_visible = true;
+            workspace.toggle_scheduling_panel(window, cx);
+            assert!(!workspace.scheduling_visible);
+            assert!(workspace.workspace_focus_handle.is_focused(window));
+        });
     }
 }

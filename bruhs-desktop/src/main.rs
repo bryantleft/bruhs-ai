@@ -81,6 +81,8 @@ const JUMP_THREAD_FIRST_INDEX: usize = 31;
 /// Window title, matching bruhs-web's `<title>`.
 const DESKTOP_WINDOW_TITLE: &str = "bruhs.ai";
 
+actions!(bruhs, [Quit]);
+
 fn main() {
     if bruhs_core::secrets::is_mcp_helper() {
         let result = tokio::runtime::Builder::new_current_thread()
@@ -121,6 +123,9 @@ fn main() {
     gpui_platform::application()
         .with_assets(assets::DesktopAssets)
         .run(|cx: &mut App| {
+            cx.on_action(|_: &Quit, cx| cx.quit());
+            cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
+            cx.set_menus([Menu::new("bruhs.ai").items([MenuItem::action("Quit bruhs.ai", Quit)])]);
             // ---- gpui-component setup ----
             // Initializes Theme, Root, dialog/sheet/notification machinery, input system, etc.
             gpui_component::init(cx);

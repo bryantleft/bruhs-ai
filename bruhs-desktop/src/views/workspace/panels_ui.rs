@@ -62,8 +62,8 @@ pub(super) fn clamp_right_panel_width(requested: f32, viewport_width: f32) -> f3
     }
     requested.clamp(RIGHT_PANEL_MIN_WIDTH_PX, max)
 }
-/// Web right panel `h-[52px]` tab bar.
-pub(super) const WORKSPACE_PANEL_TAB_BAR_HEIGHT_PX: f32 = 52.0;
+/// Matches the chat and sidebar header heights.
+pub(super) const WORKSPACE_PANEL_TAB_BAR_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
 pub(super) const WORKSPACE_PANEL_TAB_HEIGHT_PX: f32 = 28.0;
 pub(super) const WORKSPACE_PANEL_TAB_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const WORKSPACE_PANEL_TAB_ICON_SIZE_PX: f32 = 14.0;
@@ -602,7 +602,9 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label("Close panel")
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| {
                                 el.bg(theme::longan_800()
@@ -619,7 +621,12 @@ impl Workspace {
                                     this.close_panel(&ClosePanel, window, cx);
                                 }
                             }))
-                            .child("×"),
+                            .child(
+                                svg()
+                                    .path(assets::CLOSE_ICON_PATH)
+                                    .size(px(14.0))
+                                    .text_color(theme::rambutan_400()),
+                            ),
                     ),
             )
             .child(div().flex_1().min_h_0().child(body))
@@ -669,7 +676,9 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Tab)
             .aria_label(format!("{label} panel"))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _ev, _window, cx| match surface {
                 RightPanelSurface::Diff => this.set_diff_panel_visible(true, cx),
@@ -746,7 +755,9 @@ impl Workspace {
                 .role(Role::Tab)
                 .aria_label(format!("{label} panel"))
                 .aria_selected(active)
-                .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
                 .on_click(cx.listener(|this, _ev, _window, cx| {
                     this.show_file_surface(cx);
@@ -1036,7 +1047,9 @@ impl Workspace {
                 .role(Role::Tab)
                 .aria_label(format!("{label} panel"))
                 .aria_selected(active)
-                .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
                 .when(!active, |el| {
                     el.hover(|el| {

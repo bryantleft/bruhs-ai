@@ -7,6 +7,12 @@ pub(super) const DESKTOP_MODAL_FOCUS_TRAP_KEY: &str = "tab";
 pub(super) const DESKTOP_MODAL_FOCUS_START_TAB_INDEX: isize = 0;
 pub(super) const DESKTOP_MODAL_FOCUS_END_TAB_INDEX: isize = 999;
 
+pub(super) fn dialog_max_height(window: &Window) -> Pixels {
+    (window.viewport_size().height
+        - px(DESKTOP_DIALOG_TOP_PADDING_PX + DESKTOP_DIALOG_BOTTOM_GAP_PX))
+    .max(px(0.0))
+}
+
 impl Overlay {
     /// Every dialog but Settings dims and blurs the workspace behind it.
     pub(super) fn blurs_backdrop(&self) -> bool {
@@ -22,7 +28,13 @@ pub(super) const PROJECT_DELETE_ACTION_GAP_PX: f32 = 8.0;
 pub(super) const PROJECT_DELETE_PROMPT_TEXT_SIZE_PX: f32 = 14.0;
 
 impl Workspace {
+    fn cancel_picker_tasks(&mut self) {
+        self.project_picker_task = None;
+        self.import_picker.cancel();
+    }
+
     pub(super) fn close_transient_surfaces(&mut self) {
+        self.cancel_picker_tasks();
         self.date_picker = None;
         if self.event_create_visible() {
             self.selected_calendar_event_id = None;
@@ -65,8 +77,16 @@ impl Workspace {
 
         window.prevent_default();
         cx.stop_propagation();
+        self.step_modal_focus(event.keystroke.modifiers.shift, window, cx);
+    }
 
-        if event.keystroke.modifiers.shift {
+    pub(super) fn step_modal_focus(
+        &self,
+        reverse: bool,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if reverse {
             window.focus_prev(cx);
             if !self.modal_start_focus_handle.contains_focused(window, cx) {
                 self.modal_end_focus_handle.focus(window, cx);
@@ -103,6 +123,8 @@ impl Workspace {
     /// Opens a form dialog, replacing any other and closing the command bar
     /// or project picker it was started from.
     pub(super) fn open_overlay(&mut self, overlay: Overlay) {
+        self.cancel_picker_tasks();
+        self.modal_scroll.set_offset(Point::default());
         self.top_layer = None;
         self.overlay = Some(overlay);
     }
@@ -110,6 +132,7 @@ impl Workspace {
     /// Opens the command bar or project picker above any form dialog. Settings
     /// is not a form behind which either belongs, so it closes.
     pub(super) fn open_top_layer(&mut self, top_layer: TopLayer) {
+        self.cancel_picker_tasks();
         self.dismiss_overlay(|overlay| matches!(overlay, Overlay::Settings { .. }));
         self.top_layer = Some(top_layer);
     }
@@ -129,7 +152,6 @@ impl Workspace {
         matches!(self.overlay, Some(Overlay::Settings { .. }))
     }
 
-    #[cfg(test)]
     pub(super) fn project_picker_visible(&self) -> bool {
         matches!(self.top_layer, Some(TopLayer::ProjectPicker { .. }))
     }
@@ -221,7 +243,126 @@ impl Workspace {
         cx.notify();
     }
 
-    pub(super) fn render_project_delete_confirm(&self, cx: &Context<'_, Self>) -> AnyElement {
+    fn current_record_delete_target(&self) -> Option<RecordDeleteTarget> {
+        match &self.active_view {
+            AppView::DocumentDetail { document_id } => {
+                Some(RecordDeleteTarget::Document(document_id.clone()))
+            }
+            AppView::ClipDetail { clip_id } => {
+                Some(RecordDeleteTarget::SourceClip(clip_id.clone()))
+            }
+            AppView::ConversationDetail { conversation_id } => {
+                Some(RecordDeleteTarget::Conversation(conversation_id.clone()))
+            }
+            _ => None,
+        }
+    }
+
+    pub(super) fn request_record_delete(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(target) = self.current_record_delete_target() else {
+            return;
+        };
+        self.open_overlay(Overlay::RecordDeleteConfirm { target });
+        self.focus_first_modal_tab_stop(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn confirm_record_delete(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(Overlay::RecordDeleteConfirm { target }) = self.overlay.clone() else {
+            return;
+        };
+        self.close_transient_surfaces();
+        self.workspace_focus_handle.focus(window, cx);
+        if self.current_record_delete_target().as_ref() == Some(&target) {
+            match target {
+                RecordDeleteTarget::Document(_) => self.delete_current_document(cx),
+                RecordDeleteTarget::SourceClip(_) => self.delete_current_source_clip(cx),
+                RecordDeleteTarget::Conversation(_) => self.delete_current_conversation(cx),
+            }
+        }
+        cx.notify();
+    }
+
+    pub(super) fn render_record_delete_confirm(
+        &self,
+        target: &RecordDeleteTarget,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let (title, message) = match target {
+            RecordDeleteTarget::Document(_) => (
+                "Delete document",
+                "This permanently deletes the document, its history and attached files.",
+            ),
+            RecordDeleteTarget::SourceClip(_) => (
+                "Delete source",
+                "This permanently deletes the source and removes its citations from your documents.",
+            ),
+            RecordDeleteTarget::Conversation(_) => (
+                "Delete conversation",
+                "This permanently deletes the local conversation and its messages.",
+            ),
+        };
+        self.render_modal_shell(
+            title,
+            div()
+                .p_4()
+                .flex()
+                .flex_col()
+                .gap_4()
+                .child(div().text_color(theme::rambutan_300()).child(message))
+                .child(
+                    div()
+                        .flex()
+                        .justify_end()
+                        .gap_2()
+                        .child(
+                            web_button(
+                                "record-delete-cancel",
+                                WebButtonVariant::Ghost,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .aria_label("Cancel deletion")
+                            .child("Cancel")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                this.close_transient_surfaces();
+                                cx.notify();
+                            })),
+                        )
+                        .child(
+                            web_button(
+                                "record-delete-confirm",
+                                WebButtonVariant::Destructive,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .aria_label("Confirm deletion")
+                            .child("Delete")
+                            .on_click(cx.listener(
+                                |this, _, window, cx| this.confirm_record_delete(window, cx),
+                            )),
+                        ),
+                ),
+            None,
+            window,
+            cx,
+        )
+    }
+
+    pub(super) fn render_project_delete_confirm(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let project_id = self.project_delete_confirm_id().unwrap_or("");
         let project_name = self
             .projects
@@ -264,7 +405,7 @@ impl Workspace {
                             .child(PROJECT_DELETE_CANCEL_LABEL)
                             .tab_index(0)
                             .role(Role::Button)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.cancel_project_delete(cx);
                             }))
@@ -290,7 +431,7 @@ impl Workspace {
                             .child(PROJECT_DELETE_CONFIRM_LABEL)
                             .tab_index(0)
                             .role(Role::Button)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .on_click(cx.listener(|this, _ev, _window, cx| {
                                 this.confirm_project_delete(cx);
                             }))
@@ -305,6 +446,8 @@ impl Workspace {
                             )),
                         ),
                 ),
+            None,
+            window,
             cx,
         )
     }
@@ -313,6 +456,8 @@ impl Workspace {
         &self,
         title: &'static str,
         content: Div,
+        footer: Option<Div>,
+        window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         div()
@@ -340,6 +485,7 @@ impl Workspace {
                     .child(self.blur_scrim.backdrop())
                     .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
                     .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
+                    .max_h(dialog_max_height(window))
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
                     .border_1()
                     .border_color(theme::ring_modal())
@@ -358,6 +504,7 @@ impl Workspace {
                     }))
                     .child(
                         div()
+                            .flex_shrink_0()
                             .px(px(DESKTOP_MODAL_HEADER_X_PADDING_PX))
                             .py(px(DESKTOP_MODAL_HEADER_Y_PADDING_PX))
                             .border_b_1()
@@ -383,12 +530,15 @@ impl Workspace {
                                 )
                                 .debug_selector(|| "desktop-modal-close".to_string())
                                 .aria_label("Close dialog")
-                                .child("×")
+                                .child(
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(14.0))
+                                        .text_color(theme::rambutan_400()),
+                                )
                                 .tab_index(0)
                                 .role(Role::Button)
-                                .focus_visible(|el| {
-                                    el.border_2().border_color(theme::persimmon_400())
-                                })
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                 .on_click(cx.listener(|this, _ev, _window, cx| {
                                     this.close_transient_surfaces();
                                     cx.notify();
@@ -407,7 +557,26 @@ impl Workspace {
                                 )),
                             ),
                     )
-                    .child(content)
+                    .child(
+                        div()
+                            .id("desktop-modal-body")
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.modal_scroll)
+                            .child(content)
+                            .vertical_scrollbar(&self.modal_scroll),
+                    )
+                    .when_some(footer, |dialog, footer| {
+                        dialog.child(
+                            div()
+                                .id("desktop-modal-footer")
+                                .debug_selector(|| "desktop-modal-footer".into())
+                                .flex_shrink_0()
+                                .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
+                                .pb_3()
+                                .child(footer),
+                        )
+                    })
                     .child(self.render_modal_focus_sentinel()),
             )
             .into_any_element()

@@ -387,7 +387,9 @@ impl Workspace {
                 .into()
             })
             .tab_index(0)
-            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .role(Role::List)
             .aria_label(if detail {
                 "Meeting transcript and summary"

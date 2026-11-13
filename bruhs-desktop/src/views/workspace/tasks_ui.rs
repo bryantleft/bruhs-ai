@@ -868,7 +868,9 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label(TASKS_ALL_PROJECTS_LABEL)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .when(self.selected_project_id.is_none(), |el| {
                                 el.bg(theme::longan_800()
@@ -924,7 +926,7 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label(TASKS_NEW_PROJECT_LABEL)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| {
                                 el.border_color(
@@ -991,7 +993,9 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Select project {}", project.name))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(is_active, |el| {
                 el.bg(theme::longan_800().opacity(PROJECT_SIDEBAR_ROW_ACTIVE_BG_OPACITY))
@@ -1031,7 +1035,9 @@ impl Workspace {
                     .tab_index(0)
                     .role(Role::ListBoxOption)
                     .aria_label(PROJECT_DELETE_LABEL)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .group_hover(hover_group, |el| el.visible())
                     .hover(|el| {
@@ -1108,7 +1114,7 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label(TASKS_NEW_TASK_LABEL)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| {
                                 el.bg(theme::persimmon_500()
@@ -1136,7 +1142,7 @@ impl Workspace {
         &self,
         mode: DesktopTaskViewMode,
         cx: &Context<'_, Self>,
-    ) -> AnyElement {
+    ) -> Stateful<Div> {
         let is_active = self.task_view_mode == mode;
         div()
             .id(("tasks-view-mode", mode as usize))
@@ -1156,7 +1162,9 @@ impl Workspace {
             .role(Role::Tab)
             .aria_label(mode.label())
             .aria_selected(is_active)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(is_active, |el| {
                 el.bg(theme::longan_800().opacity(TASKS_HEADER_MODE_ACTIVE_BG_OPACITY))
@@ -1175,7 +1183,6 @@ impl Workspace {
                 }
             }))
             .child(mode.label())
-            .into_any_element()
     }
 
     pub(super) fn render_tasks_body(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -1306,7 +1313,9 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Open task {}", item.title))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(is_selected, |el| {
                 el.bg(theme::longan_800().opacity(TASK_ROW_SELECTED_BG_OPACITY))
@@ -1579,7 +1588,7 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Open task {}", item.title))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(!is_selected, |el| {
                 el.hover(|el| {

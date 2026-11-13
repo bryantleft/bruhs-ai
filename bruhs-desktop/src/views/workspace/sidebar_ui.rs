@@ -19,10 +19,10 @@ use crate::{assets, theme};
 use bruhs_models::logic::sidebar::{snooze_after, snooze_presets, SnoozeUnit};
 use bruhs_models::{AppView, EpochMs, SidebarTab};
 
-/// `w-[272px]`.
-pub const SIDEBAR_WIDTH_PX: f32 = 272.0;
-/// `h-[52px]` brand header.
-pub const SIDEBAR_HEADER_HEIGHT_PX: f32 = 52.0;
+/// Shared app drawer width.
+pub const SIDEBAR_WIDTH_PX: f32 = 248.0;
+/// Matches the chat and panel headers.
+pub const SIDEBAR_HEADER_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
 /// Room for the macOS traffic lights (gpui-component puts them at x=12).
 #[cfg(target_os = "macos")]
 pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 88.0;
@@ -30,12 +30,12 @@ pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 88.0;
 pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 16.0;
 const SIDEBAR_HEADER_GAP_PX: f32 = 8.0;
 const SIDEBAR_BRAND_LOGO_PX: f32 = 20.0;
-const SIDEBAR_BRAND_TEXT_PX: f32 = 14.0;
+const SIDEBAR_BRAND_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const SIDEBAR_CONTROLS_X_PADDING_PX: f32 = 8.0;
 const SIDEBAR_CONTROLS_BOTTOM_PADDING_PX: f32 = 8.0;
 const SIDEBAR_CONTROLS_GAP_PX: f32 = 4.0;
 const SIDEBAR_SEARCH_HEIGHT_PX: f32 = 32.0;
-const SIDEBAR_SEARCH_TEXT_PX: f32 = 14.0;
+const SIDEBAR_SEARCH_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const SIDEBAR_ICON_BUTTON_PX: f32 = 32.0;
 const SIDEBAR_SMALL_BUTTON_PX: f32 = 28.0;
 const SIDEBAR_FILTER_HEIGHT_PX: f32 = 28.0;
@@ -59,7 +59,7 @@ const SIDEBAR_CARD_LINE_GAP_PX: f32 = 4.0;
 const SIDEBAR_CARD_META_HEIGHT_PX: f32 = 16.0;
 /// Web: `max-w-24` on the role name.
 const SIDEBAR_CARD_ROLE_MAX_WIDTH_PX: f32 = 96.0;
-const SIDEBAR_CARD_TITLE_TEXT_PX: f32 = 14.0;
+const SIDEBAR_CARD_TITLE_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const SIDEBAR_CARD_ROW_GAP_PX: f32 = 6.0;
 const SIDEBAR_CARD_DOT_PX: f32 = 9.0;
 const SIDEBAR_CARD_DELETE_PX: f32 = 24.0;
@@ -253,7 +253,9 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(label)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _ev, window, cx| {
                 cx.stop_propagation();
@@ -354,9 +356,9 @@ impl Workspace {
                                 .role(Role::Button)
                                 .aria_label(SIDEBAR_FILTER_LABEL)
                                 .aria_expanded(self.sidebar_filter_open)
-                                .focus_visible(|el| {
-                                    el.border_2().border_color(theme::persimmon_400())
-                                })
+                                .border_1()
+                                .border_color(gpui::transparent_black())
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                 .cursor_pointer()
                                 .on_click(cx.listener(|this, _ev, _window, cx| {
                                     cx.stop_propagation();
@@ -437,7 +439,9 @@ impl Workspace {
             .role(Role::MenuItem)
             .aria_label(label.clone())
             .aria_selected(selected)
-            .focus_visible(|el| el.border_1().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _ev, _window, cx| {
                 cx.stop_propagation();
@@ -613,7 +617,9 @@ impl Workspace {
             .role(Role::Button)
             .aria_expanded(open)
             .aria_label(label.clone())
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.text_color(theme::rambutan_300()))
             .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_shelf(section, cx)))
@@ -852,7 +858,9 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(SIDEBAR_DELETE_LABEL)
-            .focus_visible(|el| el.visible().border_1().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.visible().border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _ev, _window, cx| {
                 cx.stop_propagation();
@@ -891,7 +899,9 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label("Thread actions")
-            .focus_visible(|el| el.visible().border_1().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.visible().border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _ev, _window, cx| {
                 cx.stop_propagation();
@@ -915,7 +925,7 @@ impl Workspace {
             .role(Role::Button)
             .aria_label(format!("Open conversation {}", chat.thread_title))
             .aria_selected(is_active)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(is_active, |el| {
                 el.bg(theme::longan_800())
@@ -983,7 +993,9 @@ impl Workspace {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label("Undo")
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .on_click(cx.listener(|this, _ev, window, cx| {
                         cx.stop_propagation();
                         this.undo_sidebar(window, cx);
@@ -1131,6 +1143,8 @@ impl Workspace {
             .flex()
             .items_center()
             .rounded(px(SIDEBAR_RADIUS_SEED_PX))
+            .border_1()
+            .border_color(gpui::transparent_black())
             .text_size(px(SIDEBAR_LABEL_TEXT_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_200())
@@ -1140,7 +1154,7 @@ impl Workspace {
             .when(!disabled, |el| {
                 el.cursor_pointer()
                     .tab_index(0)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .hover(|el| el.bg(theme::longan_800().opacity(0.6)))
                     .on_click(cx.listener(move |this, _ev, window, cx| {
                         cx.stop_propagation();
@@ -1188,7 +1202,9 @@ impl Workspace {
             .role(Role::Tab)
             .aria_label(label)
             .aria_selected(active)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(move |this, _ev, window, cx| {
                 cx.stop_propagation();
@@ -1242,7 +1258,9 @@ impl Workspace {
             .role(Role::Tab)
             .aria_label("Settings")
             .aria_selected(settings_active)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(|this, _ev, window, cx| {
                 cx.stop_propagation();

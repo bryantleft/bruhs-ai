@@ -182,7 +182,8 @@ impl CredentialSettings {
                         this.clear_editor();
                     }
                     Err(error) => {
-                        this.error = Some(format!("{error} Re-enter the value or retry deletion."))
+                        this.error =
+                            Some(format!("{error} Enter the value again or retry deletion."))
                     }
                 }
                 cx.notify();
@@ -209,6 +210,11 @@ impl CredentialSettings {
             ButtonState::disabled_if(self.busy),
         )
         .min_h(px(40.0))
+        .aria_label(format!(
+            "{} credential {}",
+            if delete { "Delete" } else { "Replace" },
+            review_text(&entry.name)
+        ))
         .child(if delete { "Delete" } else { "Replace" })
         .on_click(
             cx.listener(move |this, _, window, cx| this.begin_edit(id.clone(), delete, window, cx)),
@@ -245,9 +251,9 @@ impl CredentialSettings {
             )
             .child(div().text_color(theme::rambutan_400()).child(
                 if entry.state == SavedCredentialState::NeedsAttention {
-                    "Needs attention · replace or delete to finish a previous change."
+                    "Needs attention, replace or delete to finish a previous change."
                 } else {
-                    "Stored in OS keychain · value hidden"
+                    "Stored in OS keychain, value hidden"
                 },
             ))
             .child(
@@ -309,6 +315,11 @@ impl CredentialSettings {
                             ButtonState::disabled_if(self.busy),
                         )
                         .min_h(px(40.0))
+                        .aria_label(if matches!(editor, Editor::Delete(_)) {
+                            "Delete credential"
+                        } else {
+                            "Save replacement"
+                        })
                         .child(if matches!(editor, Editor::Delete(_)) {
                             "Delete credential"
                         } else {
@@ -332,6 +343,7 @@ impl CredentialSettings {
                             ButtonState::disabled_if(self.busy),
                         )
                         .min_h(px(40.0))
+                        .aria_label("Cancel credential change")
                         .child("Cancel")
                         .on_click(cx.listener(|this, _, _, cx| {
                             this.clear_editor();
@@ -370,7 +382,7 @@ impl Render for CredentialSettings {
         div().id("credential-manager").p_4().min_w_0().font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200()).flex().flex_col().gap_3()
             .child(self.connections.clone())
             .child(Input::new(&self.search).h(px(40.0)).aria_label("Search saved credentials"))
-            .child(web_button("refresh-credentials", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(self.busy)).min_h(px(40.0)).child("Refresh credentials")
+            .child(web_button("refresh-credentials", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(self.busy)).min_h(px(40.0)).aria_label("Refresh credentials").child("Refresh credentials")
                 .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| { if is_web_button_activation_key(event.keystroke.key.as_str()) { cx.stop_propagation(); this.refresh(cx); } })))
             .child("Values are never displayed. Replace a key to rotate it. Deleting removes the saved copy; running commands may finish with the value they already received.")

@@ -228,7 +228,7 @@ impl Workspace {
             );
         }
         if request_id.is_empty() || request_id.len() > 128 {
-            return Err("A request_id of 1–128 bytes is required.".into());
+            return Err("A request_id of 1 to 128 bytes is required.".into());
         }
         if let Some((id, existing)) = self.mcp_bridge.proposals.get(&request_id) {
             if existing != &proposal {

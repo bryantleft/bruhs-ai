@@ -2,13 +2,13 @@
 
 use super::*;
 
-const CAPTURE_TEXTAREA_HEIGHT_PX: f32 = 132.0;
+const CAPTURE_TEXTAREA_HEIGHT_PX: f32 = 118.0;
 
 fn capture_guidance(kind: CaptureKind) -> &'static str {
     match kind {
         CaptureKind::Task => "Creates a backlog task immediately.",
         CaptureKind::Note => "Creates a local Markdown document you can link and cite.",
-        CaptureKind::Event => "Schedules the next available half-hour for one hour.",
+        CaptureKind::Event => "Adds a one hour event to your calendar.",
         CaptureKind::Contact => "Adds a private contact and syncs when the server is available.",
         CaptureKind::MessageDraft => "Saved locally until you choose where to send it.",
     }
@@ -27,6 +27,7 @@ impl Workspace {
         self.capture_edit_id = None;
         self.capture_error = None;
         self.capture_input.update(cx, |input, cx| {
+            input.set_placeholder(CaptureKind::Task.placeholder(), window, cx);
             input.set_value("", window, cx);
         });
         let input = self.capture_input.clone();
@@ -52,15 +53,24 @@ impl Workspace {
         self.capture_edit_id = Some(record.id);
         self.capture_error = None;
         self.capture_input.update(cx, |input, cx| {
+            input.set_placeholder(record.kind.placeholder(), window, cx);
             input.set_value(&content, window, cx);
             input.focus(window, cx);
         });
         cx.notify();
     }
 
-    fn select_capture_kind(&mut self, kind: CaptureKind, cx: &mut Context<'_, Self>) {
+    fn select_capture_kind(
+        &mut self,
+        kind: CaptureKind,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.capture_kind = kind;
         self.capture_error = None;
+        self.capture_input.update(cx, |input, cx| {
+            input.set_placeholder(kind.placeholder(), window, cx);
+        });
         cx.notify();
     }
 
@@ -164,7 +174,11 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    pub(super) fn render_capture_dialog(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_capture_dialog(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let editing = self.capture_edit_id.is_some();
         let selected = self.capture_kind;
         let empty = self.capture_input.read(cx).value().trim().is_empty();
@@ -172,7 +186,9 @@ impl Workspace {
             .id("capture-type-tabs")
             .role(Role::TabList)
             .aria_label("Capture type")
-            .focus_visible(|element| element.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|element| element.border_color(theme::persimmon_400()))
             .flex()
             .gap_1()
             .rounded(px(8.0))
@@ -193,9 +209,9 @@ impl Workspace {
                             .aria_label(kind.label())
                             .aria_selected(is_selected)
                             .tab_index(0)
-                            .focus_visible(|element| {
-                                element.border_2().border_color(theme::persimmon_400())
-                            })
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|element| element.border_color(theme::persimmon_400()))
                             .flex_1()
                             .min_w_0()
                             .rounded(px(6.0))
@@ -215,9 +231,9 @@ impl Workspace {
                                     .bg(theme::longan_800())
                                     .text_color(theme::rambutan_200())
                             })
-                            .on_click(cx.listener(move |this, _event, _window, cx| {
+                            .on_click(cx.listener(move |this, _event, window, cx| {
                                 if this.capture_edit_id.is_none() {
-                                    this.select_capture_kind(kind, cx);
+                                    this.select_capture_kind(kind, window, cx);
                                 }
                             }))
                             .on_key_down(cx.listener(
@@ -229,7 +245,7 @@ impl Workspace {
                                     {
                                         window.prevent_default();
                                         cx.stop_propagation();
-                                        this.select_capture_kind(kind, cx);
+                                        this.select_capture_kind(kind, window, cx);
                                     }
                                 },
                             ))
@@ -275,44 +291,60 @@ impl Workspace {
                             .text_color(theme::rambutan_500())
                             .child(capture_guidance(selected)),
                     ),
+            );
+
+        let footer = div()
+            .mt_1()
+            .pt_3()
+            .border_t_1()
+            .border_color(theme::longan_700())
+            .flex()
+            .justify_end()
+            .gap_2()
+            .child(
+                web_button(
+                    "capture-cancel",
+                    WebButtonVariant::Ghost,
+                    WebButtonSize::Default,
+                    ButtonState::Enabled,
+                )
+                .aria_label("Cancel capture")
+                .track_focus(&self.capture_cancel_focus)
+                .on_click(cx.listener(|this, _event, _window, cx| {
+                    this.close_transient_surfaces();
+                    cx.notify();
+                }))
+                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.close_transient_surfaces();
+                        cx.notify();
+                    }
+                }))
+                .child("Cancel"),
             )
             .child(
-                div()
-                    .mt_1()
-                    .pt_3()
-                    .border_t_1()
-                    .border_color(theme::longan_700())
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        web_button(
-                            "capture-cancel",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Default,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("Cancel capture")
-                        .on_click(cx.listener(|this, _event, _window, cx| {
-                            this.close_transient_surfaces();
-                            cx.notify();
-                        }))
-                        .child("Cancel"),
-                    )
-                    .child(
-                        web_button(
-                            "capture-submit",
-                            WebButtonVariant::Primary,
-                            WebButtonSize::Default,
-                            ButtonState::disabled_if(empty),
-                        )
-                        .aria_label(if editing { "Save capture" } else { "Capture" })
-                        .debug_selector(|| "desktop-capture-submit".to_string())
-                        .on_click(cx.listener(|this, _event, window, cx| {
-                            this.submit_capture(window, cx);
-                        }))
-                        .child(if editing { "Save" } else { "Capture" }),
-                    ),
+                web_button(
+                    "capture-submit",
+                    WebButtonVariant::Primary,
+                    WebButtonSize::Default,
+                    ButtonState::disabled_if(empty),
+                )
+                .aria_label(if editing { "Save capture" } else { "Capture" })
+                .track_focus(&self.capture_submit_focus.clone().tab_stop(!empty))
+                .debug_selector(|| "desktop-capture-submit".to_string())
+                .on_click(cx.listener(|this, _event, window, cx| {
+                    this.submit_capture(window, cx);
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if !empty && is_web_button_activation_key(event.keystroke.key.as_str()) {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.submit_capture(window, cx);
+                    }
+                }))
+                .child(if editing { "Save" } else { "Capture" }),
             );
 
         self.render_modal_shell(
@@ -322,6 +354,8 @@ impl Workspace {
                 "Capture anything"
             },
             body,
+            Some(footer),
+            window,
             cx,
         )
     }

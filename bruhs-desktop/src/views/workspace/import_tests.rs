@@ -161,11 +161,11 @@ fn rows_show_home_as_a_tilde_age_and_how_they_come_in() {
             Some("/Users/me"),
             now
         ),
-        "~/shop · 3h · resumes"
+        "~/shop, 3h, resumes"
     );
     assert_eq!(
         import_row_detail(&candidate(None, None), Some("/Users/me"), now),
-        "no folder · 3h · transcript"
+        "no folder, 3h, transcript"
     );
 }
 

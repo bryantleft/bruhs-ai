@@ -135,7 +135,7 @@ impl Workspace {
             event_ids.push(block.id.clone());
             self.calendar_events.push(DesktopCalendarEvent {
                 id: block.id,
-                title: format!("Focus · {}", block.task_title),
+                title: format!("Focus: {}", block.task_title),
                 start_at,
                 end_at,
                 all_day: false,
@@ -165,6 +165,23 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
+    fn open_today_calendar_event(
+        &mut self,
+        event_id: &str,
+        event_date: Option<NaiveDate>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(date) = event_date {
+            self.calendar_anchor = date;
+        }
+        self.selected_calendar_event_id = Some(event_id.to_string());
+        self.calendar_mode = DesktopCalendarMode::Day;
+        self.active_view = AppView::Calendar;
+        self.workspace_focus_handle.focus(window, cx);
+        self.persist_and_notify(cx);
+    }
+
     pub(super) fn render_today_task_row(
         &self,
         item: &WorkItem,
@@ -186,10 +203,13 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Open task {}", item.title))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _event, _window, cx| {
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .on_click(cx.listener(move |this, _event, window, cx| {
                 this.selected_work_item_id = Some(item_id.clone());
                 this.active_view = AppView::Tasks;
+                this.workspace_focus_handle.focus(window, cx);
                 this.persist_and_notify(cx);
             }))
             .child(
@@ -219,6 +239,9 @@ impl Workspace {
         empty: &'static str,
     ) -> AnyElement {
         div()
+            .id(("desktop-today-section", element_key(title)))
+            .role(Role::Group)
+            .aria_label(title)
             .flex_1()
             .min_w(px(250.0))
             .rounded(px(12.0))
@@ -297,6 +320,7 @@ impl Workspace {
                 };
                 let event_id = event.event_id.clone();
                 let event_title = event.title.clone();
+                let event_date = local_datetime_from_ms(event.start_at_ms).map(|date| date.date());
                 div()
                     .id(("desktop-today-event", element_key(&event.event_id)))
                     .w_full()
@@ -308,11 +332,14 @@ impl Workspace {
                     .gap_3()
                     .hover(|element| element.bg(theme::longan_800().opacity(0.6)))
                     .cursor_pointer()
-                    .on_click(cx.listener(move |this, _event, _window, cx| {
-                        this.selected_calendar_event_id = Some(event_id.clone());
-                        this.calendar_mode = DesktopCalendarMode::Day;
-                        this.active_view = AppView::Calendar;
-                        this.persist_and_notify(cx);
+                    .tab_index(0)
+                    .role(Role::Button)
+                    .aria_label(format!("Open event {event_title}"))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|element| element.border_color(theme::persimmon_400()))
+                    .on_click(cx.listener(move |this, _event, window, cx| {
+                        this.open_today_calendar_event(&event_id, event_date, window, cx);
                     }))
                     .child(
                         div()
@@ -347,6 +374,7 @@ impl Workspace {
             .child(
                 div()
                     .size(px(32.0))
+                    .flex_shrink_0()
                     .rounded(px(6.0))
                     .bg(theme::persimmon_500().opacity(0.15))
                     .flex()
@@ -358,6 +386,7 @@ impl Workspace {
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .child(
                         div()
                             .text_size(px(11.0))
@@ -434,6 +463,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Dismiss")
                                 .child("Dismiss")
                                 .on_click(cx.listener(
                                     move |this, _event, _window, cx| {
@@ -451,6 +481,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Review")
                                 .child("Review")
                                 .on_click(cx.listener(
                                     |this, _event, window, cx| {
@@ -481,7 +512,7 @@ impl Workspace {
                             div()
                                 .w(px(105.0))
                                 .text_color(theme::persimmon_300())
-                                .child(format!("{start}–{end}")),
+                                .child(format!("{start} to {end}")),
                         )
                         .child(
                             div()
@@ -522,6 +553,7 @@ impl Workspace {
                                 ButtonState::Enabled,
                             )
                             .debug_selector(|| "desktop-today-plan-cancel".to_string())
+                            .aria_label("Cancel")
                             .child("Cancel")
                             .on_click(cx.listener(
                                 |this, _event, _window, cx| {
@@ -538,6 +570,7 @@ impl Workspace {
                                 ButtonState::disabled_if(proposal.blocks.is_empty()),
                             )
                             .debug_selector(|| "desktop-today-plan-apply".to_string())
+                            .aria_label("Apply plan")
                             .child("Apply plan")
                             .on_click(cx.listener(
                                 |this, _event, _window, cx| {
@@ -569,6 +602,7 @@ impl Workspace {
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
+                            .aria_label("Agent workflows")
                             .child("Agent workflows")
                             .on_click(cx.listener(
                                 |this, _event, window, cx| {
@@ -583,6 +617,7 @@ impl Workspace {
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
+                            .aria_label("Life context")
                             .child("Life context")
                             .on_click(cx.listener(
                                 |this, _event, window, cx| {
@@ -598,6 +633,7 @@ impl Workspace {
                                 ButtonState::disabled_if(self.day_plan_proposal.is_some()),
                             )
                             .debug_selector(|| "desktop-today-plan".to_string())
+                            .aria_label("Plan my day")
                             .child("Plan my day")
                             .on_click(cx.listener(
                                 |this, _event, _window, cx| {
@@ -613,7 +649,7 @@ impl Workspace {
                     .debug_selector(|| "desktop-today-scroll".to_string())
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scroll()
+                    .overflow_y_scrollbar()
                     .p_5()
                     .flex()
                     .justify_center()
@@ -638,7 +674,7 @@ impl Workspace {
                                         .justify_between()
                                         .text_size(px(12.0))
                                         .text_color(theme::pandan_300())
-                                        .child("Day plan applied as one local transaction.")
+                                        .child("Day plan applied.")
                                         .child(
                                             div()
                                                 .id("desktop-undo-day-plan")
@@ -676,7 +712,7 @@ impl Workspace {
                                 div()
                                     .flex()
                                     .when(compact, |element| element.flex_col())
-                                    .when(!compact, |element| element.flex_row())
+                                    .when(!compact, |element| element.flex_row().flex_wrap())
                                     .gap_4()
                                     .child(self.render_today_section(
                                         "Overdue",
@@ -690,7 +726,7 @@ impl Workspace {
                                     ))
                                     .child(
                                         self.render_today_section(
-                                            "Follow-ups",
+                                            "Follow ups",
                                             snapshot
                                                 .follow_ups
                                                 .into_iter()
@@ -702,13 +738,13 @@ impl Workspace {
                                                         .text_size(px(12.0))
                                                         .text_color(theme::rambutan_300())
                                                         .child(format!(
-                                                            "{} · {}",
+                                                            "{}, {}",
                                                             item.person_name, item.text
                                                         ))
                                                         .into_any_element()
                                                 })
                                                 .collect(),
-                                            "No recent follow-ups.",
+                                            "No recent follow ups.",
                                         ),
                                     )
                                     .child(
@@ -734,5 +770,113 @@ impl Workspace {
                             ),
                     ),
             )
+    }
+}
+
+#[cfg(test)]
+mod audit_tests {
+    use super::{theme, AppView, DesktopCalendarMode, DesktopState, NaiveDate, Workspace};
+    use gpui::TestAppContext;
+
+    type TaskPaths = std::rc::Rc<std::cell::RefCell<Vec<gpui::GlobalElementId>>>;
+
+    struct RepeatedTaskSections {
+        workspace: gpui::Entity<Workspace>,
+        task: bruhs_models::WorkItem,
+        paths: TaskPaths,
+    }
+
+    impl gpui::Render for RepeatedTaskSections {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            cx: &mut gpui::Context<'_, Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::prelude::*;
+            use gpui::{canvas, div, ElementId};
+
+            self.paths.borrow_mut().clear();
+            let paths = self.paths.clone();
+            let task = self.task.clone();
+            self.workspace.update(cx, |workspace, cx| {
+                div().size_full().flex().flex_col().children(
+                    ["Overdue", "Waiting on"].into_iter().map(|title| {
+                        let paths = paths.clone();
+                        let row_id =
+                            ElementId::from(("desktop-today-task", super::element_key(&task.id)));
+                        let probe = canvas(
+                            move |_, window, _| {
+                                window.with_global_id(row_id, |id, _| {
+                                    paths.borrow_mut().push(id.clone());
+                                });
+                            },
+                            |_, _, _, _| {},
+                        )
+                        .h(gpui::px(0.0));
+                        workspace.render_today_section(
+                            title,
+                            vec![
+                                workspace.render_today_task_row(&task, String::new(), cx),
+                                probe.into_any_element(),
+                            ],
+                            "",
+                        )
+                    }),
+                )
+            })
+        }
+    }
+
+    #[gpui::test]
+    fn repeated_today_tasks_have_distinct_accessibility_paths(cx: &mut TestAppContext) {
+        use gpui::AppContext as _;
+
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().unwrap());
+        });
+        let paths = TaskPaths::default();
+        let captured = paths.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let mut task = bruhs_models::WorkItem::new_at("Blocked overdue task", 0);
+            task.due_date = Some("2000-01-01".into());
+            task.planning.waiting_on = Some("Avery".into());
+            RepeatedTaskSections {
+                workspace: cx.new(|cx| Workspace::new(window, cx)),
+                task,
+                paths,
+            }
+        });
+        cx.run_until_parked();
+        let paths = captured.borrow();
+        assert_eq!(paths.len(), 2, "both Today task rows must be rendered");
+        assert_ne!(
+            paths[0], paths[1],
+            "AccessKit derives node IDs from these global paths"
+        );
+    }
+
+    #[gpui::test]
+    fn today_event_opens_its_day_and_restores_workspace_focus(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().unwrap());
+        });
+        let (workspace, cx) = cx.add_window_view(Workspace::new);
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.calendar_anchor = NaiveDate::from_ymd_opt(2025, 1, 1).unwrap();
+            let event_day = NaiveDate::from_ymd_opt(2026, 11, 12).unwrap();
+            workspace.open_today_calendar_event("today-event", Some(event_day), window, cx);
+            assert_eq!(workspace.calendar_anchor, event_day);
+            assert_eq!(
+                workspace.selected_calendar_event_id.as_deref(),
+                Some("today-event")
+            );
+            assert_eq!(workspace.calendar_mode, DesktopCalendarMode::Day);
+            assert_eq!(workspace.active_view, AppView::Calendar);
+            assert!(workspace.workspace_focus_handle.is_focused(window));
+        });
     }
 }

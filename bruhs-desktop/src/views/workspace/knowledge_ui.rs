@@ -11,11 +11,12 @@ use super::knowledge_storage::{self, attachment_path as knowledge_attachment_pat
 use super::*;
 
 impl Workspace {
-    pub(super) fn open_knowledge_view(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn open_knowledge_view(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.active_view = AppView::Knowledge;
         self.clip_create_visible = false;
         self.compact_sidebar_open = false;
         self.close_transient_surfaces();
+        self.workspace_focus_handle.focus(window, cx);
         self.persist_and_notify(cx);
     }
 
@@ -205,7 +206,7 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    fn delete_current_document(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn delete_current_document(&mut self, cx: &mut Context<'_, Self>) {
         let AppView::DocumentDetail { document_id } = &self.active_view else {
             return;
         };
@@ -235,7 +236,7 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    fn delete_current_source_clip(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn delete_current_source_clip(&mut self, cx: &mut Context<'_, Self>) {
         let AppView::ClipDetail { clip_id } = &self.active_view else {
             return;
         };
@@ -610,6 +611,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Ask agent")
                                 .child("Ask agent")
                                 .on_click(cx.listener(
                                     |this, _event, window, cx| {
@@ -625,6 +627,7 @@ impl Workspace {
                                     ButtonState::Enabled,
                                 )
                                 .debug_selector(|| "desktop-knowledge-new-clip".to_string())
+                                .aria_label("+ Web clip")
                                 .child("+ Web clip")
                                 .on_click(cx.listener(
                                     |this, _event, window, cx| {
@@ -640,6 +643,7 @@ impl Workspace {
                                     ButtonState::Enabled,
                                 )
                                 .debug_selector(|| "desktop-knowledge-new-document".to_string())
+                                .aria_label("+ Document")
                                 .child("+ Document")
                                 .on_click(cx.listener(
                                     |this, _event, window, cx| {
@@ -764,7 +768,12 @@ impl Workspace {
             .into_any_element()
     }
 
-    pub(super) fn render_document_editor(&self, document_id: &str, cx: &Context<'_, Self>) -> Div {
+    pub(super) fn render_document_editor(
+        &self,
+        document_id: &str,
+        compact: bool,
+        cx: &Context<'_, Self>,
+    ) -> Div {
         let document = self
             .knowledge_documents
             .iter()
@@ -951,6 +960,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("← Knowledge")
                         .child("← Knowledge")
                         .on_click(cx.listener(
                             |this, _event, window, cx| {
@@ -969,10 +979,11 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Delete")
                                 .child("Delete")
                                 .on_click(cx.listener(
-                                    |this, _event, _window, cx| {
-                                        this.delete_current_document(cx);
+                                    |this, _event, window, cx| {
+                                        this.request_record_delete(window, cx);
                                     },
                                 )),
                             )
@@ -984,6 +995,7 @@ impl Workspace {
                                     ButtonState::Enabled,
                                 )
                                 .debug_selector(|| "desktop-knowledge-save".to_string())
+                                .aria_label("Save")
                                 .child("Save")
                                 .on_click(cx.listener(
                                     |this, _event, _window, cx| {
@@ -1006,6 +1018,7 @@ impl Workspace {
                             .w_full()
                             .max_w(px(1120.0))
                             .flex()
+                            .when(compact, |content| content.flex_col())
                             .gap_5()
                             .child(
                                 div()
@@ -1014,19 +1027,33 @@ impl Workspace {
                                     .flex()
                                     .flex_col()
                                     .gap_3()
-                                    .child(Input::new(&self.knowledge_title_input).w_full())
-                                    .child(Input::new(&self.knowledge_body_input).w_full())
+                                    .when(compact, |editor| editor.flex_none().w_full())
+                                    .child(
+                                        Input::new(&self.knowledge_title_input)
+                                            .w_full()
+                                            .aria_label("Document title"),
+                                    )
+                                    .child(
+                                        Input::new(&self.knowledge_body_input)
+                                            .aria_label("Document Markdown body")
+                                            .w_full(),
+                                    )
                                     .child(
                                         div()
                                             .text_size(px(11.0))
                                             .text_color(theme::rambutan_500())
-                                            .child("Tags — comma separated"),
+                                            .child("Tags, comma separated"),
                                     )
-                                    .child(Input::new(&self.knowledge_tags_input).w_full()),
+                                    .child(
+                                        Input::new(&self.knowledge_tags_input)
+                                            .aria_label("Document tags, comma separated")
+                                            .w_full(),
+                                    ),
                             )
                             .child(
                                 div()
                                     .w(px(288.0))
+                                    .when(compact, |metadata| metadata.w_full())
                                     .flex_shrink_0()
                                     .flex()
                                     .flex_col()
@@ -1041,6 +1068,7 @@ impl Workspace {
                                                 WebButtonSize::Small,
                                                 ButtonState::Enabled,
                                             )
+                                            .aria_label("+ Connect next record")
                                             .child("+ Connect next record")
                                             .on_click(cx.listener(|this, _event, _window, cx| {
                                                 this.add_next_knowledge_link(cx);
@@ -1060,6 +1088,7 @@ impl Workspace {
                                                     self.source_clips.is_empty(),
                                                 ),
                                             )
+                                            .aria_label("+ Cite next source")
                                             .child("+ Cite next source")
                                             .on_click(cx.listener(|this, _event, _window, cx| {
                                                 this.add_next_citation(cx);
@@ -1077,6 +1106,7 @@ impl Workspace {
                                                 WebButtonSize::Small,
                                                 ButtonState::Enabled,
                                             )
+                                            .aria_label("Attach local file")
                                             .child("Attach local file")
                                             .on_click(cx.listener(|this, _event, window, cx| {
                                                 this.attach_to_current_document(window, cx);
@@ -1124,6 +1154,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("← Knowledge")
                         .child("← Knowledge")
                         .on_click(cx.listener(
                             |this, _event, window, cx| {
@@ -1143,6 +1174,7 @@ impl Workspace {
                                         WebButtonSize::Small,
                                         ButtonState::Enabled,
                                     )
+                                    .aria_label("Ask agent")
                                     .child("Ask agent")
                                     .on_click(cx.listener(
                                         |this, _event, window, cx| {
@@ -1157,6 +1189,7 @@ impl Workspace {
                                         WebButtonSize::Small,
                                         ButtonState::Enabled,
                                     )
+                                    .aria_label("Open original")
                                     .child("Open original")
                                     .on_click(move |_event, _window, cx| cx.open_url(&url)),
                                 )
@@ -1167,10 +1200,11 @@ impl Workspace {
                                         WebButtonSize::Small,
                                         ButtonState::Enabled,
                                     )
+                                    .aria_label("Delete")
                                     .child("Delete")
                                     .on_click(cx.listener(
-                                        |this, _event, _window, cx| {
-                                            this.delete_current_source_clip(cx);
+                                        |this, _event, window, cx| {
+                                            this.request_record_delete(window, cx);
                                         },
                                     )),
                                 )
@@ -1183,6 +1217,7 @@ impl Workspace {
                                     ButtonState::Enabled,
                                 )
                                 .debug_selector(|| "desktop-knowledge-source-save".to_string())
+                                .aria_label(if creating { "Save clip" } else { "Save source" })
                                 .child(if creating { "Save clip" } else { "Save source" })
                                 .on_click(cx.listener(
                                     |this, _event, _window, cx| {
@@ -1218,14 +1253,22 @@ impl Workspace {
                                     .text_color(theme::rambutan_500())
                                     .child("Title"),
                             )
-                            .child(Input::new(&self.clip_title_input).w_full())
+                            .child(
+                                Input::new(&self.clip_title_input)
+                                    .aria_label("Source title, required")
+                                    .w_full(),
+                            )
                             .child(
                                 div()
                                     .text_size(px(11.0))
                                     .text_color(theme::rambutan_500())
                                     .child("Source URL"),
                             )
-                            .child(Input::new(&self.clip_url_input).w_full())
+                            .child(
+                                Input::new(&self.clip_url_input)
+                                    .aria_label("Source URL, required")
+                                    .w_full(),
+                            )
                             .child(
                                 div()
                                     .flex()
@@ -1241,7 +1284,9 @@ impl Workspace {
                                                     .child("Publication"),
                                             )
                                             .child(
-                                                Input::new(&self.clip_source_name_input).w_full(),
+                                                Input::new(&self.clip_source_name_input)
+                                                    .aria_label("Source name")
+                                                    .w_full(),
                                             ),
                                     )
                                     .child(
@@ -1254,7 +1299,11 @@ impl Workspace {
                                                     .text_color(theme::rambutan_500())
                                                     .child("Author"),
                                             )
-                                            .child(Input::new(&self.clip_author_input).w_full()),
+                                            .child(
+                                                Input::new(&self.clip_author_input)
+                                                    .aria_label("Author")
+                                                    .w_full(),
+                                            ),
                                     ),
                             )
                             .child(
@@ -1271,7 +1320,11 @@ impl Workspace {
                                                     .text_color(theme::rambutan_500())
                                                     .child("Published"),
                                             )
-                                            .child(Input::new(&self.clip_published_input).w_full()),
+                                            .child(
+                                                Input::new(&self.clip_published_input)
+                                                    .aria_label("Publication date")
+                                                    .w_full(),
+                                            ),
                                     )
                                     .child(
                                         div()
@@ -1283,7 +1336,11 @@ impl Workspace {
                                                     .text_color(theme::rambutan_500())
                                                     .child("Tags"),
                                             )
-                                            .child(Input::new(&self.clip_tags_input).w_full()),
+                                            .child(
+                                                Input::new(&self.clip_tags_input)
+                                                    .aria_label("Source tags, comma separated")
+                                                    .w_full(),
+                                            ),
                                     ),
                             )
                             .child(
@@ -1292,7 +1349,11 @@ impl Workspace {
                                     .text_color(theme::rambutan_500())
                                     .child("Excerpt or note"),
                             )
-                            .child(Input::new(&self.clip_excerpt_input).w_full()),
+                            .child(
+                                Input::new(&self.clip_excerpt_input)
+                                    .aria_label("Source excerpt")
+                                    .w_full(),
+                            ),
                     ),
             )
     }

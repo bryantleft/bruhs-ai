@@ -281,7 +281,7 @@ fn settings_button(
         .tab_index(0)
         .role(Role::Button)
         .aria_label(label)
-        .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
         .when(disabled, |el| el.opacity(0.5))
         .when(!disabled, |el| {
             el.cursor_pointer()
@@ -771,7 +771,7 @@ impl Workspace {
                     SETTINGS_SUMMARY_MODEL_DROPDOWN_ID,
                     "Meeting summary model",
                     self.task_models.summary.as_deref().unwrap_or(INHERIT),
-                    model_groups("Built-in default", Some(AgentProvider::Claude)),
+                    model_groups("Default", Some(AgentProvider::Claude)),
                     cx,
                 )),
             ),
@@ -783,7 +783,7 @@ impl Workspace {
                     SETTINGS_REVIEW_CLAUDE_DROPDOWN_ID,
                     "Second opinion by Claude",
                     self.task_models.review_claude.as_deref().unwrap_or(INHERIT),
-                    model_groups("Built-in default", Some(AgentProvider::Claude)),
+                    model_groups("Default", Some(AgentProvider::Claude)),
                     cx,
                 )),
             ),
@@ -827,7 +827,7 @@ mod tests {
 
     #[test]
     fn task_models_offer_only_what_the_job_can_run_and_every_role_has_a_slot() {
-        let claude = &model_groups("Built-in default", Some(AgentProvider::Claude))[0].options;
+        let claude = &model_groups("Default", Some(AgentProvider::Claude))[0].options;
         assert_eq!(claude[0].value, INHERIT);
         assert!(claude[1..]
             .iter()
