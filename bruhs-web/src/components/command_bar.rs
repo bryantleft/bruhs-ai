@@ -524,16 +524,23 @@ impl ActiveThreadExport {
         let Some(thread) = thread else {
             return;
         };
-        let portable = self
-            .messages
-            .with_untracked(|ms| crate::components::import_thread_dialog::portable_messages(ms));
         // Where its turns run (chat.rs: the thread's project, else the
         // active one).
         let run_dir = thread
             .project_path
             .clone()
             .or_else(|| self.active_project.get_untracked().map(|p| p.path));
-        export_thread(export, &thread, run_dir, portable, self.notice);
+        export_thread(
+            export,
+            &thread,
+            run_dir,
+            || {
+                self.messages.with_untracked(|ms| {
+                    crate::components::import_thread_dialog::portable_messages(ms)
+                })
+            },
+            self.notice,
+        );
     }
 }
 
@@ -543,15 +550,19 @@ fn export_thread(
     export: ThreadExport,
     thread: &crate::state::Thread,
     run_dir: Option<String>,
-    messages: Vec<bruhs_models::logic::portable::PortableMessage>,
+    messages: impl FnOnce() -> Vec<bruhs_models::logic::portable::PortableMessage>,
     notice: ThreadNotice,
 ) {
     use bruhs_models::agent::AgentProvider;
     use bruhs_models::logic::portable::{
         resume_command, transcript_markdown, ExportT3Request, IMPORT_CONTEXT_MAX_CHARS,
     };
-    let markdown =
-        || transcript_markdown(&thread.title, "bruhs", &messages, IMPORT_CONTEXT_MAX_CHARS);
+    // Resume commands and missing-project notices need only thread metadata.
+    // Project the transcript only when an export will actually consume it.
+    let markdown = || {
+        let messages = messages();
+        transcript_markdown(&thread.title, "bruhs", &messages, IMPORT_CONTEXT_MAX_CHARS)
+    };
     match export {
         ThreadExport::ResumeCommand => match thread.session_id.as_deref() {
             Some(session) => {
