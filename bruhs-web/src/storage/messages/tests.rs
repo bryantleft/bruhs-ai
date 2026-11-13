@@ -26,9 +26,9 @@ fn payload_preserves_ordered_and_legacy_message_behavior() {
     .unwrap();
     let decoded = envelope(&record).record().unwrap();
     assert_eq!(decoded, record);
-    assert_eq!(decoded.messages[0].text(), "雪 😀");
-    assert_eq!(decoded.messages[1].text(), "second");
-    assert!(decoded.messages[1].is_streaming());
+    assert_eq!(decoded.messages()[0].text(), "雪 😀");
+    assert_eq!(decoded.messages()[1].text(), "second");
+    assert!(decoded.messages()[1].is_streaming());
 }
 
 #[test]
@@ -81,13 +81,13 @@ fn finite_float_bits_survive_json_storage() {
         f64::MAX,
         -f64::MAX,
     ] {
-        let record = MessagesRecord {
-            thread_id: "thread".into(),
-            messages: vec![AgentMessage::user("prompt".into(), value)],
-        };
+        let record = MessagesRecord::new(
+            "thread".into(),
+            vec![AgentMessage::user("prompt".into(), value)],
+        );
         let decoded = envelope(&record).record().unwrap();
         assert_eq!(
-            decoded.messages[0].started_at_ms.unwrap().to_bits(),
+            decoded.messages()[0].started_at_ms.unwrap().to_bits(),
             value.to_bits()
         );
     }
@@ -96,10 +96,10 @@ fn finite_float_bits_survive_json_storage() {
 #[test]
 fn special_numbers_require_the_structured_codec() {
     for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-        let record = MessagesRecord {
-            thread_id: "thread".into(),
-            messages: vec![AgentMessage::user("prompt".into(), value)],
-        };
+        let record = MessagesRecord::new(
+            "thread".into(),
+            vec![AgentMessage::user("prompt".into(), value)],
+        );
         assert!(prepared(&record).is_none());
     }
     assert!(metadata::json_string(&serde_json::json!({"integer": u64::MAX})).is_none());
@@ -107,10 +107,7 @@ fn special_numbers_require_the_structured_codec() {
 
 #[test]
 fn malformed_or_mismatched_envelopes_cannot_be_read_as_empty_history() {
-    let mut encoded = envelope(&MessagesRecord {
-        thread_id: "thread".into(),
-        messages: Vec::new(),
-    });
+    let mut encoded = envelope(&MessagesRecord::new("thread".into(), Vec::new()));
     encoded.thread_id = "other".into();
     assert!(matches!(encoded.clone().record(), Err(SaveError::Corrupt)));
     encoded.payload = "{\"thread_id\":\"other\",\"messages\":[{\"id\":\"broken\"}]}".into();
@@ -144,10 +141,7 @@ fn deep_tool_inputs_stay_out_of_the_json_parser() {
             ended_at_ms: None,
         },
     )];
-    let record = MessagesRecord {
-        thread_id: "thread".into(),
-        messages: vec![message],
-    };
+    let record = MessagesRecord::new("thread".into(), vec![message]);
     let encoded = envelope(&record);
     assert!(
         !encoded.payload.contains("nested"),
@@ -158,10 +152,10 @@ fn deep_tool_inputs_stay_out_of_the_json_parser() {
 
 #[test]
 fn content_arrays_require_exact_members_and_empty_placeholders() {
-    let record = MessagesRecord {
-        thread_id: "thread".into(),
-        messages: vec![AgentMessage::user("saved".into(), 1.0)],
-    };
+    let record = MessagesRecord::new(
+        "thread".into(),
+        vec![AgentMessage::user("saved".into(), 1.0)],
+    );
     let encoded = envelope(&record);
     let mut missing = encoded.clone();
     missing.strings.clear();
@@ -200,10 +194,7 @@ fn missing_and_empty_tool_outputs_remain_distinct() {
             message
         })
         .collect();
-    let record = MessagesRecord {
-        thread_id: "thread".into(),
-        messages,
-    };
+    let record = MessagesRecord::new("thread".into(), messages);
     let encoded = envelope(&record);
     assert_eq!(encoded.inputs.len(), 3);
     assert_eq!(encoded.strings.len(), 5);
