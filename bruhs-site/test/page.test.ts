@@ -34,7 +34,7 @@ describe("index.html", () => {
   });
 
   it("only references images that exist", () => {
-    const sources = [...html.matchAll(/\s(?:src|srcset)="([^"]+)"/g)]
+    const sources = [...html.matchAll(/\s(?:src|srcset|data-src|data-srcset)="([^"]+)"/g)]
       .flatMap((match) => (match[1] ?? "").split(","))
       .map((candidate) => candidate.trim().split(/\s+/)[0] ?? "")
       .filter((path) => path.startsWith("/") && !path.endsWith(".js"));
@@ -45,8 +45,22 @@ describe("index.html", () => {
   });
 
   it("gives every surface screenshot a description", () => {
-    for (const match of html.matchAll(/<img\s[^>]*src="\/shots\/[^"]+"[^>]*>/g)) {
+    for (const match of html.matchAll(/<img\s[^>]*(?:src|data-src)="\/shots\/[^"]+"[^>]*>/g)) {
       assert.match(match[0], /\salt="[^"]{20,}"/, `screenshot needs a real alt text: ${match[0].slice(0, 80)}`);
+    }
+  });
+  it("loads only the first tour image until another tab is selected", () => {
+    const panels = [...html.matchAll(/<div class="panel"([^>]*)>([\s\S]*?)<\/figure>/g)];
+    assert.equal(panels.length, 7);
+    for (const [, attributes, content] of panels) {
+      const image = content?.match(/<img\s[^>]*>/)?.[0];
+      assert.ok(image, "every surface needs its screenshot");
+      if (/\shidden(?:\s|$)/.test(attributes ?? "")) {
+        assert.doesNotMatch(image, /\ssrc(?:set)?=/, "inactive images must not contend with fonts and the selected screenshot");
+        assert.match(image, /\sdata-src="\/shots\//);
+      } else {
+        assert.match(image, /\ssrc="\/shots\//);
+      }
     }
   });
 });
