@@ -24,6 +24,8 @@ pub(super) const SETTINGS_REVIEW_CODEX_DROPDOWN_ID: &str = "desktop-review-codex
 
 /// Dropdown value that keeps what the control inherits.
 const INHERIT: &str = "inherit";
+const CUSTOM_ROLE_MODEL: &str = "current-role-custom-model";
+const DEFAULT_ROLE_MODEL: &str = "role-default-model";
 /// Dropdown values for the roles, by position: a dropdown value is
 /// `'static`, and a role id is not.
 const ROLE_SLOTS: [&str; MAX_ROLES] =
@@ -221,6 +223,46 @@ fn model_groups(inherit: &str, only: Option<AgentProvider>) -> Vec<DropdownGroup
             )
             .collect(),
     )
+}
+
+fn role_model_groups(inherit: &str, current: Option<&str>, default: &str) -> Vec<DropdownGroup> {
+    let mut groups = model_groups(inherit, None);
+    let options = &mut groups[0].options;
+    if let Some(id) = current.filter(|id| {
+        bruhs_models::agent::custom_model_selection(id).is_some()
+            && bruhs_models::agent::model_info(id).is_none()
+    }) {
+        options.push(option(
+            CUSTOM_ROLE_MODEL,
+            bruhs_models::agent::model_label(id),
+        ));
+    }
+    if bruhs_models::agent::custom_model_selection(default).is_some()
+        && bruhs_models::agent::model_info(default).is_none()
+        && current != Some(default)
+    {
+        options.push(option(
+            DEFAULT_ROLE_MODEL,
+            format!(
+                "Current default: {}",
+                bruhs_models::agent::model_label(default)
+            ),
+        ));
+    }
+    groups
+}
+
+fn role_model_value(current: Option<&str>) -> &str {
+    match current {
+        Some(id)
+            if bruhs_models::agent::custom_model_selection(id).is_some()
+                && bruhs_models::agent::model_info(id).is_none() =>
+        {
+            CUSTOM_ROLE_MODEL
+        }
+        Some(id) => id,
+        None => INHERIT,
+    }
 }
 
 fn effort_groups(inherit: &str) -> Vec<DropdownGroup> {
@@ -490,7 +532,14 @@ impl Workspace {
                 self.select_role(role, window, cx);
             }
             SETTINGS_ROLE_MODEL_DROPDOWN_ID => {
-                self.edit_role(cx, |role| role.model = chosen(value))
+                if value != CUSTOM_ROLE_MODEL {
+                    let model = if value == DEFAULT_ROLE_MODEL {
+                        Some(self.current_model.clone())
+                    } else {
+                        chosen(value)
+                    };
+                    self.edit_role(cx, |role| role.model = model);
+                }
             }
             SETTINGS_ROLE_EFFORT_DROPDOWN_ID => {
                 self.edit_role(cx, |role| role.effort = chosen(value));
@@ -504,7 +553,14 @@ impl Workspace {
                 cx.notify();
             }
             SETTINGS_ROLE_PROJECT_MODEL_DROPDOWN_ID => {
-                self.edit_role_override(cx, |change| change.model = chosen(value));
+                if value != CUSTOM_ROLE_MODEL {
+                    let model = if value == DEFAULT_ROLE_MODEL {
+                        Some(self.current_model.clone())
+                    } else {
+                        chosen(value)
+                    };
+                    self.edit_role_override(cx, |change| change.model = model);
+                }
             }
             SETTINGS_ROLE_PROJECT_EFFORT_DROPDOWN_ID => {
                 self.edit_role_override(cx, |change| change.effort = chosen(value));
@@ -641,8 +697,12 @@ impl Workspace {
                 self.role_dropdown(
                     SETTINGS_ROLE_MODEL_DROPDOWN_ID,
                     "Role model",
-                    role.model.as_deref().unwrap_or(INHERIT),
-                    model_groups("The sender's model", None),
+                    role_model_value(role.model.as_deref()),
+                    role_model_groups(
+                        "The sender's model",
+                        role.model.as_deref(),
+                        &self.current_model,
+                    ),
                     cx,
                 ),
             ))
@@ -708,8 +768,12 @@ impl Workspace {
                         self.role_dropdown(
                             SETTINGS_ROLE_PROJECT_MODEL_DROPDOWN_ID,
                             "Role model in this project",
-                            change.model.as_deref().unwrap_or(INHERIT),
-                            model_groups("Same as the role", None),
+                            role_model_value(change.model.as_deref()),
+                            role_model_groups(
+                                "Same as the role",
+                                change.model.as_deref(),
+                                &self.current_model,
+                            ),
                             cx,
                         ),
                     ))
@@ -806,9 +870,28 @@ impl Workspace {
 #[cfg(test)]
 mod tests {
     use super::{
-        access_groups, chosen, chosen_access, model_groups, AgentProvider, PermissionMode, INHERIT,
-        MAX_ROLES, MODEL_CATALOG, ROLE_SLOTS,
+        access_groups, chosen, chosen_access, model_groups, role_model_groups, role_model_value,
+        AgentProvider, PermissionMode, CUSTOM_ROLE_MODEL, DEFAULT_ROLE_MODEL, INHERIT, MAX_ROLES,
+        MODEL_CATALOG, ROLE_SLOTS,
     };
+
+    #[test]
+    fn custom_role_models_and_the_custom_default_remain_selectable() {
+        let groups =
+            role_model_groups("Inherit", Some("opencode/local/one"), "cursor/custom-model");
+        let options = &groups[0].options;
+        assert!(options
+            .iter()
+            .any(|option| option.value == CUSTOM_ROLE_MODEL && option.label.contains("local/one")));
+        assert!(options
+            .iter()
+            .any(|option| option.value == DEFAULT_ROLE_MODEL
+                && option.label.contains("custom-model")));
+        assert_eq!(
+            role_model_value(Some("opencode/local/one")),
+            CUSTOM_ROLE_MODEL
+        );
+    }
 
     #[test]
     fn a_role_is_never_offered_the_loosest_access() {

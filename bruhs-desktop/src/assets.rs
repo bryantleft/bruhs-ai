@@ -287,6 +287,7 @@ pub fn provider_logo_path(provider: AgentProvider) -> &'static str {
     match provider {
         AgentProvider::Claude => "logos/claude.svg",
         AgentProvider::Codex => "logos/openai.svg",
+        _ => BOT_ICON_PATH,
     }
 }
 

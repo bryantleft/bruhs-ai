@@ -4530,6 +4530,10 @@ fn desktop_model_settings_options_should_match_web_reference() {
             ("claude-opus-4-8", "Claude Opus 4.8", "claude"),
             ("claude-sonnet-4-6", "Claude Sonnet 4.6", "claude"),
             ("claude-haiku-4-5", "Claude Haiku 4.5", "claude"),
+            ("cursor/default", "Cursor default", "cursor"),
+            ("antigravity/default", "Antigravity default", "antigravity"),
+            ("grok/default", "Grok default", "grok"),
+            ("opencode/default", "OpenCode default", "opencode"),
         ]
     );
 
@@ -4549,6 +4553,7 @@ fn desktop_model_settings_options_should_match_web_reference() {
     assert_eq!(
         grouped,
         vec![
+            ("antigravity", vec!["antigravity/default"]),
             (
                 "claude",
                 vec![
@@ -4562,6 +4567,9 @@ fn desktop_model_settings_options_should_match_web_reference() {
                 "codex",
                 vec!["gpt-6.1-sol", "gpt-5.5", "gpt-5.4", "gpt-5.3-codex"],
             ),
+            ("cursor", vec!["cursor/default"]),
+            ("grok", vec!["grok/default"]),
+            ("opencode", vec!["opencode/default"]),
         ]
     );
 

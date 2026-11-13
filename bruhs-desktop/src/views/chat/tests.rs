@@ -1006,13 +1006,20 @@ fn desktop_model_picker_opens_from_chip_and_selects(cx: &mut gpui::TestAppContex
     });
     assert_chat_no_rendered_bounds(cx, "desktop-model-picker");
 
-    // Keyboard: ⌘⇧M-style toggle, ↓ then ↵ picks the second row; esc closes.
+    // Reopening retains the current selection; ↓ then ↵ picks the next
+    // catalog entry, even when the current model is not the first row.
     chat.update_in(cx, |chat, window, cx| {
         chat.toggle_model_picker(window, cx);
         assert!(chat.model_picker_open);
+        let selected = MODEL_CATALOG
+            .iter()
+            .position(|model| model.id == chat.model_id)
+            .unwrap();
+        assert_eq!(chat.model_picker_index, selected);
+        let next = MODEL_CATALOG.iter().cycle().nth(selected + 1).unwrap().id;
         assert!(chat.handle_model_picker_key("down", None, window, cx));
         assert!(chat.handle_model_picker_key("enter", None, window, cx));
-        assert_eq!(chat.model_id, MODEL_CATALOG[1].id);
+        assert_eq!(chat.model_id, next);
         assert!(!chat.model_picker_open);
         chat.toggle_model_picker(window, cx);
         assert!(chat.handle_model_picker_key("3", Some(3), window, cx));

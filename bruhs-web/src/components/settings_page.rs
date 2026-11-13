@@ -127,7 +127,7 @@ fn GeneralSettings() -> impl IntoView {
             providers.push(m.provider);
         }
     }
-    let model_options: Vec<DropdownOption> = providers
+    let built_in_model_options: Vec<DropdownOption> = providers
         .iter()
         .flat_map(|&p| {
             MODEL_CATALOG
@@ -136,6 +136,19 @@ fn GeneralSettings() -> impl IntoView {
                 .map(|m| DropdownOption::new(m.id, m.label).in_group(provider_label(m.provider)))
         })
         .collect();
+    let model_options = Signal::derive(move || {
+        let mut options = built_in_model_options.clone();
+        let current = default_model.get();
+        if !options.iter().any(|option| option.value == current)
+            && bruhs_models::agent::custom_model_selection(&current).is_some()
+        {
+            options.push(
+                DropdownOption::new(current.clone(), current.clone())
+                    .in_group(provider_label(AgentProvider::for_model(&current))),
+            );
+        }
+        options
+    });
     let mode_options: Vec<DropdownOption> = [
         PermissionMode::Default,
         PermissionMode::AcceptEdits,
@@ -149,7 +162,7 @@ fn GeneralSettings() -> impl IntoView {
     view! {
         <SettingsRow
             title="Model"
-            description="Change it per thread in the composer."
+            description="Change it per thread in the composer. Enter provider/model in model search to use a configured model."
         >
             <Dropdown
                 options=model_options
@@ -162,7 +175,7 @@ fn GeneralSettings() -> impl IntoView {
         </SettingsRow>
         <SettingsRow
             title="Access mode"
-            description="How much the agent may do without asking. Default asks before shell commands and edits."
+            description="Choose whether the agent may edit files or run commands. Permission support depends on its runtime."
         >
             <Dropdown
                 options=mode_options

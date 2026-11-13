@@ -989,6 +989,7 @@ impl Workspace {
                 "desktop-settings-row-update-codex",
                 "desktop-settings-update-failure-codex",
             ),
+            _ => return Vec::new(),
         };
         // One block, so the card's dividers fall between providers rather
         // than between a provider and its warning, hint or progress line.
@@ -1127,6 +1128,7 @@ impl Workspace {
                         "desktop-settings-update-codex",
                         "desktop-settings-copy-codex",
                     ),
+                    _ => return meta("Manage updates in this provider's CLI.").into_any_element(),
                 };
                 let tooltip: SharedString = format!("Runs `{command}`").into();
                 div()

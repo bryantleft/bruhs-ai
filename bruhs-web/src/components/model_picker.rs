@@ -5,7 +5,9 @@
 use leptos::html::{Div, Input};
 use leptos::prelude::*;
 
-use bruhs_models::agent::{provider_for_model_id, AgentProvider, ModelInfo, MODEL_CATALOG};
+use bruhs_models::agent::{
+    custom_model_selection, provider_for_model_id, AgentProvider, ModelInfo, MODEL_CATALOG,
+};
 
 use crate::auth::AuthStatus;
 use crate::components::provider::{provider_label, provider_logo_src, PROVIDER_LOGO_CLASS};
@@ -41,6 +43,23 @@ pub fn group_models<'a>(models: &[&'a ModelInfo]) -> Vec<(AgentProvider, Vec<&'a
     groups
 }
 
+/// A typed provider/model choice, or the current custom model while searching.
+pub fn custom_model_match(query: &str, current: &str) -> Option<String> {
+    let typed = custom_model_selection(query.trim());
+    let candidate = typed.or_else(|| {
+        let hay = current.to_lowercase();
+        query
+            .split_whitespace()
+            .all(|word| hay.contains(&word.to_lowercase()))
+            .then(|| custom_model_selection(current))
+            .flatten()
+    })?;
+    (!MODEL_CATALOG
+        .iter()
+        .any(|model| model.id == candidate.as_str()))
+    .then(|| candidate.into_inner())
+}
+
 /// Short auth line for a provider.
 pub fn auth_line(
     provider: AgentProvider,
@@ -65,6 +84,12 @@ pub fn auth_line(
                 "Claude Code not signed in. Run `claude login`".to_string()
             }
         }
+        AgentProvider::Cursor => "Uses `cursor-agent login`. App tools are unavailable.".into(),
+        AgentProvider::Antigravity => {
+            "Requires Full access and Antigravity CLI sign-in. App tools are unavailable.".into()
+        }
+        AgentProvider::Grok => "Uses Grok CLI login. App tools are unavailable.".into(),
+        AgentProvider::OpenCode => "Configure providers and models in OpenCode.".into(),
     }
 }
 
@@ -87,6 +112,7 @@ pub fn ModelPicker() -> impl IntoView {
 
     let flat = Memo::new(move |_| filter_models(MODEL_CATALOG, &query.get()));
     let groups = Memo::new(move |_| group_models(&flat.get()));
+    let custom = Memo::new(move |_| custom_model_match(&query.get(), &current_model.get()));
 
     let position_menu = move || {
         let Some(Some(menu)) = menu_ref.try_get_untracked() else {
@@ -126,6 +152,10 @@ pub fn ModelPicker() -> impl IntoView {
     };
     Effect::new(move |_| {
         if open.get() && menu_ref.get().is_some() {
+            // Filtering and provider guidance change the popup's height.
+            flat.track();
+            custom.track();
+            highlight.track();
             request_animation_frame(position_menu);
         }
     });
@@ -162,7 +192,16 @@ pub fn ModelPicker() -> impl IntoView {
         }
         set_query.set(String::new());
         let cur = current_model.get_untracked();
-        let idx = MODEL_CATALOG.iter().position(|m| m.id == cur).unwrap_or(0);
+        let idx = MODEL_CATALOG
+            .iter()
+            .position(|m| m.id == cur)
+            .unwrap_or_else(|| {
+                if custom_model_match("", &cur).is_some() {
+                    MODEL_CATALOG.len()
+                } else {
+                    0
+                }
+            });
         set_highlight.set(idx);
         gloo_timers::callback::Timeout::new(0, move || {
             if let Some(Some(el)) = input_ref.try_get_untracked() {
@@ -187,8 +226,17 @@ pub fn ModelPicker() -> impl IntoView {
         set_current_model.set(id);
         set_open.set(false);
     };
+    let choose_index = move |index: usize| {
+        if let Some(id) = flat.with_untracked(|models| models.get(index).map(|model| model.id)) {
+            choose(id.to_string());
+        } else if index == flat.with_untracked(|models| models.len()) {
+            if let Some(id) = custom.get_untracked() {
+                choose(id);
+            }
+        }
+    };
     let on_key = move |ev: leptos::ev::KeyboardEvent| {
-        let n = flat.with_untracked(|f| f.len());
+        let n = flat.with_untracked(|f| f.len()) + usize::from(custom.get_untracked().is_some());
         // ⌘1–9 pick the Nth row.
         if (ev.meta_key() || ev.ctrl_key()) && !ev.shift_key() && !ev.alt_key() {
             if let Some(k) = ev
@@ -198,9 +246,7 @@ pub fn ModelPicker() -> impl IntoView {
                 .filter(|k| (1..=9).contains(k))
             {
                 ev.prevent_default();
-                if let Some(m) = flat.with_untracked(|f| f.get(k - 1).copied()) {
-                    choose(m.id.to_string());
-                }
+                choose_index(k - 1);
                 return;
             }
         }
@@ -215,10 +261,7 @@ pub fn ModelPicker() -> impl IntoView {
             }
             "Enter" => {
                 ev.prevent_default();
-                if let Some(m) = flat.with_untracked(|f| f.get(highlight.get_untracked()).copied())
-                {
-                    choose(m.id.to_string());
-                }
+                choose_index(highlight.get_untracked());
             }
             "Escape" => {
                 ev.prevent_default();
@@ -230,6 +273,7 @@ pub fn ModelPicker() -> impl IntoView {
     let status_line = move || {
         let provider = flat
             .with(|f| f.get(highlight.get()).map(|m| m.provider))
+            .or_else(|| custom.get().map(|id| provider_for_model_id(&id)))
             .unwrap_or_else(|| provider_for_model_id(&current_model.get()));
         auth_line(provider, &auth_status.get(), codex_auth.get().authenticated)
     };
@@ -249,7 +293,7 @@ pub fn ModelPicker() -> impl IntoView {
                     <input
                         node_ref=input_ref
                         type="text"
-                        placeholder="Search models…"
+                        placeholder="Search models or enter provider/model…"
                         aria-label="Search models"
                         class="min-w-0 flex-1 bg-transparent text-body-sm text-rambutan-100 placeholder:text-rambutan-500 focus:outline-none"
                         prop:value=move || query.get()
@@ -261,9 +305,9 @@ pub fn ModelPicker() -> impl IntoView {
                 <div node_ref=list_ref role="listbox" aria-label="Models" class="min-h-0 max-h-72 overflow-y-auto p-1">
                     {move || {
                         let gs = groups.get();
-                        if gs.is_empty() {
+                        if gs.is_empty() && custom.get().is_none() {
                             return view! {
-                                <p class="px-3 py-6 text-center text-label-sm text-rambutan-400">"No models match."</p>
+                                <p class="px-3 py-6 text-center text-label-sm text-rambutan-400">"No models match. Enter a model as cursor/model, antigravity/model, grok/model or opencode/provider/model."</p>
                             }.into_any();
                         }
                         let mut index = 0usize;
@@ -316,6 +360,29 @@ pub fn ModelPicker() -> impl IntoView {
                             }
                         }).collect_view().into_any()
                     }}
+                    {move || custom.get().map(|id| {
+                        let index = flat.with(|models| models.len());
+                        let id_choose = id.clone();
+                        let is_selected_id = id.clone();
+                        view! {
+                            <button
+                                type="button"
+                                role="option"
+                                data-model-index=index
+                                aria-selected=move || (highlight.get() == index).to_string()
+                                class=move || format!("flex w-full items-center gap-3 rounded-grape px-2 py-2 text-left {}", if highlight.get() == index { "bg-white/[0.06]" } else { "" })
+                                on:mouseenter=move |_| set_highlight.set(index)
+                                on:click=move |_| choose(id_choose.clone())
+                            >
+                                <Icon name="bot" size=14 class="shrink-0 text-rambutan-400" />
+                                <div class="min-w-0 flex-1">
+                                    <div class="truncate text-label text-rambutan-100">"Use "{id}</div>
+                                    <div class="mt-0.5 text-label-sm text-rambutan-400">"Use the model configured with this provider."</div>
+                                </div>
+                                {move || (current_model.get() == is_selected_id).then(|| view! { <Icon name="check" size=14 class="shrink-0 text-rambutan-100" /> })}
+                            </button>
+                        }
+                    })}
                 </div>
                 <div class="shrink-0 border-t border-white/10 px-3 py-2 text-label-sm text-rambutan-400" role="status">
                     {status_line}
@@ -376,5 +443,36 @@ mod tests {
             auth_line(AgentProvider::Codex, &signed_out, true),
             "Codex CLI signed in"
         );
+    }
+
+    #[test]
+    fn custom_model_search_accepts_explicit_providers_and_retains_the_current_choice() {
+        assert_eq!(
+            custom_model_match("grok/my-model", "claude-sonnet-4-6"),
+            Some("grok/my-model".into())
+        );
+        assert_eq!(
+            custom_model_match("", "opencode/local/my-model"),
+            Some("opencode/local/my-model".into())
+        );
+        assert_eq!(
+            custom_model_match("local", "opencode/local/my-model"),
+            Some("opencode/local/my-model".into())
+        );
+        assert!(custom_model_match("unknown/my-model", "claude-sonnet-4-6").is_none());
+        assert!(custom_model_match("cursor/default", "claude-sonnet-4-6").is_none());
+    }
+
+    #[test]
+    fn external_provider_auth_lines_do_not_claim_a_verified_login() {
+        for provider in AgentProvider::ALL
+            .iter()
+            .copied()
+            .filter(|provider| provider.is_external())
+        {
+            let line = auth_line(provider, &AuthStatus::default(), false);
+            assert!(!line.contains("signed in"));
+            assert!(!line.is_empty());
+        }
     }
 }

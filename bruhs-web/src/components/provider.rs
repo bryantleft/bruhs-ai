@@ -18,6 +18,7 @@ pub fn provider_label(provider: AgentProvider) -> &'static str {
     match provider {
         AgentProvider::Claude => "Anthropic",
         AgentProvider::Codex => "OpenAI Codex",
+        _ => provider.label(),
     }
 }
 
@@ -26,6 +27,7 @@ pub fn provider_logo_src(provider: AgentProvider) -> &'static str {
     match provider {
         AgentProvider::Claude => "/logos/claude.svg",
         AgentProvider::Codex => "/logos/openai.svg",
+        _ => "/logos/agent.svg",
     }
 }
 
@@ -33,6 +35,10 @@ pub fn provider_agent_label_for_model(model_id: &str) -> &'static str {
     match provider_for_model_id(model_id) {
         AgentProvider::Claude => "claude agent",
         AgentProvider::Codex => "codex agent",
+        AgentProvider::Cursor => "cursor agent",
+        AgentProvider::Antigravity => "antigravity agent",
+        AgentProvider::Grok => "grok agent",
+        AgentProvider::OpenCode => "opencode agent",
     }
 }
 

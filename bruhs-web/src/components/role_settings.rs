@@ -41,6 +41,21 @@ fn model_options(inherit: &str, only: Option<AgentProvider>) -> Vec<DropdownOpti
         .collect()
 }
 
+fn role_model_options(inherit: &str, current: &str, default: &str) -> Vec<DropdownOption> {
+    let mut options = model_options(inherit, None);
+    for id in [current, default] {
+        if bruhs_models::agent::custom_model_selection(id).is_some()
+            && !options.iter().any(|option| option.value == id)
+        {
+            options.push(
+                DropdownOption::new(id, bruhs_models::agent::model_label(id))
+                    .in_group(provider_label(AgentProvider::for_model(id))),
+            );
+        }
+    }
+    options
+}
+
 fn effort_options(inherit: &str) -> Vec<DropdownOption> {
     std::iter::once(DropdownOption::new("", inherit))
         .chain(
@@ -85,6 +100,7 @@ fn some(value: String) -> Option<String> {
 #[component]
 pub fn RoleSettings() -> impl IntoView {
     let RolesSignal(book) = expect_context::<RolesSignal>();
+    let default_model = expect_context::<crate::state::DefaultModel>().0;
     let threads = expect_context::<ThreadsSignal>().0;
     // Id of the role being edited, and the project whose override is shown.
     let (selected, set_selected) = signal(String::new());
@@ -199,7 +215,11 @@ pub fn RoleSettings() -> impl IntoView {
                     <div class=FIELD>
                         <span class=FIELD_LABEL>"Model"</span>
                         <Dropdown
-                            options=model_options("The sender's model", None)
+                            options=Signal::derive(move || role_model_options(
+                                "The sender's model",
+                                role.with(|role| role.as_ref().and_then(|role| role.model.as_deref()).unwrap_or_default().to_string()).as_str(),
+                                &default_model.get(),
+                            ))
                             value=Signal::derive(move || role.with(|role| role.as_ref().and_then(|role| role.model.clone()).unwrap_or_default()))
                             on_change=Callback::new(move |value: String| edit(&|role| role.model = some(value.clone())))
                             label="Role model"
@@ -264,7 +284,11 @@ pub fn RoleSettings() -> impl IntoView {
                             <div class=FIELD>
                                 <span class=FIELD_LABEL>"Model in this project"</span>
                                 <Dropdown
-                                    options=model_options("Same as the role", None)
+                                    options=Signal::derive(move || role_model_options(
+                                        "Same as the role",
+                                        override_now().model.as_deref().unwrap_or_default(),
+                                        &default_model.get(),
+                                    ))
                                     value=Signal::derive(move || override_now().model.unwrap_or_default())
                                     on_change=Callback::new(move |value: String| change_override(&|entry| entry.model = some(value.clone())))
                                     label="Role model in this project"
@@ -380,6 +404,22 @@ pub fn TaskModelSettings() -> impl IntoView {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn custom_role_models_and_the_custom_default_remain_selectable() {
+        let options = role_model_options("Inherit", "opencode/local/one", "cursor/custom-model");
+        for id in ["opencode/local/one", "cursor/custom-model"] {
+            assert!(options.iter().any(|option| option.value == id));
+        }
+        let options = role_model_options("Inherit", "opencode/local/one", "opencode/local/one");
+        assert_eq!(
+            options
+                .iter()
+                .filter(|option| option.value == "opencode/local/one")
+                .count(),
+            1
+        );
+    }
 
     #[test]
     fn a_role_is_never_offered_the_loosest_access() {
