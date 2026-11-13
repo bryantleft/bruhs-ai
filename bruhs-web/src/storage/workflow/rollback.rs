@@ -66,7 +66,7 @@ pub async fn rollback(
                     // erase a conversation added after workflow creation.
                     if domain == AgentDomain::Chat {
                         if let Some(raw) = tx.object_store(STORE_MESSAGES)?.get(JsValue::from_str(id))?.await? {
-                            let messages: crate::storage::MessagesRecord = from_js(raw)?;
+                            let messages = crate::storage::messages::decode(raw)?;
                             if messages.thread_id != id || !messages.messages.is_empty() {
                                 return Err(SaveError::Rejected("A created chat now contains messages. No records were changed."));
                             }

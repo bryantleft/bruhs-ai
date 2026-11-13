@@ -83,6 +83,7 @@ pub async fn save(writes: &[Write<'_>]) -> Result<(), SaveError> {
                 .draft
                 .map(|record| match record {
                     Record::Attachment(attachment) => super::attachment_to_js(attachment.as_ref()),
+                    Record::Conversation(messages) => super::messages::encode(messages),
                     _ => to_js(record),
                 })
                 .transpose()
@@ -148,9 +149,7 @@ pub async fn save(writes: &[Write<'_>]) -> Result<(), SaveError> {
                     Kind::Thread => from_js(raw)
                         .map(Record::Thread)
                         .map_err(|_| SaveError::Corrupt),
-                    Kind::Conversation => from_js(raw)
-                        .map(Record::Conversation)
-                        .map_err(|_| SaveError::Corrupt),
+                    Kind::Conversation => super::messages::decode(raw).map(Record::Conversation),
                 })
                 .transpose()?;
             if current.as_ref() != write.expected {

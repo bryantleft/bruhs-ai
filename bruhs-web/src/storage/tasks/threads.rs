@@ -5,7 +5,7 @@ use super::{Kind, Write};
 use crate::storage::{
     from_js,
     metadata::{LocalTransaction, SaveError},
-    MessagesRecord, STORE_MESSAGES, STORE_THREADS,
+    STORE_MESSAGES, STORE_THREADS,
 };
 
 pub(super) async fn validate_and_cascade(
@@ -28,7 +28,7 @@ pub(super) async fn validate_and_cascade(
             let store = tx.object_store(STORE_MESSAGES)?;
             let key = JsValue::from_str(write.id);
             if let Some(raw) = store.get(key.clone())?.await? {
-                let messages: MessagesRecord = from_js(raw).map_err(|_| SaveError::Corrupt)?;
+                let messages = crate::storage::messages::decode(raw)?;
                 if messages.thread_id != write.id {
                     return Err(SaveError::Conflict);
                 }
