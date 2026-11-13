@@ -90,7 +90,7 @@ async fn forward(
             .and_then(|value| value.to_str().ok())
             .unwrap_or("application/json")
             .to_owned();
-        (content_type, body.to_vec())
+        (content_type, reqwest::Body::from(body))
     });
     let reply = match capture_client::proxy(daemon, method, route, body).await {
         Ok(reply) => reply,

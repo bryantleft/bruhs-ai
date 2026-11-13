@@ -425,12 +425,12 @@ pub struct DaemonReply {
 pub const PROXY_REPLY_LIMIT: usize = 64 * 1024;
 
 /// Forward one browser request to the daemon with the bearer token attached.
-/// `body` is `(content type, bytes)` for requests that carry one.
+/// `body` is `(content type, owned HTTP body)` for requests that carry one.
 pub async fn proxy(
     daemon: &DaemonEndpoint,
     method: reqwest::Method,
     route: ProxiedRoute,
-    body: Option<(String, Vec<u8>)>,
+    body: Option<(String, reqwest::Body)>,
 ) -> Result<DaemonReply, CaptureClientError> {
     let mut request = client()?.request(method, daemon.url(route.segments())?);
     if let Some((content_type, bytes)) = body {
@@ -558,7 +558,10 @@ mod tests {
             &daemon,
             reqwest::Method::POST,
             ProxiedRoute::Start,
-            Some(("application/json".into(), br#"{"meeting_id":"m"}"#.to_vec())),
+            Some((
+                "application/json".into(),
+                br#"{"meeting_id":"m"}"#.to_vec().into(),
+            )),
         )
         .await
         .unwrap();
