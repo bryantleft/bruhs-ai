@@ -151,6 +151,13 @@ fn command(options: &QueryOptions) -> Command {
             // rules such as `Bash(git log:*)` intact.
             cmd.arg(format!("--allowedTools={}", tools.join(",")));
         }
+        Tools::ReadOnly => {
+            cmd.args([
+                "--tools=Read,Glob,Grep",
+                "--strict-mcp-config",
+                "--mcp-config={\"mcpServers\":{}}",
+            ]);
+        }
         Tools::None => {
             // An empty approval allowlist is not an empty tool inventory. Also
             // exclude inherited MCP/config hooks from transcript-only generation.
@@ -210,7 +217,7 @@ fn command(options: &QueryOptions) -> Command {
     if let Some(config) = options
         .mcp_config
         .as_ref()
-        .filter(|_| options.tools != Tools::None)
+        .filter(|_| !matches!(options.tools, Tools::None | Tools::ReadOnly))
     {
         cmd.arg(format!("--mcp-config={config}"));
     }
@@ -737,6 +744,25 @@ mod tests {
         let args = argv_of(&options);
         assert!(!args.contains(&format!("--mcp-config={config}")));
         assert!(args.contains(&"--mcp-config={\"mcpServers\":{}}".into()));
+    }
+
+    #[test]
+    fn read_only_inventory_excludes_shell_mutation_and_inherited_mcp() {
+        let mut options = QueryOptions::new("Read the scan")
+            .tools(Tools::ReadOnly)
+            .permission_mode(PermissionMode::Plan);
+        options.mcp_config = Some(r#"{"mcpServers":{"unsafe":{"command":"anything"}}}"#.into());
+        let args = argv_of(&options);
+        assert!(args.contains(&"--tools=Read,Glob,Grep".into()));
+        assert!(args.contains(&"--strict-mcp-config".into()));
+        assert!(args.contains(&"--mcp-config={\"mcpServers\":{}}".into()));
+        assert!(args.contains(&"--permission-mode=plan".into()));
+        assert_eq!(
+            args.iter()
+                .filter(|arg| arg.starts_with("--mcp-config="))
+                .count(),
+            1
+        );
     }
 
     #[test]

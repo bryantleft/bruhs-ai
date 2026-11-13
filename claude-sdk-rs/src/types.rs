@@ -27,6 +27,9 @@ pub enum Tools {
     /// `Bash(git log:*)`) approved up front via `--allowedTools`. An empty
     /// list approves nothing extra, the same as [`Tools::CliDefault`].
     Allow(Vec<String>),
+    /// Read and search files only. Excludes shell, mutation, network and
+    /// inherited MCP tools from the inventory, for unattended event handlers.
+    ReadOnly,
     /// No tools at all, for transcript-only generation: an empty tool
     /// inventory, `--restricted`, and no inherited MCP servers. The
     /// permission mode is not passed in this case.
