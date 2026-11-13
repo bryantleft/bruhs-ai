@@ -70,6 +70,8 @@ pub struct AgentTurn {
     /// thread's. Keep them the same for a thread's whole life where
     /// possible: a changed prompt prefix misses the cache.
     pub instructions: Option<String>,
+    /// Event handlers never inherit interactive integrations or elevated access.
+    pub unattended: bool,
 }
 
 impl AgentTurn {
@@ -97,6 +99,7 @@ impl AgentTurn {
             lean: false,
             thread_access: ThreadAccess::default(),
             instructions: None,
+            unattended: false,
         }
     }
 
@@ -105,6 +108,15 @@ impl AgentTurn {
         self.instructions = instructions
             .map(|text| text.trim().to_string())
             .filter(|text| !text.is_empty());
+        self
+    }
+
+    /// Restrict an event turn independently of the owner's interactive settings.
+    pub fn unattended(mut self) -> Self {
+        self.unattended = true;
+        self.permission_mode = PermissionMode::Plan;
+        self.thread_access = ThreadAccess::Off;
+        self.lean = true;
         self
     }
 
@@ -602,6 +614,7 @@ impl AgentOrchestrator {
             lean,
             thread_access,
             instructions,
+            unattended,
         } = turn;
         // The thread's own context first (a meeting's transcript), then what
         // its role asks of it.
@@ -678,6 +691,9 @@ impl AgentOrchestrator {
             .then_some(lean_file)
             .flatten();
         apply_lean_context(&mut query_options, lean);
+        if unattended {
+            restrict_unattended(&mut query_options);
+        }
 
         let (tx, rx) = mpsc::channel::<OrchestratorEvent>(256);
         let secrets = self
@@ -712,7 +728,7 @@ impl AgentOrchestrator {
             let _secrets = producer_secrets;
             let _threads = producer_threads;
             let app_tools = query_options.supports_mcp();
-            let broker = match if !app_tools {
+            let broker = match if unattended || !app_tools {
                 Ok(None)
             } else {
                 secrets.start().await.map(Some)
@@ -726,7 +742,7 @@ impl AgentOrchestrator {
                     return;
                 }
             };
-            if permission_mode == PermissionMode::Plan {
+            if !unattended && permission_mode == PermissionMode::Plan {
                 if let ProviderQueryOptions::Claude(options) = &mut query_options {
                     crate::secrets::mcp::append_claude_instructions(options);
                 }
@@ -742,7 +758,7 @@ impl AgentOrchestrator {
             }
             // Off in Settings: no thread tools. The turn also runs without
             // them when the broker cannot start.
-            let _thread_broker = if !app_tools || thread_access == ThreadAccess::Off {
+            let _thread_broker = if unattended || !app_tools || thread_access == ThreadAccess::Off {
                 None
             } else {
                 match threads.start(threads_read_only).await {
@@ -871,6 +887,90 @@ pub(crate) fn lean_codex(options: &mut codex_sdk_rs::QueryOptions) {
 
 /// The Codex feature flag that loads plugins.
 const CODEX_PLUGINS_FEATURE: &str = "features.plugins";
+
+fn restrict_unattended(options: &mut ProviderQueryOptions) {
+    // Event content must not gain access to the daemon's integration tokens
+    // through a read-only shell's environment. Provider logins remain on disk.
+    let environment: Vec<_> = [
+        "PATH",
+        "HOME",
+        // Claude's macOS keychain lookup uses USER to locate the signed-in account.
+        "USER",
+        "USERNAME",
+        "USERPROFILE",
+        "LANG",
+        "LC_ALL",
+        "CODEX_HOME",
+        "CLAUDE_CONFIG_DIR",
+        "XDG_CONFIG_HOME",
+        "XDG_DATA_HOME",
+        "TMPDIR",
+        "TEMP",
+        "TMP",
+        "SHELL",
+        "SSL_CERT_FILE",
+        "SSL_CERT_DIR",
+        "NODE_EXTRA_CA_CERTS",
+        "HTTP_PROXY",
+        "HTTPS_PROXY",
+        "NO_PROXY",
+        "SystemRoot",
+        "WINDIR",
+    ]
+    .into_iter()
+    .filter_map(|key| {
+        std::env::var(key)
+            .ok()
+            .map(|value| (key.to_string(), value))
+    })
+    .collect();
+    match options {
+        ProviderQueryOptions::Claude(options) => {
+            options.inherit_env = false;
+            options.env = environment;
+            options.tools = claude_sdk_rs::Tools::ReadOnly;
+            options.permission_mode = Some(claude_sdk_rs::PermissionMode::Plan);
+            options.setting_sources = Some(Vec::new());
+            let mut deny = vec![serde_json::json!("mcp__*")];
+            for file in user_claude_settings() {
+                deny.extend(
+                    file["permissions"]["deny"]
+                        .as_array()
+                        .into_iter()
+                        .flatten()
+                        .cloned(),
+                );
+            }
+            // Loading hooks or allow rules here could turn an outside event
+            // into host-side actions before the read-only tool gate runs.
+            options.settings = Some(serde_json::json!({"permissions":{"deny":deny}}).to_string());
+            options.mcp_config = None;
+        }
+        ProviderQueryOptions::Codex(options) => {
+            options.inherit_env = false;
+            options.env = environment;
+            options.ignore_user_config = true;
+            options.access = codex_sdk_rs::CodexAccess::Sandboxed {
+                sandbox: codex_sdk_rs::SandboxMode::ReadOnly,
+                approval: codex_sdk_rs::ApprovalPolicy::Never,
+            };
+            options.enable_web_search = false;
+            options.config.clear();
+            for (key, value) in [
+                ("features.plugins", "false"),
+                ("features.apps", "false"),
+                ("mcp_servers", "{}"),
+                ("web_search", "\"disabled\""),
+            ] {
+                // These are fixed valid TOML paths, checked by the unit test.
+                if let Ok(entry) = codex_sdk_rs::ConfigOverride::new(key, value) {
+                    options.config.push(entry);
+                }
+            }
+        }
+        ProviderQueryOptions::External(options) => options.unattended(),
+    }
+}
 
 /// Make `options` lean: no settings files, so none of the plugins, skills
 /// or MCP servers they enable, with the safety parts of `files` (the user's
@@ -1512,6 +1612,82 @@ fn map_codex_event(event: codex_sdk_rs::QueryEvent, model: &str) -> QueryEvent {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unattended_turns_remove_interactive_integrations_and_elevated_access() {
+        let turn = AgentTurn::new(
+            ThreadId::new_v4(),
+            "event",
+            "/tmp",
+            "sonnet",
+            AgentProvider::Claude,
+            PermissionMode::BypassPermissions,
+        )
+        .unattended();
+        assert_eq!(turn.permission_mode, PermissionMode::Plan);
+        assert_eq!(turn.thread_access, ThreadAccess::Off);
+        for provider in [AgentProvider::Claude, AgentProvider::Codex] {
+            let mut options = build_query_options(
+                provider,
+                "event",
+                "/tmp",
+                "test",
+                PermissionMode::BypassPermissions,
+                None,
+                None,
+            );
+            restrict_unattended(&mut options);
+            let environment = match &options {
+                ProviderQueryOptions::Claude(options) => &options.env,
+                ProviderQueryOptions::Codex(options) => &options.env,
+                ProviderQueryOptions::External(_) => panic!("expected a managed provider"),
+            };
+            for key in ["USER", "USERNAME"] {
+                if let Ok(value) = std::env::var(key) {
+                    assert!(
+                        environment
+                            .iter()
+                            .any(|(name, actual)| name == key && actual == &value),
+                        "Unattended login must retain the account identity {key}"
+                    );
+                }
+            }
+            match options {
+                ProviderQueryOptions::Claude(options) => {
+                    assert!(!options.inherit_env);
+                    assert_eq!(options.tools, claude_sdk_rs::Tools::ReadOnly);
+                    assert_eq!(
+                        options.permission_mode,
+                        Some(claude_sdk_rs::PermissionMode::Plan)
+                    );
+                    assert_eq!(options.setting_sources, Some(Vec::new()));
+                    assert!(options.mcp_config.is_none());
+                    let settings: serde_json::Value =
+                        serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
+                    assert!(settings.get("hooks").is_none());
+                    assert!(settings["permissions"].get("allow").is_none());
+                }
+                ProviderQueryOptions::Codex(options) => {
+                    assert!(!options.inherit_env);
+                    assert!(options.ignore_user_config);
+                    assert_eq!(
+                        options.access,
+                        codex_sdk_rs::CodexAccess::Sandboxed {
+                            sandbox: codex_sdk_rs::SandboxMode::ReadOnly,
+                            approval: codex_sdk_rs::ApprovalPolicy::Never
+                        }
+                    );
+                    assert!(!options.enable_web_search);
+                    assert_eq!(options.config.len(), 4);
+                    assert!(options
+                        .config
+                        .iter()
+                        .any(|entry| entry.key() == "mcp_servers" && entry.value() == "{}"));
+                }
+                ProviderQueryOptions::External(_) => panic!("expected a managed provider"),
+            }
+        }
+    }
     use tokio_stream::StreamExt;
 
     fn options(
