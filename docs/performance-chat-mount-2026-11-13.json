@@ -1,0 +1,32 @@
+{
+  "version": 1,
+  "base_revision": "015c680c05df0a13045d63a4353978a6cc57f5d8",
+  "source_sha256": {"bruhs-web/src/components/chat.rs": "b8e19a6c8d28b61a8af3aa585b045f50b42285afa5d7ca4a887bb625c0bb779e", "bruhs-web/src/components/chat/mount_state.rs": "579b6664406f9076d521aa527ae34ee7355f8c58becbdb6dd5f84a9786007092"},
+  "boundary": "Native window capture keydown through real thread-store IDBTransaction complete, two animation frames and final-row forced layout. No physical paint claim.",
+  "hardware": "Apple M2 Max",
+  "browser": "Chrome/157.0.8103.52",
+  "viewport": {"width": 1280, "height": 800},
+  "intervals": 56,
+  "warmups": 8,
+  "retained": 48,
+  "samples_per_cell": 6,
+  "order": "Seven blocks; alternating case and implementation order. Each case starts from seeded ordinary finished history and an unpinned thread, then pin/unpin in order. Separate Chrome process/profile per implementation.",
+  "data": [{"case": "small-control", "messages": 100, "ordered_parts": 101, "json_input_bytes": 24581, "sha256": "0b427f2ebe9e351d5db406f1e8829f7c95ca90dfdb4b00084205e6f8009aad0a"}, {"case": "mixed-41k-parts", "messages": 460, "ordered_parts": 41000, "json_input_bytes": 7454613, "sha256": "2ab148136aab81f1565c36456cae3f996a7101006d358fcddfcf70d3242ede8c"}],
+  "functional_controls": 9,
+  "native_identity_tests": 2,
+  "fresh_code_reviews": 3,
+  "private_app_exports": false,
+  "whole_action_acceptance": false,
+  "matched_t3_acceptance": false,
+  "host_quiescence": "Not established. Before checkpoint observed unrelated Cargo/rustc; after checkpoint observed none. Counterbalanced order; no population-tail inference.",
+  "rows": [
+    {"case": "small-control", "direction": "pin", "implementation": "baseline", "samples_ms": [59.5, 55.300000071525574, 55.10000002384186, 56.39999997615814, 56.199999928474426, 56.200000047683716], "summary_ms": {"p50": 56.19999998807907, "p95": 59.5, "p99": 59.5}, "min": 55.10000002384186, "max": 59.5, "transcript_nodes_retained": 0, "composer_nodes_retained": 0},
+    {"case": "small-control", "direction": "pin", "implementation": "candidate", "samples_ms": [39.39999997615814, 52.10000002384186, 39.89999997615814, 38.5, 38.799999952316284, 39.40000009536743], "summary_ms": {"p50": 39.40000003576279, "p95": 52.10000002384186, "p99": 52.10000002384186}, "min": 38.5, "max": 52.10000002384186, "transcript_nodes_retained": 6, "composer_nodes_retained": 6},
+    {"case": "small-control", "direction": "unpin", "implementation": "baseline", "samples_ms": [52.200000047683716, 51.39999997615814, 53.40000009536743, 56.10000002384186, 55.10000002384186, 55.39999997615814], "summary_ms": {"p50": 54.250000059604645, "p95": 56.10000002384186, "p99": 56.10000002384186}, "min": 51.39999997615814, "max": 56.10000002384186, "transcript_nodes_retained": 0, "composer_nodes_retained": 0},
+    {"case": "small-control", "direction": "unpin", "implementation": "candidate", "samples_ms": [38.10000002384186, 38, 50.10000002384186, 50.700000047683716, 39.199999928474426, 37], "summary_ms": {"p50": 38.64999997615814, "p95": 50.700000047683716, "p99": 50.700000047683716}, "min": 37, "max": 50.700000047683716, "transcript_nodes_retained": 6, "composer_nodes_retained": 6},
+    {"case": "mixed-41k-parts", "direction": "pin", "implementation": "baseline", "samples_ms": [146.30000007152557, 146.10000002384186, 149.70000004768372, 138.40000009536743, 136.89999997615814, 151.39999997615814], "summary_ms": {"p50": 146.20000004768372, "p95": 151.39999997615814, "p99": 151.39999997615814}, "min": 136.89999997615814, "max": 151.39999997615814, "transcript_nodes_retained": 0, "composer_nodes_retained": 0},
+    {"case": "mixed-41k-parts", "direction": "pin", "implementation": "candidate", "samples_ms": [51.90000009536743, 56.299999952316284, 48, 55.299999952316284, 47, 40.5], "summary_ms": {"p50": 49.950000047683716, "p95": 56.299999952316284, "p99": 56.299999952316284}, "min": 40.5, "max": 56.299999952316284, "transcript_nodes_retained": 6, "composer_nodes_retained": 6},
+    {"case": "mixed-41k-parts", "direction": "unpin", "implementation": "baseline", "samples_ms": [129, 129.39999997615814, 142.89999997615814, 127.20000004768372, 125.79999995231628, 141.79999995231628], "summary_ms": {"p50": 129.19999998807907, "p95": 142.89999997615814, "p99": 142.89999997615814}, "min": 125.79999995231628, "max": 142.89999997615814, "transcript_nodes_retained": 0, "composer_nodes_retained": 0},
+    {"case": "mixed-41k-parts", "direction": "unpin", "implementation": "candidate", "samples_ms": [24.399999976158142, 37.5, 47.299999952316284, 40.10000002384186, 35, 40.89999997615814], "summary_ms": {"p50": 38.80000001192093, "p95": 47.299999952316284, "p99": 47.299999952316284}, "min": 24.399999976158142, "max": 47.299999952316284, "transcript_nodes_retained": 6, "composer_nodes_retained": 6}
+  ]
+}
