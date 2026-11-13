@@ -13,6 +13,8 @@ pub use bruhs_models::api::{
 mod agent_stream;
 mod http;
 mod people_sync;
+mod reactive;
+pub use reactive::{reactive_command, reactive_hook_token, reactive_snapshot, ReactiveHookToken};
 
 pub use agent_stream::{send_agent_message_streaming, StreamError};
 pub use http::ApiError;

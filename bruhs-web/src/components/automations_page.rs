@@ -146,6 +146,7 @@ pub fn AutomationsPage() -> impl IntoView {
                 })}
             </Show>
             <div class="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
+                <super::reactive_automations::ReactiveAutomations on_preview=Callback::new(move |(title, operations): (String, Vec<WorkflowOperation>)| make_preview(operations, &title)) />
                 <fieldset disabled=move || !automation.editable() || matches!(automation.status.get(), crate::durable_metadata::SaveState::Saving) || !executor.ready.get() class="m-0 min-w-0 border-0 p-0">
                 {move || execution_error.get().map(|message| view! {
                     <p role="alert" class="mx-auto mb-3 max-w-6xl rounded-grape bg-longan-900 px-3 py-2 text-body-sm text-lychee-300">{message}</p>
