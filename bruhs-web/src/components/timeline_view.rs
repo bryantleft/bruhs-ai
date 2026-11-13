@@ -585,7 +585,7 @@ fn UserRow(
     let has_checkpoint = checkpoint.as_deref().is_some_and(|tree| !tree.is_empty());
     view! {
         <div class="group/user flex flex-col items-end gap-1 pb-4">
-            <div class="relative w-fit max-w-[85%] rounded-lychee bg-longan-800 px-3.5 py-2.5 text-body-sm text-rambutan-100">
+            <div class="relative w-fit max-w-[85%] rounded-lychee bg-longan-800 px-3 py-2 text-body-sm text-rambutan-100">
                 {from_thread.map(|from| view! {
                     <div data-from-thread="" class="mb-1.5 text-label-sm text-blueberry-400">{from}</div>
                 })}
@@ -746,12 +746,12 @@ fn AssistantMetaRow(
     let tokens = usage.as_ref().map(|u| {
         (
             format!(
-                "{} in · {} out",
+                "{} in, {} out",
                 format_tokens(u.input_tokens),
                 format_tokens(u.output_tokens)
             ),
             format!(
-                "in {} · out {} · cache read {} · cache write {} · context {}",
+                "in {}, out {}, cache read {}, cache write {}, context {}",
                 format_tokens(u.input_tokens),
                 format_tokens(u.output_tokens),
                 format_tokens(u.cache_read_tokens),

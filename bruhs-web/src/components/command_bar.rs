@@ -91,7 +91,7 @@ const ACTIONS: &[Action] = &[
         id: ActionId::NavInbox,
         group: "Navigate",
         label: "Inbox",
-        hint: "messages & follow-ups",
+        hint: "messages and replies",
     },
     Action {
         id: ActionId::NavKnowledge,
@@ -964,7 +964,7 @@ pub fn CommandBar() -> impl IntoView {
                 aria-activedescendant=move || (result_count() > 0).then(|| format!("command-result-{}", selected_index.get()))
                 prop:value=move || query.get()
                 placeholder="What do you need?"
-                class="w-full border-b border-longan-800 bg-transparent px-5 py-4 text-body-sm text-rambutan-200 placeholder:text-rambutan-300 focus:outline-none"
+                class="w-full border-b border-longan-800 bg-transparent px-4 py-3 text-body-sm text-rambutan-200 placeholder:text-rambutan-300 focus:outline-none"
                 on:input=move |ev: web_sys::Event| {
                     if let Some(t) = ev.target() {
                         if let Ok(el) = t.dyn_into::<web_sys::HtmlInputElement>() {
@@ -1008,7 +1008,7 @@ pub fn CommandBar() -> impl IntoView {
                                     let label = a.label;
                                     let hint = a.hint;
                                     let action_class = move || {
-                                        let base = "flex w-full items-center justify-between rounded-grape px-3 py-2.5 text-label-sm transition-colors cursor-pointer";
+                                        let base = "flex w-full items-center justify-between rounded-grape px-3 py-2 text-label-sm transition-colors cursor-pointer";
                                         if selected_index.get() == idx {
                                             format!("{base} bg-longan-700/70 text-rambutan-100")
                                         } else {
@@ -1061,7 +1061,7 @@ pub fn CommandBar() -> impl IntoView {
                                 id=format!("command-result-{idx}")
                                 aria-label=aria_label
                                 aria-selected=move || (selected_index.get() == idx).to_string()
-                                class="block w-full min-w-0 rounded-grape px-3 py-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-700/70 cursor-pointer"
+                                class="block w-full min-w-0 rounded-grape px-3 py-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-700/70 cursor-pointer"
                                 class:bg-longan-700=move || selected_index.get() == idx
                                 on:mousemove=move |event: web_sys::MouseEvent| {
                                     if event.movement_x() != 0 || event.movement_y() != 0 {
@@ -1079,10 +1079,10 @@ pub fn CommandBar() -> impl IntoView {
             </div>
 
             // Footer hint row (TS pattern).
-            <div class="flex items-center justify-between border-t border-longan-800/50 px-5 py-2.5 text-label-sm text-rambutan-300">
+            <div class="flex items-center justify-between border-t border-longan-800/50 px-4 py-2 text-label-sm text-rambutan-300">
                 <span>
                     <kbd class="text-rambutan-200">"↑↓"</kbd>
-                    " navigate · "
+                    " navigate, "
                     <kbd class="text-rambutan-200">"↵"</kbd>
                     " select"
                 </span>

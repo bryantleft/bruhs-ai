@@ -117,7 +117,7 @@ pub(super) fn RecordPicker(
                     <Show when=move || count.get() == 0><p class="px-3 py-5 text-body-sm text-rambutan-400">"No matching records. Try another name."</p></Show>
                 </div>
                 <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-longan-700 px-3 py-2 text-label-sm text-rambutan-400">
-                    <span>"↑↓ to move · Enter to choose"</span>
+                    <span>"↑↓ to move, Enter to choose"</span>
                     <Show when=move || { count.get() > PAGE_SIZE }>
                         <div class="flex items-center gap-2">
                             <button type="button" aria-label="Previous results" disabled=move || { current() < PAGE_SIZE }

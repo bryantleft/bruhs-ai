@@ -89,7 +89,7 @@ fn format_week_range(anchor_ms: f64) -> String {
 
     if s.get_month() == e.get_month() {
         format!(
-            "{} {} — {}, {}",
+            "{} {} to {}, {}",
             names[s.get_month() as usize],
             s.get_date(),
             e.get_date(),
@@ -97,7 +97,7 @@ fn format_week_range(anchor_ms: f64) -> String {
         )
     } else {
         format!(
-            "{} {} — {} {}, {}",
+            "{} {} to {} {}, {}",
             names[s.get_month() as usize],
             s.get_date(),
             names[e.get_month() as usize],

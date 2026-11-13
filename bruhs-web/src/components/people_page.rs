@@ -572,7 +572,7 @@ fn RelationshipPanel(person_id: String) -> impl IntoView {
                 .collect_view();
             view! {
                 <div class="rounded-grape bg-persimmon-500/8 p-2.5 inset-ring inset-ring-persimmon-500/20">
-                    <p class="text-label-sm uppercase tracking-wide text-persimmon-300">"Suggested follow-ups"</p>
+                    <p class="text-label-sm uppercase tracking-wide text-persimmon-300">"Suggested follow ups"</p>
                     <div class="mt-1 space-y-1">{rows}</div>
                 </div>
             }
@@ -635,7 +635,7 @@ fn RelationshipPanel(person_id: String) -> impl IntoView {
                                         }>{item.text}</span>
                                         <span class="block text-label-sm text-rambutan-400">
                                             {item.kind.label()}
-                                            {if item.due_at_ms.is_some() { " · due" } else { "" }}
+                                            {if item.due_at_ms.is_some() { ", due" } else { "" }}
                                         </span>
                                     </span>
                                 </button>
@@ -656,7 +656,7 @@ fn RelationshipPanel(person_id: String) -> impl IntoView {
             <div class="flex items-baseline justify-between">
                 <div>
                     <h3 class="text-label text-rambutan-200">"Relationship"</h3>
-                    <p class="text-label-sm text-rambutan-500">"Private context, commitments, and timely follow-ups."</p>
+                    <p class="text-label-sm text-rambutan-500">"Private context, commitments, and timely follow ups."</p>
                 </div>
                 <button
                     type="button"
@@ -854,7 +854,7 @@ fn ObservationsByKind(observations: Vec<PersonObservation>) -> impl IntoView {
                                     let:obs
                                 >
                                     <li class="text-label text-rambutan-300 leading-snug">
-                                        "• "{obs.text}
+                                        {obs.text}
                                     </li>
                                 </For>
                             </ul>

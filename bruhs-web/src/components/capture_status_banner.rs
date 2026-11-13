@@ -32,7 +32,7 @@ pub fn CaptureStatusBanner() -> impl IntoView {
                 class="bg-lychee-900/40 inset-ring inset-ring-lychee-700 rounded-seed px-3 py-2 text-label text-rambutan-300"
             >
                 "System audio capture is " {move || permission()}
-                ". Grant Screen Recording permission to capture the other side of meetings — open "
+                ". Grant Screen Recording permission to capture the other side of meetings. Open "
                 <strong class="text-rambutan-200">"System Settings → Privacy & Security → Screen Recording"</strong>
                 " and enable bruhs-capture."
             </div>

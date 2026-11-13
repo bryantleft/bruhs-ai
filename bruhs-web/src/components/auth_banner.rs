@@ -160,7 +160,7 @@ pub fn AuthBanner() -> impl IntoView {
                                 size=ButtonSize::Small
                                 on_click=Callback::new(move |_| do_recheck())
                             >
-                                "Re-check"
+                                "Check again"
                             </Button>
                         </div>
                     </div>

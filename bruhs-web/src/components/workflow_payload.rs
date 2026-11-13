@@ -28,7 +28,7 @@ pub fn WorkflowReview(workflow_id: String) -> impl IntoView {
 pub fn WorkflowPayload(operations: Vec<WorkflowOperation>) -> impl IntoView {
     view! {
         <section aria-label="Workflow payload" class="min-w-0">
-            <p class="mt-2 text-label-sm text-rambutan-400">"Full payload · stored locally. Review every field before starting."</p>
+            <p class="mt-2 text-label-sm text-rambutan-400">"Full payload stored locally. Review every field before starting."</p>
             <ol class="mt-3 space-y-2">
                 {operations.into_iter().enumerate().map(|(index, operation)| {
                     let fields = operation.review_fields(|millis| {
@@ -42,7 +42,7 @@ pub fn WorkflowPayload(operations: Vec<WorkflowOperation>) -> impl IntoView {
                     });
                     view! {
                         <li class="min-w-0 rounded-grape bg-longan-950/60 px-3 py-2">
-                            <h3 class="text-label text-rambutan-200">{format!("{} · {}", index + 1, operation.domain().label())}</h3>
+                            <h3 class="text-label text-rambutan-200">{format!("{}, {}", index + 1, operation.domain().label())}</h3>
                             <dl class="mt-2 space-y-2">
                                 {fields.into_iter().map(|(label, value)| view! {
                                     <div class="min-w-0">

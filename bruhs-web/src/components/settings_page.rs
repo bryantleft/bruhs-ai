@@ -84,7 +84,7 @@ pub fn SettingsRow(
 ) -> impl IntoView {
     view! {
         <div class=move || format!(
-            "flex flex-col gap-3 px-4 py-3 transition-opacity sm:flex-row sm:items-center sm:justify-between {}",
+            "flex flex-col gap-3 px-4 py-2.5 transition-opacity sm:flex-row sm:items-center sm:justify-between {}",
             if disabled.get() { "opacity-60" } else { "" }
         )>
             <div class="min-w-0 sm:max-w-[60%]">
@@ -149,7 +149,7 @@ fn GeneralSettings() -> impl IntoView {
     view! {
         <SettingsRow
             title="Model"
-            description="Used for new turns. The composer chip changes it per thread."
+            description="Change it per thread in the composer."
         >
             <Dropdown
                 options=model_options
@@ -202,14 +202,14 @@ fn FollowUpBehavior() -> impl IntoView {
     let FollowUpSteerSignal(steer) = expect_context::<FollowUpSteerSignal>();
     view! {
         <SettingsRow
-            title="Follow-up behavior"
+            title="Follow up behavior"
             description="Steer sends the next message into a running Claude turn. Codex always queues. The send button names the action. Hold Command or Control and press Enter for the other one."
         >
             <Dropdown
                 options=vec![DropdownOption::new("queue", "Queue"), DropdownOption::new("steer", "Steer")]
                 value=Signal::derive(move || if steer.get() { "steer".to_string() } else { "queue".to_string() })
                 on_change=Callback::new(move |v: String| steer.set(v == "steer"))
-                label="Follow-up behavior"
+                label="Follow up behavior"
                 class=ROW_CONTROL
                 align_end=true
             />
@@ -223,13 +223,13 @@ fn AutoCompactAfter() -> impl IntoView {
     let ClaudeAutoCompactSignal(tokens) = expect_context::<ClaudeAutoCompactSignal>();
     view! {
         <SettingsRow
-            title="Auto-compact after"
-            description="Claude compacts a long thread around this many tokens, from 100000 to 1000000. Empty uses Claude's own default. Codex has no auto-compact."
+            title="Automatically compact after"
+            description="Claude compacts a long thread around this many tokens, from 100000 to 1000000. Empty uses Claude's own default. Codex has no automatic compaction."
         >
             <input
                 type="text"
                 inputmode="numeric"
-                aria-label="Auto-compact after"
+                aria-label="Automatically compact after"
                 class="h-8 w-full rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 sm:w-60"
                 placeholder="Claude default"
                 prop:value=move || tokens.get().unwrap_or_default()
@@ -551,7 +551,6 @@ fn AboutSettings() -> impl IntoView {
             <div class="flex min-w-0 flex-col gap-1">
                 <h3 class="text-label text-rambutan-100">"bruhs"</h3>
                 <span class="text-code-sm text-rambutan-200">{version}</span>
-                <p class="text-label-sm leading-relaxed text-rambutan-500">"bruhs-web, built from the workspace crate."</p>
             </div>
         </div>
         <SettingsRow
@@ -560,7 +559,7 @@ fn AboutSettings() -> impl IntoView {
         >
             <span class="text-label-sm text-rambutan-500">"Managed by Claude Code"</span>
         </SettingsRow>
-        <SettingsRow title="Design system" description="Bruhs: fruit-named tokens, all-mono type, no shadows.">
+        <SettingsRow title="Design system" description="Bruhs: fruit tokens, monospace type, no shadows.">
             <a
                 href="https://design.bruhs.dev"
                 target="_blank"
@@ -615,7 +614,17 @@ pub fn SettingsPage() -> impl IntoView {
                 })
             })
             .collect();
-        if let Some(id) = active_section(&tops, 96.0) {
+        let at_bottom = container.scroll_height() > container.client_height()
+            && container
+                .scroll_top()
+                .saturating_add(container.client_height())
+                >= container.scroll_height().saturating_sub(1);
+        let section = if at_bottom {
+            SECTIONS.last().map(|(id, _, _)| id.to_string())
+        } else {
+            active_section(&tops, 96.0)
+        };
+        if let Some(id) = section {
             if current.get_untracked() != id {
                 set_current.set(id);
             }
@@ -630,7 +639,7 @@ pub fn SettingsPage() -> impl IntoView {
 
     view! {
         <section class="flex h-full min-h-0 flex-1 flex-col bg-longan-950">
-            <header class="flex h-[52px] shrink-0 items-center gap-2 border-b border-longan-800/60 px-4">
+            <header class="flex h-11 shrink-0 items-center gap-2 border-b border-longan-800/60 px-4">
                 <h1 class="text-label text-rambutan-100">"Settings"</h1>
                 <span class="text-label-sm text-rambutan-500" aria-hidden="true">"/"</span>
                 <span class="text-label-sm text-rambutan-300">{current_label}</span>
@@ -648,7 +657,7 @@ pub fn SettingsPage() -> impl IntoView {
             <div class="flex min-h-0 flex-1">
                 <nav
                     aria-label="Settings sections"
-                    class="hidden w-52 shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-longan-800/60 p-3 md:flex"
+                    class="hidden w-[184px] shrink-0 flex-col gap-0.5 overflow-y-auto border-r border-longan-800/60 p-3 md:flex"
                 >
                     {SECTIONS.iter().map(|(id, icon, label)| {
                         let id: &'static str = id;
@@ -674,7 +683,7 @@ pub fn SettingsPage() -> impl IntoView {
                     }).collect_view()}
                 </nav>
                 <div node_ref=content_ref class="min-h-0 flex-1 overflow-y-auto" on:scroll=on_scroll>
-                    <div class="mx-auto flex w-full max-w-3xl flex-col gap-8 px-5 py-6 md:px-8">
+                    <div class="mx-auto flex w-full max-w-3xl flex-col gap-6 px-5 py-5 md:px-6">
                         <SettingsSection id="general" title="General" description="Defaults for new turns.">
                             <GeneralSettings />
                         </SettingsSection>
@@ -687,13 +696,13 @@ pub fn SettingsPage() -> impl IntoView {
                         <SettingsSection id="credentials" title="Credentials" description="Saved credentials stay in your OS keychain. Agents still need approval for every use.">
                             <crate::components::credential_settings::CredentialSettings />
                         </SettingsSection>
-                        <SettingsSection id="calendar" title="Calendar" description="Google Calendar sync for the calendar view and meeting auto-record.">
+                        <SettingsSection id="calendar" title="Calendar" description="Google Calendar sync for the calendar view and automatic meeting recording.">
                             <GoogleCalendarSettings />
                         </SettingsSection>
                         <SettingsSection id="recording" title="Recording" description="When bruhs starts recording meetings on its own.">
                             <AutoRecordSettingsPanel />
                         </SettingsSection>
-                        <SettingsSection id="transcription" title="Transcription" description="Provider and model for the final transcript, plus an on-device live preview.">
+                        <SettingsSection id="transcription" title="Transcription" description="Provider and model for the final transcript, plus a live preview on this device.">
                             <WhisperModelSettings />
                         </SettingsSection>
                         <SettingsSection id="speakers" title="Speakers" description="Telling voices apart and remembering them across meetings.">
@@ -702,7 +711,7 @@ pub fn SettingsPage() -> impl IntoView {
                         <SettingsSection id="people" title="People" description="What meeting summaries record about each person.">
                             <PersonalitySettingsPanel />
                         </SettingsSection>
-                        <SettingsSection id="keyboard" title="Keybindings" description="Each shortcut is a key, a command id, and an optional when clause. A new default is added when its command is not already listed. Chrome keeps some keys for itself.">
+                        <SettingsSection id="keyboard" title="Keybindings" description="Customize shortcuts and when they apply. Some keys are reserved by your browser.">
                             <KeyboardSettings />
                         </SettingsSection>
                         <SettingsSection id="about" title="About">

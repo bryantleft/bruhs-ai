@@ -818,7 +818,7 @@ pub fn Sidebar() -> impl IntoView {
                             }}
                         </span>
                     </span>
-                    <span class="mt-1 block truncate text-label">{move || title.get()}</span>
+                    <span class="mt-1 block truncate text-label leading-[21px]">{move || title.get()}</span>
                     {move || {
                         let b = branch.get();
                         let m = model.get();
@@ -1031,10 +1031,10 @@ pub fn Sidebar() -> impl IntoView {
     view! {
         <nav
             aria-label="Threads"
-            class="flex h-full w-[272px] shrink-0 flex-col bg-longan-900 inset-ring inset-ring-white/5 text-rambutan-300"
+            class="flex h-full w-[248px] shrink-0 flex-col bg-longan-900 inset-ring inset-ring-white/5 text-rambutan-300"
         >
             // Chrome header
-            <div class="flex h-[52px] shrink-0 items-center gap-2 px-4">
+            <div class="flex h-11 shrink-0 items-center gap-2 px-4">
                 <img src="/bruhs.svg" alt="" aria-hidden="true" class="bruhs-brand-logo" />
                 <span class="text-label text-rambutan-100">"bruhs.ai"</span>
             </div>

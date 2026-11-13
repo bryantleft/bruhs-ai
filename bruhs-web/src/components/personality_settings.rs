@@ -17,13 +17,13 @@ pub fn PersonalitySettings() -> impl IntoView {
 
     view! {
         <SettingsRow
-            title="Per-person observations"
+            title="Person observations"
             description="Each meeting summary also captures topics, decisions, action items, tone and notable quotes per speaker. Profiles populate the People page."
         >
             <Switch
                 checked=Signal::derive(move || settings.get().extract_observations)
                 on_change=on_toggle
-                label="Extract per-person observations during summarization"
+                label="Extract observations about each person during summaries"
             />
         </SettingsRow>
     }

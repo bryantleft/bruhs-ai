@@ -256,7 +256,8 @@ pub fn CaptureDialog() -> impl IntoView {
             max_width="max-w-lg".to_string()
             label="Capture anything"
         >
-            <div class="border-b border-longan-700/70 px-4 py-3">
+            <div class="flex max-h-[calc(100dvh-6rem)] flex-col">
+            <div class="shrink-0 border-b border-longan-700/70 px-4 py-2.5">
                 <div class="flex items-baseline justify-between gap-3">
                     <h2 class="text-h4 text-rambutan-100">
                         {move || if edit_id.get().is_some() { "Edit capture" } else { "Capture anything" }}
@@ -265,7 +266,7 @@ pub fn CaptureDialog() -> impl IntoView {
                 </div>
             </div>
 
-            <div class="px-4 py-3 space-y-3">
+            <div class="min-h-0 overflow-y-auto px-4 py-3 space-y-3">
                 <div class="grid grid-cols-5 gap-1 rounded-grape bg-longan-900/50 p-1 inset-ring inset-ring-longan-700/70" role="radiogroup" aria-label="Capture type">
                     {CaptureKind::ALL.into_iter().map(|option| {
                         let icon = capture_icon(option);
@@ -323,7 +324,7 @@ pub fn CaptureDialog() -> impl IntoView {
                         {move || match kind.get() {
                             CaptureKind::Task => "Creates a backlog task immediately.",
                             CaptureKind::Note => "Creates a local Markdown document you can link and cite.",
-                            CaptureKind::Event => "Schedules the next available half-hour for one hour.",
+                            CaptureKind::Event => "Adds a one hour event to your calendar.",
                             CaptureKind::Contact => "Adds a private contact and syncs when the server is available.",
                             CaptureKind::MessageDraft => "Saved locally until you choose where to send it.",
                         }}
@@ -331,7 +332,7 @@ pub fn CaptureDialog() -> impl IntoView {
                 </div>
             </div>
 
-            <div class="flex items-center justify-end gap-2 border-t border-longan-700/70 bg-longan-900/40 px-4 py-3">
+            <div class="flex shrink-0 items-center justify-end gap-2 border-t border-longan-700/70 bg-longan-900/40 px-4 py-2.5">
                 <Button variant=ButtonVariant::Ghost size=ButtonSize::Default on_click=cancel_click>
                     "Cancel"
                 </Button>
@@ -343,6 +344,7 @@ pub fn CaptureDialog() -> impl IntoView {
                 >
                     {move || if edit_id.get().is_some() { "Save" } else { "Capture" }}
                 </Button>
+            </div>
             </div>
         </Dialog>
     }

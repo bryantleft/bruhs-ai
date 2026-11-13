@@ -32,7 +32,7 @@ fn notice(state: &AutomationState, save: &SaveState, load_failed: bool) -> Optio
             "Workflow ready for next step"
         };
         (
-            format!("{mode} · {} steps saved", job.next_step),
+            format!("{mode}, {} steps saved", job.next_step),
             false,
             None,
         )
@@ -42,7 +42,7 @@ fn notice(state: &AutomationState, save: &SaveState, load_failed: bool) -> Optio
         .any(|job| job.status == BackgroundJobStatus::Paused)
     {
         (
-            "Workflow paused · saved steps are retained".into(),
+            "Workflow paused, saved steps are retained".into(),
             false,
             None,
         )
@@ -63,8 +63,8 @@ fn notice(state: &AutomationState, save: &SaveState, load_failed: bool) -> Optio
             return None;
         }
         let label = match job.status {
-            BackgroundJobStatus::Completed => "Workflow completed · saved locally",
-            BackgroundJobStatus::RolledBack => "Workflow undone · saved locally",
+            BackgroundJobStatus::Completed => "Workflow completed, saved locally",
+            BackgroundJobStatus::RolledBack => "Workflow undone, saved locally",
             _ => return None,
         };
         (

@@ -214,10 +214,10 @@ fn UpdateConfirmDialog() -> impl IntoView {
                                 <summary class="cursor-pointer select-none">{format!("{skipped_count} skipped")}</summary>
                                 <ul class="mt-1.5 space-y-1 pl-4">
                                     {skipped.iter().map(|(p, why)| view! {
-                                        <li>{format!("{} · {why}", provider_cli_label(*p))}</li>
+                                        <li>{format!("{}, {why}", provider_cli_label(*p))}</li>
                                     }).collect_view()}
                                     {app_behind.then(|| view! {
-                                        <li>"bruhs · needs a manual update (Settings → Updates has the command)"</li>
+                                        <li>"bruhs, needs a manual update (Settings → Updates has the command)"</li>
                                     })}
                                 </ul>
                             </details>

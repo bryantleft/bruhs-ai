@@ -479,7 +479,7 @@ fn finance_tab(page: Page) -> impl IntoView {
                 totals(|f| bruhs_models::format_money_totals(f.net_worth_totals())),
             )}
             {stat_card(
-                "Spend · trailing 30 days",
+                "Spend, trailing 30 days",
                 totals(|f| bruhs_models::format_money_totals(f.trailing_spend_totals(now_ms(), 30))),
             )}
             {stat_card(
@@ -652,7 +652,7 @@ fn budgets_and_income(page: Page) -> impl IntoView {
     let (life, i) = (page.life, page.inputs);
     let summary = move || {
         format!(
-            "{} budgets · {} income streams",
+            "{} budgets, {} income streams",
             life.with(|context| context.finance.budgets.len()),
             life.with(|context| context.finance.income_streams.len())
         )
@@ -681,7 +681,7 @@ fn holdings(page: Page) -> impl IntoView {
             .map(|holding| {
                 view! {
                     <span class="max-w-full [overflow-wrap:anywhere] rounded-seed bg-longan-950/45 px-2.5 py-1.5 font-mono text-body-sm text-rambutan-300">
-                        {format!("{} · {}", holding.symbol, money(holding.current_value_minor, &holding.currency))}
+                        {format!("{}, {}", holding.symbol, money(holding.current_value_minor, &holding.currency))}
                     </span>
                 }
             })
@@ -727,11 +727,10 @@ fn health_tab(page: Page) -> impl IntoView {
     let agent_access = move || life.with(|context| context.health.privacy.allow_agent_context);
     let latest_recovery = move || {
         life.with(|context| {
-            context
-                .health
-                .recovery
-                .first()
-                .map_or_else(|| "—".into(), |log| format!("{}%", log.score_percent))
+            context.health.recovery.first().map_or_else(
+                || "Not logged".into(),
+                |log| format!("{}%", log.score_percent),
+            )
         })
     };
     let active_habits = move || {
@@ -789,7 +788,7 @@ fn workouts(page: Page) -> impl IntoView {
                 view! {
                     <div class="rounded-seed bg-longan-950/45 px-2.5 py-2 text-body-sm text-rambutan-300">
                         {format!(
-                            "{} · {} min · effort {}/10",
+                            "{}, {} min, effort {}/10",
                             workout.activity,
                             workout.duration_minutes,
                             workout.perceived_exertion
@@ -822,7 +821,7 @@ fn sleep_and_recovery(page: Page) -> impl IntoView {
     let (life, i) = (page.life, page.inputs);
     let summary = move || {
         format!(
-            "{} sleep logs · {} recovery logs",
+            "{} sleep logs, {} recovery logs",
             life.with(|context| context.health.sleep.len()),
             life.with(|context| context.health.recovery.len())
         )
@@ -954,7 +953,7 @@ fn insights(
         <section class=CARD_CLASS aria-labelledby="insights-title">
             <div class="flex items-start justify-between gap-3">
                 <div>
-                    <h2 id="insights-title" class="text-label text-rambutan-200">"Evidence-labelled observations"</h2>
+                    <h2 id="insights-title" class="text-label text-rambutan-200">"Observations with evidence"</h2>
                     <p class="mt-1 text-body-sm text-rambutan-500">
                         "Local comparisons only. Never diagnoses, causal claims, or autonomous financial actions."
                     </p>

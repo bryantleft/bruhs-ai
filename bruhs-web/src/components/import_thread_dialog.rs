@@ -145,7 +145,7 @@ fn row_detail(candidate: &ImportCandidate, home: Option<&str>) -> String {
     } else {
         "transcript"
     };
-    format!("{place} · {when} · {how}")
+    format!("{place}, {when}, {how}")
 }
 
 #[component]

@@ -19,7 +19,7 @@ pub fn ServiceConnections() -> impl IntoView {
     view! {
         <div class="mb-4 border-b border-longan-800 pb-4">
             <h3 class="font-medium text-rambutan-100">"Connected accounts"</h3>
-            <p class="mt-1 text-label-sm text-rambutan-400">"Connect in your browser to reuse an existing sign-in. Your provider may still require consent or MFA. Each agent operation needs approval."</p>
+            <p class="mt-1 text-label-sm text-rambutan-400">"Connect in your browser to reuse an existing login. Your provider may still require consent or MFA. Each agent operation needs approval."</p>
             {ServiceProvider::ALL.into_iter().map(|provider| view! { <ConnectionControl provider=provider show_disconnect_note=false /> }).collect_view()}
             <p class="mt-3 text-label-sm text-rambutan-400">"Disconnect removes the local connection. It keeps your browser signed in and does not revoke access at the service."</p>
         </div>
@@ -214,18 +214,20 @@ pub fn ConnectionControl(
                 <div class="min-w-0 w-full sm:w-auto sm:flex-1">
                     <p class="font-medium">{provider.name()}</p>
                     <p class="text-label-sm text-rambutan-400">{format!("Requested access: {}", provider.access_summary())}</p>
-                    <p class="break-all text-label-sm text-rambutan-400">{move || current.get().map_or_else(|| "Loading account…".into(), |row| row.account.unwrap_or_else(|| "No account connected".into()))}</p>
-                    <p class="text-label-sm text-rambutan-400" role="status">{move || if work.get() == Work::Disconnect { "Disconnecting…" } else if busy.get() { "Waiting for browser sign-in…" } else { current.with(|row| match row.as_ref() {
+                    <p class="break-all text-label-sm text-rambutan-400">{move || current.get().map_or_else(|| if error.get().is_some() { "Account unavailable".into() } else { "Loading account…".into() }, |row| row.account.unwrap_or_else(|| "No account connected".into()))}</p>
+                    <p class="text-label-sm text-rambutan-400" role="status">{move || if work.get() == Work::Disconnect { "Disconnecting…" } else if busy.get() { "Waiting for browser login…" } else { current.with(|row| match row.as_ref() {
                         Some(row) if !row.configured => "This service is not set up on this device.",
-                        Some(row) => match row.state { ConnectionState::Connected => "Connected", ConnectionState::NeedsSignIn => "Needs sign-in", ConnectionState::Unavailable => "Keychain needs attention", ConnectionState::Disconnected => "Not connected" }, None => "",
+                        Some(row) => match row.state { ConnectionState::Connected => "Connected", ConnectionState::NeedsSignIn => "Needs login", ConnectionState::Unavailable => "Keychain needs attention", ConnectionState::Disconnected => "Not connected" }, None => "",
                     }) }}</p>
                 </div>
                 <button type="button" class=BUTTON disabled=move || busy.get() || !current.with(|row| row.as_ref().is_some_and(|row| row.configured)) on:click=connect>{move || if current.with(|row| row.as_ref().is_some_and(|row| row.id.is_some())) { "Reconnect" } else { "Connect" }}</button>
                 <Show when=move || work.get() == Work::SignIn><button type="button" class=BUTTON on:click=cancel>"Cancel"</button></Show>
                 <Show when=move || !busy.get() && current.with(|row| row.as_ref().is_some_and(|row| row.id.is_some()))><button type="button" class=BUTTON on:click=disconnect>"Disconnect"</button></Show>
-                <button type="button" class=BUTTON disabled=move || busy.get() on:click=move |_| refresh.run(())>"Refresh"</button>
+                <button type="button" class=BUTTON disabled=move || busy.get() on:click=move |_| { error.set(None); refresh.run(()); }>"Refresh"</button>
             </div>
-            <details class="mt-2 text-label-sm text-rambutan-400"><summary class="cursor-pointer">"Permissions"</summary><p class="mt-1 break-all">{move || current.get().map(|row| row.scopes.join(", ")).unwrap_or_default()}</p></details>
+            <Show when=move || current.with(|row| row.as_ref().is_some_and(|row| !row.scopes.is_empty()))>
+                <details class="mt-2 text-label-sm text-rambutan-400"><summary class="cursor-pointer">"Permissions"</summary><p class="mt-1 break-all">{move || current.get().map(|row| row.scopes.join(", ")).unwrap_or_default()}</p></details>
+            </Show>
             {move || link.get().map(|url| view! { <a class="mt-2 inline-block text-blueberry-300 underline" href=url target="_blank" rel="noopener noreferrer">"Continue in your browser"</a> })}
             {move || error.get().map(|message| view! { <p role="alert" class="mt-2 text-label-sm text-lychee-300">{message}</p> })}
             {show_disconnect_note.then(|| view! { <p class="mt-2 text-label-sm text-rambutan-400">"Disconnect removes this local connection. It keeps your browser signed in and does not revoke access at the service."</p> })}

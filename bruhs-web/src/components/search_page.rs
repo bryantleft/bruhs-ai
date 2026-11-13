@@ -44,7 +44,7 @@ fn join_non_empty(parts: impl IntoIterator<Item = String>) -> String {
         .into_iter()
         .filter(|part| !part.trim().is_empty())
         .collect::<Vec<_>>()
-        .join(" · ")
+        .join(", ")
 }
 
 struct SearchSources<'a> {
@@ -195,7 +195,7 @@ fn build_documents(sources: SearchSources<'_>) -> Vec<SearchDocument> {
             SearchKind::Event,
             &event.title,
             if event.all_day {
-                "All-day event"
+                "All day event"
             } else {
                 "Calendar event"
             },
@@ -215,9 +215,9 @@ fn build_documents(sources: SearchSources<'_>) -> Vec<SearchDocument> {
             &link.id,
             SearchKind::SchedulingLink,
             &link.title,
-            format!("{} minutes · #/book/{}", link.duration_minutes, link.slug),
+            format!("{} minutes, #/book/{}", link.duration_minutes, link.slug),
             format!(
-                "{} hour notice · {} day window · {} minute buffers",
+                "{} hour notice, {} day window, {} minute buffers",
                 link.minimum_notice_hours,
                 link.booking_window_days,
                 link.buffer_before_minutes + link.buffer_after_minutes
@@ -286,7 +286,7 @@ fn build_documents(sources: SearchSources<'_>) -> Vec<SearchDocument> {
             &workout.activity,
             "Workout",
             format!(
-                "{} minutes · effort {}",
+                "{} minutes, effort {}",
                 workout.duration_minutes, workout.perceived_exertion
             ),
             workout.occurred_at_ms,
@@ -398,7 +398,7 @@ fn build_documents(sources: SearchSources<'_>) -> Vec<SearchDocument> {
             SearchKind::Conversation,
             &conversation.subject,
             format!(
-                "{} · {}",
+                "{}, {}",
                 conversation.source.label(),
                 conversation
                     .participants
@@ -793,7 +793,7 @@ pub fn SearchPage() -> impl IntoView {
                     if value.trim().is_empty() {
                         return view! {
                             <div class="rounded-grape inset-ring inset-ring-longan-800 bg-longan-900/30 px-4 py-3 text-body-sm text-rambutan-500">
-                                "Find local records instantly. ↑↓ to choose · Enter to open · Esc to clear."
+                                "Find local records instantly. ↑↓ to choose, Enter to open, Esc to clear."
                             </div>
                         }.into_any();
                     }

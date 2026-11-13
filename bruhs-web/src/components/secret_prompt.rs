@@ -109,7 +109,7 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
         <section aria-label="Private credential request" class="mx-auto mb-3 max-h-[60vh] w-full max-w-3xl overflow-y-auto rounded-grape bg-longan-900 inset-ring inset-ring-blueberry-400/30 p-3 text-body-sm text-rambutan-200">
             <div class="flex items-center gap-2 font-medium text-rambutan-100">
                 <Icon name="shield" size=16 />
-                <span>"Credential needed · "{request.operation.name}</span>
+                <span>"Credential needed: "{request.operation.name}</span>
             </div>
             <p class="mt-1 break-words text-rambutan-300">{request.operation.reason}</p>
             {request.storage_unavailable.then(|| view! { <p role="status" class="mt-2 text-label-sm text-durian-300">"Saved credentials could not be checked. Unlock your OS keychain or use a credential once."</p> })}
@@ -139,7 +139,7 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
                         {move || if revealed.get() { "Hide" } else { "Show" }}
                     </button>
                 </div>
-                {move || error.get().map(|message| view! { <p role="alert" class="mt-2 text-label-sm text-lychee-300">{message}" You can re-enter the credential or decline."</p> })}
+                {move || error.get().map(|message| view! { <p role="alert" class="mt-2 text-label-sm text-lychee-300">{message}" You can enter the credential again or decline."</p> })}
                 <div class="mt-3 flex flex-wrap items-center gap-2">
                     <button type="submit" class=button disabled=move || busy.get()>"Use once"</button>
                     <button type="button" class=button disabled=move || busy.get() on:click=move |_| respond.run("save")>"Save securely and use"</button>

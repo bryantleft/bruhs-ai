@@ -203,7 +203,7 @@ pub fn Dropdown(
                 aria-expanded=move || open.get().to_string()
                 aria-label=label_attr
                 disabled=move || disabled.get()
-                class="inline-flex h-8 w-full items-center justify-between gap-2 rounded-grape bg-white/5 px-3 text-left text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-60"
+                class="bruhs-control inline-flex h-8 w-full items-center justify-between gap-2 rounded-grape bg-white/5 px-3 text-left text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-60"
                 on:click=move |_| if open.get_untracked() { close(false) } else { open_list() }
                 on:keydown=on_trigger_key
             >

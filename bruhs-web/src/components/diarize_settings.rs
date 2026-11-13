@@ -33,7 +33,7 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
     view! {
         <SettingsRow
             title="Distinguish multiple speakers"
-            description="Clusters voice embeddings on the system-audio channel so remote speakers become Speaker 1, Speaker 2, and so on. ~30 MB model, downloaded on first use."
+            description="Clusters voice embeddings on the system audio channel so remote speakers become Speaker 1, Speaker 2, and so on. ~30 MB model, downloaded on first use."
         >
             <Switch
                 checked=Signal::derive(move || settings.get().subspeaker_enabled)
@@ -59,14 +59,14 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
                     on_input=on_max_speakers_change
                 />
                 <div class="mt-1 flex justify-between text-label-sm text-rambutan-500">
-                    <span>"2 · faster"</span>
-                    <span>"20 · more resolution"</span>
+                    <span>"2, faster"</span>
+                    <span>"20, more resolution"</span>
                 </div>
             </SettingsRowBody>
         </Show>
         <SettingsRow
             title="Read participant names from video"
-            description="Reads on-screen name hints locally at 2 fps. Visible names do not prove who is speaking and will not rename transcript speakers. Frames stay in memory; name observations are saved on this device. Requires Screen Recording permission."
+            description="Reads name hints from the screen locally at 2 fps. Visible names do not prove who is speaking and will not rename transcript speakers. Frames stay in memory; name observations are saved on this device. Requires Screen Recording permission."
         >
             <Switch
                 checked=Signal::derive(move || settings.get().video_ocr_enabled)
@@ -81,7 +81,7 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
             <Switch
                 checked=Signal::derive(move || settings.get().cross_meeting_linking_auto)
                 on_change=on_auto_link_toggle
-                label="Auto-link voices across meetings"
+                label="Link voices across meetings"
             />
         </SettingsRow>
         <Show when=move || settings.get().cross_meeting_linking_auto>
@@ -102,8 +102,8 @@ pub fn DiarizeSettingsPanel() -> impl IntoView {
                     on_input=on_threshold_change
                 />
                 <div class="mt-1 flex justify-between text-label-sm text-rambutan-500">
-                    <span>"0.50 · looser"</span>
-                    <span>"0.95 · stricter"</span>
+                    <span>"0.50, looser"</span>
+                    <span>"0.95, stricter"</span>
                 </div>
             </SettingsRowBody>
         </Show>

@@ -199,9 +199,9 @@ pub fn AutoRecordPromptModal() -> impl IntoView {
                 <div role="timer" class="flex items-center gap-2 text-label text-rambutan-400">
                     <span class="tabular-nums">
                         {move || if paused.get() {
-                            "Auto-record paused".to_string()
+                            "Automatic recording paused".to_string()
                         } else {
-                            format!("Auto-record in {}s", countdown.get().max(0))
+                            format!("Automatic recording in {}s", countdown.get().max(0))
                         }}
                     </span>
                     <button

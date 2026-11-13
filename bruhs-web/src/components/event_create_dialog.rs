@@ -250,7 +250,7 @@ pub fn EventCreateDialog() -> impl IntoView {
     // Reactive title + button label based on mode.
     let header_text = move || {
         if is_google_event.get() {
-            "Google event (read-only)"
+            "Google event (read only)"
         } else if selected_event_id.get().is_some() {
             "Edit event"
         } else {

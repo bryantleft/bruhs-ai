@@ -166,7 +166,7 @@ pub fn TodayPage() -> impl IntoView {
                     domain: AgentDomain::Tasks,
                     operations: vec![
                         WorkflowOperation::CreateTask {
-                            title: "Finish the highest-impact task".into(),
+                            title: "Finish the most important task".into(),
                         },
                         WorkflowOperation::CreateCalendarEvent {
                             title: "Protected focus".into(),
@@ -174,7 +174,7 @@ pub fn TodayPage() -> impl IntoView {
                             end_at_ms: start_at_ms + 45.0 * 60_000.0,
                         },
                         WorkflowOperation::AddCapture {
-                            content: "Focus plan\nProtected 45 minutes for the highest-impact task."
+                            content: "Focus plan\nProtected 45 minutes for the most important task."
                                 .into(),
                         },
                     ],
@@ -248,7 +248,7 @@ pub fn TodayPage() -> impl IntoView {
             .iter()
             .map(|block| CalendarEvent {
                 id: block.id.clone(),
-                title: format!("Focus · {}", block.task_title),
+                title: format!("Focus: {}", block.task_title),
                 start_at_ms: block.start_at_ms,
                 end_at_ms: block.end_at_ms,
                 all_day: false,
@@ -375,7 +375,7 @@ pub fn TodayPage() -> impl IntoView {
                     </Show>
                     <Show when=move || applied_plan.get().is_some() fallback=|| ()>
                         <div role="status" class="flex items-center justify-between gap-3 rounded-grape bg-pandan-500/10 inset-ring inset-ring-pandan-400/20 px-3 py-2 text-body-sm text-pandan-200">
-                            <span>"Day plan applied as one local transaction."</span>
+                            <span>"Day plan applied."</span>
                             <Show
                                 when=move || applied_plan.get().is_some_and(|plan| !plan.saving)
                                 fallback=|| view! { <span class="text-label-sm text-pandan-300/70">"Saving…"</span> }
@@ -393,7 +393,7 @@ pub fn TodayPage() -> impl IntoView {
                                     <p class="text-label-sm uppercase tracking-wider text-blueberry-300">"Suggested locally"</p>
                                     <p class="mt-1 text-label text-rambutan-100">{suggestion.title}</p>
                                     <p class="mt-1 text-body-sm text-rambutan-400">{suggestion.explanation}</p>
-                                    <p class="mt-1 text-label-sm text-blueberry-300">{format!("Evidence · {}", suggestion.evidence)}</p>
+                                    <p class="mt-1 text-label-sm text-blueberry-300">{format!("Evidence: {}", suggestion.evidence)}</p>
                                 </div>
                                 <div class="flex items-center gap-2">
                                     <button type="button" class="text-button text-rambutan-500 hover:text-rambutan-200 cursor-pointer" aria-label="Dismiss proactive suggestion" on:click=move |_| automation.update(|state| { let _ = state.dismiss_suggestion(&id, crate::clock::now_ms()); })>"Dismiss"</button>
@@ -487,11 +487,11 @@ pub fn TodayPage() -> impl IntoView {
                         <TodayTaskSection title="Waiting on" tone="blueberry" empty="Nothing is blocked on someone else." items=Signal::derive(move || snapshot.get().waiting_on) on_open=Callback::new(open_task) />
 
                         <section class="rounded-2xl bg-longan-900 inset-ring inset-ring-white/5 p-4" aria-labelledby="followups-heading">
-                            <div class="mb-3 flex items-center justify-between"><h2 id="followups-heading" class="text-h4 text-rambutan-100">"Follow-ups"</h2><span class="size-2 rounded-full bg-durian-400"></span></div>
+                            <div class="mb-3 flex items-center justify-between"><h2 id="followups-heading" class="text-h4 text-rambutan-100">"Follow ups"</h2><span class="size-2 rounded-full bg-durian-400"></span></div>
                             <div class="space-y-1.5">
                                 {move || {
                                     let items = snapshot.get().follow_ups;
-                                    if items.is_empty() { empty_row("No recent follow-ups.").into_any() } else {
+                                    if items.is_empty() { empty_row("No recent follow ups.").into_any() } else {
                                         items.into_iter().take(4).map(|item| view! {
                                             <button type="button" class="w-full rounded-grape px-2 py-2 text-left hover:bg-longan-800/60 cursor-pointer" on:click=move |_| set_active_view.set(AppView::People)>
                                                 <div class="truncate text-label text-rambutan-200">{item.person_name}</div>
@@ -542,7 +542,7 @@ pub fn TodayPage() -> impl IntoView {
                     } else {
                         plan.blocks.into_iter().map(|block| view! {
                             <div class="flex items-center gap-3 rounded-grape bg-longan-800/50 px-3 py-2.5">
-                                <span class="w-24 shrink-0 text-label-sm text-persimmon-300">{format!("{}–{}", format_time(block.start_at_ms), format_time(block.end_at_ms))}</span>
+                                <span class="w-24 shrink-0 text-label-sm text-persimmon-300">{format!("{} to {}", format_time(block.start_at_ms), format_time(block.end_at_ms))}</span>
                                 <span class="min-w-0 flex-1 truncate text-body text-rambutan-200">{block.task_title}</span>
                                 <span class="text-label-sm text-rambutan-400">{duration_label(block.start_at_ms, block.end_at_ms)}</span>
                             </div>

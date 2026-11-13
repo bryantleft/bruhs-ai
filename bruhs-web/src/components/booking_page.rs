@@ -61,7 +61,7 @@ fn slot_label(timestamp_ms: i64) -> String {
         value => value,
     };
     format!(
-        "{} {} · {}:{:02} {}",
+        "{} {}, {}:{:02} {}",
         MONTHS[date.get_month() as usize],
         date.get_date(),
         display_hour,
@@ -115,12 +115,12 @@ pub fn BookingPage(slug: String) -> impl IntoView {
                                 let now = crate::clock::now_ms();
                                 let event = CalendarEvent {
                                     id: uuid::Uuid::new_v4().to_string(),
-                                    title: if name.trim().is_empty() { event_title.clone() } else { format!("{} · {}", event_title, name.trim()) },
+                                    title: if name.trim().is_empty() { event_title.clone() } else { format!("{}, {}", event_title, name.trim()) },
                                     start_at_ms: bruhs_models::EpochMs::saturating_from_i64(start - i64::from(buffer_before) * MINUTE_MS).as_f64(),
                                     end_at_ms: bruhs_models::EpochMs::saturating_from_i64(end + i64::from(buffer_after) * MINUTE_MS).as_f64(),
                                     all_day: false,
                                     color: Some("persimmon".to_string()),
-                                    notes: Some(format!("Booked locally via #/book/{link_slug}; meeting time {start}–{end}")),
+                                    notes: Some(format!("Booked locally via #/book/{link_slug}; meeting time {start} to {end}")),
                                     created_at: now,
                                     updated_at: now,
                                     source: EventSource::Local,
@@ -139,7 +139,7 @@ pub fn BookingPage(slug: String) -> impl IntoView {
                             <div>
                                 <p class="text-label-sm uppercase tracking-wide text-persimmon-400">"Bruhs scheduling"</p>
                                 <h1 class="mt-2 text-h2 text-rambutan-100">{link.title}</h1>
-                                <p class="mt-1 text-body-sm text-rambutan-500">{format!("{} minutes · protected by your availability and buffers", link.duration_minutes)}</p>
+                                <p class="mt-1 text-body-sm text-rambutan-500">{format!("{} minutes, protected by your availability and buffers", link.duration_minutes)}</p>
                                 <div class="mt-5"><Input value=Signal::derive(move || guest_name.get()) on_input=Callback::new(move |value| guest_name.set(value)) placeholder="Your name".to_string() /></div>
                                 {match booked.get() {
                                     Some((id, label)) => view! { <div role="status" class="mt-5 rounded-seed bg-longan-800 p-3 text-body-sm text-rambutan-300">{move || match saves.record_status(crate::task_saves::Kind::Event, &id) {

@@ -138,7 +138,9 @@ fn CredentialRow(
                     rows.try_update(|rows| rows.retain(|row| row.id != id));
                 }
                 Err(err) => {
-                    error.try_set(Some(format!("{err} Re-enter the value or retry deletion.")));
+                    error.try_set(Some(format!(
+                        "{err} Enter the value again or retry deletion."
+                    )));
                 }
             }
             busy.try_set(false);
@@ -151,7 +153,7 @@ fn CredentialRow(
                 <div class="min-w-0 flex-1">
                     <h3 class="break-words text-label text-rambutan-100">{review_text(&row.name)}</h3>
                     <p class="mt-1 break-all text-label-sm text-rambutan-400">{review_text(&row.project_path)}</p>
-                    <p class="mt-1 text-label-sm text-rambutan-400">{move || if rows.with(|rows| rows.iter().any(|row| row.id == id.get_value() && row.state == SavedCredentialState::NeedsAttention)) { "Needs attention · replace or delete to finish a previous change." } else { "Stored in OS keychain · value hidden" }}</p>
+                    <p class="mt-1 text-label-sm text-rambutan-400">{move || if rows.with(|rows| rows.iter().any(|row| row.id == id.get_value() && row.state == SavedCredentialState::NeedsAttention)) { "Needs attention, replace or delete to finish a previous change." } else { "Stored in OS keychain, value hidden" }}</p>
                 </div>
                 <div class="flex flex-wrap gap-2">
                     <button type="button" class=button disabled=move || busy.get() on:click=move |_| { reset.run(()); notice.set(None); mode.set(Edit::Replace); }>"Replace"</button>

@@ -51,7 +51,7 @@ pub(super) fn LifeRecordDetail() -> impl IntoView {
                     }).collect_view()}</dl>
                 })}
                 <Show when=move || life.ready() && record.get().is_none()><p class="mt-2 text-body-sm text-rambutan-400">"This record is no longer available in the local workspace. Search again or return to the overview."</p></Show>
-                <p class="mt-3 text-label-sm text-rambutan-500 [overflow-wrap:anywhere]">{move || current.get().map(|r| format!("Record ID · {}", r.id))}</p>
+                <p class="mt-3 text-label-sm text-rambutan-500 [overflow-wrap:anywhere]">{move || current.get().map(|r| format!("Record ID: {}", r.id))}</p>
             </section>
         </Show>
     }

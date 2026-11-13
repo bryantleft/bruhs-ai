@@ -340,7 +340,7 @@ pub fn TaskModelSettings() -> impl IntoView {
             description="The Claude model that writes meeting summaries. Summaries run on Claude."
         >
             <Dropdown
-                options=model_options("Built-in default", Some(AgentProvider::Claude))
+                options=model_options("Default", Some(AgentProvider::Claude))
                 value=Signal::derive(move || models.with(|models| models.summary.clone().unwrap_or_default()))
                 on_change=Callback::new(move |value: String| models.update(|models| models.summary = some(value)))
                 label="Meeting summary model"
@@ -353,7 +353,7 @@ pub fn TaskModelSettings() -> impl IntoView {
             description="The model that reviews a Codex thread's answer when you run /second-opinion there."
         >
             <Dropdown
-                options=model_options("Built-in default", Some(AgentProvider::Claude))
+                options=model_options("Default", Some(AgentProvider::Claude))
                 value=Signal::derive(move || models.with(|models| models.review_claude.clone().unwrap_or_default()))
                 on_change=Callback::new(move |value: String| models.update(|models| models.review_claude = some(value)))
                 label="Second opinion by Claude"
@@ -399,7 +399,7 @@ mod tests {
 
     #[test]
     fn task_models_offer_only_what_the_job_can_run() {
-        let claude = model_options("Built-in default", Some(AgentProvider::Claude));
+        let claude = model_options("Default", Some(AgentProvider::Claude));
         assert_eq!(claude[0].value, "");
         assert!(claude[1..]
             .iter()

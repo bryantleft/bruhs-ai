@@ -46,7 +46,7 @@ pub fn WhisperModelSettings() -> impl IntoView {
     view! {
         <SettingsRow
             title="Transcription provider"
-            description="Applies to the final transcript on your next recording. On-device Whisper keeps audio here. A compatible server receives recorded audio after Stop and may charge for usage. Live previews always stay on-device."
+            description="Applies to the final transcript on your next recording. Whisper keeps audio on this device. A compatible server receives recorded audio after Stop and may charge for usage. Live previews always stay on this device."
         >
             <Dropdown
                 options={TranscriptionProvider::ALL.into_iter().map(|provider| DropdownOption::new(provider.key(), provider.label())).collect::<Vec<_>>()}
@@ -84,7 +84,7 @@ pub fn WhisperModelSettings() -> impl IntoView {
         <Show when=move || transcription.get().provider == TranscriptionProvider::LocalWhisper>
         <SettingsRow
             title="Transcription model"
-            description="Downloaded on first use to ~/Library/Application Support/dev.bruhs.bruhs-ai/models. Takes effect on the next recording."
+            description="Downloaded on first use. Applies to your next recording."
         >
             <Dropdown
                 options=options()

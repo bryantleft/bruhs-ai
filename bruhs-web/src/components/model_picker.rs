@@ -2,7 +2,7 @@
 //! a search field, provider-grouped rows, ↑/↓ + Enter, and a one-line
 //! auth status for the provider under the cursor.
 
-use leptos::html::Input;
+use leptos::html::{Div, Input};
 use leptos::prelude::*;
 
 use bruhs_models::agent::{provider_for_model_id, AgentProvider, ModelInfo, MODEL_CATALOG};
@@ -52,7 +52,7 @@ pub fn auth_line(
             if codex_authenticated {
                 "Codex CLI signed in".to_string()
             } else {
-                "Codex CLI not signed in — run `codex login`".to_string()
+                "Codex CLI not signed in. Run `codex login`".to_string()
             }
         }
         AgentProvider::Claude => {
@@ -62,7 +62,7 @@ pub fn auth_line(
                     None => "Claude Code signed in".to_string(),
                 }
             } else {
-                "Claude Code not signed in — run `claude login`".to_string()
+                "Claude Code not signed in. Run `claude login`".to_string()
             }
         }
     }
@@ -81,9 +81,79 @@ pub fn ModelPicker() -> impl IntoView {
     let (query, set_query) = signal(String::new());
     let (highlight, set_highlight) = signal(0usize);
     let input_ref = NodeRef::<Input>::new();
+    let list_ref = NodeRef::<Div>::new();
+    let menu_ref = NodeRef::<Div>::new();
+    let menu_position = RwSignal::new(String::new());
 
     let flat = Memo::new(move |_| filter_models(MODEL_CATALOG, &query.get()));
     let groups = Memo::new(move |_| group_models(&flat.get()));
+
+    let position_menu = move || {
+        let Some(Some(menu)) = menu_ref.try_get_untracked() else {
+            return;
+        };
+        let Some(anchor) = menu.parent_element() else {
+            return;
+        };
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let (Some(width), Some(height)) = (
+            window.inner_width().ok().and_then(|value| value.as_f64()),
+            window.inner_height().ok().and_then(|value| value.as_f64()),
+        ) else {
+            return;
+        };
+        let canvas_top = document()
+            .query_selector("nav[aria-label=\"Workspace mode\"]")
+            .ok()
+            .flatten()
+            .map_or(0.0, |nav| nav.get_bounding_client_rect().bottom());
+        let inset = 8.0;
+        let top_bound = canvas_top + inset;
+        let available = (height - top_bound - inset).max(0.0);
+        let bounds = menu.get_bounding_client_rect();
+        let anchor = anchor.get_bounding_client_rect();
+        let menu_height = bounds.height().min(available);
+        let left = anchor
+            .left()
+            .clamp(inset, (width - bounds.width() - inset).max(inset));
+        let top = (anchor.top() - inset - menu_height)
+            .clamp(top_bound, (height - menu_height - inset).max(top_bound));
+        menu_position.set(format!(
+            "left:{left}px;top:{top}px;max-height:{available}px;"
+        ));
+    };
+    Effect::new(move |_| {
+        if open.get() && menu_ref.get().is_some() {
+            request_animation_frame(position_menu);
+        }
+    });
+    let resize = window_event_listener(leptos::ev::resize, move |_| {
+        if open.get_untracked() {
+            position_menu();
+        }
+    });
+    on_cleanup(move || resize.remove());
+
+    Effect::new(move |_| {
+        let index = highlight.get();
+        if !open.get() {
+            return;
+        }
+        if let Some(list) = list_ref.get() {
+            request_animation_frame(move || {
+                if let Ok(Some(row)) =
+                    list.query_selector(&format!("[data-model-index=\"{index}\"]"))
+                {
+                    let options = web_sys::ScrollIntoViewOptions::new();
+                    options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                    options.set_inline(web_sys::ScrollLogicalPosition::Nearest);
+                    row.scroll_into_view_with_scroll_into_view_options(&options);
+                }
+            });
+        }
+    });
 
     // Opening resets the search and parks the cursor on the current model.
     Effect::new(move |_| {
@@ -168,11 +238,13 @@ pub fn ModelPicker() -> impl IntoView {
         {move || open.get().then(|| view! {
             <div class="fixed inset-0 z-40" aria-hidden="true" on:click=move |_| set_open.set(false)></div>
             <div
+                node_ref=menu_ref
                 role="dialog"
                 aria-label="Choose model"
-                class="absolute bottom-full left-0 z-50 mb-2 flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-grape bg-longan-700 inset-ring inset-ring-white/15"
+                style=move || menu_position.get()
+                class="fixed z-50 flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-grape bg-longan-700 inset-ring inset-ring-white/15"
             >
-                <label class="flex items-center gap-2 border-b border-white/10 px-3 py-2">
+                <label class="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2">
                     <Icon name="search" size=14 class="shrink-0 text-rambutan-400" />
                     <input
                         node_ref=input_ref
@@ -186,7 +258,7 @@ pub fn ModelPicker() -> impl IntoView {
                     />
                     <Kbd class="text-rambutan-400">"esc"</Kbd>
                 </label>
-                <div role="listbox" aria-label="Models" class="max-h-72 overflow-y-auto p-1">
+                <div node_ref=list_ref role="listbox" aria-label="Models" class="min-h-0 max-h-72 overflow-y-auto p-1">
                     {move || {
                         let gs = groups.get();
                         if gs.is_empty() {
@@ -211,7 +283,8 @@ pub fn ModelPicker() -> impl IntoView {
                                     <button
                                         type="button"
                                         role="option"
-                                        aria-selected=move || is_selected.get().to_string()
+                                        data-model-index=i
+                                        aria-selected=move || is_hot.get().to_string()
                                         class=move || format!(
                                             "flex w-full items-center gap-3 rounded-grape px-2 py-2 text-left transition-colors {}",
                                             if is_hot.get() { "bg-white/[0.06]" } else { "" }
@@ -244,7 +317,7 @@ pub fn ModelPicker() -> impl IntoView {
                         }).collect_view().into_any()
                     }}
                 </div>
-                <div class="border-t border-white/10 px-3 py-2 text-label-sm text-rambutan-400" role="status">
+                <div class="shrink-0 border-t border-white/10 px-3 py-2 text-label-sm text-rambutan-400" role="status">
                     {status_line}
                 </div>
             </div>

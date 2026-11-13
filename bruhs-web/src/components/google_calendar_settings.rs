@@ -147,7 +147,8 @@ pub fn GoogleCalendarSettings() -> impl IntoView {
     let status_text = Signal::derive(move || {
         let s = sync_state.get();
         if !s.is_connected() {
-            return "Not connected. Connect to import events and enable auto-record.".to_string();
+            return "Not connected. Connect to import events and enable automatic recording."
+                .to_string();
         }
         let who = match s.email() {
             Some(email) => format!("Connected as {email}"),
