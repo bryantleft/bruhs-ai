@@ -1094,6 +1094,7 @@ pub struct Workspace {
     scheduling_preferences: SchedulingPreferences,
     life_context: LifeContext,
     automation_state: AutomationState,
+    reactive_automations: Entity<crate::views::reactive_automations::ReactiveAutomations>,
     palette_mode: PaletteMode,
     selected_search_record: Option<search_record_detail::SelectedSearchRecord>,
     search_record_focus: FocusHandle,
@@ -1599,6 +1600,47 @@ impl Workspace {
             selected_search_record: None,
             search_record_focus: cx.focus_handle().tab_stop(false),
             automation_state,
+            reactive_automations: {
+                let panel = cx.new(crate::views::reactive_automations::ReactiveAutomations::new);
+                subscriptions.push(cx.subscribe(
+                    &panel,
+                    |this,
+                     _,
+                     event: &crate::views::reactive_automations::ReactiveProjectOpened,
+                     cx| {
+                        this.active_project = Some(DesktopProjectLocation {
+                            path: event.path.clone(),
+                            name: event
+                                .path
+                                .rsplit('/')
+                                .next()
+                                .unwrap_or("Project")
+                                .to_string(),
+                        });
+                        this.persist_and_notify(cx);
+                    },
+                ));
+                subscriptions.push(cx.subscribe(
+                    &panel,
+                    |this, _, event: &crate::views::reactive_automations::ReactivePreview, cx| {
+                        let now = EpochMs::now().as_millis();
+                        let id = this.automation_state.create_workflow(
+                            &event.title,
+                            event.operations.clone(),
+                            now,
+                        );
+                        if this.automation_state.preview(&id, now).is_none() {
+                            this.automation_error = Some(
+                                "This draft could not be previewed. No records were changed."
+                                    .into(),
+                            );
+                        }
+                        this.reviewed_workflow_id = Some(id);
+                        this.persist_and_notify(cx);
+                    },
+                ));
+                panel
+            },
             palette_mode: PaletteMode::Commands,
             automation_error: None,
             reviewed_workflow_id: None,

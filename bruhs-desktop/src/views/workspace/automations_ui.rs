@@ -5,6 +5,8 @@ mod chat;
 mod history_ui;
 mod people;
 #[cfg(test)]
+mod reactive_tests;
+#[cfg(test)]
 mod review_tests;
 mod rollback;
 use bruhs_models::{
@@ -792,6 +794,7 @@ impl Workspace {
                     .min_h_0()
                     .overflow_y_scrollbar()
                     .p_4()
+                    .child(self.reactive_automations.clone())
                     .child(self.render_mcp_bridge(cx))
                     .when_some(self.automation_error.clone(), |panel, message| panel.child(
                         div().mb_3().text_size(px(12.0)).text_color(theme::lychee_300()).child(message)

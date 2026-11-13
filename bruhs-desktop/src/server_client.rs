@@ -8,6 +8,10 @@
 //! [`ServerError`] that says whether the server was unreachable, answered
 //! with a failure status, or answered with something unexpected.
 
+#[path = "server_client/reactive.rs"]
+mod reactive;
+pub use reactive::ReactiveHookToken;
+
 use std::sync::Arc;
 use std::time::Duration;
 
