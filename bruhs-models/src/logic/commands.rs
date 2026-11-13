@@ -19,9 +19,7 @@ pub const GOAL_NONE: &str = "No goal is set.";
 pub const GOAL_CLEARED: &str = "Goal cleared.";
 pub const GOAL_PAUSED: &str = "Goal paused.";
 
-/// Composer placeholder. The empty-thread footer under it stays as it is.
-pub const COMPOSER_PLACEHOLDER: &str =
-    "Ask anything, @ threads or files, # pull requests, $ skills, or / for commands";
+pub const COMPOSER_PLACEHOLDER: &str = "Ask anything";
 
 pub const COMMAND_HELP: &str = "\
 Available commands: /clear, /help, /model, /settings, /goal, /compact, /handoff, /second-opinion, /role.\n\

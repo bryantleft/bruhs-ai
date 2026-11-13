@@ -173,13 +173,13 @@ pub(super) async fn run_login_and_fetch_status_with(
     };
     signed_out.message = Some(match login_result {
         Ok(Ok(output)) if output.status.success() => {
-            "Still not authenticated. Run `claude auth login` in a terminal, then click Re-check."
+            "Still not authenticated. Run `claude auth login` in a terminal, then click Check again."
                 .to_string()
         }
         Ok(Ok(output)) => {
             let stderr = String::from_utf8_lossy(&output.stderr).trim().to_string();
             if stderr.is_empty() {
-                "Claude login failed. Run `claude auth login` in a terminal, then click Re-check."
+                "Claude login failed. Run `claude auth login` in a terminal, then click Check again."
                     .to_string()
             } else {
                 format!("Login failed: {stderr}")
@@ -187,7 +187,7 @@ pub(super) async fn run_login_and_fetch_status_with(
         }
         Ok(Err(error)) => format!("Login failed: {}", normalize_claude_command_error(&error)),
         Err(_) => {
-            "Claude login timed out. Run `claude auth login` in a terminal, then click Re-check."
+            "Claude login timed out. Run `claude auth login` in a terminal, then click Check again."
                 .to_string()
         }
     });
@@ -419,8 +419,7 @@ impl ChatView {
                                                 el.tab_index(0)
                                                     .role(Role::Button)
                                                     .focus_visible(|el| {
-                                                        el.border_2()
-                                                            .border_color(theme::persimmon_400())
+                                                        el.border_color(theme::persimmon_400())
                                                     })
                                                     .on_click(cx.listener(
                                                         |this, _ev, _window, cx| {
@@ -448,13 +447,11 @@ impl ChatView {
                                             WebButtonSize::Small,
                                             ButtonState::Enabled,
                                         )
-                                        .aria_label("Re-check Claude authentication")
-                                        .child("Re-check")
+                                        .aria_label("Check Claude authentication again")
+                                        .child("Check again")
                                         .tab_index(0)
                                         .role(Role::Button)
-                                        .focus_visible(|el| {
-                                            el.border_2().border_color(theme::persimmon_400())
-                                        })
+                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                         .on_click(cx.listener(|this, _ev, _window, cx| {
                                             this.start_claude_auth_check(cx);
                                         }))

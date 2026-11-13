@@ -51,7 +51,7 @@ fn totals_keep_currencies_separate_and_exceed_i64_without_wrapping() {
     assert_eq!(totals.minor("EUR"), Some(500));
     assert_eq!(
         totals.to_string(),
-        "EUR 500 minor units · $184467440737095516.14 USD"
+        "EUR 500 minor units, $184467440737095516.14 USD"
     );
 }
 

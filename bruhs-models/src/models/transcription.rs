@@ -22,8 +22,8 @@ impl TranscriptionProvider {
 
     pub fn label(self) -> &'static str {
         match self {
-            Self::LocalWhisper => "On-device Whisper",
-            Self::OpenAiCompatible => "OpenAI-compatible server",
+            Self::LocalWhisper => "Whisper on this device",
+            Self::OpenAiCompatible => "OpenAI compatible server",
         }
     }
 

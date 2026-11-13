@@ -109,7 +109,7 @@ impl fmt::Display for MoneyTotals {
         }
         for (index, (currency, minor)) in self.0.iter().enumerate() {
             if index > 0 {
-                f.write_str(" · ")?;
+                f.write_str(", ")?;
             }
             f.write_str(&format_money(*minor, currency))?;
         }

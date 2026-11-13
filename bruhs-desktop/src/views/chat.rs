@@ -106,7 +106,7 @@ const CHAT_MESSAGE_LIST_MAX_WIDTH_PX: f32 = timeline_ui::TRANSCRIPT_MAX_WIDTH_PX
 const CHAT_MESSAGE_LIST_X_PADDING_PX: f32 = timeline_ui::TRANSCRIPT_X_PADDING_PX;
 const CHAT_MESSAGE_LIST_Y_PADDING_PX: f32 = timeline_ui::TRANSCRIPT_TOP_PADDING_PX;
 const CHAT_MESSAGE_LIST_GAP_PX: f32 = 0.0;
-const CHAT_COMPOSER_MIN_ROWS: usize = 3;
+const CHAT_COMPOSER_MIN_ROWS: usize = 2;
 const CHAT_COMPOSER_MAX_ROWS: usize = 8;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -507,7 +507,14 @@ pub struct ChatView {
     pub project_scoped: bool,
     /// Any right-panel surface is showing (header panel toggle state).
     pub right_panel_open: bool,
-    permission_menu_open: bool,
+    composer_options_open: bool,
+    composer_options_focus: FocusHandle,
+    composer_effort_focus: FocusHandle,
+    composer_options_end_focus: FocusHandle,
+    composer_options_trigger_focus: FocusHandle,
+    composer_options_trigger_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
+    composer_options_scroll: ScrollHandle,
+    composer_options_section_focus: [FocusHandle; 5],
     stash_open: bool,
     /// Parked drafts (⌘S), newest first.
     stash: Vec<StashEntry>,
@@ -636,6 +643,7 @@ pub struct ChatView {
     mention_task: Option<Task<()>>,
     mention_items: Vec<DesktopMentionItem>,
     composer_hint_selected_index: usize,
+    composer_hint_scroll: ScrollHandle,
     composer_hints_suppressed_value: Option<String>,
     auth_status: DesktopAuthStatus,
     pending_permission: Option<DesktopPermissionRequest>,
@@ -656,6 +664,7 @@ pub struct ChatView {
     content_blocks: content_cache::ContentBlockCache,
     pub model_picker_open: bool,
     model_picker_index: usize,
+    model_picker_scroll: ScrollHandle,
     model_picker_query: Entity<InputState>,
     _model_picker_subscription: Subscription,
     pub input_state: Entity<InputState>,
@@ -696,6 +705,7 @@ impl ChatView {
                     this.retarget_chips(cx);
                     this.sync_composer_hint_suppression(cx);
                     this.composer_hint_selected_index = 0;
+                    this.composer_hint_scroll.set_offset(Point::default());
                     this.refresh_mention_hints(cx);
                     cx.notify();
                 }
@@ -723,6 +733,7 @@ impl ChatView {
             |this: &mut Self, _state, ev: &InputEvent, window, cx| match ev {
                 InputEvent::Change => {
                     this.model_picker_index = 0;
+                    this.model_picker_scroll.set_offset(Point::default());
                     cx.notify();
                 }
                 InputEvent::PressEnter { .. } => {
@@ -747,6 +758,46 @@ impl ChatView {
                     }
                 }
                 return;
+            }
+            if key == "tab" && !modifiers.platform && !modifiers.control && !modifiers.alt {
+                if let Some(chat) = chat.upgrade() {
+                    let handled = chat.update(cx, |this, cx| {
+                        if this.composer_options_open
+                            && (this.composer_options_focus.contains_focused(window, cx)
+                                || this.composer_options_trigger_focus.is_focused(window))
+                        {
+                            this.step_composer_options_focus(modifiers.shift, window, cx);
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    if handled {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
+            }
+            if key == "escape" && !modifiers.modified() {
+                if let Some(chat) = chat.upgrade() {
+                    let closed = chat.update(cx, |this, cx| {
+                        if this.composer_options_open
+                            && (this.composer_options_focus.contains_focused(window, cx)
+                                || this.composer_options_trigger_focus.is_focused(window))
+                        {
+                            this.close_composer_options(window, cx);
+                            true
+                        } else {
+                            false
+                        }
+                    });
+                    if closed {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        return;
+                    }
+                }
             }
             // Option/Alt+Up at the start of the draft edits the latest queued
             // message. Held anywhere else, it does not move the caret.
@@ -900,7 +951,16 @@ impl ChatView {
             project_scoped: false,
             project_name: String::new(),
             right_panel_open: false,
-            permission_menu_open: false,
+            composer_options_open: false,
+            composer_options_focus: cx.focus_handle().tab_index(0).tab_stop(false),
+            composer_effort_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            composer_options_end_focus: cx.focus_handle().tab_index(999).tab_stop(true),
+            composer_options_trigger_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            composer_options_trigger_bounds: Default::default(),
+            composer_options_scroll: ScrollHandle::new(),
+            composer_options_section_focus: std::array::from_fn(|_| {
+                cx.focus_handle().tab_stop(false)
+            }),
             stash_open: false,
             stash: Vec::new(),
             prompt_queue: PromptQueue::default(),
@@ -972,6 +1032,7 @@ impl ChatView {
             mention_task: None,
             mention_items: Vec::new(),
             composer_hint_selected_index: 0,
+            composer_hint_scroll: ScrollHandle::new(),
             composer_hints_suppressed_value: None,
             auth_status: DesktopAuthStatus::default(),
             pending_permission: None,
@@ -984,6 +1045,7 @@ impl ChatView {
             content_blocks: content_cache::ContentBlockCache::default(),
             model_picker_open: false,
             model_picker_index: 0,
+            model_picker_scroll: ScrollHandle::new(),
             model_picker_query,
             _model_picker_subscription,
             input_state,
@@ -1041,6 +1103,8 @@ impl ChatView {
         self.place_task = None;
         self.workspace_menu_open = false;
         self.effort_menu_open = false;
+        self.composer_options_open = false;
+        self.stash_open = false;
         self.text_attachments.clear();
         self.file_offers.clear();
         self.context_chips.clear();
@@ -1431,7 +1495,7 @@ impl ChatView {
             .child(
                 div()
                     .id("desktop-find-close")
-                    .size(px(24.0))
+                    .size(px(32.0))
                     .flex()
                     .items_center()
                     .justify_center()
@@ -1453,7 +1517,12 @@ impl ChatView {
                         this.find_pinned = None;
                         cx.notify();
                     }))
-                    .child("×"),
+                    .child(
+                        svg()
+                            .path(assets::CLOSE_ICON_PATH)
+                            .size(px(14.0))
+                            .text_color(theme::rambutan_400()),
+                    ),
             )
     }
 }
@@ -1688,21 +1757,33 @@ impl Render for ChatView {
             .when(hero, |el| {
                 el.child(
                     div()
+                        .id("desktop-chat-hero-body")
                         .flex_1()
                         .min_h_0()
-                        .overflow_hidden()
+                        .overflow_y_scroll()
                         .px(px(CHAT_COMPOSER_PAGE_X_PADDING_PX))
                         .flex()
                         .flex_col()
                         .items_center()
-                        .justify_center()
                         .when(self.pending_permission.is_some(), |el| {
                             el.child(self.render_permission_prompt(cx))
                         })
                         .when(self.pending_secret.is_some(), |el| {
                             el.child(self.render_secret_prompt(window, cx))
                         })
-                        .child(self.render_composer_block(ComposerPlacement::Hero, window, cx)),
+                        .child(
+                            div()
+                                .w_full()
+                                .max_w(px(composer_ui::CHAT_COMPOSER_MAX_WIDTH_PX))
+                                .min_w_0()
+                                .my_auto()
+                                .flex_shrink_0()
+                                .child(self.render_composer_block(
+                                    ComposerPlacement::Hero,
+                                    window,
+                                    cx,
+                                )),
+                        ),
                 )
             })
             .when(!hero, |el| {

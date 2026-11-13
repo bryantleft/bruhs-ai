@@ -3,7 +3,7 @@
 use super::*;
 use bruhs_models::logic::run_place::WorkspaceChoice;
 pub(super) const GIT_BRANCH_EMPTY_LABEL: &str = "No branches";
-pub(super) const GIT_BRANCH_CURRENT_MARK: &str = "●";
+pub(super) const GIT_BRANCH_CURRENT_MARK: &str = assets::CHECK_ICON_PATH;
 pub(super) const GIT_BRANCH_MENU_MIN_WIDTH_PX: f32 = 200.0;
 pub(super) const GIT_BRANCH_MENU_MAX_HEIGHT_PX: f32 = 256.0;
 pub(super) const GIT_BRANCH_EMPTY_TEXT_SIZE_PX: f32 = 12.0;
@@ -145,7 +145,9 @@ impl ChatView {
                         .role(Role::ListBoxOption)
                         .aria_label(branch.clone())
                         .aria_selected(is_current)
-                        .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                        .border_1()
+                        .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .cursor_pointer()
                         .hover(|el| el.bg(theme::longan_800()))
                         .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -161,13 +163,19 @@ impl ChatView {
                         }))
                         .child(
                             div()
-                                .w(px(GIT_BRANCH_CURRENT_MARK_WIDTH_PX))
+                                .size(px(GIT_BRANCH_CURRENT_MARK_WIDTH_PX))
                                 .flex_shrink_0()
+                                .flex()
+                                .items_center()
+                                .justify_center()
                                 .text_color(theme::rambutan_500())
-                                .child(if is_current {
-                                    GIT_BRANCH_CURRENT_MARK
-                                } else {
-                                    ""
+                                .when(is_current, |el| {
+                                    el.child(
+                                        svg()
+                                            .path(GIT_BRANCH_CURRENT_MARK)
+                                            .size(px(GIT_BRANCH_CURRENT_MARK_WIDTH_PX))
+                                            .text_color(theme::rambutan_500()),
+                                    )
                                 }),
                         )
                         .child(div().min_w_0().truncate().child(branch.clone()))

@@ -257,7 +257,7 @@ impl Render for ServiceConnections {
                 let status = if self.work == Work::Disconnect(provider) {
                     "Disconnecting…"
                 } else if self.work == Work::SignIn(provider) {
-                    "Waiting for browser sign-in…"
+                    "Waiting for browser login…"
                 } else {
                     match row {
                         Some(row) if !row.configured => {
@@ -266,7 +266,7 @@ impl Render for ServiceConnections {
                         Some(row) => match row.state {
                             ConnectionState::Connected => "Connected",
                             ConnectionState::Disconnected => "Not connected",
-                            ConnectionState::NeedsSignIn => "Needs sign-in",
+                            ConnectionState::NeedsSignIn => "Needs login",
                             ConnectionState::Unavailable => "Keychain needs attention",
                         },
                         None => "Loading account…",
@@ -298,13 +298,17 @@ impl Render for ServiceConnections {
                             .role(Role::Status)
                             .child(status),
                     )
-                    .when_some(row.map(|r| r.scopes.join(", ")), |element, scopes| {
-                        element.child(
-                            div()
-                                .text_color(theme::rambutan_400())
-                                .child(format!("Permissions: {scopes}")),
-                        )
-                    })
+                    .when_some(
+                        row.filter(|r| !r.scopes.is_empty())
+                            .map(|r| r.scopes.join(", ")),
+                        |element, scopes| {
+                            element.child(
+                                div()
+                                    .text_color(theme::rambutan_400())
+                                    .child(format!("Permissions: {scopes}")),
+                            )
+                        },
+                    )
                     .child(
                         div()
                             .flex()
@@ -341,7 +345,7 @@ impl Render for ServiceConnections {
             .collect();
         div().id("service-connections").font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200()).flex().flex_col().gap_2()
             .child(div().font_weight(FontWeight::MEDIUM).child("Connected accounts"))
-            .child("Connect in your browser to reuse an existing sign-in. Your provider may still require consent or MFA. Each agent operation needs approval.")
+            .child("Connect in your browser to reuse an existing login. Your provider may still require consent or MFA. Each agent operation needs approval.")
             .children(rows)
             .when_some(self.error.clone(), |element, error| element.child(div().id("service-connection-error").role(Role::Alert).text_color(theme::lychee_300()).child(error)))
             .child(div().text_color(theme::rambutan_400()).child("Disconnect removes this local connection. It keeps your browser signed in and does not revoke access at the service."))

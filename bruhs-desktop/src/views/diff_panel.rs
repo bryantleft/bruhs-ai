@@ -279,7 +279,7 @@ pub fn turn_files_from_messages(messages: &[Message], root: Option<&str>) -> Vec
         let prompt = last_user.take().unwrap_or_default();
         let first_line = prompt.trim().lines().next().unwrap_or("").trim();
         out.push(DesktopTurnFiles {
-            label: format!("Turn · {}", truncate_label(first_line, 30)),
+            label: format!("Turn: {}", truncate_label(first_line, 30)),
             prompt,
             files,
         });
@@ -770,7 +770,9 @@ impl DiffPanelView {
                     .role(Role::ComboBox)
                     .aria_label("Diff scope")
                     .aria_expanded(self.scope_open)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800().opacity(0.8)))
                     .on_click(move |_ev, window, cx| scope_toggle(window, cx))
@@ -790,7 +792,7 @@ impl DiffPanelView {
                                     "Uncommitted changes".to_string()
                                 }
                                 DiffScope::WorkingTree => format!(
-                                    "{scope_label} · {scope_count} file{}",
+                                    "{scope_label}, {scope_count} file{}",
                                     if scope_count == 1 { "" } else { "s" }
                                 ),
                                 DiffScope::Turn(_) => scope_label,
@@ -894,7 +896,9 @@ impl DiffPanelView {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(label)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY)))
             .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
@@ -991,7 +995,9 @@ impl DiffPanelView {
             } else {
                 Toggled::False
             })
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| {
                 el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY))
@@ -1026,7 +1032,9 @@ impl DiffPanelView {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(label)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| {
                 el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY))
@@ -1137,7 +1145,12 @@ impl DiffPanelView {
                         this.find_pinned = None;
                         cx.notify();
                     }))
-                    .child("×"),
+                    .child(
+                        svg()
+                            .path(assets::CLOSE_ICON_PATH)
+                            .size(px(14.0))
+                            .text_color(theme::rambutan_400()),
+                    ),
             )
     }
 
@@ -1245,6 +1258,8 @@ impl DiffPanelView {
             .tab_index(0)
             .role(Role::CheckBox)
             .aria_label(format!("Mark {} viewed", file.path))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 0.0, 0.0))
             .aria_toggled(if viewed {
                 Toggled::True
             } else {
@@ -1256,10 +1271,9 @@ impl DiffPanelView {
             })
             .when(!viewed, |el| {
                 el.bg(theme::longan_800())
-                    .border_1()
                     .border_color(theme::rambutan_600())
             })
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_mouse_down(
                 MouseButton::Left,
@@ -1288,13 +1302,10 @@ impl DiffPanelView {
                         theme::longan_800()
                     }),
             );
-        let row_group: SharedString = format!("desktop-diff-file-{key}").into();
-        let open_group = row_group.clone();
 
         let header = div()
             .id(("desktop-diff-file", key))
             .debug_selector(move || format!("desktop-diff-file-{key}"))
-            .group(row_group)
             .h(px(FILE_HEADER_HEIGHT_PX))
             .px_3()
             .flex()
@@ -1304,12 +1315,14 @@ impl DiffPanelView {
             .text_size(px(FILE_HEADER_TEXT_SIZE_PX))
             .tab_index(0)
             .role(Role::Button)
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 0.0, 0.0))
             .when(highlight == Some(None), |el| {
-                el.border_1().border_color(theme::persimmon_400())
+                el.border_color(theme::persimmon_400())
             })
             .aria_expanded(expanded)
             .aria_label(format!("Toggle {}", file.path))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY)))
             .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -1394,13 +1407,12 @@ impl DiffPanelView {
                     .px_2()
                     .py_1()
                     .text_color(theme::rambutan_400())
-                    // Web: `opacity-0 group-hover/file:opacity-100`.
-                    .invisible()
-                    .group_hover(open_group, |el| el.visible())
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label(format!("Open {} in editor", file.path))
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| {
                         el.bg(theme::longan_700().opacity(HOVER_BG_OPACITY))
@@ -1496,11 +1508,20 @@ impl DiffPanelView {
             }
             Some(
                 div()
+                    .id(("desktop-diff-body", key))
                     .debug_selector(move || format!("desktop-diff-body-{key}"))
+                    .w_full()
+                    .h_auto()
                     .py_1()
                     .font_family(PANEL_BODY_FONT_FAMILY)
                     .children(blocks)
-                    .into_any_element(),
+                    .map(|body| {
+                        if self.wrap {
+                            body.into_any_element()
+                        } else {
+                            body.overflow_x_scrollbar().into_any_element()
+                        }
+                    }),
             )
         };
 
@@ -1559,9 +1580,9 @@ impl DiffPanelView {
             )
             .child(
                 div()
-                    .min_w_0()
                     .pr_3()
-                    .when(!self.wrap, |el| el.whitespace_nowrap().overflow_hidden())
+                    .when(self.wrap, |el| el.min_w_0())
+                    .when(!self.wrap, |el| el.whitespace_nowrap().flex_shrink_0())
                     .child(line.text.clone()),
             )
     }
@@ -1634,7 +1655,7 @@ impl Render for DiffPanelView {
                             .text_size(px(EMPTY_TEXT_SIZE_PX))
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
                             .text_color(theme::durian_400())
-                            .child("Diff truncated — the working tree is large."),
+                            .child("Diff truncated because the working tree is large."),
                     )
                 })
                 .into_any_element()
@@ -1795,6 +1816,58 @@ mod tests {
     use bruhs_models::logic::review::{review_scope_key, DiffReviewFilter};
     use serde_json::json;
 
+    #[gpui::test]
+    fn unwrapped_diff_lines_remain_horizontally_scrollable(cx: &mut gpui::TestAppContext) {
+        use gpui::{point, px, size, Modifiers, ScrollDelta, ScrollWheelEvent, TouchPhase};
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            crate::theme::apply_bruhs_theme(cx);
+        });
+        let (panel, cx) = cx.add_window_view(|_, cx| super::DiffPanelView::new(cx));
+        cx.simulate_resize(size(px(640.0), px(480.0)));
+        panel.update(cx, |panel, cx| {
+            panel.project_path = Some("/synthetic/ui-audit".into());
+            panel.wrap = false;
+            panel.files = vec![super::DesktopDiffFile {
+                path: "audit-long.rs".into(),
+                added: true,
+                deleted: false,
+                is_binary: false,
+                hunks: vec![super::Hunk {
+                    header: "@@ -0,0 +1 @@".into(),
+                    lines: vec![super::DiffLine {
+                        kind: LineKind::Add,
+                        old_no: None,
+                        new_no: Some(1),
+                        text: format!("{} THE_LINE_END", "long_value ".repeat(80)),
+                    }],
+                }],
+            }];
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let selector: &'static str = Box::leak(
+            format!("desktop-diff-body-{}", super::element_key("audit-long.rs")).into_boxed_str(),
+        );
+        let before = cx.debug_bounds(selector).expect("unwrapped diff body");
+        assert!(
+            before.size.width > px(640.0),
+            "the complete line must retain its width"
+        );
+        cx.simulate_event(ScrollWheelEvent {
+            position: point(px(320.0), before.center().y),
+            delta: ScrollDelta::Pixels(point(px(-1000.0), px(0.0))),
+            modifiers: Modifiers::default(),
+            touch_phase: TouchPhase::Moved,
+        });
+        cx.run_until_parked();
+        let after = cx.debug_bounds(selector).expect("scrolled diff body");
+        assert!(
+            after.left() < before.left(),
+            "horizontal input must reveal the line ending"
+        );
+    }
+
     fn call(tool: &str, input: serde_json::Value) -> DesktopToolCall {
         DesktopToolCall {
             id: format!("{tool}-{}", input.to_string().len()),
@@ -1918,7 +1991,7 @@ mod tests {
         ];
         let turns = turn_files_from_messages(&messages, Some("/r"));
         assert_eq!(turns.len(), 1);
-        assert_eq!(turns[0].label, "Turn · Fix the parser");
+        assert_eq!(turns[0].label, "Turn: Fix the parser");
         assert_eq!(turns[0].prompt, "Fix the parser\nplease");
         assert_eq!(
             review_scope_key("/repo", &format!("turn:{}", turns[0].prompt)),

@@ -356,7 +356,7 @@ impl MeetingsHub {
             cx,
         );
         let meeting = Meeting::new(
-            "Synthetic dock acceptance — no capture",
+            "Synthetic dock acceptance. no capture",
             EpochMs::now().as_f64() - 65_000.0,
         );
         hub.live_meeting_id = Some(meeting.id.clone());
@@ -659,7 +659,7 @@ impl MeetingsHub {
                     SseMessage::Disconnected => Box::new(move |hub, cx| {
                         hub.stop_local_focus("Local app context paused: meeting connection lost. Enable again after reconnecting.", cx);
                         hub.server_online = false;
-                        hub.notify_notice("Live transcript disconnected — reconnecting…", true, cx);
+                        hub.notify_notice("Live transcript disconnected. Reconnecting…", true, cx);
                     }),
                 };
                 if jobs.send(job).is_err() {

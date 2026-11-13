@@ -21,7 +21,7 @@ pub fn run() {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(None, size(px(640.0), px(360.0)), cx))),
             ..Default::default()
         }, |window, cx| {
-            window.set_window_title("bruhs · Synthetic dock acceptance");
+            window.set_window_title("bruhs, Synthetic dock acceptance");
             window.on_window_should_close(cx, |_, cx| { cx.quit(); true });
             cx.new(|_| Fixture { hub, dock: None })
         }).expect("fixture window");

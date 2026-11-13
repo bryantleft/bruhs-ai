@@ -66,7 +66,7 @@ fn create_window(
                 ..Default::default()
             },
             |window, cx| {
-                window.set_window_title("bruhs · Meeting dock");
+                window.set_window_title("bruhs, Meeting dock");
                 window.on_window_should_close(cx, move |window, cx| {
                     restore_workspace(parent, window, cx);
                     true
@@ -172,7 +172,7 @@ impl MeetingDock {
             f32::from(origin.y)
         );
         window.set_window_title(&format!(
-            "bruhs · Synthetic dock · x={} y={}",
+            "bruhs, Synthetic dock, x={} y={}",
             f32::from(origin.x),
             f32::from(origin.y)
         ));

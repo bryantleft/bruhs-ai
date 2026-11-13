@@ -45,9 +45,9 @@ impl PermissionMode {
     pub fn label(&self) -> &'static str {
         match self {
             Self::Default => "Default",
-            Self::AcceptEdits => "Auto-accept",
+            Self::AcceptEdits => "Accept edits",
             Self::Plan => "Plan",
-            Self::BypassPermissions => "YOLO",
+            Self::BypassPermissions => "Full access",
         }
     }
 
@@ -69,14 +69,14 @@ impl PermissionMode {
     /// read-only rather than "ask first" (see `bruhs-core`'s `codex_access`).
     pub fn description(self, provider: Option<AgentProvider>) -> &'static str {
         match (self, provider) {
-            (Self::Default, Some(AgentProvider::Codex)) => "Read-only: Codex can't ask first",
+            (Self::Default, Some(AgentProvider::Codex)) => "Read only: Codex can't ask first",
             (Self::Default, Some(AgentProvider::Claude)) => "Ask before edits and commands",
-            (Self::Default, None) => "Ask before edits and commands; Codex is read-only",
+            (Self::Default, None) => "Ask before edits and commands; Codex is read only",
             (Self::AcceptEdits, Some(AgentProvider::Codex)) => {
                 "Edit and run commands in the sandbox"
             }
             (Self::AcceptEdits, _) => "Approve edits, ask for commands",
-            (Self::Plan, _) => "Read-only, propose a plan",
+            (Self::Plan, _) => "Read only, propose a plan",
             (Self::BypassPermissions, Some(AgentProvider::Codex)) => "Never ask, no sandbox",
             (Self::BypassPermissions, _) => "Never ask",
         }
@@ -87,7 +87,7 @@ impl PermissionMode {
     pub fn chip_title(self, provider: AgentProvider) -> &'static str {
         match (self, provider) {
             (Self::Default, AgentProvider::Codex) => {
-                "Codex can't ask for approval, so Default is read-only. Pick Auto-accept to let it edit."
+                "Codex can't ask for approval, so Default is read only. Choose Accept edits to let it edit."
             }
             _ => "Access mode",
         }
@@ -485,11 +485,11 @@ mod tests {
     #[test]
     fn codex_default_is_described_as_read_only() {
         let codex = PermissionMode::Default.description(Some(AgentProvider::Codex));
-        assert!(codex.contains("Read-only"), "{codex}");
+        assert!(codex.contains("Read only"), "{codex}");
         let claude = PermissionMode::Default.description(Some(AgentProvider::Claude));
         assert_eq!(claude, "Ask before edits and commands");
         let any = PermissionMode::Default.description(None);
-        assert!(any.contains("Codex is read-only"), "{any}");
+        assert!(any.contains("Codex is read only"), "{any}");
     }
 
     #[test]
@@ -508,7 +508,7 @@ mod tests {
     #[test]
     fn only_codex_default_gets_the_read_only_chip_hint() {
         let hint = PermissionMode::Default.chip_title(AgentProvider::Codex);
-        assert!(hint.contains("Auto-accept"), "{hint}");
+        assert!(hint.contains("Accept edits"), "{hint}");
         for &mode in PermissionMode::all() {
             assert_eq!(mode.chip_title(AgentProvider::Claude), "Access mode");
             if mode != PermissionMode::Default {
