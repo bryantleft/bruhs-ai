@@ -549,6 +549,7 @@ pub(crate) fn provider_label(provider: AgentProvider) -> &'static str {
     match provider {
         AgentProvider::Claude => "Anthropic",
         AgentProvider::Codex => "OpenAI Codex",
+        _ => provider.label(),
     }
 }
 

@@ -9,8 +9,25 @@ pub(super) const MODEL_PICKER_ROW_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const MODEL_PICKER_LABEL_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const MODEL_PICKER_GROUP_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const MODEL_PICKER_KBD_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const MODEL_PICKER_SEARCH_PLACEHOLDER: &str = "Search models…";
-pub(super) const MODEL_PICKER_EMPTY_LABEL: &str = "No models match.";
+pub(super) const MODEL_PICKER_SEARCH_PLACEHOLDER: &str = "Search or enter provider/model…";
+pub(super) const MODEL_PICKER_EMPTY_LABEL: &str =
+    "No models match. Enter provider/model, e.g. cursor/auto.";
+
+pub fn custom_model_match(query: &str, current: &str) -> Option<String> {
+    let typed = bruhs_models::agent::custom_model_selection(query.trim());
+    let candidate = typed.or_else(|| {
+        let hay = current.to_lowercase();
+        query
+            .split_whitespace()
+            .all(|word| hay.contains(&word.to_lowercase()))
+            .then(|| bruhs_models::agent::custom_model_selection(current))
+            .flatten()
+    })?;
+    (!MODEL_CATALOG
+        .iter()
+        .any(|model| model.id == candidate.as_str()))
+    .then(|| candidate.into_inner())
+}
 
 /// Web `auth_line` for the Claude provider.
 pub(super) fn model_picker_claude_line(authenticated: bool, user: Option<&str>) -> String {
@@ -74,7 +91,11 @@ fn model_picker_row_index(models: &[&'static ModelInfo], selected: usize) -> usi
             row += 1;
         }
     }
-    0
+    if selected == option {
+        row
+    } else {
+        0
+    }
 }
 
 impl ChatView {
@@ -95,12 +116,22 @@ impl ChatView {
         self.branch_menu_open = false;
         self.workspace_menu_open = false;
         self.effort_menu_open = false;
-        self.model_picker_index = 0;
+        let selected_index = MODEL_CATALOG
+            .iter()
+            .position(|model| model.id == self.model_id)
+            .unwrap_or_else(|| {
+                if custom_model_match("", &self.model_id).is_some() {
+                    MODEL_CATALOG.len()
+                } else {
+                    0
+                }
+            });
         self.model_picker_scroll.set_offset(Point::default());
         self.model_picker_query.update(cx, |input, cx| {
             input.set_value("", window, cx);
             input.focus(window, cx);
         });
+        self.model_picker_index = selected_index;
         cx.notify();
     }
 
@@ -118,13 +149,21 @@ impl ChatView {
         filter_models_like_web(MODEL_CATALOG, &query)
     }
 
+    fn model_picker_custom_match(&self, cx: &App) -> Option<String> {
+        custom_model_match(
+            self.model_picker_query.read(cx).value().as_ref(),
+            &self.model_id,
+        )
+    }
+
     pub(super) fn select_model_from_picker(
         &mut self,
-        model_id: &'static str,
+        model_id: impl Into<String>,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        self.set_model(model_id, cx);
+        let model_id = model_id.into();
+        self.set_model(model_id.clone(), cx);
         cx.emit(ChatViewEvent::SelectModel(model_id));
         self.close_model_picker(window, cx);
     }
@@ -135,9 +174,13 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) {
         let matches = self.model_picker_matches(cx);
-        let index = self.model_picker_index.min(matches.len().saturating_sub(1));
+        let custom = self.model_picker_custom_match(cx);
+        let count = matches.len() + usize::from(custom.is_some());
+        let index = self.model_picker_index.min(count.saturating_sub(1));
         if let Some(model) = matches.get(index) {
             self.select_model_from_picker(model.id, window, cx);
+        } else if let Some(id) = custom {
+            self.select_model_from_picker(id, window, cx);
         }
     }
 
@@ -153,6 +196,10 @@ impl ChatView {
             let matches = self.model_picker_matches(cx);
             if let Some(model) = matches.get(n - 1) {
                 self.select_model_from_picker(model.id, window, cx);
+            } else if n - 1 == matches.len() {
+                if let Some(id) = self.model_picker_custom_match(cx) {
+                    self.select_model_from_picker(id, window, cx);
+                }
             }
             return true;
         }
@@ -162,7 +209,8 @@ impl ChatView {
                 true
             }
             "up" | "down" => {
-                let count = self.model_picker_matches(cx).len();
+                let count = self.model_picker_matches(cx).len()
+                    + usize::from(self.model_picker_custom_match(cx).is_some());
                 if count > 0 {
                     let current = self.model_picker_index.min(count - 1);
                     self.model_picker_index = if key == "up" {
@@ -197,7 +245,14 @@ impl ChatView {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let matches = self.model_picker_matches(cx);
-        let highlighted = self.model_picker_index.min(matches.len().saturating_sub(1));
+        let custom = self.model_picker_custom_match(cx);
+        let count = matches.len() + usize::from(custom.is_some());
+        let highlighted = self.model_picker_index.min(count.saturating_sub(1));
+        let highlighted_provider = matches
+            .get(highlighted)
+            .map(|model| model.provider)
+            .or_else(|| custom.as_deref().map(AgentProvider::for_model))
+            .unwrap_or_else(|| AgentProvider::for_model(&self.model_id));
         let selected_row = model_picker_row_index(&matches, highlighted);
         let scroll = self.model_picker_scroll.clone();
         let previous_viewport = scroll.bounds().size;
@@ -247,6 +302,12 @@ impl ChatView {
                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .cursor_pointer()
                         .hover(|el| el.bg(gpui::white().opacity(0.06)))
+                        .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, _, cx| {
+                            if this.model_picker_index != index {
+                                this.model_picker_index = index;
+                                cx.notify();
+                            }
+                        }))
                         .on_click(cx.listener(move |this, _ev, window, cx| {
                             cx.stop_propagation();
                             this.select_model_from_picker(model_id, window, cx);
@@ -310,7 +371,78 @@ impl ChatView {
                 );
             }
         }
-        if matches.is_empty() {
+        if let Some(id) = custom.as_ref() {
+            let id_click = id.clone();
+            let id_key = id.clone();
+            let index = matches.len();
+            rows.push(
+                div()
+                    .id("desktop-model-picker-custom")
+                    .debug_selector(|| "desktop-model-picker-custom".to_string())
+                    .flex_shrink_0()
+                    .px_2()
+                    .py_2()
+                    .rounded(px(MODEL_PICKER_RADIUS_PX))
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .when(index == highlighted, |el| {
+                        el.bg(gpui::white().opacity(0.06))
+                    })
+                    .tab_index(0)
+                    .role(Role::ListBoxOption)
+                    .aria_label(format!("Use model {id}"))
+                    .aria_selected(index == highlighted)
+                    .cursor_pointer()
+                    .hover(|el| el.bg(gpui::white().opacity(0.06)))
+                    .on_mouse_move(cx.listener(move |this, _: &MouseMoveEvent, _, cx| {
+                        if this.model_picker_index != index {
+                            this.model_picker_index = index;
+                            cx.notify();
+                        }
+                    }))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        cx.stop_propagation();
+                        this.select_model_from_picker(id_click.clone(), window, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.select_model_from_picker(id_key.clone(), window, cx);
+                        }
+                    }))
+                    .child(
+                        svg()
+                            .path(assets::BOT_ICON_PATH)
+                            .size(px(14.0))
+                            .text_color(theme::rambutan_400())
+                            .flex_shrink_0(),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(MODEL_PICKER_LABEL_TEXT_SIZE_PX))
+                                    .text_color(theme::rambutan_100())
+                                    .child(format!("Use {id}")),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(MODEL_PICKER_ROW_TEXT_SIZE_PX))
+                                    .text_color(theme::rambutan_400())
+                                    .child("Use the model configured with this provider."),
+                            ),
+                    )
+                    .into_any_element(),
+            );
+        }
+        if matches.is_empty() && custom.is_none() {
             rows.push(
                 div()
                     .debug_selector(|| "desktop-model-picker-empty".to_string())
@@ -367,7 +499,12 @@ impl ChatView {
                                 .appearance(false)
                                 .role(Role::EditableComboBox)
                                 .aria_label(matches.get(highlighted).map_or_else(
-                                    || "Search models. No models match.".to_string(),
+                                    || {
+                                        custom.as_ref().map_or_else(
+                                            || "Search models. No models match.".to_string(),
+                                            |id| format!("Search models. Use {id} selected"),
+                                        )
+                                    },
                                     |model| {
                                         format!(
                                             "Search models. {} selected, {} of {}",
@@ -429,17 +566,26 @@ impl ChatView {
                     .text_size(px(MODEL_PICKER_ROW_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .text_color(theme::rambutan_400())
-                    .child(self.model_picker_status_line()),
+                    .child(self.model_picker_status_line(highlighted_provider)),
             )
             .into_any_element()
     }
 
     /// Web `auth_line`: who the current provider is signed in as.
-    pub(super) fn model_picker_status_line(&self) -> String {
-        if self.is_claude_model() {
-            model_picker_claude_line(self.auth_status.is_authenticated(), self.auth_status.user())
-        } else {
-            "Codex CLI signed in".to_string()
+    fn model_picker_status_line(&self, provider: AgentProvider) -> String {
+        match provider {
+            AgentProvider::Claude => model_picker_claude_line(
+                self.auth_status.is_authenticated(),
+                self.auth_status.user(),
+            ),
+            AgentProvider::Codex => "Codex uses your CLI login.".into(),
+            AgentProvider::Cursor => "Uses `cursor-agent login`. App tools are unavailable.".into(),
+            AgentProvider::Antigravity => {
+                "Requires Full access and Antigravity CLI sign-in. App tools are unavailable."
+                    .into()
+            }
+            AgentProvider::Grok => "Uses Grok CLI login. App tools are unavailable.".into(),
+            AgentProvider::OpenCode => "Configure providers and models in OpenCode.".into(),
         }
     }
 
@@ -473,5 +619,28 @@ impl ChatView {
                     .text_color(theme::rambutan_100()),
             )
             .into_any_element()
+    }
+}
+
+#[cfg(test)]
+mod provider_model_tests {
+    use super::custom_model_match;
+
+    #[test]
+    fn custom_models_accept_explicit_runtimes_and_survive_an_empty_search() {
+        assert_eq!(
+            custom_model_match("cursor/my-model", "gpt-5.5"),
+            Some("cursor/my-model".into())
+        );
+        assert_eq!(
+            custom_model_match("", "opencode/local/my-model"),
+            Some("opencode/local/my-model".into())
+        );
+        assert_eq!(
+            custom_model_match("local", "opencode/local/my-model"),
+            Some("opencode/local/my-model".into())
+        );
+        assert!(custom_model_match("unknown/my-model", "gpt-5.5").is_none());
+        assert!(custom_model_match("cursor/default", "gpt-5.5").is_none());
     }
 }

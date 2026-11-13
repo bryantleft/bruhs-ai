@@ -10,7 +10,7 @@ use leptos::prelude::*;
 use leptos::task::spawn_local;
 
 use crate::auth::{fetch_auth_status_for, trigger_login_for, AuthStatus};
-use bruhs_models::agent::provider_for_model_id;
+use bruhs_models::agent::{provider_for_model_id, AgentProvider};
 
 use crate::state::{CodexAuthSignal, SetCodexAuthSignal};
 use crate::ui::{Button, ButtonSize, ButtonVariant, Icon};
@@ -22,8 +22,16 @@ const POLL_ATTEMPTS: u32 = 30; // 30 × 2s = 60s
 fn provider_name(provider: &str) -> &'static str {
     match provider {
         "codex" => "Codex",
-        _ => "Claude",
+        "claude" => "Claude",
+        _ => "Agent",
     }
+}
+
+fn offers_in_app_login(model: &str) -> bool {
+    matches!(
+        provider_for_model_id(model),
+        AgentProvider::Claude | AgentProvider::Codex
+    )
 }
 
 #[component]
@@ -48,16 +56,21 @@ pub fn AuthBanner() -> impl IntoView {
     // The auth status for the current provider (reactive).
     let current_status = move || match current_provider().as_str() {
         "codex" => codex_auth.get(),
-        _ => claude_auth.get(),
+        "claude" => claude_auth.get(),
+        _ => AuthStatus::default(),
     };
 
     // Write a freshly-fetched status into the right provider's signal.
     let store_status = move |provider: &str, status: AuthStatus| match provider {
         "codex" => set_codex_auth.set(status),
-        _ => set_claude_auth.set(status),
+        "claude" => set_claude_auth.set(status),
+        _ => {}
     };
 
     let do_recheck = move || {
+        if !offers_in_app_login(&current_model.get_untracked()) {
+            return;
+        }
         let provider = provider_for_model_id(&current_model.get_untracked())
             .as_str()
             .to_string();
@@ -68,7 +81,7 @@ pub fn AuthBanner() -> impl IntoView {
     };
 
     let do_login = move || {
-        if polling.get_untracked() {
+        if polling.get_untracked() || !offers_in_app_login(&current_model.get_untracked()) {
             return;
         }
         set_polling.set(true);
@@ -119,7 +132,7 @@ pub fn AuthBanner() -> impl IntoView {
 
     view! {
         <Show
-            when=move || !current_status().authenticated
+            when=move || offers_in_app_login(&current_model.get()) && !current_status().authenticated
             fallback=|| ()
         >
             <div class="mx-4 my-3 rounded-grape bg-durian-500/10 inset-ring inset-ring-durian-400/30 p-3 text-body-sm text-durian-100">
@@ -205,4 +218,23 @@ where
         }
     })
     .await
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn external_runtimes_never_inherit_a_claude_or_codex_login_banner() {
+        assert!(offers_in_app_login("claude-sonnet-4-6"));
+        assert!(offers_in_app_login("gpt-5.5"));
+        for model in [
+            "cursor/default",
+            "antigravity/default",
+            "grok/default",
+            "opencode/local/model",
+        ] {
+            assert!(!offers_in_app_login(model), "{model}");
+        }
+    }
 }

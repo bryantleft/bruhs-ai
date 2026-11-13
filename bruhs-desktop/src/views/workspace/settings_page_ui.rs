@@ -182,6 +182,7 @@ pub(super) const SETTINGS_ROW_CONTROL_WIDTH_PX: f32 = 240.0;
 const GENERAL_TITLE_ROWS: usize = 2;
 pub(super) const SETTINGS_ROW_TITLE_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const SETTINGS_MODEL_DROPDOWN_ID: &str = "desktop-model";
+const CURRENT_CUSTOM_MODEL_OPTION: &str = "current-custom-model";
 pub(super) const SETTINGS_ACCESS_MODE_DROPDOWN_ID: &str = "desktop-access-mode";
 pub(super) const SETTINGS_EDITOR_DROPDOWN_ID: &str = "desktop-editor";
 pub(super) const SETTINGS_COMPACT_IDLE_DROPDOWN_ID: &str = "desktop-compact-idle";
@@ -412,7 +413,9 @@ impl Workspace {
     ) {
         match id {
             SETTINGS_MODEL_DROPDOWN_ID => {
-                if let Some(model) = model_info(value) {
+                if value == CURRENT_CUSTOM_MODEL_OPTION {
+                    self.set_default_model(self.current_model.clone(), cx);
+                } else if let Some(model) = model_info(value) {
                     self.set_default_model(model.id, cx);
                 }
             }
@@ -772,7 +775,7 @@ impl Workspace {
 
     pub(super) fn render_settings_general_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         // Model: providers as groups with their logo, like the web dropdown.
-        let model_groups: Vec<DropdownGroup> = desktop_model_provider_groups_like_web()
+        let mut model_groups: Vec<DropdownGroup> = desktop_model_provider_groups_like_web()
             .into_iter()
             .map(|(provider, models)| DropdownGroup {
                 label: Some(provider_label(provider)),
@@ -787,12 +790,30 @@ impl Workspace {
                     .collect(),
             })
             .collect();
+        let custom_current = model_info(&self.current_model).is_none()
+            && bruhs_models::agent::custom_model_selection(&self.current_model).is_some();
+        if custom_current {
+            let provider = AgentProvider::for_model(&self.current_model);
+            model_groups.push(DropdownGroup {
+                label: Some(provider_label(provider)),
+                mark: Some(provider_mark(provider, cx)),
+                options: vec![DropdownOption {
+                    value: CURRENT_CUSTOM_MODEL_OPTION,
+                    label: self.current_model.clone(),
+                    description: Some("Your configured model".into()),
+                }],
+            });
+        }
         let (model_toggle, model_select) =
             self.settings_dropdown_handlers(SETTINGS_MODEL_DROPDOWN_ID, cx);
         let model_control = dropdown(
             SETTINGS_MODEL_DROPDOWN_ID,
             "Default model",
-            &self.current_model,
+            if custom_current {
+                CURRENT_CUSTOM_MODEL_OPTION
+            } else {
+                &self.current_model
+            },
             model_groups,
             self.settings_listbox(SETTINGS_MODEL_DROPDOWN_ID),
             model_toggle,
@@ -851,13 +872,13 @@ impl Workspace {
             self.settings_row(
                 "desktop-settings-row-model",
                 "Model",
-                "Change it per thread in the composer.",
+                "Change it per thread in the composer. Enter provider/model in model search to use a configured model.",
                 settings_ui::control_column(model_control),
             ),
             self.settings_row(
                 "desktop-settings-row-access-mode",
                 "Access mode",
-                "How much the agent may do without asking. Default asks before shell commands and edits.",
+                "Choose whether the agent may edit files or run commands. Permission support depends on its runtime.",
                 settings_ui::control_column(mode_control),
             ),
             self.settings_row(

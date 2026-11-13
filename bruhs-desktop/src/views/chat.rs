@@ -418,7 +418,7 @@ pub enum ChatViewEvent {
     /// The hero heading / context strip project buttons.
     OpenProjectPicker,
     /// The user picked a model in the popover; the workspace makes it current.
-    SelectModel(&'static str),
+    SelectModel(String),
     /// A turn began: the workspace stamps model + branch on the thread card.
     TurnStarted {
         model_id: String,

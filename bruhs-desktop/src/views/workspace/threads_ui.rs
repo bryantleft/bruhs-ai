@@ -344,7 +344,7 @@ impl Workspace {
                     );
                 }
                 ChatViewEvent::SelectModel(model_id) => {
-                    this.set_current_model(*model_id, cx);
+                    this.set_current_model(model_id.clone(), cx);
                 }
                 ChatViewEvent::RunPrefs {
                     choice,
