@@ -41,6 +41,7 @@ pub mod preview_panel;
 pub mod project_picker_dialog;
 pub mod project_sidebar;
 pub mod provider;
+pub mod reactive_automations;
 mod record_focus;
 pub mod render_pass;
 pub mod right_panel;
