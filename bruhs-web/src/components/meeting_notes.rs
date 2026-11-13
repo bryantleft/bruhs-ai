@@ -77,7 +77,7 @@ pub fn MeetingNotes() -> impl IntoView {
                         <button type="button" class="min-h-11 rounded-grape px-3 py-2 hover:bg-longan-800 disabled:opacity-40"
                             disabled=move || start.get() == 0
                             on:click=move |_| page.set((start.get_untracked() / PAGE_SIZE).saturating_sub(1))>"Previous notes"</button>
-                        <span role="status">{move || format!("{}–{} of {}", start.get() + 1, (start.get() + PAGE_SIZE).min(total.get()), total.get())}</span>
+                        <span role="status">{move || format!("{} to {} of {}", start.get() + 1, (start.get() + PAGE_SIZE).min(total.get()), total.get())}</span>
                         <button type="button" class="min-h-11 rounded-grape px-3 py-2 hover:bg-longan-800 disabled:opacity-40"
                             disabled=move || { start.get() + PAGE_SIZE >= total.get() }
                             on:click=move |_| page.set(start.get_untracked() / PAGE_SIZE + 1)>"Next notes"</button>

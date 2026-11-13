@@ -1,10 +1,9 @@
-//! Composer: the prompt surface with its footer chips (model, access mode,
-//! Plan/Build), the round send/stop action, the approval panel, the context
-//! meter, the project/branch context strip, and the empty-thread hero.
+//! Composer: the prompt surface, compact model/options footer, send/stop action,
+//! approval panel, project context strip, and empty-thread hero.
 //! `rounded-mango`, tone + ring elevation, persimmon only on the primary
 //! action.
 
-use bruhs_models::agent::{provider_for_model_id, AgentProvider};
+use bruhs_models::agent::provider_for_model_id;
 use bruhs_models::num::ToIntSaturating;
 use bruhs_models::PermissionMode;
 use gloo_timers::callback::Interval;
@@ -21,38 +20,35 @@ use crate::components::find_bar::reveal_message;
 use crate::components::mention_editor::MentionEditor;
 use crate::components::model_picker::ModelPicker;
 use crate::components::provider::{provider_logo_src_for_model, PROVIDER_LOGO_CLASS};
-use crate::format::relative_time;
 use crate::format::{context_percentage, context_window_for, format_tokens};
-use crate::stash::stash_preview;
 use crate::state::{
     activate_thread, ActiveThreadId, ActiveView, AppView, BaseBranchSignal, BranchMenuOpen,
-    ChipRetargetGuard, ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal, ComposerChips,
-    EffortMenuOpen, FollowUpSteerSignal, GitStatusSignal, ModelSelectOpen, PendingPermissions,
-    PendingPermissionsSignal, PermissionModeSignal, PermissionRequest, PreviousWorktreeSignal,
-    PromptQueueSignal, PromptStashSignal, QueueHolds, RunChoiceSignal, SetActiveThreadId,
-    SetActiveView, SetMessagesSignal, SetModelSelectOpen, SetPermissionModeSignal,
-    SetProjectPickerOpen, StashMenuOpen, ThreadNotice, ThreadsSignal, Turns, UnreadThreads,
-    UsageInfo, WorkspaceMenuOpen,
+    ChipRetargetGuard, CompactIdleSignal, ComposerChips, FollowUpSteerSignal, GitStatusSignal,
+    ModelSelectOpen, PendingPermissions, PendingPermissionsSignal, PermissionModeSignal,
+    PermissionRequest, PreviousWorktreeSignal, PromptQueueSignal, QueueHolds, RunChoiceSignal,
+    SetActiveThreadId, SetActiveView, SetMessagesSignal, SetModelSelectOpen, SetProjectPickerOpen,
+    ThreadNotice, ThreadsSignal, Turns, UnreadThreads, UsageInfo, WorkspaceMenuOpen,
 };
 use crate::ui::{Icon, Kbd, Menu, MenuAlign, MenuItem, MenuSide, Tooltip};
 use bruhs_models::agent::Role;
 use bruhs_models::logic::attachments::SEND_WAITS;
-use bruhs_models::logic::commands::{COMPACT_UNAVAILABLE, COMPOSER_PLACEHOLDER};
+use bruhs_models::logic::commands::COMPOSER_PLACEHOLDER;
 use bruhs_models::logic::compact::{show_return_chip, CACHE_OAUTH_MS};
 use bruhs_models::logic::composer_text::{
     exceeds_message_limit, exceeds_message_limit_with, paste_name, TextAttachment,
     MESSAGE_LIMIT_HINT,
 };
-use bruhs_models::logic::context_chip::{
-    extra_limit_chars, join_drafts, replace_kind, ChipKind, ContextChip,
-};
+use bruhs_models::logic::context_chip::{extra_limit_chars, replace_kind, ChipKind, ContextChip};
 use bruhs_models::logic::follow_up::{
     action_enabled_for, action_label, action_title, composer_action, composer_after_lost_edit,
     provider_can_steer, ComposerAction, FollowUp,
 };
 use bruhs_models::logic::queue::PromptQueue;
 use bruhs_models::logic::recall::{recall_step, RecallAction, RecallCursor, RecallDirection};
-use bruhs_models::logic::run_place::{WorkspaceChoice, CLAUDE_EFFORTS};
+use bruhs_models::logic::run_place::WorkspaceChoice;
+
+mod options;
+use options::ComposerOptions;
 
 /// The mounted composer publishes the draft Edit from here should keep.
 /// A queued edit cancels first, so the draft from before that edit is the
@@ -132,15 +128,6 @@ pub fn model_label(model_id: &str) -> String {
 pub fn context_usage(usage: &UsageInfo) -> u64 {
     usage.window()
 }
-
-/// Tallest the chips row is on one line (h-7 chips plus p-1); taller means
-/// it wrapped.
-const CHIPS_ONE_ROW_MAX_PX: i32 = 48;
-/// How much wider than where it wrapped the row must get before the
-/// Attach and Stash labels come back.
-const CHIPS_EXPAND_MARGIN_PX: i32 = 8;
-
-const CHIP: &str = "inline-flex h-7 shrink-0 items-center gap-1.5 rounded-grape px-2.5 text-label-sm text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 cursor-pointer";
 
 const QUEUE_HIT: &str = "inline-flex size-6 shrink-0 items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 cursor-pointer";
 
@@ -237,7 +224,6 @@ pub fn Composer(
     let is_streaming = expect_context::<crate::state::IsStreaming>().0;
     let current_model = expect_context::<crate::state::CurrentModel>().0;
     let PermissionModeSignal(permission_mode) = expect_context::<PermissionModeSignal>();
-    let SetPermissionModeSignal(set_permission_mode) = expect_context::<SetPermissionModeSignal>();
     let PendingPermissionsSignal(pending_permissions) =
         expect_context::<PendingPermissionsSignal>();
     // Re-render the panel only when the request being asked about changes,
@@ -400,56 +386,6 @@ pub fn Composer(
         input.set_value("");
     };
     let file_input: NodeRef<leptos::html::Input> = NodeRef::new();
-    // When the chips row would wrap, it drops the Attach and Stash text
-    // (icons and accessible names stay) to stay on one row, and brings it
-    // back once the row is wider than where it wrapped. A ResizeObserver
-    // sees the wrap as a height change; a CSS container query would contain
-    // the menus' fixed click-away layers inside the row.
-    let chips_row: NodeRef<leptos::html::Div> = NodeRef::new();
-    let chips_compact = RwSignal::new(false);
-    let chips_observer = StoredValue::new_local(
-        None::<(
-            web_sys::ResizeObserver,
-            wasm_bindgen::closure::Closure<dyn FnMut()>,
-        )>,
-    );
-    Effect::new(move |_| {
-        let Some(row) = chips_row.get() else {
-            return;
-        };
-        let measured = row.clone();
-        let wrapped_at = std::cell::Cell::new(0);
-        let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
-            let width = measured.client_width();
-            let wraps = measured.client_height() > CHIPS_ONE_ROW_MAX_PX;
-            let compact = chips_compact.get_untracked();
-            if !compact && wraps {
-                wrapped_at.set(width);
-                chips_compact.set(true);
-            } else if compact && width > wrapped_at.get() + CHIPS_EXPAND_MARGIN_PX {
-                // Try the labels again; if they wrap, this fires once more.
-                chips_compact.set(false);
-            }
-        }) as Box<dyn FnMut()>);
-        match web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
-            Ok(observer) => {
-                observer.observe(&row);
-                chips_observer.update_value(|value| {
-                    if let Some((old, _)) = value.replace((observer, callback)) {
-                        old.disconnect();
-                    }
-                });
-            }
-            Err(error) => log::warn!("Composer chips resize observation unavailable: {error:?}"),
-        }
-    });
-    on_cleanup(move || {
-        chips_observer.update_value(|value| {
-            if let Some((observer, _callback)) = value.take() {
-                observer.disconnect();
-            }
-        });
-    });
     let pick_files = move |_| {
         if let Some(input) = file_input.get() {
             input.click();
@@ -527,52 +463,10 @@ pub fn Composer(
             }
         })));
     }
-    let PromptStashSignal(stash) = expect_context::<PromptStashSignal>();
-    let StashMenuOpen(stash_open) = expect_context::<StashMenuOpen>();
-
-    let restore_stash = move |id: String| {
-        let entry = stash.try_update(|s| s.take(&id)).flatten();
-        if let Some(e) = entry {
-            let (next, kept) = join_drafts(
-                &value.get_untracked(),
-                &context_chips.get_untracked(),
-                &e.text,
-                &e.chips,
-                true,
-            );
-            chip_guard.set_value(true);
-            context_chips.set(kept);
-            set_value.set(next);
-            stash_open.set(false);
-            if let Some(el) = web_sys::window()
-                .and_then(|w| w.document())
-                .and_then(|d| d.get_element_by_id("chat-input"))
-            {
-                if let Some(h) = el.dyn_ref::<web_sys::HtmlElement>() {
-                    let _ = h.focus();
-                }
-            }
-        }
-    };
-
-    let mode_open = RwSignal::new(false);
-    let EffortMenuOpen(effort_open) = expect_context::<EffortMenuOpen>();
-    let ClaudeEffortSignal(claude_effort_level) = expect_context::<ClaudeEffortSignal>();
-    let plan_toggle = StoredValue::new(PlanToggle::new(permission_mode.get_untracked()));
-    let is_plan = Signal::derive(move || permission_mode.get() == PermissionMode::Plan);
-    let toggle_plan = move || {
-        let current = permission_mode.get_untracked();
-        let next = plan_toggle
-            .try_update_value(|t| t.toggle(current))
-            .unwrap_or(current);
-        set_permission_mode.set(next);
-    };
-
     let history = expect_context::<crate::thread_history::ThreadHistory>();
     let threads = expect_context::<ThreadsSignal>().0;
     let FollowUpSteerSignal(follow_up_steer) = expect_context::<FollowUpSteerSignal>();
     let CompactIdleSignal(compact_idle) = expect_context::<CompactIdleSignal>();
-    let CompactFullSignal(compact_full) = expect_context::<CompactFullSignal>();
     let now_ms = RwSignal::new(js_sys::Date::now());
     let return_clock = StoredValue::new_local(None::<Interval>);
     return_clock.set_value(Some(Interval::new(30_000, move || {
@@ -582,12 +476,38 @@ pub fn Composer(
         return_clock.set_value(None);
     });
 
+    let return_compact_available = Signal::derive(move || {
+        !is_streaming.get()
+            && show_return_chip(
+                compact_idle.get(),
+                messages
+                    .with(|rows| {
+                        rows.iter()
+                            .rev()
+                            .find_map(|message| message.usage.as_ref().map(context_usage))
+                    })
+                    .unwrap_or(0),
+                active_thread_id
+                    .get()
+                    .and_then(|tid| {
+                        threads.with(|rows| {
+                            rows.iter()
+                                .find(|thread| thread.id == tid)
+                                .map(|thread| (now_ms.get() - thread.updated_at.as_f64()).max(0.0))
+                        })
+                    })
+                    .unwrap_or(0.0),
+                CACHE_OAUTH_MS,
+            )
+            && provider_can_steer(provider_for_model_id(&current_model.get()))
+    });
+
     let placeholder = COMPOSER_PLACEHOLDER;
 
     view! {
         <div class="mx-auto w-full max-w-3xl">
             {hero.then(|| view! {
-                <p class="mb-8 text-center text-h2 text-rambutan-100">
+                <p class="mb-6 text-center text-h2 text-rambutan-100">
                     {move || match project_name.get() {
                         Some(name) => view! {
                             "What should we build in "
@@ -632,7 +552,7 @@ pub fn Composer(
             // No z-index: popovers inside keep their page-level stacking.
             <div
                 data-composer-surface=""
-                class="relative rounded-mango bg-longan-900 inset-ring inset-ring-white/10 transition-[box-shadow] focus-within:inset-ring-persimmon-400/40"
+                class="relative rounded-[16px] bg-longan-900 inset-ring inset-ring-white/10 transition-[box-shadow] focus-within:inset-ring-persimmon-400/40"
                 on:dragover=on_drag_over
                 on:drop=on_drop
             >
@@ -860,264 +780,42 @@ pub fn Composer(
                     <p data-message-limit="" class="px-4 pb-1 text-label-sm text-durian-300">{MESSAGE_LIMIT_HINT}</p>
                 })}
 
-                // Footer: chips left, meter + primary action right.
-                <div class="flex items-center justify-between gap-2 px-3 pb-3 sm:px-4 sm:pb-4">
-                    <div node_ref=chips_row data-composer-chips="" data-compact=move || chips_compact.get().then_some("") class="-m-1 flex min-w-0 flex-1 flex-wrap items-center gap-1 p-1">
-                        <div class="relative shrink-0">
-                            <button
-                                type="button"
-                                class=CHIP
-                                title="Change model (⌘⇧M)"
-                                aria-label="Change model (⌘⇧M)"
-                                aria-haspopup="dialog"
-                                aria-expanded=move || model_select_open.get().to_string()
-                                on:click=move |_| set_model_select_open.update(|v| *v = !*v)
-                            >
-                                <img
-                                    src=move || provider_logo_src_for_model(&current_model.get())
-                                    alt=""
-                                    aria-hidden="true"
-                                    class=PROVIDER_LOGO_CLASS
-                                />
-                                <span class="max-w-[12rem] truncate">{move || model_label(&current_model.get())}</span>
+                <div data-composer-footer="" class="flex min-w-0 items-center justify-between gap-2 px-3 pb-3">
+                    <div data-composer-controls="" class="flex min-w-0 flex-1 items-center gap-1">
+                        <button type="button" class="composer-action bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-grape text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
+                            data-attach-file="" aria-label="Attach file" title="Attach a file" on:click=pick_files>
+                            <Icon name="paperclip" size=14 />
+                        </button>
+                        <input node_ref=file_input type="file" multiple=true class="sr-only" tabindex="-1" aria-hidden="true" on:change=on_file_input />
+                        <div class="relative min-w-0 max-w-[160px] flex-1">
+                            <button type="button" data-model-trigger=""
+                                class="composer-action bruhs-control inline-flex h-8 w-full min-w-0 items-center gap-1.5 rounded-grape px-2 text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
+                                title=move || format!("{} ({})", model_label(&current_model.get()), current_model.get())
+                                aria-label=move || format!("Change model (⌘⇧M), {}", model_label(&current_model.get()))
+                                aria-haspopup="dialog" aria-expanded=move || model_select_open.get().to_string()
+                                on:click=move |_| set_model_select_open.update(|open| *open = !*open)>
+                                <img src=move || provider_logo_src_for_model(&current_model.get()) alt="" aria-hidden="true" class=PROVIDER_LOGO_CLASS />
+                                <span class="min-w-0 flex-1 truncate text-left">{move || {
+                                    let label = model_label(&current_model.get());
+                                    label.strip_prefix("Claude ").unwrap_or(&label).to_string()
+                                }}</span>
                                 <Icon name="chevron-down" size=12 class="text-rambutan-500" />
                             </button>
                             <ModelPicker />
                         </div>
-
-                        <Menu open=mode_open align=MenuAlign::Start side=MenuSide::Top label="Access mode" class="min-w-[18rem]"
-                            trigger=move || view! {
-                                <button
-                                    type="button"
-                                    class=CHIP
-                                    aria-haspopup="menu"
-                                    aria-expanded=move || mode_open.get().to_string()
-                                    title=move || permission_mode.get().chip_title(provider_for_model_id(&current_model.get()))
-                                    on:click=move |_| mode_open.update(|v| *v = !*v)
-                                >
-                                    {move || view! { <Icon name=permission_mode.get().icon() size=14 /> }}
-                                    <span>{move || permission_mode.get().label()}</span>
-                                    <Icon name="chevron-down" size=12 class="text-rambutan-500" />
-                                </button>
-                            }
-                        >
-                            {move || {
-                                let provider = provider_for_model_id(&current_model.get());
-                                [
-                                    PermissionMode::Default,
-                                    PermissionMode::AcceptEdits,
-                                    PermissionMode::BypassPermissions,
-                                ]
-                                .into_iter()
-                                .map(|mode| view! {
-                                <MenuItem
-                                    selected=Signal::derive(move || permission_mode.get() == mode)
-                                    description=mode.description(Some(provider))
-                                    on_select=Callback::new(move |_| {
-                                        set_permission_mode.set(mode);
-                                        plan_toggle.set_value(PlanToggle::new(mode));
-                                        mode_open.set(false);
-                                    })
-                                >
-                                    <Icon name=mode.icon() size=14 class="text-rambutan-400" />
-                                    <span>{mode.label()}</span>
-                                </MenuItem>
-                                })
-                                .collect_view()
-                            }}
-                        </Menu>
-
-                        <button
-                            type="button"
-                            class=move || if is_plan.get() {
-                                format!("{CHIP} bg-longan-800 text-rambutan-100 hover:bg-longan-800")
-                            } else {
-                                CHIP.to_string()
-                            }
-                            aria-pressed=move || is_plan.get().to_string()
-                            title=move || if is_plan.get() {
-                                "Plan mode — click to return to build mode"
-                            } else {
-                                "Build mode — click to enter plan mode"
-                            }
-                            on:click=move |_| toggle_plan()
-                        >
-                            {move || view! { <Icon name=if is_plan.get() { "clipboard-list" } else { "bot" } size=14 /> }}
-                            <span>{move || if is_plan.get() { "Plan" } else { "Build" }}</span>
-                        </button>
-
-                        {move || {
-                            (provider_for_model_id(&current_model.get()) == AgentProvider::Claude).then(|| {
-                                let effort = claude_effort_level;
-                                view! {
-                                    <Menu open=effort_open align=MenuAlign::Start side=MenuSide::Top label="Effort" class="min-w-[12rem]"
-                                        trigger=move || view! {
-                                            <button
-                                                type="button"
-                                                class=CHIP
-                                                data-effort-chip=""
-                                                data-effort=move || effort.get().unwrap_or_else(|| "default".into())
-                                                aria-haspopup="menu"
-                                                aria-expanded=move || effort_open.get().to_string()
-                                                title="Effort (⌘⇧E)"
-                                                on:click=move |_| effort_open.update(|open| *open = !*open)
-                                            >
-                                                <Icon name="zap" size=14 />
-                                                <span>{move || effort.get().unwrap_or_else(|| "Effort".into())}</span>
-                                                <Icon name="chevron-down" size=12 class="text-rambutan-500" />
-                                            </button>
-                                        }
-                                    >
-                                        <MenuItem
-                                            selected=Signal::derive(move || effort.get().is_none())
-                                            on_select=Callback::new(move |_| {
-                                                effort.set(None);
-                                                effort_open.set(false);
-                                            })
-                                        >
-                                            <span>"Default"</span>
-                                        </MenuItem>
-                                        {CLAUDE_EFFORTS.into_iter().map(|level| {
-                                            let label = level.to_string();
-                                            let pick = label.clone();
-                                            view! {
-                                                <MenuItem
-                                                    selected=Signal::derive(move || effort.get().as_deref() == Some(level))
-                                                    on_select=Callback::new(move |_| {
-                                                        effort.set(Some(pick.clone()));
-                                                        effort_open.set(false);
-                                                    })
-                                                >
-                                                    <span>{label}</span>
-                                                </MenuItem>
-                                            }
-                                        }).collect_view()}
-                                    </Menu>
-                                }
-                            })
+                        <ComposerOptions value=value set_value=set_value on_slash=on_slash last_usage=last_usage return_compact_available=return_compact_available />
+                        {move || match permission_mode.get() {
+                            PermissionMode::Default => None,
+                            mode => Some(view! {
+                                <span data-composer-access="" class=if mode == PermissionMode::BypassPermissions {
+                                    "shrink-0 rounded-seed bg-lychee-500/10 px-1.5 py-1 text-label-sm text-lychee-300"
+                                } else {
+                                    "shrink-0 rounded-seed bg-longan-800/60 px-1.5 py-1 text-label-sm text-rambutan-300"
+                                }>{if mode == PermissionMode::Plan { "Plan" } else { mode.label() }}</span>
+                            }),
                         }}
-
-                        <button
-                            type="button"
-                            class=CHIP
-                            data-attach-file=""
-                            aria-label="Attach file"
-                            title="Attach a file"
-                            on:click=pick_files
-                        >
-                            <Icon name="paperclip" size=14 />
-                            <span data-chip-label="secondary">"Attach"</span>
-                        </button>
-                        <input
-                            node_ref=file_input
-                            type="file"
-                            multiple=true
-                            class="sr-only"
-                            tabindex="-1"
-                            aria-hidden="true"
-                            on:change=on_file_input
-                        />
-
-                        // Prompt stash (⌘S): parked drafts.
-                        <Menu open=stash_open align=MenuAlign::Start side=MenuSide::Top label="Prompt stash" class="min-w-[20rem] max-h-80 overflow-y-auto"
-                            trigger=move || view! {
-                                <button
-                                    type="button"
-                                    class=CHIP
-                                    data-stash-chip=""
-                                    aria-label=move || match stash.with(|s| s.len()) {
-                                        0 => "Prompt stash".to_string(),
-                                        n => format!("Prompt stash, {n} saved"),
-                                    }
-                                    aria-haspopup="menu"
-                                    aria-expanded=move || stash_open.get().to_string()
-                                    title="Prompt stash (⌘S stashes the draft)"
-                                    on:click=move |_| stash_open.update(|v| *v = !*v)
-                                >
-                                    <Icon name="archive" size=14 />
-                                    <span data-chip-label="secondary">"Stash"</span>
-                                    {move || {
-                                        let n = stash.with(|s| s.len());
-                                        (n > 0).then(|| view! {
-                                            <span data-stash-count=n class="rounded-orb bg-blueberry-500/20 px-1.5 text-label-sm tabular-nums text-blueberry-300">{n}</span>
-                                        })
-                                    }}
-                                </button>
-                            }
-                        >
-                            {move || {
-                                let entries = stash.with(|s| s.entries.clone());
-                                if entries.is_empty() {
-                                    return view! {
-                                        <p class="px-3 py-2 text-label-sm text-rambutan-500">"No stashed prompts. ⌘S stashes the current draft."</p>
-                                    }.into_any();
-                                }
-                                let now = js_sys::Date::now();
-                                view! {
-                                    <div class="flex flex-col gap-px p-1" role="list">
-                                        {entries.into_iter().map(|e| {
-                                            let id_restore = e.id.clone();
-                                            let id_delete = e.id.clone();
-                                            let preview = stash_preview(&e.text, 80);
-                                            let when = relative_time(e.at_ms, now);
-                                            let full = e.text;
-                                            view! {
-                                                <div role="listitem" class="flex items-center gap-1">
-                                                    <button
-                                                        type="button"
-                                                        data-stash-entry=""
-                                                        class="min-w-0 flex-1 rounded-grape px-2 py-1.5 text-left transition-colors hover:bg-longan-800/60 cursor-pointer"
-                                                        title=full
-                                                        on:click=move |_| restore_stash(id_restore.clone())
-                                                    >
-                                                        <span class="block truncate text-label-sm text-rambutan-200">{preview}</span>
-                                                        <span class="block text-label-sm text-rambutan-500">{when}</span>
-                                                    </button>
-                                                    <button
-                                                        type="button"
-                                                        aria-label="Delete stashed prompt"
-                                                        class="shrink-0 rounded-seed p-1 text-rambutan-500 transition-colors hover:text-lychee-300 cursor-pointer"
-                                                        on:click=move |ev| {
-                                                            ev.stop_propagation();
-                                                            stash.update(|s| { s.remove(&id_delete); });
-                                                        }
-                                                    >
-                                                        <Icon name="x" size=12 />
-                                                    </button>
-                                                </div>
-                                            }
-                                        }).collect_view()}
-                                    </div>
-                                }.into_any()
-                            }}
-                        </Menu>
                     </div>
-
-                    <div class="flex shrink-0 items-center gap-2">
-                        {move || last_usage.get().map(|(usage, model)| {
-                            let claude = provider_can_steer(provider_for_model_id(&current_model.get()));
-                            let title = if claude {
-                                "Summarize this Claude thread"
-                            } else {
-                                COMPACT_UNAVAILABLE
-                            };
-                            let slash = on_slash;
-                            view! {
-                            <div class="flex items-center gap-1">
-                                <ContextMeter usage=usage model=model />
-                                <button
-                                    type="button"
-                                    data-compact-context=""
-                                    title=title
-                                    aria-label="Compact"
-                                    class="inline-flex h-6 items-center rounded-seed px-2 text-label-sm text-rambutan-400 transition-colors hover:bg-longan-800/60 hover:text-rambutan-200 cursor-pointer"
-                                    on:click=move |_| slash.run("/compact")
-                                >
-                                    "Compact"
-                                </button>
-                            </div>
-                            }
-                        })}
+                    <div data-composer-submit="" class="flex shrink-0 items-center gap-1">
                         {move || {
                             let streaming = is_streaming.get();
                             let draft = value.get();
@@ -1155,30 +853,6 @@ pub fn Composer(
                                 has_queued,
                                 follow,
                             );
-                            let return_chip = !streaming
-                                && show_return_chip(
-                                    compact_idle.get(),
-                                    messages.with(|rows| {
-                                        rows.iter().rev().find_map(|message| {
-                                            message.usage.as_ref().map(context_usage)
-                                        })
-                                    }).unwrap_or(0),
-                                    active_thread_id
-                                        .get()
-                                        .and_then(|tid| {
-                                            threads.with(|rows| {
-                                                rows.iter().find(|thread| thread.id == tid).map(
-                                                    |thread| {
-                                                        (now_ms.get() - thread.updated_at.as_f64())
-                                                            .max(0.0)
-                                                    },
-                                                )
-                                            })
-                                        })
-                                        .unwrap_or(0.0),
-                                    CACHE_OAUTH_MS,
-                                )
-                                && provider_can_steer(provider_for_model_id(&current_model.get()));
                             let history_reason =
                                 active_thread_id.with(|id| history.reason(id.as_deref()));
                             let history_blocks = history_reason.is_some()
@@ -1203,12 +877,12 @@ pub fn Composer(
                             };
                             let show_stop =
                                 streaming && !matches!(action, ComposerAction::Interrupt);
-                            let class = match action {
-                                ComposerAction::Send => "inline-flex size-9 items-center justify-center rounded-orb bg-persimmon-500 text-longan-950 transition-[background-color,opacity] hover:bg-persimmon-400 disabled:opacity-30 disabled:hover:bg-persimmon-500 disabled:cursor-not-allowed sm:size-8 cursor-pointer",
-                                ComposerAction::Interrupt => "inline-flex h-8 items-center gap-1.5 rounded-orb bg-lychee-500 px-3 text-label-sm text-lychee-50 transition-colors hover:bg-lychee-400 cursor-pointer",
-                                ComposerAction::SteerUnavailable => "inline-flex h-8 items-center rounded-orb bg-longan-800 px-3 text-label-sm text-rambutan-400 opacity-40 cursor-not-allowed",
-                                _ => "inline-flex h-8 items-center rounded-orb bg-persimmon-500 px-3 text-label-sm text-longan-950 transition-[background-color,opacity] hover:bg-persimmon-400 disabled:opacity-30 disabled:cursor-not-allowed cursor-pointer",
+                            let tone = match action {
+                                ComposerAction::Interrupt => "bg-lychee-500 text-lychee-50 hover:bg-lychee-400",
+                                ComposerAction::SteerUnavailable => "bg-longan-800 text-rambutan-400 opacity-40 cursor-not-allowed",
+                                _ => "bg-persimmon-500 text-longan-950 hover:bg-persimmon-400 disabled:opacity-30 disabled:hover:bg-persimmon-500 disabled:cursor-not-allowed",
                             };
+                            let class = format!("composer-action bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-orb transition-colors {tone}");
                             let aria = if matches!(action, ComposerAction::Send | ComposerAction::Queue) {
                                 format!("{label} message")
                             } else {
@@ -1219,35 +893,13 @@ pub fn Composer(
                             let stop_square = on_stop;
                             let stop_primary = on_stop;
                             let label_attr = label.to_string();
-                            let full = compact_full.get();
-                            let chip_label = if full { "Full" } else { "Compact" };
-                            let chip_title = if full {
-                                "Send the full draft"
-                            } else {
-                                "Summarize this thread, then send the draft"
-                            };
                             view! {
-                                {return_chip.then(|| view! {
-                                    <button
-                                        type="button"
-                                        data-return-compact=chip_label
-                                        title=chip_title
-                                        aria-label=chip_title
-                                        class="inline-flex h-6 items-center rounded-seed px-2 text-label-sm text-rambutan-400 transition-colors hover:bg-longan-800/60 hover:text-rambutan-200 cursor-pointer"
-                                        on:click=move |ev: web_sys::MouseEvent| {
-                                            ev.stop_propagation();
-                                            compact_full.update(|full| *full = !*full);
-                                        }
-                                    >
-                                        {chip_label}
-                                    </button>
-                                })}
                                 {show_stop.then(|| view! {
                                     <button
                                         type="button"
                                         aria-label="Stop generation"
                                         title="Stop generation"
-                                        class="inline-flex size-9 items-center justify-center rounded-orb bg-lychee-500 text-lychee-50 transition-colors hover:bg-lychee-400 sm:size-8 cursor-pointer"
+                                        class="composer-action bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-orb bg-lychee-500 text-lychee-50 hover:bg-lychee-400"
                                         on:click=move |_| stop_square.run(())
                                     >
                                         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -1274,15 +926,14 @@ pub fn Composer(
                                         }
                                     }
                                 >
-                                    {match action {
-                                        ComposerAction::Send => view! { <Icon name="arrow-up" size=14 /> }.into_any(),
-                                        ComposerAction::Interrupt => view! {
+                                    {if matches!(action, ComposerAction::Interrupt) {
+                                        view! {
                                             <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
                                                 <rect x="2" y="2" width="8" height="8" rx="1.5" fill="currentColor" />
                                             </svg>
-                                            <span>{label}</span>
-                                        }.into_any(),
-                                        _ => view! { <span>{label}</span> }.into_any(),
+                                        }.into_any()
+                                    } else {
+                                        view! { <Icon name="arrow-up" size=14 /> }.into_any()
                                     }}
                                 </button>
                             }
@@ -1299,9 +950,7 @@ pub fn Composer(
             {hero.then(|| view! {
                 <p class="mt-4 flex items-center justify-center gap-1.5 text-label-sm text-rambutan-500">
                     <Kbd>"/"</Kbd><span>"commands"</span>
-                    <span aria-hidden="true">"·"</span>
                     <Kbd>"@"</Kbd><span>"files"</span>
-                    <span aria-hidden="true">"·"</span>
                     <Kbd>"⌘K"</Kbd><span>"palette"</span>
                 </p>
             })}
@@ -1407,7 +1056,7 @@ fn ContextMeter(usage: UsageInfo, model: String) -> impl IntoView {
     let offset = circumference * (1.0 - pct / 100.0);
     let color = if pct > 90.0 { "#f06b65" } else { "#c3afa1" };
     let tip = format!(
-        "Context window · {}% · {} / {}",
+        "Context window, {}%, {} of {}",
         pct.round().to_u64_saturating(),
         format_tokens(used),
         format_tokens(window)
@@ -1638,7 +1287,7 @@ fn ContextStrip(
                                 <span class="truncate">{b}</span>
                                 {move || (show_dirty && dirty_count.get() > 0).then(|| view! {
                                     <span class="rounded-seed bg-durian-400/15 px-1 tabular-nums text-durian-300" title="Uncommitted changes">
-                                        "•"{dirty_count.get()}
+                                        {dirty_count.get()}" changes"
                                     </span>
                                 })}
                                 <Icon name="chevron-down" size=12 class="shrink-0" />

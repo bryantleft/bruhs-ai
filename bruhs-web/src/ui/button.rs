@@ -30,13 +30,12 @@ pub fn button_variant_class(v: ButtonVariant) -> &'static str {
 }
 
 pub fn button_size_class(s: ButtonSize) -> &'static str {
-    // `min-w-6`/`min-w-10` on icon sizes enforces a minimum touch target of
-    // 24×24 (small) / 40×40 (default), matching WCAG 2.5.8 AA requirements.
+    // Desktop controls use compact targets; coarse-pointer overrides retain 44px targets.
     match s {
-        ButtonSize::Default => "px-3 py-2 text-button rounded-grape min-h-10",
-        ButtonSize::Small => "px-2.5 py-1.5 text-button-sm rounded-grape min-h-8",
-        ButtonSize::IconDefault => "p-2 rounded-grape min-w-10 min-h-10",
-        ButtonSize::IconSmall => "p-1.5 rounded-grape min-w-6 min-h-6",
+        ButtonSize::Default => "px-2.5 py-[5px] text-button rounded-grape min-h-8",
+        ButtonSize::Small => "px-2 py-1 text-button-sm rounded-grape min-h-7",
+        ButtonSize::IconDefault => "p-2 rounded-grape min-w-8 min-h-8",
+        ButtonSize::IconSmall => "p-1.5 rounded-grape min-w-7 min-h-7",
     }
 }
 
@@ -45,7 +44,7 @@ pub fn button_size_class(s: ButtonSize) -> &'static str {
 /// the underlying click event with state captures that can't be expressed via `Callback`).
 pub fn button_class(variant: ButtonVariant, size: ButtonSize, extra: &str) -> String {
     format!(
-        "inline-flex items-center justify-center gap-1.5 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-persimmon-400 disabled:opacity-60 disabled:cursor-not-allowed {} {} {}",
+        "bruhs-control inline-flex items-center justify-center gap-1.5 transition focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-persimmon-400 disabled:opacity-60 disabled:cursor-not-allowed {} {} {}",
         button_variant_class(variant),
         button_size_class(size),
         extra,

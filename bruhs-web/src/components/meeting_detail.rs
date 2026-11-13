@@ -135,7 +135,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                         if groups.is_empty() {
                             view! {
                                 <div class="rounded-grape inset-ring inset-ring-longan-800 bg-longan-900/40 px-3 py-2 text-body-sm text-rambutan-500">
-                                    {move || if transcript_status.get().loading { "Loading transcript…" } else if transcript_status.get().warning.is_some() { "Transcript is unavailable. Use Retry loading transcript to try again." } else { "No transcript yet — segments appear after Stop while Whisper processes the audio." }}
+                                    {move || if transcript_status.get().loading { "Loading transcript…" } else if transcript_status.get().warning.is_some() { "Transcript is unavailable. Use Retry loading transcript to try again." } else { "No transcript yet. Segments appear after Stop while Whisper processes the audio." }}
                                 </div>
                             }.into_any()
                         } else {
@@ -255,8 +255,8 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                                                         let due = a.due_hint.clone();
                                                         view! {
                                                             <li class="text-label text-rambutan-300">
-                                                                "• " {a.text}
-                                                                {due.map(|h| view! { <span class="text-rambutan-500">" — " {h}</span> })}
+                                                                {a.text}
+                                                                {due.map(|h| view! { <span class="text-rambutan-500">", " {h}</span> })}
                                                             </li>
                                                         }
                                                     }).collect_view()}
@@ -270,7 +270,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                                                 <div class="text-label text-rambutan-500 mb-0.5">"Decisions"</div>
                                                 <ul role="list" class="space-y-0.5">
                                                     {s.decisions.into_iter().map(|d| {
-                                                        view! { <li class="text-label text-rambutan-300">"• " {d}</li> }
+                                                        view! { <li class="text-label text-rambutan-300">{d}</li> }
                                                     }).collect_view()}
                                                 </ul>
                                             </div>
@@ -286,7 +286,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                                                             <div class="text-label text-rambutan-200">{t.title}</div>
                                                             <ul role="list" class="ml-2 space-y-0.5">
                                                                 {t.bullets.into_iter().map(|b| {
-                                                                    view! { <li class="text-label-sm text-rambutan-400">"– " {b}</li> }
+                                                                    view! { <li class="text-label-sm text-rambutan-400">{b}</li> }
                                                                 }).collect_view()}
                                                             </ul>
                                                         </div>
@@ -332,10 +332,10 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                                     disabled=reextract_disabled
                                     on:click=on_reextract
                                 >
-                                    "Re-extract observations"
+                                    "Extract observations again"
                                 </button>
                                 <Show when=move || !personality.get().extract_observations>
-                                    <p class="text-label-sm text-rambutan-400">"Enable observation extraction in Settings to re-extract."</p>
+                                    <p class="text-label-sm text-rambutan-400">"Enable observation extraction in Settings to extract again."</p>
                                 </Show>
                             </div>
                         }.into_any()

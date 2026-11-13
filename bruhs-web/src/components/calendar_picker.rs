@@ -49,7 +49,7 @@ pub fn CalendarPicker() -> impl IntoView {
                 let list = calendars.get();
                 if list.is_empty() {
                     view! {
-                        <div class="text-label text-rambutan-500 italic">"No calendars yet — wait for the next sync."</div>
+                        <div class="text-label text-rambutan-500 italic">"No calendars yet. Wait for the next sync."</div>
                     }.into_any()
                 } else {
                     view! {

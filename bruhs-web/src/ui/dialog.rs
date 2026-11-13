@@ -34,7 +34,7 @@ pub fn Dialog(
     children: ChildrenFn,
 ) -> impl IntoView {
     let max_w = max_width.unwrap_or_else(|| "max-w-xl".to_string());
-    let pt = padding_top.unwrap_or_else(|| "8rem".to_string());
+    let pt = padding_top.unwrap_or_else(|| "5rem".to_string());
 
     // Keep the warm modal scrim without filtering the entire workspace on every
     // keystroke. Full-screen backdrop blur exceeded the command paint budget.
@@ -204,7 +204,7 @@ fn DialogSurface(
 /// This is a small, pragmatic version of what libraries like `focus-trap`
 /// provide — covers buttons, links, inputs, textareas, and `tabindex >= 0`
 /// elements, and filters out ones that are disabled or hidden.
-fn focusable_descendants(root: &HtmlElement) -> Vec<HtmlElement> {
+pub(crate) fn focusable_descendants(root: &HtmlElement) -> Vec<HtmlElement> {
     const SELECTOR: &str = "a[href], button:not([disabled]), input:not([disabled]), \
          select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex=\"-1\"])";
     let element: &web_sys::Element = root.as_ref();

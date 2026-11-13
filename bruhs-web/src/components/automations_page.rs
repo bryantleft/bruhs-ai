@@ -176,7 +176,7 @@ pub fn AutomationsPage() -> impl IntoView {
                                                 <div class="min-w-0">
                                                     <h3 class="text-label text-rambutan-200">{title}</h3>
                                                     <p class="mt-1 text-body-sm text-rambutan-400">{suggestion.explanation.clone()}</p>
-                                                    <p class="mt-2 text-label-sm text-blueberry-300">{format!("Evidence · {}", suggestion.evidence)}</p>
+                                                    <p class="mt-2 text-label-sm text-blueberry-300">{format!("Evidence: {}", suggestion.evidence)}</p>
                                                 </div>
                                                 <button type="button" class="shrink-0 text-label-sm text-rambutan-500 hover:text-rambutan-200 cursor-pointer" aria-label="Dismiss suggestion" on:click=move |_| automation.update(|state| { let _ = state.dismiss_suggestion(&id, crate::clock::now_ms()); })>"Dismiss"</button>
                                             </div>
@@ -194,7 +194,7 @@ pub fn AutomationsPage() -> impl IntoView {
                             <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="dry-run-title">
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
-                                        <h2 id="dry-run-title" class="text-h4 text-rambutan-100">"Dry-run preview"</h2>
+                                        <h2 id="dry-run-title" class="text-h4 text-rambutan-100">"Preview changes"</h2>
                                         <p class="text-body-sm text-rambutan-500">"Nothing below has run yet."</p>
                                     </div>
                                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(recheck_preview)>"Recheck grants"</Button>
@@ -306,7 +306,7 @@ pub fn AutomationsPage() -> impl IntoView {
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50">
                             <p class="text-label-sm uppercase tracking-wide text-rambutan-400">"Safety contract"</p>
                             <p class="mt-2 text-body-sm text-rambutan-300">"Writes never inherit Read access. Every workflow requires a dry run. Undo reverts completed steps, including a partial run, only if their records are unchanged."</p>
-                            <p class="mt-2 text-label-sm text-pandan-300">{move || automation.with(|state| { let n = state.workflows.len(); format!("{} typed tools · {n} {}", bruhs_models::agent_tool_definitions().len(), if n == 1 { "workflow" } else { "workflows" }) })}</p>
+                            <p class="mt-2 text-label-sm text-pandan-300">{move || automation.with(|state| { let n = state.workflows.len(); format!("{} typed tools, {n} {}", bruhs_models::agent_tool_definitions().len(), if n == 1 { "workflow" } else { "workflows" }) })}</p>
                             <p class="mt-1 text-label-sm text-rambutan-400">{move || {
                                 let count = meeting_notes.with(Vec::len) + threads.with(Vec::len) + work_items.with(Vec::len) + events.with(Vec::len) + captures.with(Vec::len) + documents.with(Vec::len) + conversations.with(Vec::len) + life.with(|life| life.finance.transactions.len() + life.health.workouts.len());
                                 format!("{count} local {} in connected workflow domains", if count == 1 { "record" } else { "records" })

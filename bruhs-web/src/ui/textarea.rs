@@ -14,7 +14,7 @@ pub fn Textarea(
     #[prop(optional)] autofocus: bool,
 ) -> impl IntoView {
     let final_class = format!(
-        "resize-none block w-full rounded-grape bg-white/5 px-3 py-2 text-body text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 disabled:opacity-60 disabled:cursor-not-allowed {class}"
+        "resize-none block w-full bruhs-control rounded-grape bg-white/5 px-2.5 py-1.5 text-body text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 disabled:opacity-60 disabled:cursor-not-allowed {class}"
     );
 
     let r = rows.unwrap_or(3);

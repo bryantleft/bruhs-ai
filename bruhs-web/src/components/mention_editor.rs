@@ -35,6 +35,7 @@ use crate::state::{
     ActiveThreadId, AgentMessage, AppView, ChipRetargetGuard, ComposerChips, ComposerDraft,
     SetActiveView, SetModelSelectOpen, Thread, ThreadsSignal,
 };
+use crate::ui::Icon;
 
 mod autosize;
 mod caret;
@@ -215,7 +216,7 @@ pub fn grow_height(scroll_height: i32, min: i32, max: i32) -> (i32, bool) {
 }
 
 /// Default auto-grow bounds.
-pub const EDITOR_MIN_HEIGHT_PX: i32 = 70;
+pub const EDITOR_MIN_HEIGHT_PX: i32 = 52;
 pub const EDITOR_MAX_HEIGHT_PX: i32 = 200;
 
 #[component]
@@ -269,9 +270,9 @@ pub fn MentionEditor(
         if chrome {
             "resize-none block w-full rounded-grape bg-white/5 px-3 py-2 text-label leading-[1.45] text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 disabled:opacity-60 disabled:cursor-not-allowed".to_string()
         } else if value.get().is_empty() {
-            "block w-full resize-none bg-transparent px-4 pt-4 pb-1 text-body-sm leading-relaxed text-rambutan-100 placeholder:text-rambutan-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed".to_string()
+            "block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-body leading-relaxed text-rambutan-100 placeholder:text-rambutan-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed".to_string()
         } else {
-            "block w-full resize-none bg-transparent px-4 pt-4 pb-1 text-body-sm leading-relaxed text-transparent caret-rambutan-100 placeholder:text-rambutan-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed".to_string()
+            "block w-full resize-none bg-transparent px-3 pt-2.5 pb-1 text-body leading-relaxed text-transparent caret-rambutan-100 placeholder:text-rambutan-500 focus:outline-none disabled:opacity-60 disabled:cursor-not-allowed".to_string()
         }
     };
 
@@ -418,7 +419,7 @@ pub fn MentionEditor(
                 })
                 .collect::<Vec<_>>();
             rows.extend(file_results.get().into_iter().map(|file| {
-                let icon = if file.is_dir { "▸" } else { "·" };
+                let icon = if file.is_dir { "folder" } else { "file" };
                 PickRow {
                     label: file.name,
                     sub: file.path.clone(),
@@ -433,7 +434,7 @@ pub fn MentionEditor(
             .into_iter()
             .map(|pull| {
                 let label = format!("#{}", pull.number);
-                let sub = format!("{} · {}", pull.state, pull.title);
+                let sub = format!("{}: {}", pull.state, pull.title);
                 PickRow {
                     label,
                     sub,
@@ -954,7 +955,7 @@ pub fn MentionEditor(
                     node_ref=overlay_ref
                     aria-hidden="true"
                     data-composer-overlay=""
-                    class="pointer-events-none absolute inset-0 z-20 overflow-hidden whitespace-pre-wrap px-4 pt-4 pb-1 text-body-sm leading-relaxed text-rambutan-100"
+                    class="pointer-events-none absolute inset-0 z-20 overflow-hidden whitespace-pre-wrap px-3 pt-2.5 pb-1 text-body leading-relaxed text-rambutan-100"
                     inner_html=move || styled.get()
                     on:click=move |ev: web_sys::MouseEvent| {
                         let Some(target) = ev
@@ -1059,8 +1060,12 @@ pub fn MentionEditor(
                                     }
                                 )
                             >
-                                {(!icon.is_empty()).then(|| view! {
-                                    <span class="w-3 text-center text-rambutan-500">{icon}</span>
+                                {(!icon.is_empty()).then(|| {
+                                    if matches!(icon, "file" | "folder") {
+                                        view! { <Icon name=icon size=12 class="text-rambutan-500" /> }.into_any()
+                                    } else {
+                                        view! { <span class="w-3 text-center text-rambutan-500">{icon}</span> }.into_any()
+                                    }
                                 })}
                                 <span class="shrink-0 truncate font-medium">{label}</span>
                                 <span class="min-w-0 flex-1 truncate text-label-sm text-rambutan-500">{sub}</span>

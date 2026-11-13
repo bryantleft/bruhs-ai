@@ -52,13 +52,13 @@ pub fn AutoRecordSettingsPanel() -> impl IntoView {
 
     view! {
         <SettingsRow
-            title="Auto-record calendar meetings"
+            title="Auto record calendar meetings"
             description="Start recording when a Google Calendar event begins. Needs the bruhs-capture daemon running and a calendar connected."
         >
             <Switch
                 checked=Signal::derive(move || settings.get().enabled)
                 on_change=on_toggle
-                label="Auto-record calendar meetings"
+                label="Auto record calendar meetings"
             />
         </SettingsRow>
         <SettingsRow
@@ -121,7 +121,7 @@ pub fn AutoRecordSettingsPanel() -> impl IntoView {
             </p>
         </SettingsRowBody>
         <SettingsRow
-            title="Always-skip events"
+            title="Always skip events"
             description="Events you told the prompt to never record."
         >
             <span class="text-label-sm tabular-nums text-rambutan-500">

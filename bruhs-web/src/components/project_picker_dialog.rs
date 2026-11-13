@@ -281,7 +281,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
 
             // ── Footer ──────────────────────────────────────────────────────
             <div class="flex items-center justify-between border-t border-longan-800/50 px-4 py-2.5 text-label text-rambutan-300">
-                <span>"click to browse, double-click to select"</span>
+                <span>"Click to browse, double click to select"</span>
                 <button
                     type="button"
                     on:click=move |_| close()

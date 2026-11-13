@@ -139,7 +139,7 @@ fn InboxLibrary() -> impl IntoView {
 
     view! {
         <div class="flex h-full flex-col bg-longan-950 text-rambutan-300">
-            <crate::ui::PageHeader title="Inbox" subtitle="Email, Slack, Discord, iMessage and X, triaged locally.">
+            <crate::ui::PageHeader title="Inbox" subtitle="Imported conversations and local reply drafts.">
                 <crate::ui::Button size=crate::ui::ButtonSize::Small on_click=Callback::new(move |_| import_open.set(true))>
                     "Import conversation"
                 </crate::ui::Button>
@@ -286,7 +286,7 @@ fn ConversationDetail(conversation_id: String) -> impl IntoView {
                     <div class="flex h-full flex-col overflow-hidden bg-longan-950 text-rambutan-300">
                         <header class="flex flex-wrap items-center gap-2 border-b border-longan-800 px-3 py-2.5 sm:px-5">
                             <button type="button" aria-label="Back to Inbox" class="rounded-seed px-2 py-1.5 text-label text-rambutan-400 hover:bg-longan-800 cursor-pointer" on:click=move |_| set_active_view.set(AppView::Inbox)>"← Inbox"</button>
-                            <div class="min-w-0 flex-1"><h1 class="truncate text-h4 text-rambutan-100">{conversation.subject.clone()}</h1><p class="truncate text-label-sm text-rambutan-500">{format!("{} · {}", conversation.source.label(), conversation.participants.iter().map(|item| item.display_name.as_str()).collect::<Vec<_>>().join(", "))}</p></div>
+                            <div class="min-w-0 flex-1"><h1 class="truncate text-h4 text-rambutan-100">{conversation.subject.clone()}</h1><p class="truncate text-label-sm text-rambutan-500">{format!("{}, {}", conversation.source.label(), conversation.participants.iter().map(|item| item.display_name.as_str()).collect::<Vec<_>>().join(", "))}</p></div>
                             <div class="flex flex-wrap gap-1">
                                 <ActionButton label=if unread { "Mark read" } else { "Mark unread" } on_click=Callback::new(move |_| update_conversation(set_conversations, &id.get_value(), |item| item.mark_read(unread))) />
                                 <ActionButton label=if snoozed { "Unsnooze" } else { "Tomorrow" } on_click=Callback::new(move |_| update_conversation(set_conversations, &id.get_value(), |item| item.snooze_until(if snoozed { None } else { Some(crate::clock::now_ms() + 86_400_000) }))) />
@@ -305,7 +305,7 @@ fn ConversationDetail(conversation_id: String) -> impl IntoView {
                             </div>
                         </header>
                         <div class="flex items-center justify-between gap-3 border-b border-longan-800/70 px-3 py-2 sm:px-5">
-                            <p class="text-label-sm text-rambutan-500">"Link this conversation to a person for relationship follow-ups."</p>
+                            <p class="text-label-sm text-rambutan-500">"Link this conversation to a person for relationship follow ups."</p>
                             <Dropdown
                                 options=Signal::derive(move || std::iter::once(DropdownOption::new("", "Unlinked")).chain(people.get().into_iter().map(|person| DropdownOption::new(person.id, person.display_name))).collect())
                                 value=Signal::derive(move || conversations.with(|items| items.iter().find(|item| item.id == id.get_value()).and_then(|item| item.participants.first().and_then(|participant| participant.person_id.clone()))).unwrap_or_default())
@@ -319,7 +319,7 @@ fn ConversationDetail(conversation_id: String) -> impl IntoView {
                             view! { <article class=move || if outgoing { "ml-auto max-w-[88%] rounded-grape rounded-br-seed bg-persimmon-500/12 px-3 py-2.5 inset-ring inset-ring-persimmon-500/20" } else { "mr-auto max-w-[88%] rounded-grape rounded-bl-seed bg-longan-900 px-3 py-2.5 inset-ring inset-ring-longan-800" }><p class="text-label-sm text-rambutan-500">{message.sender_name}</p><p class="mt-1 whitespace-pre-wrap text-body text-rambutan-200">{message.body}</p></article> }
                         }).collect_view()}</div></div>
                         <form class="border-t border-longan-800 bg-longan-950 px-3 py-3 sm:px-5" on:submit=move |event| { event.prevent_default(); send(); }>
-                            <div class="mx-auto max-w-3xl space-y-2"><Textarea id="inbox-reply".to_string() value=Signal::derive(move || draft.get()) on_input=Callback::new(move |value| draft.set(value)) rows=3 placeholder="Write a reply…".to_string() on_keydown=Callback::new(move |event: web_sys::KeyboardEvent| { if (event.meta_key() || event.ctrl_key()) && event.key() == "Enter" { event.prevent_default(); send(); } }) /><div class="flex items-center justify-between gap-3"><p class="text-label-sm text-rambutan-400">"⌘↵ log reply · drafts stay local"</p><div class="flex gap-2"><button type="button" class="rounded-grape px-3 py-2 text-label text-rambutan-300 inset-ring inset-ring-longan-700 hover:bg-longan-800 cursor-pointer" on:click=move |_| save_draft()>"Save draft"</button><button type="submit" disabled=move || draft.get().trim().is_empty() class="rounded-grape bg-persimmon-500 px-3 py-2 text-label text-longan-950 hover:bg-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer">"Log reply"</button></div></div></div>
+                            <div class="mx-auto max-w-3xl space-y-2"><Textarea id="inbox-reply".to_string() value=Signal::derive(move || draft.get()) on_input=Callback::new(move |value| draft.set(value)) rows=3 placeholder="Write a reply…".to_string() on_keydown=Callback::new(move |event: web_sys::KeyboardEvent| { if (event.meta_key() || event.ctrl_key()) && event.key() == "Enter" { event.prevent_default(); send(); } }) /><div class="flex items-center justify-between gap-3"><p class="text-label-sm text-rambutan-400">"⌘↵ log reply, drafts stay local"</p><div class="flex gap-2"><button type="button" class="rounded-grape px-3 py-2 text-label text-rambutan-300 inset-ring inset-ring-longan-700 hover:bg-longan-800 cursor-pointer" on:click=move |_| save_draft()>"Save draft"</button><button type="submit" disabled=move || draft.get().trim().is_empty() class="rounded-grape bg-persimmon-500 px-3 py-2 text-label text-longan-950 hover:bg-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50 cursor-pointer">"Log reply"</button></div></div></div>
                         </form>
                     </div>
                 }.into_any()

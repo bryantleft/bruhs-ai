@@ -18,7 +18,7 @@ pub fn Input(
     #[prop(optional, into)] disabled: Signal<bool>,
 ) -> impl IntoView {
     let final_class = format!(
-        "block w-full rounded-grape bg-white/5 px-3 py-2 text-body text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 disabled:opacity-60 disabled:cursor-not-allowed {class}"
+        "block w-full bruhs-control rounded-grape bg-white/5 min-h-8 px-2.5 py-[5px] text-body text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 disabled:opacity-60 disabled:cursor-not-allowed {class}"
     );
     let t = input_type.unwrap_or_else(|| "text".to_string());
 

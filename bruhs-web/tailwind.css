@@ -47,9 +47,37 @@
   .bruhs-update-progress { display: none; }
 }
 
-/* Composer chips stay on one row: below a width the composer measures
-   (`data-compact`), Attach and Stash drop their text and keep their icons and
-   accessible names. */
-[data-composer-chips][data-compact] [data-chip-label="secondary"] {
-  display: none;
+/* Dense desktop controls retain comfortable touch targets and avoid iOS input zoom. */
+@media (pointer: coarse) {
+  .bruhs-control, [data-composer-chips] button { min-height: 44px; min-width: 44px; }
+  input:not([type="checkbox"]):not([type="radio"]), textarea[class],
+  [data-composer-surface] [data-composer-overlay] { font-size: 16px; }
+  [role="menuitem"], [role="option"] { min-height: 44px; }
 }
+
+@media (forced-colors: none) {
+  * { scrollbar-width: thin; scrollbar-color: #ab998f #1d1916; }
+  :where(*):hover { scrollbar-color: #c3afa1 #1d1916; }
+  [class*="overflow-auto"], [class*="overflow-y-auto"], [class*="overflow-x-auto"],
+  [class*="overflow-y-scroll"], [class*="overflow-x-scroll"], .prose-msg pre {
+    scrollbar-gutter: stable;
+  }
+  ::-webkit-scrollbar { width: 8px; height: 8px; }
+  ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner { background: #1d1916; }
+  ::-webkit-scrollbar-thumb { background: #ab998f; border: 2px solid #1d1916; border-radius: 8px; }
+  ::-webkit-scrollbar-thumb:hover { background: #c3afa1; }
+}
+
+/* The vendored theme also styles scrollbars, so explicitly restore native
+   handles when the user requests a high-contrast system palette. */
+@media (forced-colors: active) {
+  * { scrollbar-width: auto !important; scrollbar-color: auto !important; }
+  ::-webkit-scrollbar, ::-webkit-scrollbar-track, ::-webkit-scrollbar-corner,
+  ::-webkit-scrollbar-thumb { all: revert !important; }
+}
+
+:where(button:not(:disabled)) { cursor: pointer; }
+:where(button:not(:disabled):not([aria-selected="true"]):not([aria-pressed="true"]):not([aria-checked="true"])):hover {
+  background-color: rgb(245 237 231 / 0.05);
+}
+:where(button):focus-visible { outline: 2px solid #ec7f2c; outline-offset: 2px; }

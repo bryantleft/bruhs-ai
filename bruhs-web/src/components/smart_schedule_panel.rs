@@ -136,7 +136,7 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                 view! {
                     <div class="flex items-center justify-between rounded-seed bg-longan-900/55 px-2.5 py-2">
                         <span class="truncate text-body-sm text-rambutan-300">
-                            {format!("{} · {} min", link.title, link.duration_minutes)}
+                            {format!("{}, {} min", link.title, link.duration_minutes)}
                         </span>
                         <a class="text-label-sm text-blueberry-300 hover:text-blueberry-200" href=href>{text}</a>
                     </div>
@@ -203,7 +203,9 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
     view! {
         <Show when=move || open.get()>
             <Dialog open=Signal::derive(move || open.get()) label="Scheduling controls" on_close=Callback::new(move |_| open.set(false))>
-                <div class="border-b border-longan-700/70 px-4 py-3">
+                // Leave the shared dialog's 5rem top inset and 1rem below the card.
+                <div class="flex max-h-[calc(100dvh-6rem)] flex-col">
+                <div class="shrink-0 border-b border-longan-700/70 px-4 py-3">
                     <div class="flex items-start justify-between gap-3">
                         <div>
                             <h2 class="text-h4 text-rambutan-100">"Smart scheduling"</h2>
@@ -220,7 +222,7 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                         </button>
                     </div>
                 </div>
-                <div class="max-h-[70vh] space-y-4 overflow-auto px-4 py-3">
+                <div class="min-h-0 max-h-[70vh] space-y-4 overflow-auto px-4 py-3">
                     <section class="rounded-grape bg-longan-900/55 p-3 inset-ring inset-ring-longan-800">
                         <div class="flex items-center justify-between gap-3">
                             <div>
@@ -311,6 +313,7 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
                         <p role="status" class="text-body-sm text-rambutan-300">{save_status(id)}</p>
                     })}
                 </div>
+                </div>
             </Dialog>
         </Show>
     }
@@ -349,16 +352,16 @@ impl Nudge {
 /// "120 min/day · blocks of at least 45 min".
 fn focus_label(focus: &FocusProtection) -> String {
     format!(
-        "{} min/day · blocks of at least {} min",
+        "{} min/day, blocks of at least {} min",
         focus.daily_target_minutes, focus.minimum_block_minutes
     )
 }
 
-/// "Working hours · weekdays · 09:00–17:30", or a note that there is none.
+/// "Working hours, weekdays, 09:00 to 17:30", or a note that there is none.
 fn availability_label(rule: Option<&AvailabilityRule>) -> String {
     rule.map_or("No availability rule".to_string(), |rule| {
         format!(
-            "{} · weekdays · {:02}:{:02}–{:02}:{:02}",
+            "{}, weekdays, {:02}:{:02} to {:02}:{:02}",
             rule.label,
             rule.start_minute / 60,
             rule.start_minute % 60,
@@ -377,7 +380,7 @@ fn unscheduled_task_options(tasks: &[WorkItem]) -> Vec<DropdownOption> {
             DropdownOption::new(
                 task.id.clone(),
                 format!(
-                    "{} · {} min",
+                    "{}, {} min",
                     task.title,
                     task.planning.estimate_minutes.unwrap_or(60)
                 ),
@@ -484,7 +487,7 @@ mod tests {
     fn labels_and_link_lengths() {
         assert_eq!(
             availability_label(Some(&rule(540, 1_050))),
-            "Working hours · weekdays · 09:00–17:30"
+            "Working hours, weekdays, 09:00 to 17:30"
         );
         assert_eq!(availability_label(None), "No availability rule");
         assert_eq!(link_duration_minutes("45"), 45);

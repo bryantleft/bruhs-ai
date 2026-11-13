@@ -108,7 +108,7 @@ pub fn RightPanel() -> impl IntoView {
             ></div>
 
             // Tab bar
-            <div class="flex h-[52px] shrink-0 items-center gap-1 pl-2 pr-3">
+            <div class="flex h-11 shrink-0 items-center gap-1 pl-2 pr-3">
                 <PanelTab surface=PanelSurface::Diff icon="file-diff" label="Diff" />
                 <PanelTab surface=PanelSurface::Tasks icon="activity" label="Tasks" />
                 <PanelTab surface=PanelSurface::Preview icon="globe" label="Preview" />

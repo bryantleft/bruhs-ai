@@ -207,7 +207,7 @@ pub fn MeetingLive() -> impl IntoView {
                         <div class="min-h-0 flex-1 overflow-auto rounded-grape bg-longan-900 inset-ring inset-ring-longan-700 px-3 py-2 space-y-3">
                             <p class="text-label text-rambutan-100 break-words">{m.title.clone()}</p>
                             <p class="text-label-sm text-rambutan-400">"Screen context not connected"</p>
-                            <p class="text-label-sm text-rambutan-400">"Latest 50 segments · full transcript in Meetings"</p>
+                            <p class="text-label-sm text-rambutan-400">"Latest 50 segments, full transcript in Meetings"</p>
                             {move || stop_error.get().map(|error| view! { <p role="alert" class="text-body-sm text-lychee-400 break-words">{error}</p> })}
                             {move || chunk_note.get().map(|note| view! { <p role="status" class="text-body-sm text-lychee-400 break-words">{note}</p> })}
                             {segments.is_empty().then(|| view! { <p class="text-body-sm text-rambutan-400">"Waiting for transcript…"</p> })}

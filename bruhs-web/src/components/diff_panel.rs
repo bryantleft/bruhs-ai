@@ -55,7 +55,7 @@ pub fn turn_scopes<'a>(
             let first_line = prompt.trim().lines().next().unwrap_or("").trim();
             out.push((
                 uid.clone(),
-                format!("Turn · {}", truncate_chars(first_line, 30)),
+                format!("Turn: {}", truncate_chars(first_line, 30)),
             ));
             last_user = None;
         }
@@ -445,7 +445,7 @@ pub fn DiffPanel() -> impl IntoView {
             if n == 0 {
                 "Uncommitted changes".to_string()
             } else {
-                format!("Uncommitted · {n} file{}", if n == 1 { "" } else { "s" })
+                format!("Uncommitted, {n} file{}", if n == 1 { "" } else { "s" })
             }
         }
         DiffScope::Turn { user_message_id } => scopes.with(|s| {
@@ -977,13 +977,13 @@ mod tests {
         let scopes = turn_scopes(&msgs);
         assert_eq!(scopes.len(), 1);
         assert_eq!(scopes[0].0, msgs[2].id);
-        assert_eq!(scopes[0].1, "Turn · second");
+        assert_eq!(scopes[0].1, "Turn: second");
         let long = turn_scopes(&{
             let mut m = thread();
             m[2].parts = vec![MessagePart::Text("x".repeat(40))];
             m
         });
-        assert_eq!(long[0].1.chars().count(), "Turn · ".chars().count() + 31);
+        assert_eq!(long[0].1.chars().count(), "Turn: ".chars().count() + 31);
     }
 
     #[test]
@@ -1000,7 +1000,7 @@ mod tests {
 
     #[test]
     fn effective_scope_falls_back_sensibly() {
-        let scopes = vec![("u1".to_string(), "Turn · a".to_string())];
+        let scopes = vec![("u1".to_string(), "Turn: a".to_string())];
         assert_eq!(
             effective_scope(None, &scopes),
             DiffScope::Turn {

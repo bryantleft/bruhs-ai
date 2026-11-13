@@ -101,7 +101,7 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
     };
 
     view! {
-        <header class="group/header flex h-[52px] shrink-0 items-center gap-3 px-5">
+        <header class="group/header flex h-11 shrink-0 items-center gap-3 px-5">
             <nav aria-label="Thread breadcrumb" class="min-w-0 flex-1">
                 <ol class="m-0 flex min-w-0 list-none items-center gap-2 p-0 text-label">
                     {move || project.get().map(|name| {
@@ -128,7 +128,7 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
                             fallback=move || view! {
                                 <h1
                                     class="min-w-0 cursor-text truncate text-label"
-                                    title="Double-click to rename"
+                                    title="Double click to rename"
                                     on:dblclick=move |_| start_rename()
                                 >
                                     {move || bruhs_models::logic::text::plain_title(&title.get()).into_owned()}
