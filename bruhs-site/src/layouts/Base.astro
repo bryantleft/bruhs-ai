@@ -67,7 +67,7 @@ const here = (page: Props["current"]) => (page === current ? "page" : undefined)
           <a class="nav-link" href="/changelog" aria-current={here("changelog")}>Changelog</a>
           <a class="nav-link hide-sm" href="https://github.com/bryantleft/bruhs-ai"><Icon name="github" />GitHub</a>
           {palette && (
-            <button class="btn btn-ghost hide-sm" type="button" data-open-palette aria-haspopup="dialog" aria-label="Jump to a section">
+            <button class="btn btn-ghost hide-sm" type="button" data-open-palette aria-haspopup="dialog" aria-label="Jump to a section, ⌘K">
               <kbd><span class="mod">⌘</span>K</kbd>
             </button>
           )}
@@ -92,3 +92,7 @@ const here = (page: Props["current"]) => (page === current ? "page" : undefined)
     <slot name="after" />
   </body>
 </html>
+
+<script>
+  import "../scripts/layout.js";
+</script>

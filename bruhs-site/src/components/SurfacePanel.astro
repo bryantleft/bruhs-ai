@@ -1,0 +1,41 @@
+---
+interface Props {
+  id: string;
+  label: string;
+  file: string;
+  width: number;
+  alt: string;
+  caption: string;
+  selected: boolean;
+}
+
+const { id, label, file, width, alt, caption, selected } = Astro.props;
+const src = `/shots/${file}-${width}.webp`;
+const full = `/shots/${file}-${width * 2}.webp`;
+const srcset = `${src} ${width}w, ${full} ${width * 2}w`;
+---
+
+<div class="panel" role="tabpanel" id={id} aria-labelledby={`tab-${id}`} tabindex="0" hidden={!selected}>
+  <figure class="window">
+    <img
+      src={selected ? src : undefined}
+      srcset={selected ? srcset : undefined}
+      data-src={selected ? undefined : src}
+      data-srcset={selected ? undefined : srcset}
+      sizes="(min-width: 1168px) 1120px, calc(100vw - 48px)"
+      width={width}
+      height={width * 5 / 8}
+      loading="lazy"
+      decoding="async"
+      alt={alt}
+    >
+    <div class="shot-feedback" hidden>
+      <p class="shot-status" role="status"></p>
+      <button class="btn btn-quiet shot-retry" type="button" hidden>Try again</button>
+    </div>
+    <a class="shot-open" href={full} target="_blank" rel="noopener" aria-label={`View ${label} screenshot at full size (opens in a new tab)`} title="View full size">
+      <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" aria-hidden="true"><circle cx="10" cy="10" r="6.5"/><path d="m15 15 5.5 5.5M10 7v6M7 10h6"/></svg>
+    </a>
+  </figure>
+  <p class="caption">{caption}</p>
+</div>

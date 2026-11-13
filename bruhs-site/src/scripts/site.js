@@ -17,6 +17,9 @@ const IS_MAC = /mac|iphone|ipad/i.test(
 if (!IS_MAC) {
   for (const el of document.querySelectorAll(".mod")) el.textContent = "Ctrl ";
 }
+for (const button of document.querySelectorAll("[data-open-palette]")) {
+  button.setAttribute("aria-label", `Jump to a section, ${button.querySelector("kbd")?.textContent?.trim() ?? ""}`);
+}
 
 /**
  * Chord string in bruhs keybinding form, e.g. "mod+shift+y".
@@ -45,11 +48,13 @@ const tabs = /** @type {HTMLButtonElement[]} */ ([...document.querySelectorAll('
 
 /**
  * @param {HTMLButtonElement} tab
- * @param {{ focus?: boolean }} [options]
+ * @param {{ focus?: boolean, animate?: boolean }} [options]
  */
 function selectTab(tab, options = {}) {
   const from = tabs.find((other) => other.getAttribute("aria-selected") === "true");
-  if (from && from !== tab) dissolve(panelOf(from), panelOf(tab));
+  const animate = options.animate ?? !options.focus;
+  hydrateScreenshot(panelOf(tab));
+  if (from && from !== tab) dissolve(panelOf(from), panelOf(tab), animate);
   for (const other of tabs) {
     const selected = other === tab;
     other.setAttribute("aria-selected", String(selected));
@@ -57,7 +62,8 @@ function selectTab(tab, options = {}) {
     const panel = document.getElementById(other.getAttribute("aria-controls") ?? "");
     if (panel) panel.hidden = !selected;
   }
-  revealTab(tab);
+  syncImageHold();
+  revealTab(tab, animate);
   if (options.focus) tab.focus({ preventScroll: true });
 }
 
@@ -66,40 +72,46 @@ function selectTab(tab, options = {}) {
  * the tour never highlights a tab you can't see. Scrolls only the row, never
  * the page.
  * @param {HTMLButtonElement} tab
+ * @param {boolean} animate
  */
-function revealTab(tab) {
+function revealTab(tab, animate) {
   const row = tab.parentElement;
   if (!row || row.scrollWidth <= row.clientWidth) return;
   const tabBox = tab.getBoundingClientRect();
   const rowBox = row.getBoundingClientRect();
   const delta = tabBox.left - rowBox.left - (rowBox.width - tabBox.width) / 2;
-  row.scrollBy({ left: delta, behavior: matchMedia("(prefers-reduced-motion: reduce)").matches ? "auto" : "smooth" });
+  row.scrollBy({ left: delta, behavior: animate && !reducedMotion.matches ? "smooth" : "instant" });
 }
 
 // Mark which edges of the tab row have more tabs past them, for the fade.
-const tabRow = tabs[0]?.parentElement;
-if (tabRow instanceof HTMLElement) {
+/** @param {HTMLElement} row */
+function observeScrollEdges(row) {
   const markEdges = () => {
     const more = [];
-    if (tabRow.scrollLeft > 2) more.push("left");
-    if (tabRow.scrollLeft + tabRow.clientWidth < tabRow.scrollWidth - 2) more.push("right");
-    tabRow.dataset.more = more.join(" ");
+    if (row.scrollLeft > 2) more.push("left");
+    if (row.scrollLeft + row.clientWidth < row.scrollWidth - 2) more.push("right");
+    row.dataset.more = more.join(" ");
   };
-  tabRow.addEventListener("scroll", markEdges, { passive: true });
-  new ResizeObserver(markEdges).observe(tabRow);
+  row.addEventListener("scroll", markEdges, { passive: true });
+  new ResizeObserver(markEdges).observe(row);
+  markEdges();
 }
+const tabRow = tabs[0]?.parentElement;
+if (tabRow instanceof HTMLElement) observeScrollEdges(tabRow);
+const sourceRow = document.querySelector(".source");
+if (sourceRow instanceof HTMLElement) observeScrollEdges(sourceRow);
 
 for (const tab of tabs) {
-  tab.addEventListener("click", () => {
+  tab.addEventListener("click", (event) => {
     stopTour();
-    selectTab(tab);
+    selectTab(tab, { animate: event.detail > 0 });
   });
   tab.addEventListener("keydown", (event) => {
     const index = tabs.indexOf(tab);
     /** @type {number | null} */
     let next = null;
-    if (event.key === "ArrowDown" || event.key === "ArrowRight") next = (index + 1) % tabs.length;
-    else if (event.key === "ArrowUp" || event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
+    if (event.key === "ArrowRight") next = (index + 1) % tabs.length;
+    else if (event.key === "ArrowLeft") next = (index - 1 + tabs.length) % tabs.length;
     else if (event.key === "Home") next = 0;
     else if (event.key === "End") next = tabs.length - 1;
     else if (/^[1-9]$/.test(event.key) && !event.metaKey && !event.ctrlKey) next = Number(event.key) - 1;
@@ -117,8 +129,8 @@ function panelOf(tab) {
 }
 // ---------------------------------------------------------------------------
 // Dissolve: the new screenshot opens through braille-sized dots over the old
-// one, the same 2×2 ordered-dither mask the page transitions use (site.css,
-// .revealing). It's all CSS: drawing the old screenshot onto a canvas each
+// one, using the 2×2 ordered-dither mask in site.css (.revealing). It's all
+// CSS: drawing the old screenshot onto a canvas each
 // switch cost a dropped frame on a phone-speed CPU. Nothing waits on it, and
 // a second switch cuts the first one short.
 
@@ -127,24 +139,20 @@ const reducedMotion = matchMedia("(prefers-reduced-motion: reduce)");
 /**
  * @param {HTMLElement | null} from
  * @param {HTMLElement | null} to
+ * @param {boolean} animate
  */
-function dissolve(from, to) {
+function dissolve(from, to, animate) {
   for (const panel of document.querySelectorAll(".panel.leaving")) panel.classList.remove("leaving");
+  for (const figure of document.querySelectorAll(".window.revealing")) figure.classList.remove("revealing");
   const figure = to?.querySelector("figure");
   if (!(figure instanceof HTMLElement)) return;
   figure.classList.remove("revealing");
   const img = to?.querySelector("img");
-  if (reducedMotion.matches || !from || !(img instanceof HTMLImageElement) || !img.complete || img.naturalWidth === 0) return;
+  if (!animate || reducedMotion.matches || typeof CSS.registerProperty !== "function" || !from || !(img instanceof HTMLImageElement) || !img.complete || img.naturalWidth === 0) return;
   // The old screenshot stays put underneath until the new one has fully opened.
   from.classList.add("leaving");
   void figure.offsetWidth; // restart the mask animation
   figure.classList.add("revealing");
-  figure.addEventListener("animationend", function done(event) {
-    if (event.animationName !== "dot-d") return;
-    figure.removeEventListener("animationend", done);
-    figure.classList.remove("revealing");
-    from.classList.remove("leaving");
-  });
 }
 
 // ---------------------------------------------------------------------------
@@ -154,8 +162,13 @@ function dissolve(from, to) {
 
 const tour = document.querySelector("[data-surfaces]");
 const tourToggle = tour?.querySelector("[data-tour-toggle]");
+tour?.addEventListener("animationend", (event) => {
+  if (!(event instanceof AnimationEvent) || event.animationName !== "dot-d" || !(event.target instanceof HTMLElement)) return;
+  event.target.classList.remove("revealing");
+  for (const panel of tour.querySelectorAll(".panel.leaving")) panel.classList.remove("leaving");
+});
 let touring = false;
-/** @type {Set<"hover" | "focus" | "offscreen" | "hidden" | "user">} */
+/** @type {Set<"hover" | "focus" | "offscreen" | "hidden" | "user" | "loading">} */
 const tourHolds = new Set(["offscreen"]);
 
 function syncTour() {
@@ -169,11 +182,10 @@ function syncTour() {
 }
 
 function stopTour() {
-  touring = false;
-  syncTour();
+  holdTour("user", true);
 }
 
-/** @param {"hover" | "focus" | "offscreen" | "hidden" | "user"} reason @param {boolean} on */
+/** @param {"hover" | "focus" | "offscreen" | "hidden" | "user" | "loading"} reason @param {boolean} on */
 function holdTour(reason, on) {
   if (on) tourHolds.add(reason);
   else tourHolds.delete(reason);
@@ -192,16 +204,83 @@ if (tour instanceof HTMLElement && tourToggle instanceof HTMLButtonElement && !r
   });
   tourToggle.addEventListener("click", () => holdTour("user", !tourHolds.has("user")));
   // Touch taps fire pointerenter without a matching leave, so only a mouse holds it.
-  tour.addEventListener("pointerenter", (event) => event.pointerType === "mouse" && holdTour("hover", true));
+  tour.addEventListener("pointerover", (event) => {
+    if (event.pointerType === "mouse" && event.target instanceof Node) holdTour("hover", !tourToggle.contains(event.target));
+  });
   tour.addEventListener("pointerleave", () => holdTour("hover", false));
   tour.addEventListener("focusin", (event) => holdTour("focus", event.target !== tourToggle));
   tour.addEventListener("focusout", (event) => {
     if (!(event.relatedTarget instanceof Node) || !tour.contains(event.relatedTarget) || event.relatedTarget === tourToggle) holdTour("focus", false);
   });
-  new IntersectionObserver(([entry]) => holdTour("offscreen", !entry?.isIntersecting), { threshold: 0.5 }).observe(tour);
+  new IntersectionObserver(([entry]) => holdTour("offscreen", !entry?.isIntersecting)).observe(tour);
   document.addEventListener("visibilitychange", () => holdTour("hidden", document.hidden));
-  reducedMotion.addEventListener("change", () => reducedMotion.matches && stopTour());
+  reducedMotion.addEventListener("change", () => {
+    if (reducedMotion.matches) {
+      touring = false;
+      syncTour();
+      for (const figure of document.querySelectorAll(".window.revealing")) figure.classList.remove("revealing");
+      for (const panel of document.querySelectorAll(".panel.leaving")) panel.classList.remove("leaving");
+    }
+  });
   syncTour();
+}
+
+function syncImageHold() {
+  const active = tour?.querySelector('.panel:not([hidden]) img');
+  holdTour("loading", active instanceof HTMLImageElement && (!active.complete || active.naturalWidth === 0));
+}
+
+/** @param {HTMLElement | null} panel */
+function hydrateScreenshot(panel) {
+  const image = panel?.querySelector("img");
+  if (!(image instanceof HTMLImageElement) || !image.dataset.src) return;
+  if (image.dataset.srcset) image.srcset = image.dataset.srcset;
+  image.src = image.dataset.src;
+  delete image.dataset.src;
+  delete image.dataset.srcset;
+}
+
+for (const panel of document.querySelectorAll(".panel")) {
+  const image = panel.querySelector("img");
+  const figure = panel.querySelector("figure");
+  const feedback = panel.querySelector(".shot-feedback");
+  const status = panel.querySelector(".shot-status");
+  const retry = panel.querySelector(".shot-retry");
+  if (!(image instanceof HTMLImageElement) || !(figure instanceof HTMLElement) || !(feedback instanceof HTMLElement) || !(retry instanceof HTMLButtonElement) || !status) continue;
+  let restoreRetryFocus = false;
+  const update = () => {
+    const loaded = image.complete && image.naturalWidth > 0;
+    const failed = image.complete && image.hasAttribute("src") && !image.naturalWidth;
+    retry.removeAttribute("aria-disabled");
+    if ((loaded || failed) && restoreRetryFocus) {
+      if ((document.activeElement === document.body || document.activeElement === retry) && panel instanceof HTMLElement) {
+        (loaded ? panel : retry).focus({ preventScroll: true });
+      }
+      restoreRetryFocus = false;
+    }
+    figure.toggleAttribute("data-loading", !loaded);
+    figure.setAttribute("aria-busy", String(!loaded && !failed));
+    feedback.hidden = loaded;
+    retry.hidden = !failed;
+    status.textContent = loaded ? "" : failed ? "Screenshot couldn't load." : "Loading screenshot…";
+    syncImageHold();
+  };
+  image.addEventListener("load", update);
+  image.addEventListener("error", update);
+  retry.addEventListener("click", () => {
+    if (retry.getAttribute("aria-disabled") === "true") return;
+    restoreRetryFocus = document.activeElement === retry;
+    figure.setAttribute("aria-busy", "true");
+    retry.setAttribute("aria-disabled", "true");
+    status.textContent = "Loading screenshot…";
+    const src = image.src;
+    const srcset = image.srcset;
+    image.removeAttribute("srcset");
+    image.removeAttribute("src");
+    image.srcset = srcset;
+    image.src = src;
+  });
+  update();
 }
 
 // ---------------------------------------------------------------------------
@@ -217,7 +296,7 @@ function go(command) {
   const tab = tabs.find((candidate) => candidate.getAttribute("aria-controls") === id);
   if (tab) {
     stopTour();
-    selectTab(tab);
+    selectTab(tab, { animate: false });
     document.getElementById("surfaces")?.scrollIntoView({ block: "start" });
     tab.focus({ preventScroll: true });
     return;
@@ -241,6 +320,7 @@ function go(command) {
 function mountPalette(root, onPick) {
   const input = /** @type {HTMLInputElement} */ (root.querySelector('input[role="combobox"]'));
   const list = /** @type {HTMLUListElement} */ (root.querySelector('[role="listbox"]'));
+  const empty = /** @type {HTMLElement} */ (root.querySelector("[data-palette-empty]"));
   /** @type {Command[]} */
   let shown = [];
   let active = 0;
@@ -249,9 +329,7 @@ function mountPalette(root, onPick) {
     shown = filterCommands(COMMANDS, input.value);
     active = Math.min(active, Math.max(shown.length - 1, 0));
     list.replaceChildren(
-      ...(shown.length === 0
-        ? [Object.assign(document.createElement("li"), { className: "palette-empty", textContent: "Nothing matches. Try “tasks” or “privacy”." })]
-        : shown.map((command, index) => {
+      ...shown.map((command, index) => {
             const item = document.createElement("li");
             item.className = "palette-item";
             item.id = `${list.id}-${command.id}`;
@@ -279,8 +357,11 @@ function mountPalette(root, onPick) {
             item.addEventListener("pointermove", () => setActive(index));
             item.addEventListener("click", () => onPick(command));
             return item;
-          })),
+          }),
     );
+    empty.hidden = shown.length > 0;
+    list.hidden = shown.length === 0;
+    input.setAttribute("aria-expanded", String(shown.length > 0));
     syncActive();
   }
 
@@ -361,6 +442,7 @@ dialog.addEventListener("click", (event) => {
 for (const button of document.querySelectorAll("[data-open-palette]")) {
   button.addEventListener("click", openPalette);
 }
+dialog.querySelector("[data-close-palette]")?.addEventListener("click", () => dialog.close());
 
 // ---------------------------------------------------------------------------
 // Global keys: ⌘K opens the bar, "/" too when not typing.
@@ -401,6 +483,7 @@ const REVEAL_MS = 700;
  * @property {import("./braille.js").Face} face
  * @property {{ x: number, y: number }} target  Where the pointer asks the head to look.
  * @property {number} reveal
+ * @property {number} revealFrame
  * @property {boolean} visible
  */
 
@@ -418,6 +501,7 @@ for (const canvas of document.querySelectorAll("canvas[data-bruh]")) {
     face: { cx: 0, cy: 0, r: 1, lookX: 0, lookY: 0 },
     target: { x: 0, y: 0 },
     reveal: reducedMotion.matches ? 1 : 0,
+    revealFrame: 0,
     visible: false,
   });
 }
@@ -446,16 +530,21 @@ function drawOne(bruh) {
 
 /** @param {Bruh} bruh */
 function revealBruh(bruh) {
-  if (bruh.reveal >= 1) return;
+  if (reducedMotion.matches) {
+    bruh.reveal = 1;
+    drawOne(bruh);
+    return;
+  }
+  if (bruh.reveal >= 1 || bruh.revealFrame) return;
   const start = performance.now();
   /** @param {number} now */
   const step = (now) => {
     const t = Math.min(1, (now - start) / REVEAL_MS);
     bruh.reveal = t === 1 ? 1 : 1 - (1 - t) ** 3;
     drawOne(bruh);
-    if (t < 1) requestAnimationFrame(step);
+    bruh.revealFrame = t < 1 ? requestAnimationFrame(step) : 0;
   };
-  requestAnimationFrame(step);
+  bruh.revealFrame = requestAnimationFrame(step);
 }
 
 const bruhSeen = new IntersectionObserver((entries) => {
@@ -522,50 +611,111 @@ document.addEventListener("pointermove", (event) => {
 
 // The pointer left the window: look ahead again.
 document.documentElement.addEventListener("mouseleave", () => {
+  if (reducedMotion.matches) return;
   for (const bruh of bruhs) bruh.target = { x: 0, y: 0 };
   lookFrame ||= requestAnimationFrame(turnHeads);
+});
+
+reducedMotion.addEventListener("change", () => {
+  if (!reducedMotion.matches) return;
+  cancelAnimationFrame(lookFrame);
+  lookFrame = 0;
+  lastTurn = 0;
+  for (const bruh of bruhs) {
+    cancelAnimationFrame(bruh.revealFrame);
+    bruh.revealFrame = 0;
+    bruh.reveal = 1;
+    bruh.target = { x: 0, y: 0 };
+    bruh.face.lookX = 0;
+    bruh.face.lookY = 0;
+    drawOne(bruh);
+  }
 });
 
 // ---------------------------------------------------------------------------
 // Copy buttons: `data-copy` names the element whose text goes to the clipboard.
 
 for (const button of document.querySelectorAll("button[data-copy]")) {
+  if (!(button instanceof HTMLButtonElement)) continue;
   const label = button.textContent;
+  let reset = 0;
   button.addEventListener("click", async () => {
+    if (button.getAttribute("aria-disabled") === "true") return;
     const source = document.getElementById(button.getAttribute("data-copy") ?? "");
+    const command = source?.querySelector("code") ?? source;
+    const status = document.querySelector("[data-copy-status]");
     // Copy the command itself, without the "$ " prompt.
-    const text = (source?.textContent ?? "").replace(/^\s*\$\s*/, "").trim();
+    const text = (command?.textContent ?? "").replace(/^\s*\$\s*/, "").trim();
+    clearTimeout(reset);
+    button.textContent = label;
+    if (status) status.textContent = "";
+    button.setAttribute("aria-disabled", "true");
     try {
       await navigator.clipboard.writeText(text);
       button.textContent = "Copied";
+      if (status) status.textContent = "Command copied.";
+      reset = window.setTimeout(() => {
+        button.textContent = label;
+        if (status) status.textContent = "";
+      }, 1600);
     } catch {
-      button.textContent = "Select and copy";
+      if (command) {
+        const range = document.createRange();
+        range.selectNodeContents(command);
+        const selection = window.getSelection();
+        selection?.removeAllRanges();
+        selection?.addRange(range);
+        if (status) status.textContent = `Command selected. Press ${IS_MAC ? "⌘C" : "Ctrl+C"} to copy.`;
+      }
+    } finally {
+      button.removeAttribute("aria-disabled");
     }
-    setTimeout(() => {
-      button.textContent = label;
-    }, 1600);
   });
 }
 
 // "Send to your Mac" (phones and tablets, see public/os.js): the share sheet
 // hands the link to AirDrop, Messages or Mail; without one, copy it.
 for (const button of document.querySelectorAll("button[data-share]")) {
+  if (!(button instanceof HTMLButtonElement)) continue;
   const label = button.querySelector("[data-label]");
   const text = label?.textContent ?? "";
+  const status = button.parentElement?.querySelector("[data-share-status]");
+  const fallback = button.parentElement?.querySelector("[data-share-url]");
+  let reset = 0;
   button.addEventListener("click", async () => {
+    if (button.getAttribute("aria-disabled") === "true") return;
     const link = { title: "bruhs", text: "bruhs, one window for your whole day. Download it on your Mac.", url: "https://bruhs.ai" };
-    if (navigator.share) {
-      // A dismissed share sheet rejects; nothing to undo.
-      await navigator.share(link).catch(() => {});
-      return;
-    }
+    clearTimeout(reset);
+    if (label) label.textContent = text;
+    if (status) status.textContent = "";
+    button.setAttribute("aria-disabled", "true");
     try {
-      await navigator.clipboard.writeText(link.url);
-      if (label) label.textContent = "Link copied";
-    } catch {
-      if (label) label.textContent = "bruhs.ai";
+      if (navigator.share) {
+        try {
+          await navigator.share(link);
+          return;
+        } catch (error) {
+          if (error instanceof DOMException && error.name === "AbortError") return;
+        }
+      }
+      try {
+        await navigator.clipboard.writeText(link.url);
+        if (label) label.textContent = "Link copied";
+        if (status) status.textContent = "Link copied. Open it on your Mac.";
+      } catch {
+        if (fallback instanceof HTMLInputElement) {
+          fallback.hidden = false;
+          if (document.activeElement === button || document.activeElement === document.body) {
+            fallback.focus();
+            fallback.select();
+          }
+        }
+        if (status) status.textContent = "Select and copy the link to open it on your Mac.";
+      }
+    } finally {
+      button.removeAttribute("aria-disabled");
     }
-    setTimeout(() => {
+    reset = window.setTimeout(() => {
       if (label) label.textContent = text;
     }, 1600);
   });
