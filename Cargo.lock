@@ -1182,6 +1182,7 @@ dependencies = [
  "bruhs-core",
  "bruhs-models",
  "chrono",
+ "flate2",
  "futures-core",
  "futures-util",
  "home",

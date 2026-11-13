@@ -28,6 +28,35 @@ window.bruhsTerminal = (() => {
     if (statusCb) { try { statusCb(id, status); } catch (_) {} }
   };
   const encoder = new TextEncoder();
+  const replayAck = '{"type":"terminal-replay","encoding":"gzip-v1"}';
+  const isLoopback = (host) => {
+    return host === 'localhost' || host.endsWith('.localhost') || host === '[::1]' || host.startsWith('127.');
+  };
+  const decodeReplay = async (bytes) => {
+    // TerminalManager retains 512 KiB; lag recovery can prepend a two-byte RIS.
+    const limit = 512 * 1024 + 2;
+    const reader = new Blob([bytes]).stream().pipeThrough(new DecompressionStream('gzip')).getReader();
+    const chunks = [];
+    let length = 0;
+    try {
+      for (;;) {
+        const { value, done } = await reader.read();
+        if (done) break;
+        length += value.length;
+        if (length > limit) throw new Error('terminal replay exceeds the retained history');
+        chunks.push(value);
+      }
+    } catch (error) {
+      try { await reader.cancel(error); } catch (_) {}
+      throw error;
+    } finally {
+      reader.releaseLock();
+    }
+    const result = new Uint8Array(length);
+    let offset = 0;
+    for (const chunk of chunks) { result.set(chunk, offset); offset += chunk.length; }
+    return result;
+  };
   const api = {
     ready,
     onStatus(cb) { statusCb = cb; },
@@ -55,20 +84,61 @@ window.bruhsTerminal = (() => {
       });
       const fit = new window.FitAddon.FitAddon();
       term.loadAddon(fit);
-      const s = { term, fit, container, ws: null, status: 'connecting', opened: false };
+      const s = { term, fit, container, ws: null, status: 'connecting', opened: false, closed: false };
       sessions.set(id, s);
-      const ws = new WebSocket(wsUrl);
+      // Local replay avoids compressor CPU; remote replay saves link time.
+      const url = new URL(wsUrl, window.location.href);
+      const compress = typeof DecompressionStream === 'function' && !isLoopback(url.hostname);
+      if (compress) url.searchParams.set('replay', 'gzip-v1');
+      else url.searchParams.delete('replay');
+      const ws = new WebSocket(url.href);
       ws.binaryType = 'arraybuffer';
       s.ws = ws;
       ws.onopen = () => { setStatus(id, 'live'); api.fit(id); };
-      ws.onmessage = (ev) => {
-        term.write(typeof ev.data === 'string' ? ev.data : new Uint8Array(ev.data));
+      let pending = null;
+      let encoded = false;
+      const failReplay = (error) => {
+        if (s.closed || s.status === 'failed') return;
+        setStatus(id, 'failed');
+        console.error('terminal replay could not be decoded', error);
+        term.write('\r\n[Terminal replay could not be decoded. Close and reopen this terminal.]\r\n');
+        ws.close();
       };
+      const apply = (data) => {
+        if (s.closed || s.status === 'failed') return;
+        if (typeof data === 'string') {
+          if (data === replayAck) {
+            if (!compress || encoded) throw new Error('unexpected terminal replay acknowledgement');
+            encoded = true;
+          } else term.write(data);
+          return;
+        }
+        const bytes = new Uint8Array(data);
+        if (!encoded) { term.write(bytes); return; }
+        if (bytes[0] === 0) { term.write(bytes.subarray(1)); return; }
+        if (bytes[0] !== 1) throw new Error('unknown terminal frame encoding');
+        return decodeReplay(bytes.subarray(1)).then((decoded) => {
+          if (!s.closed && s.status !== 'failed') term.write(decoded);
+        });
+      };
+      const receive = (data) => {
+        try {
+          // Only asynchronous replay decoding needs a queue. The ordinary live
+          // path writes immediately, and xterm preserves its own parse order.
+          const next = pending ? pending.then(() => apply(data)) : apply(data);
+          if (next) {
+            pending = next;
+            next.then(() => { if (pending === next) pending = null; }, failReplay);
+          }
+        } catch (error) { failReplay(error); }
+      };
+      ws.onmessage = (ev) => receive(ev.data);
       ws.onclose = () => {
-        if (s.status !== 'failed') setStatus(id, 'ended');
-        term.write('\r\n\x1b[2m[session ended]\x1b[0m\r\n');
+        if (s.closed || s.status === 'failed') return;
+        setStatus(id, 'ended');
+        receive('\r\n\x1b[2m[session ended]\x1b[0m\r\n');
       };
-      ws.onerror = () => setStatus(id, 'failed');
+      ws.onerror = () => { if (!s.closed) setStatus(id, 'failed'); };
       term.onData((data) => {
         if (ws.readyState === WebSocket.OPEN) ws.send(encoder.encode(data));
       });
@@ -102,6 +172,7 @@ window.bruhsTerminal = (() => {
     close(id) {
       const s = sessions.get(id);
       if (!s) return;
+      s.closed = true;
       try { s.ws.close(); } catch (_) {}
       try { s.term.dispose(); } catch (_) {}
       s.container.remove();
