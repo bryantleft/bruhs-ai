@@ -17,7 +17,7 @@ use bruhs_models::ids::{MeetingId, ThreadId};
 use bruhs_models::{EpochMs, Meeting, MeetingEvent, TranscriptSegment};
 use std::collections::HashMap;
 use std::fmt::Write as _;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::{SystemTime, UNIX_EPOCH};
 use tokio::sync::{broadcast, RwLock};
 
@@ -120,6 +120,7 @@ pub struct AppState {
     meeting_events_tx: broadcast::Sender<MeetingEvent>,
     terminals: TerminalManager,
     orchestrator: AgentOrchestrator,
+    reactive: OnceLock<crate::reactive::ReactiveRuntime>,
 }
 
 /// Builds an [`AppState`]; every part not given gets its default.
@@ -184,6 +185,7 @@ impl AppStateBuilder {
             meeting_events_tx,
             terminals: TerminalManager::new(),
             orchestrator,
+            reactive: OnceLock::new(),
         }
     }
 }
@@ -195,6 +197,22 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Attach the single process-owned automation runtime. Builders stay pure.
+    pub fn attach_reactive(
+        &self,
+        runtime: crate::reactive::ReactiveRuntime,
+    ) -> Result<(), crate::reactive::ReactiveError> {
+        self.reactive.set(runtime).map_err(|_| {
+            crate::reactive::ReactiveError::Conflict(
+                "Reactive agents are already attached to this process.".into(),
+            )
+        })
+    }
+
+    pub fn reactive(&self) -> Option<&crate::reactive::ReactiveRuntime> {
+        self.reactive.get()
+    }
+
     /// An `AppState` with every default; see [`AppState::builder`].
     pub fn new() -> Self {
         Self::builder().build()
