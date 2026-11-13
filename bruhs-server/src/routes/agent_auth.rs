@@ -43,9 +43,8 @@ pub async fn get_auth() -> Json<AuthStatus> {
     Json(auth_status(AgentProvider::Claude).await)
 }
 
-/// GET /api/agent/auth/{provider} — auth status for `claude` (`claude auth
-/// status`, JSON) or `codex` (`codex login status`, plain text). Any other
-/// provider is a 400.
+/// GET /api/agent/auth/{provider}. Runtimes without a verified status probe
+/// return setup guidance and an unknown status, never a guessed login success.
 pub async fn get_auth_for_provider(
     provider: Result<Path<AgentProvider>, PathRejection>,
 ) -> Result<Json<AuthStatus>, AppError> {
@@ -53,9 +52,21 @@ pub async fn get_auth_for_provider(
 }
 
 async fn auth_status(provider: AgentProvider) -> AuthStatus {
+    if let Some(hint) = cli::setup_hint(provider) {
+        return AuthStatus::unknown(format!(
+            "{} login status is managed by its CLI. {hint}",
+            provider.label()
+        ));
+    }
     let (program, args): (&str, &[&str]) = match provider {
         AgentProvider::Claude => ("claude", &["auth", "status"]),
         AgentProvider::Codex => ("codex", &["login", "status"]),
+        AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => {
+            return AuthStatus::unknown("This runtime manages login in its CLI.")
+        }
     };
     let output = match cli::run(cli::cli_name(provider), program, args, STATUS_TIMEOUT).await {
         Ok(output) => output,
@@ -67,6 +78,10 @@ async fn auth_status(provider: AgentProvider) -> AuthStatus {
     match provider {
         AgentProvider::Claude => parse_claude_status(exit_ok, &stdout, &stderr),
         AgentProvider::Codex => parse_codex_status(exit_ok, &stdout, &stderr),
+        AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => AuthStatus::unknown("This runtime manages login in its CLI."),
     }
 }
 
@@ -258,6 +273,22 @@ mod tests {
         assert!(parse_codex_status(false, "Not logged in\n", "")
             .error
             .is_none());
+    }
+
+    #[tokio::test]
+    async fn external_runtime_login_status_is_unknown_with_setup_guidance() {
+        for provider in [
+            AgentProvider::Cursor,
+            AgentProvider::Antigravity,
+            AgentProvider::Grok,
+            AgentProvider::OpenCode,
+        ] {
+            let status = auth_status(provider).await;
+            assert!(!status.authenticated);
+            let message = status.error.unwrap();
+            assert!(message.contains(provider.label()));
+            assert!(message.contains("terminal"));
+        }
     }
 
     #[tokio::test]

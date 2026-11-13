@@ -391,6 +391,14 @@ impl ThreadBroker {
                         .map_err(std::io::Error::other)?,
                 );
             }
+            ProviderQueryOptions::External(options) => {
+                options.add_mcp(
+                    SERVER,
+                    &executable,
+                    &[HELPER_FLAG.into()],
+                    &std::collections::HashMap::from([(BROKER_ENV.into(), connection)]),
+                )?;
+            }
         }
         Ok(())
     }

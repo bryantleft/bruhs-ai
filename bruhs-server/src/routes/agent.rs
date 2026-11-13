@@ -337,6 +337,22 @@ pub async fn post_steer(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn explicit_runtime_models_route_to_the_selected_runtime() {
+        use bruhs_models::agent::AgentProvider;
+        for (model, provider) in [
+            ("cursor/default", AgentProvider::Cursor),
+            ("antigravity/default", AgentProvider::Antigravity),
+            ("grok/grok-4", AgentProvider::Grok),
+            ("opencode/custom/local-model", AgentProvider::OpenCode),
+        ] {
+            let request: super::AgentRequest = serde_json::from_value(serde_json::json!({
+                "thread_id": bruhs_models::ids::ThreadId::new_v4(), "prompt": "hello", "model": model
+            })).unwrap();
+            assert_eq!(request.model.unwrap().provider(), provider);
+        }
+    }
+
     use super::*;
 
     struct Server(tokio::task::JoinHandle<()>);

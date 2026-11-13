@@ -71,9 +71,13 @@ impl PermissionMode {
         match (self, provider) {
             (Self::Default, Some(AgentProvider::Codex)) => "Read only: Codex can't ask first",
             (Self::Default, Some(AgentProvider::Claude)) => "Ask before edits and commands",
+            (Self::Default, Some(_)) => "Read only when supported by the selected runtime",
             (Self::Default, None) => "Ask before edits and commands; Codex is read only",
             (Self::AcceptEdits, Some(AgentProvider::Codex)) => {
                 "Edit and run commands in the sandbox"
+            }
+            (Self::AcceptEdits, Some(provider)) if provider.is_external() => {
+                "Allow edits only when the runtime can enforce this mode"
             }
             (Self::AcceptEdits, _) => "Approve edits, ask for commands",
             (Self::Plan, _) => "Read only, propose a plan",
@@ -88,6 +92,9 @@ impl PermissionMode {
         match (self, provider) {
             (Self::Default, AgentProvider::Codex) => {
                 "Codex can't ask for approval, so Default is read only. Choose Accept edits to let it edit."
+            }
+            (Self::Default, provider) if provider.is_external() => {
+                "Default uses the runtime's read-only mode. Unsupported modes fail before running."
             }
             _ => "Access mode",
         }
@@ -132,21 +139,72 @@ impl fmt::Display for PermissionMode {
     }
 }
 
-/// Which CLI runs a turn. Wire values: `"claude"`, `"codex"`.
+/// The agent runtime that runs a turn. Model vendors are selected within a runtime.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum AgentProvider {
     Claude,
     Codex,
+    Cursor,
+    Antigravity,
+    Grok,
+    OpenCode,
 }
 
 impl AgentProvider {
+    pub const ALL: [Self; 6] = [
+        Self::Claude,
+        Self::Codex,
+        Self::Cursor,
+        Self::Antigravity,
+        Self::Grok,
+        Self::OpenCode,
+    ];
+
     /// The wire string.
     pub fn as_str(&self) -> &'static str {
         match self {
             Self::Claude => "claude",
             Self::Codex => "codex",
+            Self::Cursor => "cursor",
+            Self::Antigravity => "antigravity",
+            Self::Grok => "grok",
+            Self::OpenCode => "opencode",
         }
+    }
+
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Claude => "Claude Code",
+            Self::Codex => "Codex",
+            Self::Cursor => "Cursor",
+            Self::Antigravity => "Antigravity",
+            Self::Grok => "Grok",
+            Self::OpenCode => "OpenCode",
+        }
+    }
+
+    pub fn is_external(self) -> bool {
+        matches!(
+            self,
+            Self::Cursor | Self::Antigravity | Self::Grok | Self::OpenCode
+        )
+    }
+
+    /// Explicit routing keeps the same model usable through different agent runtimes.
+    pub fn model_prefix(self) -> &'static str {
+        match self {
+            Self::Claude => "claude/",
+            Self::Codex => "codex/",
+            Self::Cursor => "cursor/",
+            Self::Antigravity => "antigravity/",
+            Self::Grok => "grok/",
+            Self::OpenCode => "opencode/",
+        }
+    }
+
+    pub fn model_id(self, id: &str) -> &str {
+        id.strip_prefix(self.model_prefix()).unwrap_or(id)
     }
 
     /// The provider that serves `model_id`; see [`provider_for_model_id`].
@@ -162,6 +220,10 @@ impl FromStr for AgentProvider {
         match s {
             "claude" => Ok(Self::Claude),
             "codex" => Ok(Self::Codex),
+            "cursor" => Ok(Self::Cursor),
+            "antigravity" => Ok(Self::Antigravity),
+            "grok" => Ok(Self::Grok),
+            "opencode" => Ok(Self::OpenCode),
             _ => Err(UnknownVariant::new("agent provider", s)),
         }
     }
@@ -272,6 +334,26 @@ pub const MODEL_CATALOG: &[ModelInfo] = &[
         label: "Claude Haiku 4.5",
         provider: AgentProvider::Claude,
     },
+    ModelInfo {
+        id: "cursor/default",
+        label: "Cursor default",
+        provider: AgentProvider::Cursor,
+    },
+    ModelInfo {
+        id: "antigravity/default",
+        label: "Antigravity default",
+        provider: AgentProvider::Antigravity,
+    },
+    ModelInfo {
+        id: "grok/default",
+        label: "Grok default",
+        provider: AgentProvider::Grok,
+    },
+    ModelInfo {
+        id: "opencode/default",
+        label: "OpenCode default",
+        provider: AgentProvider::OpenCode,
+    },
 ];
 
 /// Model used when neither the request nor a saved preference names one.
@@ -285,14 +367,20 @@ pub fn model_info(id: &str) -> Option<&'static ModelInfo> {
 /// Bare model aliases the Claude CLI resolves itself (`--model opus`).
 const CLAUDE_MODEL_ALIASES: &[&str] = &["default", "fable", "opus", "sonnet", "haiku", "opusplan"];
 
-/// The provider that serves `model_id`: the catalog's answer when the model
-/// is listed, else Claude for the Claude CLI's id forms, else Codex.
+/// The runtime named by an explicit `runtime/model` selection, otherwise
+/// the catalog's answer, then the legacy Claude-id/Codex routing.
 ///
 /// Claude id forms, each optionally followed by a context-window suffix such
 /// as `[1m]` (`opus[1m]`, `claude-sonnet-4-5[1m]`): `claude-*` ids (including
 /// Vertex `claude-…@date`), the CLI's bare aliases (`opus`, `sonnet`, …) and
 /// Bedrock ids and ARNs (`us.anthropic.claude-…`).
 pub fn provider_for_model_id(model_id: &str) -> AgentProvider {
+    if let Some(provider) = AgentProvider::ALL
+        .into_iter()
+        .find(|provider| model_id.starts_with(provider.model_prefix()))
+    {
+        return provider;
+    }
     if let Some(model) = model_info(model_id) {
         return model.provider;
     }
@@ -328,6 +416,11 @@ fn strip_context_suffix(model_id: &str) -> &str {
 pub fn model_label(model_id: &str) -> String {
     if let Some(model) = model_info(model_id) {
         return model.label.to_string();
+    }
+    if let Some(model) = custom_model_selection(model_id) {
+        let provider = model.provider();
+        let id = provider.model_id(model.as_str());
+        return format!("{}: {}", provider.label(), model_label(id));
     }
     let base = strip_context_suffix(model_id);
     let window = (base.len() < model_id.len()).then(|| {
@@ -403,6 +496,16 @@ pub const MAX_MODEL_ID_LEN: usize = 128;
 #[serde(try_from = "String", into = "String")]
 pub struct ModelId(String);
 
+/// A typed provider/model selection from either picker. Bare ids retain their
+/// historical routing; custom choices must name a runtime explicitly.
+pub fn custom_model_selection(value: &str) -> Option<ModelId> {
+    let model = value.trim().parse::<ModelId>().ok()?;
+    AgentProvider::ALL
+        .into_iter()
+        .find(|provider| model.as_str().starts_with(provider.model_prefix()))?;
+    Some(model)
+}
+
 /// Why a string is not a [`ModelId`].
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum ModelIdError {
@@ -414,6 +517,8 @@ pub enum ModelIdError {
     LeadingDash,
     #[error("model id contains {0:?}, which is not allowed in model ids")]
     InvalidCharacter(char),
+    #[error("provider/model selections need a model id after the provider prefix")]
+    InvalidProviderSelection,
 }
 
 impl ModelId {
@@ -454,6 +559,14 @@ impl TryFrom<String> for ModelId {
         }) {
             return Err(ModelIdError::InvalidCharacter(c));
         }
+        if let Some(id) = AgentProvider::ALL
+            .into_iter()
+            .find_map(|provider| raw.strip_prefix(provider.model_prefix()))
+        {
+            if id.is_empty() || id.starts_with(['-', '/']) {
+                return Err(ModelIdError::InvalidProviderSelection);
+            }
+        }
         Ok(Self(raw))
     }
 }
@@ -481,6 +594,45 @@ impl fmt::Display for ModelId {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn explicit_provider_model_ids_route_before_model_family_names() {
+        for (id, provider) in [
+            ("cursor/claude-sonnet-4-6", "cursor"),
+            ("antigravity/gemini-3.1-pro", "antigravity"),
+            ("grok/default", "grok"),
+            ("opencode/xai/grok-code-fast-1", "opencode"),
+        ] {
+            assert_eq!(provider_for_model_id(id).as_str(), provider, "{id}");
+        }
+    }
+
+    #[test]
+    fn custom_models_keep_runtime_and_model_separate() {
+        let model = custom_model_selection(" cursor/claude-sonnet-4-6 ").unwrap();
+        assert_eq!(model.provider(), AgentProvider::Cursor);
+        assert_eq!(
+            model.provider().model_id(model.as_str()),
+            "claude-sonnet-4-6"
+        );
+        assert_eq!(model_label(model.as_str()), "Cursor: Claude Sonnet 4.6");
+        let model = custom_model_selection("opencode/local/qwen3-coder").unwrap();
+        assert_eq!(
+            model.provider().model_id(model.as_str()),
+            "local/qwen3-coder"
+        );
+        for invalid in [
+            "cursor/",
+            "cursor/-flag",
+            "cursor//model",
+            "unknown/model",
+            "grok",
+            "opencode/foo;env",
+            "grok/a b",
+        ] {
+            assert!(custom_model_selection(invalid).is_none(), "{invalid}");
+        }
+    }
 
     #[test]
     fn codex_default_is_described_as_read_only() {
@@ -593,6 +745,14 @@ mod tests {
             "\"codex\""
         );
         assert_eq!("claude".parse::<AgentProvider>(), Ok(AgentProvider::Claude));
+        for provider in AgentProvider::ALL {
+            let encoded = serde_json::to_string(&provider).unwrap();
+            assert_eq!(
+                serde_json::from_str::<AgentProvider>(&encoded).unwrap(),
+                provider
+            );
+            assert_eq!(provider.as_str().parse::<AgentProvider>(), Ok(provider));
+        }
         assert!("gateway".parse::<AgentProvider>().is_err());
         for role in [Role::User, Role::Assistant, Role::Tool] {
             let wire = serde_json::to_string(&role).unwrap();
@@ -621,6 +781,10 @@ mod tests {
                 ("claude-opus-4-8", "Claude Opus 4.8", "claude"),
                 ("claude-sonnet-4-6", "Claude Sonnet 4.6", "claude"),
                 ("claude-haiku-4-5", "Claude Haiku 4.5", "claude"),
+                ("cursor/default", "Cursor default", "cursor"),
+                ("antigravity/default", "Antigravity default", "antigravity"),
+                ("grok/default", "Grok default", "grok"),
+                ("opencode/default", "OpenCode default", "opencode"),
             ]
         );
         assert!(model_info(DEFAULT_AGENT_MODEL).is_some());

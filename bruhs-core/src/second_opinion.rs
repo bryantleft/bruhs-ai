@@ -68,6 +68,12 @@ pub async fn second_opinion(request: ReviewRequest) -> Result<Review, ReviewErro
             AgentProvider::Codex => {
                 review_with_codex(prompt, &request.project_path, request.reviewer_model).await
             }
+            AgentProvider::Cursor
+            | AgentProvider::Antigravity
+            | AgentProvider::Grok
+            | AgentProvider::OpenCode => Err(ReviewError::Failed(
+                "Second-opinion reviews require Claude Code or Codex.".into(),
+            )),
         }
     };
     let (text, usage) = tokio::time::timeout(REVIEW_TIMEOUT, run)

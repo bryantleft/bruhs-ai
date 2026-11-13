@@ -1,4 +1,4 @@
-//! Runs agent turns: spawns the provider CLI (Claude Code or Codex) for a
+//! Runs agent turns through the user's selected agent runtime for a
 //! thread, streams its events, tracks each thread's turn state and answers
 //! the tool-permission prompts a Claude turn raises.
 
@@ -15,6 +15,8 @@ use std::pin::Pin;
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::task::{Context, Poll};
 use tokio::sync::{mpsc, RwLock};
+
+mod external;
 
 // ---------------------------------------------------------------------------
 // ThreadStatus
@@ -420,6 +422,16 @@ pub enum PermissionResolveError {
 pub(crate) enum ProviderQueryOptions {
     Claude(claude_sdk_rs::QueryOptions),
     Codex(codex_sdk_rs::QueryOptions),
+    External(external::Options),
+}
+
+impl ProviderQueryOptions {
+    fn supports_mcp(&self) -> bool {
+        match self {
+            Self::External(options) => options.supports_mcp(),
+            Self::Claude(_) | Self::Codex(_) => true,
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -660,6 +672,7 @@ impl AgentOrchestrator {
             AgentProvider::Codex => {
                 crate::codex_lean::turn_is_lean(lean_file.as_deref(), resume.as_deref(), lean)
             }
+            _ => false,
         };
         let record_lean = (provider == AgentProvider::Codex && lean && resume.is_none())
             .then_some(lean_file)
@@ -679,7 +692,7 @@ impl AgentOrchestrator {
         // only read threads; so does a turn the user limited to reading.
         let threads_read_only = thread_access == ThreadAccess::Read
             || permission_mode == PermissionMode::Plan
-            || (provider == AgentProvider::Codex && permission_mode == PermissionMode::Default);
+            || (provider != AgentProvider::Claude && permission_mode == PermissionMode::Default);
         let turn = TurnContext {
             _guard: producer_guard,
             tx,
@@ -698,7 +711,12 @@ impl AgentOrchestrator {
         tokio::spawn(async move {
             let _secrets = producer_secrets;
             let _threads = producer_threads;
-            let broker = match secrets.start().await {
+            let app_tools = query_options.supports_mcp();
+            let broker = match if !app_tools {
+                Ok(None)
+            } else {
+                secrets.start().await.map(Some)
+            } {
                 Ok(broker) => broker,
                 Err(_) => {
                     turn.send_start_error(
@@ -712,7 +730,10 @@ impl AgentOrchestrator {
                 if let ProviderQueryOptions::Claude(options) = &mut query_options {
                     crate::secrets::mcp::append_claude_instructions(options);
                 }
-            } else if broker.configure(&mut query_options).is_err() {
+            } else if broker
+                .as_ref()
+                .is_some_and(|broker| broker.configure(&mut query_options).is_err())
+            {
                 turn.send_start_error(
                     "Could not configure private credential tools. Retry the turn.".into(),
                 )
@@ -721,7 +742,7 @@ impl AgentOrchestrator {
             }
             // Off in Settings: no thread tools. The turn also runs without
             // them when the broker cannot start.
-            let _thread_broker = if thread_access == ThreadAccess::Off {
+            let _thread_broker = if !app_tools || thread_access == ThreadAccess::Off {
                 None
             } else {
                 match threads.start(threads_read_only).await {
@@ -745,6 +766,7 @@ impl AgentOrchestrator {
                 ProviderQueryOptions::Codex(options) => {
                     stream_codex(options, turn, model, record_lean).await;
                 }
+                ProviderQueryOptions::External(options) => external::stream(options, turn).await,
             }
         });
 
@@ -824,6 +846,7 @@ fn apply_lean_context(options: &mut ProviderQueryOptions, lean: bool) {
             lean_claude_settings(options, &user_claude_settings());
         }
         ProviderQueryOptions::Codex(options) => lean_codex(options),
+        ProviderQueryOptions::External(_) => {}
     }
 }
 
@@ -980,6 +1003,7 @@ fn build_query_options(
     system_prompt: Option<&str>,
     session_id: Option<&str>,
 ) -> ProviderQueryOptions {
+    let runtime_model = provider.model_id(model);
     match provider {
         AgentProvider::Claude => {
             // No `--allowedTools` pre-approval: that silently granted Bash,
@@ -990,7 +1014,7 @@ fn build_query_options(
             let bypass = mode == claude_sdk_rs::PermissionMode::BypassPermissions;
             let mut options = claude_query_options_from_env(prompt)
                 .cwd(project_path)
-                .model(model)
+                .model(runtime_model)
                 .permission_prompts(!bypass)
                 .accept_input(true);
             options.permission_mode = Some(mode);
@@ -1015,9 +1039,12 @@ fn build_query_options(
             };
             let mut options = codex_sdk_rs::QueryOptions::new(prompt)
                 .cwd(project_path)
-                .model(model)
+                .model(runtime_model)
                 .access(codex_access(permission_mode))
                 .skip_git_repo_check(true);
+            if runtime_model == "default" {
+                options.model = None;
+            }
             // New threads are saved (not ephemeral) so the next turn can resume them.
             for key in crate::connections::PRIVATE_ENV {
                 options = options.env_remove(key);
@@ -1026,6 +1053,21 @@ fn build_query_options(
                 options = options.resume(thread_id);
             }
             ProviderQueryOptions::Codex(options)
+        }
+        AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => {
+            let options = external::Options::new(
+                provider,
+                prompt,
+                project_path,
+                model,
+                permission_mode,
+                system_prompt,
+                session_id,
+            );
+            ProviderQueryOptions::External(options)
         }
     }
 }
@@ -1480,6 +1522,7 @@ mod tests {
         let model = match provider {
             AgentProvider::Claude => "claude-sonnet-4-6",
             AgentProvider::Codex => "gpt-5.5",
+            _ => "default",
         };
         build_query_options(provider, "hi", "/tmp", model, mode, None, session_id)
     }
@@ -1487,14 +1530,18 @@ mod tests {
     fn claude(options: ProviderQueryOptions) -> claude_sdk_rs::QueryOptions {
         match options {
             ProviderQueryOptions::Claude(o) => o,
-            ProviderQueryOptions::Codex(_) => panic!("expected claude options"),
+            ProviderQueryOptions::Codex(_) | ProviderQueryOptions::External(_) => {
+                panic!("expected claude options")
+            }
         }
     }
 
     fn codex(options: ProviderQueryOptions) -> codex_sdk_rs::QueryOptions {
         match options {
             ProviderQueryOptions::Codex(o) => o,
-            ProviderQueryOptions::Claude(_) => panic!("expected codex options"),
+            ProviderQueryOptions::Claude(_) | ProviderQueryOptions::External(_) => {
+                panic!("expected codex options")
+            }
         }
     }
 

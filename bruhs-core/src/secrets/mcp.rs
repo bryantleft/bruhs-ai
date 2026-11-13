@@ -268,6 +268,15 @@ impl SecretBroker {
                     options.prompt
                 );
             }
+            crate::agent::ProviderQueryOptions::External(options) => {
+                options.add_mcp(
+                    "bruhs_secrets",
+                    &executable,
+                    &["--secret-mcp".into()],
+                    &std::collections::HashMap::from([(BROKER_ENV.into(), connection)]),
+                )?;
+                options.append_instructions(INSTRUCTIONS);
+            }
         }
         Ok(())
     }

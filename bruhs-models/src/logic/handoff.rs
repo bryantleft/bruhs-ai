@@ -86,7 +86,11 @@ Reply with the brief only: no preamble, no sign-off."
 pub fn reviewer_for(provider: AgentProvider) -> AgentProvider {
     match provider {
         AgentProvider::Claude => AgentProvider::Codex,
-        AgentProvider::Codex => AgentProvider::Claude,
+        AgentProvider::Codex
+        | AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => AgentProvider::Claude,
     }
 }
 
@@ -95,6 +99,10 @@ pub fn provider_name(provider: AgentProvider) -> &'static str {
     match provider {
         AgentProvider::Claude => "Claude",
         AgentProvider::Codex => "Codex",
+        AgentProvider::Cursor => "Cursor",
+        AgentProvider::Antigravity => "Antigravity",
+        AgentProvider::Grok => "Grok",
+        AgentProvider::OpenCode => "OpenCode",
     }
 }
 

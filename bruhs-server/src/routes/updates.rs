@@ -53,7 +53,14 @@ pub async fn post_provider_update(
     let provider = cli::provider(provider)?;
     let run = checker
         .start_update(provider)
-        .map_err(|error| AppError::Conflict(error.to_string()))?;
+        .map_err(|error| match error {
+            bruhs_core::updates::StartError::UnmanagedProvider => {
+                AppError::BadRequest(error.to_string())
+            }
+            bruhs_core::updates::StartError::AlreadyRunning => {
+                AppError::Conflict(error.to_string())
+            }
+        })?;
     tracing::info!("started updating {} (run {})", provider.as_str(), run.id);
     Ok((StatusCode::ACCEPTED, Json(run)))
 }

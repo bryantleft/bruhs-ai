@@ -15,7 +15,7 @@ pub struct SkillsRequest {
     pub path: Option<String>,
     #[serde(default)]
     pub query: Option<String>,
-    /// `"claude"` or `"codex"`. Anything else is an empty list plus `error`.
+    /// Runtime name. Unsupported skill discovery returns an empty list plus guidance.
     #[serde(default)]
     pub provider: Option<String>,
 }
@@ -32,16 +32,32 @@ pub struct SkillsResponse {
 pub async fn post_skills(
     Json(body): Json<SkillsRequest>,
 ) -> Result<Json<SkillsResponse>, AppError> {
-    let provider = match body.provider.as_deref().unwrap_or("claude") {
-        "claude" => AgentProvider::Claude,
-        "codex" => AgentProvider::Codex,
-        other => {
+    let provider = match body
+        .provider
+        .as_deref()
+        .unwrap_or("claude")
+        .parse::<AgentProvider>()
+    {
+        Ok(provider) => provider,
+        Err(_) => {
             return Ok(Json(SkillsResponse {
                 skills: Vec::new(),
-                error: Some(format!("Unknown provider: {other}")),
+                error: Some(format!(
+                    "Unknown provider: {}",
+                    body.provider.as_deref().unwrap_or_default()
+                )),
             }));
         }
     };
+    if provider.is_external() {
+        return Ok(Json(SkillsResponse {
+            skills: Vec::new(),
+            error: Some(format!(
+                "Browse and configure {} skills through its CLI.",
+                provider.label()
+            )),
+        }));
+    }
     let project = match body.path.as_deref().filter(|path| !path.is_empty()) {
         Some(path) => Some(HomePath::resolve(path).await?),
         None => None,

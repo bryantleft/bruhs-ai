@@ -64,10 +64,17 @@ fn skill_roots(
     project: Option<&Path>,
 ) -> Vec<PathBuf> {
     let mut roots = Vec::new();
+    if provider.is_external() {
+        return roots;
+    }
     if let Some(home) = home {
         let folder = match provider {
             AgentProvider::Claude => home.join(".claude").join("skills"),
             AgentProvider::Codex => home.join(".codex").join("skills"),
+            AgentProvider::Cursor
+            | AgentProvider::Antigravity
+            | AgentProvider::Grok
+            | AgentProvider::OpenCode => return roots,
         };
         roots.push(folder);
     }
@@ -78,6 +85,10 @@ fn skill_roots(
                 roots.push(project.join(".codex").join("skills"));
                 roots.push(project.join(".agents").join("skills"));
             }
+            AgentProvider::Cursor
+            | AgentProvider::Antigravity
+            | AgentProvider::Grok
+            | AgentProvider::OpenCode => {}
         }
     }
     roots

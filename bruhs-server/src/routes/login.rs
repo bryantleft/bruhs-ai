@@ -30,9 +30,22 @@ pub async fn post_login_for_provider(
 /// tells the user to run the login in a terminal instead. A timeout is a
 /// 504.
 async fn run_login(provider: AgentProvider) -> Result<Json<Value>, WithSuccessFlag> {
+    if let Some(hint) = cli::setup_hint(provider) {
+        return Err(AppError::BadRequest(format!(
+            "{} sign-in requires its terminal setup. {hint}",
+            provider.label()
+        ))
+        .into());
+    }
     let (program, args, manual): (&str, &[&str], &str) = match provider {
         AgentProvider::Claude => ("claude", &["auth", "login"], "claude auth login"),
         AgentProvider::Codex => ("codex", &["login"], "codex login"),
+        AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode => {
+            return Err(AppError::BadRequest("Sign in through this runtime's CLI.".into()).into())
+        }
     };
     let name = cli::cli_name(provider);
     let output = cli::run(name, program, args, LOGIN_TIMEOUT)

@@ -693,3 +693,24 @@ fn installed_release_is_the_packaged_version_and_none_from_source() {
     });
     assert_eq!(report.installed_release(), Some("0.1.1"));
 }
+
+#[test]
+fn external_runtimes_never_get_package_manager_update_commands() {
+    for provider in [
+        AgentProvider::Cursor,
+        AgentProvider::Antigravity,
+        AgentProvider::Grok,
+        AgentProvider::OpenCode,
+    ] {
+        assert!(!managed_provider(provider));
+        assert_eq!(npm_package(provider), None);
+        let install = detect_install(
+            provider,
+            "/opt/homebrew/bin/runtime",
+            "/opt/homebrew/lib/node_modules/runtime/bin",
+        );
+        assert_eq!(install.manager, InstallManager::Unknown);
+        assert_eq!(update_command(&install, &CommandContext::default()), None);
+        assert_eq!(compat(provider, "1.2.3"), None);
+    }
+}
