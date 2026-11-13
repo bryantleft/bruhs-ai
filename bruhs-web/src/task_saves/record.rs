@@ -58,7 +58,7 @@ impl Record {
             Self::Person(record) => &record.id,
             Self::Project(record) => &record.id,
             Self::Thread(record) => &record.id,
-            Self::Conversation(record) => &record.thread_id,
+            Self::Conversation(record) => record.thread_id(),
         }
     }
 
