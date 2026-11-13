@@ -40,6 +40,11 @@ Codex CLIs you already have, on your own logins.
 - **Workflows.** Cross-domain agent plans are previewed field by field, run
   step by step with permission checks, and can be undone. Every domain has
   separate read and write grants.
+- **Reactive agents.** Persistent agents react to scans, website and command
+  changes, webhooks, schedules and meeting events while the local server runs.
+  One reviewed setup enables each automation, with a single Pause/Resume control.
+  Setup can also be proposed through chat; drafts enter workflow review before
+  writes. See [reactive agents](docs/reactive-agents.md).
 - **Private credentials.** When an agent needs a secret, it asks through a
   separate form; the value goes to the OS keychain and never into the chat.
   See [credential requests](docs/secure-credential-requests.md).
