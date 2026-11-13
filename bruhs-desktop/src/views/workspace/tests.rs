@@ -472,12 +472,7 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
     workspace.update_in(cx, |_workspace, _window, cx| cx.notify());
     cx.run_until_parked();
     workspace.update_in(cx, |workspace, _window, _cx| {
-        let tops = workspace
-            .settings_section_tops()
-            .expect("sections laid out");
-        let expected = super::active_settings_section(&tops, super::SETTINGS_SCROLL_SPY_FOLD_PX)
-            .map(|ix| super::SettingsSection::ALL[ix]);
-        assert_eq!(Some(workspace.settings_section), expected);
+        assert_eq!(workspace.settings_section, super::SettingsSection::About);
     });
 }
 
@@ -1055,7 +1050,7 @@ fn desktop_diff_panel_renders_files_and_gaps(cx: &mut gpui::TestAppContext) {
         panel.update(cx, |panel, cx| {
             panel.set_turns(
                 vec![crate::views::diff_panel::DesktopTurnFiles {
-                    label: "Turn · Fix the parser".to_string(),
+                    label: "Turn: Fix the parser".to_string(),
                     prompt: "Fix the parser".to_string(),
                     files: crate::views::diff_panel::parse_unified(
                         "diff --git a/turn.rs b/turn.rs\n--- a/turn.rs\n+++ b/turn.rs\n@@ -1,1 +1,1 @@\n-old\n+new\n",
@@ -1985,7 +1980,7 @@ fn desktop_calendar_navigation_and_create_entrypoints_should_match_web_flow(
     assert_rendered_bounds(cx, "desktop-calendar-timegrid-7");
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.calendar_mode, DesktopCalendarMode::Week);
-        assert_eq!(workspace.calendar_title(), "May 3 — 9, 2026");
+        assert_eq!(workspace.calendar_title(), "May 3 to 9, 2026");
     });
 
     click_debug_selector(cx, "desktop-calendar-next");
@@ -1995,7 +1990,7 @@ fn desktop_calendar_navigation_and_create_entrypoints_should_match_web_flow(
             workspace.calendar_anchor,
             NaiveDate::from_ymd_opt(2026, 5, 13).expect("test date should be valid")
         );
-        assert_eq!(workspace.calendar_title(), "May 10 — 16, 2026");
+        assert_eq!(workspace.calendar_title(), "May 10 to 16, 2026");
     });
 
     click_debug_selector(cx, "desktop-calendar-mode-day");
@@ -2609,11 +2604,11 @@ fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContex
 
     assert_rendered_bounds(cx, "desktop-status-bar");
     assert_rendered_bounds(cx, "desktop-model-status");
-    assert_rendered_bounds(cx, "desktop-permission-mode");
+    assert_rendered_bounds(cx, "desktop-composer-options");
     assert_provider_logo_bounds(cx, "desktop-chat-provider-logo-codex");
 
-    // The access-mode chip opens a menu (web); pick Auto-accept from it.
-    click_debug_selector(cx, "desktop-permission-mode");
+    // Access selection stays in the options panel so related settings can be changed together.
+    click_debug_selector(cx, "desktop-composer-options");
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-permission-menu");
     click_debug_selector(
@@ -2624,7 +2619,10 @@ fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContex
         )),
     );
     cx.run_until_parked();
-    assert_no_rendered_bounds(cx, "desktop-permission-menu");
+    assert_rendered_bounds(cx, "desktop-permission-menu");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-composer-options-panel");
 
     workspace.update_in(cx, |workspace, _window, cx| {
         assert_eq!(workspace.permission_mode, PermissionMode::AcceptEdits);
@@ -2635,6 +2633,33 @@ fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContex
             .read(cx);
         assert_eq!(active_chat.permission_mode, PermissionMode::AcceptEdits);
     });
+
+    click_debug_selector(cx, "desktop-composer-options");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-composer-mode-plan");
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.permission_mode, PermissionMode::Plan)
+    });
+    click_debug_selector(cx, "desktop-composer-mode-build");
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.permission_mode, PermissionMode::AcceptEdits)
+    });
+    click_debug_selector(
+        cx,
+        leaked_debug_selector(format!(
+            "desktop-permission-mode-{}",
+            PermissionMode::BypassPermissions.as_str()
+        )),
+    );
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.permission_mode, PermissionMode::BypassPermissions)
+    });
+    assert_rendered_bounds(cx, "desktop-composer-status");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
 
     click_debug_selector(cx, "desktop-model-status");
     cx.run_until_parked();
@@ -4234,9 +4259,9 @@ fn command_actions_should_match_web_reference() {
     assert_eq!(COMMAND_BAR_INPUT_PLACEHOLDER, "What do you need?");
     assert_eq!(COMMAND_BAR_BODY_FONT_FAMILY, "Monaspace Neon");
     assert_eq!(COMMAND_BAR_LABEL_FONT_FAMILY, "Monaspace Argon");
-    assert_eq!(COMMAND_BAR_INPUT_TEXT_SIZE_PX, 14.0);
-    assert_eq!(COMMAND_BAR_INPUT_X_PADDING_PX, 20.0);
-    assert_eq!(COMMAND_BAR_INPUT_Y_PADDING_PX, 16.0);
+    assert_eq!(COMMAND_BAR_INPUT_TEXT_SIZE_PX, 13.0);
+    assert_eq!(COMMAND_BAR_INPUT_X_PADDING_PX, 16.0);
+    assert_eq!(COMMAND_BAR_INPUT_Y_PADDING_PX, 12.0);
     assert_eq!(COMMAND_BAR_OVERLAY_OPACITY, 0.70);
     assert_eq!(COMMAND_BAR_LIST_MAX_HEIGHT_PX, 576.0);
     assert_eq!(COMMAND_BAR_LIST_X_PADDING_PX, 8.0);
@@ -4246,14 +4271,14 @@ fn command_actions_should_match_web_reference() {
     assert_eq!(COMMAND_BAR_ACTION_RADIUS_PX, 8.0);
     assert_eq!(COMMAND_BAR_ACTION_TEXT_SIZE_PX, 12.0);
     assert_eq!(COMMAND_BAR_ACTION_X_PADDING_PX, 12.0);
-    assert_eq!(COMMAND_BAR_ACTION_Y_PADDING_PX, 10.0);
+    assert_eq!(COMMAND_BAR_ACTION_Y_PADDING_PX, 8.0);
     assert_eq!(COMMAND_BAR_ACTION_HOVER_BG_OPACITY, 0.70);
-    assert_eq!(COMMAND_BAR_GROUP_TEXT_SIZE_PX, 14.0);
+    assert_eq!(COMMAND_BAR_GROUP_TEXT_SIZE_PX, 12.0);
     assert_eq!(COMMAND_BAR_GROUP_X_PADDING_PX, 12.0);
     assert_eq!(COMMAND_BAR_GROUP_BOTTOM_PADDING_PX, 4.0);
-    assert_eq!(COMMAND_BAR_FOOTER_TEXT_SIZE_PX, 14.0);
-    assert_eq!(COMMAND_BAR_FOOTER_X_PADDING_PX, 20.0);
-    assert_eq!(COMMAND_BAR_FOOTER_Y_PADDING_PX, 10.0);
+    assert_eq!(COMMAND_BAR_FOOTER_TEXT_SIZE_PX, 12.0);
+    assert_eq!(COMMAND_BAR_FOOTER_X_PADDING_PX, 16.0);
+    assert_eq!(COMMAND_BAR_FOOTER_Y_PADDING_PX, 8.0);
     assert_eq!(COMMAND_BAR_FOOTER_BORDER_OPACITY, 0.50);
     assert_eq!(COMMAND_BAR_FOOTER_HINT_GAP_PX, 4.0);
     let actions = COMMAND_ACTIONS
@@ -4265,7 +4290,7 @@ fn command_actions_should_match_web_reference() {
         [
             ("nav-today", "Navigate", "Today", "plan & focus"),
             ("nav-chat", "Navigate", "Chat", "conversations"),
-            ("nav-inbox", "Navigate", "Inbox", "messages & follow-ups"),
+            ("nav-inbox", "Navigate", "Inbox", "messages and replies"),
             (
                 "nav-knowledge",
                 "Navigate",
@@ -4751,7 +4776,7 @@ fn clamp_right_panel_width_should_match_web_reference() {}
 
 #[test]
 fn desktop_workspace_sidebar_typography_should_match_web_reference() {
-    assert_eq!(WORKSPACE_SIDE_PANEL_WIDTH_PX, 272.0);
+    assert_eq!(WORKSPACE_SIDE_PANEL_WIDTH_PX, 248.0);
     assert_eq!(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX, 208.0);
     assert_eq!(WORKSPACE_SIDEBAR_BORDER_OPACITY, 0.50);
     assert_eq!(WORKSPACE_SIDEBAR_TAB_RADIUS_PX, 4.0);
@@ -4992,13 +5017,13 @@ fn desktop_task_form_copy_should_match_web_reference() {
     assert_eq!(FORM_FIELD_GAP_PX, 6.0);
     assert_eq!(FORM_CONTROL_RADIUS_PX, 8.0);
     assert_eq!(FORM_SELECT_BODY_FONT_FAMILY, "Monaspace Neon");
-    assert_eq!(FORM_SELECT_BODY_TEXT_SIZE_PX, 14.0);
+    assert_eq!(FORM_SELECT_BODY_TEXT_SIZE_PX, 13.0);
     assert_eq!(FORM_SELECT_HEIGHT_PX, 32.0);
     assert_eq!(FORM_SELECT_MENU_MAX_HEIGHT_PX, 184.0);
-    assert_eq!(FORM_INPUT_HEIGHT_PX, 40.0);
-    assert_eq!(FORM_INPUT_TEXT_SIZE_PX, 16.0);
-    assert_eq!(FORM_THREE_ROW_TEXTAREA_HEIGHT_PX, 88.0);
-    assert_eq!(FORM_FIVE_ROW_TEXTAREA_HEIGHT_PX, 136.0);
+    assert_eq!(FORM_INPUT_HEIGHT_PX, 32.0);
+    assert_eq!(FORM_INPUT_TEXT_SIZE_PX, 14.0);
+    assert_eq!(FORM_THREE_ROW_TEXTAREA_HEIGHT_PX, 76.0);
+    assert_eq!(FORM_FIVE_ROW_TEXTAREA_HEIGHT_PX, 118.0);
     assert_eq!(FORM_DIALOG_SECTION_X_PADDING_PX, 16.0);
     assert_eq!(FORM_GRID_GAP_PX, 12.0);
     assert_eq!(FORM_SELECT_MENU_Y_PADDING_PX, 4.0);
@@ -5241,28 +5266,28 @@ fn desktop_dialog_metrics_should_match_web_reference() {
     assert_eq!(DESKTOP_DIALOG_LG_WIDTH_PX, 576.0);
     assert_eq!(DESKTOP_DIALOG_MAX_WIDTH_RATIO, 0.9);
     assert_eq!(DESKTOP_DIALOG_RADIUS_PX, 14.0);
-    assert_eq!(DESKTOP_MODAL_TITLE_TEXT_SIZE_PX, 18.0);
+    assert_eq!(DESKTOP_MODAL_TITLE_TEXT_SIZE_PX, 16.0);
     assert_eq!(DESKTOP_MODAL_OVERLAY_OPACITY, 0.70);
     assert_eq!(DESKTOP_MODAL_HEADER_X_PADDING_PX, 16.0);
-    assert_eq!(DESKTOP_MODAL_HEADER_Y_PADDING_PX, 12.0);
-    assert_eq!(DESKTOP_DIALOG_TOP_PADDING_PX, 128.0);
+    assert_eq!(DESKTOP_MODAL_HEADER_Y_PADDING_PX, 10.0);
+    assert_eq!(DESKTOP_DIALOG_TOP_PADDING_PX, 80.0);
     assert_eq!(DESKTOP_MODAL_FOCUS_TRAP_KEY, "tab");
     assert_eq!(DESKTOP_MODAL_FOCUS_START_TAB_INDEX, 0);
     assert_eq!(DESKTOP_MODAL_FOCUS_END_TAB_INDEX, 999);
     assert_eq!(SETTINGS_CODE_FONT_FAMILY, "Monaspace Neon");
     assert_eq!(SETTINGS_CLOSE_BUTTON_SIZE_PX, 32.0);
     assert_eq!(SETTINGS_CONTROL_RADIUS_PX, 8.0);
-    assert_eq!(SETTINGS_BODY_X_PADDING_PX, 32.0);
-    assert_eq!(SETTINGS_BODY_Y_PADDING_PX, 24.0);
-    assert_eq!(SETTINGS_BODY_GAP_PX, 32.0);
+    assert_eq!(SETTINGS_BODY_X_PADDING_PX, 24.0);
+    assert_eq!(SETTINGS_BODY_Y_PADDING_PX, 20.0);
+    assert_eq!(SETTINGS_BODY_GAP_PX, 24.0);
     assert_eq!(SETTINGS_SECTION_GAP_PX, 8.0);
     assert_eq!(SETTINGS_CLOSE_HOVER_BG_OPACITY, 0.50);
     assert_eq!(SETTINGS_BODY_TEXT_SIZE_PX, 12.0);
     assert_eq!(SETTINGS_META_TEXT_SIZE_PX, 12.0);
     assert_eq!(SETTINGS_CODE_RADIUS_PX, 4.0);
-    assert_eq!(SETTINGS_MODEL_ROW_MIN_HEIGHT_PX, 48.0);
+    assert_eq!(SETTINGS_MODEL_ROW_MIN_HEIGHT_PX, 44.0);
     assert_eq!(SETTINGS_MODEL_ID_GAP_PX, 2.0);
-    assert_eq!(SETTINGS_MODEL_LABEL_TEXT_SIZE_PX, 14.0);
+    assert_eq!(SETTINGS_MODEL_LABEL_TEXT_SIZE_PX, 13.0);
     assert_eq!(SETTINGS_CLOSE_LABEL, "Close settings");
 }
 
@@ -5295,7 +5320,7 @@ fn desktop_priority_glyphs_should_match_web_reference() {
     assert_eq!(
         glyphs,
         vec![
-            ("none", "—"),
+            ("none", ""),
             ("urgent", "‼"),
             ("high", "▲"),
             ("medium", "◆"),
@@ -5433,8 +5458,8 @@ fn desktop_calendar_title_formatting_should_match_web_reference() {
 
     assert_eq!(format_month_year(may_four), "May 2026");
     assert_eq!(format_full_date(may_four), "May 4, 2026");
-    assert_eq!(format_week_range(may_four), "May 3 — 9, 2026");
-    assert_eq!(format_week_range(may_thirty_one), "May 31 — Jun 6, 2026");
+    assert_eq!(format_week_range(may_four), "May 3 to 9, 2026");
+    assert_eq!(format_week_range(may_thirty_one), "May 31 to Jun 6, 2026");
 }
 
 #[test]
@@ -6155,4 +6180,82 @@ fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext)
     assert_rendered_bounds(cx, "desktop-settings-restart-update");
     // The version's changelog entry sits beside Restart.
     assert_rendered_bounds(cx, "desktop-settings-release-notes");
+}
+
+struct TaskControlGeometryHarness {
+    workspace: Entity<Workspace>,
+    focus: [gpui::FocusHandle; 2],
+}
+
+impl gpui::Render for TaskControlGeometryHarness {
+    fn render(
+        &mut self,
+        _: &mut gpui::Window,
+        cx: &mut gpui::Context<'_, Self>,
+    ) -> impl gpui::IntoElement {
+        use gpui::prelude::*;
+        use gpui::{div, InteractiveElement};
+
+        let controls = self.workspace.update(cx, |workspace, cx| {
+            [
+                workspace.render_task_view_mode_button(DesktopTaskViewMode::List, cx),
+                workspace.render_task_view_mode_button(DesktopTaskViewMode::Board, cx),
+            ]
+        });
+        div().size_full().flex().items_start().gap_2().children(
+            controls.into_iter().enumerate().map(|(index, control)| {
+                control.track_focus(&self.focus[index]).child(
+                    div()
+                        .debug_selector(move || format!("focus-task-content-{index}"))
+                        .size(gpui::px(8.0)),
+                )
+            }),
+        )
+    }
+}
+
+#[gpui::test]
+fn native_task_tabs_keep_content_still_during_keyboard_focus(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        theme::apply_bruhs_theme(cx);
+        cx.set_global(DesktopState::new().unwrap());
+    });
+    let captured = Rc::new(RefCell::new(None));
+    let capture = captured.clone();
+    let (_root, cx) = cx.add_window_view(|window, cx| {
+        let harness = cx.new(|cx| TaskControlGeometryHarness {
+            workspace: cx.new(|cx| Workspace::new(window, cx)),
+            focus: std::array::from_fn(|_| cx.focus_handle()),
+        });
+        *capture.borrow_mut() = Some(harness.clone());
+        gpui_component::Root::new(harness, window, cx)
+    });
+    let view = captured.borrow().clone().unwrap();
+    cx.run_until_parked();
+    for (index, selector) in ["desktop-task-view-list", "desktop-task-view-board"]
+        .into_iter()
+        .enumerate()
+    {
+        let before = cx.debug_bounds(selector).unwrap();
+        let content_selector = ["focus-task-content-0", "focus-task-content-1"][index];
+        let children = cx.debug_bounds(content_selector).unwrap();
+        cx.simulate_mouse_move(before.center(), None, gpui::Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(cx.debug_bounds(selector), Some(before));
+        assert_eq!(cx.debug_bounds(content_selector).unwrap(), children);
+        cx.simulate_keystrokes("right");
+        view.update_in(cx, |view, window, cx| {
+            view.focus[index].focus(window, cx);
+            assert!(window.last_input_was_keyboard());
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            cx.debug_bounds(selector),
+            Some(before),
+            "focus resized {selector}"
+        );
+        assert_eq!(cx.debug_bounds(content_selector).unwrap(), children);
+    }
 }

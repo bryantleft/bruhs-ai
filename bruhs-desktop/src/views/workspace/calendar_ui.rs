@@ -254,7 +254,7 @@ pub(super) fn format_week_range(anchor: NaiveDate) -> String {
     let end = start + Duration::days(6);
     if start.month() == end.month() {
         format!(
-            "{} {} — {}, {}",
+            "{} {} to {}, {}",
             SHORT_MONTH_NAMES[start.month0() as usize],
             start.day(),
             end.day(),
@@ -262,7 +262,7 @@ pub(super) fn format_week_range(anchor: NaiveDate) -> String {
         )
     } else {
         format!(
-            "{} {} — {} {}, {}",
+            "{} {} to {} {}, {}",
             SHORT_MONTH_NAMES[start.month0() as usize],
             start.day(),
             SHORT_MONTH_NAMES[end.month0() as usize],
@@ -600,6 +600,8 @@ impl Workspace {
             .px(px(CALENDAR_HEADER_X_PADDING_PX))
             .py(px(CALENDAR_HEADER_Y_PADDING_PX))
             .flex()
+            .flex_wrap()
+            .gap_2()
             .items_center()
             .justify_between()
             .border_b_1()
@@ -640,9 +642,9 @@ impl Workspace {
                                     .tab_index(0)
                                     .role(Role::Button)
                                     .aria_label(CALENDAR_PREVIOUS_LABEL)
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
+                                    .border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| {
                                         el.bg(theme::longan_800()
@@ -666,7 +668,12 @@ impl Workspace {
                                             }
                                         },
                                     ))
-                                    .child("‹"),
+                                    .child(
+                                        svg()
+                                            .path(assets::CHEVRON_LEFT_ICON_PATH)
+                                            .size(px(14.0))
+                                            .text_color(theme::rambutan_400()),
+                                    ),
                             )
                             .child(
                                 div()
@@ -682,9 +689,9 @@ impl Workspace {
                                     .tab_index(0)
                                     .role(Role::Button)
                                     .aria_label("Today")
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
+                                    .border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| {
                                         el.bg(theme::longan_800()
@@ -722,9 +729,9 @@ impl Workspace {
                                     .tab_index(0)
                                     .role(Role::Button)
                                     .aria_label(CALENDAR_NEXT_LABEL)
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
+                                    .border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| {
                                         el.bg(theme::longan_800()
@@ -748,7 +755,12 @@ impl Workspace {
                                             }
                                         },
                                     ))
-                                    .child("›"),
+                                    .child(
+                                        svg()
+                                            .path(assets::CHEVRON_RIGHT_ICON_PATH)
+                                            .size(px(14.0))
+                                            .text_color(theme::rambutan_400()),
+                                    ),
                             ),
                     ),
             )
@@ -764,10 +776,11 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("Smart scheduling")
                         .child("Schedule")
                         .on_click(cx.listener(
-                            |this, _event, _window, cx| {
-                                this.toggle_scheduling_panel(cx);
+                            |this, _event, window, cx| {
+                                this.toggle_scheduling_panel(window, cx);
                             },
                         )),
                     )
@@ -776,6 +789,9 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .gap(px(CALENDAR_MODE_SWITCHER_GAP_PX))
+                            .id("calendar-view-modes")
+                            .role(Role::TabList)
+                            .aria_label("Calendar view")
                             .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
                             .border_1()
                             .border_color(
@@ -808,7 +824,7 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label(CALENDAR_NEW_EVENT_LABEL)
-                            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| {
                                 el.bg(theme::persimmon_500()
@@ -867,7 +883,7 @@ impl Workspace {
             .role(Role::Tab)
             .aria_label(mode.label())
             .aria_selected(is_active)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(!is_active, |el| {
                 el.hover(|el| {
@@ -962,7 +978,8 @@ impl Workspace {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .overflow_hidden()
+                    .id("desktop-calendar-month-scroll")
+                    .overflow_y_scrollbar()
                     .flex()
                     .flex_col()
                     .children(weeks),
@@ -1042,18 +1059,29 @@ impl Workspace {
             .flex_1()
             .min_w_0()
             .p(px(CALENDAR_MONTH_CELL_PADDING_PX))
+            .relative()
+            .border_1()
+            .border_color(gpui::transparent_black())
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Create event on {}", date.format("%A, %B %-d, %Y")))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .flex()
             .flex_col()
             .gap_1()
             .hover(|el| el.bg(theme::longan_800().opacity(CALENDAR_MONTH_CELL_HOVER_BG_OPACITY)))
-            .when(!cell_is_last_col, |el| el.border_r_1())
-            .when(!cell_is_last_row, |el| el.border_b_1())
-            .border_color(theme::longan_800().opacity(CALENDAR_MONTH_CELL_BORDER_OPACITY))
+            .child(
+                div()
+                    .absolute()
+                    .top_0()
+                    .bottom_0()
+                    .left_0()
+                    .right_0()
+                    .when(!cell_is_last_col, |el| el.border_r_1())
+                    .when(!cell_is_last_row, |el| el.border_b_1())
+                    .border_color(theme::longan_800().opacity(CALENDAR_MONTH_CELL_BORDER_OPACITY)),
+            )
             .on_click(cx.listener(move |this, _ev, window, cx| {
                 this.open_event_create(Some(at_hour(date_for_new, 9)), window, cx);
             }))
@@ -1102,7 +1130,9 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Open task {}", item.title))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.text_color(theme::rambutan_400()))
             .tooltip(|window, cx| Tooltip::new(CALENDAR_TASK_DUE_LABEL).build(window, cx))
@@ -1151,7 +1181,9 @@ impl Workspace {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Edit event {}", event.title))
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.text_color(theme::rambutan_200()))
             .on_click(cx.listener(move |this, _ev, window, cx| {
@@ -1295,16 +1327,25 @@ impl Workspace {
                     ))
                     .debug_selector(move || format!("desktop-calendar-timegrid-hour-{date}-{hour}"))
                     .h(px(DESKTOP_HOUR_ROW_PX))
+                    .relative()
+                    .border_1()
+                    .border_color(gpui::transparent_black())
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label(format!(
                         "Create event on {} at {hour:02}:00",
                         date.format("%A, %B %-d, %Y")
                     ))
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
-                    .border_b_1()
-                    .border_color(
-                        theme::longan_800().opacity(CALENDAR_TIMEGRID_HOUR_SLOT_BORDER_OPACITY),
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                    .child(
+                        div()
+                            .absolute()
+                            .bottom_0()
+                            .left_0()
+                            .right_0()
+                            .h(px(1.0))
+                            .bg(theme::longan_800()
+                                .opacity(CALENDAR_TIMEGRID_HOUR_SLOT_BORDER_OPACITY)),
                     )
                     .hover(|el| {
                         el.bg(theme::longan_800()
@@ -1421,7 +1462,7 @@ impl Workspace {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label(format!("Edit event {}", event.title))
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_grab()
                     .hover(|el| {
                         el.bg(surface_color.opacity(CALENDAR_TIMEGRID_EVENT_HOVER_BG_OPACITY))

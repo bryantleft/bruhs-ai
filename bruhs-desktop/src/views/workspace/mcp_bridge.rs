@@ -44,24 +44,20 @@ mod tests;
 
 #[cfg(unix)]
 const MCP_SESSION_ACTIVE_NOTE: &str =
-    "Session active. Granted reads cover Chat summaries/completed messages, tasks, local \
-    events, captures, documents, inbox, and People identity/relationship context. Chat \
-    drafts and voice fingerprints stay private. Finance and Health reads also require their \
-    Life agent-context opt-in; Finance monetary fields and quantities require the separate \
-    exact-amount opt-in. Identity labels remain visible; transaction notes stay private. \
-    Writes require your review and start. Chat creates empty threads; Inbox creates drafts, \
-    never sends. People adds undated local reminders. Life writes create manual records, \
-    never payments or provider changes. Disabling disconnects all clients.";
+    "Session active. Grant reads and writes separately below. Chat reads include summaries \
+    and completed messages. Drafts, voice fingerprints, and transaction notes stay private. \
+    Finance and Health also need Life consent. Sharing finance amounts and quantities needs \
+    separate consent; labels remain visible when values are hidden. Writes require review \
+    and start, and create local records. They never send messages, make payments, or change \
+    providers. Disabling disconnects all clients.";
 #[cfg(unix)]
 const MCP_OFF_NOTE: &str =
-    "Off by default. Enable only for a trusted local MCP client. Read grants cover Chat \
-    summaries/completed messages, Tasks, Calendar, Capture, Knowledge, Inbox, and People \
-    identity/relationship context. Chat drafts and voice fingerprints stay private. Finance \
-    and Health reads also require their Life agent-context opt-in; Finance monetary fields \
-    and quantities require the separate exact-amount opt-in. Identity labels remain visible; \
-    transaction notes stay private. Write proposals support empty Chat threads, manual \
-    Finance entries, Health workouts, and undated People reminders. Read and Write grants \
-    stay independent.";
+    "Off by default. Connect only a trusted local client. Grant reads and writes separately \
+    below. Chat reads include summaries and completed messages. Drafts, voice fingerprints, \
+    and transaction notes stay private. Finance and Health also need Life consent. Sharing \
+    finance amounts and quantities needs separate consent; labels remain visible when \
+    values are hidden. Writes require review and start, and create local records. They \
+    never send messages, make payments, or change providers.";
 /// The `mcpServers` entry a client pastes to reach this session.
 #[cfg(unix)]
 fn mcp_client_config(connection_path: impl serde::Serialize) -> serde_json::Value {

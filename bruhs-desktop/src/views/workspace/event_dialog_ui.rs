@@ -51,6 +51,7 @@ impl Workspace {
         self.event_create_all_day = values.all_day;
         self.event_create_color = values.color.to_string();
         self.set_event_create_color_menu_open(false);
+        self.date_picker = None;
         self.event_create_error = None;
         self.event_create_title_input.update(cx, |input, cx| {
             input.set_value(values.title.to_string(), window, cx);
@@ -142,6 +143,7 @@ impl Workspace {
 
     pub(super) fn close_event_create(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.dismiss_overlay(|overlay| matches!(overlay, Overlay::EventCreate { .. }));
+        self.date_picker = None;
         self.selected_calendar_event_id = None;
         self.event_create_error = None;
         self.event_create_title_input.update(cx, |input, cx| {
@@ -258,13 +260,15 @@ impl Workspace {
             .text_color(theme::rambutan_300())
             .tab_index(0)
             .role(Role::CheckBox)
-            .aria_label("All-day")
+            .aria_label("All day")
             .aria_toggled(if self.event_create_all_day {
                 Toggled::True
             } else {
                 Toggled::False
             })
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .on_click(cx.listener(|this, _ev, _window, cx| {
                 this.event_create_all_day = !this.event_create_all_day;
@@ -305,7 +309,7 @@ impl Workspace {
                             .child(if self.event_create_all_day { "✓" } else { "" }),
                     ),
             )
-            .child("All-day")
+            .child("All day")
             .into_any_element()
     }
 
@@ -337,7 +341,9 @@ impl Workspace {
                     .role(Role::ListBoxOption)
                     .aria_label(label)
                     .aria_selected(is_selected)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -386,7 +392,7 @@ impl Workspace {
                     .role(Role::ComboBox)
                     .aria_label("Event color")
                     .aria_expanded(self.event_create_color_menu_open())
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.border_color(theme::ring_floating()))
                     .on_click(cx.listener(|this, _ev, _window, cx| {
@@ -417,6 +423,7 @@ impl Workspace {
                 el.child(
                     div()
                         .id("event-color-options")
+                        .debug_selector(|| "desktop-event-color-options".into())
                         .role(Role::ListBox)
                         .aria_label("Event color")
                         .w_full()
@@ -445,6 +452,87 @@ impl Workspace {
             .clamp(
                 DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX,
                 FORM_DIALOG_PREFERRED_HEIGHT_PX,
+            );
+        let fields = div()
+            .flex_shrink_0()
+            .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
+            .py(px(EVENT_CREATE_BODY_Y_PADDING_PX))
+            .flex()
+            .flex_col()
+            .gap(px(EVENT_CREATE_BODY_GAP_PX))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(FORM_FIELD_GAP_PX))
+                    .child(self.event_create_field_label("Title"))
+                    .child(
+                        form_text_input(Input::new(&self.event_create_title_input))
+                            .aria_label("Event title"),
+                    )
+                    .when_some(self.event_create_error.clone(), |el, error| {
+                        el.child(
+                            div()
+                                .id("event-create-title-error")
+                                .debug_selector(|| "desktop-event-create-title-error".to_string())
+                                .role(Role::Alert)
+                                .aria_label(error.clone())
+                                .font_family(EVENT_DIALOG_LABEL_FONT_FAMILY)
+                                .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
+                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                .text_color(theme::lychee_300())
+                                .child(error),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(FORM_GRID_GAP_PX))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(FORM_FIELD_GAP_PX))
+                            .child(self.event_create_field_label("Start"))
+                            .child(self.render_date_field(
+                                date_picker_ui::DatePickerTarget::EventStart,
+                                cx,
+                            )),
+                    )
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(FORM_FIELD_GAP_PX))
+                            .child(self.event_create_field_label("End"))
+                            .child(
+                                self.render_date_field(
+                                    date_picker_ui::DatePickerTarget::EventEnd,
+                                    cx,
+                                ),
+                            ),
+                    ),
+            )
+            .child(self.render_event_all_day_toggle(cx))
+            .child(self.render_event_color_select(cx))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(FORM_FIELD_GAP_PX))
+                    .child(self.event_create_field_label("Notes"))
+                    .child(
+                        form_textarea(
+                            Input::new(&self.event_create_notes_input),
+                            FORM_THREE_ROW_TEXTAREA_HEIGHT_PX,
+                        )
+                        .aria_label("Event notes"),
+                    ),
             );
 
         div()
@@ -498,10 +586,14 @@ impl Workspace {
                     }))
                     .child(
                         div()
+                            .flex_shrink_0()
                             .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
                             .py(px(EVENT_CREATE_HEADER_Y_PADDING_PX))
                             .border_b_1()
                             .border_color(theme::longan_800())
+                            .flex()
+                            .items_center()
+                            .justify_between()
                             .child(
                                 div()
                                     .text_size(px(EVENT_DIALOG_TITLE_TEXT_SIZE_PX))
@@ -512,92 +604,53 @@ impl Workspace {
                                     } else {
                                         CALENDAR_NEW_EVENT_LABEL
                                     }),
+                            )
+                            .child(
+                                web_button(
+                                    "event-create-close",
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::IconSmall,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(|| "desktop-event-create-close".to_string())
+                                .aria_label("Close event dialog")
+                                .child(
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(14.0))
+                                        .text_color(theme::rambutan_400()),
+                                )
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.close_event_create(window, cx);
+                                }))
+                                .on_key_down(cx.listener(
+                                    |this, event: &KeyDownEvent, window, cx| {
+                                        if is_web_button_activation_key(
+                                            event.keystroke.key.as_str(),
+                                        ) {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                            this.close_event_create(window, cx);
+                                        }
+                                    },
+                                )),
                             ),
                     )
                     .child(
                         div()
-                            .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
-                            .py(px(EVENT_CREATE_BODY_Y_PADDING_PX))
-                            .flex()
-                            .flex_col()
-                            .gap(px(EVENT_CREATE_BODY_GAP_PX))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(FORM_FIELD_GAP_PX))
-                                    .child(self.event_create_field_label("Title"))
-                                    .child(
-                                        form_text_input(Input::new(&self.event_create_title_input))
-                                            .aria_label("Event title"),
-                                    )
-                                    .when_some(self.event_create_error.clone(), |el, error| {
-                                        el.child(
-                                            div()
-                                                .id("event-create-title-error")
-                                                .debug_selector(|| {
-                                                    "desktop-event-create-title-error".to_string()
-                                                })
-                                                .role(Role::Alert)
-                                                .aria_label(error.clone())
-                                                .font_family(EVENT_DIALOG_LABEL_FONT_FAMILY)
-                                                .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
-                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                                .text_color(theme::lychee_300())
-                                                .child(error),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(px(FORM_GRID_GAP_PX))
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .flex()
-                                            .flex_col()
-                                            .gap(px(FORM_FIELD_GAP_PX))
-                                            .child(self.event_create_field_label("Start"))
-                                            .child(self.render_date_field(
-                                                date_picker_ui::DatePickerTarget::EventStart,
-                                                cx,
-                                            )),
-                                    )
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .flex()
-                                            .flex_col()
-                                            .gap(px(FORM_FIELD_GAP_PX))
-                                            .child(self.event_create_field_label("End"))
-                                            .child(self.render_date_field(
-                                                date_picker_ui::DatePickerTarget::EventEnd,
-                                                cx,
-                                            )),
-                                    ),
-                            )
-                            .child(self.render_event_all_day_toggle(cx))
-                            .child(self.render_event_color_select(cx))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(FORM_FIELD_GAP_PX))
-                                    .child(self.event_create_field_label("Notes"))
-                                    .child(
-                                        form_textarea(
-                                            Input::new(&self.event_create_notes_input),
-                                            FORM_THREE_ROW_TEXTAREA_HEIGHT_PX,
-                                        )
-                                        .aria_label("Event notes"),
-                                    ),
-                            ),
+                            .id("event-create-body")
+                            .debug_selector(|| "desktop-event-create-body".to_string())
+                            .relative()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.modal_scroll)
+                            .child(fields)
+                            .vertical_scrollbar(&self.modal_scroll),
                     )
                     .child(
                         div()
+                            .debug_selector(|| "desktop-event-create-footer".to_string())
+                            .flex_shrink_0()
                             .border_t_1()
                             .border_color(theme::longan_800())
                             .bg(theme::longan_900().opacity(EVENT_CREATE_FOOTER_BG_OPACITY))
@@ -626,9 +679,9 @@ impl Workspace {
                                         .tab_index(0)
                                         .role(Role::Button)
                                         .aria_label(EVENT_DELETE_LABEL)
-                                        .focus_visible(|el| {
-                                            el.border_2().border_color(theme::persimmon_400())
-                                        })
+                                        .border_1()
+                                        .border_color(gpui::transparent_black())
+                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                         .cursor_pointer()
                                         .hover(|el| {
                                             el.bg(theme::lychee_500()
@@ -675,9 +728,7 @@ impl Workspace {
                                         .child(EVENT_CANCEL_LABEL)
                                         .tab_index(0)
                                         .role(Role::Button)
-                                        .focus_visible(|el| {
-                                            el.border_2().border_color(theme::persimmon_400())
-                                        })
+                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                         .on_click(cx.listener(|this, _ev, window, cx| {
                                             this.close_event_create(window, cx);
                                         }))

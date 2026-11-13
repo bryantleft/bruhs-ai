@@ -78,6 +78,15 @@ impl Default for ImportPicker {
     }
 }
 
+impl ImportPicker {
+    pub(super) fn cancel(&mut self) {
+        self.list_task = None;
+        self.import_task = None;
+        self.loading = false;
+        self.importing = false;
+    }
+}
+
 /// Where an imported thread lives here: its project name (empty for a chat
 /// without a project) and the folder its turns run in.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -141,7 +150,7 @@ pub(super) fn import_row_detail(
     } else {
         "transcript"
     };
-    format!("{place} · {when} · {how}")
+    format!("{place}, {when}, {how}")
 }
 
 /// Candidates whose session is not already a thread here.
@@ -408,6 +417,9 @@ impl Workspace {
         self.import_picker.import_task = Some(cx.spawn_in(window, async move |this, cx| {
             let loaded = load.await;
             let _closed = this.update_in(cx, |this, window, cx| {
+                if this.top_layer != Some(TopLayer::ImportThread) {
+                    return;
+                }
                 this.import_picker.importing = false;
                 match loaded {
                     Ok(imported) => this.open_imported_thread(imported, window, cx),
@@ -690,6 +702,7 @@ impl Workspace {
             .role(Role::ListBox)
             .aria_label("Threads")
             .max_h(px(IMPORT_LIST_MAX_HEIGHT_PX))
+            .min_h_0()
             .py_1()
             .overflow_y_scroll()
             .track_scroll(&picker.scroll)
@@ -757,7 +770,11 @@ impl Workspace {
             .into_any_element()
     }
 
-    pub(super) fn render_import_thread(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_import_thread(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let importing = self.import_picker.importing;
         div()
             .absolute()
@@ -786,6 +803,7 @@ impl Workspace {
                     .debug_selector(|| "desktop-import-thread-dialog".to_string())
                     .w(px(IMPORT_DIALOG_WIDTH_PX))
                     .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
+                    .max_h(modal_ui::dialog_max_height(window))
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
                     .border_1()
                     .border_color(theme::ring_modal())
@@ -833,6 +851,7 @@ impl Workspace {
                     }))
                     .child(
                         div()
+                            .flex_shrink_0()
                             .px_4()
                             .py_3()
                             .border_b_1()
@@ -876,6 +895,7 @@ impl Workspace {
                     .child(self.render_import_rows(cx))
                     .child(
                         div()
+                            .flex_shrink_0()
                             .px_4()
                             .py(px(10.0))
                             .border_t_1()
@@ -901,9 +921,9 @@ impl Workspace {
                                     .tab_index(0)
                                     .role(Role::Button)
                                     .aria_label("Cancel")
-                                    .focus_visible(|el| {
-                                        el.border_2().border_color(theme::persimmon_400())
-                                    })
+                                    .border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| el.text_color(theme::rambutan_300()))
                                     .on_click(cx.listener(|this, _ev, _window, cx| {

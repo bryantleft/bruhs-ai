@@ -96,6 +96,7 @@ impl Workspace {
     pub(super) fn open_task_create(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.active_view = AppView::Tasks;
         self.open_overlay(Overlay::TaskCreate { menu: None });
+        self.date_picker = None;
         self.task_create_project_id = self.selected_project_id.clone();
         self.task_create_status = DesktopWorkItemStatus::Backlog;
         self.task_create_priority = DesktopPriority::None;
@@ -126,6 +127,13 @@ impl Workspace {
     ) {
         self.open_task_create(window, cx);
         self.task_create_status = status;
+        cx.notify();
+    }
+
+    fn close_task_create(&mut self, cx: &mut Context<'_, Self>) {
+        self.dismiss_overlay(|overlay| matches!(overlay, Overlay::TaskCreate { .. }));
+        self.date_picker = None;
+        self.task_create_error = None;
         cx.notify();
     }
 
@@ -180,6 +188,7 @@ impl Workspace {
         self.work_items.push(item);
         self.selected_work_item_id = next_selected_work_item_id;
         self.dismiss_overlay(|overlay| matches!(overlay, Overlay::TaskCreate { .. }));
+        self.date_picker = None;
         self.task_create_project_id = self.selected_project_id.clone();
         self.task_create_status = DesktopWorkItemStatus::Backlog;
         self.task_create_priority = DesktopPriority::None;
@@ -246,7 +255,7 @@ impl Workspace {
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label(format!("Set status to {}", status.label()))
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .when(!is_active, |el| {
                         el.hover(|el| {
@@ -327,7 +336,7 @@ impl Workspace {
                     .role(Role::ComboBox)
                     .aria_label(label)
                     .aria_expanded(is_open)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.border_color(theme::ring_floating()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -398,7 +407,9 @@ impl Workspace {
                 .role(Role::ListBoxOption)
                 .aria_label("No project")
                 .aria_selected(none_selected)
-                .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
                 .hover(|el| el.bg(theme::longan_800()))
                 .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -447,7 +458,9 @@ impl Workspace {
                     .role(Role::ListBoxOption)
                     .aria_label(project.name.clone())
                     .aria_selected(is_selected)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -514,7 +527,9 @@ impl Workspace {
                     .role(Role::ListBoxOption)
                     .aria_label(status.label())
                     .aria_selected(is_selected)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -577,7 +592,9 @@ impl Workspace {
                     .role(Role::ListBoxOption)
                     .aria_label(priority.label())
                     .aria_selected(is_selected)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -636,6 +653,7 @@ impl Workspace {
                 div()
                     .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
                     .py(px(TASK_DETAIL_HEADER_Y_PADDING_PX))
+                    .flex_shrink_0()
                     .flex()
                     .items_center()
                     .justify_between()
@@ -658,10 +676,15 @@ impl Workspace {
                         )
                         .debug_selector(|| "desktop-task-detail-close".to_string())
                         .aria_label(TASK_DETAIL_CLOSE_LABEL)
-                        .child("×")
+                        .child(
+                            svg()
+                                .path(assets::CLOSE_ICON_PATH)
+                                .size(px(14.0))
+                                .text_color(theme::rambutan_400()),
+                        )
                         .tab_index(0)
                         .role(Role::Button)
-                        .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .tooltip(|window, cx| {
                             Tooltip::new(TASK_DETAIL_CLOSE_LABEL).build(window, cx)
                         })
@@ -685,7 +708,9 @@ impl Workspace {
             )
             .child(
                 div()
+                    .debug_selector(|| "desktop-task-detail-body".into())
                     .flex_1()
+                    .min_h_0()
                     .overflow_y_scrollbar()
                     .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
                     .py(px(TASK_DETAIL_BODY_Y_PADDING_PX))
@@ -761,117 +786,120 @@ impl Workspace {
                                             )),
                                     ),
                             ),
-                    ),
-            )
-            .child(
-                div()
-                    .border_t_1()
-                    .border_color(theme::ring_panel())
-                    .pt_3()
-                    .flex()
-                    .flex_col()
-                    .gap_3()
-                    .child(
-                        div()
-                            .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
-                            .text_size(px(12.0))
-                            .font_weight(FontWeight::MEDIUM)
-                            .text_color(theme::rambutan_200())
-                            .child("Planning"),
                     )
                     .child(
                         div()
+                            .debug_selector(|| "desktop-task-detail-planning".into())
+                            .border_t_1()
+                            .border_color(theme::ring_panel())
+                            .pt_3()
                             .flex()
-                            .gap_2()
-                            .child(
-                                web_button(
-                                    "task-detail-estimate",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label("Cycle task estimate")
-                                .child(estimate_label)
-                                .on_click(cx.listener(
-                                    |this, _event, _window, cx| {
-                                        this.cycle_selected_work_item_estimate(cx);
-                                    },
-                                )),
-                            )
-                            .child(
-                                web_button(
-                                    "task-detail-recurrence",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label("Cycle task recurrence")
-                                .child(recurrence_label)
-                                .on_click(cx.listener(
-                                    |this, _event, _window, cx| {
-                                        this.cycle_selected_work_item_recurrence(cx);
-                                    },
-                                )),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .gap(px(FORM_GRID_GAP_PX))
+                            .flex_col()
+                            .gap_3()
                             .child(
                                 div()
-                                    .min_w_0()
-                                    .flex_1()
+                                    .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
+                                    .text_size(px(12.0))
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_color(theme::rambutan_200())
+                                    .child("Planning"),
+                            )
+                            .child(
+                                div()
                                     .flex()
-                                    .flex_col()
-                                    .gap(px(FORM_FIELD_GAP_PX))
-                                    .child(self.task_create_field_label("Cycle"))
+                                    .gap_2()
                                     .child(
-                                        form_text_input(Input::new(&self.task_detail_cycle_input))
-                                            .aria_label("Task cycle"),
+                                        web_button(
+                                            "task-detail-estimate",
+                                            WebButtonVariant::Ghost,
+                                            WebButtonSize::Small,
+                                            ButtonState::Enabled,
+                                        )
+                                        .aria_label("Cycle task estimate")
+                                        .child(estimate_label)
+                                        .on_click(
+                                            cx.listener(|this, _event, _window, cx| {
+                                                this.cycle_selected_work_item_estimate(cx);
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        web_button(
+                                            "task-detail-recurrence",
+                                            WebButtonVariant::Ghost,
+                                            WebButtonSize::Small,
+                                            ButtonState::Enabled,
+                                        )
+                                        .aria_label("Cycle task recurrence")
+                                        .child(recurrence_label)
+                                        .on_click(
+                                            cx.listener(|this, _event, _window, cx| {
+                                                this.cycle_selected_work_item_recurrence(cx);
+                                            }),
+                                        ),
                                     ),
                             )
                             .child(
                                 div()
-                                    .min_w_0()
-                                    .flex_1()
                                     .flex()
-                                    .flex_col()
-                                    .gap(px(FORM_FIELD_GAP_PX))
-                                    .child(self.task_create_field_label("Waiting on"))
+                                    .gap(px(FORM_GRID_GAP_PX))
                                     .child(
-                                        form_text_input(Input::new(
-                                            &self.task_detail_waiting_input,
-                                        ))
-                                        .aria_label("Task waiting on"),
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(FORM_FIELD_GAP_PX))
+                                            .child(self.task_create_field_label("Cycle"))
+                                            .child(
+                                                form_text_input(Input::new(
+                                                    &self.task_detail_cycle_input,
+                                                ))
+                                                .aria_label("Task cycle"),
+                                            ),
+                                    )
+                                    .child(
+                                        div()
+                                            .min_w_0()
+                                            .flex_1()
+                                            .flex()
+                                            .flex_col()
+                                            .gap(px(FORM_FIELD_GAP_PX))
+                                            .child(self.task_create_field_label("Waiting on"))
+                                            .child(
+                                                form_text_input(Input::new(
+                                                    &self.task_detail_waiting_input,
+                                                ))
+                                                .aria_label("Task waiting on"),
+                                            ),
                                     ),
-                            ),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(
-                                web_button(
-                                    "task-detail-dependencies",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label("Add or clear a task dependency")
-                                .child(format!("{dependency_count} dependencies"))
-                                .on_click(cx.listener(
-                                    |this, _event, _window, cx| {
-                                        this.cycle_selected_work_item_dependency(cx);
-                                    },
-                                )),
                             )
                             .child(
                                 div()
-                                    .text_size(px(11.0))
-                                    .text_color(theme::rambutan_500())
-                                    .child(format!("{time_block_count} focus blocks")),
+                                    .flex()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(
+                                        web_button(
+                                            "task-detail-dependencies",
+                                            WebButtonVariant::Ghost,
+                                            WebButtonSize::Small,
+                                            ButtonState::Enabled,
+                                        )
+                                        .aria_label("Add or clear a task dependency")
+                                        .child(format!("{dependency_count} dependencies"))
+                                        .on_click(
+                                            cx.listener(|this, _event, _window, cx| {
+                                                this.cycle_selected_work_item_dependency(cx);
+                                            }),
+                                        ),
+                                    )
+                                    .child(
+                                        div()
+                                            .text_size(px(11.0))
+                                            .text_color(theme::rambutan_500())
+                                            .child(format!("{time_block_count} focus blocks")),
+                                    ),
                             ),
                     ),
             )
@@ -879,6 +907,7 @@ impl Workspace {
                 div()
                     .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
                     .py(px(TASK_DETAIL_FOOTER_Y_PADDING_PX))
+                    .flex_shrink_0()
                     .border_t_1()
                     .border_color(theme::ring_panel())
                     .child(
@@ -893,7 +922,7 @@ impl Workspace {
                         .child("Delete task")
                         .tab_index(0)
                         .role(Role::Button)
-                        .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .on_click(cx.listener(move |this, _ev, _window, cx| {
                             this.delete_work_item_by_id(&delete_id, cx);
                         }))
@@ -967,7 +996,7 @@ impl Workspace {
                     .role(Role::ComboBox)
                     .aria_label(label)
                     .aria_expanded(is_open)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.border_color(theme::ring_floating()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -1031,7 +1060,9 @@ impl Workspace {
                 .role(Role::ListBoxOption)
                 .aria_label("No project")
                 .aria_selected(no_project_selected)
-                .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
                 .hover(|el| el.bg(theme::longan_800()))
                 .on_click(cx.listener(|this, _ev, _window, cx| {
@@ -1075,7 +1106,9 @@ impl Workspace {
                     .role(Role::ListBoxOption)
                     .aria_label(project.name.clone())
                     .aria_selected(is_selected)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -1133,7 +1166,9 @@ impl Workspace {
                     .role(Role::ListBoxOption)
                     .aria_label(status.label())
                     .aria_selected(is_selected)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -1195,7 +1230,9 @@ impl Workspace {
                     .role(Role::ListBoxOption)
                     .aria_label(priority.label())
                     .aria_selected(is_selected)
-                    .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
                     .on_click(cx.listener(move |this, _ev, _window, cx| {
@@ -1238,6 +1275,80 @@ impl Workspace {
             .clamp(
                 DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX,
                 FORM_DIALOG_PREFERRED_HEIGHT_PX,
+            );
+        let fields = div()
+            .flex_shrink_0()
+            .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
+            .py(px(TASK_CREATE_BODY_Y_PADDING_PX))
+            .flex()
+            .flex_col()
+            .gap(px(TASK_CREATE_BODY_GAP_PX))
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(FORM_FIELD_GAP_PX))
+                    .child(self.task_create_field_label("Title"))
+                    .child(
+                        form_text_input(Input::new(&self.task_create_title_input))
+                            .aria_label("Task title"),
+                    )
+                    .when_some(self.task_create_error.clone(), |el, error| {
+                        el.child(
+                            div()
+                                .id("task-create-title-error")
+                                .debug_selector(|| "desktop-task-create-title-error".to_string())
+                                .role(Role::Alert)
+                                .aria_label(error.clone())
+                                .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
+                                .text_size(px(TASK_FORM_LABEL_TEXT_SIZE_PX))
+                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                .text_color(theme::lychee_300())
+                                .child(error),
+                        )
+                    }),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(FORM_FIELD_GAP_PX))
+                    .child(self.task_create_field_label("Description"))
+                    .child(
+                        form_textarea(
+                            Input::new(&self.task_create_description_input),
+                            FORM_THREE_ROW_TEXTAREA_HEIGHT_PX,
+                        )
+                        .aria_label("Task description"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(FORM_GRID_GAP_PX))
+                    .child(self.render_task_create_project_select(cx))
+                    .child(self.render_task_create_status_select(cx)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .gap(px(FORM_GRID_GAP_PX))
+                    .child(self.render_task_create_priority_select(cx))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .flex()
+                            .flex_col()
+                            .gap(px(FORM_FIELD_GAP_PX))
+                            .child(self.task_create_field_label("Due date"))
+                            .child(
+                                self.render_date_field(
+                                    date_picker_ui::DatePickerTarget::TaskDue,
+                                    cx,
+                                ),
+                            ),
+                    ),
             );
 
         div()
@@ -1287,96 +1398,65 @@ impl Workspace {
                     }))
                     .child(
                         div()
+                            .flex_shrink_0()
                             .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
                             .py(px(TASK_CREATE_HEADER_Y_PADDING_PX))
                             .border_b_1()
                             .border_color(theme::longan_800())
+                            .flex()
+                            .items_center()
+                            .justify_between()
                             .child(
                                 div()
                                     .text_size(px(TASK_DIALOG_TITLE_TEXT_SIZE_PX))
                                     .font_weight(FontWeight::MEDIUM)
                                     .text_color(theme::rambutan_100())
                                     .child("New task"),
+                            )
+                            .child(
+                                web_button(
+                                    "task-create-close",
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::IconSmall,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(|| "desktop-task-create-close".to_string())
+                                .aria_label("Close task dialog")
+                                .child(
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(14.0))
+                                        .text_color(theme::rambutan_400()),
+                                )
+                                .on_click(cx.listener(|this, _, _, cx| this.close_task_create(cx)))
+                                .on_key_down(cx.listener(
+                                    |this, event: &KeyDownEvent, window, cx| {
+                                        if is_web_button_activation_key(
+                                            event.keystroke.key.as_str(),
+                                        ) {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                            this.close_task_create(cx);
+                                        }
+                                    },
+                                )),
                             ),
                     )
                     .child(
                         div()
+                            .id("task-create-body")
                             .debug_selector(|| "desktop-task-create-body".to_string())
-                            .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
-                            .py(px(TASK_CREATE_BODY_Y_PADDING_PX))
-                            .flex()
-                            .flex_col()
-                            .gap(px(TASK_CREATE_BODY_GAP_PX))
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(FORM_FIELD_GAP_PX))
-                                    .child(self.task_create_field_label("Title"))
-                                    .child(
-                                        form_text_input(Input::new(&self.task_create_title_input))
-                                            .aria_label("Task title"),
-                                    )
-                                    .when_some(self.task_create_error.clone(), |el, error| {
-                                        el.child(
-                                            div()
-                                                .id("task-create-title-error")
-                                                .debug_selector(|| {
-                                                    "desktop-task-create-title-error".to_string()
-                                                })
-                                                .role(Role::Alert)
-                                                .aria_label(error.clone())
-                                                .font_family(TASK_DIALOG_LABEL_FONT_FAMILY)
-                                                .text_size(px(TASK_FORM_LABEL_TEXT_SIZE_PX))
-                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                                .text_color(theme::lychee_300())
-                                                .child(error),
-                                        )
-                                    }),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(FORM_FIELD_GAP_PX))
-                                    .child(self.task_create_field_label("Description"))
-                                    .child(
-                                        form_textarea(
-                                            Input::new(&self.task_create_description_input),
-                                            FORM_THREE_ROW_TEXTAREA_HEIGHT_PX,
-                                        )
-                                        .aria_label("Task description"),
-                                    ),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(px(FORM_GRID_GAP_PX))
-                                    .child(self.render_task_create_project_select(cx))
-                                    .child(self.render_task_create_status_select(cx)),
-                            )
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap(px(FORM_GRID_GAP_PX))
-                                    .child(self.render_task_create_priority_select(cx))
-                                    .child(
-                                        div()
-                                            .min_w_0()
-                                            .flex_1()
-                                            .flex()
-                                            .flex_col()
-                                            .gap(px(FORM_FIELD_GAP_PX))
-                                            .child(self.task_create_field_label("Due date"))
-                                            .child(self.render_date_field(
-                                                date_picker_ui::DatePickerTarget::TaskDue,
-                                                cx,
-                                            )),
-                                    ),
-                            ),
+                            .relative()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.modal_scroll)
+                            .child(fields)
+                            .vertical_scrollbar(&self.modal_scroll),
                     )
                     .child(
                         div()
+                            .debug_selector(|| "desktop-task-create-footer".to_string())
+                            .flex_shrink_0()
                             .border_t_1()
                             .border_color(theme::longan_800())
                             .bg(theme::longan_900().opacity(TASK_CREATE_FOOTER_BG_OPACITY))
@@ -1398,15 +1478,9 @@ impl Workspace {
                                 .child("Cancel")
                                 .tab_index(0)
                                 .role(Role::Button)
-                                .focus_visible(|el| {
-                                    el.border_2().border_color(theme::persimmon_400())
-                                })
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                 .on_click(cx.listener(|this, _ev, _window, cx| {
-                                    this.dismiss_overlay(|overlay| {
-                                        matches!(overlay, Overlay::TaskCreate { .. })
-                                    });
-                                    this.task_create_error = None;
-                                    cx.notify();
+                                    this.close_task_create(cx);
                                 }))
                                 .on_key_down(cx.listener(
                                     |this, event: &KeyDownEvent, window, cx| {
@@ -1415,11 +1489,7 @@ impl Workspace {
                                         ) {
                                             window.prevent_default();
                                             cx.stop_propagation();
-                                            this.dismiss_overlay(|overlay| {
-                                                matches!(overlay, Overlay::TaskCreate { .. })
-                                            });
-                                            this.task_create_error = None;
-                                            cx.notify();
+                                            this.close_task_create(cx);
                                         }
                                     },
                                 )),

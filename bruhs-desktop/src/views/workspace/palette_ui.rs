@@ -19,7 +19,7 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         id: "nav-inbox",
         group: "Navigate",
         label: "Inbox",
-        hint: "messages & follow-ups",
+        hint: "messages and replies",
     },
     CommandAction {
         id: "nav-knowledge",
@@ -327,9 +327,9 @@ pub(super) fn text_matches_query(haystack: &str, query: &str) -> bool {
 pub(super) const COMMAND_BAR_INPUT_PLACEHOLDER: &str = "What do you need?";
 pub(super) const COMMAND_BAR_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const COMMAND_BAR_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
-pub(super) const COMMAND_BAR_INPUT_TEXT_SIZE_PX: f32 = 14.0;
-pub(super) const COMMAND_BAR_INPUT_X_PADDING_PX: f32 = 20.0;
-pub(super) const COMMAND_BAR_INPUT_Y_PADDING_PX: f32 = 16.0;
+pub(super) const COMMAND_BAR_INPUT_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
+pub(super) const COMMAND_BAR_INPUT_X_PADDING_PX: f32 = 16.0;
+pub(super) const COMMAND_BAR_INPUT_Y_PADDING_PX: f32 = 12.0;
 pub(super) const COMMAND_BAR_OVERLAY_OPACITY: f32 = 0.70;
 pub(super) const COMMAND_BAR_LIST_MAX_HEIGHT_PX: f32 = 576.0;
 pub(super) const COMMAND_BAR_LIST_X_PADDING_PX: f32 = 8.0;
@@ -339,15 +339,14 @@ pub(super) const COMMAND_BAR_EMPTY_Y_PADDING_PX: f32 = 32.0;
 pub(super) const COMMAND_BAR_ACTION_RADIUS_PX: f32 = 8.0;
 pub(super) const COMMAND_BAR_ACTION_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const COMMAND_BAR_ACTION_X_PADDING_PX: f32 = 12.0;
-pub(super) const COMMAND_BAR_ACTION_Y_PADDING_PX: f32 = 10.0;
+pub(super) const COMMAND_BAR_ACTION_Y_PADDING_PX: f32 = 8.0;
 pub(super) const COMMAND_BAR_ACTION_HOVER_BG_OPACITY: f32 = 0.70;
-/// Web group headers and footer hints are `text-label` (14px).
-pub(super) const COMMAND_BAR_GROUP_TEXT_SIZE_PX: f32 = 14.0;
+pub(super) const COMMAND_BAR_GROUP_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const COMMAND_BAR_GROUP_X_PADDING_PX: f32 = 12.0;
 pub(super) const COMMAND_BAR_GROUP_BOTTOM_PADDING_PX: f32 = 4.0;
-pub(super) const COMMAND_BAR_FOOTER_TEXT_SIZE_PX: f32 = 14.0;
-pub(super) const COMMAND_BAR_FOOTER_X_PADDING_PX: f32 = 20.0;
-pub(super) const COMMAND_BAR_FOOTER_Y_PADDING_PX: f32 = 10.0;
+pub(super) const COMMAND_BAR_FOOTER_TEXT_SIZE_PX: f32 = 12.0;
+pub(super) const COMMAND_BAR_FOOTER_X_PADDING_PX: f32 = 16.0;
+pub(super) const COMMAND_BAR_FOOTER_Y_PADDING_PX: f32 = 8.0;
 pub(super) const COMMAND_BAR_FOOTER_BORDER_OPACITY: f32 = 0.50;
 pub(super) const COMMAND_BAR_FOOTER_HINT_GAP_PX: f32 = 4.0;
 
@@ -659,7 +658,7 @@ impl Workspace {
             id: thread.id.clone(),
             title: chat.thread_title.clone(),
             hint: format!(
-                "{place} · {}",
+                "{place}, {}",
                 relative_age(thread.updated_at_ms, EpochMs::now())
             ),
         }
@@ -865,6 +864,7 @@ impl Workspace {
             .px(px(COMMAND_BAR_LIST_X_PADDING_PX))
             .py(px(COMMAND_BAR_LIST_Y_PADDING_PX))
             .max_h(px(COMMAND_BAR_LIST_MAX_HEIGHT_PX))
+            .min_h_0()
             .overflow_y_scroll()
             .track_scroll(&self.command_scroll)
             .children(elements)
@@ -907,7 +907,9 @@ impl Workspace {
             .role(Role::MenuItem)
             .aria_label(label.clone())
             .aria_selected(is_selected)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(is_selected, |el| {
                 el.bg(theme::longan_700().opacity(COMMAND_BAR_ACTION_HOVER_BG_OPACITY))
@@ -973,7 +975,9 @@ impl Workspace {
             .role(Role::MenuItem)
             .aria_label(action.label)
             .aria_selected(is_selected)
-            .focus_visible(|el| el.border_2().border_color(theme::persimmon_400()))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(is_selected, |el| {
                 el.bg(theme::longan_700().opacity(COMMAND_BAR_ACTION_HOVER_BG_OPACITY))
@@ -1010,7 +1014,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    pub(super) fn render_command_bar(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(super) fn render_command_bar(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         div()
             .absolute()
             .top_0()
@@ -1038,6 +1042,7 @@ impl Workspace {
                     .debug_selector(|| "desktop-command-bar".to_string())
                     .w(px(DESKTOP_DIALOG_LG_WIDTH_PX))
                     .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
+                    .max_h(modal_ui::dialog_max_height(window))
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
                     .border_1()
                     .border_color(theme::ring_modal())
@@ -1090,6 +1095,7 @@ impl Workspace {
                     }))
                     .child(
                         div()
+                            .flex_shrink_0()
                             .px(px(COMMAND_BAR_INPUT_X_PADDING_PX))
                             .py(px(COMMAND_BAR_INPUT_Y_PADDING_PX))
                             .border_b_1()
@@ -1109,6 +1115,7 @@ impl Workspace {
                     .child(self.render_command_action_list(cx))
                     .child(
                         div()
+                            .flex_shrink_0()
                             .px(px(COMMAND_BAR_FOOTER_X_PADDING_PX))
                             .py(px(COMMAND_BAR_FOOTER_Y_PADDING_PX))
                             .border_t_1()
@@ -1132,7 +1139,7 @@ impl Workspace {
                                             .text_color(theme::rambutan_500())
                                             .child("↑↓"),
                                     )
-                                    .child("navigate ·")
+                                    .child("navigate")
                                     .child(
                                         div()
                                             .font_weight(FontWeight::MEDIUM)

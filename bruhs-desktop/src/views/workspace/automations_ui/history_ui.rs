@@ -42,7 +42,7 @@ impl Workspace {
             .map(|item| item.id.clone());
         let next = workflows.get(index + 1).map(|item| item.id.clone());
         let label = format!(
-            "{} · {:?} · workflow {} of {}",
+            "{}, {:?}, workflow {} of {}",
             workflow.title,
             workflow.status,
             index + 1,

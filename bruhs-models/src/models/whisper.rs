@@ -40,7 +40,7 @@ impl WhisperModel {
                 sha256: "921e4cf8686fdd993dcd081a5da5b6c365bfde1162e72b08d75ac75289920b1f",
                 size_bytes: 77704715,
                 size_mb: 75,
-                label: "Tiny (English) — fastest, lowest accuracy",
+                label: "Tiny (English), fastest, lowest accuracy",
                 multilingual: false,
             },
             Self::BaseEn => ModelDescriptor {
@@ -49,7 +49,7 @@ impl WhisperModel {
                 sha256: "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
                 size_bytes: 147964211,
                 size_mb: 150,
-                label: "Base (English) — balanced, default",
+                label: "Base (English), balanced, default",
                 multilingual: false,
             },
             Self::SmallEn => ModelDescriptor {
@@ -58,7 +58,7 @@ impl WhisperModel {
                 sha256: "c6138d6d58ecc8322097e0f987c32f1be8bb0a18532a3f88f734d1bbf9c41e5d",
                 size_bytes: 487614201,
                 size_mb: 470,
-                label: "Small (English) — better accuracy, slower",
+                label: "Small (English), better accuracy, slower",
                 multilingual: false,
             },
             Self::LargeV3Turbo => ModelDescriptor {
@@ -67,7 +67,7 @@ impl WhisperModel {
                 sha256: "1fc70f774d38eb169993ac391eea357ef47c88757ef72ee5943879b7e8e2bc69",
                 size_bytes: 1624555275,
                 size_mb: 1600,
-                label: "Large v3 Turbo (multilingual) — best, big download",
+                label: "Large v3 Turbo (multilingual), best, big download",
                 multilingual: true,
             },
         }

@@ -548,7 +548,8 @@ impl Workspace {
             .child(body)
     }
 
-    pub(super) fn render_automations_page(&self, _window: &Window, cx: &Context<'_, Self>) -> Div {
+    pub(super) fn render_automations_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
+        let compact = Self::compact_layout(window);
         let grants = AgentDomain::ALL
             .into_iter()
             .enumerate()
@@ -675,14 +676,14 @@ impl Workspace {
                     .text_size(px(11.0))
                     .text_color(theme::rambutan_300())
                     .child(format!(
-                        "{} · {} · {:?}{}",
+                        "{}, {}, {:?}{}",
                         index + 1,
                         step.operation.domain().label(),
                         step.status,
                         if self.save_status.is_saved() {
                             ""
                         } else {
-                            " · not yet saved"
+                            ", not yet saved"
                         }
                     ))
                     .children(fields.into_iter().map(|(label, value)| {
@@ -798,12 +799,14 @@ impl Workspace {
                     .child(
                         div()
                             .flex()
+                            .when(compact, |content| content.flex_col())
                             .gap_3()
                             .items_start()
                             .child(
                                 div()
                                     .flex_1()
                                     .min_w_0()
+                                    .when(compact, |workflows| workflows.flex_none().w_full())
                                     .flex()
                                     .flex_col()
                                     .gap_3()
@@ -816,7 +819,7 @@ impl Workspace {
                                             .child(focus_suggestion.as_ref().map_or_else(
                                                 || "No suggestion is due. Local suggestions appear at most three times, no more than daily.".to_string(),
                                                 |suggestion| format!(
-                                                    "{} — {} Evidence: {}",
+                                                    "{}. {} Evidence: {}",
                                                     suggestion.title,
                                                     suggestion.explanation,
                                                     suggestion.evidence
@@ -888,13 +891,13 @@ impl Workspace {
                                             .mt_2()
                                             .text_size(px(11.0))
                                             .text_color(theme::rambutan_400())
-                                            .child("Background execution is opt-in and runs only while this app is open.")
+                                            .child("Background execution is optional and runs only while this app is open.")
                                             .child(if !self.save_status.is_saved() {
-                                                "Changes are provisional · waiting for local save".to_string()
+                                                "Changes are provisional, waiting for local save".to_string()
                                             } else if let Some(job) = latest_running {
-                                                format!("Running · next checkpoint {}", job.next_step + 1)
+                                                format!("Running, next checkpoint {}", job.next_step + 1)
                                             } else if let Some(job) = latest_paused {
-                                                format!("Paused · resumes at checkpoint {}", job.next_step + 1)
+                                                format!("Paused, resumes at checkpoint {}", job.next_step + 1)
                                             } else {
                                                 "No active job.".to_string()
                                             })
@@ -945,12 +948,13 @@ impl Workspace {
                                             .children(workflow_rows),
                                     ))
                                     .child(self.automation_panel("Audit timeline", div()
-                                        .when(!self.save_status.is_saved(), |el| el.child("Pending local save · entries below are provisional"))
+                                        .when(!self.save_status.is_saved(), |el| el.child("Pending local save, entries below are provisional"))
                                         .children(audit))),
                             )
                             .child(
                                 div()
                                     .w(px(320.0))
+                                    .when(compact, |grants| grants.w_full())
                                     .flex_none()
                                     .child(self.automation_panel(
                                         "Capability grants",
@@ -971,7 +975,7 @@ impl Workspace {
                                                     .child({
                                                         let n = self.automation_state.workflows.len();
                                                         format!(
-                                                            "{} typed tools · {n} {}",
+                                                            "{} typed tools, {n} {}",
                                                             agent_tool_definitions().len(),
                                                             if n == 1 { "workflow" } else { "workflows" }
                                                         )

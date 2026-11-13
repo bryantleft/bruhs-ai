@@ -9,11 +9,12 @@ use std::cmp::Reverse;
 use super::*;
 
 impl Workspace {
-    pub(super) fn open_inbox_view(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn open_inbox_view(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.active_view = AppView::Inbox;
         self.inbox_import_visible = false;
         self.compact_sidebar_open = false;
         self.close_transient_surfaces();
+        self.workspace_focus_handle.focus(window, cx);
         self.persist_and_notify(cx);
     }
 
@@ -100,6 +101,7 @@ impl Workspace {
         self.active_view = AppView::ConversationDetail {
             conversation_id: id.to_string(),
         };
+        self.workspace_focus_handle.focus(window, cx);
         self.persist_and_notify(cx);
     }
 
@@ -146,7 +148,7 @@ impl Workspace {
             .update(cx, |input, cx| input.set_value("", window, cx));
     }
 
-    fn delete_current_conversation(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn delete_current_conversation(&mut self, cx: &mut Context<'_, Self>) {
         let AppView::ConversationDetail { conversation_id } = &self.active_view else {
             return;
         };
@@ -241,7 +243,7 @@ impl Workspace {
                                 div()
                                     .text_size(px(11.0))
                                     .text_color(theme::rambutan_500())
-                                    .child("Every conversation, one decisive local queue"),
+                                    .child("Imported conversations and local reply drafts."),
                             ),
                     )
                     .child(
@@ -251,6 +253,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("+ Import conversation")
                         .child("+ Import conversation")
                         .on_click(cx.listener(|this, _event, window, cx| {
                             this.start_inbox_import(window, cx);
@@ -291,13 +294,7 @@ impl Workspace {
                                         .child("Nothing waiting here. A clear inbox is a good place to be."),
                                 )
                             })
-                            .child(
-                                div()
-                                    .pt_2()
-                                    .text_size(px(12.0))
-                                    .text_color(theme::rambutan_400())
-                                    .child("Email · Slack · Discord · iMessage · X use one adapter contract; import/share capture works offline now."),
-                            ),
+,
                     ),
             )
     }
@@ -331,7 +328,7 @@ impl Workspace {
             .px_3()
             .py_2()
             .hover(|element| element.bg(theme::longan_800().opacity(0.7)))
-            .focus_visible(|element| element.border_2().border_color(theme::persimmon_400()))
+            .focus_visible(|element| element.border_color(theme::persimmon_400()))
             .on_click(cx.listener(move |this, _event, window, cx| {
                 this.select_inbox_conversation(&id, window, cx);
             }))
@@ -411,73 +408,91 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("Cancel")
                         .child("Cancel")
                         .on_click(cx.listener(
-                            |this, _event, _window, cx| {
+                            |this, _event, window, cx| {
                                 this.inbox_import_visible = false;
+                                this.workspace_focus_handle.focus(window, cx);
                                 cx.notify();
                             },
                         )),
                     ),
             )
             .child(
-                div().p_5().flex().justify_center().child(
-                    div()
-                        .w_full()
-                        .max_w(px(680.0))
-                        .flex()
-                        .flex_col()
-                        .gap_3()
-                        .child(
-                            div()
-                                .text_size(px(11.0))
-                                .text_color(theme::rambutan_500())
-                                .child("Provider"),
-                        )
-                        .child(
-                            web_button(
-                                "cycle-inbox-provider",
-                                WebButtonVariant::Outline,
-                                WebButtonSize::Small,
-                                ButtonState::Enabled,
-                            )
-                            .child(self.inbox_import_source.label())
-                            .on_click(
-                                cx.listener(|this, _event, _window, cx| {
-                                    this.cycle_inbox_source(cx)
-                                }),
-                            ),
-                        )
-                        .child(Input::new(&self.inbox_sender_input))
-                        .child(Input::new(&self.inbox_subject_input))
-                        .child(Input::new(&self.inbox_body_input))
-                        .when_some(self.persistence_error.clone(), |element, error| {
-                            element.child(
+                div()
+                    .id("desktop-inbox-import-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scrollbar()
+                    .p_5()
+                    .flex()
+                    .justify_center()
+                    .items_start()
+                    .child(
+                        div()
+                            .w_full()
+                            .max_w(px(680.0))
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .child(
                                 div()
                                     .text_size(px(11.0))
-                                    .text_color(theme::lychee_300())
-                                    .child(error),
+                                    .text_color(theme::rambutan_500())
+                                    .child("Provider"),
                             )
-                        })
-                        .child(
-                            web_button(
-                                "save-inbox-import",
-                                WebButtonVariant::Primary,
-                                WebButtonSize::Default,
-                                ButtonState::Enabled,
+                            .child(
+                                web_button(
+                                    "cycle-inbox-provider",
+                                    WebButtonVariant::Outline,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .child(self.inbox_import_source.label())
+                                .on_click(cx.listener(
+                                    |this, _event, _window, cx| this.cycle_inbox_source(cx),
+                                )),
                             )
-                            .child("Import")
-                            .on_click(cx.listener(
-                                |this, _event, window, cx| this.save_inbox_import(window, cx),
-                            )),
-                        ),
-                ),
+                            .child(
+                                Input::new(&self.inbox_sender_input).aria_label("Sender, required"),
+                            )
+                            .child(
+                                Input::new(&self.inbox_subject_input)
+                                    .aria_label("Conversation subject"),
+                            )
+                            .child(
+                                Input::new(&self.inbox_body_input).aria_label("Message, required"),
+                            )
+                            .when_some(self.persistence_error.clone(), |element, error| {
+                                element.child(
+                                    div()
+                                        .text_size(px(11.0))
+                                        .text_color(theme::lychee_300())
+                                        .child(error),
+                                )
+                            })
+                            .child(
+                                web_button(
+                                    "save-inbox-import",
+                                    WebButtonVariant::Primary,
+                                    WebButtonSize::Default,
+                                    ButtonState::Enabled,
+                                )
+                                .aria_label("Import")
+                                .child("Import")
+                                .on_click(cx.listener(
+                                    |this, _event, window, cx| this.save_inbox_import(window, cx),
+                                )),
+                            ),
+                    ),
             )
     }
 
     pub(super) fn render_conversation_detail(
         &self,
         conversation_id: &str,
+        compact: bool,
         cx: &Context<'_, Self>,
     ) -> Div {
         let Some(conversation) = self
@@ -548,6 +563,7 @@ impl Workspace {
                     .border_b_1()
                     .border_color(theme::longan_800())
                     .flex()
+                    .when(compact, |header| header.flex_wrap())
                     .items_center()
                     .gap_2()
                     .child(
@@ -557,6 +573,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("← Inbox")
                         .child("← Inbox")
                         .on_click(
                             cx.listener(|this, _event, window, cx| {
@@ -568,6 +585,7 @@ impl Workspace {
                         div()
                             .min_w_0()
                             .flex_1()
+                            .when(compact, |subject| subject.w_full().flex_none())
                             .font_family(theme::HEADING_FONT_FAMILY)
                             .text_size(px(15.0))
                             .text_color(theme::rambutan_100())
@@ -580,6 +598,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label(if unread { "Mark read" } else { "Mark unread" })
                         .child(if unread { "Mark read" } else { "Mark unread" })
                         .on_click(cx.listener(
                             move |this, _event, _window, cx| {
@@ -597,6 +616,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label(if snoozed { "Unsnooze" } else { "Tomorrow" })
                         .child(if snoozed { "Unsnooze" } else { "Tomorrow" })
                         .on_click(cx.listener(
                             move |this, _event, _window, cx| {
@@ -620,6 +640,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label(if important { "Unstar" } else { "Important" })
                         .child(if important { "Unstar" } else { "Important" })
                         .on_click(cx.listener(
                             |this, _event, _window, cx| {
@@ -637,6 +658,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label(if archived { "Unarchive" } else { "Archive" })
                         .child(if archived { "Unarchive" } else { "Archive" })
                         .on_click(cx.listener(
                             move |this, _event, _window, cx| {
@@ -654,6 +676,7 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("Ask agent")
                         .child("Ask agent")
                         .on_click(cx.listener(
                             |this, _event, window, cx| {
@@ -668,9 +691,10 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .aria_label("Delete")
                         .child("Delete")
                         .on_click(cx.listener(
-                            |this, _event, _window, cx| this.delete_current_conversation(cx),
+                            |this, _event, window, cx| this.request_record_delete(window, cx),
                         )),
                     ),
             )
@@ -693,7 +717,7 @@ impl Workspace {
                     .flex()
                     .flex_col()
                     .gap_2()
-                    .child(Input::new(&self.inbox_reply_input))
+                    .child(Input::new(&self.inbox_reply_input).aria_label("Reply draft"))
                     .child(
                         div()
                             .flex()
@@ -706,6 +730,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Save draft")
                                 .child("Save draft")
                                 .on_click(cx.listener(
                                     |this, _event, _window, cx| this.save_inbox_draft(cx),
@@ -720,6 +745,7 @@ impl Workspace {
                                         self.inbox_reply_input.read(cx).value().trim().is_empty(),
                                     ),
                                 )
+                                .aria_label("Log reply")
                                 .child("Log reply")
                                 .on_click(cx.listener(
                                     |this, _event, window, cx| this.send_inbox_draft(window, cx),

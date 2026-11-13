@@ -121,6 +121,7 @@ fn ring(overlay: Rect, dialog: Rect) -> [Rect; 4] {
 #[derive(Clone, Default)]
 pub struct BlurScrimHandle {
     state: Rc<RefCell<State>>,
+    clear_bounds: Rc<RefCell<Option<Bounds<Pixels>>>>,
 }
 
 /// A window that cannot blur says so once, not once per frame.
@@ -135,6 +136,7 @@ enum State {
 impl BlurScrimHandle {
     /// Blur the window everywhere except `dialog`.
     fn show(&self, window: &mut Window, dialog: Bounds<Pixels>) {
+        *self.clear_bounds.borrow_mut() = Some(dialog);
         let mut state = self.state.borrow_mut();
         if matches!(*state, State::Unbuilt) {
             *state = match platform::BlurScrim::new(window) {
@@ -163,6 +165,7 @@ impl BlurScrimHandle {
 
     /// Stop blurring. Cheap to call on every frame that has no dialog.
     pub fn hide(&self) {
+        *self.clear_bounds.borrow_mut() = None;
         if let State::Ready(scrim) = &mut *self.state.borrow_mut() {
             scrim.hide();
         }
@@ -180,6 +183,32 @@ impl BlurScrimHandle {
         .top_0()
         .left_0()
         .size_full()
+    }
+
+    /// Keep a deferred popover crisp when it extends beyond its dialog.
+    /// The dialog's backdrop resets the clear bounds on every frame.
+    pub fn keep_clear(&self) -> impl IntoElement {
+        let handle = self.clone();
+        canvas(
+            move |bounds, window, _cx| {
+                let dialog = *handle.clear_bounds.borrow();
+                if let Some(dialog) = dialog {
+                    handle.show(window, dialog.union(&bounds));
+                }
+            },
+            |_bounds, _, _, _| {},
+        )
+        .absolute()
+        .top_0()
+        .left_0()
+        .size_full()
+    }
+
+    #[cfg(test)]
+    pub(crate) fn clear_bounds(&self) -> Option<Bounds<Pixels>> {
+        self.clear_bounds
+            .borrow()
+            .map(|bounds| bounds.dilate(gpui::px(DIALOG_BORDER_PX)))
     }
 }
 

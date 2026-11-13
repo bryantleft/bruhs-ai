@@ -10,7 +10,7 @@
 use gpui::prelude::*;
 use gpui::{
     div, px, Action, AnyElement, App, Context, Entity, Focusable, KeyBinding, Keystroke,
-    KeystrokeEvent, SharedString, Subscription, Unbind, WeakEntity, Window,
+    KeystrokeEvent, Role, SharedString, Subscription, Unbind, WeakEntity, Window,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::WindowExt;
@@ -488,6 +488,8 @@ impl Workspace {
             .px_4()
             .py_2()
             .flex()
+            .flex_wrap()
+            .min_w_0()
             .items_center()
             .gap_2()
             .child(keybinding_field(
@@ -515,6 +517,12 @@ impl Workspace {
                     .items_center()
                     .text_size(px(12.0))
                     .text_color(crate::theme::rambutan_300())
+                    .tab_index(0)
+                    .role(Role::Button)
+                    .aria_label("Reset selected shortcut")
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(crate::theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| {
                         el.bg(crate::theme::longan_800())
@@ -538,6 +546,11 @@ impl Workspace {
         let command = rule.command.clone();
         let key = rule.key.clone();
         let when = rule.when.clone().unwrap_or_default();
+        let label = if when.is_empty() {
+            format!("{command}: {key}")
+        } else {
+            format!("{command}: {key}, when {when}")
+        };
         div()
             .id(SharedString::from(format!(
                 "desktop-keybinding-row-{index}"
@@ -546,10 +559,18 @@ impl Workspace {
             .px_4()
             .py_2()
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
             .gap_3()
             .cursor_pointer()
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(label)
+            .aria_toggled(selected.into())
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(crate::theme::persimmon_400()))
             .when(selected, |el| el.bg(crate::theme::longan_800()))
             .hover(|el| el.bg(crate::theme::longan_800()))
             .on_click(cx.listener(move |this, _, window, cx| {
@@ -557,7 +578,7 @@ impl Workspace {
             }))
             .child(
                 div()
-                    .min_w_0()
+                    .min_w(px(KEY_INPUT_WIDTH_PX))
                     .flex_1()
                     .text_size(px(SETTINGS_MODEL_LABEL_TEXT_SIZE_PX))
                     .text_color(crate::theme::rambutan_200())
@@ -565,13 +586,15 @@ impl Workspace {
             )
             .child(
                 div()
-                    .flex_shrink_0()
+                    .min_w_0()
+                    .max_w_full()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap_2()
                     .text_size(px(12.0))
                     .text_color(crate::theme::rambutan_300())
-                    .font(crate::theme::tabular_system_font())
+                    .font_family(crate::theme::CODE_FONT_FAMILY)
                     .child(key)
                     .when(!when.is_empty(), |el| {
                         el.child(div().text_color(crate::theme::rambutan_500()).child(when))
@@ -591,15 +614,16 @@ fn keybinding_field(
     div()
         .id(selector)
         .debug_selector(move || selector.to_string())
-        .aria_label(label)
         .w(px(width))
+        .max_w_full()
+        .flex_shrink_0()
         .h(px(FIELD_HEIGHT_PX))
         .rounded(px(SETTINGS_CODE_RADIUS_PX))
         .bg(crate::theme::longan_800())
         .when(broken, |el| {
             el.border_2().border_color(crate::theme::persimmon_400())
         })
-        .child(Input::new(input))
+        .child(Input::new(input).aria_label(label))
         .into_any_element()
 }
 
@@ -758,6 +782,7 @@ mod tests {
     use super::{binding_names, rules_from_saved};
     use crate::views::chat::StashDraft;
     use crate::views::diff_panel::FindInDiff;
+    use ::core::prelude::v1::test;
     use bruhs_models::logic::keybindings::{default_keybindings, gpui_shortcut};
     use gpui::{Action, Keystroke};
 

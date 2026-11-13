@@ -133,7 +133,7 @@ impl Workspace {
                         (
                             "All day",
                             if record.all_day {
-                                "Yes · end is exclusive"
+                                "Yes, end is exclusive"
                             } else {
                                 "No"
                             }
@@ -273,7 +273,7 @@ impl Workspace {
                     div()
                         .text_size(px(10.0))
                         .text_color(theme::rambutan_500())
-                        .child(format!("Record ID · {}", selected.id())),
+                        .child(format!("Record ID: {}", selected.id())),
                 )
                 .into_any_element(),
         )

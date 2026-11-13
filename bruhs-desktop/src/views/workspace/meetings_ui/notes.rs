@@ -101,7 +101,7 @@ impl Workspace {
                         ))
                         .child(label(
                             format!(
-                                "{}–{} of {total}",
+                                "{} to {} of {total}",
                                 start + 1,
                                 (start + PAGE_SIZE).min(total)
                             ),

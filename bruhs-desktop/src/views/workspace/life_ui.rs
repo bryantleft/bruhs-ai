@@ -73,12 +73,12 @@ impl Workspace {
         let category = self.life_category_input.read(cx).value().trim().to_string();
         let value = self.life_value_input.read(cx).value().to_string();
         if name.is_empty() {
-            self.persistence_error = Some("Name the finance record first.".to_string());
+            self.life_error = Some("Name the finance record first.".to_string());
             cx.notify();
             return;
         }
         let Some(amount) = parse_amount_minor(&value) else {
-            self.persistence_error = Some(bruhs_models::MoneyError::InvalidAmount.to_string());
+            self.life_error = Some(bruhs_models::MoneyError::InvalidAmount.to_string());
             cx.notify();
             return;
         };
@@ -118,7 +118,7 @@ impl Workspace {
                 .insert(0, Holding::manual(name, amount, now)),
         }
         self.life_context.finance.updated_at_ms = now;
-        self.persistence_error = None;
+        self.life_error = None;
         self.clear_life_inputs(window, cx);
         self.persist_and_notify(cx);
     }
@@ -135,12 +135,17 @@ impl Workspace {
         match kind {
             HealthEntryKind::Workout => {
                 let Ok(minutes) = value.parse::<u16>() else {
-                    self.persistence_error = Some("Enter workout minutes.".to_string());
+                    self.life_error = Some("Enter workout minutes from 1 to 1440.".into());
                     cx.notify();
                     return;
                 };
+                if !(1..=1440).contains(&minutes) {
+                    self.life_error = Some("Enter workout minutes from 1 to 1440.".into());
+                    cx.notify();
+                    return;
+                }
                 if name.is_empty() {
-                    self.persistence_error = Some("Name the workout first.".to_string());
+                    self.life_error = Some("Name the workout first.".to_string());
                     cx.notify();
                     return;
                 }
@@ -151,16 +156,27 @@ impl Workspace {
             }
             HealthEntryKind::Sleep => {
                 let Ok(hours) = value.parse::<f64>() else {
-                    self.persistence_error = Some("Enter sleep hours.".to_string());
+                    self.life_error = Some("Enter sleep hours.".to_string());
                     cx.notify();
                     return;
                 };
-                if !hours.is_finite() || hours <= 0.0 {
-                    self.persistence_error = Some("Enter sleep hours above zero.".to_string());
+                if !hours.is_finite() || !(1.0 / 60.0..=24.0).contains(&hours) {
+                    self.life_error = Some("Enter sleep hours from one minute to 24 hours.".into());
                     cx.notify();
                     return;
                 }
-                let quality = name.parse::<u8>().unwrap_or(0);
+                let Ok(quality) = name.parse::<u8>() else {
+                    self.life_error =
+                        Some("Enter sleep quality from 0 to 100 in the name field.".into());
+                    cx.notify();
+                    return;
+                };
+                if quality > 100 {
+                    self.life_error =
+                        Some("Enter sleep quality from 0 to 100 in the name field.".into());
+                    cx.notify();
+                    return;
+                }
                 self.life_context.health.sleep.insert(
                     0,
                     SleepLog::manual((hours * 60.0).round().to_u16_saturating(), quality, now),
@@ -168,10 +184,15 @@ impl Workspace {
             }
             HealthEntryKind::Recovery => {
                 let Ok(score) = value.parse::<u8>() else {
-                    self.persistence_error = Some("Enter a recovery score.".to_string());
+                    self.life_error = Some("Enter a recovery score from 0 to 100.".into());
                     cx.notify();
                     return;
                 };
+                if score > 100 {
+                    self.life_error = Some("Enter a recovery score from 0 to 100.".into());
+                    cx.notify();
+                    return;
+                }
                 self.life_context
                     .health
                     .recovery
@@ -179,7 +200,7 @@ impl Workspace {
             }
             HealthEntryKind::Habit => {
                 if name.is_empty() {
-                    self.persistence_error = Some("Name the habit first.".to_string());
+                    self.life_error = Some("Name the habit first.".to_string());
                     cx.notify();
                     return;
                 }
@@ -190,7 +211,7 @@ impl Workspace {
             }
         }
         self.life_context.health.updated_at_ms = now;
-        self.persistence_error = None;
+        self.life_error = None;
         self.clear_life_inputs(window, cx);
         self.persist_and_notify(cx);
     }
@@ -203,13 +224,13 @@ impl Workspace {
         ) {
             Ok(prompt) => prompt,
             Err(message) => {
-                self.persistence_error = Some(message.to_string());
+                self.life_error = Some(message.to_string());
                 cx.notify();
                 return;
             }
         };
         let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) else {
-            self.persistence_error = Some("Start a chat before sharing life context.".to_string());
+            self.life_error = Some("Start a chat before sharing life context.".to_string());
             cx.notify();
             return;
         };
@@ -255,12 +276,15 @@ impl Workspace {
             self.life_context.health.privacy.allow_agent_context
         };
         div()
+            .debug_selector(|| "desktop-life-privacy".into())
             .rounded(px(6.0))
             .bg(theme::longan_900().opacity(0.65))
             .border_1()
             .border_color(theme::longan_800())
             .p_3()
             .flex()
+            .flex_wrap()
+            .gap_3()
             .items_center()
             .justify_between()
             .child(
@@ -294,6 +318,12 @@ impl Workspace {
                     WebButtonSize::Small,
                     ButtonState::Enabled,
                 )
+                .debug_selector(|| "desktop-life-agent-access".into())
+                .aria_label(if enabled {
+                    "Disable agent access"
+                } else {
+                    "Enable agent access"
+                })
                 .child(if enabled {
                     "Agent access on"
                 } else {
@@ -327,6 +357,19 @@ impl Workspace {
                         WebButtonSize::Small,
                         ButtonState::disabled_if(!enabled),
                     )
+                    .debug_selector(|| "desktop-life-exact-amounts".into())
+                    .aria_label(
+                        if self
+                            .life_context
+                            .finance
+                            .privacy
+                            .reveal_exact_amounts_to_agent
+                        {
+                            "Hide exact amounts from agents"
+                        } else {
+                            "Share exact amounts with agents"
+                        },
+                    )
                     .child(
                         if self
                             .life_context
@@ -358,7 +401,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_life_quick_add(&self, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_life_quick_add(&self, compact: bool, cx: &Context<'_, Self>) -> AnyElement {
         let finance = self.life_tab == DesktopLifeTab::Finance;
         let finance_buttons =
             [
@@ -377,6 +420,7 @@ impl Workspace {
                     WebButtonSize::Small,
                     ButtonState::Enabled,
                 )
+                .aria_label(label)
                 .child(label)
                 .on_click(cx.listener(move |this, _event, window, cx| {
                     this.add_finance_entry(kind, window, cx)
@@ -400,6 +444,7 @@ impl Workspace {
                     WebButtonSize::Small,
                     ButtonState::Enabled,
                 )
+                .aria_label(label)
                 .child(label)
                 .on_click(cx.listener(move |this, _event, window, cx| {
                     this.add_health_entry(kind, window, cx)
@@ -427,11 +472,11 @@ impl Workspace {
                 div()
                     .mt_2()
                     .grid()
-                    .grid_cols(3)
+                    .grid_cols(if compact { 1 } else if finance { 3 } else { 2 })
                     .gap_2()
-                    .child(Input::new(&self.life_name_input))
-                    .child(Input::new(&self.life_value_input))
-                    .child(Input::new(&self.life_category_input)),
+                    .child(Input::new(&self.life_name_input).aria_label(if finance { "Finance record name" } else { "Workout or habit name, or sleep quality percent" }))
+                    .child(Input::new(&self.life_value_input).aria_label(if finance { "Amount in USD" } else { "Workout minutes, sleep hours, or recovery percent" }))
+                    .when(finance, |form| form.child(Input::new(&self.life_category_input).aria_label("Category, optional"))),
             )
             .child(
                 div()
@@ -451,11 +496,14 @@ impl Workspace {
                     .text_size(px(12.0))
                     .text_color(theme::rambutan_400())
                     .child(if finance {
-                        "Name · amount · optional category. Spend is recorded as an outflow."
+                        "Name, amount, optional category. Spend is recorded as an outflow."
                     } else {
                         "Workout: name + minutes. Sleep: quality % + hours. Recovery: score. Habit: name."
                     }),
             )
+            .when_some(self.life_error.clone(), |panel, error| panel.child(
+                div().id("life-entry-error").role(Role::Alert).text_size(px(11.0)).text_color(theme::lychee_300()).child(error)
+            ))
             .into_any_element()
     }
 
@@ -503,7 +551,12 @@ impl Workspace {
                                         ButtonState::Enabled,
                                     )
                                     .aria_label("Delete account")
-                                    .child("×")
+                                    .child(
+                                        svg()
+                                            .path(assets::CLOSE_ICON_PATH)
+                                            .size(px(14.0))
+                                            .text_color(theme::rambutan_400()),
+                                    )
                                     .on_click(cx.listener(
                                         move |this, _event, _window, cx| {
                                             this.life_context
@@ -610,7 +663,7 @@ impl Workspace {
                     habit.title
                 ))
                 .child(format!(
-                    "{} · {}",
+                    "{}, {}",
                     habit.title,
                     if done { "Done today" } else { "Mark done" }
                 ))
@@ -647,7 +700,7 @@ impl Workspace {
                     .text_size(px(11.0))
                     .text_color(theme::rambutan_300())
                     .child(format!(
-                        "{} · {} min · effort {}/10",
+                        "{}, {} min, effort {}/10",
                         workout.activity, workout.duration_minutes, workout.perceived_exertion
                     ))
                     .into_any_element()
@@ -706,7 +759,12 @@ impl Workspace {
                                     ButtonState::Enabled,
                                 )
                                 .aria_label("Dismiss observation")
-                                .child("×")
+                                .child(
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(14.0))
+                                        .text_color(theme::rambutan_400()),
+                                )
                                 .on_click(cx.listener(
                                     move |this, _event, _window, cx| {
                                         this.life_context.dismiss_insight(id.clone());
@@ -749,14 +807,14 @@ impl Workspace {
                 div()
                     .text_size(px(12.0))
                     .text_color(theme::rambutan_200())
-                    .child("Evidence-labelled observations"),
+                    .child("Observations with evidence"),
             )
             .child(
                 div()
                     .mt_1()
                     .text_size(px(12.0))
                     .text_color(theme::rambutan_400())
-                    .child("Local comparisons only—never diagnoses, causal claims, or autonomous transactions."),
+                    .child("Local comparisons do not provide diagnoses, causal claims, or autonomous transactions."),
             )
             .when(insights.is_empty(), |panel| {
                 panel.child(
@@ -764,7 +822,7 @@ impl Workspace {
                         .mt_2()
                         .text_size(px(11.0))
                         .text_color(theme::rambutan_400())
-                        .child("Add consistent records to reveal evidence-backed observations."),
+                        .child("Add consistent records to reveal observations supported by evidence."),
                 )
             })
             .children(insights)
@@ -829,7 +887,8 @@ impl Workspace {
             .into_any_element()
     }
 
-    pub(super) fn render_life_page(&self, _window: &Window, cx: &Context<'_, Self>) -> Div {
+    pub(super) fn render_life_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
+        let compact = Self::compact_layout(window);
         let finance = self.life_tab == DesktopLifeTab::Finance;
         let summary = if finance {
             vec![
@@ -838,7 +897,7 @@ impl Workspace {
                     bruhs_models::format_money_totals(self.life_context.finance.net_worth_totals()),
                 ),
                 self.life_summary_card(
-                    "Spend · trailing 30 days",
+                    "Spend, trailing 30 days",
                     bruhs_models::format_money_totals(
                         self.life_context
                             .finance
@@ -864,7 +923,9 @@ impl Workspace {
                         .health
                         .recovery
                         .first()
-                        .map_or("—".to_string(), |log| format!("{}%", log.score_percent)),
+                        .map_or("Not logged".to_string(), |log| {
+                            format!("{}%", log.score_percent)
+                        }),
                 ),
                 self.life_summary_card(
                     "Active habits",
@@ -893,6 +954,8 @@ impl Workspace {
                     .border_b_1()
                     .border_color(theme::longan_800().opacity(0.5))
                     .flex()
+                    .flex_wrap()
+                    .gap_2()
                     .items_center()
                     .justify_between()
                     .child(
@@ -927,6 +990,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Finance")
                                 .child("Finance")
                                 .on_click(cx.listener(|this, _event, _window, cx| {
                                     this.life_tab = DesktopLifeTab::Finance;
@@ -944,6 +1008,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Health")
                                 .child("Health")
                                 .on_click(cx.listener(|this, _event, _window, cx| {
                                     this.life_tab = DesktopLifeTab::Health;
@@ -957,6 +1022,7 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .aria_label("Ask agent")
                                 .child("Ask agent")
                                 .on_click(cx.listener(|this, _event, window, cx| {
                                     this.ask_agent_about_life(window, cx)
@@ -978,22 +1044,14 @@ impl Workspace {
                         .child("Manual amounts are USD. Other currencies stay separate in minor units; no exchange rate is applied.")))
                     .child(div().flex().flex_wrap().gap_2().children(summary))
                     .child(self.render_life_privacy(cx))
-                    .child(self.render_life_quick_add(cx))
+                    .child(self.render_life_quick_add(compact, cx))
                     .child(if finance {
                         self.render_finance_records(cx)
                     } else {
                         self.render_health_records(cx)
                     })
                     .child(self.render_life_insights(cx))
-                    .child(self.render_life_providers())
-                    .when_some(self.persistence_error.clone(), |page, error| {
-                        page.child(
-                            div()
-                                .text_size(px(11.0))
-                                .text_color(theme::lychee_300())
-                                .child(error),
-                        )
-                    }),
+                    .child(self.render_life_providers()),
             )
     }
 }
@@ -1072,7 +1130,7 @@ mod money_tests {
                     input.set_value("90071992547409.93", window, cx)
                 });
                 w.add_finance_entry(kind, window, cx);
-                assert!(w.persistence_error.is_none());
+                assert!(w.life_error.is_none());
             });
             cx.condition(&workspace, |w, _| w.save_status.is_saved())
                 .await;
@@ -1102,13 +1160,111 @@ mod money_tests {
                 .update(cx, |input, cx| input.set_value("Retain", window, cx));
             w.life_value_input
                 .update(cx, |input, cx| input.set_value("1e30", window, cx));
+            w.persistence_error = Some("Existing disk failure".into());
             w.add_finance_entry(FinanceEntryKind::Account, window, cx);
-            assert!(w.persistence_error.is_some());
+            assert!(w.life_error.is_some());
+            assert_eq!(
+                w.persistence_error.as_deref(),
+                Some("Existing disk failure")
+            );
             assert_eq!(w.life_value_input.read(cx).value().as_str(), "1e30");
             assert_eq!(w.life_context.finance.accounts.len(), 1);
         });
         cx.run_until_parked();
         assert_eq!(fs::read(&path).unwrap(), before);
         fs::remove_dir_all(dir).unwrap();
+    }
+}
+
+#[cfg(test)]
+mod health_audit_tests {
+    use super::{theme, DesktopState, HealthEntryKind, Workspace};
+    use gpui::TestAppContext;
+
+    #[gpui::test]
+    fn health_forms_reject_normalized_values_and_preserve_invalid_drafts(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().unwrap());
+        });
+        let (workspace, cx) = cx.add_window_view(Workspace::new);
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.life_context = bruhs_models::LifeContext::default();
+            workspace.persistence_error = Some("Existing disk failure".into());
+            let before_saves = workspace.persist_requests;
+            for (kind, name, value) in [
+                (HealthEntryKind::Workout, "Walk", "0"),
+                (HealthEntryKind::Workout, "Walk", "1441"),
+                (HealthEntryKind::Workout, "Walk", "abc"),
+                (HealthEntryKind::Sleep, "Quality", "8"),
+                (HealthEntryKind::Sleep, "101", "8"),
+                (HealthEntryKind::Sleep, "75", "0"),
+                (HealthEntryKind::Sleep, "75", "0.001"),
+                (HealthEntryKind::Sleep, "75", "24.1"),
+                (HealthEntryKind::Sleep, "75", "NaN"),
+                (HealthEntryKind::Recovery, "", "101"),
+                (HealthEntryKind::Recovery, "", "abc"),
+            ] {
+                workspace
+                    .life_name_input
+                    .update(cx, |input, cx| input.set_value(name, window, cx));
+                workspace
+                    .life_value_input
+                    .update(cx, |input, cx| input.set_value(value, window, cx));
+                workspace.add_health_entry(kind, window, cx);
+                assert!(workspace.life_error.is_some(), "{name} / {value}");
+                assert_eq!(
+                    workspace.persistence_error.as_deref(),
+                    Some("Existing disk failure")
+                );
+                assert_eq!(workspace.life_name_input.read(cx).value().as_str(), name);
+                assert_eq!(workspace.life_value_input.read(cx).value().as_str(), value);
+                assert!(workspace.life_context.health.workouts.is_empty());
+                assert!(workspace.life_context.health.sleep.is_empty());
+                assert!(workspace.life_context.health.recovery.is_empty());
+                assert_eq!(workspace.persist_requests, before_saves);
+            }
+            for (kind, name, value) in [
+                (HealthEntryKind::Workout, "Walk", "1"),
+                (HealthEntryKind::Workout, "Walk", "1440"),
+                (HealthEntryKind::Sleep, "75", "8.5"),
+                (HealthEntryKind::Sleep, "100", "24"),
+                (HealthEntryKind::Recovery, "", "0"),
+                (HealthEntryKind::Recovery, "", "100"),
+            ] {
+                workspace
+                    .life_name_input
+                    .update(cx, |input, cx| input.set_value(name, window, cx));
+                workspace
+                    .life_value_input
+                    .update(cx, |input, cx| input.set_value(value, window, cx));
+                workspace.add_health_entry(kind, window, cx);
+                assert!(workspace.life_error.is_none());
+                assert_eq!(
+                    workspace.persistence_error.as_deref(),
+                    Some("Existing disk failure")
+                );
+                assert!(workspace.life_value_input.read(cx).value().is_empty());
+            }
+            assert_eq!(
+                workspace
+                    .life_context
+                    .health
+                    .workouts
+                    .iter()
+                    .map(|log| log.duration_minutes)
+                    .collect::<Vec<_>>(),
+                [1440, 1]
+            );
+            assert_eq!(
+                workspace.life_context.health.sleep[0].duration_minutes,
+                1440
+            );
+            assert_eq!(workspace.life_context.health.sleep[1].duration_minutes, 510);
+            assert_eq!(workspace.life_context.health.sleep[1].quality_percent, 75);
+            assert_eq!(workspace.life_context.health.recovery[0].score_percent, 100);
+            assert_eq!(workspace.life_context.health.recovery[1].score_percent, 0);
+        });
     }
 }
