@@ -6,3 +6,9 @@ dist = "dist"
 # `<script type="module">`. It reads the hashed file names from these
 # attributes.
 pattern_script = "<script type=\"module\" src=\"{base}js/boot.js\" data-bruhs-boot data-js=\"{base}{js}\" data-wasm=\"{base}{wasm}\"></script>"
+
+# All generated assets and the finalized HTML are present at this stage.
+[[hooks]]
+stage = "post_build"
+command = "python3"
+command_arguments = ["-c", "import os, runpy; runpy.run_path(os.path.join(os.environ['TRUNK_SOURCE_DIR'], 'precompress.py'), run_name='__main__')"]

@@ -3,6 +3,7 @@ mod error;
 mod local_access;
 mod parent_watch;
 mod routes;
+mod static_assets;
 
 use axum::{
     extract::DefaultBodyLimit,
@@ -13,7 +14,7 @@ use bruhs_core::AppState;
 use std::future::IntoFuture;
 use std::sync::Arc;
 use std::time::Duration;
-use tower_http::{services::ServeDir, trace::TraceLayer};
+use tower_http::trace::TraceLayer;
 use tracing_subscriber::{filter::Targets, layer::SubscriberExt, util::SubscriberInitExt};
 
 use crate::config::{Config, ServerState};
@@ -185,7 +186,7 @@ fn router(state: ServerState) -> Router {
         axum::http::HeaderName::from_static("x-bruhs-transcript-source"),
         axum::http::HeaderName::from_static("x-bruhs-transcript-refresh"),
     ]);
-    let spa = ServeDir::new(&state.config.spa_dir);
+    let spa = static_assets::service(&state.config.spa_dir);
 
     Router::new()
         .route("/api/agent", post(routes::agent::post_agent))
