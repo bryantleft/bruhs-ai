@@ -5,12 +5,14 @@ agents, tasks, calendar, meetings, people, notes, money and health share one
 window, and your data stays on your machine.
 
 bruhs runs on macOS as a native app (GPUI) and in the browser (a Leptos WASM
-app served by a local Rust server). Agents run through the Claude Code and
-Codex CLIs you already have, on your own logins.
+app served by a local Rust server). Agents run through Claude Code, Codex,
+Cursor, Antigravity, Grok or OpenCode, using each CLI's own login and
+configuration. OpenCode connects additional API providers and local models.
+See [agent runtimes and models](docs/agent-providers.md) for setup and access modes.
 
 ## What it does
 
-- **Agent threads.** Chat or code with Claude or Codex in a project, with
+- **Agent threads.** Chat or code with your chosen runtime and model in a project, with
   diffs, a terminal drawer (`⌘J`), a preview pane (`⌘⇧J`), worktrees,
   branch and PR context, a model picker, prompt stash (`⌘S`), and threads
   that keep running in the background. Threads import from Claude Code,

@@ -274,18 +274,15 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
 .panel.leaving figure { visibility: visible; }
 .panel:not([hidden]) { z-index: 1; }
 
-/* Works with: the two agents bruhs runs, right under the buttons */
-.works-with { display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 6px 10px; margin: 0; font-size: .875rem; color: var(--rambutan-500); }
-.works-with span { display: inline-flex; align-items: center; gap: 6px; color: var(--rambutan-300); }
+/* Provider choice, using the logins and model settings the app supports. */
+.providers { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); align-items: center; gap: 40px 80px; }
+.provider-copy h2 { text-wrap: balance; }
+.provider-copy p { margin: 20px 0 0; max-width: 52ch; color: var(--rambutan-400); }
+.provider-list { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 0 24px; }
+.provider-list li { min-width: 0; padding: 20px 0; border-bottom: 1px dotted var(--longan-700); }
+.provider-list p { margin: 6px 0 0; color: var(--rambutan-400); font-size: .875rem; }
 
 .flow-section h2, .news h2, .faq h2, .open-source h2 { text-wrap: balance; }
-
-/* Promises: three checkable claims about what stays yours */
-.promises { padding: 64px 0; }
-.promise-list { list-style: none; margin-block: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px; text-align: center; }
-.promise-list h2 { margin: 0 0 8px; }
-.promise-list h2:focus { outline: none; }
-.promise-list p { margin: 0 auto; max-width: 30ch; color: var(--rambutan-400); text-wrap: balance; }
 
 /* How it connects: three steps on a dotted line. */
 .flow-section .wrap { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 48px; text-align: center; }
@@ -407,7 +404,7 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
   .release-links { gap: 0 24px; }
 }
 @media (max-width: 900px) {
-  .promise-list { grid-template-columns: minmax(0, 1fr); gap: 28px; }
+  .providers { grid-template-columns: minmax(0, 1fr); gap: 24px; max-width: 640px; }
   .release { grid-template-columns: minmax(0, 1fr); gap: 24px; padding: 48px 0; }
   .release-meta { position: static; }
 }
