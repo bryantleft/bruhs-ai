@@ -1,0 +1,126 @@
+// Actual production WASM and IndexedDB with synthetic, local API and agent fixtures.
+import assert from 'node:assert/strict';
+import {createHash,randomUUID} from 'node:crypto';
+import {readFile,readdir,mkdir,writeFile} from 'node:fs/promises';
+import {createServer} from 'node:http';
+import path from 'node:path';
+import {fileURLToPath,pathToFileURL} from 'node:url';
+const modulePath=process.env.BRUHS_PLAYWRIGHT_MODULE;
+const {chromium}=modulePath?await import(pathToFileURL(modulePath).href):await import('playwright');
+const root=path.resolve(path.dirname(fileURLToPath(import.meta.url)),'../..');
+const dist=path.resolve(process.env.BRUHS_WHITEBOARD_DIST??path.join(root,'target/whiteboard-ui-dist'));
+const output=path.join(root,'target/whiteboard-ui-qa'),origin='http://127.0.0.1:46168';
+const thread='10000000-0000-4000-8000-000000000001',project='/fixture/whiteboard';
+await mkdir(output,{recursive:true});
+const report={started_at:new Date().toISOString(),cells:[],requests:[],replies:[],errors:[],console_errors:[],unexpected:[]};
+let stream=null,scope=null,source='pub fn handler() { store(); }\nfn store() {}\n';
+const replies=new Map(),streams=new Set();
+function sendTool(operation){
+ assert(stream,'A synthetic provider turn must be active');const id=randomUUID();
+ const promise=new Promise((resolve,reject)=>{const timer=setTimeout(()=>{replies.delete(id);reject(new Error('Owner did not answer '+JSON.stringify(operation)));},20000);replies.set(id,reply=>{clearTimeout(timer);resolve(reply);});});
+ stream.write('data: '+JSON.stringify({envelope:'query',type:'thread_request',id,thread_id:thread,operation:{op:'whiteboard',turn_id:scope,request:operation}})+'\n\n');return promise;
+}
+function finishTurn(){if(!stream)return;stream.write('data: '+JSON.stringify({envelope:'query',type:'result',result:'Synthetic tool turn complete',session_id:scope,duration_ms:1,usage:{input_tokens:1,output_tokens:1},is_error:false})+'\n\n');stream.end();stream=null;}
+const server=createServer(async(req,res)=>{
+ const url=new URL(req.url,origin);const body=await new Promise(resolve=>{let data='';req.on('data',part=>data+=part);req.on('end',()=>resolve(data));});
+ const json=value=>{res.writeHead(200,{'content-type':'application/json','cache-control':'no-store'});res.end(JSON.stringify(value));};
+ if(url.pathname.startsWith('/api/')){
+  report.requests.push({method:req.method,path:url.pathname});
+  if(req.method==='OPTIONS')return json({});
+  if(url.pathname==='/api/agent'&&req.method==='POST'){assert(!stream);stream=res;scope=randomUUID();streams.add(res);res.on('close',()=>streams.delete(res));res.writeHead(200,{'content-type':'text/event-stream','cache-control':'no-store'});res.write('data: '+JSON.stringify({envelope:'query',type:'init',session_id:scope,model:'claude-sonnet-4-6',tools:[],mcp_servers:[]})+'\n\n');return;}
+  if(url.pathname==='/api/agent/thread-reply'&&req.method==='POST'){const posted=JSON.parse(body);report.replies.push(posted);const resolve=replies.get(posted.request_id);if(resolve){replies.delete(posted.request_id);resolve(posted.reply);}return json({});}
+  if(url.pathname==='/api/whiteboards/source-fingerprint'&&req.method==='POST'){const posted=JSON.parse(body);assert.equal(posted.project_path,project);assert.equal(posted.path,'src/module.rs');return json({sha256:createHash('sha256').update(source).digest('hex')});}
+  if(url.pathname==='/api/people/profiles'&&req.method==='POST')return json([]);
+  if(url.pathname==='/api/agent/git-branches')return json({branches:['main'],current:'main'});
+  if(url.pathname==='/api/agent/git-status')return json({branch:'main',ahead:0,behind:0,dirty:[]});
+  if(url.pathname==='/api/agent/branch-pull')return json({signed_in:false,pull:null});
+  if(req.method!=='GET'){report.unexpected.push(req.method+' '+url.pathname);res.writeHead(400);res.end('Unexpected fixture mutation');return;}
+  if(url.pathname.endsWith('/stream')){res.writeHead(200,{'content-type':'text/event-stream'});res.write(': fixture\n\n');streams.add(res);res.on('close',()=>streams.delete(res));return;}
+  if(url.pathname==='/api/agent/providers')return json({providers:[{provider:'claude',label:'Claude Code',available:true,authenticated:true,supports_custom_models:true,capabilities:{access_modes:['default','auto-accept','yolo','plan'],effort_values:['low','medium','high'],custom_models:true,app_tools:true,second_opinion:true,prompt_suggestions:false}}]});
+  if(url.pathname==='/api/agent/models')return json({models:[{id:'claude/claude-sonnet-4-6',name:'Claude Sonnet',provider:'claude',group:'Claude',context_window:200000,supports_images:true}],source:'fixture',stale:false});
+  if(url.pathname==='/api/reactive')return json({agents:[],sources:[],subscriptions:[],events:[],runs:[],proposals:[],source_statuses:[]});
+  if(url.pathname==='/api/people/versions')return json({entries:[],next_after:null});
+  if(url.pathname==='/api/agent/git-branches')return json({branches:['main'],current:'main'});
+  if(url.pathname==='/api/agent/branch-pull')return json({signed_in:false,pull:null});
+  if(url.pathname==='/api/agent/git-status')return json({branch:'main',ahead:0,behind:0,dirty:[]});
+  if(url.pathname==='/api/agent/uploads/open')return json({name:'module.rs',path:'src/module.rs',kind:'text',mime:'text/plain',text:source,truncated:false,bytes:source.length});
+  if(/\/auth\//.test(url.pathname))return json({status:'authenticated',authenticated:true});
+  if(/(meetings|people|credentials|tasks|threads|skills)$/.test(url.pathname))return json([]);
+  return json({});
+ }
+ const file=path.resolve(dist,'.'+(url.pathname==='/'?'/index.html':decodeURIComponent(url.pathname)));
+ if(!file.startsWith(dist+path.sep)){res.writeHead(403);res.end();return;}
+ try{let data,compressed=false;if(req.headers['accept-encoding']?.includes('gzip')){try{data=await readFile(file+'.gz');compressed=true;}catch(error){if(error.code!=='ENOENT')throw error;}}data??=await readFile(file);res.writeHead(200,{'content-type':{'.html':'text/html','.js':'text/javascript','.mjs':'text/javascript','.wasm':'application/wasm','.css':'text/css','.svg':'image/svg+xml','.woff2':'font/woff2'}[path.extname(file)]??'application/octet-stream',...(compressed?{'content-encoding':'gzip'}:{})});res.end(data);}catch{res.writeHead(404);res.end();}
+});
+await new Promise(resolve=>server.listen(46168,'127.0.0.1',resolve));
+const browser=await chromium.launch({headless:true,executablePath:process.env.BRUHS_CHROME??'/Applications/Google Chrome.app/Contents/MacOS/Google Chrome'});
+async function board(page,id){return page.evaluate(id=>new Promise((resolve,reject)=>{const open=indexedDB.open('bruhs');open.onerror=()=>reject(open.error);open.onsuccess=()=>{const db=open.result;const get=db.transaction('whiteboards').objectStore('whiteboards').get(id);get.onsuccess=()=>{db.close();resolve(get.result?JSON.parse(get.result.json):null);};get.onerror=()=>reject(get.error);};}),id);}
+async function saved(page){await page.locator('[data-whiteboard-editor] [role=status]').filter({hasText:'Saved on this device'}).waitFor();}
+async function closeSidebar(page){
+ const toggle=page.getByRole('button',{name:'Toggle sidebar (⌘B)',exact:true});
+ if(await toggle.getAttribute('aria-expanded')!=='true')return;
+ const scrim=page.locator('div[aria-hidden="true"].fixed.inset-0').first();
+ if(await scrim.isVisible())await scrim.click({position:{x:page.viewportSize().width-12,y:60}});
+ else await toggle.click();
+}
+async function command(page,name){await page.getByRole('button',{name:'Commands ⌘K',exact:true}).click();const dialog=page.getByRole('dialog',{name:'Whiteboard commands',exact:true});await dialog.getByRole('textbox',{name:'Find a board action'}).fill(name);await dialog.getByRole('button',{name,exact:true}).click();}
+async function rename(page,title){await command(page,'Rename board');await applyText(page,title);}
+async function applyText(page,text){const dialog=page.getByRole('dialog',{name:'Board edit',exact:true});await dialog.getByRole('textbox',{name:'Board edit text'}).fill(text);await dialog.getByRole('button',{name:'Apply',exact:true}).click();await dialog.waitFor({state:'hidden'});await saved(page);}
+async function create(page){await page.keyboard.press('Meta+k');const dialog=page.getByRole('dialog',{name:'Command bar'});await dialog.getByRole('combobox').fill('New whiteboard');await dialog.getByRole('option').filter({hasText:'New whiteboard'}).click();await page.locator('[data-whiteboard-editor]').waitFor();await saved(page);await page.waitForURL(/#\/whiteboards\/[\da-f-]{36}$/);return new URL(page.url()).hash.split('/').at(-1);}
+async function seed(context){
+ await context.addInitScript(({origin,project,thread})=>{
+  if(location.origin!==origin||localStorage.getItem('whiteboard-seeded'))return;localStorage.setItem('whiteboard-seeded','1');
+  localStorage.setItem('bruhs.activeProject',JSON.stringify({name:'Fixture',path:project}));localStorage.setItem('bruhs.model','claude/claude-sonnet-4-6');localStorage.setItem('bruhs.taskModels',JSON.stringify({prompt_suggestions:false}));localStorage.setItem('bruhs.permissionMode','auto-accept');
+  const open=indexedDB.open('bruhs',1);open.onupgradeneeded=()=>{open.result.createObjectStore('threads',{keyPath:'id'});open.result.createObjectStore('messages',{keyPath:'thread_id'});};
+  open.onsuccess=()=>{const db=open.result,tx=db.transaction(['threads','messages'],'readwrite'),fence=String.fromCharCode(96).repeat(3);tx.objectStore('threads').put({id:thread,title:'Board context',project_name:'Fixture',project_path:project,updated_at:Date.now(),pinned:false,settled:false,model:'claude/claude-sonnet-4-6'});tx.objectStore('messages').put({thread_id:thread,messages:[{id:'diagram',role:'assistant',content:'An editable diagram:\n\n'+fence+'mermaid\nflowchart LR\n Browser --> API\n'+fence+'\n'}]});tx.oncomplete=()=>db.close();};
+ },{origin,project,thread});
+ await context.route('**/*',route=>{const url=new URL(route.request().url());if(url.origin===origin||url.protocol==='data:'||url.protocol==='blob:')return route.continue();report.unexpected.push(route.request().url());return route.abort();});
+}
+async function beginTurn(page){await page.goto(origin+'/#thread/'+thread);await page.locator('#chat-input').waitFor();await page.locator('#chat-input').fill('Use the whiteboard tools in this synthetic fixture.');const started=page.waitForResponse(response=>response.url()===origin+'/api/agent'&&response.request().method()==='POST');await page.getByRole('button',{name:'Send message',exact:true}).click();await started;assert(stream,'Provider stream opened');}
+try{
+ for(const cell of [{name:'desktop',width:1280,height:900},{name:'compact',width:640,height:480},{name:'touch',width:390,height:844,hasTouch:true}].filter(cell=>!process.env.BRUHS_WHITEBOARD_CELL||cell.name===process.env.BRUHS_WHITEBOARD_CELL)){
+  const context=await browser.newContext({viewport:{width:cell.width,height:cell.height},hasTouch:!!cell.hasTouch,permissions:['clipboard-read','clipboard-write'],recordVideo:{dir:path.join(output,'video'),size:{width:cell.width,height:cell.height}}});
+  await seed(context);const page=await context.newPage();page.setDefaultTimeout(20000);page.on('pageerror',e=>report.errors.push(e.stack||e.message));page.on('console',event=>{if(event.type()==='error')report.console_errors.push(event.text());});
+  if(process.env.BRUHS_WHITEBOARD_SLOW_3G){const session=await context.newCDPSession(page);await session.send('Network.enable');await session.send('Network.emulateNetworkConditions',{offline:false,latency:400,downloadThroughput:50*1024,uploadThroughput:50*1024,connectionType:'cellular3g'});page.setDefaultNavigationTimeout(180000);page.setDefaultTimeout(180000);report.network={latency_ms:400,download_bytes_per_second:50*1024,upload_bytes_per_second:50*1024};}
+  const result={...cell,checks:[]};report.cells.push(result);const check=(value,label)=>{assert(value,cell.name+': '+label);result.checks.push(label);process.stdout.write(cell.name+': '+label+'\n');};
+  try{
+   await page.goto(origin+'/#/whiteboards');await page.getByRole('button',{name:'New board',exact:true}).waitFor();await closeSidebar(page);
+   const id=await create(page);check(/^[\da-f-]{36}$/.test(id),'Command K creates a local project board');
+   const canvas=page.locator('canvas[aria-label^="Whiteboard canvas"]');await canvas.focus();await page.keyboard.press('r');await page.keyboard.press('Enter');await applyText(page,'Browser');let doc=await board(page,id);check(Object.keys(doc.shapes).length===1,'Keyboard creates an editable rectangle');
+   await canvas.focus();await page.keyboard.press('c');await applyText(page,'API');doc=await board(page,id);check(Object.keys(doc.shapes).length===3,'C creates the next node and a bound arrow');
+   const edge=Object.values(doc.shapes).find(s=>s.kind.type==='arrow');check(!!edge.kind.start.binding&&!!edge.kind.end.binding,'Both arrow terminals persist their bindings');
+   await canvas.focus();await page.keyboard.press('ArrowDown');await saved(page);doc=await board(page,id);check(Object.values(doc.shapes).some(s=>s.text==='API'&&s.rect.y!==Object.values(doc.shapes).find(s=>s.text==='Browser').rect.y),'Arrow keys move the selected node');
+   await command(page,'Link selection');let dialog=page.getByRole('dialog',{name:'Board edit'});await dialog.getByLabel('Link type').selectOption('file');await dialog.getByLabel('Start line').fill('1');await dialog.getByLabel('End line').fill('2');await dialog.getByRole('textbox',{name:'Board edit text'}).fill('src/module.rs');await dialog.getByRole('button',{name:'Apply',exact:true}).click();await saved(page);doc=await board(page,id);check(Object.values(doc.shapes).some(s=>s.links.some(l=>l.type==='file'&&l.path==='src/module.rs'&&l.start_line===1&&l.end_line===2)),'Typed file link and line range persist');
+   await page.reload();await page.locator('[data-whiteboard-editor]').waitFor();await saved(page);await closeSidebar(page);check(Object.keys((await board(page,id)).shapes).length===3,'Reload reopens the project board from IndexedDB');
+   await page.getByRole('button',{name:'Boards',exact:true}).click();await page.getByRole('button').filter({hasText:'Untitled board'}).last().click();await page.locator('[data-whiteboard-editor]').waitFor();check(true,'The project catalog reopens its board');
+   await command(page,'Fit board');const bounds=await canvas.boundingBox();await page.getByRole('button',{name:'Frame (f)',exact:true}).click();await page.mouse.move(bounds.x+20,bounds.y+20);await page.mouse.down();await page.mouse.move(bounds.x+Math.min(bounds.width-20,300),bounds.y+Math.min(bounds.height-20,170),{steps:6});await page.mouse.up();await saved(page);doc=await board(page,id);check(Object.values(doc.shapes).some(s=>s.kind.type==='frame'),'Mouse creates an editable frame');
+   await command(page,'Undo');await saved(page);check(Object.keys((await board(page,id)).shapes).length===3,'Undo restores the previous document');await command(page,'Redo');await saved(page);check(Object.values((await board(page,id)).shapes).some(s=>s.kind.type==='frame'),'Redo restores the frame');
+   await command(page,'Import Mermaid');dialog=page.getByRole('dialog',{name:'Board edit'});await dialog.getByRole('textbox',{name:'Board edit text'}).fill('flowchart LR\n Service["Service"] --> Store["Store"]');await dialog.getByRole('button',{name:'Preview shapes'}).click();const preview=page.getByRole('dialog',{name:'Imported board preview'});await preview.waitFor();check(Object.keys((await board(page,id)).shapes).length===4,'Mermaid preview does not change the original board');await preview.getByRole('button',{name:'Save as new board'}).click();await page.locator('[data-whiteboard-editor]').waitFor();await saved(page);const importedId=new URL(page.url()).hash.split('/').at(-1);check(importedId!==id&&Object.keys((await board(page,importedId)).shapes).length===3,'Owner saves Mermaid as editable shapes in a new private board');
+   const svgEvent=page.waitForEvent('download');await command(page,'Export SVG');const svg=await svgEvent;await svg.saveAs(path.join(output,cell.name+'.svg'));check((await readFile(path.join(output,cell.name+'.svg'),'utf8')).includes('<svg'),'SVG export produces a real artifact');
+   const pngEvent=page.waitForEvent('download');await command(page,'Export PNG');const png=await pngEvent;await png.saveAs(path.join(output,cell.name+'.png'));check((await readFile(path.join(output,cell.name+'.png'))).subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])),'PNG export waits for fonts and produces encoded pixels');
+   check(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth+1),'No horizontal page overflow');
+   if(cell.name==='desktop'&&!process.env.BRUHS_WHITEBOARD_SKIP_AGENTS){
+    for(const name of ['tldraw-5.6.0.tldr','excalidraw-v2.excalidraw']){
+     await command(page,'Import board');await page.getByLabel('Import whiteboard file').setInputFiles(path.join(root,'bench/whiteboard/fixtures',name));const dialog=page.getByRole('dialog',{name:'Imported board preview'});await dialog.waitFor();check(await dialog.locator('svg').count()===1,'Real '+name+' file has a rendered owner preview');await dialog.getByRole('button',{name:'Save as new board'}).click();await page.locator('[data-whiteboard-editor]').waitFor();await saved(page);check(!(await board(page,new URL(page.url()).hash.split('/').at(-1))).agent_read,'Legacy import resets agent sharing');
+    }
+    await page.goto(origin+'/#thread/'+thread);await page.getByRole('button',{name:'Open as board',exact:true}).waitFor();await page.getByRole('button',{name:'Open as board',exact:true}).click();const chatPreview=page.getByRole('dialog',{name:'Open chat diagram as board'});await chatPreview.waitFor();await chatPreview.getByRole('button',{name:'Save private board',exact:true}).click();await page.locator('[data-whiteboard-editor]').waitFor();await saved(page);const chatBoard=await board(page,new URL(page.url()).hash.split('/').at(-1));check(!chatBoard.agent_read&&Object.values(chatBoard.shapes).every(shape=>shape.links.some(link=>link.type==='thread'&&link.id===thread)),'Chat Mermaid opens as editable private shapes with a thread backlink');
+    await page.goto(origin+'/#/whiteboards/'+id);await page.locator('[data-whiteboard-editor]').waitFor();await saved(page);
+    await beginTurn(page);let reply=await sendTool({action:'read',board_id:id});check(!reply.ok,'Private board is refused by the app-owned agent route');finishTurn();
+    await page.goto(origin+'/#/whiteboards/'+id);await page.locator('[data-whiteboard-editor]').waitFor();await page.getByRole('button',{name:'Private to you',exact:true}).click();await saved(page);
+    await beginTurn(page);reply=await sendTool({action:'read',board_id:id,limit:2});check(reply.ok&&JSON.parse(reply.text).shapes.length===2,'Shared board reads are paginated in the calling project');
+    const original=await board(page,id);reply=await sendTool({action:'propose',board_id:id,base_revision:original.revision,description:'Diagram this module',edits_json:JSON.stringify({mermaid:'flowchart LR\n Handler --> Store',source_path:'src/module.rs'})});check(reply.ok,'Agent module diagram arrives as an immutable proposal');const proposalId=JSON.parse(reply.text).proposal_id;
+    await page.getByRole('button',{name:'Review whiteboard proposal',exact:true}).click();await page.getByRole('button').filter({hasText:'Review proposal: Diagram this module'}).click();const review=page.getByRole('dialog',{name:'Review exact agent edit'});await review.waitFor();check((await board(page,id)).revision===original.revision,'Before/after review does not apply edits');await review.getByText('Exact changed records and deletions').click();check((await review.locator('pre').textContent()).includes('src/module.rs'),'Owner can inspect exact source metadata operations');await review.getByRole('button',{name:'Accept exact edit'}).click();await saved(page);const accepted=await board(page,id);check(accepted.revision===original.revision+1&&Object.keys(accepted.sources).length===1,'Owner acceptance commits one revision with a living source');
+    reply=await sendTool({action:'status',proposal_id:proposalId});check(reply.ok&&JSON.parse(reply.text).status.status==='accepted','The same turn receives accepted status outside chat');
+    source+='// changed\n';await command(page,'Check source drift');await page.getByText('src/module.rs · changed or unavailable',{exact:true}).waitFor();check(Object.values((await board(page,id)).sources).some(s=>s.stale),'Source drift is flagged without overwriting the diagram');
+    let current=await board(page,id);reply=await sendTool({action:'propose',board_id:id,base_revision:current.revision,description:'Stale edit fixture',edits_json:JSON.stringify({operations:[{op:'title',title:'Agent title'}]})});check(reply.ok,'A second proposal remains pending until owner action');const staleId=JSON.parse(reply.text).proposal_id;await rename(page,'Owner title');reply=await sendTool({action:'status',proposal_id:staleId});check(reply.ok&&JSON.parse(reply.text).status.status==='stale','Owner edits invalidate pending proposals');
+    const other=await context.newPage();await other.goto(origin+'/#/whiteboards/'+id);await other.locator('[data-whiteboard-editor]').waitFor();await saved(other);await other.getByRole('button',{name:'Shared with agents',exact:true}).click();await saved(other);reply=await sendTool({action:'read',board_id:id});check(!reply.ok,'Revocation in another tab immediately refuses cached agent reads');reply=await sendTool({action:'list'});check(reply.ok&&!JSON.parse(reply.text).boards.some(board=>board.id===id),'Revoked boards disappear from agent discovery');finishTurn();await other.close();
+    await page.reload();await page.locator('[data-whiteboard-editor]').waitFor();await saved(page);const contender=await context.newPage();await contender.goto(origin+'/#/whiteboards/'+id);await contender.locator('[data-whiteboard-editor]').waitFor();await saved(contender);await rename(page,'First writer');await command(contender,'Rename board');await contender.getByRole('textbox',{name:'Board edit text'}).fill('Unsaved second writer');await contender.getByRole('button',{name:'Apply',exact:true}).click();await contender.getByRole('button',{name:'Export recovery copy',exact:true}).waitFor();check((await board(page,id)).title==='First writer','A concurrent tab cannot overwrite the committed board');const recoveryEvent=contender.waitForEvent('download');await contender.getByRole('button',{name:'Export recovery copy',exact:true}).click();const recovery=await recoveryEvent;await recovery.saveAs(path.join(output,'conflict-recovery.json'));check(JSON.parse(await readFile(path.join(output,'conflict-recovery.json'),'utf8')).board.title==='Unsaved second writer','Save conflict preserves the local draft in a recovery export');await contender.close();
+   }
+   if(cell.hasTouch){await page.getByRole('button',{name:'Ellipse (e)',exact:true}).tap();const rect=await canvas.boundingBox(),cdp=await context.newCDPSession(page);const currentId=new URL(page.url()).hash.split('/').at(-1),before=Object.keys((await board(page,currentId)).shapes).length;await cdp.send('Input.dispatchTouchEvent',{type:'touchStart',touchPoints:[{x:rect.x+50,y:rect.y+180,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchMove',touchPoints:[{x:rect.x+200,y:rect.y+270,id:1}]});await cdp.send('Input.dispatchTouchEvent',{type:'touchEnd',touchPoints:[]});await saved(page);check(Object.keys((await board(page,currentId)).shapes).length===before+1,'A real touch pointer gesture creates durable shape geometry');await cdp.detach();}
+   await context.setOffline(true);await canvas.focus();await page.keyboard.press('n');await page.keyboard.press('Enter');await applyText(page,'Offline local note');const offlineId=new URL(page.url()).hash.split('/').at(-1);check(Object.values((await board(page,offlineId)).shapes).some(shape=>shape.text==='Offline local note'),'An already loaded board edits and saves with the network offline');await context.setOffline(false);await command(page,'Fit board');
+   await page.screenshot({path:path.join(output,cell.name+'-editor.png'),fullPage:true});check(report.errors.length===0,'No browser runtime errors');
+  }catch(error){await writeFile(path.join(output,cell.name+'-failure.html'),await page.content());await page.screenshot({path:path.join(output,cell.name+'-failure.png'),fullPage:true}).catch(()=>{});throw error;}finally{finishTurn();await context.close();}
+ }
+ assert.deepEqual(report.unexpected,[]);assert.deepEqual(report.errors,[]);
+ const names=(await readdir(dist)).filter(name=>/\.(wasm|js|css|html)$/.test(name));report.assets=await Promise.all(names.map(async name=>({name,sha256:createHash('sha256').update(await readFile(path.join(dist,name))).digest('hex')})));report.completed_at=new Date().toISOString();report.checks=report.cells.reduce((sum,cell)=>sum+cell.checks.length,0);
+}finally{finishTurn();for(const response of streams)response.destroy();await browser.close();server.closeAllConnections();await new Promise(resolve=>server.close(resolve));await writeFile(path.join(output,'validation.json'),JSON.stringify(report,null,2)+'\n');}

@@ -60,6 +60,44 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if let ThreadOperation::Whiteboard {
+            turn_id,
+            request: operation,
+        } = &request.operation
+        {
+            let Some(project) = self.whiteboard_request_project(chat, cx) else {
+                Self::resolve_thread_request(
+                    &request.thread_id,
+                    &request.id,
+                    ThreadReply::refused(
+                        "Attach a project folder before using whiteboard agent tools.",
+                    ),
+                    cx,
+                );
+                return;
+            };
+            let library = self.whiteboard_library(project, window, cx);
+            let reply = library.update(cx, |library, cx| {
+                library.answer(
+                    operation.clone(),
+                    bruhs_models::whiteboard::BoardRequester {
+                        thread_id: request.thread_id.to_string(),
+                        turn_id: turn_id.clone(),
+                    },
+                    cx,
+                )
+            });
+            let thread_id = request.thread_id.clone();
+            let id = request.id.clone();
+            cx.spawn(async move |this, cx| {
+                let reply = reply.await;
+                let _ = this.update(cx, |_, cx| {
+                    Self::resolve_thread_request(&thread_id, &id, reply, cx)
+                });
+            })
+            .detach();
+            return;
+        }
         match self.thread_reply(chat, &request.operation, window, cx) {
             ThreadAnswer::Now(reply) => {
                 Self::resolve_thread_request(&request.thread_id, &request.id, reply, cx)
@@ -207,6 +245,9 @@ impl Workspace {
             ));
         };
         match operation {
+            ThreadOperation::Whiteboard { .. } => ThreadAnswer::Now(ThreadReply::refused(
+                "Whiteboard requests require their turn-scoped UI route.",
+            )),
             ThreadOperation::List => ThreadAnswer::Now(self.thread_list_reply(&caller, cx)),
             ThreadOperation::Read { thread_id, limit } => {
                 ThreadAnswer::Now(self.thread_read_reply(thread_id, *limit, cx))

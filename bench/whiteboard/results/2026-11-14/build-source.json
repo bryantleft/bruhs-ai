@@ -1,0 +1,196 @@
+{
+  "at": "2026-11-14T09:00:04.191318+00:00",
+  "state": "frozen after narrow Chat scroll-disposal guards; final optimized build in progress",
+  "sources": [
+    {
+      "path": "bruhs-core/src/whiteboard/sources.rs",
+      "sha256": "2124aa09633486fd3d4439c0c96136d9a6de81b4e4fc7b59f0dacef1fe7c11fe"
+    },
+    {
+      "path": "bruhs-core/src/whiteboard/writer.rs",
+      "sha256": "7df4a7f48a6f1ad66e83417b63c940423193ae04e5cae5d5c5e401639bb07760"
+    },
+    {
+      "path": "bruhs-core/src/whiteboard.rs",
+      "sha256": "a58a04d41e7dffd9f0739722ac28d5bb44b4b142656c2f47a2f32b7ff04c9953"
+    },
+    {
+      "path": "bruhs-desktop/src/views/whiteboard/canvas.rs",
+      "sha256": "026a825eee7666d50be89ada0b32deef2625553cc77058e397c0bf030ee1e763"
+    },
+    {
+      "path": "bruhs-desktop/src/views/whiteboard/catalog/agent.rs",
+      "sha256": "018be7e5476aa78d47e4ecc4bedf67afc4e0459a144e2c6ebb39ce758577b257"
+    },
+    {
+      "path": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+      "sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0"
+    },
+    {
+      "path": "bruhs-desktop/src/views/whiteboard/catalog/files.rs",
+      "sha256": "63389b68624b9b36d725a15b7ded54c0069f83d22b3ea1204934d4d614752501"
+    },
+    {
+      "path": "bruhs-desktop/src/views/whiteboard/catalog.rs",
+      "sha256": "8639e9d7a91131a2293ed231cba1c04cab84ba4d37ae5031f0731c8431c21697"
+    },
+    {
+      "path": "bruhs-desktop/src/views/whiteboard.rs",
+      "sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0"
+    },
+    {
+      "path": "bruhs-desktop/src/whiteboard_performance.rs",
+      "sha256": "d7a5a1c749ea916c4e9d166a5aa95c23a42b70ce8aad3687fe3364e674107100"
+    },
+    {
+      "path": "bruhs-desktop/src/whiteboard_performance_entry.rs",
+      "sha256": "3c5ab3057c7b684968b7cda01c952a417cca6d710b72697ac977d7312dbee97d"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/agent.rs",
+      "sha256": "5360c1c0197af3edb2c0f3e623e82fc4b7cd2193847870f1a3570ded8b2c8bbb"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/assets.rs",
+      "sha256": "64bcdf2c00e99a47843b4261ebe37a24885a7bf37e36a785b88f00950b8e4cd3"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/authoring.rs",
+      "sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/authority_tests.rs",
+      "sha256": "34f9978a097d0a2c82b5827161cd232feabdaa6373f9da303c62b5570ec5468b"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/commands.rs",
+      "sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/diff.rs",
+      "sha256": "5dbd2750ddccaf7c759dec66083251e9513e16a9cdd947fe5f3294461fd9ed91"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/editor.rs",
+      "sha256": "3180d18f751889245ee29cedd7b4d3f867f2ba57e5d1c183bb7cbbbcc7564422"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/fixture.rs",
+      "sha256": "43b37d7f91cca89cc06e5b0c4b2b83fb39794436c997cab4b353ebd82ddeecde"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/geometry.rs",
+      "sha256": "fb5ca526815af3816217489cb2ac5d982e4307dee7779813a1bf642b82611309"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/import/excalidraw.rs",
+      "sha256": "7adbf14f8f7c658accf7bb0a17355a7c903c3c2549ae2df811fed9eee5cde9df"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/import/tldraw.rs",
+      "sha256": "f1d686ff7221af345f181b94153381a465d46230e05b348bd6e45cb3c5f23ee0"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/import.rs",
+      "sha256": "e10b10e41362f4fa9840726ad1731330606982a5b0f4ac2422b2ae28e1faf153"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/input.rs",
+      "sha256": "14da07efb34f70a01f5faca36f79659a4f1eee68d14f665e6fdfe703629a22fd"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/mermaid.rs",
+      "sha256": "030a27028cfeacad53fb6683487cc7d9ca7a029bd955b9529ea54b25253d4b8b"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/proposal.rs",
+      "sha256": "f7a5f108fd8347449ab0552128071ce7b8af3b187d3f8c6acb113b9349ccfcf9"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/review_tests.rs",
+      "sha256": "1e5c23cf4db90e828cc8d5c0e6405677ff2609dc713674b613096a425fe1abbd"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/svg.rs",
+      "sha256": "84b246734ab01c4a2d58f324217221c93abb00a92f7a6eb94a0d99efbf6d8a5a"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard/types.rs",
+      "sha256": "d87f5c5ffaa0a213ebe54537120d630b3fe0590afb87e7f27ad9900481403df2"
+    },
+    {
+      "path": "bruhs-models/src/whiteboard.rs",
+      "sha256": "60eb0c50cb2f12c24742fa002250b3670d62f43e56588f849a01787882db6057"
+    },
+    {
+      "path": "bruhs-web/src/components/chat.rs",
+      "sha256": "ce486a2d2d10b1428e0cfd9ce0e25530a82798321f91a1a356fbec50bcba9746"
+    },
+    {
+      "path": "bruhs-web/src/storage/whiteboards.rs",
+      "sha256": "ed866a09b36300bc7b875fc9a0920d617ebcecd5fa2a22c93f54eedc305fa82a"
+    },
+    {
+      "path": "bruhs-web/src/thread_link.rs",
+      "sha256": "dab7ad413a8f458cf8dde0f057c5dec854fc20664092144bda99e8a24a44c770"
+    },
+    {
+      "path": "bruhs-web/src/whiteboard/agent.rs",
+      "sha256": "d9780f978295c423fee4e2474f0005fce8e427af2a35d7fb9ff2f8eea65a2513"
+    },
+    {
+      "path": "bruhs-web/src/whiteboard/benchmark.rs",
+      "sha256": "5a16f50f119a12e9475ee47dcdf86c08f7884d746e59053941deadd374df7d51"
+    },
+    {
+      "path": "bruhs-web/src/whiteboard/canvas.rs",
+      "sha256": "0f1bc5ddbe4e4c88275765953f8a9f5f7b65d6cf1a59f7a19bb067452c709598"
+    },
+    {
+      "path": "bruhs-web/src/whiteboard/export.rs",
+      "sha256": "3c7d8132434e46f5bd6f001125cee7a510d560a61849dcfbc2abf52177ff11d8"
+    },
+    {
+      "path": "bruhs-web/src/whiteboard/host.rs",
+      "sha256": "31fa0f7d6b0fb7f54d6c92ae1ce20f7ca3f7ad2aaed2f079dac01da3b52ec64b"
+    },
+    {
+      "path": "bruhs-web/src/whiteboard/mod.rs",
+      "sha256": "1ca3ca71d60b05d9d1fcf98c28b20b6c77f2cabce01500aa5beb3fc104097bf0"
+    },
+    {
+      "path": "bruhs-web/src/whiteboard/review.rs",
+      "sha256": "2d5f8a1a79b08bd71eb0154284caff45a0fe9f09574bc14d07e4f26fd6849ed4"
+    },
+    {
+      "path": "bruhs-web/src/whiteboard/ui.rs",
+      "sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db"
+    }
+  ],
+  "captured_at": "2026-11-14T09:05:09.140612+00:00",
+  "dist": "target/whiteboard-final-dist",
+  "feature": "whiteboard-benchmark",
+  "trunk_log": "/tmp/bruhs-ticket-work/whiteboard-trunk-retained.log",
+  "assets": [
+    {
+      "name": "bruhs-177889e8322d3722.css",
+      "sha256": "085607056dc3d78710976132ec99290c24c81239938b6bc2a19fcbd2c8055a7d"
+    },
+    {
+      "name": "bruhs-web-56e8081e79bb5481.js",
+      "sha256": "64391a2e09bc1a7cf2034901a5a80c87728022e190f962547120630b10e4e1eb"
+    },
+    {
+      "name": "bruhs-web-56e8081e79bb5481_bg.wasm",
+      "sha256": "e5f76b2bcdb2a7168ab13a085b8f5eeaf9c15ce44f4c14882c739e498c96cb5a"
+    },
+    {
+      "name": "index.html",
+      "sha256": "f5b5779f301f2523f239b41c95e67d24f512c3a9bc11c5cec7c0508a701f32c8"
+    },
+    {
+      "name": "tailwind-9584bd976602b089.css",
+      "sha256": "ea009d88f78ae1930d5e894f3ac20dac5280229aa0cf19022a31d5a44a843254"
+    }
+  ]
+}

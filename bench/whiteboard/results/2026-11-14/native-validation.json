@@ -1,0 +1,24 @@
+{
+  "captured_at": "2026-11-14T08:50:19.486539+00:00",
+  "profile": "/tmp/bruhs-whiteboard-editor-qa.eexjqw3y/profile/whiteboards/c4105586-0caa-4136-b135-61f2fd70342b.json",
+  "sha256": "87992d0658b5c36f593e7ee692eaad5eeed70310cc9ff08fb848ed2b4caf35a2",
+  "board_id": "c4105586-0caa-4136-b135-61f2fd70342b",
+  "revision": 21,
+  "shapes": 22,
+  "rectangles": 10,
+  "bound_arrows": 9,
+  "frames": 1,
+  "ellipses": 2,
+  "checks": [
+    "New board focuses the canvas before first render",
+    "Keyboard rectangle, text, ten nodes and nine bound arrows",
+    "Cmd+Enter submits without changing text",
+    "Pointer ellipse creates durable geometry",
+    "Keyboard undo and redo",
+    "Typed file backlink includes lines 1-2",
+    "Project catalog reopens saved board",
+    "Real native image decoding and PNG pixels covered by separate production-painter test"
+  ],
+  "runtime_log": "/tmp/bruhs-ticket-work/whiteboard-native-editor.stderr.log",
+  "screenshot": "target/whiteboard-ui-qa/native-editor.png"
+}
