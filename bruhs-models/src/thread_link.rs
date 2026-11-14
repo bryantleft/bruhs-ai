@@ -27,6 +27,8 @@ use crate::roles::{ResolvedRole, RoleBook, MAX_NAME_CHARS};
 /// Longest chain of agent-to-agent messages after the user's own prompt,
 /// unless the user picks another of [`HOP_CHOICES`].
 pub const MAX_HOPS: u32 = 6;
+/// The authenticated local broker framing contract.
+pub const BROKER_FRAME_BYTES: usize = 256 * 1024;
 /// The chain lengths Settings offers.
 pub const HOP_CHOICES: [u32; 4] = [2, 4, 6, 10];
 /// Threads one `list_threads` reply names.
@@ -112,6 +114,11 @@ const fn is_false(value: &bool) -> bool {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "op", rename_all = "snake_case", deny_unknown_fields)]
 pub enum ThreadOperation {
+    Whiteboard {
+        #[serde(default)]
+        turn_id: String,
+        request: crate::whiteboard::BoardRequest,
+    },
     /// Name the app's threads.
     List,
     /// Read the latest messages of one thread.
@@ -141,6 +148,7 @@ impl ThreadOperation {
     /// Whether the operation changes anything. Read-only turns get the rest.
     pub const fn writes(&self) -> bool {
         matches!(self, Self::Message { .. })
+            || matches!(self, Self::Whiteboard { request, .. } if request.writes())
     }
 
     /// Whether the caller asked to wait for the recipient's reply.
@@ -160,6 +168,7 @@ impl ThreadOperation {
             }
         };
         match self {
+            Self::Whiteboard { request, .. } => request.validate(),
             Self::List => Ok(()),
             Self::Read { thread_id, .. } => reference(thread_id),
             Self::Message {
