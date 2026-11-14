@@ -1,0 +1,87 @@
+{
+  "passed": 33,
+  "checks": [
+    "pairing fragment removed before exchange",
+    "actual native project thread list",
+    "nonproject chats excluded",
+    "credential action remains laptop-only",
+    "exact native approval consumed",
+    "phone draft does not cross threads",
+    "phone thread draft restored",
+    "exact HTTP retry returns receipt without another native dispatch",
+    "older native history pages",
+    "streamed HTML is inert text",
+    "inert content did not execute",
+    "diff resolves actual native thread worktree",
+    "diff pages retain revision",
+    "phone draft survives a diff round trip",
+    "ambiguous command committed before response loss",
+    "reload reconciles stored command without replay",
+    "terminal receipt clears tab command storage",
+    "stale sequence reconciles and unlocks second tab",
+    "offline disables mutation controls",
+    "offline retains marked stale snapshot",
+    "reconnect resnapshots native state",
+    "read-only phone cannot send prompts",
+    "diff is an independent scope",
+    "approval is an independent scope",
+    "backend rejects read-only phone writes",
+    "no horizontal overflow at tested viewport",
+    "no horizontal overflow at tested viewport",
+    "no horizontal overflow at tested viewport",
+    "revocation clears phone token and displayed data",
+    "revocation clears stale chat content",
+    "phone disconnect revokes its own device",
+    "real bounded HTTPS snapshots observed",
+    "browser errors: "
+  ],
+  "snapshots": 55,
+  "commands": [
+    {
+      "sequence": 1,
+      "kind": "permission"
+    },
+    {
+      "sequence": 2,
+      "kind": "prompt"
+    },
+    {
+      "sequence": 2,
+      "kind": "prompt"
+    },
+    {
+      "sequence": 3,
+      "kind": "prompt"
+    },
+    {
+      "sequence": 4,
+      "kind": "prompt"
+    },
+    {
+      "sequence": 4,
+      "kind": "prompt"
+    },
+    {
+      "sequence": 5,
+      "kind": "prompt"
+    },
+    {
+      "sequence": 1,
+      "kind": "prompt"
+    }
+  ],
+  "viewports": [
+    {
+      "width": 390,
+      "height": 844,
+      "touch": true
+    },
+    {
+      "width": 640,
+      "height": 480,
+      "touch": true
+    }
+  ],
+  "transport": "actual desktop GPUI broker over trusted isolated HTTPS",
+  "browser": "158.0.8127.18"
+}

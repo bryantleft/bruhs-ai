@@ -1,0 +1,91 @@
+{
+  "ticket": "BNLE-65",
+  "recorded_at": "2026-11-14T00:09:18.299821+00:00",
+  "scope": "local working tree; not a published release",
+  "base_head": "c543e865b01ace7b0e29fa110cdc7dfb38aa032d",
+  "platform": {
+    "architecture": "arm64",
+    "macos": "26.3",
+    "rustc": "1.95.0 (59807616e 2026-04-14)",
+    "browser": "Chrome Headless Shell 158.0.8127.18, Playwright Chromium build 1254",
+    "postgres": "18.6 Homebrew, isolated temporary native cluster"
+  },
+  "checks": [
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo test -p bruhs-core database --locked --quiet",
+      "passed": 17,
+      "ignored": 1,
+      "log": "core-tests.log"
+    },
+    {
+      "command": "BRUHS_DATABASE_TEST_FIXTURE=<private fixture receipt> CARGO_INCREMENTAL=0 cargo test -p bruhs-core live_postgres_readonly_boundary --locked -- --ignored --nocapture",
+      "passed": 1,
+      "log": "postgres-tests.log"
+    },
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo test -p bruhs-desktop database_native_controls --locked --quiet",
+      "passed": 1,
+      "log": "native-controls.log"
+    },
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo build -p bruhs-server --locked; BRUHS_DATABASE_MCP_EXECUTABLE=<built server executable> CARGO_INCREMENTAL=0 cargo test -p bruhs-server database_native_http --locked -- --nocapture",
+      "passed": 1,
+      "log": "native-http-and-mcp.log"
+    },
+    {
+      "command": "python3 -m unittest scripts/test_database_fixture.py",
+      "passed": 4,
+      "log": "fixture-tests.log"
+    },
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo clippy -p bruhs-core -p bruhs-server -p bruhs-desktop --all-targets --locked -- -D warnings",
+      "success": true,
+      "log": "clippy.log"
+    },
+    {
+      "cwd": "bruhs-web",
+      "command": "CARGO_INCREMENTAL=0 env -u NO_COLOR trunk build --dist ../target/database-ui-dist",
+      "success": true,
+      "log": "wasm-build.log"
+    },
+    {
+      "command": "BRUHS_CHROME=<compatible chromium executable> node bruhs-web/tests/database_browser.mjs",
+      "passed": 44,
+      "viewports": [
+        "640x480",
+        "390x844 touch"
+      ],
+      "log": "browser.log"
+    }
+  ],
+  "boundaries": [
+    "UI uses production WASM and mocked APIs; engine checks are separate.",
+    "Native controls use a GPUI control harness, not a launched desktop session.",
+    "Credential tests use an isolated in-memory SecretStore, not an OS keychain prompt/write.",
+    "Postgres supports the documented SELECT subset over ordinary heap tables.",
+    "Connections and agent grants are scoped to the canonical working folder.",
+    "Fixture receipt passwords are excluded; native fixture was stopped and removed."
+  ],
+  "source_sha256": {
+    "Cargo.toml": "672a0f20190675979eb3a021d24303052509aeb901b34705a380f4204a01bb82",
+    "Cargo.lock": "f33659dd7c11d1ff7d52576b0174db47e200a0cbd02774e494397ae3940341fb",
+    "bruhs-models/src/database.rs": "834b244a18328d430035f862f865223bbb5a6f9fdca511231e43bed635b87a4e",
+    "bruhs-core/src/database.rs": "586d7f007f191f9c98aeb880f0fd7bb0b0b8d840dcd668b34d7d0cc1c8bd4450",
+    "bruhs-core/src/database/sqlite.rs": "c8718d675db36e458547e9e47af0dd4c8e32cd11b3f283995d0252c26cf2a536",
+    "bruhs-core/src/database/postgres.rs": "ddc3943b241296582defbbabeb5ab76804eaf8351998d8256c3893c9ca4ccbe1",
+    "bruhs-core/src/database/postgres_policy.rs": "4d612be54ee648d948463e7cb4e0cd4c21382e20274da2891b6023b3a9c03dca",
+    "bruhs-core/src/database/pgwire.rs": "f1f91cbd576d7f4705faa575ae5a7a09890ea4bff324b894586f6477cbae4584",
+    "bruhs-core/src/database/tests.rs": "26dfdb555d99ae6e9f5182087d37bb2039f7299d34d21067fb55b7bc889af1b2",
+    "bruhs-core/src/database_tools.rs": "9f51977ea09369644105637e6e637c76464954f43c3d132f2ad29ada17146eb8",
+    "bruhs-core/src/secrets/database.rs": "9b493238fcb0ea896eef19741dc42d3da28787c092b56266e462fc144108b21b",
+    "bruhs-server/src/routes/database.rs": "8c78ee6580e80fb275ee7430c84fd1d08d08e3bc0b62351017612af2ccc3655d",
+    "bruhs-server/src/routes/database/tests.rs": "7f62d7a1e48733223c09347bf9d4d1d526af90745555b5e65f514473a6ea3c45",
+    "bruhs-web/src/api/database.rs": "5df9706a4086f7c3fffdca375ec42d1afa7e2387c5180b1f1bab901115979570",
+    "bruhs-web/src/components/database_panel.rs": "735cbe86717cd88d2aaf641173026b29f63f0323041031463aef2be905f01a82",
+    "bruhs-web/tests/database_browser.mjs": "8daeb6bc942b4e2dea3dc6a9cf066680e2e6b1fca7efc94c6445eb6ca6c625b6",
+    "bruhs-desktop/src/server_client/database.rs": "caaf0e51f0ac3b8b19d8f07689579d2e51abb36b894897308779dbdacabae5ef",
+    "bruhs-desktop/src/views/database_panel.rs": "eb13f2e9a9fa8ff10522979b3fff450d215ddc7ec209ba84f13cd9b509b43694",
+    "scripts/database_fixture.py": "94edf9862efcb200bc61bfddfb5480816899fe1ed4856af1bd51403b3e279a34",
+    "scripts/test_database_fixture.py": "19ae2add544a3034fe7527c3db85ca9420248bf9cd5d739876fd0fd6947d368f"
+  }
+}

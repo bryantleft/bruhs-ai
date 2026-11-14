@@ -1,0 +1,454 @@
+{
+  "schema_version": 1,
+  "measured_at": "2026-11-13T19:25:38.379808+00:00",
+  "hardware": {
+    "system": "macOS-26.3-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "manifest_sha256": "741fa98dbb33f02fb05194e29c797d6f0d921b905cb07790b0547af5ee1658f1",
+  "model_sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+  "runner_sha256": "cf01af0614c048deb02f01d25bc4e1e3853a0b94027433a78b1739c8ada9e9ba",
+  "scorer_sha256": "56a894922bbe216fe624f007a774686013f030331a0f0bc0378e77316b8d41b6",
+  "variant": "candidate",
+  "model_language": "en",
+  "provenance": "synthetic",
+  "provenance_note": "Generated locally with installed macOS say voices; no user recordings or voice clones. Gold speaker intervals are utterance extents, including internal pauses. Channel attribution only; this corpus does not validate cross-meeting identity or multiple system-audio speakers. Overlapping speech uses the scripted utterance order for word-error scoring.",
+  "measurement_scope": "Cold final-pass ASR plus production Me/Them channel attribution. First segment measures final-pass callback latency, not live-preview latency. Cross-meeting identity and multiple remote speakers are not evaluated. CPU/RSS cover the whole runner process, not individual clips.",
+  "runtime": {
+    "wall_seconds": 1.653131667058915,
+    "user_cpu_seconds": 0.5877589999999999,
+    "system_cpu_seconds": 0.603938,
+    "peak_rss_bytes": 297320448
+  },
+  "summary": {
+    "reference_words": 124,
+    "speech_word_errors": 62,
+    "word_error_rate": 0.5,
+    "false_silence_words": 0,
+    "speaker_error_rate": 0.09327044267200323
+  },
+  "cases": [
+    {
+      "id": "clean",
+      "text": "deployment past its tests, we can release the update tomorrow.",
+      "audio_ms": 3913.0,
+      "decode_ms": 0.399,
+      "inference_ms": 227.332167,
+      "first_segment_ms": 220.11333299999998,
+      "segments": [
+        {
+          "start_ms": 0,
+          "end_ms": 3840,
+          "text": "deployment past its tests, we can release the update tomorrow.",
+          "speaker_id": "me"
+        }
+      ],
+      "reference": "The deployment passed its tests. We can release the update tomorrow.",
+      "tags": [
+        "clean",
+        "mic"
+      ],
+      "words": {
+        "errors": 2,
+        "reference_words": 11,
+        "hypothesis_words": 10,
+        "word_error_rate": 0.18181818181818182,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 3910.0625,
+        "missed_ms": 70.0625,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 70.0625,
+        "error_rate": 0.01791851153274404
+      }
+    },
+    {
+      "id": "technical",
+      "text": "Bryant reviewed the Post-Garescual migration. The API returns a JSO and responds after authentication.",
+      "audio_ms": 7235.3125,
+      "decode_ms": 0.727,
+      "inference_ms": 196.05325000000002,
+      "first_segment_ms": 188.36504200000002,
+      "segments": [
+        {
+          "start_ms": 0,
+          "end_ms": 3120,
+          "text": "Bryant reviewed the Post-Garescual migration.",
+          "speaker_id": "them"
+        },
+        {
+          "start_ms": 3120,
+          "end_ms": 7200,
+          "text": "The API returns a JSO and responds after authentication.",
+          "speaker_id": "them"
+        }
+      ],
+      "reference": "Bryant reviewed the PostgreSQL migration. The API returns a JSON response after authentication.",
+      "tags": [
+        "technical_names",
+        "british_english",
+        "system"
+      ],
+      "words": {
+        "errors": 5,
+        "reference_words": 13,
+        "hypothesis_words": 15,
+        "word_error_rate": 0.38461538461538464,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 7227.625,
+        "missed_ms": 27.625,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 27.625,
+        "error_rate": 0.0038221407447121287
+      }
+    },
+    {
+      "id": "accent",
+      "text": "Please review the pull request before merging, the database backup completed successfully.",
+      "audio_ms": 4966.5625,
+      "decode_ms": 0.500167,
+      "inference_ms": 183.354709,
+      "first_segment_ms": 175.98125000000002,
+      "segments": [
+        {
+          "start_ms": 0,
+          "end_ms": 4960,
+          "text": "Please review the pull request before merging, the database backup completed successfully.",
+          "speaker_id": "them"
+        }
+      ],
+      "reference": "Please review the pull request before merging. The database backup completed successfully.",
+      "tags": [
+        "indian_english",
+        "system"
+      ],
+      "words": {
+        "errors": 0,
+        "reference_words": 12,
+        "hypothesis_words": 12,
+        "word_error_rate": 0.0,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 4966.0625,
+        "missed_ms": 6.0625,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 6.0625,
+        "error_rate": 0.0012207860855557094
+      }
+    },
+    {
+      "id": "spanish",
+      "text": "And that's it for today's video. I'll see you in the next video.",
+      "audio_ms": 5057.3125,
+      "decode_ms": 0.531625,
+      "inference_ms": 230.639125,
+      "first_segment_ms": 222.435958,
+      "segments": [
+        {
+          "start_ms": 0,
+          "end_ms": 5080,
+          "text": "And that's it for today's video. I'll see you in the next video.",
+          "speaker_id": "me"
+        }
+      ],
+      "reference": "La reunión comienza mañana. Necesitamos revisar las pruebas antes de publicar la nueva versión.",
+      "tags": [
+        "multilingual",
+        "spanish",
+        "mic"
+      ],
+      "words": {
+        "errors": 14,
+        "reference_words": 14,
+        "hypothesis_words": 13,
+        "word_error_rate": 1.0,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 5050.625,
+        "missed_ms": 0.0,
+        "false_alarm_ms": 29.375,
+        "confusion_ms": 0.0,
+        "error_ms": 29.375,
+        "error_rate": 0.005816111867343151
+      }
+    },
+    {
+      "id": "french",
+      "text": "Let's see what happens in the next video.",
+      "audio_ms": 4614.0,
+      "decode_ms": 0.465958,
+      "inference_ms": 224.90491600000001,
+      "first_segment_ms": 217.559166,
+      "segments": [
+        {
+          "start_ms": 0,
+          "end_ms": 4580,
+          "text": "Let's see what happens in the next video.",
+          "speaker_id": "them"
+        }
+      ],
+      "reference": "La réunion commence demain. Nous devons vérifier les tests avant de publier la nouvelle version.",
+      "tags": [
+        "multilingual",
+        "french",
+        "system"
+      ],
+      "words": {
+        "errors": 15,
+        "reference_words": 15,
+        "hypothesis_words": 8,
+        "word_error_rate": 1.0,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 4604.5,
+        "missed_ms": 24.5,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 24.5,
+        "error_rate": 0.005320881746117928
+      }
+    },
+    {
+      "id": "noise-10db",
+      "text": "deployment pass its test. We can release the update tomorrow.",
+      "audio_ms": 3913.0,
+      "decode_ms": 0.372,
+      "inference_ms": 169.246208,
+      "first_segment_ms": 161.946416,
+      "segments": [
+        {
+          "start_ms": 0,
+          "end_ms": 3840,
+          "text": "deployment pass its test. We can release the update tomorrow.",
+          "speaker_id": "me"
+        }
+      ],
+      "reference": "The deployment passed its tests. We can release the update tomorrow.",
+      "tags": [
+        "noise",
+        "snr_10db",
+        "mic"
+      ],
+      "words": {
+        "errors": 3,
+        "reference_words": 11,
+        "hypothesis_words": 10,
+        "word_error_rate": 0.2727272727272727,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 3913.0,
+        "missed_ms": 73.0,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 73.0,
+        "error_rate": 0.018655762841809354
+      }
+    },
+    {
+      "id": "turns",
+      "text": "deployment past its tests, we can release the update tomorrow. Bryant reviewed the Postgresql migration, the API returns a JSON response after authentication.",
+      "audio_ms": 11648.3125,
+      "decode_ms": 1.101792,
+      "inference_ms": 216.864125,
+      "first_segment_ms": 209.204666,
+      "segments": [
+        {
+          "start_ms": 0,
+          "end_ms": 4440,
+          "text": "deployment past its tests, we can release the update tomorrow.",
+          "speaker_id": "me"
+        },
+        {
+          "start_ms": 4440,
+          "end_ms": 11560,
+          "text": "Bryant reviewed the Postgresql migration, the API returns a JSON response after authentication.",
+          "speaker_id": "them"
+        }
+      ],
+      "reference": "The deployment passed its tests. We can release the update tomorrow. Bryant reviewed the PostgreSQL migration. The API returns a JSON response after authentication.",
+      "tags": [
+        "channel_turns",
+        "sequential"
+      ],
+      "words": {
+        "errors": 2,
+        "reference_words": 24,
+        "hypothesis_words": 23,
+        "word_error_rate": 0.08333333333333333,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 11148.3125,
+        "missed_ms": 88.3125,
+        "false_alarm_ms": 500.0,
+        "confusion_ms": 27.0,
+        "error_ms": 615.3125,
+        "error_rate": 0.05519333082921743
+      }
+    },
+    {
+      "id": "overlap",
+      "text": "deployment past its tests.",
+      "audio_ms": 9191.8125,
+      "decode_ms": 0.8775000000000001,
+      "inference_ms": 166.14000000000001,
+      "first_segment_ms": 157.360708,
+      "segments": [
+        {
+          "start_ms": 0,
+          "end_ms": 9280,
+          "text": "deployment past its tests.",
+          "speaker_id": "them"
+        }
+      ],
+      "reference": "The deployment passed its tests. We can release the update tomorrow. Bryant reviewed the PostgreSQL migration. The API returns a JSON response after authentication.",
+      "tags": [
+        "channel_turns",
+        "overlap"
+      ],
+      "words": {
+        "errors": 21,
+        "reference_words": 24,
+        "hypothesis_words": 4,
+        "word_error_rate": 0.875,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 11148.3125,
+        "missed_ms": 1956.5,
+        "false_alarm_ms": 88.1875,
+        "confusion_ms": 1956.5,
+        "error_ms": 4001.1875,
+        "error_rate": 0.3589052154754363
+      }
+    },
+    {
+      "id": "silence-8s",
+      "text": "",
+      "audio_ms": 8000.0,
+      "decode_ms": 0.814959,
+      "inference_ms": 0.039667,
+      "first_segment_ms": null,
+      "segments": [],
+      "reference": "",
+      "tags": [
+        "digital_silence"
+      ],
+      "words": {
+        "errors": 0,
+        "reference_words": 0,
+        "hypothesis_words": 0,
+        "word_error_rate": null,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 0.0,
+        "missed_ms": 0.0,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 0.0,
+        "error_rate": null
+      }
+    },
+    {
+      "id": "silence-30s",
+      "text": "",
+      "audio_ms": 30000.0,
+      "decode_ms": 2.9595,
+      "inference_ms": 0.14837499999999998,
+      "first_segment_ms": null,
+      "segments": [],
+      "reference": "",
+      "tags": [
+        "digital_silence"
+      ],
+      "words": {
+        "errors": 0,
+        "reference_words": 0,
+        "hypothesis_words": 0,
+        "word_error_rate": null,
+        "false_silence_words": 0
+      },
+      "speakers": {
+        "reference_speaker_ms": 0.0,
+        "missed_ms": 0.0,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 0.0,
+        "error_rate": null
+      }
+    }
+  ],
+  "comparison": {
+    "clean": {
+      "speech_word_errors_delta": 0,
+      "false_silence_words_delta": 0,
+      "speaker_error_ms_delta": 0.0,
+      "inference_ms_delta": 0.3867509999999754
+    },
+    "technical": {
+      "speech_word_errors_delta": 0,
+      "false_silence_words_delta": 0,
+      "speaker_error_ms_delta": 0.0,
+      "inference_ms_delta": -6.674915999999968
+    },
+    "accent": {
+      "speech_word_errors_delta": 0,
+      "false_silence_words_delta": 0,
+      "speaker_error_ms_delta": 0.0,
+      "inference_ms_delta": 5.088251000000014
+    },
+    "spanish": {
+      "speech_word_errors_delta": 0,
+      "false_silence_words_delta": 0,
+      "speaker_error_ms_delta": 0.0,
+      "inference_ms_delta": -7.425332999999995
+    },
+    "french": {
+      "speech_word_errors_delta": 0,
+      "false_silence_words_delta": 0,
+      "speaker_error_ms_delta": 0.0,
+      "inference_ms_delta": 3.516791000000012
+    },
+    "noise-10db": {
+      "speech_word_errors_delta": 0,
+      "false_silence_words_delta": 0,
+      "speaker_error_ms_delta": 0.0,
+      "inference_ms_delta": -14.844166999999999
+    },
+    "turns": {
+      "speech_word_errors_delta": 0,
+      "false_silence_words_delta": 0,
+      "speaker_error_ms_delta": 0.0,
+      "inference_ms_delta": -1.9147090000000162
+    },
+    "overlap": {
+      "speech_word_errors_delta": 0,
+      "false_silence_words_delta": 0,
+      "speaker_error_ms_delta": 0.0,
+      "inference_ms_delta": 2.597375000000028
+    },
+    "silence-8s": {
+      "speech_word_errors_delta": null,
+      "false_silence_words_delta": -4,
+      "speaker_error_ms_delta": -8240.0,
+      "inference_ms_delta": -284.56287399999997
+    },
+    "silence-30s": {
+      "speech_word_errors_delta": null,
+      "false_silence_words_delta": -15,
+      "speaker_error_ms_delta": -30360.0,
+      "inference_ms_delta": -794.335416
+    }
+  }
+}

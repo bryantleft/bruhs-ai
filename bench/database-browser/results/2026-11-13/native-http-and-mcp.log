@@ -1,0 +1,35 @@
+   Compiling bruhs-core v0.1.0 (bruhs-core)
+   Compiling bruhs-server v0.1.1 (bruhs-server)
+    Finished `test` profile [unoptimized + debuginfo] target(s) in 24.61s
+     Running unittests src/main.rs (target/debug/deps/bruhs_server-f8e864c9ba83de16)
+
+running 1 test
+Production database MCP helper: initialization, registry, opt-in reads, column schema, blocked write and revoked read passed.
+test routes::database::tests::database_native_http_and_agent_grants_share_the_readonly_boundary ... ok
+
+test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 196 filtered out; finished in 1.72s
+
+     Running tests/meeting_restart.rs (target/debug/deps/meeting_restart-ffafe9716ce58103)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/secret_mcp.rs (target/debug/deps/secret_mcp-fda2e8d464e355b2)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/thread_mcp.rs (target/debug/deps/thread_mcp-39ff6b139ae539a5)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s
+
+     Running tests/transcript_restart.rs (target/debug/deps/transcript_restart-25d19d1a87ce94f8)
+
+running 0 tests
+
+test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s
+

@@ -1,0 +1,38 @@
+{
+  "trials": 3,
+  "control": {
+    "quality": {
+      "reference_words": 124,
+      "speech_word_errors": 62,
+      "word_error_rate": 0.5,
+      "false_silence_words": 19,
+      "speaker_error_rate": 0.8360280746990966
+    },
+    "runtime": {
+      "wall_seconds_median": 2.7520889999577776,
+      "cpu_seconds_median": 1.598272,
+      "peak_rss_bytes_median": 325664768
+    }
+  },
+  "candidate": {
+    "quality": {
+      "reference_words": 124,
+      "speech_word_errors": 62,
+      "word_error_rate": 0.5,
+      "false_silence_words": 0,
+      "speaker_error_rate": 0.09327044267200323
+    },
+    "runtime": {
+      "wall_seconds_median": 1.653131667058915,
+      "cpu_seconds_median": 1.191697,
+      "peak_rss_bytes_median": 295714816
+    }
+  },
+  "speech_segments_unchanged_every_trial": true,
+  "notes": [
+    "Synthetic corpus only, English Base model forced to English including Spanish/French stress cases.",
+    "Channel attribution is Me/Them, not cross-meeting identity or multiple remote-speaker clustering.",
+    "Speech clip timings have overlapping run-to-run variation; no per-clip speedup or universal latency limit is claimed.",
+    "Scope is final-pass decoder, ASR and channel attribution, not live preview, summaries or end-to-end capture finalization."
+  ]
+}

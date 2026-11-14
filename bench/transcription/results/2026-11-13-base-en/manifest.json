@@ -1,0 +1,248 @@
+{
+  "schema_version": 1,
+  "provenance": "synthetic",
+  "provenance_note": "Generated locally with installed macOS say voices; no user recordings or voice clones. Gold speaker intervals are utterance extents, including internal pauses. Channel attribution only; this corpus does not validate cross-meeting identity or multiple system-audio speakers. Overlapping speech uses the scripted utterance order for word-error scoring.",
+  "generator": "scripts/transcription_fixtures.py",
+  "cases": [
+    {
+      "id": "clean",
+      "audio": "clean.wav",
+      "mic_audio": "clean.mic.wav",
+      "system_audio": "clean.sys.wav",
+      "reference": "The deployment passed its tests. We can release the update tomorrow.",
+      "tags": [
+        "clean",
+        "mic"
+      ],
+      "language": "en",
+      "turns": [
+        {
+          "start_ms": 0.0,
+          "end_ms": 3910.0625,
+          "speaker_id": "me"
+        }
+      ],
+      "sha256": {
+        "audio": "10e93b020e7b4cc77fd9e2cfd67bcf7b5a4baa3ff8f63ee6b38ef92eeb8874b9",
+        "mic_audio": "10e93b020e7b4cc77fd9e2cfd67bcf7b5a4baa3ff8f63ee6b38ef92eeb8874b9",
+        "system_audio": "a1a2e74790cad949406e8e064f91cc3c381d72e77cea399e2c70976ea2dbbe66"
+      }
+    },
+    {
+      "id": "technical",
+      "audio": "technical.wav",
+      "mic_audio": "technical.mic.wav",
+      "system_audio": "technical.sys.wav",
+      "reference": "Bryant reviewed the PostgreSQL migration. The API returns a JSON response after authentication.",
+      "tags": [
+        "technical_names",
+        "british_english",
+        "system"
+      ],
+      "language": "en",
+      "turns": [
+        {
+          "start_ms": 0.0,
+          "end_ms": 7227.625,
+          "speaker_id": "them"
+        }
+      ],
+      "sha256": {
+        "audio": "5493c23fd7b0fe5961257076af6267c535bc4d6bb2a984e4d479e6c072822e33",
+        "mic_audio": "cbe0c93af823f53b8fa87aa5afd283a27455902ccbb20703e3ec7c11e1917b67",
+        "system_audio": "5493c23fd7b0fe5961257076af6267c535bc4d6bb2a984e4d479e6c072822e33"
+      }
+    },
+    {
+      "id": "accent",
+      "audio": "accent.wav",
+      "mic_audio": "accent.mic.wav",
+      "system_audio": "accent.sys.wav",
+      "reference": "Please review the pull request before merging. The database backup completed successfully.",
+      "tags": [
+        "indian_english",
+        "system"
+      ],
+      "language": "en",
+      "turns": [
+        {
+          "start_ms": 0.0,
+          "end_ms": 4966.0625,
+          "speaker_id": "them"
+        }
+      ],
+      "sha256": {
+        "audio": "25cbb4c4870586eca271d2b37a60bd4faa1998fb2269ef9b809a29c99f18e03f",
+        "mic_audio": "565352742438294681b6fb0d0169a974e697dbf37adfdfb5610ced150e0925f3",
+        "system_audio": "25cbb4c4870586eca271d2b37a60bd4faa1998fb2269ef9b809a29c99f18e03f"
+      }
+    },
+    {
+      "id": "spanish",
+      "audio": "spanish.wav",
+      "mic_audio": "spanish.mic.wav",
+      "system_audio": "spanish.sys.wav",
+      "reference": "La reunión comienza mañana. Necesitamos revisar las pruebas antes de publicar la nueva versión.",
+      "tags": [
+        "multilingual",
+        "spanish",
+        "mic"
+      ],
+      "language": "es",
+      "turns": [
+        {
+          "start_ms": 0.0,
+          "end_ms": 5050.625,
+          "speaker_id": "me"
+        }
+      ],
+      "sha256": {
+        "audio": "91daca0bed778a6889a72d4451b509107b23305c72d47d721c8be061f466c4d7",
+        "mic_audio": "91daca0bed778a6889a72d4451b509107b23305c72d47d721c8be061f466c4d7",
+        "system_audio": "3e0cf0d4fc92168011211466548035abaa03fb13d54a3be09a6ae7312e794b2c"
+      }
+    },
+    {
+      "id": "french",
+      "audio": "french.wav",
+      "mic_audio": "french.mic.wav",
+      "system_audio": "french.sys.wav",
+      "reference": "La réunion commence demain. Nous devons vérifier les tests avant de publier la nouvelle version.",
+      "tags": [
+        "multilingual",
+        "french",
+        "system"
+      ],
+      "language": "fr",
+      "turns": [
+        {
+          "start_ms": 0.0,
+          "end_ms": 4604.5,
+          "speaker_id": "them"
+        }
+      ],
+      "sha256": {
+        "audio": "3aec98c81a6435c05de690a950e3b03b57fac6621874161f7b947e9620932bb3",
+        "mic_audio": "7e9254e7a7be3c3269da7f91f6f3c64bdb9c8dc9abd9a11d7dfd5db414c60498",
+        "system_audio": "3aec98c81a6435c05de690a950e3b03b57fac6621874161f7b947e9620932bb3"
+      }
+    },
+    {
+      "id": "noise-10db",
+      "audio": "noise-10db.wav",
+      "mic_audio": "noise-10db.mic.wav",
+      "system_audio": "noise-10db.sys.wav",
+      "reference": "The deployment passed its tests. We can release the update tomorrow.",
+      "tags": [
+        "noise",
+        "snr_10db",
+        "mic"
+      ],
+      "language": "en",
+      "turns": [
+        {
+          "start_ms": 0.0,
+          "end_ms": 3913.0,
+          "speaker_id": "me"
+        }
+      ],
+      "sha256": {
+        "audio": "0e1e5d8746d664b8cce3ae4d2c63fa91bdd964d98232044e3a867c57e5826fda",
+        "mic_audio": "0e1e5d8746d664b8cce3ae4d2c63fa91bdd964d98232044e3a867c57e5826fda",
+        "system_audio": "a1a2e74790cad949406e8e064f91cc3c381d72e77cea399e2c70976ea2dbbe66"
+      }
+    },
+    {
+      "id": "turns",
+      "audio": "turns.wav",
+      "mic_audio": "turns.mic.wav",
+      "system_audio": "turns.sys.wav",
+      "reference": "The deployment passed its tests. We can release the update tomorrow. Bryant reviewed the PostgreSQL migration. The API returns a JSON response after authentication.",
+      "tags": [
+        "channel_turns",
+        "sequential"
+      ],
+      "language": "en",
+      "turns": [
+        {
+          "start_ms": 0,
+          "end_ms": 3913.0,
+          "speaker_id": "me"
+        },
+        {
+          "start_ms": 4413.0,
+          "end_ms": 11648.3125,
+          "speaker_id": "them"
+        }
+      ],
+      "sha256": {
+        "audio": "f7f1a0b6ed7188f5e6d3dfebc7c9e171c0a92d7a5247c80097820115ef9a33bb",
+        "mic_audio": "07ac9f0af3e3291fc38f5d2d7f95f08420032ae35e8573fe89e92935fd00e09c",
+        "system_audio": "58f5f5fed514bc1a502a5a98d999ee7b455690e81f78aeab8246caf5ec77c424"
+      }
+    },
+    {
+      "id": "overlap",
+      "audio": "overlap.wav",
+      "mic_audio": "overlap.mic.wav",
+      "system_audio": "overlap.sys.wav",
+      "reference": "The deployment passed its tests. We can release the update tomorrow. Bryant reviewed the PostgreSQL migration. The API returns a JSON response after authentication.",
+      "tags": [
+        "channel_turns",
+        "overlap"
+      ],
+      "language": "en",
+      "turns": [
+        {
+          "start_ms": 0,
+          "end_ms": 3913.0,
+          "speaker_id": "me"
+        },
+        {
+          "start_ms": 1956.5,
+          "end_ms": 9191.8125,
+          "speaker_id": "them"
+        }
+      ],
+      "sha256": {
+        "audio": "a65126a9b74ecf4b65ca790b59f874673b12c82db551064349ade88202d17138",
+        "mic_audio": "4bf27c009a174b0e709a7720c56422d39bca03150b05b9d2be7accf28343b22c",
+        "system_audio": "e9dfa7fbfc6fbe72abdaf655911afb99ba3bbfe7a1cd25d8ebeba19ec8aababc"
+      }
+    },
+    {
+      "id": "silence-8s",
+      "audio": "silence-8s.wav",
+      "mic_audio": "silence-8s.mic.wav",
+      "system_audio": "silence-8s.sys.wav",
+      "reference": "",
+      "tags": [
+        "digital_silence"
+      ],
+      "language": "en",
+      "turns": [],
+      "sha256": {
+        "audio": "190415015d40eef0cd797e1b59ffe00846b01873050b12d44b3a216de3faa2a9",
+        "mic_audio": "190415015d40eef0cd797e1b59ffe00846b01873050b12d44b3a216de3faa2a9",
+        "system_audio": "190415015d40eef0cd797e1b59ffe00846b01873050b12d44b3a216de3faa2a9"
+      }
+    },
+    {
+      "id": "silence-30s",
+      "audio": "silence-30s.wav",
+      "mic_audio": "silence-30s.mic.wav",
+      "system_audio": "silence-30s.sys.wav",
+      "reference": "",
+      "tags": [
+        "digital_silence"
+      ],
+      "language": "en",
+      "turns": [],
+      "sha256": {
+        "audio": "40abc924dc63f75aafb2400bb99fd66741e22eb9ff2450973a18db53a06286ac",
+        "mic_audio": "40abc924dc63f75aafb2400bb99fd66741e22eb9ff2450973a18db53a06286ac",
+        "system_audio": "40abc924dc63f75aafb2400bb99fd66741e22eb9ff2450973a18db53a06286ac"
+      }
+    }
+  ]
+}

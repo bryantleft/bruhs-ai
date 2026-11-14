@@ -1,0 +1,10 @@
+{
+  "hardware_model": "Mac14,6",
+  "physical_cpu_cores": 12,
+  "memory_bytes": 34359738368,
+  "os": "macOS 26.3 arm64",
+  "provider": "whisper-rs 0.12.0 / whisper.cpp with Metal",
+  "model": "Whisper Base English",
+  "model_sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+  "scope": "Applies to every control, candidate and postprocess result in this directory. Local shared development session; no CPU isolation. Paired comparisons use the same recordings and settings."
+}
