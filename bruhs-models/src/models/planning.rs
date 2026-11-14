@@ -8,6 +8,9 @@ use super::{
     CalendarEvent, Meeting, ObservationKind, PersonProfile, Priority, WorkItem, WorkItemStatus,
 };
 
+mod day_plan;
+pub use day_plan::*;
+
 const MINUTE_MS: f64 = 60_000.0;
 const FIFTEEN_MINUTES_MS: f64 = 15.0 * MINUTE_MS;
 
@@ -420,8 +423,39 @@ pub fn propose_day_plan(
     work_items: &[WorkItem],
     events: &[CalendarEvent],
 ) -> DayPlanProposal {
-    let workday_start = day_start_ms + 9.0 * 60.0 * MINUTE_MS;
-    let workday_end = day_start_ms + 18.0 * 60.0 * MINUTE_MS;
+    build_day_plan(
+        now_ms,
+        DayPlanWindow {
+            start_at_ms: day_start_ms + 9.0 * 60.0 * MINUTE_MS,
+            end_at_ms: day_start_ms + 18.0 * 60.0 * MINUTE_MS,
+        },
+        work_items,
+        events,
+    )
+}
+
+/// Propose within platform-resolved local wall-clock workday boundaries.
+pub fn propose_day_plan_in_window(
+    now_ms: f64,
+    window: DayPlanWindow,
+    work_items: &[WorkItem],
+    events: &[CalendarEvent],
+) -> Result<DayPlanProposal, DayPlanChangeError> {
+    EpochMs::try_from(now_ms).map_err(|_| DayPlanChangeError::InvalidClock)?;
+    if !day_plan::valid_interval(window.start_at_ms, window.end_at_ms) {
+        return Err(DayPlanChangeError::InvalidWindow);
+    }
+    Ok(build_day_plan(now_ms, window, work_items, events))
+}
+
+fn build_day_plan(
+    now_ms: f64,
+    window: DayPlanWindow,
+    work_items: &[WorkItem],
+    events: &[CalendarEvent],
+) -> DayPlanProposal {
+    let workday_start = window.start_at_ms;
+    let workday_end = window.end_at_ms;
     let mut cursor = round_up(now_ms.max(workday_start), FIFTEEN_MINUTES_MS);
     let completed = work_items
         .iter()

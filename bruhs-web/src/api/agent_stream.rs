@@ -5,7 +5,7 @@
 //! across two network chunks is decoded whole. A failed read ends the turn
 //! as failed ([`StreamError`]), never as a success.
 
-use bruhs_models::api::{AgentRequest, AgentStreamMessage};
+use bruhs_models::api::{AgentRequest, AgentStreamEvent, AgentStreamMessage};
 use gloo_net::http::{Method, RequestBuilder};
 use wasm_bindgen::JsValue;
 
@@ -75,7 +75,7 @@ fn read_error(error: &JsValue) -> StreamError {
 }
 
 /// Run one turn. Each SSE `data:` payload is handed to `on_event` as it
-/// arrives; the call returns when the server closes the stream.
+/// arrives; EOF succeeds only after a terminal event or `[DONE]` marker.
 pub async fn send_agent_message_streaming(
     request: &AgentRequest,
     abort_signal: Option<&web_sys::AbortSignal>,
@@ -97,9 +97,14 @@ pub async fn send_agent_message_streaming(
         .get_reader()
         .dyn_into()
         .map_err(|_| StreamError::Decode("the reply body cannot be read as a stream".into()))?;
+    let _reader_lock = ReaderLock(&reader);
 
     let mut decoder = SseDecoder::default();
+    let mut saw_terminal = false;
     loop {
+        if abort_signal.is_some_and(web_sys::AbortSignal::aborted) {
+            return Err(StreamError::Stopped);
+        }
         let chunk = JsFuture::from(reader.read())
             .await
             .map_err(|error| read_error(&error))?;
@@ -123,23 +128,53 @@ pub async fn send_agent_message_streaming(
             }
         };
         for data in events {
-            dispatch(&data, &mut on_event);
+            if abort_signal.is_some_and(web_sys::AbortSignal::aborted) {
+                return Err(StreamError::Stopped);
+            }
+            saw_terminal |= dispatch(&data, &mut on_event);
         }
     }
     if decoder.has_partial_event() {
         log::warn!("agent stream: the server closed the stream inside an event; dropped it");
     }
+    if !saw_terminal {
+        return Err(StreamError::Decode(
+            "the server closed the stream before the turn finished".into(),
+        ));
+    }
     Ok(())
 }
 
-fn dispatch(data: &str, on_event: &mut impl FnMut(AgentStreamMessage)) {
+/// The function owns this reader's lock even when an awaited read fails.
+struct ReaderLock<'a>(&'a web_sys::ReadableStreamDefaultReader);
+
+impl Drop for ReaderLock<'_> {
+    fn drop(&mut self) {
+        self.0.release_lock();
+    }
+}
+
+fn dispatch(data: &str, on_event: &mut impl FnMut(AgentStreamMessage)) -> bool {
     if data == "[DONE]" {
-        return;
+        return true;
     }
     match serde_json::from_str::<serde_json::Value>(data) {
-        Ok(value) => on_event(AgentStreamMessage::from_value(value)),
+        Ok(value) => {
+            let message = AgentStreamMessage::from_value(value);
+            let terminal = matches!(
+                &message,
+                AgentStreamMessage::Event(
+                    AgentStreamEvent::Result { .. } | AgentStreamEvent::Error { .. }
+                )
+            );
+            on_event(message);
+            terminal
+        }
         // One unreadable frame should not end a turn that is still running.
-        Err(error) => log::warn!("agent stream: skipped a frame that is not JSON: {error}"),
+        Err(error) => {
+            log::warn!("agent stream: skipped a frame that is not JSON: {error}");
+            false
+        }
     }
 }
 
@@ -152,18 +187,27 @@ fn dispatch(data: &str, on_event: &mut impl FnMut(AgentStreamMessage)) {
 #[derive(Debug, Default)]
 pub(crate) struct SseDecoder {
     buffer: Vec<u8>,
+    /// Complete events before this offset need no further decoding.
+    consumed: usize,
     /// How far `buffer` has been searched for a boundary.
     scanned: usize,
 }
 
 impl SseDecoder {
     pub(crate) fn push(&mut self, bytes: &[u8]) -> Result<Vec<String>, StreamError> {
+        // Compact an unfinished tail once per chunk, not after every event.
+        if self.consumed != 0 {
+            self.buffer.drain(..self.consumed);
+            self.scanned -= self.consumed;
+            self.consumed = 0;
+        }
         self.buffer.extend_from_slice(bytes);
         let mut events = Vec::new();
         while let Some((end, next)) = self.boundary() {
-            let raw: Vec<u8> = self.buffer.drain(..next).take(end).collect();
-            self.scanned = 0;
-            let text = std::str::from_utf8(&raw)
+            let start = self.consumed;
+            self.consumed = next;
+            self.scanned = next;
+            let text = std::str::from_utf8(&self.buffer[start..end])
                 .map_err(|error| StreamError::Decode(format!("an event is not UTF-8: {error}")))?;
             if let Some(data) = event_data(text) {
                 events.push(data);
@@ -174,13 +218,15 @@ impl SseDecoder {
 
     /// Bytes of an event the stream has not finished.
     pub(crate) fn has_partial_event(&self) -> bool {
-        self.buffer.iter().any(|byte| !byte.is_ascii_whitespace())
+        self.buffer[self.consumed..]
+            .iter()
+            .any(|byte| !byte.is_ascii_whitespace())
     }
 
     /// `(end of the event, start of the next one)` for the first blank line.
     fn boundary(&mut self) -> Option<(usize, usize)> {
         // A boundary can straddle the previous search end by up to 3 bytes.
-        let from = self.scanned.saturating_sub(3);
+        let from = self.scanned.saturating_sub(3).max(self.consumed);
         let found = (from..self.buffer.len()).find_map(|i| {
             let rest = &self.buffer[i..];
             if rest.starts_with(b"\n\n") {
@@ -220,6 +266,41 @@ fn event_data(event: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn terminal_frames_are_recognized_without_dropping_typed_callbacks() {
+        let mut received = Vec::new();
+        for frame in [
+            r#"{"type":"result"}"#,
+            r#"{"envelope":"query","type":"error","message":"failed"}"#,
+        ] {
+            assert!(dispatch(frame, &mut |message| received.push(message)));
+        }
+        assert!(matches!(
+            received.as_slice(),
+            [
+                AgentStreamMessage::Event(AgentStreamEvent::Result { .. }),
+                AgentStreamMessage::Event(AgentStreamEvent::Error { .. })
+            ]
+        ));
+        assert!(dispatch("[DONE]", &mut |_| panic!(
+            "DONE is not a typed callback"
+        )));
+    }
+
+    #[test]
+    fn unknown_or_malformed_frames_cannot_finish_a_turn() {
+        for frame in [
+            r#"{"type":"text","text":"partial"}"#,
+            r#"{"type":"raw","data":{"type":"error"}}"#,
+            r#"{"type":"result","usage":42}"#,
+            r#"{"envelope":"future","type":"result"}"#,
+            r#"{"type":"future"}"#,
+            "not JSON",
+        ] {
+            assert!(!dispatch(frame, &mut |_| {}), "{frame}");
+        }
+    }
 
     fn decode_all(chunks: &[&[u8]]) -> Vec<String> {
         let mut decoder = SseDecoder::default();
@@ -300,5 +381,46 @@ mod tests {
             StreamError::from(ApiError::http(500, "")).to_string(),
             "Server returned status 500"
         );
+    }
+
+    #[test]
+    fn completed_events_preserve_a_partial_tail_across_pushes() {
+        let mut decoder = SseDecoder::default();
+        assert_eq!(
+            decoder.push(b"data: first\n\ndata: par").unwrap(),
+            vec!["first"]
+        );
+        assert!(decoder.has_partial_event());
+        assert_eq!(
+            decoder.push(b"tial\r\n\r\ndata: last\n\n").unwrap(),
+            vec!["partial", "last"]
+        );
+        assert!(!decoder.has_partial_event());
+        assert!(decoder.push(b": keepalive\n\n").unwrap().is_empty());
+        assert!(!decoder.has_partial_event());
+    }
+
+    #[test]
+    fn complete_batches_do_not_appear_as_unfinished_events() {
+        let mut decoder = SseDecoder::default();
+        assert_eq!(
+            decoder.push(b"data: a\n\ndata: b\n\n").unwrap(),
+            vec!["a", "b"]
+        );
+        assert!(!decoder.has_partial_event());
+        assert!(decoder.push(b" \r\n\t").unwrap().is_empty());
+        assert!(!decoder.has_partial_event());
+    }
+
+    #[test]
+    fn a_decode_error_keeps_the_same_remaining_event_state() {
+        let mut decoder = SseDecoder::default();
+        assert!(matches!(
+            decoder.push(b"data: first\n\ndata:\xff\n\ndata: recovery\n\n"),
+            Err(StreamError::Decode(_))
+        ));
+        assert!(decoder.has_partial_event());
+        assert_eq!(decoder.push(b"").unwrap(), vec!["recovery"]);
+        assert!(!decoder.has_partial_event());
     }
 }

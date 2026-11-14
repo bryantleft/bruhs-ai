@@ -9,6 +9,8 @@ use serde::Serialize;
 
 use super::BASE_URL;
 
+mod error_body;
+
 /// Longest server error message shown to the user; anything longer is
 /// treated as an unreadable body rather than a message.
 const MAX_DETAIL_LEN: usize = 512;
@@ -124,7 +126,7 @@ pub async fn send_request(request: gloo_net::http::Request) -> Result<Response, 
     let status = response.status();
     // The body only refines the message; the status alone is the error when
     // the body cannot be read.
-    let body = response.text().await.unwrap_or_default();
+    let body = error_body::read(&response).await.unwrap_or_default();
     Err(ApiError::http(status, &body))
 }
 
