@@ -2521,7 +2521,7 @@ impl Workspace {
                                         .font_family(LABEL_FONT)
                                         .text_size(px(LABEL_SM_PX))
                                         .text_color(theme::rambutan_300())
-                                        .child("UNTRACKED"),
+                                        .child("NOT TRACKED"),
                                 )
                             }),
                     )
@@ -2636,9 +2636,19 @@ impl Workspace {
             card = card.child(self.render_merge_panel(&id, all, cx));
         }
         if expanded {
+            if !tracked {
+                card = card.child(
+                    label(
+                        "Observation tracking is off. Summaries add no observations about this person, and agents cannot read the saved ones.",
+                        LABEL_SM_PX,
+                        theme::rambutan_400(),
+                    )
+                    .debug_selector(|| "desktop-person-opt-out".into()),
+                );
+            }
             card = card
                 .child(self.render_relationship_panel(&id, cx))
-                .child(self.render_observations_by_kind(&profile.observations));
+                .child(self.render_observations_by_kind(index, &profile.observations, cx));
         }
         card.into_any_element()
     }
@@ -2716,9 +2726,10 @@ impl Workspace {
         .filter(|suggestion| suggestion.person_id == person_id)
         .map(|suggestion| {
             div()
-                .text_size(px(11.0))
-                .text_color(theme::persimmon_300())
-                .child(format!("→ {}", suggestion.reason))
+                .font_family(LABEL_FONT)
+                .text_size(px(LABEL_SM_PX))
+                .text_color(theme::blueberry_200())
+                .child(suggestion.reason)
                 .into_any_element()
         })
         .collect::<Vec<_>>();
@@ -2933,7 +2944,20 @@ impl Workspace {
     }
 
     /// Web `ObservationsByKind`.
-    fn render_observations_by_kind(&self, observations: &[PersonObservation]) -> AnyElement {
+    fn render_observations_by_kind(
+        &self,
+        card: usize,
+        observations: &[PersonObservation],
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let hub = self.meetings_hub.read(cx);
+        let title = |meeting_id: &str| {
+            hub.meetings
+                .iter()
+                .find(|meeting| meeting.id == meeting_id)
+                .map(|meeting| meeting.title.clone())
+        };
+        let mut row = 0usize;
         let mut by_kind: BTreeMap<&'static str, Vec<PersonObservation>> = BTreeMap::new();
         for obs in observations {
             by_kind
@@ -2960,7 +2984,43 @@ impl Workspace {
                         theme::rambutan_500(),
                     ))
                     .children(items.into_iter().map(|o| {
-                        label(o.text, LABEL_PX, theme::rambutan_300()).line_height(relative(1.375))
+                        row += 1;
+                        // Provenance: open the meeting this observation came from.
+                        let source = match title(&o.at_meeting_id) {
+                            Some(title) => {
+                                let meeting_id = o.at_meeting_id.clone();
+                                text_button(
+                                    ("desktop-observation-source", card * 10_000 + row),
+                                    format!("From {title}"),
+                                    theme::blueberry_200(),
+                                    theme::rambutan_100(),
+                                )
+                                .aria_label(format!("Open source meeting {title}"))
+                                .debug_selector(move || {
+                                    format!("desktop-observation-source-{card}-{row}")
+                                })
+                                .on_click(cx.listener(move |this, _event, _window, cx| {
+                                    this.open_meeting_detail(meeting_id.clone(), cx)
+                                }))
+                                .into_any_element()
+                            }
+                            None => label(
+                                "Source meeting is not stored",
+                                LABEL_SM_PX,
+                                theme::rambutan_500(),
+                            )
+                            .into_any_element(),
+                        };
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_baseline()
+                            .gap_2()
+                            .child(
+                                label(o.text, LABEL_PX, theme::rambutan_300())
+                                    .line_height(relative(1.375)),
+                            )
+                            .child(source)
                     }))
             }))
             .into_any_element()
@@ -3063,12 +3123,9 @@ impl Workspace {
             EnrollState::Uploading => {
                 label("Uploading…", LABEL_PX, theme::rambutan_400()).into_any_element()
             }
-            EnrollState::Success => body(
-                "✓ Voice enrolled successfully",
-                BODY_SM_PX,
-                theme::pandan_400(),
-            )
-            .into_any_element(),
+            EnrollState::Success => {
+                body("Voice enrolled", BODY_SM_PX, theme::pandan_400()).into_any_element()
+            }
             EnrollState::Error(message) => label(message.clone(), LABEL_PX, theme::lychee_400())
                 .text_center()
                 .into_any_element(),

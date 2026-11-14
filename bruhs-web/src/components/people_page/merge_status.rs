@@ -21,7 +21,7 @@ pub fn ContactMergeStatus() -> impl IntoView {
                             Phase::Confirmed { .. } => "Server confirmed; local merge still pending",
                             Phase::Completed { .. } => "Contact merge saved locally",
                         };
-                        format!("{status}: {} → {}.", record.source.display_name, record.target.display_name)
+                        format!("{status}: {} into {}.", record.source.display_name, record.target.display_name)
                     }).unwrap_or_default()
                 })}</p>
                 {move || executor.merge_error.get().map(|message| view! { <p role="alert" class="text-body-sm text-lychee-300">{message}</p> })}

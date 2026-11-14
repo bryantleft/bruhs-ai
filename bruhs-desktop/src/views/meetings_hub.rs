@@ -1216,7 +1216,11 @@ impl MeetingsHub {
                         }
                         hub.people_changed(cx);
                     }
-                    Err(e) => hub.notify_notice(format!("rename_person failed: {e}"), true, cx),
+                    Err(e) => hub.notify_notice(
+                        format!("The profile was not renamed. Try again. Details: {e}"),
+                        true,
+                        cx,
+                    ),
                 }
                 cx.notify();
             },
@@ -1236,13 +1240,19 @@ impl MeetingsHub {
                 match result {
                     Ok(updated) => {
                         if let Some(p) = hub.people.iter_mut().find(|p| p.id == updated.id) {
-                            Arc::make_mut(p).tracked = updated.tracked;
+                            // Keep the server's version with the flag, or the
+                            // cache treats the opt-out record as stale.
+                            let p = Arc::make_mut(p);
+                            p.tracked = updated.tracked;
+                            p.updated_at = updated.updated_at;
                         }
                         hub.people_changed(cx);
                     }
-                    Err(e) => {
-                        hub.notify_notice(format!("set_person_tracked failed: {e}"), true, cx)
-                    }
+                    Err(e) => hub.notify_notice(
+                        format!("Observation tracking was not changed. Try again. Details: {e}"),
+                        true,
+                        cx,
+                    ),
                 }
                 cx.notify();
             },

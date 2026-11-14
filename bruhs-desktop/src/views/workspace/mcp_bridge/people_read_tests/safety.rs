@@ -293,3 +293,59 @@ async fn opted_out_person_observations_never_reach_agent_reads(cx: &mut TestAppC
     assert!(tracked.get("observations_withheld").is_none());
     workspace.update_in(cx, |w, _, _| w.mcp_bridge = WorkspaceBridge::default());
 }
+
+/// The People card explains an opt-out and links each observation to the
+/// meeting it came from; a missing source stays explicit.
+#[gpui::test]
+async fn opted_out_card_explains_and_observation_opens_its_source_meeting(cx: &mut TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    workspace.update_in(cx, |w, _, cx| {
+        let mut meeting = bruhs_models::Meeting::new("Synthetic planning sync", 1.0);
+        meeting.id = "source-meeting".into();
+        let mut person = PersonProfile::new("Opted Out");
+        person.id = "opted-out".into();
+        person.tracked = false;
+        person.observations = vec![
+            PersonObservation {
+                at_meeting_id: "source-meeting".into(),
+                kind: ObservationKind::Decision,
+                text: "Synthetic decision".into(),
+                created_at: 9,
+            },
+            PersonObservation {
+                at_meeting_id: "deleted-meeting".into(),
+                kind: ObservationKind::Decision,
+                text: "Synthetic orphan".into(),
+                created_at: 9,
+            },
+        ];
+        w.meetings_hub.update(cx, |hub, _| {
+            hub.meetings = vec![meeting];
+            hub.people = vec![person.into()];
+        });
+        w.expanded_person_id = Some("opted-out".into());
+        w.active_view = super::super::super::AppView::People;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-person-opt-out").is_some());
+    let orphan = cx.debug_bounds("desktop-observation-source-0-2");
+    assert!(
+        orphan.is_none(),
+        "a missing meeting renders as text, not a link"
+    );
+    let bounds = cx
+        .debug_bounds("desktop-observation-source-0-1")
+        .expect("source meeting link");
+    cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    workspace.update_in(cx, |w, _, _| {
+        assert_eq!(
+            w.active_view,
+            super::super::super::AppView::MeetingDetail {
+                meeting_id: "source-meeting".into()
+            }
+        );
+        w.mcp_bridge = WorkspaceBridge::default();
+    });
+}
