@@ -177,10 +177,10 @@ fn scope_storage_key(project: &str, scope: &DiffScope) -> String {
 }
 
 /// Hunk line texts in the order `Cmd+F` searches and `data-diff-line` stamps.
-fn hunk_line_texts(file: &PanelFile) -> Vec<String> {
+fn hunk_line_texts(file: &PanelFile) -> Vec<&str> {
     file.hunks
         .iter()
-        .flat_map(|hunk| hunk.lines.iter().map(|line| line.text.clone()))
+        .flat_map(|hunk| hunk.lines.iter().map(|line| line.text.as_str()))
         .collect()
 }
 
@@ -376,32 +376,29 @@ pub fn DiffPanel() -> impl IntoView {
     });
 
     let find_hits = Memo::new(move |_| {
+        if !find_cmds.diff_open.get() {
+            return Vec::new();
+        }
         let query = find_query.get();
+        if query.is_empty() {
+            return Vec::new();
+        }
         let filter = review_filter.get();
-        let files = state.with(|current| match current {
-            TreeState::Ready { files, .. } => files
+        state.with(|current| {
+            let TreeState::Ready { files, .. } = current else {
+                return Vec::new();
+            };
+            let borrowed: Vec<(&str, Vec<&str>)> = files
                 .iter()
                 .filter(|file| filter.includes(classify_path(&file.path)))
-                .cloned()
-                .collect(),
-            _ => Vec::new(),
-        });
-        let lines: Vec<Vec<String>> = files.iter().map(hunk_line_texts).collect();
-        let borrowed: Vec<(&str, Vec<&str>)> = files
-            .iter()
-            .zip(&lines)
-            .map(|(file, texts)| {
-                (
-                    file.path.as_str(),
-                    texts.iter().map(String::as_str).collect(),
-                )
-            })
-            .collect();
-        let pairs: Vec<(&str, &[&str])> = borrowed
-            .iter()
-            .map(|(path, texts)| (*path, texts.as_slice()))
-            .collect();
-        search_diff(&query, &pairs)
+                .map(|file| (file.path.as_str(), hunk_line_texts(file)))
+                .collect();
+            let pairs: Vec<(&str, &[&str])> = borrowed
+                .iter()
+                .map(|(path, texts)| (*path, texts.as_slice()))
+                .collect();
+            search_diff(&query, &pairs)
+        })
     });
     let find_count = Signal::derive(move || find_hits.with(|hits| hits.len()));
     let find_focus = Signal::derive(move || find_cmds.diff.get());
@@ -457,7 +454,11 @@ pub fn DiffPanel() -> impl IntoView {
     let icon_btn = move |active: bool| {
         format!(
             "inline-flex size-7 items-center justify-center rounded-grape transition-colors hover:bg-longan-800/60 hover:text-rambutan-100 {}",
-            if active { "bg-longan-800/60 text-rambutan-100" } else { "text-rambutan-400" }
+            if active {
+                "bg-longan-800/60 text-rambutan-100"
+            } else {
+                "text-rambutan-400"
+            }
         )
     };
 

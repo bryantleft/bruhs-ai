@@ -165,3 +165,54 @@ fn streaming_tick_cost() {
         before / after
     );
 }
+
+#[test]
+#[ignore = "diagnostic release timings depend on machine load"]
+fn timeline_row_lookup_cost() {
+    use crate::components::timeline_view::row_directory::RowDirectory;
+    use leptos::prelude::*;
+    use std::hint::black_box;
+    for count in [100, 1_000, 5_000] {
+        let mut message = AgentMessage::assistant_placeholder("m".into(), 1.0);
+        message.parts = (0..count)
+            .map(|index| MessagePart::Text(format!("Part {index}: {}", "saved prose ".repeat(32))))
+            .collect();
+        let turn = RowBuilder::new(None, Some(&message.id)).turn(&message);
+        let keys = turn
+            .rows
+            .iter()
+            .map(|row| row.key().to_string())
+            .collect::<Vec<_>>();
+        let mut samples = (0..31)
+            .map(|_| {
+                let start = Instant::now();
+                for key in black_box(&keys) {
+                    black_box(turn.rows.iter().find(|row| row.key() == key).cloned());
+                }
+                start.elapsed()
+            })
+            .collect::<Vec<_>>();
+        samples.sort_unstable();
+        let before = (samples[15], samples[29]);
+        let owner = Owner::new();
+        let after = owner.with(|| {
+            let source = ArcRwSignal::new(turn.rows.clone());
+            let directory = RowDirectory::new(Memo::new(move |_| source.get()));
+            untrack(|| directory.lookup(&keys[0]));
+            let mut samples = (0..31)
+                .map(|_| {
+                    let start = Instant::now();
+                    untrack(|| {
+                        for key in black_box(&keys) {
+                            black_box(directory.lookup(key));
+                        }
+                    });
+                    start.elapsed()
+                })
+                .collect::<Vec<_>>();
+            samples.sort_unstable();
+            (samples[15], samples[29])
+        });
+        println!("timeline / {count} parts: scan lookup + clone p50 {:.3} ms, p95 {:.3} ms; indexed lookup + clone p50 {:.3} ms, p95 {:.3} ms", before.0.as_secs_f64() * 1_000.0, before.1.as_secs_f64() * 1_000.0, after.0.as_secs_f64() * 1_000.0, after.1.as_secs_f64() * 1_000.0);
+    }
+}

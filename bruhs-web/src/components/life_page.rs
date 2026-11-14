@@ -180,7 +180,7 @@ impl Page {
         self.finance(
             entry,
             &[i.merchant, i.spend_amount, i.spend_category],
-            |f, t| f.transactions.insert(0, t),
+            |f, t| f.transactions.insert(0, t.into()),
         );
     }
 
@@ -227,7 +227,10 @@ impl Page {
             return;
         }
         self.life.update(|context| {
-            context.finance.transactions.splice(0..0, imported);
+            context
+                .finance
+                .transactions
+                .splice(0..0, imported.into_iter().map(Into::into));
             context.finance.updated_at_ms = now;
         });
         self.inputs.csv.set(String::new());
@@ -612,8 +615,8 @@ fn transactions(page: Page) -> impl IntoView {
                 view! {
                     <div class=ROW>
                         <div class="min-w-0 [overflow-wrap:anywhere]">
-                            <p class="text-body-sm text-rambutan-300">{transaction.merchant}</p>
-                            <p class="text-label-sm text-rambutan-400">{transaction.category}</p>
+                            <p class="text-body-sm text-rambutan-300">{transaction.merchant.clone()}</p>
+                            <p class="text-label-sm text-rambutan-400">{transaction.category.clone()}</p>
                         </div>
                         <div class="flex min-w-0 max-w-full flex-wrap items-center gap-2">
                             <span class=ROW_AMOUNT>{money(transaction.amount_minor, &transaction.currency)}</span>

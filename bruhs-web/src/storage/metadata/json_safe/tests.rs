@@ -6,7 +6,7 @@ fn normal_metadata_and_exact_money_strings_use_the_batch_path() {
     let mut life = LifeContext::default();
     life.finance
         .transactions
-        .push(FinanceTransaction::manual("Exact", "Manual", i64::MIN, 42));
+        .push(FinanceTransaction::manual("Exact", "Manual", i64::MIN, 42).into());
     assert!(life.serialize(JsonSafe).is_ok());
     assert!(AutomationState::default().serialize(JsonSafe).is_ok());
     assert!(WorkflowOperation::AddFinanceTransaction {

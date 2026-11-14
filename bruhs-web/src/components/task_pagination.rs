@@ -16,11 +16,11 @@ pub fn TaskPagination(
         <Show when=move || { total.get() > page_size }>
             <nav aria-label=label.clone() class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-longan-800/40 px-3 py-2 text-label-sm text-rambutan-400">
                 <button type="button" disabled=move || start.get() == 0
-                    class="rounded-grape px-2 py-2 hover:bg-longan-800/50 disabled:opacity-40 cursor-pointer"
+                    class="bruhs-control min-h-[32px] rounded-grape px-2 py-2 hover:bg-longan-800/50 disabled:opacity-40 cursor-pointer"
                     on:click=move |_| page.set((start.get_untracked() / page_size).saturating_sub(1))>"Previous"</button>
                 <span role="status" aria-live="polite">{move || format!("{} to {} of {}", start.get() + 1, (start.get() + page_size).min(total.get()), total.get())}</span>
                 <button type="button" disabled=move || { start.get() + page_size >= total.get() }
-                    class="rounded-grape px-2 py-2 hover:bg-longan-800/50 disabled:opacity-40 cursor-pointer"
+                    class="bruhs-control min-h-[32px] rounded-grape px-2 py-2 hover:bg-longan-800/50 disabled:opacity-40 cursor-pointer"
                     on:click=move |_| page.set(start.get_untracked() / page_size + 1)>"Next"</button>
             </nav>
         </Show>

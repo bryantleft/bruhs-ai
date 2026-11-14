@@ -195,7 +195,7 @@ pub fn TodayPage() -> impl IntoView {
             &work_items.read(),
             &events.read(),
             &meetings.read(),
-            &people.read(),
+            people.read().iter(),
         )
     });
 
