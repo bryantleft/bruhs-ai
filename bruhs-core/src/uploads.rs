@@ -1,6 +1,7 @@
 //! Files the user attached, and files the viewer opens from a path.
 //!
-//! Uploads land under the temp directory's `bruhs-attachments` folder. A
+//! Uploads live in the private app data directory. Legacy temp uploads
+//! remain readable so old conversations can be captured durably. A
 //! turn may only point the agent at files written there. Opening a path is
 //! read-only and may leave the project: the viewer follows the file the
 //! agent named.
@@ -15,6 +16,22 @@ use bruhs_models::logic::attachments::{
 };
 
 const ATTACHMENT_DIR: &str = "bruhs-attachments";
+
+/// The shared output location for media in chats without a project. Merely
+/// naming it does no I/O; the agent creates the directory before writing.
+pub fn media_output_directory() -> std::io::Result<PathBuf> {
+    if let Some(path) = std::env::var_os("BRUHS_ATTACHMENTS_DIR") {
+        if path.is_empty() {
+            return Err(std::io::Error::other(
+                "BRUHS_ATTACHMENTS_DIR must not be empty.",
+            ));
+        }
+        return Ok(path.into());
+    }
+    directories::ProjectDirs::from("dev", "bruhs", "bruhs-ai")
+        .map(|dirs| dirs.data_local_dir().join("attachments"))
+        .ok_or_else(|| std::io::Error::other("The private app data directory is unavailable."))
+}
 
 /// Why a preview path could not be opened.
 #[derive(Debug, PartialEq, Eq)]
@@ -98,13 +115,17 @@ pub fn write_upload(name: &str, bytes: &[u8]) -> Result<UploadedFile, &'static s
 
 /// `true` when `path` is a regular file inside the attachment directory.
 pub fn is_upload_path(path: &str) -> bool {
-    let Some(root) = attachment_root() else {
-        return false;
-    };
     let Ok(canonical) = std::fs::canonicalize(path) else {
         return false;
     };
-    canonical.starts_with(&root) && canonical.is_file()
+    if !canonical.is_file() {
+        return false;
+    }
+    attachment_root().is_some_and(|root| canonical.starts_with(root))
+        || std::env::temp_dir()
+            .join(ATTACHMENT_DIR)
+            .canonicalize()
+            .is_ok_and(|root| canonical.starts_with(root))
 }
 
 /// Every path must be an upload this app wrote.
@@ -196,7 +217,7 @@ fn read_text_preview(path: &Path) -> Result<(String, bool), OpenError> {
 }
 
 fn attachment_root() -> Option<PathBuf> {
-    let dir = std::env::temp_dir().join(ATTACHMENT_DIR);
+    let dir = media_output_directory().ok()?;
     std::fs::create_dir_all(&dir).ok()?;
     dir.canonicalize().ok()
 }
@@ -217,10 +238,7 @@ mod tests {
         let uploaded = write_upload("../secret.png", b"png").unwrap();
         assert_eq!(uploaded.name, "secret.png");
         let path = Path::new(&uploaded.path);
-        let root = std::env::temp_dir()
-            .join(ATTACHMENT_DIR)
-            .canonicalize()
-            .unwrap();
+        let root = media_output_directory().unwrap().canonicalize().unwrap();
         assert!(path.starts_with(&root));
         assert!(is_upload_path(&uploaded.path));
         assert!(require_uploaded(std::slice::from_ref(&uploaded)).is_ok());

@@ -44,7 +44,7 @@ use crate::state::{
     PermissionModeSignal, PreviousWorktreeSignal, PromptQueueSignal, QueueHolds, RightPanelSignal,
     RunChoiceSignal, ThreadNotice, Turns, UnreadThreads,
 };
-use crate::stream::{apply_message, StreamEffect, UnknownEvents};
+use crate::stream::{apply_message, StreamEffect, StreamContext};
 use crate::ui::Icon;
 use bruhs_models::logic::attachments::{
     append_uploaded_files, upload_label, viewer_target, UploadedFile, SEND_WAITS,
@@ -971,7 +971,7 @@ pub fn ChatPage() -> impl IntoView {
             // told so, not handed a cut-off answer.
             let mut stopped = false;
             // One per turn, so a new event kind is logged once, not per token.
-            let unknown = Rc::new(RefCell::new(UnknownEvents::default()));
+            let unknown = Rc::new(RefCell::new(StreamContext::default()));
             let mut project_path = project_path;
             let mut blocked: Option<String> = None;
             let mut snapshot_path: Option<String> = None;

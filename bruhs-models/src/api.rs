@@ -571,6 +571,10 @@ pub enum AgentStreamEvent {
         #[serde(default)]
         mcp_servers: Vec<McpServerInfo>,
     },
+    /// Immutable media captured before this reply completes.
+    ResponseMedia {
+        bindings: std::collections::BTreeMap<String, String>,
+    },
     /// A chunk of assistant prose.
     Text {
         #[serde(default)]

@@ -695,6 +695,7 @@ impl AgentOrchestrator {
             restrict_unattended(&mut query_options);
         }
 
+        let artifact_project = project_path.clone();
         let (tx, rx) = mpsc::channel::<OrchestratorEvent>(256);
         let secrets = self
             .secrets
@@ -710,6 +711,8 @@ impl AgentOrchestrator {
             || permission_mode == PermissionMode::Plan
             || (provider != AgentProvider::Claude && permission_mode == PermissionMode::Default);
         let turn = TurnContext {
+            media_project: artifact_project.clone(),
+            response_text: Mutex::new(String::new()),
             _guard: producer_guard,
             tx,
             registry: Arc::clone(&self.registry),
@@ -776,6 +779,16 @@ impl AgentOrchestrator {
                 }
             };
             if !unattended && app_tools {
+                if let Err(error) =
+                    crate::artifact_tools::configure(&mut query_options, &artifact_project)
+                {
+                    turn.send_start_error(format!(
+                        "Could not configure local artifact tools: {error}"
+                    ))
+                    .await;
+                    return;
+                }
+
                 if let Err(error) = crate::reactive_tools::configure(
                     &mut query_options,
                     permission_mode == PermissionMode::Plan,
@@ -816,6 +829,8 @@ impl AgentOrchestrator {
 
 /// What a producer task needs to forward one turn's events.
 struct TurnContext {
+    media_project: String,
+    response_text: Mutex<String>,
     /// Declared first so it drops before `tx`: by the time the caller's
     /// stream reports its end, the thread is already idle.
     _guard: TurnGuard,
@@ -1134,7 +1149,11 @@ fn build_query_options(
             // Appended, not `--system-prompt`: replacing Claude Code's prompt
             // saves ~3.8k tokens but drops its tool-use guidance. The snapshot
             // keeps the appended text cached across resumed turns.
-            options.append_system_prompt = system_prompt.map(String::from);
+            let response_format = response_instructions();
+            options.append_system_prompt = Some(match system_prompt {
+                Some(context) => format!("{context}\n\n{response_format}"),
+                None => response_format,
+            });
             ProviderQueryOptions::Claude(options)
         }
         AgentProvider::Codex => {
@@ -1149,6 +1168,12 @@ fn build_query_options(
                 }
                 None => prompt.to_string(),
             };
+            // Resumed sessions may predate rich replies. Supply the small
+            // format contract without replacing the user's CLI instructions.
+            let prompt = format!(
+                "<response_format>\n{}\n</response_format>\n\n{prompt}",
+                response_instructions()
+            );
             let mut options = codex_sdk_rs::QueryOptions::new(prompt)
                 .cwd(project_path)
                 .model(runtime_model)
@@ -1170,7 +1195,7 @@ fn build_query_options(
         | AgentProvider::Antigravity
         | AgentProvider::Grok
         | AgentProvider::OpenCode => {
-            let options = external::Options::new(
+            let mut options = external::Options::new(
                 provider,
                 prompt,
                 project_path,
@@ -1179,9 +1204,26 @@ fn build_query_options(
                 system_prompt,
                 session_id,
             );
+            options.append_instructions(&response_instructions());
             ProviderQueryOptions::External(options)
         }
     }
+}
+
+fn response_instructions() -> String {
+    let output = match crate::uploads::media_output_directory() {
+        Ok(path) => format!(
+            "For project-less chats, create {} if needed and save response media there; use its absolute path in the reply.",
+            path.display()
+        ),
+        Err(error) => format!(
+            "The media output directory is unavailable: {error}. Use a project directory or explain the failure."
+        ),
+    };
+    format!(
+        "{}\n{output}\nInteractive widgets can await window.bruhs.ready, use bruhs.getState()/setState(value) for custom state, and bruhs.submit({{label,message}}) to propose a chat draft for user review. Form values save automatically except password/file fields; use stable id/name attributes. Media JSON also accepts poster, tracks:[{{src,label,language,kind:\"subtitles\"}}], and transcript text. Publish an HTML file with the publish_artifact tool for durable bundled assets and inspect_artifact for actual client preview diagnostics.",
+        bruhs_models::logic::rich_response::RESPONSE_INSTRUCTIONS
+    )
 }
 
 /// Opt-in that lets Claude runs keep an inherited `ANTHROPIC_API_KEY`.
@@ -1435,7 +1477,61 @@ impl TurnContext {
 
     /// Send `event` (and any background task it starts) to the caller.
     /// False when the caller has dropped the stream.
-    async fn forward(&self, event: QueryEvent) -> bool {
+    async fn forward(&self, mut event: QueryEvent) -> bool {
+        match &event {
+            QueryEvent::Text(text) => self
+                .response_text
+                .lock()
+                .unwrap_or_else(PoisonError::into_inner)
+                .push_str(text),
+            QueryEvent::Result { .. } | QueryEvent::Error(_) => {
+                let mut text = std::mem::take(
+                    &mut *self
+                        .response_text
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner),
+                );
+                if text.is_empty() {
+                    if let QueryEvent::Result { result, .. } = &event {
+                        text.clone_from(result)
+                    }
+                }
+                if !text.is_empty() {
+                    let project = self.media_project.clone();
+                    // Capture valid local media before publishing completion,
+                    // including replies in background or unopened threads.
+                    let result = tokio::task::spawn_blocking(move || {
+                        crate::rich_responses::capture_turn_media(&text, &project)
+                    })
+                    .await;
+                    match result {
+                        Ok((bindings, errors)) => {
+                            if let QueryEvent::Result { result, .. } = &mut event {
+                                *result =
+                                    bruhs_models::logic::rich_response::rewrite_response_media(
+                                        result, &bindings,
+                                    );
+                            }
+                            if !bindings.is_empty() && self.tx.send(OrchestratorEvent::Query(QueryEvent::Raw(serde_json::json!({"type":"response_media","bindings":bindings})))).await.is_err(){return false}
+                            for error in errors {
+                                tracing::warn!(%error,"could not retain response media")
+                            }
+                        }
+                        Err(error) => {
+                            tracing::warn!(%error,"response media capture worker stopped")
+                        }
+                    }
+                }
+            }
+            QueryEvent::ToolCall { .. } | QueryEvent::ToolResult { .. } => {
+                self.response_text
+                    .lock()
+                    .unwrap_or_else(PoisonError::into_inner)
+                    .push_str("\n\n");
+            }
+            _ => {}
+        }
+
         if let Some(task) =
             maybe_register_background_task(&self.registry, &self.owner.thread_id, &event)
         {
@@ -1747,7 +1843,9 @@ mod tests {
             Some("meeting notes"),
             None,
         ));
-        assert_eq!(o.append_system_prompt.as_deref(), Some("meeting notes"));
+        let context = o.append_system_prompt.as_deref().unwrap();
+        assert!(context.starts_with("meeting notes\n\n"));
+        assert!(context.contains(bruhs_models::logic::rich_response::RESPONSE_INSTRUCTIONS));
         assert_eq!(o.system_prompt, None);
     }
 
@@ -1767,12 +1865,17 @@ mod tests {
             ))
         };
         let new = build(None);
-        assert_eq!(
-            new.prompt,
-            "<thread_context>\nmeeting notes\n</thread_context>\n\nhi"
-        );
+        assert!(new
+            .prompt
+            .ends_with("<thread_context>\nmeeting notes\n</thread_context>\n\nhi"));
+        assert!(new
+            .prompt
+            .contains(bruhs_models::logic::rich_response::RESPONSE_INSTRUCTIONS));
         assert!(new.config.is_empty(), "no developer_instructions override");
-        assert_eq!(build(Some("thr-1")).prompt, "hi", "already in the session");
+        let resumed = build(Some("thr-1")).prompt;
+        assert!(!resumed.contains("meeting notes"), "already in the session");
+        assert!(resumed.contains(bruhs_models::logic::rich_response::RESPONSE_INSTRUCTIONS));
+        assert!(resumed.ends_with("\n\nhi"));
     }
 
     /// Measured on CLI 2.1.319: a turn with two requests whose `result.usage`
@@ -2293,6 +2396,8 @@ mod tests {
     ) -> (TurnContext, mpsc::Receiver<OrchestratorEvent>) {
         let (tx, rx) = mpsc::channel(16);
         let context = TurnContext {
+            media_project: "/tmp".into(),
+            response_text: Mutex::new(String::new()),
             _guard: TurnGuard {
                 sessions: Arc::clone(sessions),
                 thread_id: thread.clone(),

@@ -7,7 +7,7 @@
 //! permission request without an id is not surfaced (it could not be
 //! answered).
 
-use std::collections::HashSet;
+use std::collections::{BTreeMap, HashSet};
 
 use bruhs_models::api::{AgentStreamEvent, AgentStreamMessage};
 use serde_json::Value;
@@ -60,10 +60,19 @@ pub fn apply_message(
     msg: &mut AgentMessage,
     message: &AgentStreamMessage,
     now_ms: f64,
-    unknown: &mut UnknownEvents,
+    unknown: &mut StreamContext,
 ) -> StreamEffect {
     match message {
-        AgentStreamMessage::Event(event) => apply_event(msg, event, now_ms),
+        AgentStreamMessage::Event(event) => {
+            if let AgentStreamEvent::ResponseMedia { bindings } = event {
+                unknown.media_bindings.extend(bindings.clone());
+            }
+            let effect = apply_event(msg, event, now_ms);
+            if matches!(event, AgentStreamEvent::Result { .. }) {
+                rewrite_media(msg, &unknown.media_bindings);
+            }
+            effect
+        }
         AgentStreamMessage::BackgroundTaskRegistered(_) => StreamEffect::None,
         AgentStreamMessage::Unknown(value) => {
             if let Some(kind) = unknown.first_sighting(value) {
@@ -87,6 +96,10 @@ pub fn apply_event(msg: &mut AgentMessage, event: &AgentStreamEvent, now_ms: f64
                 Some(MessagePart::Text(t)) => t.push_str(text),
                 _ => msg.parts.push(MessagePart::Text(text.clone())),
             }
+            StreamEffect::None
+        }
+        AgentStreamEvent::ResponseMedia { bindings } => {
+            rewrite_media(msg, bindings);
             StreamEffect::None
         }
         AgentStreamEvent::Thinking { thinking } => {
@@ -156,6 +169,13 @@ pub fn apply_event(msg: &mut AgentMessage, event: &AgentStreamEvent, now_ms: f64
                 } else {
                     result.clone()
                 });
+            } else if !result.trim().is_empty()
+                && !msg
+                    .parts
+                    .iter()
+                    .any(|part| matches!(part,MessagePart::Text(text) if !text.trim().is_empty()))
+            {
+                msg.parts.push(MessagePart::Text(result.clone()));
             }
             StreamEffect::Finished {
                 is_error: *is_error,
@@ -199,15 +219,29 @@ pub fn apply_event(msg: &mut AgentMessage, event: &AgentStreamEvent, now_ms: f64
 /// The unreadable event kinds a turn has already logged, so a provider that
 /// streams a new event type does not flood the console.
 #[derive(Debug, Default)]
-pub struct UnknownEvents(HashSet<String>);
+pub struct StreamContext {
+    unknown: HashSet<String>,
+    media_bindings: BTreeMap<String, String>,
+}
 
-impl UnknownEvents {
+fn rewrite_media(message: &mut AgentMessage, bindings: &BTreeMap<String, String>) {
+    if bindings.is_empty() {
+        return;
+    }
+    for part in &mut message.parts {
+        if let MessagePart::Text(text) = part {
+            *text = bruhs_models::logic::rich_response::rewrite_response_media(text, bindings);
+        }
+    }
+}
+
+impl StreamContext {
     /// The payload's kind (`envelope`/`type`) the first time it is seen;
     /// `None` after that.
     pub fn first_sighting(&mut self, value: &Value) -> Option<String> {
         let field = |key: &str| value.get(key).and_then(Value::as_str).unwrap_or("-");
         let kind = format!("envelope {}, type {}", field("envelope"), field("type"));
-        self.0.insert(kind.clone()).then_some(kind)
+        self.unknown.insert(kind.clone()).then_some(kind)
     }
 }
 
@@ -216,6 +250,39 @@ mod tests {
     use super::*;
     use crate::state::{AgentMessage, MessagePart};
     use serde_json::json;
+
+    #[test]
+    fn immutable_media_bindings_update_saved_text_and_result_only_replies() {
+        let binding = AgentStreamMessage::from_value(
+            json!({"type":"response_media","bindings":{"output/plot.png":"/immutable/first.png"}}),
+        );
+        let mut streamed = msg();
+        let mut context = StreamContext::default();
+        apply_message(
+            &mut streamed,
+            &AgentStreamMessage::from_value(
+                json!({"type":"text","text":"![plot](output/plot.png)"}),
+            ),
+            0.0,
+            &mut context,
+        );
+        apply_message(&mut streamed, &binding, 1.0, &mut context);
+        assert!(streamed.text().contains("/immutable/first.png"));
+        assert!(!streamed.text().contains("output/plot.png"));
+        let mut fallback = msg();
+        let mut context = StreamContext::default();
+        apply_message(&mut fallback, &binding, 0.0, &mut context);
+        apply_message(
+            &mut fallback,
+            &AgentStreamMessage::from_value(
+                json!({"type":"result","result":"![plot](output/plot.png)"}),
+            ),
+            1.0,
+            &mut context,
+        );
+        assert!(fallback.text().contains("/immutable/first.png"));
+        assert_eq!(fallback.parts.len(), 1);
+    }
 
     #[test]
     fn private_request_events_never_become_saved_message_parts() {
@@ -258,7 +325,7 @@ mod tests {
     /// Apply a wire payload the way the chat page does.
     fn apply(m: &mut AgentMessage, wire: Value, now: f64) -> StreamEffect {
         let message = AgentStreamMessage::from_value(wire);
-        apply_message(m, &message, now, &mut UnknownEvents::default())
+        apply_message(m, &message, now, &mut StreamContext::default())
     }
 
     #[test]
@@ -475,7 +542,7 @@ mod tests {
     fn unknown_and_task_messages_change_nothing_and_log_once_per_kind() {
         let mut m = msg();
         let before = m.clone();
-        let mut unknown = UnknownEvents::default();
+        let mut unknown = StreamContext::default();
         for wire in [
             json!({"envelope":"query","type":"brand_new","x":1}),
             json!({"envelope":"other"}),

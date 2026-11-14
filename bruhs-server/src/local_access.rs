@@ -84,6 +84,24 @@ impl Policy {
             }))
             .allow_methods(Any)
             .allow_headers(Any)
+            .expose_headers([
+                header::CONTENT_DISPOSITION,
+                header::CONTENT_LENGTH,
+                header::CONTENT_RANGE,
+            ])
+    }
+
+    fn frame_ancestors(&self) -> HeaderValue {
+        let mut policy = String::from("frame-ancestors 'self' http://localhost:* https://localhost:* http://127.0.0.1:* https://127.0.0.1:*");
+        for origin in &self.configured_origins {
+            if let Ok(origin) = origin.to_str() {
+                policy.push(' ');
+                policy.push_str(origin);
+            }
+        }
+        // Configured origins were validated as HTTP header values at startup.
+        HeaderValue::from_str(&policy)
+            .unwrap_or_else(|_| HeaderValue::from_static("frame-ancestors 'none'"))
     }
 }
 
@@ -140,6 +158,26 @@ pub async fn guard(
 ) -> Result<Response, AppError> {
     let headers = request.headers();
     let is_api = request.uri().path() == "/api" || request.uri().path().starts_with("/api/");
+    let inline_response = matches!(
+        request.uri().path(),
+        "/api/agent/rich-response"
+            | "/api/agent/rich-media"
+            | "/api/agent/media"
+    ) || request
+        .uri()
+        .path()
+        .strip_prefix("/api/agent/artifacts/")
+        .and_then(|rest| rest.strip_suffix("/preview"))
+        .is_some_and(|id| id.len() == 36 && !id.contains('/'));
+    // This one read-only route verifies an immutable asset capability before
+    // opening any file. Opaque media frames need CORS for subtitle tracks;
+    // their grants do not authorize any other API or state operation.
+    let scoped_asset = matches!(*request.method(), Method::GET | Method::HEAD)
+        && request
+            .uri()
+            .path()
+            .strip_prefix("/api/agent/rich-response/asset/")
+            .is_some_and(|name| !name.is_empty() && !name.contains('/'));
     // The browser returns here from Google without Origin. The handler still
     // validates its one-use, expiring OAuth state before exchanging any code.
     let oauth_return = request.method() == Method::GET && request.uri().path() == OAUTH_CALLBACK;
@@ -151,9 +189,10 @@ pub async fn guard(
         || headers.get_all(header::ORIGIN).iter().count() > 1
         || headers
             .get(header::ORIGIN)
-            .is_some_and(|origin| !policy.allows_origin(origin))
+            .is_some_and(|origin| !policy.allows_origin(origin) && !scoped_asset)
         || (is_api
             && !oauth_return
+            && !scoped_asset
             && !headers.contains_key(header::ORIGIN)
             && headers
                 .get("sec-fetch-site")
@@ -169,9 +208,20 @@ pub async fn guard(
             .headers_mut()
             .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
     }
-    response
-        .headers_mut()
-        .insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    if scoped_asset {
+        // A capability intentionally allows this inert file to be displayed
+        // in an opaque-origin media frame; no general API is frameable.
+    } else if inline_response {
+        // Only the inert shell and scoped media can be framed. Every other
+        // API retains DENY; the exact same origin guard still runs above.
+        response
+            .headers_mut()
+            .append(header::CONTENT_SECURITY_POLICY, policy.frame_ancestors());
+    } else {
+        response
+            .headers_mut()
+            .insert(header::X_FRAME_OPTIONS, HeaderValue::from_static("DENY"));
+    }
     response.headers_mut().insert(
         header::X_CONTENT_TYPE_OPTIONS,
         HeaderValue::from_static("nosniff"),

@@ -27,13 +27,21 @@ portable-pty = "0.9"
 # portable-pty reports its errors as anyhow::Error; kept as error sources.
 anyhow = "1"
 futures-core = { workspace = true }
+futures-util = { workspace = true }
 async-trait = "0.1"
 # ── Phase 1 (Calendar v1 Google Sync) ──
-reqwest = { workspace = true }
+reqwest = { workspace = true, features = ["stream"] }
 axum = { workspace = true }
 keyring = { workspace = true }
 directories = { workspace = true }
 base64 = "0.22"
+percent-encoding = "2"
+zip = { version = "2.4.2", default-features = false }
+hmac = "0.12"
+html5ever = "0.27"
+markup5ever_rcdom = "0.3"
+cssparser = "0.36"
+ress = "0.11.7"
 sha2 = { workspace = true }
 rand = { workspace = true }
 chrono = { workspace = true }

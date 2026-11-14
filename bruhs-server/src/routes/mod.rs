@@ -1,6 +1,7 @@
 pub mod agent;
 pub mod agent_auth;
 pub mod approve;
+pub mod artifacts;
 pub mod calendar_events_stream;
 pub mod calendar_google;
 pub mod capture_proxy;
@@ -24,6 +25,7 @@ pub mod people;
 pub mod preview;
 pub mod pulls;
 pub mod reactive;
+pub mod rich_response;
 pub mod secrets;
 pub mod skills;
 pub mod tasks;
