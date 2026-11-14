@@ -148,6 +148,22 @@ impl Thread {
         }
     }
 
+    /// Moving a conversation to another folder starts a session carrying its history.
+    pub fn set_project(&mut self, name: String, path: Option<String>, context: Option<String>) {
+        if self.project_name == name && self.project_path == path {
+            return;
+        }
+        self.project_name = name;
+        self.project_path = path;
+        self.session_id = None;
+        self.fresh_session = true;
+        self.branch = None;
+        self.worktree_path = None;
+        self.run_locked = false;
+        self.instructions_stamp = None;
+        self.import_context = context.or_else(|| self.import_context.take());
+    }
+
     /// True while the thread still carries a placeholder title, so the first
     /// prompt can name it.
     pub fn is_default_title(&self) -> bool {
@@ -983,6 +999,42 @@ pub(super) fn provide() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn changing_project_retains_thread_identity_and_carries_history() {
+        let mut thread = Thread::new(
+            "Design discussion".into(),
+            String::new(),
+            None,
+            EpochMs::UNIX_EPOCH,
+        );
+        let id = thread.id.clone();
+        thread.session_id = Some("previous-session".into());
+        thread.branch = Some("old-branch".into());
+        thread.worktree_path = Some("/old/worktree".into());
+        thread.run_locked = true;
+        thread.set_project(
+            "Project".into(),
+            Some("/project".into()),
+            Some("Earlier discussion".into()),
+        );
+        assert_eq!(thread.id, id);
+        assert_eq!(thread.title, "Design discussion");
+        assert!(thread.session_id.is_none() && thread.fresh_session);
+        assert!(thread.branch.is_none() && thread.worktree_path.is_none() && !thread.run_locked);
+        assert_eq!(thread.import_context.as_deref(), Some("Earlier discussion"));
+
+        thread.session_id = Some("current-session".into());
+        thread.set_project(
+            "Project".into(),
+            Some("/project".into()),
+            Some("Replacement".into()),
+        );
+        assert_eq!(thread.session_id.as_deref(), Some("current-session"));
+        thread.set_project(String::new(), None, None);
+        assert!(thread.project_name.is_empty() && thread.project_path.is_none());
+        assert_eq!(thread.import_context.as_deref(), Some("Earlier discussion"));
+    }
 
     #[test]
     fn each_threads_queue_is_held_on_its_own() {

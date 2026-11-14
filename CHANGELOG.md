@@ -37,7 +37,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 - Chat and coding conversations now share one thread list on web and desktop.
   New threads keep the current conversation’s optional project, and project
-  filters help you focus without switching modes.
+  filters help you focus without switching modes. Choose a project folder
+  within a thread to continue the same conversation with files and tools.
 - The web app now runs threads side by side, up to three at once. Sending in
   one thread no longer waits for another thread's turn to end, a queued prompt
   starts when its thread is free even if that thread is not open, and each

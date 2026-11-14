@@ -328,16 +328,6 @@ impl Workspace {
                 ChatViewEvent::ThreadRequest(request) => {
                     this.answer_thread_request(chat, request, window, cx);
                 }
-                ChatViewEvent::NewThreadInProject => {
-                    let project = this
-                        .threads
-                        .iter()
-                        .find(|thread| thread.chat.entity_id() == chat.entity_id())
-                        .map(|thread| (thread.project_name.clone(), thread.project_path.clone()));
-                    if let Some((name, path)) = project.filter(|(name, _)| !name.is_empty()) {
-                        this.new_thread_in_project(name, path, window, cx);
-                    }
-                }
                 ChatViewEvent::ToggleTasks => {
                     this.set_tasks_panel_visible(
                         tasks_panel_visibility_after_toggle(this.tasks_panel_visible),
@@ -702,23 +692,14 @@ impl Workspace {
 
     /// The sidebar's "New chat": a general (project-less) thread.
     pub(super) fn new_general_thread(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let active_project = self.active_project.as_ref();
-        let project_path =
-            general_thread_project_path_like_web(active_project, current_dir_string());
-        let project_scoped = general_thread_project_scoped_like_web(active_project);
         let thread = Self::create_thread(
             String::new(),
-            project_path.clone(),
+            path_to_string(&project_picker_start_path()),
             self.current_model.clone(),
             self.permission_mode,
             window,
             cx,
         );
-        if project_scoped {
-            thread.chat.update(cx, |chat, cx| {
-                chat.set_project_context(project_path, String::new(), true, cx);
-            });
-        }
         self.stamp_chat_run_prefs(&thread.chat, cx);
         thread.chat.update(cx, |chat, cx| {
             chat.tasks_panel_visible = self.tasks_panel_visible;

@@ -1038,8 +1038,8 @@ pub fn Sidebar() -> impl IntoView {
                     </Menu>
                     <button
                         type="button"
-                        aria-label="New session in a project"
-                        title="New session in a project"
+                        aria-label="Choose project folder"
+                        title="Choose project folder"
                         class="ml-auto inline-flex size-7 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100"
                         on:click=move |_| set_project_picker_open.set(true)
                     >

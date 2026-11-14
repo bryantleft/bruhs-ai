@@ -434,8 +434,6 @@ pub enum ChatViewEvent {
     ToggleDiff,
     /// The header's panel-right button (⌘⌥B).
     TogglePanel,
-    /// The breadcrumb's project crumb: a new thread in the same project.
-    NewThreadInProject,
     /// The hero heading / context strip project buttons.
     OpenProjectPicker,
     /// The user picked a model in the popover; the workspace makes it current.
@@ -1346,6 +1344,41 @@ impl ChatView {
         }
         self.refresh_mention_hints(cx);
         cx.notify();
+    }
+
+    /// Keep this conversation while changing the folder its next turn can use.
+    pub fn change_project(
+        &mut self,
+        path: String,
+        name: String,
+        scoped: bool,
+        cx: &mut Context<'_, Self>,
+    ) -> Result<(), &'static str> {
+        if self.is_streaming
+            || self.placing
+            || self.running_tasks_count > 0
+            || self.has_pending_permission()
+        {
+            return Err("Wait for this thread to finish before changing its project.");
+        }
+        if self.project_path != path || self.project_scoped != scoped {
+            self.import_context = self
+                .conversation_context(&self.messages)
+                .or_else(|| self.import_context.take());
+            self.session_id = None;
+            self.session_provider = None;
+            self.fresh_session = true;
+            self.instructions_stamp = None;
+            self.worktree_path = None;
+            self.run_locked = false;
+            self.run_choice = WorkspaceChoice::Checkout;
+            self.previous_worktree = None;
+            self.base_branch.clear();
+            self.context_chips.clear();
+            self.clear_git_info();
+        }
+        self.set_project_context(path, name, scoped, cx);
+        Ok(())
     }
 
     pub fn focus_composer(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {

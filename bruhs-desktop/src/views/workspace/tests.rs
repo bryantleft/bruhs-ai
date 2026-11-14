@@ -10,8 +10,7 @@ use super::{
     event_form_times_from_inputs, event_timegrid_surface_color, event_timegrid_text_color,
     focused_input_should_receive_plain_shortcut, format_desktop_due_date,
     format_event_form_datetime, format_full_date, format_month_year, format_week_range,
-    general_thread_project_path_like_web, general_thread_project_scoped_like_web, home_dir_path,
-    initial_active_thread_id_after_start, initial_active_view_after_start,
+    home_dir_path, initial_active_thread_id_after_start, initial_active_view_after_start,
     initial_calendar_anchor_after_start, initial_calendar_mode_after_start,
     initial_permission_mode_from_persisted, initial_selected_calendar_event_after_start,
     initial_selected_project_after_start, initial_selected_work_item_after_start,
@@ -1250,7 +1249,7 @@ fn desktop_code_thread_cards_and_settled_fold_should_match_web_sidebar(
 }
 
 #[gpui::test]
-fn desktop_project_picker_select_current_should_create_project_session_like_web(
+fn desktop_project_picker_select_current_should_attach_to_current_thread(
     cx: &mut gpui::TestAppContext,
 ) {
     let Some(home) = home_dir_path().and_then(|path| fs::canonicalize(path).ok()) else {
@@ -1303,9 +1302,11 @@ fn desktop_project_picker_select_current_should_create_project_session_like_web(
         .expect("workspace entity should be captured");
 
     let mut initial_thread_count = 0;
+    let mut initial_thread_id = None;
     let project_path_for_open = project_path.clone();
     workspace.update_in(cx, |workspace, window, cx| {
         initial_thread_count = workspace.threads.len();
+        initial_thread_id = workspace.active_thread_id.clone();
         workspace.open_project_picker(&OpenProjectPicker, window, cx);
         workspace.load_project_directory(Some(project_path_for_open), cx);
     });
@@ -1327,7 +1328,8 @@ fn desktop_project_picker_select_current_should_create_project_session_like_web(
 
     workspace.update_in(cx, |workspace, _window, cx| {
         assert!(!workspace.project_picker_visible());
-        assert_eq!(workspace.threads.len(), initial_thread_count + 1);
+        assert_eq!(workspace.threads.len(), initial_thread_count);
+        assert_eq!(workspace.active_thread_id, initial_thread_id);
 
         let active_project = workspace
             .active_project
@@ -1346,7 +1348,7 @@ fn desktop_project_picker_select_current_should_create_project_session_like_web(
 
         let active_thread = workspace
             .active_thread()
-            .expect("selecting a project should create an active thread");
+            .expect("selecting a project should keep the active thread");
         assert_eq!(active_thread.project_name, project_name);
         assert_eq!(active_thread.project_path, project_path);
         let active_chat = active_thread.chat.read(cx);
@@ -1411,9 +1413,11 @@ fn desktop_project_picker_directory_clicks_should_match_web_browse_and_select_fl
         .expect("workspace entity should be captured");
 
     let mut initial_thread_count = 0;
+    let mut initial_thread_id = None;
     let root_path_for_open = root_path.clone();
     workspace.update_in(cx, |workspace, window, cx| {
         initial_thread_count = workspace.threads.len();
+        initial_thread_id = workspace.active_thread_id.clone();
         workspace.open_project_picker(&OpenProjectPicker, window, cx);
         workspace.load_project_directory(Some(root_path_for_open), cx);
     });
@@ -1443,7 +1447,8 @@ fn desktop_project_picker_directory_clicks_should_match_web_browse_and_select_fl
 
     workspace.update_in(cx, |workspace, _window, cx| {
         assert!(!workspace.project_picker_visible());
-        assert_eq!(workspace.threads.len(), initial_thread_count + 1);
+        assert_eq!(workspace.threads.len(), initial_thread_count);
+        assert_eq!(workspace.active_thread_id, initial_thread_id);
         let active_project = workspace
             .active_project
             .as_ref()
@@ -1452,7 +1457,7 @@ fn desktop_project_picker_directory_clicks_should_match_web_browse_and_select_fl
         assert_eq!(active_project.name, "alpha-project");
         let active_thread = workspace
             .active_thread()
-            .expect("selecting a directory should create an active thread");
+            .expect("selecting a directory should keep the active thread");
         assert_eq!(active_thread.project_name, "alpha-project");
         assert_eq!(active_thread.project_path, child_path);
         assert_eq!(active_thread.chat.read(cx).project_path, child_path);
@@ -4338,7 +4343,12 @@ fn command_actions_should_match_web_reference() {
                 "Terminal",
                 "shells, no thread needed"
             ),
-            ("open-project", "Agent", "Open project...", "coding agent"),
+            (
+                "open-project",
+                "Agent",
+                "Choose project folder",
+                "attach a folder to this thread"
+            ),
             ("new-thread", "Agent", "New thread", "⌘⇧O"),
             (
                 "import-thread",
@@ -4459,7 +4469,7 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "People",
             "Search",
             "Terminal",
-            "Open project...",
+            "Choose project folder",
             "New thread",
             "Import thread...",
             "Pin / unpin thread",
@@ -4903,27 +4913,6 @@ fn project_picker_recents_should_match_web_dedupe_order_and_cap() {
             "/projects/3"
         ]
     );
-}
-
-#[test]
-fn general_thread_project_path_should_follow_active_project_like_web_reference() {
-    let active_project = DesktopProjectLocation {
-        path: "/projects/bruhs-ai".to_string(),
-        name: "bruhs-ai".to_string(),
-    };
-
-    assert_eq!(
-        general_thread_project_path_like_web(Some(&active_project), "/fallback".to_string()),
-        "/projects/bruhs-ai"
-    );
-    assert_eq!(
-        general_thread_project_path_like_web(None, "/fallback".to_string()),
-        "/fallback"
-    );
-    assert!(general_thread_project_scoped_like_web(Some(
-        &active_project
-    )));
-    assert!(!general_thread_project_scoped_like_web(None));
 }
 
 #[test]

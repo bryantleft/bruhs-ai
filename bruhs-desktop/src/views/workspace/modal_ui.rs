@@ -175,7 +175,10 @@ impl Workspace {
     pub(super) fn project_picker_for_terminal(&self) -> bool {
         matches!(
             self.top_layer,
-            Some(TopLayer::ProjectPicker { for_terminal: true })
+            Some(TopLayer::ProjectPicker {
+                for_terminal: true,
+                ..
+            })
         )
     }
 

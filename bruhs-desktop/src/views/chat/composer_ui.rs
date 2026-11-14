@@ -354,58 +354,57 @@ impl ChatView {
                     .items_center()
                     .gap_2()
                     .text_size(px(CHAT_HEADER_TEXT_SIZE_PX))
-                    .when_some(project, |el, name| {
-                        let label = format!("New thread in {name}");
-                        el.child(
-                            div()
-                                .id("chat-header-project")
-                                .debug_selector(|| "desktop-chat-header-project".to_string())
-                                .max_w(px(CHAT_HEADER_CRUMB_MAX_WIDTH_PX))
-                                .flex()
-                                .items_center()
-                                .gap(px(6.0))
-                                .rounded(px(4.0))
-                                .text_color(theme::rambutan_400())
-                                .hover(|el| el.text_color(theme::rambutan_100()))
-                                .tab_index(0)
-                                .role(Role::Button)
-                                .aria_label(label.clone())
-                                .border_1()
-                                .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
-                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .cursor_pointer()
-                                .tooltip(move |window, cx| {
-                                    Tooltip::new(label.clone()).build(window, cx)
-                                })
-                                .on_click(cx.listener(|_this, _ev, _window, cx| {
+                    .child(
+                        div()
+                            .id("chat-header-project")
+                            .debug_selector(|| "desktop-chat-header-project".to_string())
+                            .max_w(px(CHAT_HEADER_CRUMB_MAX_WIDTH_PX))
+                            .h(px(32.0))
+                            .flex()
+                            .items_center()
+                            .gap(px(6.0))
+                            .rounded(px(4.0))
+                            .text_color(theme::rambutan_400())
+                            .hover(|el| el.text_color(theme::rambutan_100()))
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .aria_label("Choose project folder")
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .cursor_pointer()
+                            .tooltip(|window, cx| {
+                                Tooltip::new("Choose project folder").build(window, cx)
+                            })
+                            .on_click(cx.listener(|_this, _ev, _window, cx| {
+                                cx.stop_propagation();
+                                cx.emit(ChatViewEvent::OpenProjectPicker);
+                            }))
+                            .on_key_down(cx.listener(|_this, event: &KeyDownEvent, window, cx| {
+                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                                    window.prevent_default();
                                     cx.stop_propagation();
-                                    cx.emit(ChatViewEvent::NewThreadInProject);
-                                }))
-                                .on_key_down(cx.listener(
-                                    |_this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            cx.emit(ChatViewEvent::NewThreadInProject);
-                                        }
-                                    },
-                                ))
-                                .child(icon(
-                                    assets::FOLDER_ICON_PATH,
-                                    CHAT_HEADER_ICON_SIZE_PX,
-                                    theme::rambutan_400(),
-                                ))
-                                .child(div().min_w_0().truncate().child(name)),
-                        )
-                        .child(
-                            div()
-                                .flex_shrink_0()
-                                .text_color(theme::rambutan_600())
-                                .child("/"),
-                        )
-                    })
+                                    cx.emit(ChatViewEvent::OpenProjectPicker);
+                                }
+                            }))
+                            .child(icon(
+                                assets::FOLDER_ICON_PATH,
+                                CHAT_HEADER_ICON_SIZE_PX,
+                                theme::rambutan_400(),
+                            ))
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .truncate()
+                                    .child(project.unwrap_or_else(|| "Add project".into())),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .flex_shrink_0()
+                            .text_color(theme::rambutan_600())
+                            .child("/"),
+                    )
                     .child(
                         div()
                             .debug_selector(|| "desktop-chat-header-title".to_string())
