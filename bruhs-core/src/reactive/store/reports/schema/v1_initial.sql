@@ -1,0 +1,5 @@
+CREATE TABLE IF NOT EXISTS weekly_report_presets(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS weekly_report_jobs(id TEXT PRIMARY KEY,preset_id TEXT NOT NULL,window_end INTEGER NOT NULL,payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS weekly_report_requests(id TEXT PRIMARY KEY,preset_id TEXT NOT NULL,run_id TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS engineering_reports(id TEXT PRIMARY KEY,preset_id TEXT NOT NULL,window_end INTEGER NOT NULL,payload TEXT NOT NULL);
+CREATE TABLE IF NOT EXISTS weekly_report_schema(id INTEGER PRIMARY KEY CHECK(id=1),version INTEGER NOT NULL);
