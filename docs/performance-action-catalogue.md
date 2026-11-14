@@ -1,6 +1,6 @@
 # Semantic action catalogue (incomplete)
 
-The first reviewed group maps 86 registered commands to 45 user intents across web and desktop. Exact published-main and working-tree source profiles and dispatch comparisons are retained in JSON; matching spans do not prove identical downstream behavior. All 1,245 binding search references still require semantic/test/lifecycle review, and other entrypoint kinds remain outside this first group. The full goal remains active.
+The reviewed groups map 86 registered commands to 45 user intents across web and desktop, plus 17 connected-mail intents. The pinned discovery snapshot contains 366 entrypoints and 1,378 binding search references; discovery references still require semantic/test/lifecycle review. Exact source profiles and dispatch comparisons are retained in JSON; matching spans do not prove identical downstream behavior. The full goal remains active.
 
 Opening a form and saving its record are separate actions. New document creates a record immediately; New task opens a form. Creating an integrated PTY differs from launching system Terminal. A route or panel is not ready merely because its state flag changed.
 
@@ -53,6 +53,30 @@ Opening a form and saving its record are separate actions. New document creates 
 | Navigate to Today | desktop, web | Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion. |
 
 A missing palette client is not proof the app lacks another entrypoint for that intent. The JSON keeps exact source profiles, registry/dispatch locations, required variants and unresolved measurement status. No whole-action acceptance is established.
+
+## Connected-mail intents
+
+These 17 intents retain their pinned pre-compose source profile, completion boundaries and required variants in JSON. Adopted web GET cancellation has separate controlled transport and functional evidence in [the mail cancellation report](performance-mail-cancellation-2026-11-14.md). It preserves app-owned sync/downloads and page-boundary Stop. Compose and later current-root changes are outside this snapshot; no whole-action acceptance is established.
+
+| Intent | Reviewed clients | Completion boundary to verify |
+| --- | --- | --- |
+| Open connected Email | desktop, web | Account and thread controls reach their loaded, empty or actionable error state. |
+| Return to imported conversations | desktop, web | Imported Inbox and its preserved local search/draft controls are usable. |
+| Open mail Connections | desktop, web | Connections view has usable loaded, empty or actionable error controls. |
+| Refresh saved accounts and visible mail | desktop, web | Fresh account state and dependent current list/reader settle with a usable result or error. |
+| Choose a saved mail account | desktop, web | Selected account's first result page is usable and stale account results cannot replace it. |
+| Search saved email | desktop, web | Applied query's first result page, empty state or error is usable. |
+| Filter saved email | desktop, web | Chosen filter's first result page, empty state or error is usable. |
+| Page through saved email | desktop, web | Requested or server-clamped page is usable with correct controls and count. |
+| Open a saved email thread | desktop, web | Selected thread's current saved message, envelope and attachment controls or actionable error are usable. |
+| Return from a saved thread to email | desktop, web | Saved list is usable with restored focus; abandoned detail transport settles without stale feedback. |
+| Choose an older or newer saved message | desktop, web | Correct message text, envelope, attachment controls and index are usable. |
+| Copy saved message text | desktop, web | Clipboard contains exact selected text, or visible failure offers manual copy. |
+| Download an explicit mail attachment | desktop, web | Validated exact bytes reach browser-owned download completion or native private atomic save; failure is visible. |
+| Sync connected Gmail | desktop, web | Provider pages and cursor are durably saved, account/list refresh completes, and final status or recoverable error is usable. |
+| Sync connected Outlook | desktop, web | Provider pages and cursor are durably saved, account/list refresh completes, and final status or recoverable error is usable. |
+| Restart the selected provider sync | desktop, web | Selected provider's restarted traversal reaches saved/current results or an actionable error. |
+| Stop sync after the current page | desktop, web | Current provider page commits, no next page starts, resumable cursor is retained, and refreshed list plus stopped status are usable. |
 
 ## Remaining work
 
