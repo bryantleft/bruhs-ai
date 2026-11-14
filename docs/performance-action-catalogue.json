@@ -3,7 +3,7 @@
   "completion_status": "in_progress",
   "semantic_inventory_complete": false,
   "scope": "Reviewed command intent group plus17 connected-mail intents. Downstream completion boundaries are requirements, not measured acceptance. Source bindings are not an exhaustive semantic denominator.",
-  "recorded_at": "2026-11-14T20:14:00.112876+00:00",
+  "recorded_at": "2026-11-14T23:09:11.061104+00:00",
   "source_profiles": {
     "published_main": {
       "base_revision": "53c1f1a365d32d2a93f0831aa5ce2ddaf8a029f6",
@@ -30,21 +30,30 @@
       "build_receipt_sha256": "8e480529dedd7c84e390098345105256a750604f5ad886c0fd5511f39db604f8",
       "build_inputs_sha256": "075e24733d44b40d101a8932e13de909fa44134861ba06b0f5d92b9ffafd2333",
       "scope": "Web bindings byte-match193910 production capture; desktop bindings are current source only, without a paired native build claim."
+    },
+    "whiteboard_actions_20261114": {
+      "base_revision": "73a330ad061487405eed31989a699d736d1ef082",
+      "capture": "target/performance-whiteboard-actions1/source-capture.json",
+      "capture_sha256": "5b619def1b80a7fa09e387e1c507d5d7690a8789dbbc7f4434bf54c7d4c0dfad",
+      "source_files": 43,
+      "scope": "Source-only review of45 shared board command/tool declarations plus21 gesture/lifecycle/review intents. Source bytes, not a combined build or semantic completeness, are pinned."
     }
   },
   "counts": {
     "semantic_palette_intents": 45,
     "palette_entrypoints_per_source_profile": 86,
-    "source_profiles": 3,
-    "source_entrypoints_in_broader_inventory": 366,
-    "binding_search_references_pending_review": 1378,
+    "source_profiles": 4,
+    "source_entrypoints_in_broader_inventory": 376,
+    "binding_search_references_pending_review": 1383,
     "whole_action_acceptances": 0,
     "semantic_connected_mail_intents": 17,
-    "reviewed_semantic_intents": 62
+    "reviewed_semantic_intents": 128,
+    "semantic_whiteboard_intents": 66
   },
   "discovery_snapshot": {
-    "path": "target/performance-discovery11-inventory.json",
-    "sha256": "9bcd6819ca4c510294d25eebb7ad46fbbfcc2b31c5206648115e7c838fe3295d"
+    "receipt": "target/performance-http-error1/discovery14-receipt.json",
+    "receipt_sha256": "ac711b3063983b1004eadbc3e9a2fb7fb24be86d2be45b48b48c3fe5a6bea71b",
+    "scope": "Latest pinned non-atomic source discovery:376 identities/1383 references; not a complete user-action denominator."
   },
   "actions": [
     {
@@ -1187,7 +1196,7 @@
           "entrypoint": "desktop:local-servers",
           "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
           "registry_line": 228,
-          "label": "Open a local server\u2026",
+          "label": "Open a local server…",
           "dispatch": {
             "line": 499,
             "sha256": "69094696a1594149e19d7d8ec0a034b6f973499ea15418d10ba94a6e4ae67323"
@@ -1200,7 +1209,7 @@
           "entrypoint": "desktop:local-servers",
           "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
           "registry_line": 228,
-          "label": "Open a local server\u2026",
+          "label": "Open a local server…",
           "dispatch": {
             "line": 498,
             "sha256": "69094696a1594149e19d7d8ec0a034b6f973499ea15418d10ba94a6e4ae67323"
@@ -3828,6 +3837,2612 @@
       "historical_partial_evidence_ids": [],
       "timing_status": "unmeasured_complete_action",
       "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.undo",
+      "label": "Undo",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Previous revision content is restored, committed and rendered; redo remains valid.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 5,
+          "anchor": "    Undo,",
+          "line_sha256": "ef2505cfebedfb4783efe7fd8186ecf1f42349828319c2577472676ae321f370"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.redo",
+      "label": "Redo",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Redo content is restored, committed and rendered; history remains valid.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 6,
+          "anchor": "    Redo,",
+          "line_sha256": "4bc813ce100ef020891f37d63351c7e4bd1be8f935772b4f1779f5221f398ffc"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.select_all",
+      "label": "Select all",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "All eligible shapes are selected and rendered without a durable edit.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 7,
+          "anchor": "    SelectAll,",
+          "line_sha256": "a8d9ddd922ea2f55c6f24f61832d6065b047fc41705dcb46742a7435e7162b9e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.delete",
+      "label": "Delete selection",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 8,
+          "anchor": "    Delete,",
+          "line_sha256": "1ca724038d36d9961bb27b5dcdbb810680f7f2f7f0a27663885322366a3d4d4e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.group",
+      "label": "Group",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 9,
+          "anchor": "    Group,",
+          "line_sha256": "9f1b760a7cac328c3ec8edafcb7c841c1e8f627ee46e3dfaac7be505266ddc11"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.ungroup",
+      "label": "Ungroup",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 10,
+          "anchor": "    Ungroup,",
+          "line_sha256": "2dcf4bcffe784b1157273dc7ea03efa5a13584a343b2f437c1db292fdf0e3809"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.align_left",
+      "label": "Align left",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 11,
+          "anchor": "    AlignLeft,",
+          "line_sha256": "44189954f27d955074b26a9fefbec339496debacaf24ee58a323268158d44363"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.align_center",
+      "label": "Align center",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 12,
+          "anchor": "    AlignCenter,",
+          "line_sha256": "de20610f585bb0970373eac8b71889808435f769a69257e22b9543676991dd4a"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.align_right",
+      "label": "Align right",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 13,
+          "anchor": "    AlignRight,",
+          "line_sha256": "709998472b8a031fe564ce89ad128a692a8b6d02fcaa749be56b9a98395aaa9e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.align_top",
+      "label": "Align top",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 14,
+          "anchor": "    AlignTop,",
+          "line_sha256": "653d7695f8c5d8c2cfb75b3203f424a0e8651a22307162c3d7c3b4c1db1c7a2f"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.align_middle",
+      "label": "Align middle",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 15,
+          "anchor": "    AlignMiddle,",
+          "line_sha256": "d1d33bd3a39a4dad9fa290f7f168671cffa90b3044cb442e3bc902dd70641e54"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.align_bottom",
+      "label": "Align bottom",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 16,
+          "anchor": "    AlignBottom,",
+          "line_sha256": "0c6800f90f0062265c9c45a4ab6e0c5586cf4b0c9fc5125403709cc290e26c45"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.distribute_horizontal",
+      "label": "Distribute horizontally",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 17,
+          "anchor": "    DistributeHorizontal,",
+          "line_sha256": "675065dcb21149a22404760961f1275f99b31ca51c5fcdc02988b3edae920dab"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.distribute_vertical",
+      "label": "Distribute vertically",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact intended board revision is committed through IndexedDB/native writer, saved status is current, and final canvas/selection is rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 18,
+          "anchor": "    DistributeVertical,",
+          "line_sha256": "769f9476f1c5815f647f2f2dd730d21876d96d2a2a1f944b2a2142f71fb837db"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.copy",
+      "label": "Copy",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Clipboard write acknowledgement and recoverable exact selection payload; native OS clipboard and browser permission paths measured separately.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 19,
+          "anchor": "    Copy,",
+          "line_sha256": "0097ddd3351b677c4234f0878b8f23ed0ae1ef6e74d23d1292b75c1cf543e1f3"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.paste",
+      "label": "Paste",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Clipboard read/validation and asset ownership finish; pasted selection commits and renders.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 20,
+          "anchor": "    Paste,",
+          "line_sha256": "84e916bcef8379baf284dcf2411d560eeb92478edbbcf219321a06c90be7c3e3"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.edit_text",
+      "label": "Edit text",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Dialog opens/focuses; applying edited shape text commits and renders. Cancellation closes without changing content.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 21,
+          "anchor": "    EditText,",
+          "line_sha256": "ea1e3efdf4a2f734d8fa32398f620b64f262e452eff56a3e3bca0064ac74d946"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.connect_next",
+      "label": "Connect next node",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Text entry produces the intended new node and bound connector, commits and renders; invalid/empty selection paths remain explicit.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 22,
+          "anchor": "    ConnectNext,",
+          "line_sha256": "9ecc7cde51508adb099c97bd12d0c72b27f6417e436276c05ac332f8174d41cc"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.rename",
+      "label": "Rename board",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Title dialog opens; applying a valid title commits and appears in board and catalog.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 23,
+          "anchor": "    Rename,",
+          "line_sha256": "22784fef484929956df1100e935cd2b29420057abed767b23a15c9ea3684e9b6"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.link",
+      "label": "Link selection",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Typed link dialog validates target and optional line range; link commits and appears on the selection.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 24,
+          "anchor": "    Link,",
+          "line_sha256": "19dc8c4f78d9cba7af38c11ff8bf29dd1a13f42997ed1207dae24eb95543f562"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.import",
+      "label": "Import board",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "OS/browser file selection, bounded read, parser and raster preparation produce an inspectable preview or explicit error. Saving the preview is separately catalogued.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 25,
+          "anchor": "    Import,",
+          "line_sha256": "ba78b2f5d0686da0c820c240b969d6dd99710f428f09abb13f5bc284a382fabc"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.import_mermaid",
+      "label": "Import Mermaid",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Mermaid editor opens and parsing produces an inspectable editable-shape preview or actionable error.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 26,
+          "anchor": "    ImportMermaid,",
+          "line_sha256": "5e8b21dae7425060b505abdee0aa1d85ecc6f65da7c1e7e47f289944ccf2e06b"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.export_mermaid",
+      "label": "Export Mermaid",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Supported diagram/selection serialization completes, then browser-owned download completion and exact text are verified; native file-write confirmation and readback are verified separately. Handoff alone is not completion.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 27,
+          "anchor": "    ExportMermaid,",
+          "line_sha256": "17cc53ef74310b41829a0775ec0eb86a0376c81b4bc2f9ab8afb218c84a96d73"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.export_json",
+      "label": "Export portable JSON",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Portable board and referenced assets serialize, then browser-owned download completion and exact bytes are verified; native file-write confirmation and readback are verified separately. Handoff alone is not completion.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 28,
+          "anchor": "    ExportJson,",
+          "line_sha256": "d44562a5bf37166bbea82450e8f1a43d272c6ee819074c1e469a2ccc9c05dbf6"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.export_svg",
+      "label": "Export SVG",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "SVG serialization and asset embedding finish, then browser-owned download completion or native file-write confirmation is verified with the exact resulting SVG. Handoff alone is not completion.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 29,
+          "anchor": "    ExportSvg,",
+          "line_sha256": "3b6e69e32f751f791f26eb7a2782bca17ca4f8fa430dd5b7123733209ea51759"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.export_png",
+      "label": "Export PNG",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Font/image decode, rasterization and encoding finish, then browser-owned download completion or native file-write confirmation is verified with bytes and decoded pixels. Handoff alone is not completion.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 30,
+          "anchor": "    ExportPng,",
+          "line_sha256": "97c710af78d08425d5ad224cc95939c3c874982dec3f15fceb3501f2fa5e4b9a"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.fit",
+      "label": "Fit board",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Visible content bounds are fitted and rendered, including deferred viewport readiness; no persistence is implied.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 31,
+          "anchor": "    Fit,",
+          "line_sha256": "d7061f169750f11a75c257e02ff97f80cb89976c9a44a328308e41506fc402ce"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.reset_zoom",
+      "label": "Reset zoom",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Camera scale resets and renders without changing board content.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 32,
+          "anchor": "    ResetZoom,",
+          "line_sha256": "67a7785a7034ed2e9252d6079b80d79ccf754228f37de0a3fe211e6bb63895d3"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.toggle_snap",
+      "label": "Toggle snapping",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Snapping state changes and the next gesture obeys it; no durable edit until the gesture commits.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 33,
+          "anchor": "    ToggleSnap,",
+          "line_sha256": "780cce7825cf9fe86f3cb4b8878ab53fd1843d13b4c4649121768a7bbaa587c6"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.share",
+      "label": "Toggle agent sharing",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Agent-read flag commits, status renders, and authorization reads reflect the new state.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 34,
+          "anchor": "    Share,",
+          "line_sha256": "9bdea2a04bbeb8e94e814a7341cf163ceeab17739706f25676596366f0ab1cbf"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": true,
+      "web_platform_arm": false,
+      "native_platform_arm": false,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.save",
+      "label": "Retry save",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Explicit retry completes the current pending revision or leaves actionable conflict/quota/IO feedback without losing the recovery copy.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 35,
+          "anchor": "    Save,",
+          "line_sha256": "89562ef86e6b6d23cbd4128d956a46e0add206a0062cda6c2f593ad775784910"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.save_copy",
+      "label": "Save a copy",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "A new private board ID/content/assets commit and open; original bytes/revision remain intact.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 36,
+          "anchor": "    SaveCopy,",
+          "line_sha256": "d0a49daa6045febfac11dfe34b3eb8e039c0273fb9df39753e56bf2b6d8a9155"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.refresh_sources",
+      "label": "Check source drift",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "All relevant fingerprints settle; changed/unavailable sources update with revision guards, commit when needed and render while user edits remain intact.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 37,
+          "anchor": "    RefreshSources,",
+          "line_sha256": "8817689bca6fee5637a60574cbaf8747b5320f80eac7c01f856fa663d9b8e450"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/whiteboard/host.rs",
+          "source_sha256": "31fa0f7d6b0fb7f54d6c92ae1ce20f7ca3f7ad2aaed2f079dac01da3b52ec64b",
+          "line": 146,
+          "anchor": "pub fn check_sources(",
+          "line_sha256": "cf631cdccaba74e8cdba17824bf56d777561b0a652792ebdb7b3c71de7361b48"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop_state",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/files.rs",
+          "source_sha256": "63389b68624b9b36d725a15b7ded54c0069f83d22b3ea1204934d4d614752501",
+          "line": 353,
+          "anchor": "pub(super) fn check_sources(",
+          "line_sha256": "06c1b34220bdec047cdbcadfe70201751c59ac07de8bf2f205982cbdd34d5966"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "POST /api/whiteboards/source-fingerprint",
+          "source": "bruhs-server/src/routes/whiteboard.rs",
+          "line": 10,
+          "scope": "Web checks one source at a time over HTTP; native uses background local file hashing. Request identity does not establish all parameter/error branches."
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.all_boards",
+      "label": "All project boards",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Project catalog is loaded and usable with correct ownership, summary ordering and empty/error feedback.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 38,
+          "anchor": "    AllBoards,",
+          "line_sha256": "8f8d18ef73a0e10f024a82410d54b2cbd64b53b19d751595a460ae3129e3f30e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_global_palette",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "source_sha256": "55818d2eca98d37021b8e60f4d3fd839310737f00b93452cd8bb017239be6de5",
+          "line": 781,
+          "anchor": "ActionId::NavWhiteboards =>",
+          "line_sha256": "e86c0f6da22229df3a6588f173fdc4072e7b798173a8c381318e0af40b4ae593"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.new_board",
+      "label": "New board",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "A new private board commits in the selected project and its ready canvas is focused/rendered.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_command",
+          "source": "bruhs-models/src/whiteboard/commands.rs",
+          "source_sha256": "298dacbd949ed01a27e9c8c53a603617bcd60b5f61e3ddaa0c44419b13629fbf",
+          "line": 39,
+          "anchor": "    NewBoard,",
+          "line_sha256": "63bb15ebf53c1dd96b275ec6a80124a2ed51ff72d4d7bc8f72e46adc7fd3b126"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 184,
+          "anchor": "fn act(self, action: BoardAction)",
+          "line_sha256": "a84c6330dd9d9b3eb52bded5cbfb9a318e530699c9dee685767c256946ee20d1"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 26,
+          "anchor": "pub(super) fn action(",
+          "line_sha256": "cde5cdcb9f3c16743659ca58f8259d3b25192d69c87d1c751e9abff460a14079"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_global_palette",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "source_sha256": "55818d2eca98d37021b8e60f4d3fd839310737f00b93452cd8bb017239be6de5",
+          "line": 784,
+          "anchor": "ActionId::NewWhiteboard =>",
+          "line_sha256": "8a6d44d528746e545d4d1ba5076d946e35e3e14637582c3a99724a6e79c743ac"
+        }
+      ],
+      "shared_apply": false,
+      "web_platform_arm": true,
+      "native_platform_arm": true,
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_select",
+      "label": "Select select tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 10,
+          "anchor": "    Select,",
+          "line_sha256": "be2e7a5b6004cfee7967ba6efd44132470b32c83ac2814c1c9e9ac0e53406227"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_hand",
+      "label": "Select hand tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 11,
+          "anchor": "    Hand,",
+          "line_sha256": "8b769a022c01cb092b92b503f1456090fbad8c009087a5fbc50578bc4f5ca535"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_rectangle",
+      "label": "Select rectangle tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 12,
+          "anchor": "    Rectangle,",
+          "line_sha256": "b1814d6e30f28cbbff02627e0ca22bd8679549af9e2b2ed4f3bf73c36ea8f4de"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_ellipse",
+      "label": "Select ellipse tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 13,
+          "anchor": "    Ellipse,",
+          "line_sha256": "a49a7c1cfb2c71c32d4135e829ce9487456a4d1a3fd612109252ff1598b4cde8"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_arrow",
+      "label": "Select arrow tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 14,
+          "anchor": "    Arrow,",
+          "line_sha256": "a0b39659e77b683927c1b754521c01054ce28b87fe04640efbf66d03de7b3acf"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_text",
+      "label": "Select text tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 15,
+          "anchor": "    Text,",
+          "line_sha256": "cc131c8d31f61b979b8b26e702a4f24622ab0cf49815c37cba54f442b28cbc48"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_note",
+      "label": "Select note tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 16,
+          "anchor": "    Note,",
+          "line_sha256": "66319481470b5a080e4974d1df0167ab280772df30c09b4975b9cce72e3200ac"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_frame",
+      "label": "Select frame tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 17,
+          "anchor": "    Frame,",
+          "line_sha256": "7bdf9e9d0d0705327197480b1b3b0ba27983d38fae8f3058028772b641933bc0"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_freehand",
+      "label": "Select draw tool",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tool state and pressed/focus indicators update; any prior preview is canceled. Drawing/selection/panning gestures are separate intents.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. Switching tools during an unfinished gesture.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 18,
+          "anchor": "    Freehand,",
+          "line_sha256": "6a1751535c5187ec694c47a77696b7e771d2f8d3586a155089cc1a977f2467b8"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.tool_image",
+      "label": "Insert local image",
+      "review_status": "declarations_immediate_dispatch_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "File picker/read/validation/decode and current-board image insertion commit; decoded image renders or an actionable error leaves the original unchanged.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly. OS/browser picker cancel/denial, corrupt/oversized image, decode failure, rapid board switch and referenced asset deduplication.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "shared_tool",
+          "source": "bruhs-models/src/whiteboard/authoring.rs",
+          "source_sha256": "e946c3c0dafa3469eb5ee3d7c56c3d8cda5f181f90019f27fc6ef56f0db991b8",
+          "line": 19,
+          "anchor": "    Image,",
+          "line_sha256": "5df0e1ea9fd0353b8e770dfd242788faf240977537004ecab9f07bc9feaa6969"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 133,
+          "anchor": "fn command(self, command: BoardCommand)",
+          "line_sha256": "e9f9f45565b234d376a4354c12eb716820587678afdf7cfea489295dbfec357e"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 9,
+          "anchor": "fn command(&mut self, command: BoardCommand",
+          "line_sha256": "6d6ebff5715fc00ee6d5ac03f995a4a7b983bb170cb48727f071afa74c4439c8"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.open_board",
+      "label": "Open an existing board",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Local record, revision/lease and referenced assets load; decoded first canvas, current save state and controls are ready.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 88,
+          "anchor": "let result = host.load(",
+          "line_sha256": "a55b75f2af601b1a15ef2a3188c4ed08a40afe42816a965926c2de6c801dd679"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog.rs",
+          "source_sha256": "8639e9d7a91131a2293ed231cba1c04cab84ba4d37ae5031f0731c8431c21697",
+          "line": 160,
+          "anchor": "pub fn open(",
+          "line_sha256": "f901de73bc1c5ee4c99f3150f9b0812ec13f6d3d4f16abd1ae2f4659a02db9cf"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.commands",
+      "label": "Open and filter board commands",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Command dialog is focused, query-filtered actions are usable, keyboard/click activation dispatches the same command, and dismiss restores editor focus.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 744,
+          "anchor": "label=\"Whiteboard commands\"",
+          "line_sha256": "0a6c0c0cb48c2d55fccf6c318dc7d07cdcdf411fa99515830d6d70396744b22c"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 266,
+          "anchor": "\"Whiteboard commands\"",
+          "line_sha256": "c1473018abef7a1fcdd6141c01bce37730e025bb587de8a4897b6646fbd696f3"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.focus_node",
+      "label": "Focus next or previous shape",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Tab/Shift-Tab changes the intended selection and canvas/accessible selection caption without mutating content.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 685,
+          "anchor": "input.editor.focus_next(event.shift_key())",
+          "line_sha256": "57f3335508f02ea13520d33196ae6c0844aa52efbc602c8f99dfaebcb41b0d6b"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 203,
+          "anchor": "input.editor.focus_next(modifiers.shift)",
+          "line_sha256": "8271897974f5ca8919a27695d9ce20ff353aa8628820206d075efcd65be7ccff"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.nudge",
+      "label": "Nudge selected shapes",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Arrow/Shift-Arrow moves intended selection and bindings, commits and renders; empty/frozen selection remains safe.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 698,
+          "anchor": "input.editor.nudge(delta, now())",
+          "line_sha256": "3036585944d84ef0e3aff74eb4013f35d1dce5e945fa2f97c82cc66a1db28539"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 209,
+          "anchor": "let amount = if modifiers.shift",
+          "line_sha256": "9b772063ebd006e47c488c1734d5041d725d15ebfb1cb338fbe1df39d32aa352"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.cancel_gesture",
+      "label": "Cancel an unfinished gesture",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Escape or pointer cancellation removes draft/move/selection preview without a durable mutation and releases interaction state.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 653,
+          "anchor": "input.cancel();",
+          "line_sha256": "179843ad2bf13b5c002d473e6470fc182ff91104e3bdd31adf3fb202aee1f793"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 170,
+          "anchor": "input.cancel();",
+          "line_sha256": "7f77765ea9ff5007acf82a0614b816eb7a5097aa5a653730d02ed10109c154e7"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.point_select",
+      "label": "Select shapes by pointer",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Hit selection/additive toggle and focus render correctly under zoom/rotation/group/overlap and touch/mouse inputs.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 735,
+          "anchor": "on:pointerdown=",
+          "line_sha256": "821b03216b045efa9fde2220d2e639c0f252406a2a2f76a746f2a0257873c40b"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 307,
+          "anchor": ".on_mouse_down(MouseButton::Left",
+          "line_sha256": "3d192bdd6c3c3cf3b1888cf18f56893b19876ca212642d6d617ad98a09839744"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.box_select",
+      "label": "Select shapes with a marquee",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Drag selection and additive prior selection are correct through completion/cancel; no content revision is written.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-models/src/whiteboard/input.rs",
+          "source_sha256": "14da07efb34f70a01f5faca36f79659a4f1eee68d14f665e6fdfe703629a22fd",
+          "line": 152,
+          "anchor": "Gesture::Box { world, previous } =>",
+          "line_sha256": "979aba48f96d99bd0e83cda4e142b68c40d82ff2ae10713d0e8171431033a3d0"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 307,
+          "anchor": "view.dragging=true",
+          "line_sha256": "3d192bdd6c3c3cf3b1888cf18f56893b19876ca212642d6d617ad98a09839744"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.move_selection",
+      "label": "Drag a selection",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Every live preview stays responsive; pointer-up produces exactly the intended committed edit, including snaps and connector/group bindings.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-models/src/whiteboard/input.rs",
+          "source_sha256": "14da07efb34f70a01f5faca36f79659a4f1eee68d14f665e6fdfe703629a22fd",
+          "line": 145,
+          "anchor": "Gesture::Move { world } =>",
+          "line_sha256": "5200e0e7bf3e2b063557a80862c6acfdab54e4904a509dbbfdf759e49f3ecf0a"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 307,
+          "anchor": "view.dragging=true",
+          "line_sha256": "3d192bdd6c3c3cf3b1888cf18f56893b19876ca212642d6d617ad98a09839744"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [
+        "whiteboard-rendering-existing-2026-11-14"
+      ],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false,
+      "related_bounded_measurement_scope": "Historical opt-in production painter adapter using scripted camera/selection updates. Throughput, pipeline duration and native scheduling are separate; this does not accept the complete UI/store action."
+    },
+    {
+      "id": "whiteboard.pan",
+      "label": "Pan the board",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Hand/middle-button/right-button where supported and unmodified wheel update camera/rendering without board content writes.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 737,
+          "anchor": "on:wheel=",
+          "line_sha256": "704101c99c1564585731c0323d024c17cc6df83fce8c20b507c9ab8db1fede9d"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 309,
+          "anchor": ".on_scroll_wheel(",
+          "line_sha256": "6c1b8a87fc4d960e2628176d7072422eeb82dce0f4c3abe691759d29eaa3c0f1"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [
+        "whiteboard-rendering-existing-2026-11-14"
+      ],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false,
+      "related_bounded_measurement_scope": "Historical opt-in production painter adapter using scripted camera/selection updates. Throughput, pipeline duration and native scheduling are separate; this does not accept the complete UI/store action."
+    },
+    {
+      "id": "whiteboard.zoom",
+      "label": "Zoom around the pointer",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Modified wheel updates a clamped camera around the pointer and final canvas remains usable; zoom bounds and input devices are exercised.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 737,
+          "anchor": "input.editor.camera.zoom_at(",
+          "line_sha256": "704101c99c1564585731c0323d024c17cc6df83fce8c20b507c9ab8db1fede9d"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 309,
+          "anchor": "input.editor.camera.zoom_at(",
+          "line_sha256": "6c1b8a87fc4d960e2628176d7072422eeb82dce0f4c3abe691759d29eaa3c0f1"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.draw",
+      "label": "Create shapes with a gesture or keyboard",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Active drawing tool previews correctly and commits the intended shape/bindings at gesture end; keyboard creation and text entry are separate measured phases.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-models/src/whiteboard/input.rs",
+          "source_sha256": "14da07efb34f70a01f5faca36f79659a4f1eee68d14f665e6fdfe703629a22fd",
+          "line": 202,
+          "anchor": "pub fn pointer_up(",
+          "line_sha256": "a1ee946db3f6bfd6d3cfbbaa1ba5ec5dd25254bfcaf1fac7a640b513736d10ca"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 177,
+          "anchor": "\"enter\" =>",
+          "line_sha256": "a99d31f86331b19a04ff48b29350d832118a2300eb0d97d574db0d1ef9fe47b0"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.accept_import",
+      "label": "Save an imported preview as a private board",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Reviewed imported content and referenced assets commit under a new private ID and open without altering the source/original board.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 747,
+          "anchor": "\"Save as new board\"",
+          "line_sha256": "7dab65a06ba8cdd2a86715da43d38cc937002cb814e1de3189c214c2ab29fb23"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 521,
+          "anchor": "\"board-import-accept\"",
+          "line_sha256": "1e5d81e0c708fdf1f7a5592e6b8dbef9a71303294eb9ad06cacee61f7bce7355"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.cancel_import",
+      "label": "Cancel an imported preview",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Preview closes without adding a board, leaving original data and recovery state unchanged.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 747,
+          "anchor": "ui.preview.set(None)>\"Cancel\"",
+          "line_sha256": "7dab65a06ba8cdd2a86715da43d38cc937002cb814e1de3189c214c2ab29fb23"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 524,
+          "anchor": "\"board-import-cancel\"",
+          "line_sha256": "0cc41fa21df201b13f7e95687bfef57ece1188eb99e49eaa7586db8975314aca"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.follow_link",
+      "label": "Follow a shape link",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Correct typed target and project context open; target view/file/OS URL handoff completes or an explicit missing-target error appears.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 829,
+          "anchor": "fn open_link(",
+          "line_sha256": "b9da1f86e9aa53f490300fb41a6054c9140594bc4e4cac699e020c64190992fc"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/whiteboard_ui.rs",
+          "source_sha256": "be8a3b267b2acdf5144796bf9c67c4e02026e12df742f61f08501358bc885b53",
+          "line": 42,
+          "anchor": "WhiteboardEvent::OpenLink(",
+          "line_sha256": "b2b77f725200b645c88b214391116dcf08b03b00b3d1550d7ce7d625d84031e3"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.review_proposal",
+      "label": "Review an agent proposal",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Exact before/after preview and immutable operations/metadata become inspectable; stale or invalid proposal is clearly blocked without mutation.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/review.rs",
+          "source_sha256": "2d5f8a1a79b08bd71eb0154284caff45a0fe9f09574bc14d07e4f26fd6849ed4",
+          "line": 16,
+          "anchor": "pub(crate) fn ProposalReviews(",
+          "line_sha256": "1a8419f440dcdc8f5d78d3af0c1641e399089f103820214385f2b01ad9db5589"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/agent.rs",
+          "source_sha256": "018be7e5476aa78d47e4ecc4bedf67afc4e0459a144e2c6ebb39ce758577b257",
+          "line": 81,
+          "anchor": "pub(super) fn review(",
+          "line_sha256": "a1c8c51e40f2766e1318466226288e0d68a8358478378dee77c23a3e5d575393"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.accept_proposal",
+      "label": "Accept an exact agent proposal",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Only pending, current, saved proposal is committed; accepted revision/state and canvas agree, errors preserve recovery and release the frozen state.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/host.rs",
+          "source_sha256": "31fa0f7d6b0fb7f54d6c92ae1ce20f7ca3f7ad2aaed2f079dac01da3b52ec64b",
+          "line": 311,
+          "anchor": "pub fn accept(",
+          "line_sha256": "875bf73c047293c028db74269e59e514c7b99004e4a5965ff753d5ff12f84fb4"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/agent.rs",
+          "source_sha256": "018be7e5476aa78d47e4ecc4bedf67afc4e0459a144e2c6ebb39ce758577b257",
+          "line": 132,
+          "anchor": "pub(super) fn accept(",
+          "line_sha256": "48eabb7ae7dc0baff20048e2864f8b32d6fd8cb38493b90e254d0375df061c0d"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.reject_proposal",
+      "label": "Reject an agent proposal",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Pending status becomes rejected and preview closes without changing stored board content.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/review.rs",
+          "source_sha256": "2d5f8a1a79b08bd71eb0154284caff45a0fe9f09574bc14d07e4f26fd6849ed4",
+          "line": 29,
+          "anchor": "ProposalStatus::Rejected",
+          "line_sha256": "a184aba0cac1828c8e127ca8b2482c5180230fc0f638b5adcee8427e9a5ee218"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 494,
+          "anchor": "ProposalStatus::Rejected",
+          "line_sha256": "d183368fe01748fabc4468723a825af1b041909d92a507a4a66f7263f43e7ea6"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.save_chat_mermaid",
+      "label": "Save a chat diagram as a private board",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Previewed editable diagram and retained thread links commit as a private project board and become usable. The originating chat-renderer button remains outside this capture.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/review.rs",
+          "source_sha256": "2d5f8a1a79b08bd71eb0154284caff45a0fe9f09574bc14d07e4f26fd6849ed4",
+          "line": 69,
+          "anchor": "\"Save private board\"",
+          "line_sha256": "41106d00fcced47f69c0c4dbaacaa5ff179b4311ecaf145097a1eef5ba95215b"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog.rs",
+          "source_sha256": "8639e9d7a91131a2293ed231cba1c04cab84ba4d37ae5031f0731c8431c21697",
+          "line": 444,
+          "anchor": "pub fn open_mermaid(",
+          "line_sha256": "b84a8b931ac6614613fa78ee9e34642df860c078ea8ed098e636baa6dc4e21c2"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.dismiss_overlay",
+      "label": "Dismiss a board dialog or local error",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Target dialog/error closes, pending proposal status/content remain unchanged, and editor focus/keyboard behavior recover.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 745,
+          "anchor": "ui.dialog.set(None)",
+          "line_sha256": "75bf87db113091ae6d795340453c818259db742110c66669e7f4734fab8415de"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog/controls.rs",
+          "source_sha256": "f372258fe5d671ef46104d98b7bd1917d5989dd9276fbce1610d8ebbb6850cf0",
+          "line": 336,
+          "anchor": "\"board-dialog-cancel\"",
+          "line_sha256": "b598132b2129be66940891cec1ed1e0ce9b7944e7f6e591cd5bbd8a1416b93f1"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.resize",
+      "label": "Resize the board viewport",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Canvas backing size/DPR and viewport transform update; existing content/selection remain correct and the next interaction is usable.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 591,
+          "anchor": "web_sys::ResizeObserver::new(",
+          "line_sha256": "4d600a5dd4f5e775de5ae0592cd1ca2c7fa4bd2327bcbc7af02ce7823df600da"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard.rs",
+          "source_sha256": "0d581e5ee7944ce347d345f5b263a17073193a1d9388787f83ffa9c8842b87d0",
+          "line": 258,
+          "anchor": "bounds.set(area)",
+          "line_sha256": "1e90acd6907b35c7a195d1a520fac2095eb69a1dd31c1a55ca840b4578928c3b"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "whiteboard.return_focus",
+      "label": "Return to a whiteboard window",
+      "review_status": "immediate_callbacks_and_completion_contracts_reviewed",
+      "completion_boundary_to_verify": "Visible board and guarded source verification settle while edits remain intact. App activation/source hashing/network work retain separate boundaries.",
+      "required_variants": "Web desktop/touch and native; toolbar/local palette/available keyboard aliases; empty/small/large valid boards; assets/groups/bindings; stale revisions; read-only/frozen state; invalid input; route/project switch; cancellation/retry and real persistence failures. Measure command/dialog/commit/render stages separately and exclude human think time explicitly.",
+      "entrypoints": [
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "web_or_shared_input",
+          "source": "bruhs-web/src/whiteboard/ui.rs",
+          "source_sha256": "2a15434df2ef4a3ea8bd2116dd4d764c02b383e6fb675fa6b4d9088cb0d0b8db",
+          "line": 551,
+          "anchor": "window_event_listener(leptos::ev::focus",
+          "line_sha256": "72cdd3f8ea57f984541bd785662f76a2335939bf7b1c47332b28a6ef720e0df2"
+        },
+        {
+          "source_profile": "whiteboard_actions_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/whiteboard/catalog.rs",
+          "source_sha256": "8639e9d7a91131a2293ed231cba1c04cab84ba4d37ae5031f0731c8431c21697",
+          "line": 66,
+          "anchor": "cx.observe_window_activation(",
+          "line_sha256": "480667e9a5bcf86be07cf15845e9e6e8e6d07984ad9b41cf2c066792227d0895"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
     }
   ],
   "remaining": [
@@ -4188,6 +6803,13 @@
     "No complete-action timing, real-provider/network/mobile or matchedT3 acceptance is added.",
     "Connection authorization and provider routes depend on parameters; HTTP identity is not proof that all branches were measured.",
     "Compose/send are being integrated separately and are outside this reviewed captured read-control catalogue.",
-    "Other UI/menu/keyboard/form/OS actions and downstream persistence, network, failure and recovery variants remain to classify."
-  ]
+    "Other UI/menu/keyboard/form/OS actions and downstream persistence, network, failure and recovery variants remain to classify.",
+    "All62 previous intent records and three previous source profiles remain exact;66 new whiteboard requirements are source-only, with no runtime/timing acceptance.",
+    "35 board actions plus10 tool declarations are reviewed through immediate dispatch. Twenty-one additional intents cover gestures, dialogs, lifecycle and proposal transitions; other fields, global chat entrypoints and downstream paths remain to classify.",
+    "Tool selection is distinct from drawing. Import preview is distinct from saving it. Browser download handoff and native file completion require separate clocks and byte verification."
+  ],
+  "prior_discovery_snapshot": {
+    "path": "target/performance-discovery11-inventory.json",
+    "sha256": "9bcd6819ca4c510294d25eebb7ad46fbbfcc2b31c5206648115e7c838fe3295d"
+  }
 }

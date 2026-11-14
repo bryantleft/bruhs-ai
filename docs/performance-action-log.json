@@ -6,23 +6,23 @@
   "counts": {
     "source_entrypoints": 376,
     "binding_search_references": 1383,
-    "partial_evidence_records": 245,
-    "normalized_observations": 2236,
+    "partial_evidence_records": 246,
+    "normalized_observations": 2296,
     "request_count_observations": 34,
     "whole_action_acceptances": 0,
     "verified_faster_t3_targets": 0,
-    "reviewed_semantic_intents": 62,
+    "reviewed_semantic_intents": 128,
     "response_body_byte_observations": 40
   },
   "inputs_sha256": {
-    "ledger": "f2bc694b1ce5d041988490f9a4d0787514f338b29ef302b22aeae4b48fb2dea4",
+    "ledger": "e943d11b5b4e33800f678d3f35c001ce936c6ebc8b69b215ed2b3face417b247",
     "inventory": "9f48e42f8a5fed0ff07ea97c98bd390d547ad02260c9578d0bcf57a9b383660f",
     "comparisons": "76437ddeceaf77c7e1332f6a0b418c7ebe653772c90f25a88dbc88821835aed0",
-    "semantic_catalogue": "85ce0be85d821977270237232781349753029a1905b626bc003abdbc97fd5308",
     "network_body_observations": {
-      "mail_navigation": "e3b290f1d8fbfedc07d6c5338c183df034eb1f941bc486adce431ba158b574cd",
-      "http_error": "e939be8b163160ad986b428fb81162c3c75ce5dbb222d1e92027607dd6750c26"
-    }
+      "target/performance-mail-cancel1/network-body-observations.json": "e3b290f1d8fbfedc07d6c5338c183df034eb1f941bc486adce431ba158b574cd",
+      "target/performance-http-error1/network-body-observations.json": "e939be8b163160ad986b428fb81162c3c75ce5dbb222d1e92027607dd6750c26"
+    },
+    "semantic_catalogue": "e408ca7ebc85dc73c7ff5218797c6334968df433efc5131501abb191c217a828"
   },
   "actions": [
     {
@@ -6548,10 +6548,73 @@
       "line": 25,
       "semantic_inventory_review": "pending",
       "source_status": "requires_evidence_mapping",
-      "evidence_ids": [],
-      "normalized_observation_ids": [],
+      "evidence_ids": [
+        "whiteboard-rendering-existing-2026-11-14"
+      ],
+      "normalized_observation_ids": [
+        "whiteboard-rendering-0",
+        "whiteboard-rendering-1",
+        "whiteboard-rendering-2",
+        "whiteboard-rendering-3",
+        "whiteboard-rendering-4",
+        "whiteboard-rendering-5",
+        "whiteboard-rendering-6",
+        "whiteboard-rendering-7",
+        "whiteboard-rendering-8",
+        "whiteboard-rendering-9",
+        "whiteboard-rendering-10",
+        "whiteboard-rendering-11",
+        "whiteboard-rendering-12",
+        "whiteboard-rendering-13",
+        "whiteboard-rendering-14",
+        "whiteboard-rendering-15",
+        "whiteboard-rendering-16",
+        "whiteboard-rendering-17",
+        "whiteboard-rendering-18",
+        "whiteboard-rendering-19",
+        "whiteboard-rendering-20",
+        "whiteboard-rendering-21",
+        "whiteboard-rendering-22",
+        "whiteboard-rendering-23",
+        "whiteboard-rendering-24",
+        "whiteboard-rendering-25",
+        "whiteboard-rendering-26",
+        "whiteboard-rendering-27",
+        "whiteboard-rendering-28",
+        "whiteboard-rendering-29",
+        "whiteboard-rendering-30",
+        "whiteboard-rendering-31",
+        "whiteboard-rendering-32",
+        "whiteboard-rendering-33",
+        "whiteboard-rendering-34",
+        "whiteboard-rendering-35",
+        "whiteboard-rendering-36",
+        "whiteboard-rendering-37",
+        "whiteboard-rendering-38",
+        "whiteboard-rendering-39",
+        "whiteboard-rendering-40",
+        "whiteboard-rendering-41",
+        "whiteboard-rendering-42",
+        "whiteboard-rendering-43",
+        "whiteboard-rendering-44",
+        "whiteboard-rendering-45",
+        "whiteboard-rendering-46",
+        "whiteboard-rendering-47",
+        "whiteboard-rendering-48",
+        "whiteboard-rendering-49",
+        "whiteboard-rendering-50",
+        "whiteboard-rendering-51",
+        "whiteboard-rendering-52",
+        "whiteboard-rendering-53",
+        "whiteboard-rendering-54",
+        "whiteboard-rendering-55",
+        "whiteboard-rendering-56",
+        "whiteboard-rendering-57",
+        "whiteboard-rendering-58",
+        "whiteboard-rendering-59"
+      ],
       "request_count_observation_ids": [],
-      "timing_status": "measurement_pending",
+      "timing_status": "bounded_variant_observations",
       "whole_action_acceptance": false
     },
     {
@@ -116632,6 +116695,2046 @@
       "t3_comparable": false,
       "wire_bytes": null,
       "evidence_id": "web-fold-sharing-send-stop-ui-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-0",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 0.8784509144660967,
+        "p95": 0.8996937466595404,
+        "p99": 0.8996937466595404,
+        "mean": 0.8808165612585249
+      },
+      "min": 0.860597137014315,
+      "max": 0.8996937466595404,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        0
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-1",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 6.584947058823529,
+        "p95": 6.733312,
+        "p99": 6.733312,
+        "mean": 6.55277625942203
+      },
+      "min": 6.120825454545455,
+      "max": 6.733312,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        1
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-2",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 15.925715715833181,
+        "p95": 16.094173026659696,
+        "p99": 16.094173026659696,
+        "mean": 15.939674266057269
+      },
+      "min": 15.801283797729619,
+      "max": 16.094173026659696,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        2
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-3",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 0.8750200872442252,
+        "p95": 0.9098294405214558,
+        "p99": 0.9098294405214558,
+        "mean": 0.8741983517416615
+      },
+      "min": 0.8485283687943262,
+      "max": 0.9098294405214558,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        3
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-4",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 6.575600335698482,
+        "p95": 6.815093117408907,
+        "p99": 6.815093117408907,
+        "mean": 6.549401270631462
+      },
+      "min": 5.78479381443299,
+      "max": 6.815093117408907,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        4
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-5",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 15.65253543583988,
+        "p95": 15.81228057553957,
+        "p99": 15.81228057553957,
+        "mean": 15.647326315196675
+      },
+      "min": 15.431786835443038,
+      "max": 15.81228057553957,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        5
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-6",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 1.1697380562422293,
+        "p95": 1.1989693732193731,
+        "p99": 1.1989693732193731,
+        "mean": 1.1673152074429674
+      },
+      "min": 1.1379042119565217,
+      "max": 1.1989693732193731,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        6
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-7",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 6.689884462151394,
+        "p95": 6.927279835390946,
+        "p99": 6.927279835390946,
+        "mean": 6.599263682169464
+      },
+      "min": 5.969336879432625,
+      "max": 6.927279835390946,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        7
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-8",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "primary",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 15.401465463539935,
+        "p95": 15.473558303886925,
+        "p99": 15.473558303886925,
+        "mean": 15.400072481192254
+      },
+      "min": 15.349868512110726,
+      "max": 15.473558303886925,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        8
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-9",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 2.219651774637157,
+        "p95": 2.431055152394775,
+        "p99": 2.431055152394775,
+        "mean": 2.2417134095702833
+      },
+      "min": 2.1069132075471697,
+      "max": 2.431055152394775,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        9
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-10",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 7.827084112149533,
+        "p95": 8.01584761904762,
+        "p99": 8.01584761904762,
+        "mean": 7.797574578232513
+      },
+      "min": 7.415273127753304,
+      "max": 8.01584761904762,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        10
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-11",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 17.47453564246585,
+        "p95": 18.610646376811594,
+        "p99": 18.610646376811594,
+        "mean": 17.581838231025845
+      },
+      "min": 17.360254172015406,
+      "max": 18.610646376811594,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        11
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-12",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 4.045847142565419,
+        "p95": 4.3402630208333335,
+        "p99": 4.3402630208333335,
+        "mean": 4.062188721157814
+      },
+      "min": 3.852009153318078,
+      "max": 4.3402630208333335,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        12
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-13",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 7.902028700504916,
+        "p95": 8.130053658536585,
+        "p99": 8.130053658536585,
+        "mean": 7.832421744901568
+      },
+      "min": 7.282382608695652,
+      "max": 8.130053658536585,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        13
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-14",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 18.545343602186115,
+        "p95": 18.920412987012988,
+        "p99": 18.920412987012988,
+        "mean": 18.53074421484333
+      },
+      "min": 18.221643835616437,
+      "max": 18.920412987012988,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        14
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-15",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 25.984146205357142,
+        "p95": 28.362473684210528,
+        "p99": 28.362473684210528,
+        "mean": 26.120465318180592
+      },
+      "min": 24.37805970149254,
+      "max": 28.362473684210528,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        15
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-16",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 25.984146205357142,
+        "p95": 28.362473684210528,
+        "p99": 28.362473684210528,
+        "mean": 26.120465318180592
+      },
+      "min": 24.378059701492536,
+      "max": 28.362473684210528,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        16
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-17",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "primary",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 12,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 49.27443605769231,
+        "p95": 53.56236206896552,
+        "p99": 53.56236206896552,
+        "mean": 49.48632320441373
+      },
+      "min": 45.92808823529412,
+      "max": 53.56236206896552,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        17
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-18",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.333305,
+        "p95": 8.374761194029851,
+        "p99": 8.374761194029851,
+        "mean": 8.347123225538972
+      },
+      "min": 8.333303482587064,
+      "max": 8.374761194029851,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        18
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-19",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.725973821989529,
+        "p95": 8.815757894736842,
+        "p99": 8.815757894736842,
+        "mean": 8.71004492598362
+      },
+      "min": 8.58840306122449,
+      "max": 8.815757894736842,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        19
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-20",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 18.633574257425742,
+        "p95": 18.870618811881187,
+        "p99": 18.870618811881187,
+        "mean": 18.70193997832619
+      },
+      "min": 18.60162686567164,
+      "max": 18.870618811881187,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        20
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-21",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.333303482587064,
+        "p95": 8.333308457711443,
+        "p99": 8.333308457711443,
+        "mean": 8.333305140961857
+      },
+      "min": 8.333303482587064,
+      "max": 8.333308457711443,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        21
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-22",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 9.20326923076923,
+        "p95": 9.305522222222223,
+        "p99": 9.305522222222223,
+        "mean": 9.108183115909432
+      },
+      "min": 8.815757894736842,
+      "max": 9.305522222222223,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        22
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-23",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 18.327336633663368,
+        "p95": 18.674772277227724,
+        "p99": 18.674772277227724,
+        "mean": 18.36348184818482
+      },
+      "min": 18.088336633663367,
+      "max": 18.674772277227724,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        23
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-24",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.333303482587064,
+        "p95": 8.333303482587064,
+        "p99": 8.333303482587064,
+        "mean": 8.319552156708207
+      },
+      "min": 8.292049504950494,
+      "max": 8.333303482587064,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        24
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-25",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.723927083333335,
+        "p95": 9.682046242774566,
+        "p99": 9.682046242774566,
+        "mean": 8.998562048873573
+      },
+      "min": 8.58971282051282,
+      "max": 9.682046242774566,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        25
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-26",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "normal",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 18.804049504950495,
+        "p95": 18.83684236453202,
+        "p99": 18.83684236453202,
+        "mean": 18.406322042302754
+      },
+      "min": 17.578074257425744,
+      "max": 18.83684236453202,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        26
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-27",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.333305,
+        "p95": 8.333308457711443,
+        "p99": 8.333308457711443,
+        "mean": 8.33322106965174
+      },
+      "min": 8.333049751243781,
+      "max": 8.333308457711443,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        27
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-28",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.333305000000001,
+        "p95": 8.333308457711443,
+        "p99": 8.333308457711443,
+        "mean": 8.333221069651742
+      },
+      "min": 8.333049751243781,
+      "max": 8.333308457711443,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        28
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-29",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 19.2265,
+        "p95": 19.228129353233832,
+        "p99": 19.228129353233832,
+        "mean": 19.219028266259464
+      },
+      "min": 19.202455445544555,
+      "max": 19.228129353233832,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        29
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-30",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.333303482587064,
+        "p95": 8.333308457711443,
+        "p99": 8.333308457711443,
+        "mean": 8.33328192371476
+      },
+      "min": 8.33323383084577,
+      "max": 8.333308457711443,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        30
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-31",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.333303482587066,
+        "p95": 8.333308457711443,
+        "p99": 8.333308457711443,
+        "mean": 8.33328192371476
+      },
+      "min": 8.33323383084577,
+      "max": 8.333308457711443,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        31
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-32",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 19.226143564356438,
+        "p95": 19.247871287128714,
+        "p99": 19.247871287128714,
+        "mean": 19.229097359735974
+      },
+      "min": 19.213277227722774,
+      "max": 19.247871287128714,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        32
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-33",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 27.18562295081967,
+        "p95": 27.361016666666668,
+        "p99": 27.361016666666668,
+        "mean": 27.16366320582878
+      },
+      "min": 26.94435,
+      "max": 27.361016666666668,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        33
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-34",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 27.185622950819674,
+        "p95": 27.361016666666668,
+        "p99": 27.361016666666668,
+        "mean": 27.16366320582878
+      },
+      "min": 26.94435,
+      "max": 27.361016666666668,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        34
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-35",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "normal",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 3,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 48.58639344262295,
+        "p95": 48.58644262295082,
+        "p99": 48.58644262295082,
+        "mean": 48.51061202185792
+      },
+      "min": 48.359,
+      "max": 48.58644262295082,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        35
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-36",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/pan",
+      "operation": "pan",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 2.31024985958574,
+        "p95": 2.3328621169916435,
+        "p99": 2.3328621169916435,
+        "mean": 2.31024985958574
+      },
+      "min": 2.2876376021798364,
+      "max": 2.3328621169916435,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        36
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-37",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/pan",
+      "operation": "pan",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 7.324547184925237,
+        "p95": 7.411482300884956,
+        "p99": 7.411482300884956,
+        "mean": 7.324547184925237
+      },
+      "min": 7.237612068965517,
+      "max": 7.411482300884956,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        37
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-38",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/pan",
+      "operation": "pan",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 16.50273723425392,
+        "p95": 16.570045897079275,
+        "p99": 16.570045897079275,
+        "mean": 16.50273723425392
+      },
+      "min": 16.43542857142857,
+      "max": 16.570045897079275,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        38
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-39",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/single",
+      "operation": "single",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 2.385183948863636,
+        "p95": 2.3910923295454545,
+        "p99": 2.3910923295454545,
+        "mean": 2.385183948863636
+      },
+      "min": 2.3792755681818183,
+      "max": 2.3910923295454545,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        39
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-40",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/single",
+      "operation": "single",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 7.115125,
+        "p95": 7.13275,
+        "p99": 7.13275,
+        "mean": 7.115125
+      },
+      "min": 7.0975,
+      "max": 7.13275,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        40
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-41",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/single",
+      "operation": "single",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 16.601185106382978,
+        "p95": 16.641178723404256,
+        "p99": 16.641178723404256,
+        "mean": 16.601185106382978
+      },
+      "min": 16.5611914893617,
+      "max": 16.641178723404256,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        41
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-42",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/group",
+      "operation": "group",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_completed_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 6.924431045969354,
+        "p95": 7.067493670886076,
+        "p99": 7.067493670886076,
+        "mean": 6.924431045969354
+      },
+      "min": 6.7813684210526315,
+      "max": 7.067493670886076,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        42
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-43",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/group",
+      "operation": "group",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 8.074571926400893,
+        "p95": 8.210764705882353,
+        "p99": 8.210764705882353,
+        "mean": 8.074571926400893
+      },
+      "min": 7.938379146919432,
+      "max": 8.210764705882353,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        43
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-44",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/group",
+      "operation": "group",
+      "group": "scale",
+      "variant": "rust",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 21.156222994036327,
+        "p95": 21.417260504201682,
+        "p99": 21.417260504201682,
+        "mean": 21.156222994036327
+      },
+      "min": 20.895185483870968,
+      "max": 21.417260504201682,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        44
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-45",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/pan",
+      "operation": "pan",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 14.213790179910045,
+        "p95": 14.275321739130435,
+        "p99": 14.275321739130435,
+        "mean": 14.213790179910045
+      },
+      "min": 14.152258620689656,
+      "max": 14.275321739130435,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        45
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-46",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/pan",
+      "operation": "pan",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 14.213790179910045,
+        "p95": 14.275321739130435,
+        "p99": 14.275321739130435,
+        "mean": 14.213790179910045
+      },
+      "min": 14.152258620689656,
+      "max": 14.275321739130435,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        46
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-47",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/pan",
+      "operation": "pan",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 42.866949712643674,
+        "p95": 43.022666666666666,
+        "p99": 43.022666666666666,
+        "mean": 42.866949712643674
+      },
+      "min": 42.71123275862069,
+      "max": 43.022666666666666,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        47
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-48",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/single",
+      "operation": "single",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 47.54886764705883,
+        "p95": 48.529264705882355,
+        "p99": 48.529264705882355,
+        "mean": 47.54886764705883
+      },
+      "min": 46.56847058823529,
+      "max": 48.529264705882355,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        48
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-49",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/single",
+      "operation": "single",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 47.54886764705882,
+        "p95": 48.52926470588235,
+        "p99": 48.52926470588235,
+        "mean": 47.54886764705882
+      },
+      "min": 46.56847058823529,
+      "max": 48.52926470588235,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        49
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-50",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/single",
+      "operation": "single",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 73.26205714285715,
+        "p95": 75.17777142857143,
+        "p99": 75.17777142857143,
+        "mean": 73.26205714285715
+      },
+      "min": 71.34634285714286,
+      "max": 75.17777142857143,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        50
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-51",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/group",
+      "operation": "group",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_completed_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 384.7211666666667,
+        "p95": 388.8876666666667,
+        "p99": 388.8876666666667,
+        "mean": 384.7211666666667
+      },
+      "min": 380.55466666666666,
+      "max": 388.8876666666667,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        51
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-52",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/group",
+      "operation": "group",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_unique_feedback_interval_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 384.7211666666667,
+        "p95": 388.8876666666667,
+        "p99": 388.8876666666667,
+        "mean": 384.7211666666667
+      },
+      "min": 380.55466666666666,
+      "max": 388.8876666666667,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        52
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-53",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/group",
+      "operation": "group",
+      "group": "scale",
+      "variant": "tldraw",
+      "metric": "mean_pipeline_latency_ms",
+      "samples": 2,
+      "sample_level": "per_member_workload_mean",
+      "quantiles": {
+        "p50": 412.653125,
+        "p95": 413.93775,
+        "p99": 413.93775,
+        "mean": 412.653125
+      },
+      "min": 411.3685,
+      "max": 413.93775,
+      "measurement_level": "instrumented_rendering_variant",
+      "scope": "Quantiles are across member workload means, not individual frames or a population latency tail. Metrics and workloads reuse members; normal-vsync and scaling cohorts remain separate.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        53
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-54",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/pan",
+      "operation": "pan",
+      "group": "native_dev",
+      "variant": "rust_gpui",
+      "metric": "callback_interval_ms",
+      "samples": 180,
+      "sample_level": "display_link_callback_interval",
+      "quantiles": {
+        "p50": 8.330187500000001,
+        "p95": 8.824958,
+        "p99": 28.816833,
+        "mean": 8.7319338
+      },
+      "min": 2.7905,
+      "max": 48.950250000000004,
+      "measurement_level": "native_scheduling_variant",
+      "scope": "Sequential correlated callback intervals from one native dev probe, including scheduling; no native/browser ratio or GPU/input latency acceptance.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        54
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-55",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/single",
+      "operation": "single",
+      "group": "native_dev",
+      "variant": "rust_gpui",
+      "metric": "callback_interval_ms",
+      "samples": 180,
+      "sample_level": "display_link_callback_interval",
+      "quantiles": {
+        "p50": 8.331667,
+        "p95": 8.765333,
+        "p99": 8.949416,
+        "mean": 8.332231016666666
+      },
+      "min": 6.908959,
+      "max": 9.296958,
+      "measurement_level": "native_scheduling_variant",
+      "scope": "Sequential correlated callback intervals from one native dev probe, including scheduling; no native/browser ratio or GPU/input latency acceptance.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        55
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-56",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "1000 shapes/group",
+      "operation": "group",
+      "group": "native_dev",
+      "variant": "rust_gpui",
+      "metric": "callback_interval_ms",
+      "samples": 180,
+      "sample_level": "display_link_callback_interval",
+      "quantiles": {
+        "p50": 8.320646,
+        "p95": 8.791333,
+        "p99": 9.123249999999999,
+        "mean": 8.332702316666667
+      },
+      "min": 7.610666,
+      "max": 9.969292,
+      "measurement_level": "native_scheduling_variant",
+      "scope": "Sequential correlated callback intervals from one native dev probe, including scheduling; no native/browser ratio or GPU/input latency acceptance.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        56
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-57",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/pan",
+      "operation": "pan",
+      "group": "native_dev",
+      "variant": "rust_gpui",
+      "metric": "callback_interval_ms",
+      "samples": 180,
+      "sample_level": "display_link_callback_interval",
+      "quantiles": {
+        "p50": 15.435917,
+        "p95": 16.698625000000003,
+        "p99": 17.358917,
+        "mean": 15.687013888888888
+      },
+      "min": 2.783541,
+      "max": 52.57125,
+      "measurement_level": "native_scheduling_variant",
+      "scope": "Sequential correlated callback intervals from one native dev probe, including scheduling; no native/browser ratio or GPU/input latency acceptance.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        57
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-58",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/single",
+      "operation": "single",
+      "group": "native_dev",
+      "variant": "rust_gpui",
+      "metric": "callback_interval_ms",
+      "samples": 180,
+      "sample_level": "display_link_callback_interval",
+      "quantiles": {
+        "p50": 17.319063,
+        "p95": 18.063375,
+        "p99": 18.353417,
+        "mean": 17.36120948888889
+      },
+      "min": 15.600875,
+      "max": 18.380917,
+      "measurement_level": "native_scheduling_variant",
+      "scope": "Sequential correlated callback intervals from one native dev probe, including scheduling; no native/browser ratio or GPU/input latency acceptance.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        58
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
+    },
+    {
+      "observation_id": "whiteboard-rendering-59",
+      "kind": "view",
+      "id": "Whiteboards",
+      "unit": "ms",
+      "workload": "10000 shapes/group",
+      "operation": "group",
+      "group": "native_dev",
+      "variant": "rust_gpui",
+      "metric": "callback_interval_ms",
+      "samples": 180,
+      "sample_level": "display_link_callback_interval",
+      "quantiles": {
+        "p50": 35.748917000000006,
+        "p95": 37.496625,
+        "p99": 39.936083999999994,
+        "mean": 36.04316273333333
+      },
+      "min": 34.45125,
+      "max": 54.932833,
+      "measurement_level": "native_scheduling_variant",
+      "scope": "Sequential correlated callback intervals from one native dev probe, including scheduling; no native/browser ratio or GPU/input latency acceptance.",
+      "raw_artifact": "target/performance-whiteboard-actions1/existing-timing-rows.json",
+      "raw_sha256": "a3d01d9a3a8fc670f8809897fa9c9588ab939c066167e8dc0b9bc738a8fec401",
+      "raw_pointer": [
+        "rows",
+        59
+      ],
+      "run_receipt": "target/performance-whiteboard-actions1/existing-benchmark-check.json",
+      "run_receipt_sha256": "aee09bdf16ac461c5a32794e35e7938b6af0820c1d18bb6f5c570d9b00d7bf72",
+      "whole_action_acceptance": false,
+      "t3_comparable": false,
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14"
     }
   ],
   "request_count_observations": [
@@ -119329,6 +121432,18 @@
         900
       ],
       "network": "Real private loopback HTTP/SSE and local reload-capable ACP; no shaped link or real AI provider."
+    },
+    "whiteboard-rendering-existing-2026-11-14": {
+      "source": "Historical owner-recorded environment; no new sampling.",
+      "browser": {
+        "protocolVersion": "1.3",
+        "product": "Chrome/157.0.8103.52",
+        "revision": "@0985600c06a688b9c669e74afde7dacd5aaed047",
+        "userAgent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/157.0.0.0 Safari/537.36",
+        "jsVersion": "15.7.112.23"
+      },
+      "hardware": "hw.model: Mac14,6\nhw.physicalcpu: 12\nhw.logicalcpu: 12\nhw.memsize: 34359738368\nmachdep.cpu.brand_string: Apple M2 Max",
+      "scope": "Instrumented completed compositor-frame intervals, not physical scanout or input latency."
     }
   },
   "t3_comparisons": [
@@ -119517,234 +121632,14 @@
       "build_receipt_sha256": "8e480529dedd7c84e390098345105256a750604f5ad886c0fd5511f39db604f8",
       "build_inputs_sha256": "075e24733d44b40d101a8932e13de909fa44134861ba06b0f5d92b9ffafd2333",
       "scope": "Web bindings byte-match193910 production capture; desktop bindings are current source only, without a paired native build claim."
+    },
+    "whiteboard_actions_20261114": {
+      "base_revision": "73a330ad061487405eed31989a699d736d1ef082",
+      "capture": "target/performance-whiteboard-actions1/source-capture.json",
+      "capture_sha256": "5b619def1b80a7fa09e387e1c507d5d7690a8789dbbc7f4434bf54c7d4c0dfad",
+      "source_files": 43,
+      "scope": "Source-only review of45 shared board command/tool declarations plus21 gesture/lifecycle/review intents. Source bytes, not a combined build or semantic completeness, are pinned."
     }
-  },
-  "landings": [
-    {
-      "id": "sqlite-meeting-save-main-2026-11-12",
-      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/2",
-      "merge_commit": "0de9416ab3708e046f08b401641ff52b9588c48a",
-      "tested_and_merged_tree": "17882b184bb12d2f3a08bddbc3f7664486c0508b",
-      "report": "docs/performance-goal-2026-11-09.md#sqlite-meeting-save-fix-landed-on-main"
-    },
-    {
-      "id": "capture-proxy-owned-body-2026-11-12",
-      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/3",
-      "merge_commit": "2d1a29a60e596e3ba17e6efb66ad15f2d998df5a",
-      "tested_and_merged_tree": "6a31da472666552b9e865ec927fd4132afba289c",
-      "report": "docs/performance-goal-2026-11-09.md#capture-proxy-copy-removal-landed"
-    },
-    {
-      "id": "terminal-replay-compression-2026-11-13",
-      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/4",
-      "merge_commit": "7e060f60ff41b378e05763230b2bf91f37a27e09",
-      "tested_and_merged_tree": "5056bf6ca1eb28a9743f66190e95c49611fc86bc",
-      "report": "docs/performance-goal-2026-11-09.md#terminal-replay-over-a-slow-connection"
-    },
-    {
-      "id": "conversation-header-content-codec-2026-11-13",
-      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/5",
-      "merge_commit": "0c140e8db1fef716c4ebb10276d91cbe6c322ae5",
-      "tested_and_merged_tree": "2dce15b6cdc32dbbb8c787fb8c32a8094597c9dd",
-      "report": "docs/performance-goal-2026-11-09.md#web-conversation-header-and-content-codec"
-    },
-    {
-      "id": "static-release-assets-2026-11-13",
-      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/6",
-      "merge_commit": "aa26ef9a9a0751cde8cc376e384f8846b36f7322",
-      "tested_and_merged_tree": "c0935dc69575da3328f55d7b0105ccd6100109e2",
-      "root_integration": {
-        "at": "2026-11-13T15:58:17.057341+00:00",
-        "owned_stash": "1980c4c989eeb41c5b1f5170a70ca284ba9b1d78",
-        "stash_paths": [
-          "README.md",
-          "bruhs-server/Cargo.toml",
-          "bruhs-server/src/main.rs",
-          "scripts/gate.sh"
-        ],
-        "stage": "complete",
-        "base": "0c140e8db1fef716c4ebb10276d91cbe6c322ae5",
-        "expected_main": "aa26ef9a9a0751cde8cc376e384f8846b36f7322",
-        "root_main": "aa26ef9a9a0751cde8cc376e384f8846b36f7322",
-        "overlap_three_way_outputs_match": true,
-        "unrelated_original_files_unchanged": true,
-        "original_index_state_empty": true,
-        "original_stashes_unchanged": true,
-        "owned_stash_dropped": true,
-        "authorized_main_paths": [
-          ".github/workflows/ci.yml",
-          "README.md",
-          "bruhs-server/Cargo.toml",
-          "bruhs-server/src/main.rs",
-          "bruhs-server/src/static_assets.rs",
-          "bruhs-server/src/static_assets/tests.rs",
-          "bruhs-web/Trunk.toml",
-          "bruhs-web/precompress.py",
-          "bruhs-web/tests/test_precompress.py",
-          "docs/performance-static-assets-2026-11-13.json",
-          "docs/performance-static-assets-2026-11-13.md",
-          "scripts/gate.sh"
-        ],
-        "authorized_audit_paths": [
-          "docs/performance-action-evidence.json",
-          "docs/performance-action-log.json",
-          "docs/performance-action-log.md",
-          "docs/performance-goal-2026-11-09.md",
-          "scripts/performance-action-log.py"
-        ]
-      },
-      "report": "docs/performance-static-assets-2026-11-13.md"
-    },
-    {
-      "id": "web-resume-export-2026-11-13",
-      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/7",
-      "merge_commit": "015c680c05df0a13045d63a4353978a6cc57f5d8",
-      "tested_and_merged_tree": "1c5d71fbb3ee20b8cc8ba614b1ab1dfd63cff398",
-      "root_integration": {
-        "status": "not_performed",
-        "reason": "Local main advanced with five unrelated commits while the isolated candidate was under review. Preserve the concurrent committed and uncommitted work; no reset, stash, merge, rebase or main update was performed.",
-        "root_head": "a6f72da6bda06241437c4ee6d1a603f83f637458",
-        "root_index_tree": "f91f0c996aabcce1dc9c2030b03ac224073c7ee1",
-        "ahead": 5,
-        "behind": 2,
-        "incoming_report_copied_identically": true,
-        "discovery_tool_already_identical": true,
-        "production_fix_present_in_local_main": false,
-        "preservation_receipt": "target/performance-export-resume1-root-preservation.json",
-        "concurrent_changes_after_snapshot": [
-          {
-            "path": "bruhs-desktop/src/views/reactive_automations.rs",
-            "before": "6f302616b4ac8c156e94d9a8718976d0f69ba95ac63d0832e5467c7f5af27ad9",
-            "after": "006104c5bb9bbc8af0d18a3f6b8015b768e97ad5592c9ab1d795e361788a1d47"
-          },
-          {
-            "path": "bruhs-web/src/components/reactive_automations.rs",
-            "before": "cf9c01e0c662da481481d149368e376fde5e185a7431e4a0628dfe3da5dd1450",
-            "after": "ee92aa3009056eaf1baed80387cd7b5d052cb051c756d9abcbbbf0b95ca8259e"
-          },
-          {
-            "path": "bruhs-web/tests/reactive_agents_browser.mjs",
-            "before": "ed67b6d6663a5eaef8cde820e092dcde00b5cb2a0cae51f92e9aad472f29b694",
-            "after": "d00e1af8d04280a4781d268adc1093a000183953b12de5235077053fafcbf0ad"
-          }
-        ]
-      },
-      "report": "docs/performance-resume-export-2026-11-13.md"
-    },
-    {
-      "id": "web-chat-mount-2026-11-13",
-      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/8",
-      "merge_commit": "8350d9b7303c050f7ebf843e7465eb04291d31ee",
-      "tested_and_merged_tree": "1c2c07963f189e1840a5c0f8299c1b31b995e783",
-      "root_integration": {
-        "status": "not_performed",
-        "reason": "Concurrent local main commits and WIP preserved without reset, stash, merge or rebase.",
-        "root_head": "a6f72da6bda06241437c4ee6d1a603f83f637458",
-        "root_index_tree": "f91f0c996aabcce1dc9c2030b03ac224073c7ee1",
-        "local_ahead": 5,
-        "local_behind": 4
-      },
-      "report": "docs/performance-chat-mount-2026-11-13.md"
-    },
-    {
-      "id": "web-conversation-save2-2026-11-13",
-      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/9",
-      "merge_commit": "53c1f1a365d32d2a93f0831aa5ce2ddaf8a029f6",
-      "tested_and_merged_tree": "353ba3ab01feb4df122d97d46fcb47ec3c0bc7c9",
-      "report": "docs/performance-conversation-save-2026-11-13.md",
-      "root_integration": "Published main updated only. Concurrent local main commits/index/WIP are retained and not reset, rebased or merged."
-    }
-  ],
-  "discovery_supplements": [
-    {
-      "artifact": "target/performance-envelope3-network-discovery-supplement.json",
-      "sha256": "54636278e5046900e4ca678c07352ff950ec6cf130e694548a1163a0c7994419",
-      "scope": "16 known unpublished root network entrypoints outside the frozen inventory; not a full refresh, no timing acceptance"
-    }
-  ],
-  "source_discovery_snapshot": {
-    "receipt": "target/performance-http-error1/discovery14-receipt.json",
-    "receipt_sha256": "ac711b3063983b1004eadbc3e9a2fb7fb24be86d2be45b48b48c3fe5a6bea71b",
-    "at": "2026-11-14T22:42:31.607304+00:00",
-    "root_head": "cdf35b428d39a2ff0c369c246574820b8e29867f",
-    "source_root": ".",
-    "source_capture": "target/performance-discovery14-source",
-    "source_files": 481,
-    "entrypoints": 376,
-    "counts": {
-      "http": 207,
-      "palette": 94,
-      "view": 21,
-      "slash": 9,
-      "mcp": 31,
-      "workflow": 10,
-      "mcp_method": 4,
-      "binding_reference": 1383
-    },
-    "source_capture_is_atomic": false,
-    "all_discovery_source_bytes_copied": true,
-    "discovery_fields_reproduced": true,
-    "historical_evidence_metadata_reproduced": false,
-    "replay_order_note": "Discovery fields compared by (kind,id); filesystem enumeration order can differ.",
-    "generator_sha256": "30b9a60c16a5e55a228937dd250b15565e6d338b7f0b52b9ebf4c59ea9078b2d",
-    "inventory_sha256": "9f48e42f8a5fed0ff07ea97c98bd390d547ad02260c9578d0bcf57a9b383660f",
-    "replay_sha256": "c21624dbf8f514512e8966c6e63bb1d415803b82f537978b22d851ead2416594",
-    "old_frozen_entrypoints": 366,
-    "added_entrypoints": [
-      [
-        "http",
-        "DELETE /api/mail/mailboxes/{mailbox}/drafts/{client}/files/{file}"
-      ],
-      [
-        "http",
-        "GET /api/mail/mailboxes/{mailbox}/drafts"
-      ],
-      [
-        "http",
-        "GET /api/mail/mailboxes/{mailbox}/drafts/{client}"
-      ],
-      [
-        "http",
-        "GET /api/mail/mailboxes/{mailbox}/sends/{operation}"
-      ],
-      [
-        "http",
-        "POST /api/mail/mailboxes/{mailbox}/drafts"
-      ],
-      [
-        "http",
-        "POST /api/mail/mailboxes/{mailbox}/drafts/{client}/files/{file}"
-      ],
-      [
-        "http",
-        "POST /api/mail/mailboxes/{mailbox}/drafts/{client}/review"
-      ],
-      [
-        "http",
-        "POST /api/mail/mailboxes/{mailbox}/drafts/{client}/send"
-      ],
-      [
-        "http",
-        "POST /api/mail/mailboxes/{mailbox}/sends/{operation}/cancel"
-      ],
-      [
-        "http",
-        "PUT /api/mail/mailboxes/{mailbox}/drafts/{client}"
-      ]
-    ],
-    "removed_entrypoints": [],
-    "validation_receipt": "target/performance-http-error1/inventory-validation/receipt.json",
-    "validation_receipt_sha256": "7182704b661b5664bdd938531bf1d00c1cc98ad267f3b792289dd65ce4065ef4",
-    "in_progress_owner_scope": "Snapshot adds ten explicit compose HTTP method/path identities. Compose behavior, bindings and downstream user actions still need semantic and performance review. Capture predates the later HTTP error-reader adoption and is not a combined build receipt.",
-    "semantic_inventory_complete": false,
-    "whole_action_acceptances": 0,
-    "matched_t3_wins": 0
-  },
-  "semantic_catalogue_snapshot": {
-    "path": "target/performance-mail-cancel1/proposed-action-catalogue.json",
-    "reviewed_intents": 62,
-    "complete": false,
-    "scope": "45 earlier command intents plus 17 mail intents reviewed at their pinned source profiles. The later adopted API/state files are pinned by the adoption receipt; ongoing compose is outside this review."
   },
   "response_body_byte_observations": [
     {
@@ -120714,5 +122609,232 @@
       "t3_comparable": false
     }
   ],
-  "response_body_observation_scope": "Twelve preserved mail-navigation and 28 new HTTP-error body observations. Each is one functional loopback diagnostic per case/implementation with real production WASM. Body counts exclude request/header/TCP/TLS overhead; no normalized latency, provider, whole-action or T3 acceptance."
+  "response_body_observation_scope": "Functional response-body observations only. No request/header/TCP/TLS wire total or normalized latency; complete-action and T3 acceptance remain open.",
+  "landings": [
+    {
+      "id": "sqlite-meeting-save-main-2026-11-12",
+      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/2",
+      "merge_commit": "0de9416ab3708e046f08b401641ff52b9588c48a",
+      "tested_and_merged_tree": "17882b184bb12d2f3a08bddbc3f7664486c0508b",
+      "report": "docs/performance-goal-2026-11-09.md#sqlite-meeting-save-fix-landed-on-main"
+    },
+    {
+      "id": "capture-proxy-owned-body-2026-11-12",
+      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/3",
+      "merge_commit": "2d1a29a60e596e3ba17e6efb66ad15f2d998df5a",
+      "tested_and_merged_tree": "6a31da472666552b9e865ec927fd4132afba289c",
+      "report": "docs/performance-goal-2026-11-09.md#capture-proxy-copy-removal-landed"
+    },
+    {
+      "id": "terminal-replay-compression-2026-11-13",
+      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/4",
+      "merge_commit": "7e060f60ff41b378e05763230b2bf91f37a27e09",
+      "tested_and_merged_tree": "5056bf6ca1eb28a9743f66190e95c49611fc86bc",
+      "report": "docs/performance-goal-2026-11-09.md#terminal-replay-over-a-slow-connection"
+    },
+    {
+      "id": "conversation-header-content-codec-2026-11-13",
+      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/5",
+      "merge_commit": "0c140e8db1fef716c4ebb10276d91cbe6c322ae5",
+      "tested_and_merged_tree": "2dce15b6cdc32dbbb8c787fb8c32a8094597c9dd",
+      "report": "docs/performance-goal-2026-11-09.md#web-conversation-header-and-content-codec"
+    },
+    {
+      "id": "static-release-assets-2026-11-13",
+      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/6",
+      "merge_commit": "aa26ef9a9a0751cde8cc376e384f8846b36f7322",
+      "tested_and_merged_tree": "c0935dc69575da3328f55d7b0105ccd6100109e2",
+      "root_integration": {
+        "at": "2026-11-13T15:58:17.057341+00:00",
+        "owned_stash": "1980c4c989eeb41c5b1f5170a70ca284ba9b1d78",
+        "stash_paths": [
+          "README.md",
+          "bruhs-server/Cargo.toml",
+          "bruhs-server/src/main.rs",
+          "scripts/gate.sh"
+        ],
+        "stage": "complete",
+        "base": "0c140e8db1fef716c4ebb10276d91cbe6c322ae5",
+        "expected_main": "aa26ef9a9a0751cde8cc376e384f8846b36f7322",
+        "root_main": "aa26ef9a9a0751cde8cc376e384f8846b36f7322",
+        "overlap_three_way_outputs_match": true,
+        "unrelated_original_files_unchanged": true,
+        "original_index_state_empty": true,
+        "original_stashes_unchanged": true,
+        "owned_stash_dropped": true,
+        "authorized_main_paths": [
+          ".github/workflows/ci.yml",
+          "README.md",
+          "bruhs-server/Cargo.toml",
+          "bruhs-server/src/main.rs",
+          "bruhs-server/src/static_assets.rs",
+          "bruhs-server/src/static_assets/tests.rs",
+          "bruhs-web/Trunk.toml",
+          "bruhs-web/precompress.py",
+          "bruhs-web/tests/test_precompress.py",
+          "docs/performance-static-assets-2026-11-13.json",
+          "docs/performance-static-assets-2026-11-13.md",
+          "scripts/gate.sh"
+        ],
+        "authorized_audit_paths": [
+          "docs/performance-action-evidence.json",
+          "docs/performance-action-log.json",
+          "docs/performance-action-log.md",
+          "docs/performance-goal-2026-11-09.md",
+          "scripts/performance-action-log.py"
+        ]
+      },
+      "report": "docs/performance-static-assets-2026-11-13.md"
+    },
+    {
+      "id": "web-resume-export-2026-11-13",
+      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/7",
+      "merge_commit": "015c680c05df0a13045d63a4353978a6cc57f5d8",
+      "tested_and_merged_tree": "1c5d71fbb3ee20b8cc8ba614b1ab1dfd63cff398",
+      "root_integration": {
+        "status": "not_performed",
+        "reason": "Local main advanced with five unrelated commits while the isolated candidate was under review. Preserve the concurrent committed and uncommitted work; no reset, stash, merge, rebase or main update was performed.",
+        "root_head": "a6f72da6bda06241437c4ee6d1a603f83f637458",
+        "root_index_tree": "f91f0c996aabcce1dc9c2030b03ac224073c7ee1",
+        "ahead": 5,
+        "behind": 2,
+        "incoming_report_copied_identically": true,
+        "discovery_tool_already_identical": true,
+        "production_fix_present_in_local_main": false,
+        "preservation_receipt": "target/performance-export-resume1-root-preservation.json",
+        "concurrent_changes_after_snapshot": [
+          {
+            "path": "bruhs-desktop/src/views/reactive_automations.rs",
+            "before": "6f302616b4ac8c156e94d9a8718976d0f69ba95ac63d0832e5467c7f5af27ad9",
+            "after": "006104c5bb9bbc8af0d18a3f6b8015b768e97ad5592c9ab1d795e361788a1d47"
+          },
+          {
+            "path": "bruhs-web/src/components/reactive_automations.rs",
+            "before": "cf9c01e0c662da481481d149368e376fde5e185a7431e4a0628dfe3da5dd1450",
+            "after": "ee92aa3009056eaf1baed80387cd7b5d052cb051c756d9abcbbbf0b95ca8259e"
+          },
+          {
+            "path": "bruhs-web/tests/reactive_agents_browser.mjs",
+            "before": "ed67b6d6663a5eaef8cde820e092dcde00b5cb2a0cae51f92e9aad472f29b694",
+            "after": "d00e1af8d04280a4781d268adc1093a000183953b12de5235077053fafcbf0ad"
+          }
+        ]
+      },
+      "report": "docs/performance-resume-export-2026-11-13.md"
+    },
+    {
+      "id": "web-chat-mount-2026-11-13",
+      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/8",
+      "merge_commit": "8350d9b7303c050f7ebf843e7465eb04291d31ee",
+      "tested_and_merged_tree": "1c2c07963f189e1840a5c0f8299c1b31b995e783",
+      "root_integration": {
+        "status": "not_performed",
+        "reason": "Concurrent local main commits and WIP preserved without reset, stash, merge or rebase.",
+        "root_head": "a6f72da6bda06241437c4ee6d1a603f83f637458",
+        "root_index_tree": "f91f0c996aabcce1dc9c2030b03ac224073c7ee1",
+        "local_ahead": 5,
+        "local_behind": 4
+      },
+      "report": "docs/performance-chat-mount-2026-11-13.md"
+    },
+    {
+      "id": "web-conversation-save2-2026-11-13",
+      "pull_request": "https://github.com/bryantleft/bruhs-ai/pull/9",
+      "merge_commit": "53c1f1a365d32d2a93f0831aa5ce2ddaf8a029f6",
+      "tested_and_merged_tree": "353ba3ab01feb4df122d97d46fcb47ec3c0bc7c9",
+      "report": "docs/performance-conversation-save-2026-11-13.md",
+      "root_integration": "Published main updated only. Concurrent local main commits/index/WIP are retained and not reset, rebased or merged."
+    }
+  ],
+  "discovery_supplements": [
+    {
+      "artifact": "target/performance-envelope3-network-discovery-supplement.json",
+      "sha256": "54636278e5046900e4ca678c07352ff950ec6cf130e694548a1163a0c7994419",
+      "scope": "16 known unpublished root network entrypoints outside the frozen inventory; not a full refresh, no timing acceptance"
+    }
+  ],
+  "source_discovery_snapshot": {
+    "receipt": "target/performance-http-error1/discovery14-receipt.json",
+    "receipt_sha256": "ac711b3063983b1004eadbc3e9a2fb7fb24be86d2be45b48b48c3fe5a6bea71b",
+    "at": "2026-11-14T22:42:31.607304+00:00",
+    "root_head": "cdf35b428d39a2ff0c369c246574820b8e29867f",
+    "source_root": ".",
+    "source_capture": "target/performance-discovery14-source",
+    "source_files": 481,
+    "entrypoints": 376,
+    "counts": {
+      "http": 207,
+      "palette": 94,
+      "view": 21,
+      "slash": 9,
+      "mcp": 31,
+      "workflow": 10,
+      "mcp_method": 4,
+      "binding_reference": 1383
+    },
+    "source_capture_is_atomic": false,
+    "all_discovery_source_bytes_copied": true,
+    "discovery_fields_reproduced": true,
+    "historical_evidence_metadata_reproduced": false,
+    "replay_order_note": "Discovery fields compared by (kind,id); filesystem enumeration order can differ.",
+    "generator_sha256": "30b9a60c16a5e55a228937dd250b15565e6d338b7f0b52b9ebf4c59ea9078b2d",
+    "inventory_sha256": "9f48e42f8a5fed0ff07ea97c98bd390d547ad02260c9578d0bcf57a9b383660f",
+    "replay_sha256": "c21624dbf8f514512e8966c6e63bb1d415803b82f537978b22d851ead2416594",
+    "old_frozen_entrypoints": 366,
+    "added_entrypoints": [
+      [
+        "http",
+        "DELETE /api/mail/mailboxes/{mailbox}/drafts/{client}/files/{file}"
+      ],
+      [
+        "http",
+        "GET /api/mail/mailboxes/{mailbox}/drafts"
+      ],
+      [
+        "http",
+        "GET /api/mail/mailboxes/{mailbox}/drafts/{client}"
+      ],
+      [
+        "http",
+        "GET /api/mail/mailboxes/{mailbox}/sends/{operation}"
+      ],
+      [
+        "http",
+        "POST /api/mail/mailboxes/{mailbox}/drafts"
+      ],
+      [
+        "http",
+        "POST /api/mail/mailboxes/{mailbox}/drafts/{client}/files/{file}"
+      ],
+      [
+        "http",
+        "POST /api/mail/mailboxes/{mailbox}/drafts/{client}/review"
+      ],
+      [
+        "http",
+        "POST /api/mail/mailboxes/{mailbox}/drafts/{client}/send"
+      ],
+      [
+        "http",
+        "POST /api/mail/mailboxes/{mailbox}/sends/{operation}/cancel"
+      ],
+      [
+        "http",
+        "PUT /api/mail/mailboxes/{mailbox}/drafts/{client}"
+      ]
+    ],
+    "removed_entrypoints": [],
+    "validation_receipt": "target/performance-http-error1/inventory-validation/receipt.json",
+    "validation_receipt_sha256": "7182704b661b5664bdd938531bf1d00c1cc98ad267f3b792289dd65ce4065ef4",
+    "in_progress_owner_scope": "Snapshot adds ten explicit compose HTTP method/path identities. Compose behavior, bindings and downstream user actions still need semantic and performance review. Capture predates the later HTTP error-reader adoption and is not a combined build receipt.",
+    "semantic_inventory_complete": false,
+    "whole_action_acceptances": 0,
+    "matched_t3_wins": 0
+  },
+  "semantic_catalogue_snapshot": {
+    "path": "target/performance-whiteboard-actions1/proposed-action-catalogue.json",
+    "reviewed_intents": 128,
+    "complete": false,
+    "scope": "62 exact earlier intents plus66 source-only whiteboard intent requirements. No complete-action acceptance follows from declarations or historical painter measurements."
+  }
 }

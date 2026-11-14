@@ -1,37 +1,29 @@
 # Action timing log (incomplete)
 
-Latest HTTP checkpoint: recognized markup error bodies cancel at their decoded prefix; plaintext/JSON messages and the existing deadline remain intact. There are 245 partial evidence records, 2,236 unchanged timing groups, 34 unchanged request-count cases and 40 separately typed body observations (12 preserved plus 28 new). The reviewed semantic catalogue remains 62 intents. No new latency measurement, complete-action acceptance or matched T3 win is claimed. [HTTP report](performance-http-error-2026-11-14.md).
+Latest private successor: 128 source-only reviewed intent requirements (62 preserved plus 66 whiteboard), 246 partial evidence entries and 2,296 typed timing groups. The 60 added groups extract existing owner whiteboard data; no measurements were rerun. All 2,236 earlier timing groups, 34 request cases and 40 body observations remain exact. Complete-action and matched T3 acceptances stay zero. The 376-entrypoint/1,383-binding source scan remains a historical non-atomic snapshot, not a complete denominator. [Whiteboard review](../target/performance-whiteboard-actions1/report.md).
 
-## HTTP error response bodies
+## Existing whiteboard rendering evidence
 
-Each row is one gated functional diagnostic per implementation. Server response-body writes match CDP received-body bytes; headers/TCP/TLS and controlled latency are excluded. Both implementations use identical input fixtures and produce identical user-facing error messages. The paired timing study remains unlaunched.
+The table shows arithmetic means of completed compositor-frame intervals across member workload means. This is a throughput statistic, not input latency or physical FPS. Separate groups retain unique-feedback intervals and pipeline start-to-end duration; pipeline duration is not input-to-photon latency. The JSON adds 54 member-mean groups and six separately scoped native scheduling groups. Quantiles in those browser groups describe member means, not individual-frame/population latency. The underlying 121 artifacts reproduce the owner's aggregate unchanged. No new benchmark, full UI/store action, physical input latency, provider/network or T3 acceptance is added.
 
-| Payload | Before body B | After body B |
-| --- | ---: | ---: |
-| immediate-lt | 49 | 1 |
-| bom-unicode-fragmented | 71 | 12 |
-| large-html | 1,048,631 | 27 |
-| short-plain | 45 | 45 |
-| json-specific | 57 | 57 |
-| json-large-ignored | 1,048,642 | 1,048,642 |
-| split-multibyte-json | 51 | 51 |
-| duplicate-bom | 46 | 46 |
-| invalid-utf8-before-lt | 42 | 42 |
-| truncated-utf8-eof | 29 | 29 |
-| unicode0085-before-lt | 40 | 3 |
-| empty-body | 0 | 0 |
-| json-error-starts-lt | 47 | 47 |
-| declared-length-truncated | 49 | 49 |
+| Cohort | Renderer | Pan mean ms | Single-node mean ms | Whole-selection mean ms |
+| --- | --- | ---: | ---: | ---: |
+| 1000 shapes / uncapped /12 pairs | rust | 0.881 | 0.874 | 1.167 |
+| 1000 shapes / uncapped /12 pairs | tldraw | 2.242 | 4.062 | 26.120 |
+| 1000 shapes /vsync /3 pairs | rust | 8.347 | 8.333 | 8.320 |
+| 1000 shapes /vsync /3 pairs | tldraw | 8.333 | 8.333 | 27.164 |
+| 10000 shapes /uncapped /2 pairs | rust | 2.310 | 2.385 | 6.924 |
+| 10000 shapes /uncapped /2 pairs | tldraw | 14.214 | 47.549 | 384.721 |
 
-The twelve earlier mail-navigation body observations remain byte-for-byte in JSON. [All 40 typed body observations](performance-action-log.json) · [HTTP body replay](../target/performance-http-error1/network-body-observations.json).
+Normal-vsync pan and single-node rows are effectively tied at the display ceiling. Different production adornments remain part of the comparison. Native values remain scheduling-only in JSON; the original owner report records failed GPU pilots. [Original protocol](../bench/whiteboard/protocol.md) · [Owner report](whiteboard-v1.md).
 
 The performance goal is active. This log lists discovered entrypoints and bounded measurements; it does not establish that every semantic action is catalogued or fast. The final version must include each supported action and its verified timings.
 
-The catalogue has **376 source entrypoints** plus 1383 binding search references awaiting semantic review. There are 245 partial evidence records and 2236 normalized timing observations from bounded studies, plus 34 separate request-count cases without latency measurements. Whole-action acceptances and matched faster-than-T3 results are both zero. Older records remain linked while their numerical timings are normalized.
+The catalogue has **376 source entrypoints** plus 1383 binding search references awaiting semantic review. There are 246 partial evidence records and 2296 typed timing groups from bounded studies, plus 34 separate request-count cases without latency measurements. Whole-action acceptances and matched faster-than-T3 results are both zero. Older records remain linked while their numerical timings are normalized.
 
 Normalized observations are typed timing groups. Different clocks can reuse the same underlying intervals, so this total is not a count of independent trials.
 
-The 45 earlier command intents are a subset of the 62 reviewed intents; the other 17 cover connected mail. Those command intents retain their earlier source profiles: published main `53c1f1a3` and local working-tree base `c543e865`. New source discovery does not revalidate that semantic review. Timing rows keep their own captured build hashes. Concurrent edits after each capture are outside its snapshot. These are historical source profiles; later integration is outside their captured context.
+The 45 reviewed command intents retain their earlier source profiles: published main `53c1f1a3` and local working-tree base `c543e865`. New source discovery does not revalidate that semantic review. Timing rows keep their own captured build hashes. Concurrent edits after each capture are outside its snapshot. Those are historical source profiles; later integration and source changes remain separately scoped.
 
 The [newer source-pinned discovery capture](../target/performance-http-error1/discovery14-receipt.json) includes 376 entrypoints from 481 files: 13 delivery routes, 3 local remote-host routes and 8 routes on the optional paired-task listener. Listener identities remain distinct. The isolated replay reproduces discovery fields; historical availability metadata stays separate. Exact source bytes are retained, but this text scan is not an atomic build snapshot, complete semantic action inventory or network acceptance. Snapshot adds ten explicit compose HTTP method/path identities. Compose behavior, bindings and downstream user actions still need semantic and performance review. Capture predates the later HTTP error-reader adoption and is not a combined build receipt.
 
@@ -211,7 +203,7 @@ Actual mounted web UI with existing synthetic history offscreen in Inbox. Native
 | no-active | shortcut | baseline | Two frames; no write | 20.050 | 11.600–29.900 | [web-resume-export-ui1-2026-11-13](../target/performance-export-resume1-timings.json) |
 | no-active | shortcut | candidate | Two frames; no write | 17.500 | 2.900–31.800 | [web-resume-export-ui1-2026-11-13](../target/performance-export-resume1-timings.json) |
 
-The [semantic action catalogue](performance-action-catalogue.md) records 45 earlier command intents and 17 connected-mail intents. It does not establish downstream parity or complete application coverage. Working-tree search references now include callbacks after inline tests and global desktop app/dock code; comments/tests/lifecycle candidates remain unclassified.
+The [semantic action catalogue](performance-action-catalogue.md) starts with 45 intents from 86 web/desktop registered commands. It does not establish downstream parity or complete application coverage. Working-tree search references now include callbacks after inline tests and global desktop app/dock code; comments/tests/lifecycle candidates remain unclassified.
 
 
 The JSON companion retains all normalized cases, per-process quantiles, raw pointers, units and measurement scopes. Component decode timings and 128-event delivery diagnostics remain separate from the complete-delivery network rows.
@@ -1019,6 +1011,53 @@ The matrix below uses the earlier default 32-byte predicate, identity/Fastest/De
 Fastest was selected to limit native per-request work while retaining the main impaired-link gain. Default saved more bytes and was about 27ms faster for the largest repetitive UI fixture; it cost more native HTTP work. Small UI differences and overlapping local frame ranges do not prove a universal latency win. A 131-check prototype browser gate, 49 checks on the exact final router and 72 final byte controls pass. Original favicon failures and intermediate negative small-proposal results remain preserved. The router is tested over the older archived backend; the changing root, providers/concurrency and the full integration gate remain open. See the [compression report](performance-task-compression-2026-11-13.md).
 
 
+## Functional response-body observations
+
+Each row is one functional diagnostic per case/implementation. Fixture-server response writes match the recorded CDP received-body count; request/header/TCP/TLS overhead and controlled latency are excluded. Input bodies and completion contracts retain their source-specific scope in the linked reports. These rows are not timing samples.
+
+| Case | Implementation | Body bytes | Raw evidence |
+| --- | --- | ---: | --- |
+| thread-headers | baseline | 263,294 | [mail-read-thread-headers-baseline](../target/performance-mail-cancel1/probe/run02/report.json) |
+| thread-headers | candidate | 0 | [mail-read-thread-headers-candidate](../target/performance-mail-cancel1/candidate-probe/run01/report.json) |
+| thread-body | baseline | 263,294 | [mail-read-thread-body-baseline](../target/performance-mail-cancel1/probe/run02/report.json) |
+| thread-body | candidate | 16,384 | [mail-read-thread-body-candidate](../target/performance-mail-cancel1/candidate-probe/run01/report.json) |
+| search-headers | baseline | 262,759 | [mail-read-search-headers-baseline](../target/performance-mail-cancel1/probe/run02/report.json) |
+| search-headers | candidate | 0 | [mail-read-search-headers-candidate](../target/performance-mail-cancel1/candidate-probe/run01/report.json) |
+| search-body | baseline | 262,759 | [mail-read-search-body-baseline](../target/performance-mail-cancel1/probe/run02/report.json) |
+| search-body | candidate | 16,384 | [mail-read-search-body-candidate](../target/performance-mail-cancel1/candidate-probe/run01/report.json) |
+| mailbox-headers | baseline | 263,294 | [mail-read-mailbox-headers-baseline](../target/performance-mail-cancel1/probe/run02/report.json) |
+| mailbox-headers | candidate | 0 | [mail-read-mailbox-headers-candidate](../target/performance-mail-cancel1/candidate-probe/run01/report.json) |
+| mailbox-body | baseline | 263,294 | [mail-read-mailbox-body-baseline](../target/performance-mail-cancel1/probe/run02/report.json) |
+| mailbox-body | candidate | 16,384 | [mail-read-mailbox-body-candidate](../target/performance-mail-cancel1/candidate-probe/run01/report.json) |
+| immediate-lt | baseline | 49 | [http-error-body-immediate-lt-baseline](../target/performance-http-error1/probe/run02/report.json) |
+| immediate-lt | candidate | 1 | [http-error-body-immediate-lt-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| bom-unicode-fragmented | baseline | 71 | [http-error-body-bom-unicode-fragmented-baseline](../target/performance-http-error1/probe/run02/report.json) |
+| bom-unicode-fragmented | candidate | 12 | [http-error-body-bom-unicode-fragmented-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| large-html | baseline | 1,048,631 | [http-error-body-large-html-baseline](../target/performance-http-error1/probe/run02/report.json) |
+| large-html | candidate | 27 | [http-error-body-large-html-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| short-plain | baseline | 45 | [http-error-body-short-plain-baseline](../target/performance-http-error1/probe/run02/report.json) |
+| short-plain | candidate | 45 | [http-error-body-short-plain-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| json-specific | baseline | 57 | [http-error-body-json-specific-baseline](../target/performance-http-error1/probe/run02/report.json) |
+| json-specific | candidate | 57 | [http-error-body-json-specific-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| json-large-ignored | baseline | 1,048,642 | [http-error-body-json-large-ignored-baseline](../target/performance-http-error1/probe/run02/report.json) |
+| json-large-ignored | candidate | 1,048,642 | [http-error-body-json-large-ignored-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| split-multibyte-json | baseline | 51 | [http-error-body-split-multibyte-json-baseline](../target/performance-http-error1/reader-probe/baseline01/report.json) |
+| split-multibyte-json | candidate | 51 | [http-error-body-split-multibyte-json-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| duplicate-bom | baseline | 46 | [http-error-body-duplicate-bom-baseline](../target/performance-http-error1/reader-probe/baseline01/report.json) |
+| duplicate-bom | candidate | 46 | [http-error-body-duplicate-bom-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| invalid-utf8-before-lt | baseline | 42 | [http-error-body-invalid-utf8-before-lt-baseline](../target/performance-http-error1/reader-probe/baseline01/report.json) |
+| invalid-utf8-before-lt | candidate | 42 | [http-error-body-invalid-utf8-before-lt-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| truncated-utf8-eof | baseline | 29 | [http-error-body-truncated-utf8-eof-baseline](../target/performance-http-error1/reader-probe/baseline01/report.json) |
+| truncated-utf8-eof | candidate | 29 | [http-error-body-truncated-utf8-eof-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| unicode0085-before-lt | baseline | 40 | [http-error-body-unicode0085-before-lt-baseline](../target/performance-http-error1/reader-probe/baseline01/report.json) |
+| unicode0085-before-lt | candidate | 3 | [http-error-body-unicode0085-before-lt-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| empty-body | baseline | 0 | [http-error-body-empty-body-baseline](../target/performance-http-error1/reader-probe/baseline01/report.json) |
+| empty-body | candidate | 0 | [http-error-body-empty-body-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| json-error-starts-lt | baseline | 47 | [http-error-body-json-error-starts-lt-baseline](../target/performance-http-error1/reader-probe/baseline01/report.json) |
+| json-error-starts-lt | candidate | 47 | [http-error-body-json-error-starts-lt-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+| declared-length-truncated | baseline | 49 | [http-error-body-declared-length-truncated-baseline](../target/performance-http-error1/reader-probe/baseline01/report.json) |
+| declared-length-truncated | candidate | 49 | [http-error-body-declared-length-truncated-candidate](../target/performance-http-error1/reader-probe/candidate02/report.json) |
+
 ## Discovered entrypoints
 
 These identities overlap across surfaces and are discovery starting points. A view or binding is not automatically one complete user action. “Extraction pending” means older partial measurements exist but their numeric distributions have not yet been normalized into this log. Functional checks and request counts remain distinct from measured latency.
@@ -1389,7 +1428,7 @@ These identities overlap across surfaces and are discovery starting points. A vi
 | view | Tasks | [ui.rs:20](../bruhs-models/src/models/ui.rs:20) | 0 | measurement_pending |
 | view | Terminal | [ui.rs:54](../bruhs-models/src/models/ui.rs:54) | 0 | measurement_pending |
 | view | Today | [ui.rs:16](../bruhs-models/src/models/ui.rs:16) | 0 | measurement_pending |
-| view | Whiteboards | [ui.rs:25](../bruhs-models/src/models/ui.rs:25) | 0 | measurement_pending |
+| view | Whiteboards | [ui.rs:25](../bruhs-models/src/models/ui.rs:25) | 1 | bounded_variant_observations |
 | view | Workbench | [ui.rs:24](../bruhs-models/src/models/ui.rs:24) | 0 | measurement_pending |
 | workflow | AddCapture | [automation.rs:256](../bruhs-models/src/models/automation.rs:256) | 0 | measurement_pending |
 | workflow | AddFinanceTransaction | [automation.rs:246](../bruhs-models/src/models/automation.rs:246) | 0 | measurement_pending |
