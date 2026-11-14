@@ -1,6 +1,6 @@
 use super::*;
 use crate::meetings::person_changes::{merged_profile, next_version, validate_person};
-use bruhs_models::{PersonObservation, PersonProfile};
+use bruhs_models::{person_name_key, PersonObservation, PersonProfile};
 use std::collections::HashMap;
 
 pub(super) fn resolve_merges(
@@ -82,7 +82,31 @@ pub(super) fn save(connection: &Connection, value: &PersonProfile) -> MeetingSto
     let mut insert_name =
         connection.prepare("INSERT OR IGNORE INTO person_names(name,person_id) VALUES(?1,?2)")?;
     for name in std::iter::once(&value.display_name).chain(&value.aliases) {
-        insert_name.execute([&name.to_ascii_lowercase(), &value.id])?;
+        insert_name.execute([&person_name_key(name), &value.id])?;
+    }
+    Ok(())
+}
+
+/// Rekey names indexed by older builds, which stored ASCII-lowercased names, so
+/// a contact (and its opt-out) still matches every differently cased label.
+/// Keys are idempotent, so this is a no-op once every row is current.
+pub(super) fn rekey_names(connection: &Connection) -> MeetingStoreResult<()> {
+    let rows = connection
+        .prepare("SELECT name,person_id FROM person_names")?
+        .query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?))
+        })?
+        .collect::<Result<Vec<_>, _>>()?;
+    let mut delete =
+        connection.prepare("DELETE FROM person_names WHERE name=?1 AND person_id=?2")?;
+    let mut insert =
+        connection.prepare("INSERT OR IGNORE INTO person_names(name,person_id) VALUES(?1,?2)")?;
+    for (name, person_id) in rows {
+        let key = person_name_key(&name);
+        if key != name {
+            delete.execute([&name, &person_id])?;
+            insert.execute([&key, &person_id])?;
+        }
     }
     Ok(())
 }
@@ -186,7 +210,7 @@ pub(super) fn observations(
         }
         let ids = connection
             .prepare("SELECT person_id FROM person_names WHERE name=?1")?
-            .query_map([name.to_ascii_lowercase()], |row| row.get::<_, String>(0))?
+            .query_map([person_name_key(name)], |row| row.get::<_, String>(0))?
             .collect::<Result<Vec<_>, _>>()?;
         if ids.len() > 1 {
             return Err(MeetingStoreError::Conflict(

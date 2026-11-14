@@ -76,6 +76,7 @@ pub(super) fn open(path: &Path) -> MeetingStoreResult<Connection> {
         )?;
         transaction.pragma_update(None, "user_version", 5)?;
     }
+    contacts::rekey_names(&transaction)?;
     transaction.commit()?;
     let check: String = connection.pragma_query_value(None, "quick_check", |row| row.get(0))?;
     if check != "ok" {

@@ -206,3 +206,90 @@ async fn duplicate_people_or_relationship_keys_never_select_an_arbitrary_profile
     ));
     workspace.update_in(cx, |w, _, _| w.mcp_bridge = WorkspaceBridge::default());
 }
+
+/// Opting a person out of observation tracking is a privacy guarantee: their
+/// stored observations must never reach agent context through any read.
+#[gpui::test]
+async fn opted_out_person_observations_never_reach_agent_reads(cx: &mut TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    workspace.update_in(cx, |w, _, cx| {
+        w.automation_state
+            .permissions
+            .set(AgentDomain::People, AgentAccess::Read, true);
+        let mut person = PersonProfile::new("Opted Out");
+        person.id = "opted-out".into();
+        person.tracked = false;
+        person.observations = vec![PersonObservation {
+            at_meeting_id: "meeting-private".into(),
+            kind: ObservationKind::Tone,
+            text: "Synthetic-private-observation".into(),
+            created_at: 3,
+        }];
+        let mut tracked = PersonProfile::new("Tracked");
+        tracked.id = "tracked".into();
+        tracked.observations = vec![PersonObservation {
+            at_meeting_id: "meeting-shared".into(),
+            kind: ObservationKind::Decision,
+            text: "Synthetic-shared-observation".into(),
+            created_at: 4,
+        }];
+        w.meetings_hub.update(cx, |hub, _| {
+            hub.people = vec![person.into(), tracked.into()]
+        });
+    });
+    connect(&workspace, cx).await;
+    let mut seen = String::new();
+    for query in ["", "Opted", "opted-out"] {
+        let page = value(
+            call(
+                &workspace,
+                cx,
+                BridgeRequest::Read {
+                    domain: AgentDomain::People,
+                    query: query.into(),
+                    offset: 0,
+                },
+            )
+            .await,
+        );
+        let opted = page["records"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .find(|record| record["id"] == "opted-out")
+            .expect("identity stays discoverable so the agent can respect the opt-out");
+        assert_eq!(opted["tracked"], false);
+        assert_eq!(opted["observations_withheld"], true);
+        assert!(opted["observation_count"].is_null());
+        seen.push_str(&page.to_string());
+    }
+    for section in [
+        PersonReadSection::Profile,
+        PersonReadSection::Observations,
+        PersonReadSection::RelationshipItems,
+    ] {
+        let page = value(call(&workspace, cx, details("opted-out", section, 0)).await);
+        if section == PersonReadSection::Observations {
+            assert_eq!(page["records"], json!([]));
+            assert_eq!(page["observations_withheld"], true);
+            assert!(page["next_offset"].is_null());
+        }
+        seen.push_str(&page.to_string());
+    }
+    assert!(!seen.contains("Synthetic-private-observation"), "{seen}");
+    assert!(!seen.contains("meeting-private"), "{seen}");
+    let tracked = value(
+        call(
+            &workspace,
+            cx,
+            details("tracked", PersonReadSection::Observations, 0),
+        )
+        .await,
+    );
+    assert_eq!(
+        tracked["records"][0]["text"],
+        "Synthetic-shared-observation"
+    );
+    assert!(tracked.get("observations_withheld").is_none());
+    workspace.update_in(cx, |w, _, _| w.mcp_bridge = WorkspaceBridge::default());
+}
