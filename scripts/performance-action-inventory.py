@@ -132,10 +132,28 @@ def register_routes(path, full_text, body, offset=0, handler_prefix="", listener
 
 def registered_function(path, name, **context):
     text = source(path)
-    declaration = re.search(r'pub fn ' + re.escape(name) + r'\s*\(', text)
+    declaration = re.search(r'pub(?:\(super\))? fn ' + re.escape(name) + r'\s*\(', text)
     assert declaration is not None, (path, name)
     start = text.index("{", declaration.start())
     body = balanced(text, start, "{", "}")
+    if path == "bruhs-server/src/routes/mail.rs":
+        # Keep child composition explicit so new routers cannot disappear.
+        nested = list(re.finditer(r'\.merge\s*\(', body))
+        seen = set()
+        for merge in nested:
+            begin = body.index("(", merge.start())
+            call = balanced(body, begin)
+            child = re.fullmatch(r'\((outlook|compose)::router\(\)\)', re.sub(r'\s+', '', call))
+            assert child is not None, "Resolve this mail child router explicitly"
+            name = child[1]
+            assert name not in seen, "Resolve repeated mail child router registration"
+            seen.add(name)
+            body = body[:merge.start()] + ' ' * (begin + len(call) - merge.start()) + body[begin + len(call):]
+            child_context = {**context, "composition_source": path,
+                             "composition_line": text.count("\n", 0, start + merge.start()) + 1,
+                             "handler_prefix": f"routes::mail::{name}::"}
+            registered_function(f"bruhs-server/src/routes/mail/{name}.rs", "router", **child_context)
+        assert "outlook" in seen, "Resolve missing Outlook mail router registration"
     register_routes(path, text, body, start, **context)
 
 
@@ -144,6 +162,11 @@ text = source(path)
 merges = list(re.finditer(r'\.merge\s*\(', text))
 workbench = re.search(r'\bfn workbench_services\s*\(', text)
 composed = []
+mail_merges = [merge for merge in merges
+               if re.sub(r'\s+', '', balanced(text, text.index('(', merge.start()))) == '(routes::mail::router())']
+assert len(mail_merges) <= 1, "Resolve repeated mail router registration"
+if mail_merges:
+    composed.append(('mail', mail_merges[0], {}))
 if workbench is not None:
     start = text.index('{', workbench.start())
     helper = balanced(text, start, '{', '}')
@@ -156,7 +179,7 @@ if workbench is not None:
         '(workbench_services(delivery,remote_hosts.clone(),config.access.clone()))',
         '(routes::remote_hosts::router(hosts))',
     }
-    calls = [(merge, re.sub(r'\s+', '', balanced(text, text.index('(', merge.start())))) for merge in merges]
+    calls = [(merge, re.sub(r'\s+', '', balanced(text, text.index('(', merge.start())))) for merge in merges if merge not in mail_merges]
     assert len(calls) == 2 and all(call in expected for _, call in calls), 'Catalogue this merged workbench router explicitly'
     outer = [merge for merge, call in calls if call.startswith('(workbench_services(')]
     assert len(outer) == 1 and all(call != '(routes::remote_hosts::router(hosts))' or start <= merge.start() < start + len(helper) for merge, call in calls), 'Resolve workbench registration'
@@ -164,11 +187,14 @@ if workbench is not None:
         composed.append((module, outer[0], {'composition_source': path, 'composition_line': text.count('\n', 0, workbench.start()) + 1}))
 else:
     for merge in merges:
+        if merge in mail_merges:
+            continue
         call = balanced(text, text.index("(", merge.start()))
         assert re.match(r'\(\s*routes::delivery::router\(delivery\)\.with_state\(', call), "Catalogue this merged router explicitly"
-    assert len(merges) <= 1, "Resolve repeated delivery router composition"
-    if merges:
-        composed.append(('delivery', merges[0], {}))
+    delivery_merges = [merge for merge in merges if merge not in mail_merges]
+    assert len(delivery_merges) <= 1, "Resolve repeated delivery router composition"
+    if delivery_merges:
+        composed.append(('delivery', delivery_merges[0], {}))
 assert not re.search(r'\.(?:nest|nest_service|route_service)\s*\(', text), "Catalogue nested routers explicitly"
 router_calls = re.findall(r'\b(routes::\w+::(?:router|remote_router))\s*\(', text)
 allowed = {'routes::coordination::remote_router'} | {f'routes::{module}::router' for module, _, _ in composed}
