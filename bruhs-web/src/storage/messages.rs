@@ -163,12 +163,12 @@ impl Serialize for StoredParts<'_> {
 
 fn prepared(record: &MessagesRecord) -> Option<Encoded<'_>> {
     let payload = metadata::json_string(&StoredRecord {
-        thread_id: &record.thread_id,
-        messages: StoredMessages(&record.messages),
+        thread_id: record.thread_id(),
+        messages: StoredMessages(record.messages()),
     })?;
     let mut strings = Vec::new();
     let mut inputs = Vec::new();
-    for part in record.messages.iter().flat_map(|message| &message.parts) {
+    for part in record.messages().iter().flat_map(|message| &message.parts) {
         match part {
             MessagePart::Text(text) | MessagePart::Thinking(text) => strings.push(text.as_str()),
             MessagePart::ToolCall(tool) => {
@@ -180,7 +180,7 @@ fn prepared(record: &MessagesRecord) -> Option<Encoded<'_>> {
         }
     }
     Some(Encoded {
-        thread_id: &record.thread_id,
+        thread_id: record.thread_id(),
         bruhs_messages_encoding: Encoding::PartsV1,
         payload,
         strings,
@@ -197,7 +197,7 @@ impl Envelope {
             strings,
             inputs,
         } = self;
-        let mut record: MessagesRecord =
+        let mut record: super::messages_record::Data =
             serde_json::from_str(&payload).map_err(|_| SaveError::Corrupt)?;
         if record.thread_id != thread_id {
             return Err(SaveError::Corrupt);
@@ -235,7 +235,7 @@ impl Envelope {
         if strings.next().is_some() || inputs.next().is_some() {
             return Err(SaveError::Corrupt);
         }
-        Ok(record)
+        Ok(record.into())
     }
 }
 

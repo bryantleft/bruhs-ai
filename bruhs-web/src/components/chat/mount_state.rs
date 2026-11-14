@@ -15,8 +15,9 @@ impl ChatMount {
         active: ReadSignal<Option<String>>,
         threads: ReadSignal<Vec<Thread>>,
         messages: ReadSignal<Vec<AgentMessage>>,
-        streaming: ReadSignal<bool>,
+        streaming: impl Into<Signal<bool>>,
     ) -> Self {
+        let streaming = streaming.into();
         Self {
             thread_id: Memo::new(move |_| {
                 let id = active.get()?;

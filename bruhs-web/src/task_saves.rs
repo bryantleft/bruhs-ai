@@ -225,6 +225,9 @@ impl TaskSaves {
         self.saving.set(true);
         wasm_bindgen_futures::spawn_local(async move {
             loop {
+                if self.queue.with_untracked(Queue::is_empty) {
+                    break;
+                }
                 yield_before_save().await;
                 let Some(pending) = self.queue.with_untracked(Queue::next_batch) else {
                     break;
