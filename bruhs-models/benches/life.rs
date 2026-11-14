@@ -25,6 +25,7 @@ fn fixture() -> LifeContext {
                 -1_500,
                 40 * DAY_MS - int(index % 30) * DAY_MS,
             )
+            .into()
         })
         .collect();
     context.health.workouts = (0..RECORD_COUNT)

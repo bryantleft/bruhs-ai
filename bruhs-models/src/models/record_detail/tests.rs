@@ -13,12 +13,7 @@ fn fixture() -> LifeContext {
     context
         .finance
         .transactions
-        .push(FinanceTransaction::manual(
-            "Merchant",
-            "Category",
-            i64::MAX,
-            12,
-        ));
+        .push(FinanceTransaction::manual("Merchant", "Category", i64::MAX, 12).into());
     let mut budget = FinanceBudget::monthly("Budget", 1);
     budget.monthly_limit_minor = u64::MAX;
     context.finance.budgets.push(budget);
@@ -159,7 +154,7 @@ fn historical_records_beyond_the_overview_limit_keep_their_own_dates_and_notes()
         .map(|i| {
             let mut record = FinanceTransaction::manual("Repeated merchant", "Category", -i, i);
             record.note = Some(format!("Receipt {i}"));
-            record
+            record.into()
         })
         .collect();
     let selected = SelectedLifeRecord {

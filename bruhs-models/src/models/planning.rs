@@ -194,7 +194,7 @@ impl TodaySnapshot {
         clippy::too_many_arguments,
         reason = "one input per record collection the snapshot joins; callers pass them positionally"
     )]
-    pub fn build(
+    pub fn build<'a>(
         now_ms: f64,
         day_start_ms: f64,
         day_end_ms: f64,
@@ -202,7 +202,7 @@ impl TodaySnapshot {
         work_items: &[WorkItem],
         events: &[CalendarEvent],
         meetings: &[Meeting],
-        people: &[PersonProfile],
+        people: impl IntoIterator<Item = &'a PersonProfile>,
     ) -> Self {
         let mut agenda = events
             .iter()
@@ -273,7 +273,7 @@ impl TodaySnapshot {
         let lookback_ms: i64 = 14 * 24 * 60 * 60 * 1_000;
         let cutoff = EpochMs::saturating_from_f64(now_ms).as_millis() - lookback_ms;
         let mut follow_ups = people
-            .iter()
+            .into_iter()
             .flat_map(|person| {
                 person
                     .observations
@@ -440,14 +440,21 @@ pub fn propose_day_plan(
                 .all(|dependency| completed.contains(dependency.as_str()))
         })
         .collect::<Vec<_>>();
-    tasks.sort_by(|left, right| {
+    let by_priority = |left: &&WorkItem, right: &&WorkItem| {
         status_rank(left.status)
             .cmp(&status_rank(right.status))
             .then_with(|| priority_rank(left.priority).cmp(&priority_rank(right.priority)))
             .then_with(|| left.due_date.cmp(&right.due_date))
             .then_with(|| right.updated_at.cmp(&left.updated_at))
             .then_with(|| left.id.cmp(&right.id))
-    });
+    };
+    let eligible_count = tasks.len();
+    // Only the first 50 appear in the proposal (six scheduled, the rest deferred).
+    if tasks.len() > 50 {
+        tasks.select_nth_unstable_by(50, by_priority);
+        tasks.truncate(50);
+    }
+    tasks.sort_unstable_by(by_priority);
 
     let mut busy = events
         .iter()
@@ -493,7 +500,7 @@ pub fn propose_day_plan(
         }
     }
 
-    let unscheduled_count = tasks.len().saturating_sub(blocks.len());
+    let unscheduled_count = eligible_count.saturating_sub(blocks.len());
     DayPlanProposal {
         id: format!("day-plan-{}", EpochMs::saturating_from_f64(now_ms)),
         created_at_ms: EpochMs::saturating_from_f64(now_ms).as_millis(),
@@ -579,6 +586,48 @@ mod tests {
         assert_eq!(proposal.blocks[0].start_at_ms, nine);
         assert_eq!(proposal.blocks[1].start_at_ms, nine + 90.0 * MINUTE_MS);
         assert_eq!(proposal.busy_blocks_respected, 1);
+    }
+
+    #[test]
+    fn large_proposals_keep_top_fifty_order_and_total_unscheduled_count() {
+        let day = 1_800_000_000_000.0;
+        let tasks = (0..200)
+            .map(|i| {
+                let mut task = task(&format!("task-{i:03}"), "Task", Priority::Medium);
+                task.updated_at = (i * 17) % 200;
+                task
+            })
+            .collect::<Vec<_>>();
+        let mut ranked = tasks.clone();
+        ranked.sort_by_key(|task| Reverse(task.updated_at));
+        let proposal = propose_day_plan(day + 9.0 * 60.0 * MINUTE_MS, day, &tasks, &[]);
+        assert_eq!(
+            proposal
+                .blocks
+                .iter()
+                .map(|block| &block.task_id)
+                .collect::<Vec<_>>(),
+            ranked[..6].iter().map(|task| &task.id).collect::<Vec<_>>()
+        );
+        assert_eq!(proposal.unscheduled_count, 194);
+        assert_eq!(
+            proposal.unscheduled_task_ids,
+            ranked[6..50]
+                .iter()
+                .map(|task| task.id.clone())
+                .collect::<Vec<_>>()
+        );
+
+        let full_day = propose_day_plan(day + 18.0 * 60.0 * MINUTE_MS, day, &tasks, &[]);
+        assert!(full_day.blocks.is_empty());
+        assert_eq!(full_day.unscheduled_count, 200);
+        assert_eq!(
+            full_day.unscheduled_task_ids,
+            ranked[..50]
+                .iter()
+                .map(|task| task.id.clone())
+                .collect::<Vec<_>>()
+        );
     }
 
     #[test]
