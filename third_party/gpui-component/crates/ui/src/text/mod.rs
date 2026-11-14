@@ -12,6 +12,8 @@ mod utils;
 mod window_selection;
 
 use gpui::{App, ElementId, IntoElement, RenderOnce, SharedString, Window};
+#[cfg(feature = "test-support")]
+pub use inline::geometry::inline_geometry_matches_full_scan;
 pub use markdown_ext::*;
 pub use state::*;
 pub use style::*;

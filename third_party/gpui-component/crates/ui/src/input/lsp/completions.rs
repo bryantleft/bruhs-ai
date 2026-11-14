@@ -104,6 +104,43 @@ impl Default for InlineCompletion {
 }
 
 impl InputState {
+    /// Display an app-owned, plain-text completion without changing the draft
+    /// or running an LSP provider. Selection and IME always take precedence.
+    pub fn set_inline_completion_text(&mut self, text: Option<String>, cx: &mut Context<Self>) {
+        let text = text.filter(|text| {
+            !text.is_empty() && self.selected_range.is_empty() && self.ime_marked_range.is_none()
+        });
+        if self
+            .inline_completion
+            .item
+            .as_ref()
+            .map(|item| &item.insert_text)
+            == text.as_ref()
+        {
+            return;
+        }
+        self.inline_completion = InlineCompletion::default();
+        self.inline_completion.item = text.map(|insert_text| InlineCompletionItem {
+            insert_text,
+            filter_text: None,
+            range: None,
+            command: None,
+            insert_text_format: None,
+        });
+        cx.notify();
+    }
+
+    /// The currently offered suffix, excluding selections and IME composition.
+    pub fn inline_completion_text(&self) -> Option<&str> {
+        if !self.selected_range.is_empty() || self.ime_marked_range.is_some() {
+            return None;
+        }
+        self.inline_completion
+            .item
+            .as_ref()
+            .map(|item| item.insert_text.as_str())
+    }
+
     pub(crate) fn handle_completion_trigger(
         &mut self,
         range: &Range<usize>,

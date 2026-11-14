@@ -17,6 +17,8 @@ use crate::{
     text::TextViewMultiClickKind, text::node::LinkMark, text::selection::word_range_at,
 };
 
+pub(super) mod geometry;
+
 /// A inline element used to render a inline text and support selectable.
 ///
 /// All text in TextView (including the CodeBlock) used this for text rendering.
@@ -144,43 +146,32 @@ impl Inline {
         // self.paint_selected_bounds(Bounds::from_corners(selection_start, selection_end), window, cx);
 
         let mut selection: Option<Selection> = None;
-        let mut offset = 0;
-        let mut chars = self.text.chars().peekable();
-        while let Some(c) = chars.next() {
-            let Some(pos) = text_layout.position_for_index(offset) else {
-                offset += c.len_utf8();
-                continue;
-            };
+        geometry::visit_visible_characters(
+            &self.text,
+            text_layout,
+            line_height,
+            mask_bounds,
+            |offset, next_offset, pos, char_width| {
+                let char_center = point(pos.x + char_width.half(), pos.y + line_height.half());
+                if mask_bounds.contains(&char_center)
+                    && point_in_text_selection(
+                        pos,
+                        char_width,
+                        selection_start,
+                        selection_end,
+                        line_height,
+                    )
+                {
+                    if selection.is_none() {
+                        selection = Some((offset..offset).into());
+                    }
 
-            let next_offset = offset + c.len_utf8();
-            let mut char_width = line_height.half();
-            if let Some(next_pos) = text_layout.position_for_index(next_offset) {
-                if next_pos.y == pos.y {
-                    char_width = next_pos.x - pos.x;
+                    if let Some(selection) = selection.as_mut() {
+                        selection.end = next_offset;
+                    }
                 }
-            }
-
-            let char_center = point(pos.x + char_width.half(), pos.y + line_height.half());
-            if mask_bounds.contains(&char_center)
-                && point_in_text_selection(
-                    pos,
-                    char_width,
-                    selection_start,
-                    selection_end,
-                    line_height,
-                )
-            {
-                if selection.is_none() {
-                    selection = Some((offset..offset).into());
-                }
-
-                if let Some(selection) = selection.as_mut() {
-                    selection.end = next_offset;
-                }
-            }
-
-            offset = next_offset;
-        }
+            },
+        );
 
         (true, true, selection)
     }
@@ -194,40 +185,30 @@ impl Inline {
         let mut line_bounds = Vec::new();
         let mut current_line_y = None;
         let mut current_bounds: Option<Bounds<Pixels>> = None;
-        let mut offset = 0;
-
-        for c in self.text.chars() {
-            let next_offset = offset + c.len_utf8();
-            let Some(pos) = text_layout.position_for_index(offset) else {
-                offset = next_offset;
-                continue;
-            };
-
-            let mut char_width = line_height.half();
-            if let Some(next_pos) = text_layout.position_for_index(next_offset) {
-                if next_pos.y == pos.y {
-                    char_width = next_pos.x - pos.x;
-                }
-            }
-
-            let bounds = Bounds::from_corners(pos, point(pos.x + char_width, pos.y + line_height))
-                .intersect(&mask_bounds);
-            if bounds.size.width > px(0.) && bounds.size.height > px(0.) {
-                if current_line_y == Some(pos.y) {
-                    if let Some(current) = current_bounds.as_mut() {
-                        *current = current.union(&bounds);
+        geometry::visit_visible_characters(
+            &self.text,
+            text_layout,
+            line_height,
+            mask_bounds,
+            |_, _, pos, char_width| {
+                let bounds =
+                    Bounds::from_corners(pos, point(pos.x + char_width, pos.y + line_height))
+                        .intersect(&mask_bounds);
+                if bounds.size.width > px(0.) && bounds.size.height > px(0.) {
+                    if current_line_y == Some(pos.y) {
+                        if let Some(current) = current_bounds.as_mut() {
+                            *current = current.union(&bounds);
+                        }
+                    } else {
+                        if let Some(current) = current_bounds.take() {
+                            line_bounds.push(current);
+                        }
+                        current_line_y = Some(pos.y);
+                        current_bounds = Some(bounds);
                     }
-                } else {
-                    if let Some(current) = current_bounds.take() {
-                        line_bounds.push(current);
-                    }
-                    current_line_y = Some(pos.y);
-                    current_bounds = Some(bounds);
                 }
-            }
-
-            offset = next_offset;
-        }
+            },
+        );
 
         if let Some(current) = current_bounds {
             line_bounds.push(current);
