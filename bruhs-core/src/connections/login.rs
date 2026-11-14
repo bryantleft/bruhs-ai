@@ -77,7 +77,7 @@ impl Connections {
         let mut auth_url = config.auth_url(&redirect, &state, &verifier)?;
         // Google only returns a refresh token on renewed consent after a grant was used before.
         // The first connection reuses SSO; explicit reconnect after a lost/expired grant renews consent.
-        if provider == ServiceProvider::Google
+        if matches!(provider, ServiceProvider::Google | ServiceProvider::Gmail)
             && saved.as_ref().is_some_and(|m| {
                 matches!(
                     m.state,

@@ -23,20 +23,41 @@ impl Config {
         let client_secret = std::env::var(format!("{prefix}_CLIENT_SECRET"))
             .ok()
             .filter(|s| !s.is_empty());
+        let tenant = std::env::var(format!("{prefix}_TENANT")).ok();
+        Self::for_client(provider, client_id, client_secret, tenant.as_deref())
+    }
+
+    pub(super) fn for_client(
+        provider: ServiceProvider,
+        client_id: String,
+        client_secret: Option<String>,
+        tenant: Option<&str>,
+    ) -> Option<Self> {
         let (auth, token, identity, scopes) = match provider {
-            ServiceProvider::Google => (
+            ServiceProvider::Google | ServiceProvider::Gmail => (
                 "https://accounts.google.com/o/oauth2/v2/auth".into(),
                 "https://oauth2.googleapis.com/token".into(),
                 "https://openidconnect.googleapis.com/v1/userinfo",
-                vec![
-                    "openid",
-                    "email",
-                    "https://www.googleapis.com/auth/calendar.events.readonly",
-                ],
+                if provider == ServiceProvider::Gmail {
+                    vec![
+                        "openid",
+                        "email",
+                        "https://www.googleapis.com/auth/gmail.modify",
+                    ]
+                } else {
+                    vec![
+                        "openid",
+                        "email",
+                        "https://www.googleapis.com/auth/calendar.events.readonly",
+                    ]
+                },
             ),
-            ServiceProvider::Microsoft => {
-                let tenant = std::env::var(format!("{prefix}_TENANT"))
-                    .unwrap_or_else(|_| "organizations".into());
+            ServiceProvider::Microsoft | ServiceProvider::Outlook => {
+                let tenant = tenant.unwrap_or(if provider == ServiceProvider::Outlook {
+                    "common"
+                } else {
+                    "organizations"
+                });
                 if tenant.is_empty()
                     || !tenant
                         .bytes()
@@ -48,13 +69,24 @@ impl Config {
                     format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/authorize"),
                     format!("https://login.microsoftonline.com/{tenant}/oauth2/v2.0/token"),
                     "https://graph.microsoft.com/oidc/userinfo",
-                    vec![
-                        "openid",
-                        "profile",
-                        "email",
-                        "offline_access",
-                        "https://graph.microsoft.com/Calendars.ReadBasic",
-                    ],
+                    if provider == ServiceProvider::Outlook {
+                        vec![
+                            "openid",
+                            "profile",
+                            "email",
+                            "offline_access",
+                            "https://graph.microsoft.com/Mail.ReadWrite",
+                            "https://graph.microsoft.com/Mail.Send",
+                        ]
+                    } else {
+                        vec![
+                            "openid",
+                            "profile",
+                            "email",
+                            "offline_access",
+                            "https://graph.microsoft.com/Calendars.ReadBasic",
+                        ]
+                    },
                 )
             }
             ServiceProvider::Github => (
@@ -86,6 +118,12 @@ impl Config {
             hash.update(item);
             hash.update([0]);
         }
+        if matches!(
+            self.provider,
+            ServiceProvider::Gmail | ServiceProvider::Outlook
+        ) {
+            hash.update(self.provider.id());
+        }
         format!("{:x}", hash.finalize())
     }
 
@@ -101,7 +139,10 @@ impl Config {
             ("code_challenge", challenge.as_str()),
             ("code_challenge_method", "S256"),
         ]);
-        if self.provider == ServiceProvider::Google {
+        if matches!(
+            self.provider,
+            ServiceProvider::Google | ServiceProvider::Gmail
+        ) {
             url.query_pairs_mut().append_pair("access_type", "offline");
         }
         // An unset prompt lets the provider reuse the user's browser session.
@@ -226,7 +267,10 @@ pub(super) async fn exchange(
     }
     let value: serde_json::Value = identity.json().await.map_err(|_| Error::InvalidResponse)?;
     let (account_id, account) = match config.provider {
-        ServiceProvider::Google | ServiceProvider::Microsoft => (
+        ServiceProvider::Google
+        | ServiceProvider::Microsoft
+        | ServiceProvider::Gmail
+        | ServiceProvider::Outlook => (
             value["sub"].as_str().map(String::from),
             value["email"]
                 .as_str()
@@ -252,6 +296,8 @@ pub(super) async fn exchange(
     let refresh_token = parsed
         .refresh_token
         .or_else(|| previous.and_then(|p| p.refresh_token.clone()));
+    let scopes = granted_scopes(parsed.scope.as_deref(), &config.scopes);
+    require_mail_permissions(config.provider, &scopes)?;
     Ok(Tokens {
         id: uuid::Uuid::new_v4().to_string(),
         access_token: parsed.access_token,
@@ -260,16 +306,7 @@ pub(super) async fn exchange(
         account_id,
         account,
         registration,
-        scopes: parsed.scope.map_or_else(
-            || config.scopes.clone(),
-            |scope| {
-                scope
-                    .split([' ', ','])
-                    .filter(|s| !s.is_empty())
-                    .map(String::from)
-                    .collect()
-            },
-        ),
+        scopes,
     })
 }
 
@@ -280,6 +317,8 @@ pub(super) async fn refresh(config: &Config, previous: &Tokens) -> Result<Tokens
         &[("grant_type", "refresh_token"), ("refresh_token", refresh)],
     )
     .await?;
+    let scopes = granted_scopes(parsed.scope.as_deref(), &previous.scopes);
+
     Ok(Tokens {
         id: previous.id.clone(),
         access_token: parsed.access_token,
@@ -290,15 +329,42 @@ pub(super) async fn refresh(config: &Config, previous: &Tokens) -> Result<Tokens
         account_id: previous.account_id.clone(),
         account: previous.account.clone(),
         registration: previous.registration.clone(),
-        scopes: parsed.scope.map_or_else(
-            || previous.scopes.clone(),
-            |scope| {
-                scope
-                    .split([' ', ','])
-                    .filter(|s| !s.is_empty())
-                    .map(String::from)
-                    .collect()
-            },
-        ),
+        scopes,
     })
+}
+
+fn granted_scopes(advertised: Option<&str>, previous: &[String]) -> Vec<String> {
+    advertised.map_or_else(
+        || previous.to_vec(),
+        |scope| {
+            scope
+                .split([' ', ','])
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .collect()
+        },
+    )
+}
+
+pub(super) fn require_mail_permissions(
+    provider: ServiceProvider,
+    scopes: &[String],
+) -> Result<(), Error> {
+    let required: &[&str] = match provider {
+        ServiceProvider::Gmail => &["https://www.googleapis.com/auth/gmail.modify"],
+        ServiceProvider::Outlook => &["Mail.ReadWrite", "Mail.Send"],
+        _ => return Ok(()),
+    };
+    if required.iter().all(|required| {
+        scopes.iter().any(|scope| {
+            scope
+                .strip_prefix("https://graph.microsoft.com/")
+                .unwrap_or(scope)
+                == *required
+        })
+    }) {
+        Ok(())
+    } else {
+        Err(Error::MissingMailPermissions)
+    }
 }

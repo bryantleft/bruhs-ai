@@ -1,9 +1,12 @@
 # Service connections
 
-Google Workspace, Microsoft 365, and GitHub share the Connect flow in
+Google Workspace, Microsoft 365, GitHub, Gmail, and Outlook Mail share the Connect flow in
 Settings → Credentials and in agent account-access requests. Each provider has
 one connected account per device. Disconnect before switching accounts or OAuth
 registrations. These accounts are separate from Calendar sync and saved API keys.
+Gmail and Outlook Mail have separate authorization entries from the existing
+read-only Calendar connections. Their credential setup is implemented; Inbox
+sync and delivery are still being built and are not enabled by connecting alone.
 
 ## What users see
 
@@ -50,6 +53,8 @@ loopback flow.
 |---|---|---|
 | Google Workspace | Google OAuth Desktop app; enable Calendar API and configure consent/test users | `BRUHS_CONNECTION_GOOGLE_CLIENT_ID`; optional `BRUHS_CONNECTION_GOOGLE_CLIENT_SECRET` if supplied by the registration |
 | Microsoft 365 | Entra Mobile and desktop application; allow public-client authorization and the configured tenant audience | `BRUHS_CONNECTION_MICROSOFT_CLIENT_ID`; optional `BRUHS_CONNECTION_MICROSOFT_TENANT` (default `organizations`) |
+| Gmail | Google OAuth Desktop app; enable Gmail API and configure consent/test users | `BRUHS_CONNECTION_GMAIL_CLIENT_ID`; optional `BRUHS_CONNECTION_GMAIL_CLIENT_SECRET` if supplied by the registration |
+| Outlook Mail | Entra Mobile and desktop application; configure the supported account audience and public-client authorization | `BRUHS_CONNECTION_OUTLOOK_CLIENT_ID`; optional `BRUHS_CONNECTION_OUTLOOK_TENANT` (default `common`, for work/school and personal accounts) |
 | GitHub | OAuth app with a loopback callback | `BRUHS_CONNECTION_GITHUB_CLIENT_ID` and `BRUHS_CONNECTION_GITHUB_CLIENT_SECRET` |
 
 The native broker listens on a random IPv4 loopback port and uses
@@ -72,6 +77,20 @@ Initial permissions are deliberately limited:
   `Calendars.ReadBasic` for basic calendar details.
 - GitHub: `read:user`, `read:org`, and `offline_access` for profile, organization
   membership, and renewable access. This does not grant private repository access.
+- Gmail: `openid`, `email`, and `gmail.modify` for the separate mail entry.
+  This permits reading, organizing, composing, and sending mail, while excluding
+  immediate permanent deletion. See [Google's scope definitions](https://developers.google.com/workspace/gmail/api/auth/scopes).
+- Outlook Mail: `openid`, `profile`, `email`, `offline_access`, `Mail.ReadWrite`,
+  and `Mail.Send` for its separate mail entry. Read/write access and send access
+  are separate permissions. See [message updates](https://learn.microsoft.com/en-us/graph/api/message-update?view=graph-rest-1.0)
+  and [sending mail](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0).
+
+Existing Google/Microsoft Calendar scopes are unchanged. Partial mail grants
+cannot complete mail sign-in or expose a token to a mail operation. If refresh
+returns narrower mail access, the broker saves any rotated credentials, marks
+the connection for sign-in, and refuses access. Disconnecting the mail entry
+leaves the separate Calendar entry intact. Mail client secrets are removed from
+agent commands along with the existing service client secrets.
 
 These are service access tokens, not universal credentials for other resources.
 Adding write permissions or another API requires a separate scope decision and
@@ -103,8 +122,8 @@ command or a compromised local application.
 rotation, disconnect fences, metadata-only recovery, canceled storage I/O, and
 per-operation approval. No test reads a user's keychain.
 
-The UI acceptance fixture uses the real WASM application and synthetic local
-services. It verifies all three Connect flows, error/retry, reordered responses
+The original UI acceptance fixture uses the real WASM application and synthetic local
+services. It verifies the Google Workspace, Microsoft 365, and GitHub Connect flows, error/retry, reordered responses
 after cancellation, desktop/mobile layout, and the absence of automatic command
 approval. It saves screenshots in a temporary directory:
 
@@ -117,6 +136,15 @@ BRUHS_PLAYWRIGHT_PATH=/path/to/playwright \
 Live SSO session reuse, tenant policies, and OS keychain prompts require a
 separate test with registered clients and user-authorized accounts. Synthetic
 tests cannot establish those live-provider outcomes.
+
+The additive mail authorization checks run with
+`cargo test -p bruhs-core --lib connections:: --locked`: 18 checks passed using
+synthetic providers and an in-memory credential store, including authorization
+for both new entries and denied/narrowed mail grants. The captured default
+production bundle also passes 642 synthetic mail-connection UI checks, including
+44px Permissions targets. No live mail account, mailbox sync, send or provider
+SSO acceptance is claimed. Evidence and the
+remaining product cases are in the [Inbox checklist](inbox-completion-2026-11-13.md).
 
 References: [Google desktop OAuth](https://developers.google.com/identity/protocols/oauth2/native-app),
 [Microsoft authorization code flow](https://learn.microsoft.com/en-us/entra/identity-platform/v2-oauth2-auth-code-flow),

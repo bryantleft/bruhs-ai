@@ -27,15 +27,17 @@ async fn another_hosts_disconnect_fences_a_pending_callback() {
 }
 
 fn config(provider: ServiceProvider, base: &str) -> oauth::Config {
-    oauth::Config {
+    let mut config = oauth::Config::for_client(
         provider,
-        client_id: "synthetic-client".into(),
-        client_secret: Some("synthetic-client-secret".into()),
-        auth: format!("{base}/authorize"),
-        token: format!("{base}/token"),
-        identity: format!("{base}/identity"),
-        scopes: vec!["profile.read".into()],
-    }
+        "synthetic-client".into(),
+        Some("synthetic-client-secret".into()),
+        None,
+    )
+    .unwrap();
+    config.auth = format!("{base}/authorize");
+    config.token = format!("{base}/token");
+    config.identity = format!("{base}/identity");
+    config
 }
 
 fn manager(provider: ServiceProvider, base: &str) -> Connections {
@@ -69,7 +71,7 @@ impl Connections {
                 expires_at_ms: None,
                 account_id: "stable-subject".into(),
                 account: "you@example.test".into(),
-                scopes: vec!["profile.read".into()],
+                scopes: manager.0.configs[&provider].scopes.clone(),
                 registration: manager.0.configs[&provider].registration(),
             })
             .await
@@ -79,9 +81,11 @@ impl Connections {
 }
 
 async fn setup(provider: ServiceProvider) -> (Connections, MockServer) {
-    let server = MockServer::start().await;
+    // OAuth shares a process-wide HTTP client, while each test has its own runtime.
+    // Dedicated origins keep its connection pool separate from recycled mock servers.
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST")).and(path("/token"))
-        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "access_token": "access-canary", "refresh_token": "refresh-canary", "expires_in": 3600, "scope": "profile.read", "token_type": "Bearer" })))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({ "access_token": "access-canary", "refresh_token": "refresh-canary", "expires_in": 3600, "scope": config(provider, &server.uri()).scopes.join(" "), "token_type": "Bearer" })))
         .mount(&server).await;
     let identity = match provider {
         ServiceProvider::Github => serde_json::json!({"id": 42, "login": "synthetic-user"}),
@@ -120,9 +124,13 @@ async fn all_services_complete_browser_authorization_without_leaking_tokens() {
         assert!(response.status().is_success());
         let page = response.text().await.unwrap();
         assert!(!page.contains("canary"));
+        let attempt = manager.attempt(&start.id).unwrap();
         assert_eq!(
-            manager.attempt(&start.id).unwrap().state,
-            AttemptState::Connected
+            attempt.state,
+            AttemptState::Connected,
+            "{} authorization failed: {:?}",
+            provider.id(),
+            attempt.message
         );
         let rows = manager.list().await.unwrap();
         let row = rows.iter().find(|row| row.provider == provider).unwrap();
@@ -136,6 +144,200 @@ async fn all_services_complete_browser_authorization_without_leaking_tokens() {
             .unwrap();
         assert_eq!(access.value.as_str(), "access-canary");
         drop(access);
+    }
+}
+
+#[test]
+fn mail_connections_have_separate_scopes_and_registration_identity() {
+    let client = |provider| {
+        oauth::Config::for_client(provider, "same-client".into(), None, Some("common")).unwrap()
+    };
+    let google = client(ServiceProvider::Google);
+    let gmail = client(ServiceProvider::Gmail);
+    let microsoft = client(ServiceProvider::Microsoft);
+    let outlook = client(ServiceProvider::Outlook);
+    assert!(google
+        .scopes
+        .iter()
+        .any(|scope| scope.ends_with("calendar.events.readonly")));
+    assert!(!google.scopes.iter().any(|scope| scope.contains("gmail")));
+    assert!(microsoft
+        .scopes
+        .iter()
+        .any(|scope| scope.ends_with("Calendars.ReadBasic")));
+    assert!(!microsoft.scopes.iter().any(|scope| scope.contains("Mail.")));
+    assert!(oauth::require_mail_permissions(ServiceProvider::Gmail, &gmail.scopes).is_ok());
+    assert!(oauth::require_mail_permissions(ServiceProvider::Outlook, &outlook.scopes).is_ok());
+    assert_ne!(google.registration(), gmail.registration());
+    assert_ne!(microsoft.registration(), outlook.registration());
+    assert_ne!(ServiceProvider::Google.id(), ServiceProvider::Gmail.id());
+    assert_ne!(
+        ServiceProvider::Microsoft.id(),
+        ServiceProvider::Outlook.id()
+    );
+}
+
+#[tokio::test]
+async fn missing_mail_permissions_cannot_complete_authorization() {
+    for provider in [ServiceProvider::Gmail, ServiceProvider::Outlook] {
+        let server = MockServer::builder().start().await;
+        Mock::given(method("POST")).and(path("/token"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "access_token":"partial-canary", "refresh_token":"partial-refresh", "expires_in":3600,
+                "scope":"openid email", "token_type":"Bearer"
+            }))).mount(&server).await;
+        Mock::given(method("GET"))
+            .and(path("/identity"))
+            .respond_with(
+                ResponseTemplate::new(200).set_body_json(
+                    serde_json::json!({"sub":"stable", "email":"mail@example.test"}),
+                ),
+            )
+            .mount(&server)
+            .await;
+        let manager = manager(provider, &server.uri());
+        let started = manager.start(provider).await.unwrap();
+        reqwest::get(callback(&started)).await.unwrap();
+        assert_eq!(
+            manager.attempt(&started.id).unwrap().state,
+            AttemptState::Failed
+        );
+        assert_eq!(
+            manager.connection(provider).await.unwrap().state,
+            ConnectionState::Disconnected
+        );
+        assert!(manager
+            .0
+            .store
+            .lease(provider)
+            .await
+            .unwrap()
+            .read()
+            .await
+            .unwrap()
+            .is_none());
+    }
+}
+
+#[tokio::test]
+async fn refreshing_a_narrowed_mail_grant_saves_rotation_but_refuses_access() {
+    let provider = ServiceProvider::Outlook;
+    let server = MockServer::builder().start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token":"narrow-canary", "refresh_token":"rotated-canary", "expires_in":3600,
+            "scope":"openid email Mail.ReadWrite", "token_type":"Bearer"
+        })))
+        .mount(&server)
+        .await;
+    let manager = manager(provider, &server.uri());
+    manager
+        .0
+        .store
+        .lease(provider)
+        .await
+        .unwrap()
+        .write(&Tokens {
+            id: "mail-connection".into(),
+            access_token: "expired-canary".into(),
+            refresh_token: Some("old-refresh".into()),
+            expires_at_ms: Some(1),
+            account_id: "stable".into(),
+            account: "mail@example.test".into(),
+            registration: manager.0.configs[&provider].registration(),
+            scopes: manager.0.configs[&provider].scopes.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        manager.access(provider, "mail-connection").await,
+        Err(ConnectionError::MissingMailPermissions)
+    ));
+    assert_eq!(
+        manager.connection(provider).await.unwrap().state,
+        ConnectionState::NeedsSignIn
+    );
+    let lease = manager.0.store.lease(provider).await.unwrap();
+    let saved = lease.read().await.unwrap().unwrap();
+    drop(lease);
+    assert_eq!(saved.refresh_token.as_deref(), Some("rotated-canary"));
+    assert_eq!(saved.access_token, "narrow-canary");
+}
+
+#[tokio::test]
+async fn disconnecting_mail_leaves_the_calendar_connection_and_token_intact() {
+    let configs = [ServiceProvider::Google, ServiceProvider::Gmail]
+        .map(|provider| (provider, config(provider, "http://127.0.0.1")))
+        .into();
+    let manager = Connections(Arc::new(Inner {
+        configs,
+        store: storage::Store::memory(),
+        attempts: Mutex::new(HashMap::new()),
+    }));
+    for provider in [ServiceProvider::Google, ServiceProvider::Gmail] {
+        manager
+            .0
+            .store
+            .lease(provider)
+            .await
+            .unwrap()
+            .write(&Tokens {
+                id: provider.id().into(),
+                access_token: format!("{}-canary", provider.id()),
+                refresh_token: None,
+                expires_at_ms: None,
+                account_id: "stable".into(),
+                account: "same@example.test".into(),
+                registration: manager.0.configs[&provider].registration(),
+                scopes: manager.0.configs[&provider].scopes.clone(),
+            })
+            .await
+            .unwrap();
+    }
+    manager.disconnect(ServiceProvider::Gmail).await.unwrap();
+    assert_eq!(
+        manager
+            .connection(ServiceProvider::Gmail)
+            .await
+            .unwrap()
+            .state,
+        ConnectionState::Disconnected
+    );
+    assert_eq!(
+        manager
+            .connection(ServiceProvider::Google)
+            .await
+            .unwrap()
+            .state,
+        ConnectionState::Connected
+    );
+    let access = manager
+        .access(ServiceProvider::Google, "google")
+        .await
+        .unwrap();
+    assert_eq!(access.value.as_str(), "google-canary");
+    drop(access);
+}
+
+#[test]
+fn mail_client_secrets_are_removed_from_agent_commands() {
+    let mut command = tokio::process::Command::new("unused-fixture");
+    for key in [
+        "BRUHS_CONNECTION_GMAIL_CLIENT_SECRET",
+        "BRUHS_CONNECTION_OUTLOOK_CLIENT_SECRET",
+    ] {
+        command.env(key, "synthetic-secret");
+    }
+    protect_command(&mut command);
+    for key in [
+        "BRUHS_CONNECTION_GMAIL_CLIENT_SECRET",
+        "BRUHS_CONNECTION_OUTLOOK_CLIENT_SECRET",
+    ] {
+        assert!(command
+            .as_std()
+            .get_envs()
+            .any(|(name, value)| name == key && value.is_none()));
     }
 }
 
@@ -211,7 +413,7 @@ async fn disconnect_invalidates_old_connection_references() {
 #[tokio::test]
 async fn refresh_rotation_is_serialized_and_persists_new_credentials() {
     let provider = ServiceProvider::Github;
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST")).and(path("/token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"access_token":"new-access", "refresh_token":"new-refresh", "expires_in":3600}))).expect(1).mount(&server).await;
     let manager = manager(provider, &server.uri());
@@ -257,7 +459,7 @@ async fn refresh_rotation_is_serialized_and_persists_new_credentials() {
 
 #[tokio::test]
 async fn provider_errors_never_echo_response_bodies_or_tokens() {
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .and(path("/token"))
         .respond_with(ResponseTemplate::new(400).set_body_json(
@@ -345,7 +547,7 @@ async fn reconnect_cannot_change_a_lost_accounts_stable_identity_even_with_the_s
 #[tokio::test]
 async fn revoked_github_refresh_requires_reauthentication() {
     let provider = ServiceProvider::Github;
-    let server = MockServer::start().await;
+    let server = MockServer::builder().start().await;
     Mock::given(method("POST"))
         .and(path("/token"))
         .respond_with(ResponseTemplate::new(200).set_body_json(

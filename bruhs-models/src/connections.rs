@@ -7,16 +7,26 @@ pub enum ServiceProvider {
     Google,
     Microsoft,
     Github,
+    Gmail,
+    Outlook,
 }
 
 impl ServiceProvider {
-    pub const ALL: [Self; 3] = [Self::Google, Self::Microsoft, Self::Github];
+    pub const ALL: [Self; 5] = [
+        Self::Google,
+        Self::Microsoft,
+        Self::Github,
+        Self::Gmail,
+        Self::Outlook,
+    ];
 
     pub const fn id(self) -> &'static str {
         match self {
             Self::Google => "google",
             Self::Microsoft => "microsoft",
             Self::Github => "github",
+            Self::Gmail => "gmail",
+            Self::Outlook => "outlook",
         }
     }
 
@@ -25,6 +35,8 @@ impl ServiceProvider {
             Self::Google => "Google Workspace",
             Self::Microsoft => "Microsoft 365",
             Self::Github => "GitHub",
+            Self::Gmail => "Gmail",
+            Self::Outlook => "Outlook Mail",
         }
     }
 
@@ -33,6 +45,9 @@ impl ServiceProvider {
             Self::Google => "Read calendar events and identify your account",
             Self::Microsoft => "Read basic calendar details and identify your account",
             Self::Github => "Read your profile and organization memberships",
+            Self::Gmail | Self::Outlook => {
+                "Authorize reading, organizing, composing, and sending email. Inbox sync and delivery are still being built."
+            }
         }
     }
 }
