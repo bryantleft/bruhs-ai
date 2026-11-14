@@ -1,4 +1,5 @@
 use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
+use std::sync::Arc;
 
 use super::attachment_recovery::{RecoveryAttachment, RecoveryRecord};
 use super::{Kind, Record};
@@ -20,7 +21,7 @@ pub(super) struct Pending {
 pub(super) struct Queue(BTreeMap<(Kind, String), Pending>);
 
 impl Queue {
-    pub fn conversation(&self, id: &str) -> Option<Option<crate::storage::MessagesRecord>> {
+    pub fn conversation(&self, id: &str) -> Option<Option<Arc<crate::storage::MessagesRecord>>> {
         let pending = self.0.get(&(Kind::Conversation, id.to_owned()))?;
         Some(match &pending.draft {
             Some(Record::Conversation(record)) => Some(record.clone()),
