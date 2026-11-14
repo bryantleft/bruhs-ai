@@ -1,0 +1,25 @@
+{
+  "status": "partial_actual_runtime_evidence",
+  "goal_status": "active",
+  "source_input": "target/performance-task-runtime6-input.json",
+  "source_input_sha256": "ed618d0325d9712c369d17c6439da3e2a5dfc99b47863d42433ed0d037768fc3",
+  "build_completion": "target/performance-task-runtime5-build-completion.json",
+  "run_receipt": "target/performance-task-runtime6-run-receipt.json",
+  "source_sha256": {
+    "bruhs-server/src/routes/coordination/remote.html": "c7d36a577351e7c31f68883a31b5c06d436fda9e4ca530e581191616d56a17b9",
+    "bruhs-server/src/routes/coordination.rs": "8f6680598066b5fde98e6d13e9c23470f1439030e9791d693ed9df66ca839864",
+    "bruhs-core/src/coordination.rs": "119d0c761c4ce9cd1c5f7c5d6bf3f762cb8a1df5b916204cff6ada57b9b71333",
+    "bruhs-core/src/coordination/access.rs": "7dcb8844fdfe27fb70105d2035f272f6dfaddb4da558b286006b02e5532106b4",
+    "bruhs-models/src/coordination.rs": "d2ee1e02b364d3fd0b16b0e6d4fa9a954fe9fcc48e3f313b08c3889aab6cc47d"
+  },
+  "timing_observations": "target/performance-task-runtime6-observations.json",
+  "request_count_observations": "target/performance-task-runtime6-counts.json",
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "remaining": [
+    "Publish and integrate the complete task-workspace feature with required checks before merging this working-tree performance fix.",
+    "Exercise active/provider work, all task commands, cancellation/reconnect, concurrency and larger histories; match T3 data and boundaries separately.",
+    "Measure DNS/TLS/proxy, physical devices/paint and real impaired links. The current CDP profile shapes loopback transport only.",
+    "Review duplicate startup reads, snapshot payload growth and notification backpressure while preserving lossless current-state delivery."
+  ]
+}

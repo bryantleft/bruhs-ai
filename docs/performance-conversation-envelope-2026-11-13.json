@@ -1,0 +1,43 @@
+{
+  "version": 1,
+  "status": "withheld_mixed_results",
+  "base_revision": "53c1f1a365d32d2a93f0831aa5ce2ddaf8a029f6",
+  "scope": "Unmounted synthetic local storage variants; no whole-action or network/provider/T3 acceptance",
+  "comparison_saves": 224,
+  "retained_saves": 192,
+  "samples_per_cell": 6,
+  "functional_saves": 20,
+  "browser_codec_controls": 21,
+  "native_storage_tests_passed": 17,
+  "source_sha256": {
+    "bruhs-web/src/storage/messages.rs": "73591858305c2053b7e14f1c0d85367249e04061c9cdce0dd01baa612c9e9308",
+    "bruhs-web/src/storage/messages/tests.rs": "2ecfe23a16395e8e07fb3ab79c2d614d47310067ea06307ea10ee15d0b9546d0",
+    "bruhs-web/src/storage/tasks.rs": "ec9471296cb5d7f6daca43d8f7eddd9fc036b9a89da52f73e323b72588d82ed5",
+    "bruhs-web/src/storage/messages/tests/original_checks.rs": "767af0a876cb9129c023f7307475d649f96ab0f54f00c85d84db9438f378f92f"
+  },
+  "raw_inputs_sha256": {
+    "target/performance-envelope3-input.json": "5df6049697ab93cf94783293b975703587f2a5d9da13ef7f41077f9cda0d16dc",
+    "target/performance-envelope3-build-completion.json": "5a23e04677b832a0e7b2f4a8d769e0eecadc7669622e9eff1a40cf8c867fc452",
+    "target/performance-envelope3-run-receipt.json": "a2c0fc93c67fb633c7307f159661ebb7c43ebe6bdf1dd074effb3d0b11101a52",
+    "target/performance-envelope3-timings.json": "6f1682378891a8297a1e4f7731ee37549e77f959a37c110b1f77682e84c5c097",
+    "target/performance-envelope3-action-observations.json": "d1b078b6ce44e95fa16e94106c6948c33f5e1cf98faebad1a63295c257d354b0",
+    "target/performance-envelope3-code-review.json": "9304c4a85589a2d622807eac685bd614243c183f4f9b67c522754651efe8b2c6",
+    "target/performance-envelope3-checkpoint-red.log": "ec6791a2432010b8699fc65de41cb5b70a58fd61b61df1b53ff45e71e264a018",
+    "target/performance-envelope3-checkpoint-green.log": "44dfed69f70e2a6945b1e93e6f4d7f172d14faec5bbd8b1c23c96e102f2d3ce8",
+    "target/performance-envelope3-preflight.json": "3d5addbf06266b5f0d42477c48e6e43561a383b2a6e8ba232ddf5dff2b81d07b",
+    "target/performance-envelope3-inventory-receipt.json": "2de55e5cfd7baaed3bd45bc93e429ec08b2bc11a80e688b555d15d998a061fc9",
+    "target/performance-envelope3-network-discovery-supplement.json": "54636278e5046900e4ca678c07352ff950ec6cf130e694548a1163a0c7994419",
+    "target/performance-envelope3-production.patch": "6f77871eb791e61c23f60a09446623396843f33b8560152b957683f0627ecad0",
+    "target/performance-envelope3-production-restoration.json": "2ac8a40c126f9d1a4bc3b21912c66ffcdb75c833c19a22c97e6367f8f92fe2c0",
+    "target/performance-envelope3-cleanup.json": "b4d12ccb97dd274d9786e02bb1b7ad23bb017dc1d07acada58be65c95b7685f5",
+    "target/performance-envelope3-network-revalidation.json": "d1a00c0ecaddecb00109d3d345191598685d0bb64840c9e49a1c09757aae57c8"
+  },
+  "source_review": "three independent passes, 2/3 flagged the empty-checkpoint typed equality difference; regression reproduced and fixed",
+  "ordinary_release_and_merge_gate": "not run for this withheld candidate",
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "candidate_patch": "target/performance-envelope3-production.patch",
+  "decision": "Do not adopt this mixed whole-history comparison path. Continue bounded history access and incremental writes.",
+  "private_overlay_inventory": "All nine measured files are pinned. The actual six private-overlay files and complete removal check are recorded in production-restoration.json; raw input.private_files retains its earlier shared-hook list.",
+  "network_discovery_source_note": "Concurrent root formatting changed source after the first supplement. All 16 known method/path/handler pairs were revalidated unchanged; the current three-file source capsule is complete. This is still not a full inventory refresh."
+}

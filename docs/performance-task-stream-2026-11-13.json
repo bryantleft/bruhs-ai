@@ -1,0 +1,59 @@
+{
+  "version": 1,
+  "status": "applied_to_unpublished_working_tree_not_merged",
+  "source_sha256": {
+    "bruhs-server/src/routes/coordination/remote.html": "7eaf0a3a6e83c30feefa64521496662f5996e5f34563470f19b0b27ab5bfd3de",
+    "bruhs-server/src/routes/coordination.rs": "8f6680598066b5fde98e6d13e9c23470f1439030e9791d693ed9df66ca839864",
+    "bruhs-core/src/coordination.rs": "25e6cf719d33088e19c8713cbdaa24bab1d7af336a9d426c834a01e1a9152de7",
+    "bruhs-core/src/coordination/access.rs": "7dcb8844fdfe27fb70105d2035f272f6dfaddb4da558b286006b02e5532106b4",
+    "bruhs-models/src/coordination.rs": "06fdb6191fc53e696dc6e42003b7c0f2438402c58f3a3b5232801c58365daa73"
+  },
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "latency_measured": false,
+  "measurement_level": "browser_stream_request_counts",
+  "scope": "Exact task HTML with real loopback HTTP snapshot requests. SSE transport chunks are emulated by a controlled browser ReadableStream, not TCP fragmentation. Request/body-byte counts and behavior only; no latency, real runtime/provider, full action or T3 acceptance.",
+  "counts": {
+    "baseline_event_case_snapshots": 111,
+    "candidate_event_case_snapshots": 5,
+    "parser_controls": 508,
+    "stream_cases": 32,
+    "browser_action_checks": 21,
+    "separate_adversarial_checks": 9,
+    "disconnect_red_to_green_cases": 2,
+    "expected_negative_auth_console_403s": 3,
+    "unexpected_browser_errors": 0
+  },
+  "raw_inputs_sha256": {
+    "target/performance-task-stream2-application-receipt.json": "cb87db55368a378e3c473dc65e09f22c66376c37a87961f73c554d3bf41be486",
+    "target/performance-task-stream2-candidate.html": "7eaf0a3a6e83c30feefa64521496662f5996e5f34563470f19b0b27ab5bfd3de",
+    "target/performance-task-stream2-candidate.patch": "56e6dd576e8af491f49d4448f830922c540469c48e45608328f7db9f4b58ea99",
+    "target/performance-task-stream2-browser.cjs": "14b0da79a840a08ca908d7396e89882f659629620dd757713574a4c7578b2dcc",
+    "target/performance-task-stream2-browser.json": "f2d8da36d2be3747ab49bfcb46f2f1b4d29c1d09b0f994c6bed91dd889c65a5c",
+    "target/performance-task-stream2-parser.cjs": "6f95b121859173decb0e957c6673a606fe2c2cab05f90e2dbc48da932d0c98af",
+    "target/performance-task-stream2-parser-controls.json": "cae27aaf0045a41b5b8c0bf371c54c47c47c35f7c176b888c8c56a35f25af786",
+    "target/performance-task-stream2-disconnect.cjs": "d1d7d7dc1134c9509ed6d2d61b88346f32fc179bddb6783586f28eefad8114fe",
+    "target/performance-task-stream2-disconnect-red-success.json": "1a45e0302f011dc4bb50b76790492972dbc0740b32667b516d9e2ba7849d8997",
+    "target/performance-task-stream2-disconnect-red-failure.json": "229831885b36bf91370b0f454c53d1fa2a15dfc357960fd0b0529421122d4b41",
+    "target/performance-task-stream2-disconnect-green-success.json": "e757e36aa68a85654f02bbb5a112f63c33679e484c04221b02924b5265b1714c",
+    "target/performance-task-stream2-disconnect-green-failure.json": "ba19e880cc62f831745d9628bdfb04f386928ec6c973a61c411cd0ce07052226",
+    "target/performance-task-stream2-adversarial.cjs": "b0c3350c97a3bf377d6e98652b84dd7f23210de34ad69acd80112a27f68aa93b",
+    "target/performance-task-stream2-adversarial.json": "87a97bec52f84cda2549f6bedda8e9f06d7ec2c39d43a7028ce86d87e090a4a4",
+    "target/performance-task-stream2-paired-observations.json": "d2ffdbd69e40205e0e60a3e3d93c1663d85d2527b3e1c1c741b32ef6cbc958b2",
+    "target/performance-task-stream2-local-observations.json": "5eaff8b8808580f4c71c23f8351bbd98bac10b716628186398afef34c32c8a25",
+    "target/performance-task-stream2-counts.py": "132cfbde25f1fedfdf599222bf01e9ac5545bc95b674469278cf34d28ca74bc6"
+  },
+  "baseline_source_archive": "target/performance-task-stream2-source",
+  "candidate_html": "target/performance-task-stream2-candidate.html",
+  "historical_failure": {
+    "report": "target/performance-task-stream1-browser.json",
+    "pass": false,
+    "reason": "First browser error gate counted three intentional invalid-token HTTP 403 console messages; its original failed report is preserved. The corrected harness records those expected errors separately and rejects other errors."
+  },
+  "remaining": [
+    "Run the real task runtime/server and actual TCP SSE, reconnect/error/cancellation and all task action variants.",
+    "Measure response and complete UI latency on defined local/remote and impaired-network profiles.",
+    "Run required integration/merge checks when the unpublished task-workspace feature is ready; no main merge occurred."
+  ],
+  "goal_status": "active"
+}

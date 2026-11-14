@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "status": "withheld_full_read_regressions",
+  "base_revision": "53c1f1a365d32d2a93f0831aa5ce2ddaf8a029f6",
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "comparison_intervals": 532,
+  "retained_intervals": 456,
+  "eligible_cells": 76,
+  "samples_per_cell": 6,
+  "single_preparations": 8,
+  "normalized_observations": 84,
+  "protocol": {
+    "cases": [
+      "small-control",
+      "mixed-41k-parts",
+      "messages-45k",
+      "messages-75k",
+      "large-tool-output",
+      "long-reasoning",
+      "escaped-output",
+      "structured-fallback"
+    ],
+    "operations": [
+      "tail",
+      "earlier",
+      "full",
+      "append",
+      "replace"
+    ],
+    "limit": 77,
+    "units": "requested messages, not T3 timeline items",
+    "implementations": [
+      "baseline",
+      "indexed"
+    ],
+    "format": "writer-prepared v12; non-finite fallback structured",
+    "warmups": 1,
+    "retained": 6,
+    "ordering": "case/op/implementation order reversed on alternating blocks",
+    "quantiles": "linear interpolation; six-sample quantiles descriptive, not population tails",
+    "migration": "one complete preparation per case outside read/write timing, separately recorded; no cold physical I/O claim"
+  },
+  "measured_source_sha256": {
+    "bruhs-web/Cargo.toml": "91e3250d526fd1c2b6ad9b1f0c97cfef769c1e02ccff7693eb2649e705eed0e5",
+    "bruhs-web/src/main.rs": "e37e872061a18305a119cc2d17a326d46e900a625c81704122269681c5487795",
+    "bruhs-web/src/storage.rs": "cfa3d6a4c5831f61274d1a0607bcda77b8b62e9a0bebc2fa6c348d8ca41b22f6",
+    "bruhs-web/src/storage/messages.rs": "2db4d11ee9f21e8b79a2859593b37b7d85d7edd88771812816c738dd6353a35f",
+    "bruhs-web/src/storage/conversation_schema.rs": "dc18408fa5c51804cc50e2d9fc7d11b93e3c94d9ab293dcd82e28d1709a66ea5",
+    "bruhs-web/src/storage/bounded_probe.rs": "4cab455edf195e08ccc4de6a7dd2836d724d9271ad1f6ba824a9ca6644671767"
+  },
+  "raw_inputs_sha256": {
+    "target/performance-bounded3-input.json": "84bf26c9d9a3496ff01943c556f1d10c992736afbd0167886f167238d4cfeea3",
+    "target/performance-bounded3-build-completion.json": "046b950e0a0fa4ef0a668c07c968a1ac187db80ba36fdf42256df182957f571a",
+    "target/performance-bounded3-run-receipt.json": "7fc29e5c2e55ab819929147fae084c59ff6e6ff059950be9e40b125aad4997fe",
+    "target/performance-bounded3-run-audit.json": "ac1d3752a5a40c80721778886d702fbb55df59fa0b95eff73a638dd8bddb6aeb",
+    "target/performance-bounded3-browser-probe.json": "18a54c101dd57ac452cf7a60f88e2b2c156a7a7f1d5921ec3aff3f8d72019c85",
+    "target/performance-bounded3-runs.ndjson": "922f08080a8ea89dfbf24293c9d9ae373886cd3333ae1e21542b16a31fc95310",
+    "target/performance-bounded3-preflight.json": "df212019895aac3e9c7027a1e70f18504c5a24322c6fb84263082ca798182940",
+    "target/performance-bounded3-preflight-runs.ndjson": "9f8453f660b0037e1bfad5d079cd156a138409084bf620b3b7b90a1381b61426",
+    "target/performance-bounded3-timings.json": "72ad3ac39deda02bfcf661d0286b1f1746ebc95f57c17d3e9eb867fa8d95890c",
+    "target/performance-bounded3-action-observations.json": "3b569b782a16338e81e88e2f584ef10ef25f72254ab0d803044424cb4344d23a",
+    "target/performance-bounded3-integration-requirements.json": "5ab9c4f4185a731f1db66060fa6f95f8e09f53db8708cefde71a2291a4a235f1",
+    "target/performance-bounded3-schema-review.json": "222d8d08e5038d34e0e59b0ed0006e4d0290e31e284ae073241be466b8226bcc",
+    "target/performance-bounded3-schema-production-input.json": "a422aabbf46d13806620883a25f0df48ab78c4c642a40d93570fab2adaac85bc",
+    "target/performance-bounded3-schema-gate-receipt.json": "c67a99857ee4979547746c7a1d68faadcdb23e322d1fb1de21f9409b1c7007f7",
+    "target/performance-bounded3-normalize.py": "35ddd41afbf7cf9a20813a62e9e74c619c86d0e1446f6c7c098189083937679a"
+  },
+  "validation": {
+    "schema_control_groups": 4,
+    "data_control_groups": 13,
+    "format_barrier_group": 1,
+    "functional_API_invocations": 20,
+    "schema_only_reviews_clean": 3,
+    "schema_only_gate": {
+      "at": "2026-11-14T01:08:30.491146+00:00",
+      "exit_code": 0,
+      "session_id": 28758,
+      "all_eleven_steps_passed": true,
+      "source_sha256": {
+        "bruhs-web/src/storage.rs": "e5f226c619c92371a3e2336e47ef78985d8d0bcf9c61662fa24f3815a52e92a3",
+        "bruhs-web/src/storage/conversation_schema.rs": "dc18408fa5c51804cc50e2d9fc7d11b93e3c94d9ab293dcd82e28d1709a66ea5"
+      },
+      "logs_sha256": {
+        "target/performance-bounded3-schema-gate/bench-check.log": "7ce07812e290d2541735b6dc08881caa4033c561af95d47ebcea518d0b7ccf8c",
+        "target/performance-bounded3-schema-gate/desktop-release.log": "5af91dd4e2e137ff462799ceb31990146584c7a825baad533763325b6eb4ebe1",
+        "target/performance-bounded3-schema-gate/fmt.log": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        "target/performance-bounded3-schema-gate/web-assets.log": "812020290987e68027b66f0b10a6cd36f917bfc0dc21dae04c9d9796dd2b845e",
+        "target/performance-bounded3-schema-gate/wasm-build.log": "0aec798dd871f83eb77760e7bf70508719e9f35bf5225795be5c81223a9c5bff",
+        "target/performance-bounded3-schema-gate/test.log": "a4ddd76c83f791c0e4a60e2a4ff4899b1153229d8575dac8847369ecc56c2b1b",
+        "target/performance-bounded3-schema-gate/deny.log": "e75696081ede757c4222c5c53e6381092e8f05ab3e9024fb434919a4b839bfad",
+        "target/performance-bounded3-schema-gate/clippy.log": "282a32773a107c4f5493b3a87cfc3a3aa1d05d63dfe711d9706d6271d40d1e9a",
+        "target/performance-bounded3-schema-gate/clippy-wasm.log": "9ad16a875b3656282d0227c55a624ca37c000cf0269d103a51d2d76eb3fd0b70",
+        "target/performance-bounded3-schema-gate/rustdoc.log": "0cba52b6dcaf41e51651a3146a9cd9e0f38c89f89c33e0bfb0ea35c303f2a980",
+        "target/performance-bounded3-schema-gate/trunk-build.log": "40570eeabfe9ff7dca37a8f857fd421741a12f3925b1caaaa8a561fb7a5de672"
+      },
+      "native_test_results": {
+        "passed": 2337,
+        "failed": 0,
+        "ignored": 6
+      },
+      "scope": "Ordinary schema-only build with private feature/hooks removed; not a full gate on the private indexed reader/writer prototype",
+      "ordinary_release_UI_controls": "not run; schema/format withheld, no merge requested",
+      "merge_status": "withheld; no PR or main change"
+    }
+  },
+  "decision": "Do not activate one-message-per-row layout or merge an unused schema upgrade. Bounded reads and incremental writes improve large histories, but full reads and some short histories regress, and first preparation is material. Measure a chunked layout before a format rollout.",
+  "retained_runner_failure": {
+    "at": "2026-11-14T00:27:06.087584+00:00",
+    "accepted": true,
+    "original_node_exit": 1,
+    "original_report_pass": false,
+    "correction": "Final count assertion expected 546, but the declared eligibility rule excludes earlier pages for both 2-message long-reasoning and 50-message escaped-output. Exact expected matrix is 76 cells times seven blocks = 532. No raw report or sample rewritten.",
+    "original_report_sha256": "18a54c101dd57ac452cf7a60f88e2b2c156a7a7f1d5921ec3aff3f8d72019c85",
+    "raw_ndjson_sha256": "922f08080a8ea89dfbf24293c9d9ae373886cd3333ae1e21542b16a31fc95310",
+    "actual_intervals": 532,
+    "eligible_cells": 76,
+    "retained": 456,
+    "samples_per_cell": 6,
+    "semantic_groups": 38,
+    "matrix_exact": true,
+    "all_clock_semantic_float_event_order_and_structural_IO_checks_pass": true,
+    "whole_action_acceptance": false,
+    "t3_comparable": false
+  },
+  "required_before_activation": [
+    "A newer database version must close v13 preparation tabs that still write legacy blobs; the same-version divergence and version-barrier rejection are reproduced in preflight1.",
+    "Every official conversation mutation, offscreen queue, import, thread-link reader, rewind, deletion and workflow rollback must use compatible head/row transactions.",
+    "Keep unread prefix rows unchanged; do not claim global value equality from a revision check. Changed records still require exact affected-original checks.",
+    "Full snapshot/export/delete must audit the by_thread index for unexpected rows outside [0,head.count), in addition to requested-range gap/order/identity checks. Private probe currently validates only the declared interval; its full-read timing is a valid-data component trial, not complete corruption handling.",
+    "Recovery and display normalization remain separate from persisted originals; no failed or partial migration may appear as empty history.",
+    "Measure first migration separately, range/full reads, append and replacement, then real UI/input/paint, provider and network paths; 77 requested messages are not equivalent to T3 timeline items.",
+    "Desktop workspace persistence currently restores all persisted thread/chat entities; web indexed work does not close native startup/history gaps."
+  ],
+  "goal_status": "active"
+}

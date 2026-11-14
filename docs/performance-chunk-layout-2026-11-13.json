@@ -1,0 +1,64 @@
+{
+  "version": 1,
+  "status": "exploratory_fixed_count_tradeoff_no_adoption",
+  "base_revision": "53c1f1a365d32d2a93f0831aa5ce2ddaf8a029f6",
+  "comparison_intervals": 760,
+  "retained_intervals": 570,
+  "cells": 190,
+  "samples_per_cell": 3,
+  "single_preparations": 32,
+  "normalized_observations": 222,
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "measured_source_sha256": {
+    "bruhs-web/Cargo.toml": "91e3250d526fd1c2b6ad9b1f0c97cfef769c1e02ccff7693eb2649e705eed0e5",
+    "bruhs-web/src/main.rs": "e37e872061a18305a119cc2d17a326d46e900a625c81704122269681c5487795",
+    "bruhs-web/src/storage.rs": "cfa3d6a4c5831f61274d1a0607bcda77b8b62e9a0bebc2fa6c348d8ca41b22f6",
+    "bruhs-web/src/storage/messages.rs": "1353269919e0bef9405c26b0687f544cb23481059a847b7083dae88d8403b244",
+    "bruhs-web/src/storage/conversation_schema.rs": "dc18408fa5c51804cc50e2d9fc7d11b93e3c94d9ab293dcd82e28d1709a66ea5",
+    "bruhs-web/src/storage/bounded_probe.rs": "a2e162511f0c2d8f162f71a5f5d70a7edbb6edc779ff666359ce54646d3d03cb"
+  },
+  "source_archive": "target/performance-chunk4-measured-source",
+  "compiled_assets": "target/performance-chunk4-dist",
+  "raw_inputs_sha256": {
+    "target/performance-chunk5-input.json": "35b6b73ef49a55979d06e825d8d3e645ddcb4119dd0e4349859f20c412670d4e",
+    "target/performance-chunk5-build-completion.json": "6cf145ec6a1c52a4ecd42d14d9442c713c0676ac6394ca850067466aa47b0e52",
+    "target/performance-chunk5-preflight.json": "25fad87dbb923550f7f897dbb27d09733363e946ec53248c6d62b1f579da62d2",
+    "target/performance-chunk5-preflight-runs.ndjson": "1a269f77baf45eb9a6f0ce18ba088a0445a5ea4a0140eef05123861970f99cb0",
+    "target/performance-chunk5-browser-probe.json": "381ed232ad002ed1307444d3080c7d0de6ae9b004c157bfac6ce5bfaba58fa36",
+    "target/performance-chunk5-runs.ndjson": "223eef37bd17d52bd1c3efd83765eb73926fb306fe0f4b1bd0f14e23c09b97ee",
+    "target/performance-chunk5-run-audit.json": "7af79c0329d9f8e839c55480eb5a84aaf4cfd791533007dafb89b1235badb677",
+    "target/performance-chunk5-run-receipt.json": "04c31d1fd6a183fed5d4f599b0ada63bc8e1d31f8a149677c6862a44e8c31999",
+    "target/performance-chunk5-timings.json": "2218bf3d6be232e5fbabb4edf59d8c5bb4f7abe47bd161e975c1936701c39f1e",
+    "target/performance-chunk5-action-observations.json": "7943d24deffbfb2d222c205109f2731366c5c6cc2270f810763c3b653f939b49",
+    "target/performance-chunk5-worker-before.json": "4eed57582e66493daf9d2247cd50a7d2bdf36b65cd2b909b88a938ea6f061247",
+    "target/performance-chunk5-worker-after.json": "ca7880de9890f851fa57cee5f2045779be6b19640e15ed3cc561a276308dcfaf",
+    "target/performance-chunk5-normalize.py": "41a17ba67daffa6429a954fcbaade91f7e43203d9a0d501dc6c66d00729b5b10",
+    "target/performance-chunk4-check.log": "9eefa884326f45723bb82cdd0aca37aea7880068263541d0bfdef34703f7962d",
+    "target/performance-chunk4-build.log": "a33bd39ee32776d5f908442614ffd5b364fcb051fffcf1fb4155272a0622ba71"
+  },
+  "controls": {
+    "schema_groups": 4,
+    "data_groups": 16,
+    "range_edge_pairs_within_controls": 49,
+    "functional_pairs": 60,
+    "functional_API_invocations": 120,
+    "format_barrier": true
+  },
+  "prior_failed_comparison": {
+    "report": "target/performance-chunk4-browser-probe.json",
+    "raw": "target/performance-chunk4-runs.ndjson",
+    "exit_code": 1,
+    "accepted": false,
+    "reason": "Canonical JSON includes the per-size thread_id. Cross-size comparisons must compare messages content plus exact float bits, while validating each original full record thread_id against the selected seeded identity. Preflight now also checks cross-size content parity on small/mixed/fallback histories. No failed run data promoted."
+  },
+  "decision": "No message-count chunk size is adopted. The sweep exposes a trade-off between full-history row overhead and rewriting/decoding large affected chunks. Measure a content-size-aware layout and retain full/small-history and recovery behavior before integration.",
+  "production_status": "No app reader/writer or schema from this layout experiment has merged. A previous ordinary schema-only gate is not validation of this private prototype.",
+  "remaining": [
+    "Measure byte/content-sensitive grouping without selecting a budget from this small exploratory sample.",
+    "Integrate every official reader/writer, offscreen queue, import/export, rewind, parent deletion and rollback behind a compatible format/version barrier.",
+    "Preserve exact affected originals, revision protocol, recovery and full-range corruption checks.",
+    "Validate native persistence, actual UI completion, provider/network and seven equivalent T3 workloads."
+  ],
+  "goal_status": "active"
+}

@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "status": "withheld_not_merged",
+  "scope": "Actual local TaskSaves enqueue/drain with unmounted UI; not full action or network/T3 acceptance",
+  "base_revision": "8350d9b7303c050f7ebf843e7465eb04291d31ee",
+  "intervals": 224,
+  "retained": 192,
+  "samples_per_cell": 6,
+  "preflight_controls": 20,
+  "source_sha256": {
+    "bruhs-web/src/storage.rs": "2492c2b87f0f156b06168f15c0239eb4f4c9c2d247ea253ba62bed5ba5807128",
+    "bruhs-web/src/storage/messages.rs": "3e5fa04747cba0355695b51e9504d8e691a82a995888b61706c9171f6057fe30",
+    "bruhs-web/src/storage/messages/tests.rs": "3138931835463f317865896e011c1625f0d6f475c1ca309717fe2e6ef6e8e53b",
+    "bruhs-web/src/storage/tasks/threads.rs": "d7163cc0c9562ec64953e05bd809226e04d43083cb696778731a45fb65112d74",
+    "bruhs-web/src/storage/workflow/rollback.rs": "461a8b1a09607fab4afe38aaf57d7ea2cfdde766440056bda6ebdb11d6d3b29e",
+    "bruhs-web/src/task_saves/queue/thread_tests.rs": "e096f84796271038e8c73ba978cfb32fb914dda1916a7f2ef50a1478bfbfea1a",
+    "bruhs-web/src/task_saves/record.rs": "65875d824baf0f8f0a45138810d20d91cbe040da0ac63541db22aa2e911acb1d",
+    "bruhs-web/src/task_saves/threads.rs": "aec6dd96ed308b1ba5288ec40e8b0e16447de69253e5ad262fdc86416c864e35",
+    "bruhs-web/src/storage/messages_record.rs": "636787262fbc27e6afa629d4383be94eb1fc6b28b26d6e62b8f723e8f758e7fa"
+  },
+  "raw_inputs_sha256": {
+    "target/performance-snapshot1-timings.json": "2dd80b6c17012a301cff189d7a098ea20b8702a7c500d6a93285f2c8ea193f09",
+    "target/performance-snapshot1-browser-probe.json": "dbcd86f71a90cb3e84001fdfbb59c996095c1f20a3c426e0564c0ad628030bb8",
+    "target/performance-snapshot1-runs.ndjson": "34fe304752a6f7d42139360f5b4875b6b3d22f9f40949571f1dca0a2d06c76c1",
+    "target/performance-snapshot1-build-input.json": "17dec8de078ec5dd17be1ea78e1baa3195dc3da4afaf475efb2b5ce7445bd473",
+    "target/performance-snapshot1-build-completion.json": "1df010620ff546d1381c498d11a2a9462a778455d03388a82c7ed1aa8a935b49",
+    "target/performance-snapshot1-preflight.json": "b0ee41ab2df3ae94d816429896ede4d68d0577f58866d1db3e2c92ef0f2400b4",
+    "target/performance-snapshot1-code-review.json": "357109711184d71f563797203199f2ee4852e80c7dbdca867c52c9860cb83bbb",
+    "target/performance-snapshot1-measured-source.json": "b35cface3882bb9730640a977433a7713fff3416d9043be8bde5c9ac1d683c50",
+    "target/performance-snapshot1-small-control1-timings.json": "3c83942494037f99520cd099ecb3c41e49033840303bafc08ddfd6f2ae3f09a8",
+    "target/performance-snapshot1-small-control1-browser-probe.json": "39d854c5772c12f891b3a9e0c0ca31870b6dd45bd07680d9dd66c48d77952cfd",
+    "target/performance-snapshot1-small-control1-runs.ndjson": "5a64c5a6a54b656e0ff58d0c61e1a20cbcd890577195a4fbabf5fc6d4b74a11d",
+    "target/performance-snapshot1-small-control1-protocol-receipt.json": "630c416883436ce5d4cec87cdc39b9c83a37189d980a58e8c28d9414ac9649eb",
+    "target/performance-snapshot1-gate-receipt.json": "82937034c6eb14dff82aa581d2fdac1e1f7e84b3a0459bcd079a5d9ffe1a0377",
+    "target/performance-snapshot1-gate-controls.json": "cb895e6b63f10c68d7c9579e9abd60c17e4897d2906e010e0afa598f5507666e",
+    "target/performance-snapshot1-send-network-source-audit.json": "eb1d86e82607a9e8d3d6380915177c11e181b7b0efa5dbb598d1271a8eb393bb"
+  },
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "followup_intervals": 396,
+  "followup_retained": 384,
+  "followup_samples_per_cell": 32,
+  "gate": {
+    "steps": 11,
+    "rust_passed": 2337,
+    "rust_failed": 0,
+    "rust_ignored": 6,
+    "python_passed": 5
+  },
+  "ordinary_release_browser_controls": 9,
+  "decision": "Large-history gains, mixed short-history completion, slower prepared structured fallback in 32-sample follow-up. Keep unmerged pending queue-scheduling/commit-boundary investigation.",
+  "validated_save_intervals": 620
+}

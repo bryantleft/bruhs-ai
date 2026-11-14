@@ -1,0 +1,36 @@
+{
+  "status": "partial_transport_evidence",
+  "goal_status": "active",
+  "measured_source_sha256": {
+    "bruhs-server/src/routes/coordination.rs": "bf52cbb0aaf05edc95a3e23291dd9e3fc371f4f41b4a5efb3a35a19a84224426",
+    "bruhs-server/src/routes/coordination/remote.html": "f335321ee188fb3a9d6d884d3ecda97473ea6da36843222f10076c5fc979b699",
+    "bruhs-server/Cargo.toml": "c5062a1e0e0fde3cadf058acc24c12dbfa31a149ced06606e0677b59667a4c49",
+    "bruhs-core/src/coordination.rs": "119d0c761c4ce9cd1c5f7c5d6bf3f762cb8a1df5b916204cff6ada57b9b71333",
+    "bruhs-core/src/coordination/access.rs": "7dcb8844fdfe27fb70105d2035f272f6dfaddb4da558b286006b02e5532106b4",
+    "bruhs-models/src/coordination.rs": "d2ee1e02b364d3fd0b16b0e6d4fa9a954fe9fcc48e3f313b08c3889aab6cc47d"
+  },
+  "adopted_source_sha256": {
+    "bruhs-server/src/routes/coordination.rs": "32857e529c32ef932cdfd671c9972d65c2036fe7be3afe3eeed0afdd176aa17a",
+    "bruhs-server/src/routes/coordination/remote.html": "f335321ee188fb3a9d6d884d3ecda97473ea6da36843222f10076c5fc979b699",
+    "bruhs-server/Cargo.toml": "c5062a1e0e0fde3cadf058acc24c12dbfa31a149ced06606e0677b59667a4c49",
+    "bruhs-core/src/coordination.rs": "119d0c761c4ce9cd1c5f7c5d6bf3f762cb8a1df5b916204cff6ada57b9b71333",
+    "bruhs-core/src/coordination/access.rs": "7dcb8844fdfe27fb70105d2035f272f6dfaddb4da558b286006b02e5532106b4",
+    "bruhs-models/src/coordination.rs": "d2ee1e02b364d3fd0b16b0e6d4fa9a954fe9fcc48e3f313b08c3889aab6cc47d"
+  },
+  "timing_observations": "target/performance-task-compression3-observations.json",
+  "run_receipt": "target/performance-task-compression3-run-receipt.json",
+  "final_functional_receipt": "target/performance-task-compression5-verify01-readback.json",
+  "final_byte_controls": "target/performance-task-compression5-boundary1.json",
+  "selected_quality": "Fastest",
+  "minimum_response_bytes": 768,
+  "threshold_calibration": "target/performance-task-compression4-curve1.json",
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "whiteboard_scope": "User-owned implementation in progress; source declarations are discovery only, related errors untouched.",
+  "remaining": [
+    "Run the full current-root integration gate after the whiteboard owner completes that work. Leave whiteboard-owned transient errors and files to that owner.",
+    "Measure exact final-policy UI/transport across current backend, physical devices, TLS/proxies, provider activity, concurrency and remaining task variants. The matrix uses the older backend and earlier 32-byte minimum.",
+    "Review the conservative 768-byte floor on broader real payloads. Some smaller repetitive replies would shrink; a tested threshold is not a theorem for every payload or link.",
+    "Complete semantic action review and equivalent workloads for all seven T3 comparisons. Source declarations, timing groups and functional checks are not whole-action acceptance."
+  ]
+}

@@ -1,0 +1,30 @@
+{
+  "status": "partial_pairing_ui_evidence",
+  "goal_status": "active",
+  "source_sha256": {
+    "bruhs-server/src/routes/coordination/remote.html": "f335321ee188fb3a9d6d884d3ecda97473ea6da36843222f10076c5fc979b699",
+    "bruhs-server/src/routes/coordination.rs": "8f6680598066b5fde98e6d13e9c23470f1439030e9791d693ed9df66ca839864",
+    "bruhs-core/src/coordination.rs": "119d0c761c4ce9cd1c5f7c5d6bf3f762cb8a1df5b916204cff6ada57b9b71333",
+    "bruhs-core/src/coordination/access.rs": "7dcb8844fdfe27fb70105d2035f272f6dfaddb4da558b286006b02e5532106b4",
+    "bruhs-models/src/coordination.rs": "d2ee1e02b364d3fd0b16b0e6d4fa9a954fe9fcc48e3f313b08c3889aab6cc47d"
+  },
+  "source_input": "target/performance-task-pair1-input.json",
+  "backend_source_archive": "target/performance-task-runtime4-source",
+  "application_receipt": "target/performance-task-pair1-application-receipt.json",
+  "run_receipt": "target/performance-task-pair1-run-receipt.json",
+  "timing_observations": "target/performance-task-pair1-observations.json",
+  "candidate_controls_passed": 23,
+  "expected_baseline_failures": 4,
+  "normalized_timing_groups": 16,
+  "total_ui_intervals": 16,
+  "retained_ui_intervals": 12,
+  "warmups": 4,
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "remaining": [
+    "Integrate and verify the complete task-workspace feature before a main merge. The changing root backend and the full application are not validated by this older frozen native build.",
+    "Saved-token startup still reads two snapshots. Removing its initial stream refresh needs a protocol/order proof so intervening changes are never lost.",
+    "Exercise provider/active tasks, larger histories, reconnect/error/cancel/concurrency variants and every other task action.",
+    "Measure physical devices/paint, DNS/TLS/real proxies and equivalent T3 workloads; keep unmeasured actions explicit."
+  ]
+}

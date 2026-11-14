@@ -1,0 +1,3173 @@
+{
+  "version": 1,
+  "completion_status": "in_progress",
+  "semantic_inventory_complete": false,
+  "scope": "First reviewed semantic group: registered command intents and immediate dispatch, on published main and current working tree. No assertion of downstream behavior parity, complete UI actions or all possible application actions.",
+  "recorded_at": "2026-11-13T21:42:58.284162+00:00",
+  "source_profiles": {
+    "published_main": {
+      "base_revision": "53c1f1a365d32d2a93f0831aa5ce2ddaf8a029f6",
+      "source_sha256": {
+        "bruhs-web/src/components/command_bar.rs": "299d36137ff231d8e815b7c6a5a5d5f2be4c45c11de8ed6ebc2ff1f87f3b3869",
+        "bruhs-desktop/src/views/workspace/palette_ui.rs": "ff612f6049dc0bec67adbc21071ede843d3ce60fcce97c396992d1680e8b7520"
+      }
+    },
+    "working_tree": {
+      "base_revision": "c543e865b01ace7b0e29fa110cdc7dfb38aa032d",
+      "source_sha256": {
+        "bruhs-web/src/components/command_bar.rs": "c5bae39833abc83db5745998c6f05b1c2eee9c5908929902b31e86a6af3b707e",
+        "bruhs-desktop/src/views/workspace/palette_ui.rs": "fb45d2745ab9c0ddfcc7de07a351a14c945b454c3ef5fde218b21cadef19bd6c"
+      }
+    }
+  },
+  "counts": {
+    "semantic_palette_intents": 45,
+    "palette_entrypoints_per_source_profile": 86,
+    "source_profiles": 2,
+    "source_entrypoints_in_broader_inventory": 276,
+    "binding_search_references_pending_review": 1245,
+    "whole_action_acceptances": 0
+  },
+  "discovery_snapshot": {
+    "path": "target/performance-snapshot1-inventory-working-tree.json",
+    "sha256": "25f481597d82a2acf731453cd49f4d8eb16854ea87d67230eab3712571402395",
+    "parser_sha256": "1229141a4d38142670cf3358439db6e007127399a1191498afc9a0dc11ba1890"
+  },
+  "actions": [
+    {
+      "id": "calendar.open_scheduling",
+      "label": "Open smart scheduling",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Scheduling controls and their loaded/empty/error state are usable.",
+      "required_variants": "View transition, cached/fresh availability; accepting/writing a suggested event is a separate action.",
+      "entrypoints": [
+        {
+          "semantic_id": "calendar.open_scheduling",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:SmartScheduling",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 228,
+          "label": "Smart scheduling",
+          "dispatch": {
+            "line": 878,
+            "sha256": "22435195119a3e2046db46385d67d2e011c07fedb1bfd9dea3defac0f909c608"
+          }
+        },
+        {
+          "semantic_id": "calendar.open_scheduling",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:smart-scheduling",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 156,
+          "label": "Smart scheduling",
+          "dispatch": {
+            "line": 508,
+            "sha256": "1249733c78ed649b437da003a259bf0489d5da34968f792eed607e4220e4f84b"
+          }
+        },
+        {
+          "semantic_id": "calendar.open_scheduling",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:SmartScheduling",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 228,
+          "label": "Smart scheduling",
+          "dispatch": {
+            "line": 867,
+            "sha256": "22435195119a3e2046db46385d67d2e011c07fedb1bfd9dea3defac0f909c608"
+          }
+        },
+        {
+          "semantic_id": "calendar.open_scheduling",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:smart-scheduling",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 156,
+          "label": "Smart scheduling",
+          "dispatch": {
+            "line": 507,
+            "sha256": "1249733c78ed649b437da003a259bf0489d5da34968f792eed607e4220e4f84b"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "capture.open_editor",
+      "label": "Open quick capture editor",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "A fresh capture editor is visible with no edit identity retained.",
+      "required_variants": "Previously editing versus fresh; submitting text differs from meeting audio capture.",
+      "entrypoints": [
+        {
+          "semantic_id": "capture.open_editor",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:Capture",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 252,
+          "label": "Capture anything",
+          "dispatch": {
+            "line": 902,
+            "sha256": "778b7dafc5e2fe1bd070690d3f2e7cac8f0fcf6f02407ac16e4f23b1ccbf1b81"
+          }
+        },
+        {
+          "semantic_id": "capture.open_editor",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:capture",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 180,
+          "label": "Capture anything",
+          "dispatch": {
+            "line": 517,
+            "sha256": "a24e1e8a0be742512f9faad7f9d1e1f44329c00b6bca9a045120344e25b7f0bf"
+          }
+        },
+        {
+          "semantic_id": "capture.open_editor",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:Capture",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 252,
+          "label": "Capture anything",
+          "dispatch": {
+            "line": 891,
+            "sha256": "778b7dafc5e2fe1bd070690d3f2e7cac8f0fcf6f02407ac16e4f23b1ccbf1b81"
+          }
+        },
+        {
+          "semantic_id": "capture.open_editor",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:capture",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 180,
+          "label": "Capture anything",
+          "dispatch": {
+            "line": 516,
+            "sha256": "a24e1e8a0be742512f9faad7f9d1e1f44329c00b6bca9a045120344e25b7f0bf"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "day_plan.request",
+      "label": "Request a day plan draft",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The Today request is consumed and its draft/feedback is ready.",
+      "required_variants": "Only dispatch/request intent is reviewed here; downstream proposal production and approval remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "day_plan.request",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:PlanDay",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 222,
+          "label": "Plan my day",
+          "dispatch": {
+            "line": 872,
+            "sha256": "30648e39fba33f67f01174d875f4ebb9184bf7835151e11fb17c41b61688b415"
+          }
+        },
+        {
+          "semantic_id": "day_plan.request",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:plan-day",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 150,
+          "label": "Plan my day",
+          "dispatch": {
+            "line": 504,
+            "sha256": "4766af313bb60f1ac70c60fe4e6bebb161913b50796d074a29e3c7b8efef75e6"
+          }
+        },
+        {
+          "semantic_id": "day_plan.request",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:PlanDay",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 222,
+          "label": "Plan my day",
+          "dispatch": {
+            "line": 861,
+            "sha256": "30648e39fba33f67f01174d875f4ebb9184bf7835151e11fb17c41b61688b415"
+          }
+        },
+        {
+          "semantic_id": "day_plan.request",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:plan-day",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 150,
+          "label": "Plan my day",
+          "dispatch": {
+            "line": 503,
+            "sha256": "4766af313bb60f1ac70c60fe4e6bebb161913b50796d074a29e3c7b8efef75e6"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "inbox.open_import",
+      "label": "Open conversation import",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Inbox import/create controls are visible and usable; saving/importing is separate.",
+      "required_variants": "Already-open versus transitioned Inbox; source/validation/save branches need further review.",
+      "entrypoints": [
+        {
+          "semantic_id": "inbox.open_import",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ImportConversation",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 240,
+          "label": "Import conversation",
+          "dispatch": {
+            "line": 896,
+            "sha256": "ec48cd331881982fe6a6fae570ed82fb765bbcd66d54902d33d41391ad510bc5"
+          }
+        },
+        {
+          "semantic_id": "inbox.open_import",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:import-conversation",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 168,
+          "label": "Import conversation",
+          "dispatch": {
+            "line": 516,
+            "sha256": "6d56af1eee1ff5870630defea3678d5a337ebbe894a42a82bf6d1fcb5c0af415"
+          }
+        },
+        {
+          "semantic_id": "inbox.open_import",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ImportConversation",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 240,
+          "label": "Import conversation",
+          "dispatch": {
+            "line": 885,
+            "sha256": "ec48cd331881982fe6a6fae570ed82fb765bbcd66d54902d33d41391ad510bc5"
+          }
+        },
+        {
+          "semantic_id": "inbox.open_import",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:import-conversation",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 168,
+          "label": "Import conversation",
+          "dispatch": {
+            "line": 515,
+            "sha256": "6d56af1eee1ff5870630defea3678d5a337ebbe894a42a82bf6d1fcb5c0af415"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "knowledge.new_document",
+      "label": "Create and open a knowledge document",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The new document is visible in its detail editor and its durable write result is observed.",
+      "required_variants": "This command creates a record, unlike commands that only open a form; empty/populated stores and persistence errors.",
+      "entrypoints": [
+        {
+          "semantic_id": "knowledge.new_document",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NewDocument",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 234,
+          "label": "New document",
+          "dispatch": {
+            "line": 882,
+            "sha256": "4fd9403c8cac4c2a7ed1c93f27c45337c08506d8b2ea47ab6a727759152c8446"
+          }
+        },
+        {
+          "semantic_id": "knowledge.new_document",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-document",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 162,
+          "label": "New document",
+          "dispatch": {
+            "line": 514,
+            "sha256": "b0f71e7488b1b0d89aceca1c5dac92e4880c73aa5b97c8ba357e59677790bc4e"
+          }
+        },
+        {
+          "semantic_id": "knowledge.new_document",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NewDocument",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 234,
+          "label": "New document",
+          "dispatch": {
+            "line": 871,
+            "sha256": "4fd9403c8cac4c2a7ed1c93f27c45337c08506d8b2ea47ab6a727759152c8446"
+          }
+        },
+        {
+          "semantic_id": "knowledge.new_document",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-document",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 162,
+          "label": "New document",
+          "dispatch": {
+            "line": 513,
+            "sha256": "b0f71e7488b1b0d89aceca1c5dac92e4880c73aa5b97c8ba357e59677790bc4e"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "knowledge.open_clip",
+      "label": "Open web clip creation",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Knowledge clip creation controls are usable; fetching/saving a clip is separate.",
+      "required_variants": "Already-open versus transitioned Knowledge; URL fetch/error/save branches remain separate.",
+      "entrypoints": [
+        {
+          "semantic_id": "knowledge.open_clip",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NewWebClip",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 246,
+          "label": "Save web clip",
+          "dispatch": {
+            "line": 890,
+            "sha256": "1eee493476bb2b4bd10382ec6e83d8a2a3d467a46a5bfa84d67ed2c26d4e2b2b"
+          }
+        },
+        {
+          "semantic_id": "knowledge.open_clip",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-web-clip",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 174,
+          "label": "Save web clip",
+          "dispatch": {
+            "line": 515,
+            "sha256": "b18c31673a00e7911def6e38488a2bc831bbbf34543803e549873c6e6dd15f89"
+          }
+        },
+        {
+          "semantic_id": "knowledge.open_clip",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NewWebClip",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 246,
+          "label": "Save web clip",
+          "dispatch": {
+            "line": 879,
+            "sha256": "1eee493476bb2b4bd10382ec6e83d8a2a3d467a46a5bfa84d67ed2c26d4e2b2b"
+          }
+        },
+        {
+          "semantic_id": "knowledge.open_clip",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-web-clip",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 174,
+          "label": "Save web clip",
+          "dispatch": {
+            "line": 514,
+            "sha256": "b18c31673a00e7911def6e38488a2bc831bbbf34543803e549873c6e6dd15f89"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "meeting.open_note",
+      "label": "Open new meeting note editor",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "A fresh note editor is visible on Meetings; committing the note is separate.",
+      "required_variants": "Existing editor state, current view, cancel and later persistence branches.",
+      "entrypoints": [
+        {
+          "semantic_id": "meeting.open_note",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NewMeetingNote",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 258,
+          "label": "New meeting note",
+          "dispatch": {
+            "line": 906,
+            "sha256": "7d84da0940d79e62d8462dab3541afdee32e391b7e9158c70d6b963a4036ef25"
+          }
+        },
+        {
+          "semantic_id": "meeting.open_note",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-meeting-note",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 186,
+          "label": "New meeting note",
+          "dispatch": {
+            "line": 518,
+            "sha256": "f0fb7fce470a4529da0ab832a9bc5026575d01f1ef876bc0a2fc2e60024ef9aa"
+          }
+        },
+        {
+          "semantic_id": "meeting.open_note",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NewMeetingNote",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 258,
+          "label": "New meeting note",
+          "dispatch": {
+            "line": 895,
+            "sha256": "7d84da0940d79e62d8462dab3541afdee32e391b7e9158c70d6b963a4036ef25"
+          }
+        },
+        {
+          "semantic_id": "meeting.open_note",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-meeting-note",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 186,
+          "label": "New meeting note",
+          "dispatch": {
+            "line": 517,
+            "sha256": "f0fb7fce470a4529da0ab832a9bc5026575d01f1ef876bc0a2fc2e60024ef9aa"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "model.open_picker",
+      "label": "Open model selector",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The intended selector state and model/provider choices are usable.",
+      "required_variants": "Current selector state, provider/auth availability, filtering, selection and persistence are distinct branches.",
+      "entrypoints": [
+        {
+          "semantic_id": "model.open_picker",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ModelSelect",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 326,
+          "label": "Model",
+          "dispatch": {
+            "line": 914,
+            "sha256": "96badd1ba0663185595c156abf35b6eef4a478cd114b8447e8c89ac5f5d7c46b"
+          }
+        },
+        {
+          "semantic_id": "model.open_picker",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:model-picker",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 252,
+          "label": "Model",
+          "dispatch": {
+            "line": 531,
+            "sha256": "752d9c5b153da148c4a46e172064cd66a5200a701a3909ed62c47efa791aa247"
+          }
+        },
+        {
+          "semantic_id": "model.open_picker",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ModelSelect",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 326,
+          "label": "Model",
+          "dispatch": {
+            "line": 903,
+            "sha256": "96badd1ba0663185595c156abf35b6eef4a478cd114b8447e8c89ac5f5d7c46b"
+          }
+        },
+        {
+          "semantic_id": "model.open_picker",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:model-picker",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 252,
+          "label": "Model",
+          "dispatch": {
+            "line": 530,
+            "sha256": "752d9c5b153da148c4a46e172064cd66a5200a701a3909ed62c47efa791aa247"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "panel.diff",
+      "label": "Toggle diff panel",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The diff surface reaches usable content/empty/error or closed state.",
+      "required_variants": "Opening a lazy panel is not complete at a boolean flip; data loading, project absence and errors remain to measure.",
+      "entrypoints": [
+        {
+          "semantic_id": "panel.diff",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ToggleDiff",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 272,
+          "label": "Toggle diff panel",
+          "dispatch": {
+            "line": 802,
+            "sha256": "05fde7547b966a42f04079fbc12b5abdae3f9f22d7c366f7b8e7793b25c1d27a"
+          }
+        },
+        {
+          "semantic_id": "panel.diff",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-diff",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 198,
+          "label": "Toggle diff panel",
+          "dispatch": {
+            "line": 528,
+            "sha256": "687e7f0cb310692b8d0508607c8c4f680c52c9273a5febe4b9ea2ffbda5a4d3b"
+          }
+        },
+        {
+          "semantic_id": "panel.diff",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ToggleDiff",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 272,
+          "label": "Toggle diff panel",
+          "dispatch": {
+            "line": 791,
+            "sha256": "05fde7547b966a42f04079fbc12b5abdae3f9f22d7c366f7b8e7793b25c1d27a"
+          }
+        },
+        {
+          "semantic_id": "panel.diff",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-diff",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 198,
+          "label": "Toggle diff panel",
+          "dispatch": {
+            "line": 527,
+            "sha256": "687e7f0cb310692b8d0508607c8c4f680c52c9273a5febe4b9ea2ffbda5a4d3b"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "panel.files",
+      "label": "Toggle files panel",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "File controls reach ready/empty/error or closed state.",
+      "required_variants": "Project absence, tree size, filesystem/network loading and cancellation branches.",
+      "entrypoints": [
+        {
+          "semantic_id": "panel.files",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ToggleFiles",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 308,
+          "label": "Toggle files panel",
+          "dispatch": {
+            "line": 822,
+            "sha256": "4420bfc73f3fc1f8d0c5d112693633ae4c6490c47f204e997a26d8eb9badac10"
+          }
+        },
+        {
+          "semantic_id": "panel.files",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-files",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 240,
+          "label": "Toggle files panel",
+          "dispatch": {
+            "line": 530,
+            "sha256": "08b6a77fd9c0590f1c35d139d6fd4be756c1fa19b20e3fc6917db36003b13347"
+          }
+        },
+        {
+          "semantic_id": "panel.files",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ToggleFiles",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 308,
+          "label": "Toggle files panel",
+          "dispatch": {
+            "line": 811,
+            "sha256": "4420bfc73f3fc1f8d0c5d112693633ae4c6490c47f204e997a26d8eb9badac10"
+          }
+        },
+        {
+          "semantic_id": "panel.files",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-files",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 240,
+          "label": "Toggle files panel",
+          "dispatch": {
+            "line": 529,
+            "sha256": "08b6a77fd9c0590f1c35d139d6fd4be756c1fa19b20e3fc6917db36003b13347"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "panel.preview",
+      "label": "Toggle preview panel",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Preview reaches usable content/empty/error or closes.",
+      "required_variants": "Preview loading/navigation and network lifecycle remain beyond the immediate dispatch.",
+      "entrypoints": [
+        {
+          "semantic_id": "panel.preview",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:TogglePreview",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 302,
+          "label": "Toggle preview",
+          "dispatch": {
+            "line": 818,
+            "sha256": "cb4b7b95ddacb9f0e0f2726c771516d99597fbf74f931ae5362031d39ab23398"
+          }
+        },
+        {
+          "semantic_id": "panel.preview",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-preview",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 234,
+          "label": "Toggle preview",
+          "dispatch": {
+            "line": 529,
+            "sha256": "a0db0c623ee6a003aa769365eca76b32ad2ae2990b58e2a8582c3d798e813530"
+          }
+        },
+        {
+          "semantic_id": "panel.preview",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:TogglePreview",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 302,
+          "label": "Toggle preview",
+          "dispatch": {
+            "line": 807,
+            "sha256": "cb4b7b95ddacb9f0e0f2726c771516d99597fbf74f931ae5362031d39ab23398"
+          }
+        },
+        {
+          "semantic_id": "panel.preview",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-preview",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 234,
+          "label": "Toggle preview",
+          "dispatch": {
+            "line": 528,
+            "sha256": "a0db0c623ee6a003aa769365eca76b32ad2ae2990b58e2a8582c3d798e813530"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "panel.right",
+      "label": "Toggle right panel",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The requested right-panel surface/launcher is usable or closed.",
+      "required_variants": "Previous surface and current view, cached/fresh content and loading errors.",
+      "entrypoints": [
+        {
+          "semantic_id": "panel.right",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:TogglePanel",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 278,
+          "label": "Toggle right panel",
+          "dispatch": {
+            "line": 806,
+            "sha256": "6bd15f936308bf2b5658c444c4d47522819312f91fc5dcfd0243b1102a2c8260"
+          }
+        },
+        {
+          "semantic_id": "panel.right",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-panel",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 204,
+          "label": "Toggle right panel",
+          "dispatch": {
+            "line": 535,
+            "sha256": "7653ca8575455ac94ffd5210d4f04e978cd9f649768f465ea06336f62ce5fd76"
+          }
+        },
+        {
+          "semantic_id": "panel.right",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:TogglePanel",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 278,
+          "label": "Toggle right panel",
+          "dispatch": {
+            "line": 795,
+            "sha256": "6bd15f936308bf2b5658c444c4d47522819312f91fc5dcfd0243b1102a2c8260"
+          }
+        },
+        {
+          "semantic_id": "panel.right",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-panel",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 204,
+          "label": "Toggle right panel",
+          "dispatch": {
+            "line": 534,
+            "sha256": "7653ca8575455ac94ffd5210d4f04e978cd9f649768f465ea06336f62ce5fd76"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "panel.tasks",
+      "label": "Toggle tasks panel",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Tasks panel reaches ready/empty/error or closed state.",
+      "required_variants": "Current view, task volume, loading and failure branches.",
+      "entrypoints": [
+        {
+          "semantic_id": "panel.tasks",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ToggleTasks",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 284,
+          "label": "Toggle tasks panel",
+          "dispatch": {
+            "line": 810,
+            "sha256": "edc267eada0e39220a9c6b7a847d0f4f386f0e96f02b42a03ce773b585a299c9"
+          }
+        },
+        {
+          "semantic_id": "panel.tasks",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-tasks",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 210,
+          "label": "Toggle tasks panel",
+          "dispatch": {
+            "line": 536,
+            "sha256": "0258c1d4ebb01e16482fb4b1b454888cdc11eb3b6959614377ffbb162b11aee9"
+          }
+        },
+        {
+          "semantic_id": "panel.tasks",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ToggleTasks",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 284,
+          "label": "Toggle tasks panel",
+          "dispatch": {
+            "line": 799,
+            "sha256": "edc267eada0e39220a9c6b7a847d0f4f386f0e96f02b42a03ce773b585a299c9"
+          }
+        },
+        {
+          "semantic_id": "panel.tasks",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-tasks",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 210,
+          "label": "Toggle tasks panel",
+          "dispatch": {
+            "line": 535,
+            "sha256": "0258c1d4ebb01e16482fb4b1b454888cdc11eb3b6959614377ffbb162b11aee9"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "project.open_editor",
+      "label": "Open active project in editor",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Editor launch result/feedback is observed, or no-project feedback is visible.",
+      "required_variants": "Registered web palette action; thread project precedes active project; editor selection and launch errors.",
+      "entrypoints": [
+        {
+          "semantic_id": "project.open_editor",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:OpenInEditor",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 320,
+          "label": "Open project in editor",
+          "dispatch": {
+            "line": 826,
+            "sha256": "afae1177c12643f014899d5dfcfdfec8fee55fb9623af02b9c2f2a030eff96eb"
+          }
+        },
+        {
+          "semantic_id": "project.open_editor",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:OpenInEditor",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 320,
+          "label": "Open project in editor",
+          "dispatch": {
+            "line": 815,
+            "sha256": "afae1177c12643f014899d5dfcfdfec8fee55fb9623af02b9c2f2a030eff96eb"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "project.open_picker",
+      "label": "Open project chooser",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The chooser is visible and usable; opening the selected project is a separate action.",
+      "required_variants": "No projects, existing projects, cancelled chooser; downstream project loading remains separate.",
+      "entrypoints": [
+        {
+          "semantic_id": "project.open_picker",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:OpenProject",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 150,
+          "label": "Open project...",
+          "dispatch": {
+            "line": 743,
+            "sha256": "e6664c1f9d3e8c69a9942912f5308da818fcbce57d5df6b2f065b4cbceaec09a"
+          }
+        },
+        {
+          "semantic_id": "project.open_picker",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:open-project",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 78,
+          "label": "Open project...",
+          "dispatch": {
+            "line": 494,
+            "sha256": "2a0f6bd5dbf399b35215826e44ef02bffaf8a9e48c1b5cf9fd074162a79b7730"
+          }
+        },
+        {
+          "semantic_id": "project.open_picker",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:OpenProject",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 150,
+          "label": "Open project...",
+          "dispatch": {
+            "line": 732,
+            "sha256": "e6664c1f9d3e8c69a9942912f5308da818fcbce57d5df6b2f065b4cbceaec09a"
+          }
+        },
+        {
+          "semantic_id": "project.open_picker",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:open-project",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 78,
+          "label": "Open project...",
+          "dispatch": {
+            "line": 493,
+            "sha256": "2a0f6bd5dbf399b35215826e44ef02bffaf8a9e48c1b5cf9fd074162a79b7730"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "prompt.stash",
+      "label": "Stash prompt or open stash menu",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "A nonempty draft/chips are stashed and cleared, or the empty-draft stash chooser is usable.",
+      "required_variants": "Empty/nonempty draft, chips, existing stash and persistence/recovery variants.",
+      "entrypoints": [
+        {
+          "semantic_id": "prompt.stash",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:StashPrompt",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 314,
+          "label": "Stash prompt",
+          "dispatch": {
+            "line": 851,
+            "sha256": "ba649b5cfd719e79dbb8881cc3d623205f20b919fddd73cc7e0c4516ed0c18bc"
+          }
+        },
+        {
+          "semantic_id": "prompt.stash",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:stash-prompt",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 246,
+          "label": "Stash prompt",
+          "dispatch": {
+            "line": 537,
+            "sha256": "73c3a6d77e80eef143bc0a75149bed95215cebb1233ecd49b911e02ba647d42d"
+          }
+        },
+        {
+          "semantic_id": "prompt.stash",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:StashPrompt",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 314,
+          "label": "Stash prompt",
+          "dispatch": {
+            "line": 840,
+            "sha256": "ba649b5cfd719e79dbb8881cc3d623205f20b919fddd73cc7e0c4516ed0c18bc"
+          }
+        },
+        {
+          "semantic_id": "prompt.stash",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:stash-prompt",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 246,
+          "label": "Stash prompt",
+          "dispatch": {
+            "line": 536,
+            "sha256": "73c3a6d77e80eef143bc0a75149bed95215cebb1233ecd49b911e02ba647d42d"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "pull.copy_link",
+      "label": "Copy displayed pull request link",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Clipboard contains the displayed pull URL, or the panel/no-pull notice is shown.",
+      "required_variants": "Pull panel open/closed; loaded/missing pull; clipboard state.",
+      "entrypoints": [
+        {
+          "semantic_id": "pull.copy_link",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:CopyPullLink",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 204,
+          "label": "Copy pull request link",
+          "dispatch": {
+            "line": 768,
+            "sha256": "4f052b21c31e7cfa5ed24f42c1647888e33ce6bd5c4a269439d1882e3a3c6aa3"
+          }
+        },
+        {
+          "semantic_id": "pull.copy_link",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-pull-link",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 132,
+          "label": "Copy pull request link",
+          "dispatch": {
+            "line": 557,
+            "sha256": "6efa987294a60441c9bf0a48b9cd062834ff3c1caad1e49df0be3658c81f88cc"
+          }
+        },
+        {
+          "semantic_id": "pull.copy_link",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:CopyPullLink",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 204,
+          "label": "Copy pull request link",
+          "dispatch": {
+            "line": 757,
+            "sha256": "4f052b21c31e7cfa5ed24f42c1647888e33ce6bd5c4a269439d1882e3a3c6aa3"
+          }
+        },
+        {
+          "semantic_id": "pull.copy_link",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-pull-link",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 132,
+          "label": "Copy pull request link",
+          "dispatch": {
+            "line": 556,
+            "sha256": "6efa987294a60441c9bf0a48b9cd062834ff3c1caad1e49df0be3658c81f88cc"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "pull.copy_number",
+      "label": "Copy displayed pull request number",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Clipboard contains the displayed pull number, or the panel/no-pull notice is shown.",
+      "required_variants": "Pull panel open/closed; loaded/missing pull; clipboard state.",
+      "entrypoints": [
+        {
+          "semantic_id": "pull.copy_number",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:CopyPullNumber",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 210,
+          "label": "Copy pull request number",
+          "dispatch": {
+            "line": 768,
+            "sha256": "4f052b21c31e7cfa5ed24f42c1647888e33ce6bd5c4a269439d1882e3a3c6aa3"
+          }
+        },
+        {
+          "semantic_id": "pull.copy_number",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-pull-number",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 138,
+          "label": "Copy pull request number",
+          "dispatch": {
+            "line": 558,
+            "sha256": "29e102865746083c869d30c1160e0d188db5056223792386cd64cf40c823fda5"
+          }
+        },
+        {
+          "semantic_id": "pull.copy_number",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:CopyPullNumber",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 210,
+          "label": "Copy pull request number",
+          "dispatch": {
+            "line": 757,
+            "sha256": "4f052b21c31e7cfa5ed24f42c1647888e33ce6bd5c4a269439d1882e3a3c6aa3"
+          }
+        },
+        {
+          "semantic_id": "pull.copy_number",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-pull-number",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 138,
+          "label": "Copy pull request number",
+          "dispatch": {
+            "line": 557,
+            "sha256": "29e102865746083c869d30c1160e0d188db5056223792386cd64cf40c823fda5"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "servers.open_picker",
+      "label": "Open local server chooser",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The local-server chooser is usable; launching/navigating a chosen server is separate.",
+      "required_variants": "Registered desktop palette action; server scan/list/launch/error branches remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "servers.open_picker",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:local-servers",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 228,
+          "label": "Open a local server…",
+          "dispatch": {
+            "line": 499,
+            "sha256": "69094696a1594149e19d7d8ec0a034b6f973499ea15418d10ba94a6e4ae67323"
+          }
+        },
+        {
+          "semantic_id": "servers.open_picker",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:local-servers",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 228,
+          "label": "Open a local server…",
+          "dispatch": {
+            "line": 498,
+            "sha256": "69094696a1594149e19d7d8ec0a034b6f973499ea15418d10ba94a6e4ae67323"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "sidebar.toggle",
+      "label": "Toggle sidebar",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The applicable sidebar reaches the requested visible state.",
+      "required_variants": "Current view, narrow/wide window, open/closed, stored preference; child lifecycle not exhaustively reviewed.",
+      "entrypoints": [
+        {
+          "semantic_id": "sidebar.toggle",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ToggleSidebar",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 266,
+          "label": "Toggle sidebar",
+          "dispatch": {
+            "line": 913,
+            "sha256": "e99dbab9be6afcde164d49ad125ecb9c2ab3175e1822487a0d48078f606d8c94"
+          }
+        },
+        {
+          "semantic_id": "sidebar.toggle",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-sidebar",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 192,
+          "label": "Toggle sidebar",
+          "dispatch": {
+            "line": 523,
+            "sha256": "e6fd9b0e5956ca10dc6d41b0b6cb8ba35f131411840f8d11c3557b7cebcdd6b2"
+          }
+        },
+        {
+          "semantic_id": "sidebar.toggle",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ToggleSidebar",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 266,
+          "label": "Toggle sidebar",
+          "dispatch": {
+            "line": 902,
+            "sha256": "e99dbab9be6afcde164d49ad125ecb9c2ab3175e1822487a0d48078f606d8c94"
+          }
+        },
+        {
+          "semantic_id": "sidebar.toggle",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-sidebar",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 192,
+          "label": "Toggle sidebar",
+          "dispatch": {
+            "line": 522,
+            "sha256": "e6fd9b0e5956ca10dc6d41b0b6cb8ba35f131411840f8d11c3557b7cebcdd6b2"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "task.open_create",
+      "label": "Open task creation form",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Task form is visible on the Tasks surface; submitting the task is a separate action.",
+      "required_variants": "Current view, empty/populated project/task stores, cancel and invalid submission are separate branches.",
+      "entrypoints": [
+        {
+          "semantic_id": "task.open_create",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NewTask",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 216,
+          "label": "New task",
+          "dispatch": {
+            "line": 866,
+            "sha256": "0a756119140eb94bbf97bb641043098d030149c232a9ac0d330441f24ca791a1"
+          }
+        },
+        {
+          "semantic_id": "task.open_create",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-task",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 144,
+          "label": "New task",
+          "dispatch": {
+            "line": 503,
+            "sha256": "86b639d1e253ba641ade05830976593670a1524992b81627ea300d5287196725"
+          }
+        },
+        {
+          "semantic_id": "task.open_create",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NewTask",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 216,
+          "label": "New task",
+          "dispatch": {
+            "line": 855,
+            "sha256": "0a756119140eb94bbf97bb641043098d030149c232a9ac0d330441f24ca791a1"
+          }
+        },
+        {
+          "semantic_id": "task.open_create",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-task",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 144,
+          "label": "New task",
+          "dispatch": {
+            "line": 502,
+            "sha256": "86b639d1e253ba641ade05830976593670a1524992b81627ea300d5287196725"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "terminal.create_session",
+      "label": "Create integrated terminal session",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The server-created PTY session is selected and usable, or creation feedback is shown.",
+      "required_variants": "Registered web palette action; project/default directory, existing session and backend errors.",
+      "entrypoints": [
+        {
+          "semantic_id": "terminal.create_session",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NewTerminal",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 296,
+          "label": "New terminal",
+          "dispatch": {
+            "line": 721,
+            "sha256": "4800817f16b4e51fa1e38a455c19b79245201f903baafb45cb10dafa6ddb3a57"
+          }
+        },
+        {
+          "semantic_id": "terminal.create_session",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NewTerminal",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 296,
+          "label": "New terminal",
+          "dispatch": {
+            "line": 710,
+            "sha256": "4800817f16b4e51fa1e38a455c19b79245201f903baafb45cb10dafa6ddb3a57"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "terminal.open_system",
+      "label": "Open system Terminal",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The operating-system Terminal launch is acknowledged or an error is reported.",
+      "required_variants": "Registered desktop palette action; distinct from creating an integrated PTY.",
+      "entrypoints": [
+        {
+          "semantic_id": "terminal.open_system",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:open-terminal",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 222,
+          "label": "Open in system Terminal",
+          "dispatch": {
+            "line": 497,
+            "sha256": "56dee574ad890f367a5c0f234421bdc85fcd2cec9486382984eeabb1b139ee75"
+          }
+        },
+        {
+          "semantic_id": "terminal.open_system",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:open-terminal",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 222,
+          "label": "Open in system Terminal",
+          "dispatch": {
+            "line": 496,
+            "sha256": "56dee574ad890f367a5c0f234421bdc85fcd2cec9486382984eeabb1b139ee75"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "terminal.panel",
+      "label": "Toggle integrated terminal",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The terminal panel is visible and reaches its session/empty/error state, or closes.",
+      "required_variants": "Session attach/replay/reconnect/network variants are required beyond the toggle callback.",
+      "entrypoints": [
+        {
+          "semantic_id": "terminal.panel",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ToggleTerminal",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 290,
+          "label": "Toggle terminal",
+          "dispatch": {
+            "line": 814,
+            "sha256": "876f92ad5e08c4b95671c2584718e78e979942cefd4811915a3ba5144048210f"
+          }
+        },
+        {
+          "semantic_id": "terminal.panel",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-terminal",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 216,
+          "label": "Toggle terminal",
+          "dispatch": {
+            "line": 498,
+            "sha256": "671313b839232e5ca3066ef199f27bef176b65e73c7446be2980cd303395aeb4"
+          }
+        },
+        {
+          "semantic_id": "terminal.panel",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ToggleTerminal",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 290,
+          "label": "Toggle terminal",
+          "dispatch": {
+            "line": 803,
+            "sha256": "876f92ad5e08c4b95671c2584718e78e979942cefd4811915a3ba5144048210f"
+          }
+        },
+        {
+          "semantic_id": "terminal.panel",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:toggle-terminal",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 216,
+          "label": "Toggle terminal",
+          "dispatch": {
+            "line": 497,
+            "sha256": "671313b839232e5ca3066ef199f27bef176b65e73c7446be2980cd303395aeb4"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "thread.continue_t3",
+      "label": "Continue active thread in T3",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "The controlled bridge acknowledges the created thread, or missing-project/bridge-error feedback is shown.",
+      "required_variants": "No active thread/project, project precedence, bounded transcript, bridge unavailable/error; actual external writes require their own safe fixture.",
+      "entrypoints": [
+        {
+          "semantic_id": "thread.continue_t3",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ContinueInT3",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 198,
+          "label": "Continue in T3 Code",
+          "dispatch": {
+            "line": 747,
+            "sha256": "9df24206ce3520bc0cc7106ea93372a2b887a1b10b6cc0ae087036cc9a3a4672"
+          }
+        },
+        {
+          "semantic_id": "thread.continue_t3",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:continue-in-t3",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 126,
+          "label": "Continue in T3 Code",
+          "dispatch": {
+            "line": 553,
+            "sha256": "303caef92eaf1ee150a87d9d3d90271e6515612b3ade27be5eec580f3027dc24"
+          }
+        },
+        {
+          "semantic_id": "thread.continue_t3",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ContinueInT3",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 198,
+          "label": "Continue in T3 Code",
+          "dispatch": {
+            "line": 736,
+            "sha256": "9df24206ce3520bc0cc7106ea93372a2b887a1b10b6cc0ae087036cc9a3a4672"
+          }
+        },
+        {
+          "semantic_id": "thread.continue_t3",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:continue-in-t3",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 126,
+          "label": "Continue in T3 Code",
+          "dispatch": {
+            "line": 552,
+            "sha256": "303caef92eaf1ee150a87d9d3d90271e6515612b3ade27be5eec580f3027dc24"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "thread.copy_link",
+      "label": "Copy active thread link",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Clipboard contains the client-specific thread address, or the no-active-thread outcome is observed.",
+      "required_variants": "Web-origin versus desktop link format; no active thread; clipboard permission/unavailable states.",
+      "entrypoints": [
+        {
+          "semantic_id": "thread.copy_link",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:CopyThreadLink",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 180,
+          "label": "Copy thread link",
+          "dispatch": {
+            "line": 758,
+            "sha256": "a9575874e0312d462e627919921125d7188deba59e6f63d37611b5db28833f86"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_link",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-thread-link",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 108,
+          "label": "Copy thread link",
+          "dispatch": {
+            "line": 544,
+            "sha256": "a13e529b0857d3db7c3c9021f7468771bd06958c331e9d219bc9970188a9ff48"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_link",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:CopyThreadLink",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 180,
+          "label": "Copy thread link",
+          "dispatch": {
+            "line": 747,
+            "sha256": "a9575874e0312d462e627919921125d7188deba59e6f63d37611b5db28833f86"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_link",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-thread-link",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 108,
+          "label": "Copy thread link",
+          "dispatch": {
+            "line": 543,
+            "sha256": "a13e529b0857d3db7c3c9021f7468771bd06958c331e9d219bc9970188a9ff48"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "thread.copy_markdown",
+      "label": "Copy thread Markdown",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Clipboard contains the bounded transcript and the expected notice appears.",
+      "required_variants": "No active thread, mixed parts, large outputs/reasoning, Unicode and truncation; clipboard errors.",
+      "entrypoints": [
+        {
+          "semantic_id": "thread.copy_markdown",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:CopyThreadMarkdown",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 192,
+          "label": "Copy thread as Markdown",
+          "dispatch": {
+            "line": 746,
+            "sha256": "11a76957b949fb02dd6c80907622fbbf977d8611e94f25918ad49ced17d85376"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_markdown",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-thread-markdown",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 120,
+          "label": "Copy thread as Markdown",
+          "dispatch": {
+            "line": 549,
+            "sha256": "339a1e785150969ad112cb8b7ab3fb5faf60c756822ef0e22e92f5b9a86a8a3f"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_markdown",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:CopyThreadMarkdown",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 192,
+          "label": "Copy thread as Markdown",
+          "dispatch": {
+            "line": 735,
+            "sha256": "11a76957b949fb02dd6c80907622fbbf977d8611e94f25918ad49ced17d85376"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_markdown",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-thread-markdown",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 120,
+          "label": "Copy thread as Markdown",
+          "dispatch": {
+            "line": 548,
+            "sha256": "339a1e785150969ad112cb8b7ab3fb5faf60c756822ef0e22e92f5b9a86a8a3f"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "thread.copy_resume",
+      "label": "Copy CLI resume command",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Clipboard contains the provider/session/project command, or the correct missing-session/no-active-thread outcome is observed.",
+      "required_variants": "Claude/Codex; project override/fallback/home; shell quoting; small/large offscreen and visible histories; clipboard availability. Headless browser memory clipboard differs from OS clipboard.",
+      "entrypoints": [
+        {
+          "semantic_id": "thread.copy_resume",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:CopyResumeCommand",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 186,
+          "label": "Copy resume command",
+          "dispatch": {
+            "line": 745,
+            "sha256": "c5d8caf04bcded163e716b6a85443a2b71efa272bc5a2d37a8939bf54afadeeb"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_resume",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-resume-command",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 114,
+          "label": "Copy resume command",
+          "dispatch": {
+            "line": 545,
+            "sha256": "35e5c3d96e6ea09347d6d1e8223ab9454fbf119a4d58eecda4c0d4fb1bbde051"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_resume",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:CopyResumeCommand",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 186,
+          "label": "Copy resume command",
+          "dispatch": {
+            "line": 734,
+            "sha256": "c5d8caf04bcded163e716b6a85443a2b71efa272bc5a2d37a8939bf54afadeeb"
+          }
+        },
+        {
+          "semantic_id": "thread.copy_resume",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:copy-resume-command",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 114,
+          "label": "Copy resume command",
+          "dispatch": {
+            "line": 544,
+            "sha256": "35e5c3d96e6ea09347d6d1e8223ab9454fbf119a4d58eecda4c0d4fb1bbde051"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [
+        "web-resume-export-ui1-2026-11-13"
+      ],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "thread.import_dialog",
+      "label": "Open thread import",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Import chooser is visible and usable; selection/import/commit are separate actions.",
+      "required_variants": "Provider/source tabs, empty list, permission/error state require later review.",
+      "entrypoints": [
+        {
+          "semantic_id": "thread.import_dialog",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:ImportThread",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 162,
+          "label": "Import thread...",
+          "dispatch": {
+            "line": 744,
+            "sha256": "76b6f34db0b76979b90c1ad920e112907bd6781a5eb27a4e8ab6d08e08af3259"
+          }
+        },
+        {
+          "semantic_id": "thread.import_dialog",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:import-thread",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 90,
+          "label": "Import thread...",
+          "dispatch": {
+            "line": 496,
+            "sha256": "fe3eccd87482537226a872864f672f3ff03eb1cfd20e1b7f385a740bed0cc668"
+          }
+        },
+        {
+          "semantic_id": "thread.import_dialog",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:ImportThread",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 162,
+          "label": "Import thread...",
+          "dispatch": {
+            "line": 733,
+            "sha256": "76b6f34db0b76979b90c1ad920e112907bd6781a5eb27a4e8ab6d08e08af3259"
+          }
+        },
+        {
+          "semantic_id": "thread.import_dialog",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:import-thread",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 90,
+          "label": "Import thread...",
+          "dispatch": {
+            "line": 495,
+            "sha256": "fe3eccd87482537226a872864f672f3ff03eb1cfd20e1b7f385a740bed0cc668"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "thread.new",
+      "label": "Create a thread or choose its project",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "A fresh thread is selected with a ready composer and durable result, or the required project chooser is usable.",
+      "required_variants": "Web has-projects chooser versus immediate creation; desktop new-thread behavior; no project, active project, writer errors.",
+      "entrypoints": [
+        {
+          "semantic_id": "thread.new",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NewThread",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 156,
+          "label": "New thread",
+          "dispatch": {
+            "line": 790,
+            "sha256": "abcb007fe1560bdf659103322073a8a10c57b94fd00c7ae28c35a0ad4ddf26d7"
+          }
+        },
+        {
+          "semantic_id": "thread.new",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-thread",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 84,
+          "label": "New thread",
+          "dispatch": {
+            "line": 495,
+            "sha256": "ed4685814493f595f3d41a5786c5e656a6be2b3e39eac895551e58bd6eae2a30"
+          }
+        },
+        {
+          "semantic_id": "thread.new",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NewThread",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 156,
+          "label": "New thread",
+          "dispatch": {
+            "line": 779,
+            "sha256": "abcb007fe1560bdf659103322073a8a10c57b94fd00c7ae28c35a0ad4ddf26d7"
+          }
+        },
+        {
+          "semantic_id": "thread.new",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:new-thread",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 84,
+          "label": "New thread",
+          "dispatch": {
+            "line": 494,
+            "sha256": "ed4685814493f595f3d41a5786c5e656a6be2b3e39eac895551e58bd6eae2a30"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [
+        "new-thread-auth-process-counts-2026-11-11"
+      ],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "thread.pin",
+      "label": "Pin or unpin the active thread",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Pinned state and ordering are reflected, with the writer result observed.",
+      "required_variants": "No active thread, pinned/unpinned, populated catalogue, conflict/persistence failures.",
+      "entrypoints": [
+        {
+          "semantic_id": "thread.pin",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:PinThread",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 168,
+          "label": "Pin / unpin thread",
+          "dispatch": {
+            "line": 748,
+            "sha256": "ccc5caafb6f30bd8e50e30ff0e914472e336c6b27f9ce0e03761ea674bce6b0d"
+          }
+        },
+        {
+          "semantic_id": "thread.pin",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:pin-thread",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 96,
+          "label": "Pin / unpin thread",
+          "dispatch": {
+            "line": 542,
+            "sha256": "b31c888e575bee777696f0d0f9cc8f1c68790727d311c3d90e78dadaffbd7a2d"
+          }
+        },
+        {
+          "semantic_id": "thread.pin",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:PinThread",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 168,
+          "label": "Pin / unpin thread",
+          "dispatch": {
+            "line": 737,
+            "sha256": "ccc5caafb6f30bd8e50e30ff0e914472e336c6b27f9ce0e03761ea674bce6b0d"
+          }
+        },
+        {
+          "semantic_id": "thread.pin",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:pin-thread",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 96,
+          "label": "Pin / unpin thread",
+          "dispatch": {
+            "line": 541,
+            "sha256": "b31c888e575bee777696f0d0f9cc8f1c68790727d311c3d90e78dadaffbd7a2d"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [
+        "web-pin-chat-mount1-2026-11-13"
+      ],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "thread.settle",
+      "label": "Settle or unsettle the active thread",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Settled state, unread state and ordering are reflected, with the writer result observed.",
+      "required_variants": "No active thread, settled/unsettled, unread, active work and writer errors.",
+      "entrypoints": [
+        {
+          "semantic_id": "thread.settle",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:SettleThread",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 174,
+          "label": "Settle / unsettle thread",
+          "dispatch": {
+            "line": 753,
+            "sha256": "a2f1777d2065b50d19e43bada5c51c1692cbed900faa9d708b5d751c01ea3cc6"
+          }
+        },
+        {
+          "semantic_id": "thread.settle",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:settle-thread",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 102,
+          "label": "Settle / unsettle thread",
+          "dispatch": {
+            "line": 543,
+            "sha256": "4000643f7dd0c8bf95a19e5c5d7984b86f2d71498ac14f086e9988b1e432de6a"
+          }
+        },
+        {
+          "semantic_id": "thread.settle",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:SettleThread",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 174,
+          "label": "Settle / unsettle thread",
+          "dispatch": {
+            "line": 742,
+            "sha256": "a2f1777d2065b50d19e43bada5c51c1692cbed900faa9d708b5d751c01ea3cc6"
+          }
+        },
+        {
+          "semantic_id": "thread.settle",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:settle-thread",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 102,
+          "label": "Settle / unsettle thread",
+          "dispatch": {
+            "line": 542,
+            "sha256": "4000643f7dd0c8bf95a19e5c5d7984b86f2d71498ac14f086e9988b1e432de6a"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.automations",
+      "label": "Navigate to Automations",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.automations",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavAutomations",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 120,
+          "label": "Agent workflows",
+          "dispatch": {
+            "line": 716,
+            "sha256": "73fffd99893ef9084d0f481ca42eb47404f9008d0d25c00a1529d0336463433f"
+          }
+        },
+        {
+          "semantic_id": "view.automations",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-automations",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 48,
+          "label": "Agent workflows",
+          "dispatch": {
+            "line": 492,
+            "sha256": "7ecba1746fb72d2718acaa08053b9cd7b0c934f87a093f146cf98dea72e421f2"
+          }
+        },
+        {
+          "semantic_id": "view.automations",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavAutomations",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 120,
+          "label": "Agent workflows",
+          "dispatch": {
+            "line": 705,
+            "sha256": "73fffd99893ef9084d0f481ca42eb47404f9008d0d25c00a1529d0336463433f"
+          }
+        },
+        {
+          "semantic_id": "view.automations",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-automations",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 48,
+          "label": "Agent workflows",
+          "dispatch": {
+            "line": 491,
+            "sha256": "7ecba1746fb72d2718acaa08053b9cd7b0c934f87a093f146cf98dea72e421f2"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.calendar",
+      "label": "Navigate to Calendar",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.calendar",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavCalendar",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 108,
+          "label": "Calendar",
+          "dispatch": {
+            "line": 714,
+            "sha256": "82394f386752a01bc14463633ed3d3038bae3cf44144ac5c22bb538234243f6b"
+          }
+        },
+        {
+          "semantic_id": "view.calendar",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-calendar",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 36,
+          "label": "Calendar",
+          "dispatch": {
+            "line": 490,
+            "sha256": "7531a73e34a6438f7c2eccbd6048e34437151eb0dba89890c0a7db6696e7b69c"
+          }
+        },
+        {
+          "semantic_id": "view.calendar",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavCalendar",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 108,
+          "label": "Calendar",
+          "dispatch": {
+            "line": 703,
+            "sha256": "82394f386752a01bc14463633ed3d3038bae3cf44144ac5c22bb538234243f6b"
+          }
+        },
+        {
+          "semantic_id": "view.calendar",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-calendar",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 36,
+          "label": "Calendar",
+          "dispatch": {
+            "line": 489,
+            "sha256": "7531a73e34a6438f7c2eccbd6048e34437151eb0dba89890c0a7db6696e7b69c"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.chat",
+      "label": "Navigate to Chat",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.chat",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavChat",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 84,
+          "label": "Chat",
+          "dispatch": {
+            "line": 712,
+            "sha256": "b5249c768ee438db599b734fcb075d2aa4f80e02daa4ed051f8e1266b51349f2"
+          }
+        },
+        {
+          "semantic_id": "view.chat",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-chat",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 12,
+          "label": "Chat",
+          "dispatch": {
+            "line": 488,
+            "sha256": "4f4cbdf5605adb03738c64b94dd66eb024a8a830d1a8d9407788b6d50646b427"
+          }
+        },
+        {
+          "semantic_id": "view.chat",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavChat",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 84,
+          "label": "Chat",
+          "dispatch": {
+            "line": 701,
+            "sha256": "b5249c768ee438db599b734fcb075d2aa4f80e02daa4ed051f8e1266b51349f2"
+          }
+        },
+        {
+          "semantic_id": "view.chat",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-chat",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 12,
+          "label": "Chat",
+          "dispatch": {
+            "line": 487,
+            "sha256": "4f4cbdf5605adb03738c64b94dd66eb024a8a830d1a8d9407788b6d50646b427"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.inbox",
+      "label": "Navigate to Inbox",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.inbox",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavInbox",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 90,
+          "label": "Inbox",
+          "dispatch": {
+            "line": 710,
+            "sha256": "58dd097fd8a14c01ab43b3b460edf77af24c06d246fdb0201fb2b9d23b7657e8"
+          }
+        },
+        {
+          "semantic_id": "view.inbox",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-inbox",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 18,
+          "label": "Inbox",
+          "dispatch": {
+            "line": 486,
+            "sha256": "980a1677312cf9fa9454c4ee3e57b2acd3a0f8a071f57fed5afe1e6fb37ec507"
+          }
+        },
+        {
+          "semantic_id": "view.inbox",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavInbox",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 90,
+          "label": "Inbox",
+          "dispatch": {
+            "line": 699,
+            "sha256": "58dd097fd8a14c01ab43b3b460edf77af24c06d246fdb0201fb2b9d23b7657e8"
+          }
+        },
+        {
+          "semantic_id": "view.inbox",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-inbox",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 18,
+          "label": "Inbox",
+          "dispatch": {
+            "line": 485,
+            "sha256": "980a1677312cf9fa9454c4ee3e57b2acd3a0f8a071f57fed5afe1e6fb37ec507"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.knowledge",
+      "label": "Navigate to Knowledge",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.knowledge",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavKnowledge",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 96,
+          "label": "Knowledge",
+          "dispatch": {
+            "line": 711,
+            "sha256": "828480bb160d17aec2559a2c8acf0a5cb3e61945ff1953dbaea762239c7cb00b"
+          }
+        },
+        {
+          "semantic_id": "view.knowledge",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-knowledge",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 24,
+          "label": "Knowledge",
+          "dispatch": {
+            "line": 487,
+            "sha256": "1d0704a6389571bc2940b5d107dd305117e2ca18b3c6d3817abff86db2e037d4"
+          }
+        },
+        {
+          "semantic_id": "view.knowledge",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavKnowledge",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 96,
+          "label": "Knowledge",
+          "dispatch": {
+            "line": 700,
+            "sha256": "828480bb160d17aec2559a2c8acf0a5cb3e61945ff1953dbaea762239c7cb00b"
+          }
+        },
+        {
+          "semantic_id": "view.knowledge",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-knowledge",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 24,
+          "label": "Knowledge",
+          "dispatch": {
+            "line": 486,
+            "sha256": "1d0704a6389571bc2940b5d107dd305117e2ca18b3c6d3817abff86db2e037d4"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.life",
+      "label": "Navigate to Life",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.life",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavLife",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 114,
+          "label": "Life",
+          "dispatch": {
+            "line": 715,
+            "sha256": "f157f514947b1b52f75c12961870614f8ae2d4091873bb76781c7be901ea7882"
+          }
+        },
+        {
+          "semantic_id": "view.life",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-life",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 42,
+          "label": "Life",
+          "dispatch": {
+            "line": 491,
+            "sha256": "6eefb2560139a6450375d397264664392483dcc8bfce7ac620b5ab58d48dd8ba"
+          }
+        },
+        {
+          "semantic_id": "view.life",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavLife",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 114,
+          "label": "Life",
+          "dispatch": {
+            "line": 704,
+            "sha256": "f157f514947b1b52f75c12961870614f8ae2d4091873bb76781c7be901ea7882"
+          }
+        },
+        {
+          "semantic_id": "view.life",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-life",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 42,
+          "label": "Life",
+          "dispatch": {
+            "line": 490,
+            "sha256": "6eefb2560139a6450375d397264664392483dcc8bfce7ac620b5ab58d48dd8ba"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.meetings",
+      "label": "Navigate to Meetings",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.meetings",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavMeetings",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 126,
+          "label": "Meetings",
+          "dispatch": {
+            "line": 717,
+            "sha256": "3350d1b75fd7dc7f802ae6f0e35303d6f75c8a47147f81bdfb78880afd986d7a"
+          }
+        },
+        {
+          "semantic_id": "view.meetings",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-meetings",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 54,
+          "label": "Meetings",
+          "dispatch": {
+            "line": 500,
+            "sha256": "106e42acf69624785ee607925fb2aaa0c9a3092741f2062e6a7f2766bf1a9872"
+          }
+        },
+        {
+          "semantic_id": "view.meetings",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavMeetings",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 126,
+          "label": "Meetings",
+          "dispatch": {
+            "line": 706,
+            "sha256": "3350d1b75fd7dc7f802ae6f0e35303d6f75c8a47147f81bdfb78880afd986d7a"
+          }
+        },
+        {
+          "semantic_id": "view.meetings",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-meetings",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 54,
+          "label": "Meetings",
+          "dispatch": {
+            "line": 499,
+            "sha256": "106e42acf69624785ee607925fb2aaa0c9a3092741f2062e6a7f2766bf1a9872"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.people",
+      "label": "Navigate to People",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.people",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavPeople",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 132,
+          "label": "People",
+          "dispatch": {
+            "line": 718,
+            "sha256": "f688e0766df407cba37fb4bc656eb4e38ded3e48a7c226e4f3800858f412ab6c"
+          }
+        },
+        {
+          "semantic_id": "view.people",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-people",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 60,
+          "label": "People",
+          "dispatch": {
+            "line": 501,
+            "sha256": "686bf88f5c82618bada37385364fd6e3f7b0088e5daefaf998a129ddb410d60e"
+          }
+        },
+        {
+          "semantic_id": "view.people",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavPeople",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 132,
+          "label": "People",
+          "dispatch": {
+            "line": 707,
+            "sha256": "f688e0766df407cba37fb4bc656eb4e38ded3e48a7c226e4f3800858f412ab6c"
+          }
+        },
+        {
+          "semantic_id": "view.people",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-people",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 60,
+          "label": "People",
+          "dispatch": {
+            "line": 500,
+            "sha256": "686bf88f5c82618bada37385364fd6e3f7b0088e5daefaf998a129ddb410d60e"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.search",
+      "label": "Navigate to Search",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.search",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavSearch",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 138,
+          "label": "Search",
+          "dispatch": {
+            "line": 719,
+            "sha256": "c03b4eb2561a09cc2488f9bff2005d2d2d08f031040781ecd4e3c6b97823857c"
+          }
+        },
+        {
+          "semantic_id": "view.search",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-search",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 66,
+          "label": "Search",
+          "dispatch": {
+            "line": 502,
+            "sha256": "5803c4e773b19ec497a1f0bf96c6aa4be5907bd38183289600fc4c5d848b9425"
+          }
+        },
+        {
+          "semantic_id": "view.search",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavSearch",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 138,
+          "label": "Search",
+          "dispatch": {
+            "line": 708,
+            "sha256": "c03b4eb2561a09cc2488f9bff2005d2d2d08f031040781ecd4e3c6b97823857c"
+          }
+        },
+        {
+          "semantic_id": "view.search",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-search",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 66,
+          "label": "Search",
+          "dispatch": {
+            "line": 501,
+            "sha256": "5803c4e773b19ec497a1f0bf96c6aa4be5907bd38183289600fc4c5d848b9425"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.settings",
+      "label": "Navigate to Settings",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.settings",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:Settings",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 332,
+          "label": "Settings",
+          "dispatch": {
+            "line": 915,
+            "sha256": "e191fd6329c53aa2bc092c140e6e27fb99f8c2f62cb23bf285affd2b635773e2"
+          }
+        },
+        {
+          "semantic_id": "view.settings",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:settings",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 258,
+          "label": "Settings",
+          "dispatch": {
+            "line": 527,
+            "sha256": "b9ad803ea51cbc1a6758d9e9af71a721951af5240568f2cb0435b70dd0c4b9cf"
+          }
+        },
+        {
+          "semantic_id": "view.settings",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:Settings",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 332,
+          "label": "Settings",
+          "dispatch": {
+            "line": 904,
+            "sha256": "e191fd6329c53aa2bc092c140e6e27fb99f8c2f62cb23bf285affd2b635773e2"
+          }
+        },
+        {
+          "semantic_id": "view.settings",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:settings",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 258,
+          "label": "Settings",
+          "dispatch": {
+            "line": 526,
+            "sha256": "b9ad803ea51cbc1a6758d9e9af71a721951af5240568f2cb0435b70dd0c4b9cf"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.tasks",
+      "label": "Navigate to Tasks",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.tasks",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavTasks",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 102,
+          "label": "Tasks",
+          "dispatch": {
+            "line": 713,
+            "sha256": "d08d53466deddaab951f04035fcab974a199386c67797b4ec57be06bd4667663"
+          }
+        },
+        {
+          "semantic_id": "view.tasks",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-tasks",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 30,
+          "label": "Tasks",
+          "dispatch": {
+            "line": 489,
+            "sha256": "7e17a636c73bfe06773bdd8d6ae419cdd3dba54f2c5d96b9d6644846560976bf"
+          }
+        },
+        {
+          "semantic_id": "view.tasks",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavTasks",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 102,
+          "label": "Tasks",
+          "dispatch": {
+            "line": 702,
+            "sha256": "d08d53466deddaab951f04035fcab974a199386c67797b4ec57be06bd4667663"
+          }
+        },
+        {
+          "semantic_id": "view.tasks",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-tasks",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 30,
+          "label": "Tasks",
+          "dispatch": {
+            "line": 488,
+            "sha256": "7e17a636c73bfe06773bdd8d6ae419cdd3dba54f2c5d96b9d6644846560976bf"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.terminal",
+      "label": "Navigate to Terminal",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.terminal",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavTerminal",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 144,
+          "label": "Terminal",
+          "dispatch": {
+            "line": 720,
+            "sha256": "ef28c696407f36c626b7676f5c7318d3120add1c0fe1c99d2d50e68a834c38d7"
+          }
+        },
+        {
+          "semantic_id": "view.terminal",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-terminal",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 72,
+          "label": "Terminal",
+          "dispatch": {
+            "line": 493,
+            "sha256": "e9e601724065a5ef6a600b17726622969f8f43b879ebc694f2b24314639c2ff1"
+          }
+        },
+        {
+          "semantic_id": "view.terminal",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavTerminal",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 144,
+          "label": "Terminal",
+          "dispatch": {
+            "line": 709,
+            "sha256": "ef28c696407f36c626b7676f5c7318d3120add1c0fe1c99d2d50e68a834c38d7"
+          }
+        },
+        {
+          "semantic_id": "view.terminal",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-terminal",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 72,
+          "label": "Terminal",
+          "dispatch": {
+            "line": 492,
+            "sha256": "e9e601724065a5ef6a600b17726622969f8f43b879ebc694f2b24314639c2ff1"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "view.today",
+      "label": "Navigate to Today",
+      "review_status": "registered_dispatch_intent_reviewed",
+      "completion_boundary_to_verify": "Requested view reaches ready, empty or error state and is usable; setting AppView alone is not completion.",
+      "required_variants": "Initial/reused route; empty/populated and cached/fresh data; permission/load errors; client lifecycle and other entry routes remain to inspect.",
+      "entrypoints": [
+        {
+          "semantic_id": "view.today",
+          "source_profile": "published_main",
+          "surface": "web",
+          "entrypoint": "web:NavToday",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 78,
+          "label": "Today",
+          "dispatch": {
+            "line": 709,
+            "sha256": "18fee7ac93f9fd1a4235acac196b545a9d13712738a680e32aae11ff3f9948e7"
+          }
+        },
+        {
+          "semantic_id": "view.today",
+          "source_profile": "published_main",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-today",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 6,
+          "label": "Today",
+          "dispatch": {
+            "line": 485,
+            "sha256": "965f5ff6762b5117abcf6003e0b286d1f75ff89d63debd6e9b0242b96ce6c8f4"
+          }
+        },
+        {
+          "semantic_id": "view.today",
+          "source_profile": "working_tree",
+          "surface": "web",
+          "entrypoint": "web:NavToday",
+          "source": "bruhs-web/src/components/command_bar.rs",
+          "registry_line": 78,
+          "label": "Today",
+          "dispatch": {
+            "line": 698,
+            "sha256": "18fee7ac93f9fd1a4235acac196b545a9d13712738a680e32aae11ff3f9948e7"
+          }
+        },
+        {
+          "semantic_id": "view.today",
+          "source_profile": "working_tree",
+          "surface": "desktop",
+          "entrypoint": "desktop:nav-today",
+          "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
+          "registry_line": 6,
+          "label": "Today",
+          "dispatch": {
+            "line": 484,
+            "sha256": "965f5ff6762b5117abcf6003e0b286d1f75ff89d63debd6e9b0242b96ce6c8f4"
+          }
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "requires_measurement_mapping",
+      "whole_action_acceptance": false
+    }
+  ],
+  "remaining": [
+    "Classify all binding search candidates, including tests/comments, lifecycle callbacks, pointer/context menus, field inputs and submit operations.",
+    "Review downstream loading, storage, network, completion/error/cancel/retry behavior for every registered intent and supported client.",
+    "Expand HTTP parameter/method/fallback, slash argument/provider/state, MCP operation and workflow/lifecycle branches into semantic actions.",
+    "Include user actions absent from command palette, settings changes, clipboard/OS integrations, background stream/reconnect and all supported client variants.",
+    "Measure complete actions against these boundaries; partial component/fixture results do not automatically accept a whole action."
+  ],
+  "dispatch_comparisons": [
+    {
+      "entrypoint": "web:NavToday",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavChat",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavInbox",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavKnowledge",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavTasks",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavCalendar",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavLife",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavAutomations",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavMeetings",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavPeople",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavSearch",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NavTerminal",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:OpenProject",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NewThread",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ImportThread",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:PinThread",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:SettleThread",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:CopyThreadLink",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:CopyResumeCommand",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:CopyThreadMarkdown",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ContinueInT3",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:CopyPullLink",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:CopyPullNumber",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NewTask",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:PlanDay",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:SmartScheduling",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NewDocument",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ImportConversation",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NewWebClip",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:Capture",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NewMeetingNote",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ToggleSidebar",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ToggleDiff",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:TogglePanel",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ToggleTasks",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ToggleTerminal",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:NewTerminal",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:TogglePreview",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ToggleFiles",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:StashPrompt",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:OpenInEditor",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:ModelSelect",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "web:Settings",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-today",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-chat",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-inbox",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-knowledge",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-tasks",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-calendar",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-life",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-automations",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-meetings",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-people",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-search",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:nav-terminal",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:open-project",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:new-thread",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:import-thread",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:pin-thread",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:settle-thread",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:copy-thread-link",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:copy-resume-command",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:copy-thread-markdown",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:continue-in-t3",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:copy-pull-link",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:copy-pull-number",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:new-task",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:plan-day",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:smart-scheduling",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:new-document",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:import-conversation",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:new-web-clip",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:capture",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:new-meeting-note",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:toggle-sidebar",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:toggle-diff",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:toggle-panel",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:toggle-tasks",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:toggle-terminal",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:open-terminal",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:local-servers",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:toggle-preview",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:toggle-files",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:stash-prompt",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:model-picker",
+      "dispatch_spans_equal": true
+    },
+    {
+      "entrypoint": "desktop:settings",
+      "dispatch_spans_equal": true
+    }
+  ]
+}

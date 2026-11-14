@@ -1,0 +1,53 @@
+{
+  "version": 1,
+  "status": "validated_ready_for_merge",
+  "base_revision": "8350d9b7303c050f7ebf843e7465eb04291d31ee",
+  "scope": "Local queue/IndexedDB fixture, no whole-action/network/T3 acceptance",
+  "primary_intervals": 224,
+  "primary_retained": 192,
+  "primary_samples_per_cell": 6,
+  "phase_intervals": 396,
+  "phase_retained": 384,
+  "phase_samples_per_cell": 32,
+  "diagnostic_intervals": 204,
+  "diagnostic_samples_per_cell": 16,
+  "untimed_controls": 40,
+  "source_sha256": {
+    "bruhs-web/src/storage.rs": "2492c2b87f0f156b06168f15c0239eb4f4c9c2d247ea253ba62bed5ba5807128",
+    "bruhs-web/src/storage/messages.rs": "3e5fa04747cba0355695b51e9504d8e691a82a995888b61706c9171f6057fe30",
+    "bruhs-web/src/storage/messages/tests.rs": "3138931835463f317865896e011c1625f0d6f475c1ca309717fe2e6ef6e8e53b",
+    "bruhs-web/src/storage/tasks/threads.rs": "d7163cc0c9562ec64953e05bd809226e04d43083cb696778731a45fb65112d74",
+    "bruhs-web/src/storage/workflow/rollback.rs": "461a8b1a09607fab4afe38aaf57d7ea2cfdde766440056bda6ebdb11d6d3b29e",
+    "bruhs-web/src/task_saves/queue/thread_tests.rs": "e096f84796271038e8c73ba978cfb32fb914dda1916a7f2ef50a1478bfbfea1a",
+    "bruhs-web/src/task_saves/record.rs": "65875d824baf0f8f0a45138810d20d91cbe040da0ac63541db22aa2e911acb1d",
+    "bruhs-web/src/task_saves/threads.rs": "aec6dd96ed308b1ba5288ec40e8b0e16447de69253e5ad262fdc86416c864e35",
+    "bruhs-web/src/storage/messages_record.rs": "636787262fbc27e6afa629d4383be94eb1fc6b28b26d6e62b8f723e8f758e7fa",
+    "bruhs-web/src/task_saves.rs": "18cca84a642c18f5829597d0726f87cf466aee6f7d42f0491e1fc8573ea1694a"
+  },
+  "raw_inputs_sha256": {
+    "target/performance-save2-build-input.json": "b4e408680f69c5451e783ef24b8a0fc26b3474f4415c5ca11a57030a34e57ecb",
+    "target/performance-save2-build-completion.json": "0331d43e57e6b95a0ff5a406690a4d2b18e6a5e13b66a35dc2d3fb8a8a4c8e1f",
+    "target/performance-save2-code-review.json": "8ebabdabb297a91b17bf550ce640e60891dc834e0187ff1f8e2e46df522fc4b2",
+    "target/performance-save2-timings.json": "77a189b29e09bbcfa35d4423489fb34a69de22d73de61f9e66d86d7118bd2314",
+    "target/performance-save2-phase-control1-input.json": "623af9bced190c5c6c993c955f5fadd0052808de03bae2ef1e1faff62651cc79",
+    "target/performance-save2-phase-control1-timings.json": "a46f7154cce99735b0c95c2f8cce5f6fc671ccb38229eec28a4da4e74993bb46",
+    "target/performance-save2-measured-source.json": "96dd72afdabbf97610b09073e00a404ac6d32de9abba5f1f0777ef70accdb25f",
+    "target/performance-save-boundary3-input.json": "3de9b8e1c535af83e5875be47ab003922c2f4197209984d61c35ebb1aa1d5607",
+    "target/performance-save-boundary3-build-verification.json": "9d2be3b28e44d86bee4dacaea866e57673975e9d7718d07c6edfb81c63a0a8d4",
+    "target/performance-save-boundary3-timings.json": "26ab37620b7b5e8f640d08adf5bbbeea51eea72a3c195aa7ca2bd2ca51336e52",
+    "target/performance-save2-gate-receipt.json": "eda1a66be56eef333d9a8431fdd49723d13d74cbcf6b9f67150ce7744446483f",
+    "target/performance-save2-gate-controls.json": "cb895e6b63f10c68d7c9579e9abd60c17e4897d2906e010e0afa598f5507666e",
+    "target/performance-save2-preflight.json": "7f6a8599aa026f67f1b61ffb50fc8f599d7bc2a6cbd464ecb7b2b5db4feb08aa",
+    "target/performance-save2-phase-control1-preflight.json": "6c6e7c07d4f3d5814f5993f576dd663d2f0de4f4aaf83db95229866b120bb416"
+  },
+  "whole_action_acceptance": false,
+  "t3_comparable": false,
+  "gate": {
+    "steps": 11,
+    "rust_passed": 2337,
+    "rust_failed": 0,
+    "rust_ignored": 6,
+    "python_passed": 5
+  },
+  "ordinary_release_browser_checks": 9
+}
