@@ -5,6 +5,8 @@ mod assets;
 mod helpers;
 mod logging;
 mod motion;
+#[cfg(feature = "native-performance")]
+mod native_performance;
 mod paths;
 mod server_client;
 mod shell_path;
@@ -16,6 +18,8 @@ mod theme;
 mod views;
 mod voice_capture;
 mod webview_platform;
+#[cfg(feature = "whiteboard-benchmark")]
+mod whiteboard_performance;
 
 use gpui::*;
 use gpui_component::{Root, TitleBar};
@@ -85,6 +89,39 @@ const DESKTOP_WINDOW_TITLE: &str = "bruhs.ai";
 actions!(bruhs, [Quit]);
 
 fn main() {
+    if bruhs_core::workbench_tools::is_mcp_helper() {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .and_then(|runtime| runtime.block_on(bruhs_core::workbench_tools::run_mcp_helper()));
+        if let Err(error) = result {
+            eprintln!("Workbench helper failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if bruhs_core::api_client_tools::is_mcp_helper() {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .and_then(|runtime| runtime.block_on(bruhs_core::api_client_tools::run_mcp_helper()));
+        if let Err(error) = result {
+            eprintln!("API client helper failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
+    if bruhs_core::database_tools::is_mcp_helper() {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .and_then(|runtime| runtime.block_on(bruhs_core::database_tools::run_mcp_helper()));
+        if let Err(error) = result {
+            eprintln!("Database helper failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if bruhs_core::artifact_tools::is_mcp_helper() {
         let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -104,6 +141,22 @@ fn main() {
         if let Err(error) = result {
             eprintln!("Reactive automation helper failed: {error}");
             std::process::exit(1);
+        }
+        return;
+    }
+    #[cfg(feature = "whiteboard-benchmark")]
+    if whiteboard_performance::is_executable() {
+        if let Err(error) = whiteboard_performance::run() {
+            eprintln!("WHITEBOARD_PERFORMANCE_ERROR {error}");
+            std::process::exit(2);
+        }
+        return;
+    }
+    #[cfg(feature = "native-performance")]
+    if native_performance::is_executable() {
+        if let Err(error) = native_performance::run() {
+            eprintln!("NATIVE_PERFORMANCE_ERROR {error}");
+            std::process::exit(2);
         }
         return;
     }

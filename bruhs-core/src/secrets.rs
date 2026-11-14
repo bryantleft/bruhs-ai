@@ -1,9 +1,12 @@
 //! Private credential input and execution. Values never enter provider events.
 
+mod api_client;
+mod database;
 pub(crate) mod mcp;
 mod storage;
 #[cfg(test)]
 mod tests;
+mod trackers;
 
 pub use mcp::{is_mcp_helper, run_mcp_helper};
 pub use storage::SecretStore;

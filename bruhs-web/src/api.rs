@@ -11,16 +11,32 @@ pub use bruhs_models::api::{
 };
 
 mod agent_stream;
+mod database;
+pub use database::*;
+mod api_client;
+pub use api_client::*;
 mod http;
 mod people_sync;
 mod reactive;
 pub use reactive::{reactive_command, reactive_hook_token, reactive_snapshot, ReactiveHookToken};
+pub use reactive::{weekly_report, weekly_report_command, weekly_reports};
 
 pub use agent_stream::{send_agent_message_streaming, StreamError};
 pub use http::ApiError;
 use http::{decode, found, send_json, send_request, url};
 pub(crate) use http::{get_json, segment, send};
 pub use people_sync::{get_people, person_versions};
+
+/// An optional next-message prediction. Aborting drops the browser request.
+pub async fn prompt_suggestion(
+    request: &bruhs_models::logic::prompt_suggestion::SuggestionRequest,
+    signal: &web_sys::AbortSignal,
+) -> Result<bruhs_models::logic::prompt_suggestion::SuggestionReply, ApiError> {
+    let request = gloo_net::http::Request::post(&url("/api/agent/prompt-suggestion"))
+        .abort_signal(Some(signal))
+        .json(request)?;
+    decode(send_request(request).await?).await
+}
 
 // The API origin is baked at build time. Override via env when building (e.g.
 // `BRUHS_API_URL=https://api.bruhs.localhost trunk build`) to point the WASM
@@ -51,6 +67,19 @@ pub async fn submit_thread_reply(
     let _: serde_json::Value =
         send_json(Method::POST, "/api/agent/thread-reply", Some(body)).await?;
     Ok(())
+}
+pub async fn whiteboard_source_fingerprint(project: &str, path: &str) -> Result<String, ApiError> {
+    #[derive(Deserialize)]
+    struct Fingerprint {
+        sha256: String,
+    }
+    let value: Fingerprint = send_json(
+        Method::POST,
+        "/api/whiteboards/source-fingerprint",
+        Some(&serde_json::json!({"project_path":project,"path":path})),
+    )
+    .await?;
+    Ok(value.sha256)
 }
 
 pub async fn saved_credentials() -> Result<Vec<bruhs_models::secrets::SavedCredential>, ApiError> {

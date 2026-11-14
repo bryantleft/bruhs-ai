@@ -257,7 +257,9 @@ impl SecretBroker {
                 // The one-day ceiling covers an unattended overnight turn; turn teardown revokes it sooner.
                 // Required servers finish startup before Codex builds its initial tool catalog.
                 // Approving this one tool opens our form; the harness still gates command execution.
-                let config = format!("{{ command = {executable}, args = [\"--secret-mcp\"], env = {{ {BROKER_ENV} = {connection} }}, tool_timeout_sec = 86400, required = true, tools = {{ request_secret = {{ approval_mode = \"approve\" }}, request_connection = {{ approval_mode = \"approve\" }} }} }}");
+                let config = format!(
+                    "{{ command = {executable}, args = [\"--secret-mcp\"], env = {{ {BROKER_ENV} = {connection} }}, tool_timeout_sec = 86400, required = true, tools = {{ request_secret = {{ approval_mode = \"approve\" }}, request_connection = {{ approval_mode = \"approve\" }} }} }}"
+                );
                 options.config.push(
                     codex_sdk_rs::ConfigOverride::new("mcp_servers.bruhs_secrets", config)
                         .map_err(std::io::Error::other)?,

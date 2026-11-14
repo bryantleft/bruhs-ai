@@ -8,6 +8,10 @@ use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement;
+use gpui_component::ActiveTheme;
+
+mod viewport;
+pub(super) use viewport::SidebarViewport;
 
 use super::{
     element_key, is_web_button_activation_key, provider_mark, redraw_on_edit, threads_ui,
@@ -517,18 +521,55 @@ impl Workspace {
     /// Pinned and active cards, then the Working, Snoozed, and Settled folds.
     fn render_sidebar_list(&self, cx: &Context<'_, Self>) -> AnyElement {
         let shelves = self.sidebar_shelves(cx);
-        let searching = !self.sidebar_query(cx).trim().is_empty();
+        let query = self.sidebar_query(cx);
+        let searching = !query.trim().is_empty();
         let empty = shelves.pinned.is_empty()
             && shelves.active.is_empty()
             && shelves.working.is_empty()
             && shelves.snoozed.is_empty()
             && shelves.settled.is_empty();
-        let cards: Vec<AnyElement> = shelves
-            .pinned
-            .iter()
-            .chain(shelves.active.iter())
-            .map(|thread| self.render_thread_card(thread, cx))
-            .collect();
+        let rows = viewport::sidebar_rows(self, &shelves, cx);
+        let (state, rows, focus) = self.sidebar_viewport.borrow_mut().prepare(
+            rows,
+            viewport::SidebarScope {
+                filter: self.sidebar_filter.clone(),
+                query,
+            },
+            cx.theme().font_size,
+            cx,
+        );
+        let (start, end) = self.sidebar_viewport.borrow().boundaries();
+        let len = rows.len();
+        let content = list(
+            state.clone(),
+            cx.processor(move |this, index: usize, _, cx| {
+                let row = rows[index];
+                let element = match row {
+                    viewport::SidebarRow::Thread {
+                        index: thread_index,
+                        ..
+                    } => this.render_thread_card(&this.threads[thread_index], &focus[index], cx),
+                    viewport::SidebarRow::Shelf {
+                        section,
+                        count,
+                        open,
+                    } => this
+                        .render_shelf_header(section, count, open, &focus[index].card, cx)
+                        .into_any_element(),
+                };
+                div()
+                    .id(("sidebar-list-row", index))
+                    .w_full()
+                    .role(Role::ListItem)
+                    .aria_position_in_set(index + 1)
+                    .aria_size_of_set(len)
+                    .when(index + 1 < len, |el| el.pb(px(SIDEBAR_LIST_GAP_PX)))
+                    .child(element)
+                    .into_any_element()
+            }),
+        )
+        .size_full()
+        .pb(px(SIDEBAR_LIST_BOTTOM_PADDING_PX));
         div()
             .id("sidebar-threads")
             .debug_selector(|| "desktop-sidebar-threads".to_string())
@@ -536,12 +577,20 @@ impl Workspace {
             .aria_label("Threads")
             .flex_1()
             .min_h_0()
-            .overflow_y_scrollbar()
+            .relative()
             .px(px(SIDEBAR_LIST_X_PADDING_PX))
-            .pb(px(SIDEBAR_LIST_BOTTOM_PADDING_PX))
+            .overflow_hidden()
             .flex()
             .flex_col()
-            .gap(px(SIDEBAR_LIST_GAP_PX))
+            .when(empty, |el| el.pb(px(SIDEBAR_LIST_BOTTOM_PADDING_PX)))
+            // a11y-exempt: zero-size programmatic focus boundaries, never tab stops.
+            .child(
+                div()
+                    .size_0()
+                    .track_focus(&start)
+                    .tab_index(0)
+                    .tab_stop(false),
+            )
             .when(empty, |el| {
                 el.child(
                     div()
@@ -559,49 +608,43 @@ impl Workspace {
                         }),
                 )
             })
-            .children(cards)
-            .children(self.render_shelf(
-                "desktop-sidebar-working-fold",
-                format!("Working ({})", shelves.working.len()),
-                self.sidebar_working_open,
-                SidebarSection::Working,
-                &shelves.working,
-                cx,
-            ))
-            .children(self.render_shelf(
-                "desktop-sidebar-snoozed-fold",
-                format!("Snoozed ({})", shelves.snoozed.len()),
-                self.sidebar_snoozed_open,
-                SidebarSection::Snoozed,
-                &shelves.snoozed,
-                cx,
-            ))
-            .children(self.render_shelf(
-                "desktop-sidebar-settled-fold",
-                format!("Settled ({})", shelves.settled.len()),
-                self.sidebar_settled_open,
-                SidebarSection::Settled,
-                &shelves.settled,
-                cx,
-            ))
+            .when(!empty, |el| {
+                el.child(content).child(
+                    canvas(
+                        cx.processor(|this, _, _, _| {
+                            this.sidebar_viewport.borrow_mut().seed_height_hints();
+                        }),
+                        |_, (), _, _| {},
+                    )
+                    .absolute()
+                    .size_0(),
+                )
+            })
+            .child(
+                div()
+                    .size_0()
+                    .track_focus(&end)
+                    .tab_index(0)
+                    .tab_stop(false),
+            )
+            .vertical_scrollbar(&state)
             .into_any_element()
     }
 
-    /// A folded shelf. An empty shelf takes no space.
-    fn render_shelf(
+    /// Shelf headers share the same list as their variable-height cards.
+    fn render_shelf_header(
         &self,
-        id: &'static str,
-        label: String,
-        open: bool,
         section: SidebarSection,
-        threads: &[&DesktopThread],
+        count: usize,
+        open: bool,
+        focus: &FocusHandle,
         cx: &Context<'_, Self>,
-    ) -> Option<AnyElement> {
-        if threads.is_empty() {
-            return None;
-        }
-        let header = div()
+    ) -> Stateful<Div> {
+        let (id, name) = viewport::shelf_labels(section);
+        let label = format!("{name} ({count})");
+        div()
             .id(id)
+            .track_focus(focus)
             .debug_selector(move || id.to_string())
             .mt(px(SIDEBAR_SETTLED_TOP_PADDING_PX))
             .px(px(SIDEBAR_SETTLED_X_PADDING_PX))
@@ -646,25 +689,7 @@ impl Workspace {
                 .when(open, |el| {
                     el.with_transformation(Transformation::rotate(Radians(std::f32::consts::PI)))
                 }),
-            );
-        let cards: Vec<AnyElement> = if open {
-            threads
-                .iter()
-                .map(|thread| self.render_thread_card(thread, cx))
-                .collect()
-        } else {
-            Vec::new()
-        };
-        Some(
-            div()
-                .debug_selector(move || format!("{id}-shelf"))
-                .flex()
-                .flex_col()
-                .gap(px(SIDEBAR_LIST_GAP_PX))
-                .child(header)
-                .children(cards)
-                .into_any_element(),
-        )
+            )
     }
 
     /// Working / approval / unread / idle, like the web card's status dot.
@@ -683,9 +708,10 @@ impl Workspace {
 
     /// One thread card: project (or "Chat") + pin + age/status, the title,
     /// then branch + provider glyph. Delete shows on hover at the top right.
-    pub(super) fn render_thread_card(
+    fn render_thread_card(
         &self,
         thread: &DesktopThread,
+        focus: &viewport::SidebarRowFocus,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let chat = thread.chat.read(cx);
@@ -839,6 +865,7 @@ impl Workspace {
 
         let delete_button = div()
             .id(("desktop-thread-delete", key))
+            .track_focus(&focus.delete)
             .debug_selector(move || format!("desktop-thread-delete-{debug_key}"))
             .absolute()
             .right(px(SIDEBAR_CARD_DELETE_INSET_PX))
@@ -881,6 +908,7 @@ impl Workspace {
 
         let menu_button = div()
             .id(("desktop-thread-actions", key))
+            .track_focus(&focus.menu)
             .debug_selector(move || format!("desktop-thread-actions-{debug_key}"))
             .absolute()
             .right(px(SIDEBAR_CARD_DELETE_INSET_PX
@@ -912,6 +940,7 @@ impl Workspace {
 
         div()
             .id(("desktop-thread-row", key))
+            .track_focus(&focus.card)
             .debug_selector(move || format!("desktop-thread-row-{debug_key}"))
             .group(row_group)
             .relative()
@@ -1316,6 +1345,12 @@ impl Workspace {
                 AppView::Terminal,
                 assets::TOOL_TERMINAL_ICON_PATH,
                 "Terminal",
+                cx,
+            ))
+            .child(self.render_sidebar_nav_icon(
+                AppView::Workbench,
+                "icons/wrench.svg",
+                "Workbench",
                 cx,
             ))
             .child(self.render_sidebar_nav_icon(

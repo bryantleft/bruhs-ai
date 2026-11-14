@@ -77,10 +77,14 @@ mod inbox_ui;
 mod keybindings_ui;
 mod knowledge_storage;
 mod knowledge_ui;
+mod library_pages_ui;
 mod life_ui;
 mod mcp_bridge;
 mod meetings_ui;
+mod mobile;
 mod modal_ui;
+#[cfg(all(feature = "native-performance", target_os = "macos"))]
+pub(crate) mod native_fixture;
 mod modes_ui;
 #[cfg(test)]
 mod notification_tests;
@@ -90,6 +94,8 @@ mod overlay_tests;
 mod palette_tests;
 mod palette_ui;
 mod panels_ui;
+#[cfg(test)]
+mod performance_tests;
 mod persisted_enum;
 mod persistence;
 mod person_merge;
@@ -111,11 +117,16 @@ mod state_file;
 mod state_fixture_tests;
 mod task_forms_ui;
 mod tasks_ui;
+#[cfg(all(test, unix))]
+mod thread_auth_tests;
+#[cfg(test)]
+mod thread_catalog_tests;
 mod thread_link_ui;
 mod thread_snapshot;
 mod threads_ui;
 mod today_ui;
 mod updates_ui;
+mod whiteboard_ui;
 use calendar_ui::*;
 use event_dialog_ui::*;
 use modal_ui::*;
@@ -1064,6 +1075,9 @@ pub struct Workspace {
     file_preview: DesktopFilePreview,
     file_generation: u64,
     files_panel_visible: bool,
+    database_panel: Option<Entity<crate::views::database_panel::DatabasePanel>>,
+    project_tool: panels_ui::ProjectTool,
+    api_client_panel: Option<Entity<crate::views::api_client_panel::ApiClientPanel>>,
     files_dir: String,
     files_root: Option<String>,
     files_entries: Vec<bruhs_core::files::FileEntry>,
@@ -1102,6 +1116,7 @@ pub struct Workspace {
     automation_error: Option<String>,
     reviewed_workflow_id: Option<String>,
     mcp_bridge: mcp_bridge::WorkspaceBridge,
+    mobile: mobile::MobileUi,
     local_servers: Vec<LocalServer>,
     local_servers_loading: bool,
     #[cfg_attr(
@@ -1147,6 +1162,8 @@ pub struct Workspace {
     sidebar_filter_open: bool,
     /// Title search box in the sidebar (web: the `Search` input).
     sidebar_search: Entity<InputState>,
+    /// Geometry and keyboard targets for visible sidebar rows.
+    sidebar_viewport: RefCell<sidebar_ui::SidebarViewport>,
     /// Threads whose turn finished while another thread was active.
     unread_thread_ids: HashSet<String>,
     sidebar_settled_open: bool,
@@ -1206,6 +1223,7 @@ pub struct Workspace {
     /// Base branch for a new worktree. This session only; not saved.
     base_branch: String,
     task_view_mode: DesktopTaskViewMode,
+    library_pages: library_pages_ui::LibraryPages,
     projects: Vec<DesktopProject>,
     selected_project_id: Option<String>,
     work_items: Vec<DesktopWorkItem>,
@@ -1218,6 +1236,8 @@ pub struct Workspace {
     calendar_mode: DesktopCalendarMode,
     calendar_anchor: NaiveDate,
     calendar_events: Vec<DesktopCalendarEvent>,
+    #[cfg(test)]
+    calendar_legacy_preparation: std::cell::Cell<bool>,
     selected_calendar_event_id: Option<String>,
     event_create_all_day: bool,
     event_create_color: String,
@@ -1262,6 +1282,10 @@ pub struct Workspace {
     clip_excerpt_input: Entity<InputState>,
     clip_create_visible: bool,
     inbox_import_visible: bool,
+    inbox_page: usize,
+    inbox_filter: bruhs_models::InboxFilter,
+    inbox_search_input: Entity<InputState>,
+    inbox_directory: RefCell<Option<(usize, bruhs_models::InboxDirectory)>>,
     inbox_import_source: InboxSource,
     inbox_sender_input: Entity<InputState>,
     inbox_subject_input: Entity<InputState>,
@@ -1329,6 +1353,12 @@ pub struct Workspace {
     /// One panel for the drawer (⌘J) and the Terminal view; sessions are shared.
     terminal_panel: Entity<TerminalPanelView>,
     preview_panel: Entity<PreviewPanelView>,
+    workbench_panel: Option<Entity<crate::views::workbench::WorkbenchPanel>>,
+    whiteboard_panel: Option<Entity<crate::views::whiteboard::catalog::WhiteboardLibrary>>,
+    whiteboard_panels: std::collections::BTreeMap<
+        String,
+        Entity<crate::views::whiteboard::catalog::WhiteboardLibrary>,
+    >,
     terminal_drawer_open: bool,
     terminal_drawer_height: f32,
     /// Right panel width in px, dragged at its left edge (web `RightPanelWidth`).
@@ -1340,9 +1370,39 @@ pub struct Workspace {
     _subscriptions: Vec<Subscription>,
 }
 
+#[cfg(test)]
+type ThreadRestorer = fn(
+    Option<&mut PersistedWorkspaceState>,
+    &str,
+    PermissionMode,
+    &mut Window,
+    &mut Context<'_, Workspace>,
+) -> (Vec<DesktopThread>, Option<String>);
+
 impl Workspace {
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
-        let (persisted, persistence_error, disk_version) = load_desktop_state();
+        Self::from_loaded_state(
+            load_desktop_state(),
+            window,
+            cx,
+            #[cfg(test)]
+            RestoredRecords::take_from_persisted,
+            #[cfg(test)]
+            Self::restore_threads,
+        )
+    }
+
+    fn from_loaded_state(
+        (mut persisted, persistence_error, disk_version): (
+            Option<PersistedWorkspaceState>,
+            Option<String>,
+            DiskVersion,
+        ),
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+        #[cfg(test)] restore_records: fn(Option<&mut PersistedWorkspaceState>) -> RestoredRecords,
+        #[cfg(test)] restore_threads: ThreadRestorer,
+    ) -> Self {
         let current_model = persisted
             .as_ref()
             .and_then(|state| state.current_model.clone())
@@ -1365,6 +1425,7 @@ impl Workspace {
             clip_excerpt_input,
         } = Self::new_knowledge_inputs(window, cx, &mut subscriptions);
         let inbox_ui::InboxInputs {
+            inbox_search_input,
             inbox_sender_input,
             inbox_subject_input,
             inbox_body_input,
@@ -1453,13 +1514,26 @@ impl Workspace {
             Self::new_transcription_model_input(&stepper_prefs, window, cx, &mut subscriptions);
         let (date_picker_hour_input, date_picker_minute_input) =
             Self::new_date_picker_inputs(window, cx, &mut subscriptions);
+        #[cfg(not(test))]
         let (threads, active_thread_id) = Self::restore_threads(
-            persisted.as_ref(),
+            persisted.as_mut(),
             &current_model,
             permission_mode,
             window,
             cx,
         );
+        #[cfg(test)]
+        let (threads, active_thread_id) = restore_threads(
+            persisted.as_mut(),
+            &current_model,
+            permission_mode,
+            window,
+            cx,
+        );
+        #[cfg(not(test))]
+        let records = RestoredRecords::take_from_persisted(persisted.as_mut());
+        #[cfg(test)]
+        let records = restore_records(persisted.as_mut());
         let RestoredRecords {
             projects,
             work_items,
@@ -1475,7 +1549,7 @@ impl Workspace {
             automation_state,
             active_project,
             recent_projects,
-        } = RestoredRecords::from_persisted(persisted.as_ref());
+        } = records;
         Self::restore_contact_people(&captures, &meetings_hub, cx);
 
         let selected_work_item_id = initial_selected_work_item_after_start(
@@ -1566,6 +1640,9 @@ impl Workspace {
             file_preview: DesktopFilePreview::Empty,
             file_generation: 0,
             files_panel_visible: false,
+            database_panel: None,
+            project_tool: panels_ui::ProjectTool::Files,
+            api_client_panel: None,
             files_dir: String::new(),
             files_root: None,
             files_entries: Vec::new(),
@@ -1646,6 +1723,7 @@ impl Workspace {
             automation_error: None,
             reviewed_workflow_id: None,
             mcp_bridge: mcp_bridge::WorkspaceBridge::default(),
+            mobile: mobile::MobileUi::new(window, cx),
             local_servers: Vec::new(),
             local_servers_loading: false,
             local_servers_generation: 0,
@@ -1700,6 +1778,7 @@ impl Workspace {
             sidebar_filter: sidebar_ui::SidebarFilter::All,
             sidebar_filter_open: false,
             sidebar_search,
+            sidebar_viewport: RefCell::new(sidebar_ui::SidebarViewport::new(cx)),
             sidebar_settled_open: persisted
                 .as_ref()
                 .and_then(|state| state.sidebar_settled_open)
@@ -1759,6 +1838,7 @@ impl Workspace {
                 .as_ref()
                 .and_then(|state| state.task_view_mode)
                 .unwrap_or(DesktopTaskViewMode::List),
+            library_pages: Default::default(),
             projects,
             selected_project_id: initial_selected_project_after_start(
                 persisted
@@ -1782,6 +1862,8 @@ impl Workspace {
                 today_date(),
             ),
             calendar_events,
+            #[cfg(test)]
+            calendar_legacy_preparation: std::cell::Cell::new(false),
             selected_calendar_event_id: initial_selected_calendar_event_after_start(
                 persisted
                     .as_ref()
@@ -1824,6 +1906,10 @@ impl Workspace {
             clip_excerpt_input,
             clip_create_visible: false,
             inbox_import_visible: false,
+            inbox_page: 0,
+            inbox_filter: bruhs_models::InboxFilter::Inbox,
+            inbox_search_input,
+            inbox_directory: RefCell::new(None),
             inbox_import_source: InboxSource::Email,
             inbox_sender_input,
             inbox_subject_input,
@@ -1883,12 +1969,16 @@ impl Workspace {
             terminal_panel,
             preview_panel,
             terminal_drawer_open: false,
+            workbench_panel: None,
+            whiteboard_panel: None,
+            whiteboard_panels: std::collections::BTreeMap::new(),
             terminal_drawer_height,
             right_panel_width,
             right_panel_split_state,
             terminal_split_state,
             _subscriptions: subscriptions,
         };
+        workspace.reveal_selected_task_page();
         workspace.stamp_run_prefs_on_threads(cx);
         workspace.sync_keybindings(cx);
         cx.spawn(async move |this, cx| loop {
@@ -2342,6 +2432,22 @@ impl Workspace {
             AppView::Calendar => self.render_calendar_page(cx),
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
+            AppView::Workbench => div()
+                .flex_1()
+                .h_full()
+                .min_w_0()
+                .min_h_0()
+                .when_some(self.workbench_panel.as_ref(), |el, panel| {
+                    el.child(panel.clone())
+                }),
+            AppView::Whiteboards { .. } => div()
+                .flex_1()
+                .h_full()
+                .min_w_0()
+                .min_h_0()
+                .when_some(self.whiteboard_panel.as_ref(), |el, panel| {
+                    el.child(panel.clone())
+                }),
             // Web-only surfaces. They're unreachable from the desktop command
             // bar, but shared AppView state can still land here — show an
             // explanation instead of a blank pane.
@@ -2409,6 +2515,8 @@ impl Workspace {
 
 impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        self.sync_api_client_visibility(window, cx);
+        self.sync_mobile_offer();
         if !self.settings_visible() && self.credential_settings.read(cx).has_editor() {
             self.credential_settings
                 .update(cx, |view, _| view.clear_editor());
@@ -2418,18 +2526,16 @@ impl Render for Workspace {
                 && self.active_thread_id.as_deref() == Some(thread.id.as_str());
             thread.chat.update(cx, |chat, cx| {
                 chat.set_rich_response_shown(visible && !self.overlay_open(), cx);
+                if !visible {
+                    chat.cancel_dictation(cx);
+                }
             });
             if !visible && thread.chat.read(cx).has_private_input() {
                 thread.chat.update(cx, |chat, _| chat.clear_private_input());
             }
         }
         self.page_history.visit(&page_key(&self.active_view));
-        let threads = self
-            .threads
-            .iter()
-            .map(|thread| (thread.id.clone(), thread.chat.read(cx).thread_title.clone()))
-            .collect();
-        cx.set_global(crate::app_state::ThreadCatalog { threads });
+        self.sync_thread_catalog(cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
         if !self.overlay_open() {
@@ -2464,6 +2570,36 @@ impl Render for Workspace {
             self.preview_panel_visible && self.active_view == AppView::Chat && !self.overlay_open();
         self.preview_panel
             .update(cx, |panel, _| panel.set_shown(preview_shown));
+        if self.active_view == AppView::Workbench && self.workbench_panel.is_none() {
+            self.workbench_panel =
+                Some(cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(window, cx)));
+        }
+        if let AppView::Whiteboards { board_id } = self.active_view.clone() {
+            let project = self.whiteboard_project(cx);
+            let panel = self.whiteboard_library(project, window, cx);
+            if self
+                .whiteboard_panel
+                .as_ref()
+                .is_none_or(|current| current.entity_id() != panel.entity_id())
+            {
+                if let Some(id) = board_id {
+                    panel.update(cx, |panel, cx| panel.open(id, window, cx));
+                }
+            }
+            self.whiteboard_panel = Some(panel);
+        }
+        for panel in self.whiteboard_panels.values() {
+            let shown = matches!(self.active_view, AppView::Whiteboards { .. })
+                && self
+                    .whiteboard_panel
+                    .as_ref()
+                    .is_some_and(|active| active.entity_id() == panel.entity_id());
+            panel.update(cx, |panel, _| panel.set_shown(shown));
+        }
+        let workbench_shown = self.active_view == AppView::Workbench && !self.overlay_open();
+        if let Some(panel) = self.workbench_panel.as_ref() {
+            panel.update(cx, |panel, cx| panel.set_shown(workbench_shown, cx));
+        }
         let body = div()
             .id("workspace-body")
             .role(Role::Main)

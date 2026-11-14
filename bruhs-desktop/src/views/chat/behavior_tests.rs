@@ -9,7 +9,9 @@ use std::rc::Rc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 
+mod prompt_suggestion;
 mod rich_responses;
+mod streaming_costs;
 mod ui_audit;
 
 pub(in crate::views::chat) fn chat_window(
@@ -1053,7 +1055,7 @@ fn begin(
     let turn = chat
         .begin_turn(
             prompt.to_string(),
-            Vec::new(),
+            super::streaming::PreparedPastes::default(),
             Vec::new(),
             Vec::new(),
             None,

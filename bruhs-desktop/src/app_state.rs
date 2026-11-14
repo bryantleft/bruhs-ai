@@ -13,7 +13,7 @@ pub struct DesktopState {
 impl Global for DesktopState {}
 
 /// Thread ids and titles the composer’s `@` menu reads. The workspace
-/// republishes this while it draws, so a chat can list siblings without
+/// synchronizes this while it draws, so a chat can list siblings without
 /// holding the workspace.
 #[derive(Clone, Debug, Default)]
 pub struct ThreadCatalog {

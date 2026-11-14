@@ -719,6 +719,7 @@ pub fn Composer(
                     on_command=on_slash
                     placeholder=placeholder.to_string()
                     chrome=false
+                    suggestion_blocked=Signal::derive(move || editing_id.get().is_some() || !attachments.with(Vec::is_empty) || !file_offers.with(Vec::is_empty) || !context_chips.with(Vec::is_empty) || active_thread_id.with(|id| id.as_deref().is_some_and(|id| queue.with(|queue| queue.has_for(id)))))
                 />
 
                 {move || {

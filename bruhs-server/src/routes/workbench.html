@@ -1,0 +1,25 @@
+<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Workbench · Bruhs</title>
+<style>:root{color-scheme:dark;font:13px "Monaspace Neon",ui-monospace,monospace;color:#e8e0da;background:#141210}*{box-sizing:border-box}body{margin:0;display:flex;flex-direction:column;height:100dvh}header{display:flex;align-items:center;gap:18px;padding:12px 16px;border-bottom:1px solid #39312b;flex-wrap:wrap}h1{font-size:15px;font-weight:500;margin:0}nav{display:flex;gap:4px;flex-wrap:wrap}a{color:inherit;text-decoration:none;padding:10px 12px;border-radius:6px}a[aria-current=page]{background:#34291f;color:#f6c196}a:hover{background:#29231e}a:focus-visible{outline:2px solid #df9b65;outline-offset:2px}small{color:#b8aaa0}iframe{border:0;width:100%;flex:1;min-height:0}button{font:inherit}@media(max-width:430px){header{gap:8px;padding:10px}nav{width:100%}a{padding:12px 9px}}@media(pointer:coarse){nav a{min-height:44px;display:inline-flex;align-items:center}}</style>
+<header><h1>Workbench</h1><nav aria-label="Workbench tools"><a href="#tasks" data-src="/api/coordination/ui">Tasks</a><a href="#delivery" data-src="/api/delivery/ui">Delivery</a><a href="#verification" data-src="/api/local-tools/ui">Verification</a><a href="#hosts" data-src="/api/remote-hosts/ui">Hosts</a><a href="#usage" data-src="/api/agent-extensions/ui#usage">Usage</a><a href="#providers" data-src="/api/agent-extensions/ui#providers">Providers</a></nav><small>Runs on this machine</small></header>
+<iframe id="panel" title="Workbench task sessions" src="/api/coordination/ui" allow="microphone; clipboard-write"></iframe>
+<script>
+const panel=document.getElementById('panel');let pendingTask=null,parentOrigin=null,panelReady=false;
+function deliverTask(){if(!panelReady)return;if(pendingTask&&panel.getAttribute('src')==='/api/coordination/ui'){panel.contentWindow.postMessage(pendingTask,location.origin);pendingTask=null}if(parentOrigin)panel.contentWindow.postMessage({type:'bruhs:composer-bridge-ready'},location.origin)}
+function select(){const links=[...document.querySelectorAll('nav a')],choice=links.find(a=>a.hash===location.hash)||links[0];for(const a of links){if(a===choice)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}if(panel.getAttribute('src')!==choice.dataset.src){panelReady=false;panel.src=choice.dataset.src}else deliverTask();panel.title='Workbench '+choice.textContent.toLowerCase()}
+panel.addEventListener('load',()=>{panelReady=true;deliverTask()});
+addEventListener('message',event=>{
+ // frame-ancestors restricts the embedding page to the configured Bruhs web
+ // origin and loopback. Pin its explicit handshake, including a different dev port.
+ if(event.source===parent&&parent!==window&&event.data?.type==='bruhs:composer-bridge-ready'){
+  parentOrigin=event.origin;deliverTask();return;
+ }
+ if(event.origin!==location.origin||event.source!==panel.contentWindow||!event.data||typeof event.data!=='object')return;
+ const data=event.data;
+ if(data.type==='bruhs:open-workspace'&&typeof data.path==='string'&&typeof data.prompt==='string'){
+  pendingTask={type:'bruhs:prefill-task',path:data.path,prompt:data.prompt,title:'Work on issue'};location.hash='#tasks';select();
+ }else if(data.type==='bruhs-dictation-draft'&&typeof data.text==='string'&&parentOrigin){
+  parent.postMessage({type:data.type,text:data.text},parentOrigin);
+ }
+});
+addEventListener('hashchange',select);select();
+</script></html>

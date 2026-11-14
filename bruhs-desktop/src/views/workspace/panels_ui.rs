@@ -3,6 +3,13 @@
 use super::*;
 use crate::app_state::spawn_tokio;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(super) enum ProjectTool {
+    Files,
+    Databases,
+    Api,
+}
+
 pub(super) fn tasks_panel_visibility_after_toggle(current_visible: bool) -> bool {
     !current_visible
 }
@@ -364,14 +371,21 @@ impl Workspace {
             }
             _ => path.to_string(),
         };
-        if let Err(err) =
-            bruhs_core::editor::open_in_editor(&self.editor_id, Path::new(&full), line)
-        {
-            tracing::warn!("open in editor failed: {err}");
-            self.meetings_hub.update(cx, |hub, cx| {
-                hub.show_notice(format!("Open in editor failed: {err}"), true, cx)
-            });
-        }
+        let editor = self.editor_id.clone();
+        let opened = cx.background_spawn(async move {
+            bruhs_core::editor::open_in_editor(&editor, Path::new(&full), line)
+        });
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = opened.await {
+                tracing::warn!("open in editor failed: {error}");
+                let _ = this.update(cx, |this, cx| {
+                    this.meetings_hub.update(cx, |hub, cx| {
+                        hub.show_notice(format!("Open in editor failed: {error}"), true, cx)
+                    });
+                });
+            }
+        })
+        .detach();
     }
 
     pub(super) fn set_tasks_panel_visible(&mut self, visible: bool, cx: &mut Context<'_, Self>) {
@@ -533,7 +547,7 @@ impl Workspace {
             RightPanelSurface::Diff => self.diff_panel.clone().into_any_element(),
             RightPanelSurface::Tasks => self.tasks_panel.clone().into_any_element(),
             RightPanelSurface::Preview => self.preview_panel.clone().into_any_element(),
-            RightPanelSurface::Files => self.render_files_panel(cx),
+            RightPanelSurface::Files => self.render_files_and_data(cx),
             RightPanelSurface::Pull => self.render_branch_pull(cx),
             RightPanelSurface::File => self.render_file_viewer(cx),
         };
@@ -785,7 +799,7 @@ impl Workspace {
         )
     }
 
-    fn active_project_path(&self, cx: &App) -> Option<String> {
+    pub(super) fn active_project_path(&self, cx: &App) -> Option<String> {
         let thread = self.active_thread()?;
         let chat = thread.chat.read(cx);
         if chat.project_scoped && !chat.project_path.is_empty() {
@@ -868,6 +882,203 @@ impl Workspace {
             });
         })
         .detach();
+    }
+
+    fn open_database_panel(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(project) = self.active_project_path(cx) else {
+            return;
+        };
+        if self
+            .database_panel
+            .as_ref()
+            .is_none_or(|panel| panel.read(cx).project_path != project)
+        {
+            let panel =
+                cx.new(|cx| crate::views::database_panel::DatabasePanel::new(project, window, cx));
+            self._subscriptions.push(cx.subscribe_in(
+                &panel,
+                window,
+                |this, _, event: &crate::views::database_panel::DatabaseAttachment, window, cx| {
+                    if this.active_project_path(cx).as_deref() != Some(event.project_path.as_str())
+                    {
+                        return;
+                    }
+                    if let Some(thread) = this.active_thread() {
+                        thread.chat.update(cx, |chat, cx| {
+                            chat.append_composer_draft(&event.text, window, cx)
+                        });
+                    }
+                },
+            ));
+            self.database_panel = Some(panel);
+        }
+        self.project_tool = ProjectTool::Databases;
+        cx.notify();
+    }
+
+    fn open_api_client_panel(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(project) = self.active_project_path(cx) else {
+            return;
+        };
+        if self
+            .api_client_panel
+            .as_ref()
+            .is_none_or(|panel| panel.read(cx).project_path != project)
+        {
+            let panel = cx
+                .new(|cx| crate::views::api_client_panel::ApiClientPanel::new(project, window, cx));
+            self._subscriptions.push(cx.subscribe_in(
+                &panel,
+                window,
+                |this, _, event: &crate::views::api_client_panel::ApiAttachment, window, cx| {
+                    if this.active_project_path(cx).as_deref() != Some(event.project_path.as_str())
+                    {
+                        return;
+                    }
+                    if let Some(thread) = this.active_thread() {
+                        thread.chat.update(cx, |chat, cx| {
+                            chat.append_composer_draft(&event.text, window, cx)
+                        });
+                    }
+                },
+            ));
+            self.api_client_panel = Some(panel);
+        }
+        self.project_tool = ProjectTool::Api;
+        cx.notify();
+    }
+
+    pub(super) fn sync_api_client_visibility(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let project = self.active_project_path(cx);
+        let shown = self.active_view == AppView::Chat
+            && self.files_panel_visible
+            && !self.file_surface
+            && !self.pull_panel_visible
+            && self.project_tool == ProjectTool::Api
+            && !self.settings_visible()
+            && !self.overlay_open();
+        if let Some(panel) = &self.api_client_panel {
+            panel.update(cx, |panel, cx| {
+                panel.set_visible(
+                    shown && project.as_deref() == Some(panel.project_path.as_str()),
+                    window,
+                    cx,
+                );
+            });
+        }
+    }
+
+    fn render_files_and_data(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let mut body = div().size_full().flex().flex_col().child(
+            div()
+                .flex()
+                .gap_2()
+                .p_2()
+                .border_b_1()
+                .border_color(theme::longan_800())
+                .child(
+                    crate::views::web_button::web_button(
+                        "files-mode",
+                        crate::views::web_button::WebButtonVariant::Ghost,
+                        crate::views::web_button::WebButtonSize::Small,
+                        crate::views::web_button::ButtonState::Enabled,
+                    )
+                    .child("Files")
+                    .role(Role::Tab)
+                    .aria_selected(self.project_tool == ProjectTool::Files)
+                    .on_click(cx.listener(|this, _, _, cx| {
+                        this.project_tool = ProjectTool::Files;
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(
+                        |this, event: &KeyDownEvent, window, cx| {
+                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                                window.prevent_default();
+                                this.project_tool = ProjectTool::Files;
+                                cx.notify();
+                            }
+                        },
+                    )),
+                )
+                .child(
+                    crate::views::web_button::web_button(
+                        "databases-mode",
+                        crate::views::web_button::WebButtonVariant::Ghost,
+                        crate::views::web_button::WebButtonSize::Small,
+                        crate::views::web_button::ButtonState::Enabled,
+                    )
+                    .child("Databases")
+                    .role(Role::Tab)
+                    .aria_selected(self.project_tool == ProjectTool::Databases)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_database_panel(window, cx)),
+                    )
+                    .on_key_down(cx.listener(
+                        |this, event: &KeyDownEvent, window, cx| {
+                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                                window.prevent_default();
+                                this.open_database_panel(window, cx);
+                            }
+                        },
+                    )),
+                )
+                .child(
+                    crate::views::web_button::web_button(
+                        "api-mode",
+                        crate::views::web_button::WebButtonVariant::Ghost,
+                        crate::views::web_button::WebButtonSize::Small,
+                        crate::views::web_button::ButtonState::Enabled,
+                    )
+                    .child("API")
+                    .role(Role::Tab)
+                    .aria_selected(self.project_tool == ProjectTool::Api)
+                    .on_click(
+                        cx.listener(|this, _, window, cx| this.open_api_client_panel(window, cx)),
+                    )
+                    .on_key_down(cx.listener(
+                        |this, event: &KeyDownEvent, window, cx| {
+                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                                window.prevent_default();
+                                this.open_api_client_panel(window, cx);
+                            }
+                        },
+                    )),
+                ),
+        );
+        if self.project_tool == ProjectTool::Api {
+            if let Some(panel) = self.api_client_panel.as_ref().filter(|panel| {
+                Some(panel.read(cx).project_path.as_str())
+                    == self.active_project_path(cx).as_deref()
+            }) {
+                return body
+                    .child(div().min_h_0().flex_1().child(panel.clone()))
+                    .into_any_element();
+            }
+            return body
+                .child(self.files_status_line(
+                    "Select API again to open the current project's collection.",
+                ))
+                .into_any_element();
+        }
+        if self.project_tool == ProjectTool::Databases {
+            if let Some(panel) = self.database_panel.as_ref().filter(|panel| {
+                Some(panel.read(cx).project_path.as_str())
+                    == self.active_project_path(cx).as_deref()
+            }) {
+                body = body.child(div().min_h_0().flex_1().child(panel.clone()));
+            } else {
+                body = body.child(self.files_status_line(
+                    "Select Databases again to open the current project's connections.",
+                ));
+            }
+        } else {
+            body = body.child(div().min_h_0().flex_1().child(self.render_files_panel(cx)));
+        }
+        body.into_any_element()
     }
 
     fn render_files_panel(&self, cx: &Context<'_, Self>) -> AnyElement {

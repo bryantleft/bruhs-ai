@@ -11,6 +11,13 @@ use leptos::prelude::*;
 /// Parse a routed hash into an AppView.
 pub(crate) fn parse_hash(hash: &str) -> Option<AppView> {
     let h = hash.trim_start_matches('#');
+    if let Some(id) = h.strip_prefix("/whiteboards/") {
+        return uuid::Uuid::parse_str(id)
+            .ok()
+            .map(|_| AppView::Whiteboards {
+                board_id: Some(id.into()),
+            });
+    }
     if let Some(rest) = h.strip_prefix("/meeting-notes/") {
         let note_id: String = js_sys::decode_uri_component(rest).ok()?.into();
         if !note_id.trim().is_empty() && note_id.len() <= 128 {
@@ -62,6 +69,8 @@ pub(crate) fn parse_hash(hash: &str) -> Option<AppView> {
         "/calendar" => Some(AppView::Calendar),
         "/life" => Some(AppView::Life),
         "/automations" => Some(AppView::Automations),
+        "/workbench" => Some(AppView::Workbench),
+        "/whiteboards" => Some(AppView::Whiteboards { board_id: None }),
         "/meetings" => Some(AppView::Meetings),
         "/people" => Some(AppView::People),
         "/search" => Some(AppView::Search),
@@ -81,6 +90,7 @@ pub fn App() -> impl IntoView {
     crate::navigation_guard::install();
     crate::workflow_executor::WorkflowExecutor::install();
     crate::thread_catalog::ThreadCatalog::install();
+    crate::whiteboard::host::WhiteboardHost::install();
     crate::thread_link::ThreadLink::install();
     crate::meeting_actions::MeetingActions::install();
 
@@ -112,6 +122,11 @@ pub fn App() -> impl IntoView {
                 AppView::Calendar => "#/calendar".to_string(),
                 AppView::Life => "#/life".to_string(),
                 AppView::Automations => "#/automations".to_string(),
+                AppView::Workbench => "#/workbench".to_string(),
+                AppView::Whiteboards { board_id } => board_id.as_ref().map_or_else(
+                    || "#/whiteboards".into(),
+                    |id| format!("#/whiteboards/{id}"),
+                ),
                 AppView::Meetings => "#/meetings".to_string(),
                 AppView::MeetingDetail { meeting_id } => format!("#/meetings/{meeting_id}"),
                 AppView::MeetingNoteDetail { note_id } => {
@@ -217,6 +232,9 @@ pub fn App() -> impl IntoView {
 
     wasm_bindgen_futures::spawn_local(async move {
         workflow_executor.hydrate_people().await;
+        workflow_executor.refresh_people().await;
+    });
+    wasm_bindgen_futures::spawn_local(async move {
         match storage::load_calendars().await {
             Ok(cals) => {
                 if !cals.is_empty() {
@@ -225,6 +243,8 @@ pub fn App() -> impl IntoView {
             }
             Err(e) => log::warn!("idb hydrate calendars failed: {e:?}"),
         }
+    });
+    wasm_bindgen_futures::spawn_local(async move {
         match crate::api::fetch_capture_status().await {
             Ok(s) => set_capture_status.set(s),
             Err(e) => {
@@ -241,12 +261,40 @@ pub fn App() -> impl IntoView {
                 }
             }
         }
-        workflow_executor.refresh_people().await;
     });
 
     view! {
         <Shell />
+        <crate::whiteboard::review::BoardNotices />
         <crate::components::capture_dialog::CaptureDialog />
         <crate::components::auto_record_prompt::AutoRecordPromptModal />
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::parse_hash;
+    use crate::state::AppView;
+
+    #[test]
+    fn thread_routes_keep_other_workspace_routes_distinct() {
+        assert_eq!(parse_hash("#/settings"), Some(AppView::Settings));
+        assert_eq!(
+            parse_hash("#/inbox/item"),
+            Some(AppView::ConversationDetail {
+                conversation_id: "item".into(),
+            })
+        );
+        assert_eq!(
+            parse_hash("#/whiteboards"),
+            Some(AppView::Whiteboards { board_id: None })
+        );
+        let id = "00000000-0000-4000-8000-000000000001";
+        assert_eq!(
+            parse_hash(&format!("#/whiteboards/{id}")),
+            Some(AppView::Whiteboards {
+                board_id: Some(id.into()),
+            })
+        );
     }
 }

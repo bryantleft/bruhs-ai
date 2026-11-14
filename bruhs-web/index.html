@@ -70,30 +70,40 @@
          cross-origin in some browsers, which silently fell back to the system mono). */
       @font-face { font-family: 'MonaspaceArgonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceArgonVariable.woff2) format("woff2"); }
       @font-face { font-family: 'MonaspaceNeonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceNeonVariable.woff2) format("woff2"); }
+      /* Transcript prose uses the same Neon font without its optional joining
+         features. Scope these defaults to the face so fallback fonts keep
+         their own script shaping; other Neon roles retain their features. */
+      @font-face { font-family: 'MonaspaceNeonTranscript'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; font-feature-settings: 'calt' 0, 'liga' 0; src: url(/fonts/MonaspaceNeonVariable.woff2) format("woff2"); }
       @font-face { font-family: 'MonaspaceXenonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceXenonVariable.woff2) format("woff2"); }
       @font-face { font-family: 'MonaspaceKryptonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceKryptonVariable.woff2) format("woff2"); }
       @font-face { font-family: 'MonaspaceRadonVariable'; font-weight: 200 800; font-stretch: 100% 125%; font-style: normal; font-display: swap; src: url(/fonts/MonaspaceRadonVariable.woff2) format("woff2"); }
+      /* Explicit emoji fallbacks avoid repeated system font searches for
+         symbol-heavy text. Keep monospace ahead of them for ordinary glyphs. */
+      :root { --font-emoji: 'Apple Color Emoji', 'Segoe UI Emoji', 'Noto Color Emoji'; }
+      .font-neon { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace, var(--font-emoji); }
       /* Bruhs typography role classes */
-      .text-display-lg { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace; font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 300; }
-      .text-display-md { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace; font-size: clamp(2rem, 4vw, 3.5rem); font-weight: 400; }
-      .text-display-sm { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace; font-size: clamp(1.75rem, 3vw, 2.75rem); font-weight: 400; }
-      .text-h1 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace; font-size: clamp(1.5rem, 2vw, 2rem); font-weight: 500; }
-      .text-h2 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace; font-size: 1.25rem; font-weight: 500; }
-      .text-h3 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace; font-size: 1.125rem; font-weight: 500; }
-      .text-h4 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace; font-size: 1rem; font-weight: 500; }
-      .text-body-lg { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 1rem; font-weight: 400; }
-      .text-body { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 0.875rem; font-weight: 400; }
-      .text-body-sm { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 0.8125rem; font-weight: 400; }
-      .text-label-lg { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.875rem; font-weight: 500; }
-      .text-label { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.8125rem; font-weight: 500; }
-      .text-label-sm { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.75rem; font-weight: 500; }
-      .text-code-lg { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 0.875rem; font-weight: 400; }
-      .text-code { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 0.8125rem; font-weight: 400; }
-      .text-code-sm { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace; font-size: 0.75rem; font-weight: 400; }
-      .text-button-lg { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.875rem; font-weight: 500; }
-      .text-button { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.8125rem; font-weight: 500; }
-      .text-button-sm { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace; font-size: 0.75rem; font-weight: 500; }
-      .text-callout { font-family: 'MonaspaceRadonVariable', 'Monaspace Radon', monospace; font-size: 1.125rem; font-weight: 400; }
+      .text-display-lg { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace, var(--font-emoji); font-size: clamp(2.5rem, 5vw, 4.5rem); font-weight: 300; }
+      .text-display-md { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace, var(--font-emoji); font-size: clamp(2rem, 4vw, 3.5rem); font-weight: 400; }
+      .text-display-sm { font-family: 'MonaspaceKryptonVariable', 'Monaspace Krypton', monospace, var(--font-emoji); font-size: clamp(1.75rem, 3vw, 2.75rem); font-weight: 400; }
+      .text-h1 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace, var(--font-emoji); font-size: clamp(1.5rem, 2vw, 2rem); font-weight: 500; }
+      .text-h2 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace, var(--font-emoji); font-size: 1.25rem; font-weight: 500; }
+      .text-h3 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace, var(--font-emoji); font-size: 1.125rem; font-weight: 500; }
+      .text-h4 { font-family: 'MonaspaceXenonVariable', 'Monaspace Xenon', monospace, var(--font-emoji); font-size: 1rem; font-weight: 500; }
+      .text-body-lg { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace, var(--font-emoji); font-size: 1rem; font-weight: 400; }
+      .text-body { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace, var(--font-emoji); font-size: 0.875rem; font-weight: 400; }
+      .text-body-sm { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace, var(--font-emoji); font-size: 0.8125rem; font-weight: 400; }
+      .text-label-lg { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace, var(--font-emoji); font-size: 0.875rem; font-weight: 500; }
+      .text-label { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace, var(--font-emoji); font-size: 0.8125rem; font-weight: 500; }
+      .text-label-sm { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace, var(--font-emoji); font-size: 0.75rem; font-weight: 500; }
+      .text-code-lg { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace, var(--font-emoji); font-size: 0.875rem; font-weight: 400; }
+      .text-code { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace, var(--font-emoji); font-size: 0.8125rem; font-weight: 400; }
+      .text-code-sm { font-family: 'MonaspaceNeonVariable', 'Monaspace Neon', monospace, var(--font-emoji); font-size: 0.75rem; font-weight: 400; }
+      .text-button-lg { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace, var(--font-emoji); font-size: 0.875rem; font-weight: 500; }
+      .text-button { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace, var(--font-emoji); font-size: 0.8125rem; font-weight: 500; }
+      .text-button-sm { font-family: 'MonaspaceArgonVariable', 'Monaspace Argon', monospace, var(--font-emoji); font-size: 0.75rem; font-weight: 500; }
+      .text-callout { font-family: 'MonaspaceRadonVariable', 'Monaspace Radon', monospace, var(--font-emoji); font-size: 1.125rem; font-weight: 400; }
+
+      [data-transcript-segment] { font-family: 'MonaspaceNeonTranscript', 'Monaspace Neon', monospace, var(--font-emoji); }
 
       /* Uniform persimmon focus ring for keyboard nav (a11y — WCAG 2.4.7).
        * Applied to anything focusable so we don't depend on per-component

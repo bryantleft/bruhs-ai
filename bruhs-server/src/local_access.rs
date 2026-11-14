@@ -158,9 +158,28 @@ pub async fn guard(
 ) -> Result<Response, AppError> {
     let headers = request.headers();
     let is_api = request.uri().path() == "/api" || request.uri().path().starts_with("/api/");
+    let verification_browser = headers.contains_key("x-bruhs-verification-browser")
+        || headers
+            .get(header::USER_AGENT)
+            .and_then(|value| value.to_str().ok())
+            .is_some_and(|value| value.contains("BruhsVerification/1"));
+    if is_api && verification_browser {
+        return Err(AppError::Forbidden(
+            "The verification browser cannot access Bruhs APIs. Use the scoped workbench tools."
+                .into(),
+        ));
+    }
     let inline_response = matches!(
         request.uri().path(),
-        "/api/agent/rich-response" | "/api/agent/rich-media" | "/api/agent/media"
+        "/api/agent/rich-response"
+            | "/api/agent/rich-media"
+            | "/api/agent/media"
+            | "/api/workbench/ui"
+            | "/api/coordination/ui"
+            | "/api/delivery/ui"
+            | "/api/local-tools/ui"
+            | "/api/remote-hosts/ui"
+            | "/api/agent-extensions/ui"
     ) || request
         .uri()
         .path()

@@ -27,6 +27,7 @@ pub mod people;
 pub mod relationships;
 pub mod tasks;
 pub mod transcripts;
+pub mod whiteboards;
 pub mod workflow;
 
 use crate::state::{

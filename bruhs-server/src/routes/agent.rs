@@ -204,13 +204,19 @@ pub async fn post_agent(
             "role instructions are too long".into(),
         ));
     }
-    crate::routes::uploads::reject_foreign_uploads(&body.file_attachments)?;
+    crate::routes::uploads::reject_foreign_uploads(&body.file_attachments).await?;
     let project = turn_dir(body.project_path.as_deref(), home::home_dir().as_deref()).await?;
     let model = body.model.unwrap_or_else(ModelId::default_agent_model);
     // The same routing the pickers use, so the UI and the server agree on
     // which CLI serves a model.
     let provider = model.provider();
-    let files = write_paste_files(&body.text_attachments);
+    let files = if body.text_attachments.is_empty() {
+        Vec::new()
+    } else {
+        tokio::task::spawn_blocking(move || write_paste_files(&body.text_attachments))
+            .await
+            .map_err(|error| AppError::internal_in("pasted text writer failed", error))?
+    };
     let prompt = bruhs_models::logic::composer_text::agent_prompt(&body.prompt, &files);
     let prompt =
         bruhs_models::logic::attachments::append_uploaded_files(&prompt, &body.file_attachments);

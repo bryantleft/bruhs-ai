@@ -546,6 +546,64 @@ impl Workspace {
         self.show_thread_notice("Thread copied as Markdown", false, cx);
     }
 
+    pub(super) fn continue_in_workbench(&mut self, cx: &mut Context<'_, Self>) {
+        let Some((title, project, model, markdown)) = self.active_thread_markdown(cx) else {
+            return;
+        };
+        let Some(thread) = self.active_thread() else {
+            return;
+        };
+        let chat = thread.chat.read(cx);
+        if chat.is_streaming {
+            self.show_thread_notice(
+                "Stop the current run before continuing in workbench.",
+                true,
+                cx,
+            );
+            return;
+        }
+        let path = chat.worktree_path.clone().unwrap_or(project);
+        let task = match bruhs_models::workbench_handoff::from_chat(
+            &title,
+            &path,
+            &model,
+            chat.permission_mode,
+            &markdown,
+        ) {
+            Ok(task) => task,
+            Err(error) => {
+                self.show_thread_notice(error, true, cx);
+                return;
+            }
+        };
+        let request = crate::app_state::spawn_tokio(cx, async move {
+            let client = crate::server_client::ServerClient::workbench_client();
+            client
+                .coordination_command(&bruhs_models::coordination::CoordinationCommand::Create {
+                    parent_id: None,
+                    task,
+                })
+                .await
+                .map_err(|error| error.to_string())
+        });
+        cx.spawn(async move |this, cx| {
+            let result = request.await;
+            let _ = this.update(cx, |this, cx| match result {
+                Ok(_) => {
+                    this.active_view = AppView::Workbench;
+                    this.persist_and_notify(cx);
+                    this.show_thread_notice(
+                        "Continued in workbench. The original chat is kept.",
+                        false,
+                        cx,
+                    );
+                }
+                Err(error) => this.show_thread_notice(format!("Workbench: {error}"), true, cx),
+            });
+        })
+        .detach();
+    }
+
     /// Start a T3 Code thread in this thread's project that carries its
     /// transcript. The T3 CLI runs in the background.
     pub(super) fn continue_in_t3(&mut self, cx: &mut Context<'_, Self>) {

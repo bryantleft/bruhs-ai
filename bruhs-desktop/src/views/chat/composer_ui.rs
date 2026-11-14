@@ -795,6 +795,9 @@ impl ChatView {
                     cx.stop_propagation();
                 } else if this.handle_composer_hint_key("escape", window, cx) {
                     cx.stop_propagation();
+                } else {
+                    this.dismiss_prompt_suggestion(cx);
+                    cx.notify();
                 }
             }))
             .capture_action(cx.listener(|this, action: &InputEnter, window, cx| {
@@ -815,8 +818,46 @@ impl ChatView {
                     .cleanable(false)
                     .font_family(theme::CODE_FONT_FAMILY)
                     .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
-                    .disabled(composer_input_disabled_like_web(self.is_streaming))
+                    .disabled(
+                        composer_input_disabled_like_web(self.is_streaming)
+                            || self.dictation.active(),
+                    )
                     .tab_index(composer_input_tab_index_like_web(self.is_streaming)),
+            )
+            .when(
+                self.dictation.active() || self.dictation.error.is_some(),
+                |el| el.child(self.render_dictation_status(cx)),
+            )
+            .when(
+                self.input_state.read(cx).inline_completion_text().is_some(),
+                |el| {
+                    el.child(
+                        div()
+                            .id("accept-prompt-suggestion")
+                            .role(Role::Button)
+                            .aria_label("Accept suggested prompt")
+                            .tab_index(0)
+                            .py_1()
+                            .text_size(px(12.0))
+                            .text_color(theme::rambutan_500())
+                            .cursor_pointer()
+                            .child("Tab to accept suggestion")
+                            .on_click(cx.listener(|this, _, window, cx| {
+                                this.input_state
+                                    .update(cx, |input, cx| input.focus(window, cx));
+                                this.accept_prompt_suggestion(window, cx);
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                                    window.prevent_default();
+                                    this.input_state
+                                        .update(cx, |input, cx| input.focus(window, cx));
+                                    this.accept_prompt_suggestion(window, cx);
+                                    cx.stop_propagation();
+                                }
+                            })),
+                    )
+                },
             )
             .into_any_element()
     }
@@ -1142,6 +1183,7 @@ impl ChatView {
                 1 => 2,
                 2 => 3,
                 3 => 3 + usize::from(self.effort_chip_visible()),
+                4 => 5 + usize::from(self.effort_chip_visible()),
                 _ => 4 + usize::from(self.effort_chip_visible()),
             };
             self.composer_options_scroll.scroll_to_item(row);
@@ -1346,6 +1388,16 @@ impl ChatView {
                 el.child(section(2, "Effort", self.render_effort_menu(cx)))
             })
             .child(section(3, "Prompts", prompts))
+            .child(
+                div().track_focus(&self.composer_options_section_focus[5])
+                    .flex_shrink_0().flex().flex_col().gap_1()
+                    .child(div().text_size(px(12.0)).text_color(theme::rambutan_500()).child("Dictation"))
+                    .when(!self.dictation.active(), |el| el.child(self.composer_option(
+                        "composer-dictate".into(), "desktop-composer-dictate".into(), "Dictate locally", None,
+                        |this,_,cx| {this.start_dictation(cx);this.composer_options_open=false;},cx,
+                    )))
+                    .child(div().text_size(px(12.0)).text_color(theme::rambutan_400()).child("Uses your microphone and local Whisper. Review the draft before sending.")),
+            )
             .when(
                 self.return_chip_visible()
                     || self.messages.iter().any(|message| message.usage.is_some()),
@@ -1369,6 +1421,65 @@ impl ChatView {
                 },
             )
             .vertical_scrollbar(&self.composer_options_scroll)
+            .into_any_element()
+    }
+
+    fn render_dictation_status(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let recording = self.dictation.recording();
+        div()
+            .id("desktop-dictation-status")
+            .px_3()
+            .py_2()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .when(self.dictation.active(), |el| {
+                el.child(
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_2()
+                        .child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(theme::rambutan_300())
+                                .child(if recording {
+                                    "Recording microphone"
+                                } else {
+                                    "Transcribing locally"
+                                }),
+                        )
+                        .when(recording, |el| {
+                            el.child(self.composer_option(
+                                "dictation-stop".into(),
+                                "desktop-dictation-stop".into(),
+                                "Stop and insert",
+                                None,
+                                |this, _, cx| this.stop_dictation(cx),
+                                cx,
+                            ))
+                        })
+                        .child(self.composer_option(
+                            "dictation-cancel".into(),
+                            "desktop-dictation-cancel".into(),
+                            "Cancel dictation",
+                            None,
+                            |this, _, cx| this.cancel_dictation(cx),
+                            cx,
+                        )),
+                )
+            })
+            .when_some(self.dictation.error.clone(), |el, error| {
+                el.child(
+                    div()
+                        .id("desktop-dictation-error")
+                        .role(Role::Alert)
+                        .text_size(px(12.0))
+                        .text_color(theme::lychee_300())
+                        .child(error),
+                )
+            })
             .into_any_element()
     }
 
@@ -1479,6 +1590,7 @@ impl ChatView {
             .tab_index(0)
             .role(Role::Button)
             .aria_label(title)
+            .aria_toggled(if full { Toggled::True } else { Toggled::False })
             .tooltip(move |window, cx| Tooltip::new(title).build(window, cx))
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .on_click(cx.listener(|this, _ev, _window, cx| {
@@ -1924,10 +2036,11 @@ impl ChatView {
     fn render_send_button(&self, cx: &Context<'_, Self>) -> AnyElement {
         let action = self.composer_action_now(cx);
         let draft_empty = self.composer_draft_empty(cx);
-        let enabled = action_enabled_for(
-            action,
-            draft_empty || self.message_over_limit(cx) || self.uploads_block_send(),
-        );
+        let enabled = !self.dictation.active()
+            && action_enabled_for(
+                action,
+                draft_empty || self.message_over_limit(cx) || self.uploads_block_send(),
+            );
         let label = action_label(action);
         let title = action_title(action).to_string();
         let interrupt = matches!(action, ComposerAction::Interrupt);

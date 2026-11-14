@@ -61,6 +61,14 @@ pub struct KnowledgeSaveRequest(pub OneShot);
 #[derive(Copy, Clone)]
 pub struct InboxCreateRequest(pub OneShot);
 
+/// Transient Inbox navigation survives opening a conversation and returning.
+#[derive(Copy, Clone)]
+pub struct InboxBrowseState {
+    pub filter: RwSignal<bruhs_models::InboxFilter>,
+    pub query: RwSignal<String>,
+    pub page: RwSignal<usize>,
+}
+
 #[derive(Copy, Clone)]
 pub struct CommandBarOpen(pub ReadSignal<bool>);
 #[derive(Copy, Clone)]
@@ -347,6 +355,11 @@ pub(super) fn provide() {
     provide_context(KnowledgeCreateClipRequest(OneShot::new()));
     provide_context(KnowledgeSaveRequest(OneShot::new()));
     provide_context(InboxCreateRequest(OneShot::new()));
+    provide_context(InboxBrowseState {
+        filter: RwSignal::new(bruhs_models::InboxFilter::Inbox),
+        query: RwSignal::new(String::new()),
+        page: RwSignal::new(0),
+    });
 }
 
 #[cfg(test)]

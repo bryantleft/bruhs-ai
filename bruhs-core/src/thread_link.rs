@@ -40,7 +40,7 @@ const HELPER_FLAG: &str = "--thread-mcp";
 const BROKER_ENV: &str = "BRUHS_THREAD_BROKER";
 const SERVER: &str = "bruhs_threads";
 /// A reply holds at most a clipped transcript; a request at most one message.
-const MAX_FRAME_BYTES: usize = 256 * 1024;
+const MAX_FRAME_BYTES: usize = bruhs_models::thread_link::BROKER_FRAME_BYTES;
 /// How long the helper has to say what it wants after it connects.
 const HANDSHAKE: Duration = Duration::from_secs(15);
 /// How long the app has to answer. Every answer is local and immediate, so
@@ -51,6 +51,7 @@ const WAIT: Duration = Duration::from_secs(60 * 60);
 /// The tools that change nothing; a turn never has to ask before using them.
 const READ_TOOLS: [&str; 2] = ["list_threads", "read_thread"];
 const WRITE_TOOL: &str = "message_thread";
+mod whiteboards;
 
 /// Why an answer was not delivered.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
@@ -271,14 +272,23 @@ impl ThreadScope {
     }
 
     /// Stream `operation` to the app and wait for its answer.
-    async fn request(self: &Arc<Self>, operation: ThreadOperation) -> ThreadReply {
+    async fn request(self: &Arc<Self>, mut operation: ThreadOperation) -> ThreadReply {
         const ENDED: &str = "The turn ended before the app answered.";
         if let Err(reason) = operation.validate() {
             return ThreadReply::refused(reason);
         }
         // A waiting call is answered when the recipient has replied.
         let waits = operation.waits() && self.links.waits;
-        let limit = if waits { WAIT } else { ANSWER };
+        let limit = if waits {
+            WAIT
+        } else if matches!(operation, ThreadOperation::Whiteboard { .. }) {
+            HANDSHAKE
+        } else {
+            ANSWER
+        };
+        if let ThreadOperation::Whiteboard { turn_id, .. } = &mut operation {
+            *turn_id = self.id.clone();
+        }
         let request = ThreadRequest {
             id: uuid::Uuid::new_v4().to_string(),
             thread_id: self.thread_id.clone(),
@@ -354,7 +364,7 @@ impl ThreadBroker {
                     json!({"command": executable, "args": [HELPER_FLAG], "env": {BROKER_ENV: connection}}),
                 );
                 options.mcp_config = Some(config.to_string());
-                for tool in READ_TOOLS {
+                for tool in READ_TOOLS.into_iter().chain(whiteboards::READS) {
                     let tool = format!("mcp__{SERVER}__{tool}");
                     match &mut options.tools {
                         claude_sdk_rs::Tools::CliDefault => {
@@ -372,7 +382,9 @@ impl ThreadBroker {
                 let connection = json!(connection).to_string();
                 let tools: Vec<String> = READ_TOOLS
                     .iter()
+                    .chain(whiteboards::READS.iter())
                     .chain((!self.connection.read_only).then_some(&WRITE_TOOL))
+                    .chain((!self.connection.read_only).then_some(&whiteboards::WRITE))
                     .map(|tool| format!("{tool} = {{ approval_mode = \"approve\" }}"))
                     .collect();
                 // A waiting call must outlive Codex's own tool deadline.
@@ -568,6 +580,7 @@ fn tools(connection: &Connection) -> Value {
             }
         }));
     }
+    tools.extend(whiteboards::tools(connection.read_only));
     json!({ "tools": tools })
 }
 
@@ -605,6 +618,27 @@ fn error(id: Value, code: i32, message: &str) -> Value {
 
 /// Run one tool call and shape its MCP result.
 async fn call_tool(connection: &Connection, params: &Value) -> Value {
+    if params["name"]
+        .as_str()
+        .is_some_and(|name| whiteboards::READS.contains(&name) || name == whiteboards::WRITE)
+    {
+        let arguments = match &params["arguments"] {
+            Value::Object(args) => args.clone(),
+            Value::Null => serde_json::Map::new(),
+            _ => return tool_result(&ThreadReply::refused("Arguments must be an object.")),
+        };
+        let reply = match whiteboards::operation(
+            params["name"].as_str().unwrap_or_default(),
+            arguments,
+            connection.read_only,
+        ) {
+            Ok(op) => call(connection, op).await.unwrap_or_else(|_| {
+                ThreadReply::refused("The owner app is no longer reachable from this turn.")
+            }),
+            Err(e) => ThreadReply::refused(e),
+        };
+        return tool_result(&reply);
+    }
     let op = match params["name"].as_str() {
         Some("list_threads") => "list",
         Some("read_thread") => "read",
@@ -942,7 +976,18 @@ mod tests {
             .iter()
             .map(|tool| tool["name"].as_str().unwrap())
             .collect();
-        assert_eq!(names, ["list_threads", "read_thread", "message_thread"]);
+        assert_eq!(
+            names,
+            [
+                "list_threads",
+                "read_thread",
+                "message_thread",
+                "list_whiteboards",
+                "read_whiteboard",
+                "whiteboard_proposal_status",
+                "propose_whiteboard"
+            ]
+        );
 
         // Two calls, then a ping that must not wait for either.
         client_write.write_all(b"{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"tools/call\",\"params\":{\"name\":\"read_thread\",\"arguments\":{\"thread_id\":\"abcd1234\",\"limit\":3}}}\n{\"jsonrpc\":\"2.0\",\"id\":\"m\",\"method\":\"tools/call\",\"params\":{\"name\":\"message_thread\",\"arguments\":{\"message\":\"hi\",\"title\":\"T\"}}}\n{\"jsonrpc\":\"2.0\",\"id\":3,\"method\":\"ping\"}\n").await.unwrap();
@@ -958,7 +1003,9 @@ mod tests {
                     assert_eq!((title.as_deref(), message.as_str()), (Some("T"), "hi"));
                     ("not sent", false)
                 }
-                ThreadOperation::List => panic!("unexpected list"),
+                ThreadOperation::List | ThreadOperation::Whiteboard { .. } => {
+                    panic!("unexpected operation")
+                }
             };
             turn.links
                 .resolve(
@@ -1014,7 +1061,7 @@ mod tests {
             &connection,
         )
         .unwrap();
-        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 2);
+        assert_eq!(listed["result"]["tools"].as_array().unwrap().len(), 5);
         let result = call_tool(
             &connection,
             &json!({"name": "message_thread", "arguments": {"message": "hi"}}),
@@ -1077,6 +1124,9 @@ mod tests {
                 "mcp__bruhs_secrets__request_secret".into(),
                 "mcp__bruhs_threads__list_threads".into(),
                 "mcp__bruhs_threads__read_thread".into(),
+                "mcp__bruhs_threads__list_whiteboards".into(),
+                "mcp__bruhs_threads__read_whiteboard".into(),
+                "mcp__bruhs_threads__whiteboard_proposal_status".into(),
             ])
         );
         assert_eq!(claude.prompt, "hello");
@@ -1092,6 +1142,9 @@ mod tests {
             claude_sdk_rs::Tools::Allow(vec![
                 "mcp__bruhs_threads__list_threads".into(),
                 "mcp__bruhs_threads__read_thread".into(),
+                "mcp__bruhs_threads__list_whiteboards".into(),
+                "mcp__bruhs_threads__read_whiteboard".into(),
+                "mcp__bruhs_threads__whiteboard_proposal_status".into(),
             ])
         );
         let mut broken = claude_sdk_rs::QueryOptions::new("hello");
@@ -1135,5 +1188,49 @@ mod tests {
         assert!(options.config[0]
             .value()
             .contains("tool_timeout_sec = 3660,"));
+    }
+    #[tokio::test]
+    async fn whiteboard_requests_get_broker_owned_turn_identity_and_read_only_turns_cannot_propose()
+    {
+        use bruhs_models::whiteboard::BoardRequest;
+        let mut turn = turn();
+        let scope = turn.scope.clone();
+        let operation = ThreadOperation::Whiteboard {
+            turn_id: "forged".into(),
+            request: BoardRequest::List,
+        };
+        let asked = tokio::spawn(async move { scope.request(operation).await });
+        let request = next_request(&mut turn.events).await;
+        let ThreadOperation::Whiteboard { turn_id, .. } = &request.operation else {
+            panic!("whiteboard request required")
+        };
+        assert_eq!(turn_id, &turn.scope.id);
+        assert_ne!(turn_id, "forged");
+        turn.links
+            .resolve(&turn.thread_id, &request.id, ThreadReply::ok("shared only"))
+            .unwrap();
+        assert!(asked.await.unwrap().ok);
+        let broker = turn.scope.start(true).await.unwrap();
+        let reply = call(
+            &broker.connection,
+            ThreadOperation::Whiteboard {
+                turn_id: String::new(),
+                request: BoardRequest::Propose {
+                    board_id: uuid::Uuid::new_v4().to_string(),
+                    base_revision: 0,
+                    description: "edit".into(),
+                    edits_json: r#"{"operations":[]}"#.into(),
+                },
+            },
+        )
+        .await
+        .unwrap();
+        assert!(!reply.ok);
+        assert!(turn.events.try_recv().is_err());
+        assert!(tools(&broker.connection)["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != "propose_whiteboard"));
     }
 }

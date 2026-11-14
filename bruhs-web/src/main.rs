@@ -29,10 +29,23 @@ mod thread_link;
 mod transcript_sync;
 mod ui;
 mod updates;
+mod whiteboard;
 mod workflow_executor;
 
 fn main() {
     console_error_panic_hook::set_once();
     console_log::init_with_level(log::Level::Debug).ok();
+    #[cfg(feature = "whiteboard-benchmark")]
+    if web_sys::window().is_some_and(|window| {
+        window
+            .location()
+            .pathname()
+            .is_ok_and(|path| path == "/whiteboard-benchmark")
+    }) {
+        if let Err(error) = whiteboard::benchmark::mount() {
+            log::error!("Whiteboard benchmark failed: {error:?}");
+        }
+        return;
+    }
     leptos::mount::mount_to_body(app::App);
 }

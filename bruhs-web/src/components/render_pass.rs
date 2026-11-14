@@ -282,8 +282,22 @@ fn convert_mermaid(document: &web_sys::Document, block: &web_sys::Element) -> bo
         if div.set_attribute("class", "mermaid").is_err() {
             continue;
         }
-        div.set_text_content(code.text_content().as_deref());
-        if parent.replace_child(&div, &pre).is_ok() {
+        let source = code.text_content().unwrap_or_default();
+        div.set_text_content(Some(&source));
+        let Ok(wrapper) = document.create_element("div") else {
+            continue;
+        };
+        let Ok(button) = document.create_element("button") else {
+            continue;
+        };
+        let _ = button.set_attribute("type", "button");
+        let _ = button.set_attribute("data-open-whiteboard", &source);
+        let _=button.set_attribute("class","my-2 min-h-10 rounded-grape border border-longan-700 px-3 text-label-sm hover:bg-longan-800");
+        button.set_text_content(Some("Open as board"));
+        if wrapper.append_child(&button).is_err() || wrapper.append_child(&div).is_err() {
+            continue;
+        }
+        if parent.replace_child(&wrapper, &pre).is_ok() {
             converted = true;
         }
     }

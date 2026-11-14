@@ -27,6 +27,9 @@ enum ActionId {
     NavCalendar,
     NavLife,
     NavAutomations,
+    NavWorkbench,
+    NavWhiteboards,
+    NewWhiteboard,
     NavMeetings,
     NavPeople,
     NavSearch,
@@ -40,6 +43,7 @@ enum ActionId {
     CopyResumeCommand,
     CopyThreadMarkdown,
     ContinueInT3,
+    ContinueInWorkbench,
     CopyPullLink,
     CopyPullNumber,
     NewTask,
@@ -130,6 +134,24 @@ const ACTIONS: &[Action] = &[
         hint: "recorded conversations",
     },
     Action {
+        id: ActionId::NavWorkbench,
+        group: "Navigate",
+        label: "Workbench",
+        hint: "agents, delivery, verification, usage and providers",
+    },
+    Action {
+        id: ActionId::NavWhiteboards,
+        group: "Navigate",
+        label: "Whiteboards",
+        hint: "local diagrams for this project",
+    },
+    Action {
+        id: ActionId::NewWhiteboard,
+        group: "Create",
+        label: "New whiteboard",
+        hint: "draw and link a project diagram",
+    },
+    Action {
         id: ActionId::NavPeople,
         group: "Navigate",
         label: "People",
@@ -200,6 +222,12 @@ const ACTIONS: &[Action] = &[
         group: "Actions",
         label: "Continue in T3 Code",
         hint: "new T3 thread",
+    },
+    Action {
+        id: ActionId::ContinueInWorkbench,
+        group: "Actions",
+        label: "Continue in workbench",
+        hint: "local task with this conversation",
     },
     Action {
         id: ActionId::CopyPullLink,
@@ -398,6 +426,9 @@ mod tests {
                 "Life",
                 "Agent workflows",
                 "Meetings",
+                "Workbench",
+                "Whiteboards",
+                "New whiteboard",
                 "People",
                 "Search",
                 "Terminal",
@@ -410,6 +441,7 @@ mod tests {
                 "Copy resume command",
                 "Copy thread as Markdown",
                 "Continue in T3 Code",
+                "Continue in workbench",
                 "Copy pull request link",
                 "Copy pull request number",
                 "New task",
@@ -479,6 +511,7 @@ pub enum ThreadExport {
     ResumeCommand,
     Markdown,
     ContinueInT3,
+    ContinueInWorkbench,
 }
 
 impl ThreadExport {
@@ -488,6 +521,7 @@ impl ThreadExport {
             "thread.copyResumeCommand" => Some(Self::ResumeCommand),
             "thread.copyMarkdown" => Some(Self::Markdown),
             "thread.continueInT3" => Some(Self::ContinueInT3),
+            "thread.continueInWorkbench" => Some(Self::ContinueInWorkbench),
             _ => None,
         }
     }
@@ -502,6 +536,10 @@ pub struct ActiveThreadExport {
     messages: ReadSignal<Vec<crate::state::AgentMessage>>,
     active_project: ReadSignal<Option<crate::state::ActiveProject>>,
     notice: ThreadNotice,
+    model: ReadSignal<String>,
+    permission_mode: ReadSignal<bruhs_models::PermissionMode>,
+    set_view: WriteSignal<AppView>,
+    turns: crate::state::Turns,
 }
 
 impl ActiveThreadExport {
@@ -512,6 +550,10 @@ impl ActiveThreadExport {
             messages: expect_context::<crate::state::MessagesSignal>().0,
             active_project: expect_context::<ActiveProjectSignal>().0,
             notice: expect_context::<ThreadNotice>(),
+            model: expect_context::<crate::state::CurrentModel>().0,
+            permission_mode: expect_context::<crate::state::PermissionModeSignal>().0,
+            set_view: expect_context::<SetActiveView>().0,
+            turns: expect_context::<crate::state::Turns>(),
         }
     }
 
@@ -524,6 +566,13 @@ impl ActiveThreadExport {
         let Some(thread) = thread else {
             return;
         };
+        if export == ThreadExport::ContinueInWorkbench
+            && self.turns.is_running_untracked(&thread.id)
+        {
+            self.notice
+                .flash("Stop the current run before continuing in workbench.");
+            return;
+        }
         let portable = self
             .messages
             .with_untracked(|ms| crate::components::import_thread_dialog::portable_messages(ms));
@@ -533,7 +582,7 @@ impl ActiveThreadExport {
             .project_path
             .clone()
             .or_else(|| self.active_project.get_untracked().map(|p| p.path));
-        export_thread(export, &thread, run_dir, portable, self.notice);
+        export_thread(export, &thread, run_dir, portable, self);
     }
 }
 
@@ -544,8 +593,9 @@ fn export_thread(
     thread: &crate::state::Thread,
     run_dir: Option<String>,
     messages: Vec<bruhs_models::logic::portable::PortableMessage>,
-    notice: ThreadNotice,
+    context: ActiveThreadExport,
 ) {
+    let notice = context.notice;
     use bruhs_models::agent::AgentProvider;
     use bruhs_models::logic::portable::{
         resume_command, transcript_markdown, ExportT3Request, IMPORT_CONTEXT_MAX_CHARS,
@@ -584,6 +634,40 @@ fn export_thread(
                 match crate::api::export_to_t3(&request).await {
                     Ok(_) => notice.flash("Started a T3 thread"),
                     Err(error) => notice.flash(format!("T3: {error}")),
+                }
+            });
+        }
+        ThreadExport::ContinueInWorkbench => {
+            let path = thread.worktree_path.clone().or(run_dir).unwrap_or_default();
+            let task = match bruhs_models::workbench_handoff::from_chat(
+                &thread.title,
+                &path,
+                &context.model.get_untracked(),
+                context.permission_mode.get_untracked(),
+                &markdown(),
+            ) {
+                Ok(task) => task,
+                Err(error) => {
+                    notice.flash(error);
+                    return;
+                }
+            };
+            leptos::task::spawn_local(async move {
+                let command = bruhs_models::coordination::CoordinationCommand::Create {
+                    task,
+                    parent_id: None,
+                };
+                match crate::components::local_tools_panel::request::<
+                    bruhs_models::coordination::CoordinationSnapshot,
+                    _,
+                >("POST", "/api/coordination/commands", Some(&command))
+                .await
+                {
+                    Ok(_) => {
+                        context.set_view.set(AppView::Workbench);
+                        notice.flash("Continued in workbench. The original chat is kept.");
+                    }
+                    Err(error) => notice.flash(format!("Workbench: {error}")),
                 }
             });
         }
@@ -703,6 +787,16 @@ pub fn CommandBar() -> impl IntoView {
             ActionId::NavCalendar => set_active_view.set(AppView::Calendar),
             ActionId::NavLife => set_active_view.set(AppView::Life),
             ActionId::NavAutomations => set_active_view.set(AppView::Automations),
+            ActionId::NavWorkbench => set_active_view.set(AppView::Workbench),
+            ActionId::NavWhiteboards => {
+                set_active_view.set(AppView::Whiteboards { board_id: None })
+            }
+            ActionId::NewWhiteboard => {
+                expect_context::<crate::whiteboard::host::WhiteboardHost>()
+                    .create
+                    .request();
+                set_active_view.set(AppView::Whiteboards { board_id: None });
+            }
             ActionId::NavMeetings => set_active_view.set(AppView::Meetings),
             ActionId::NavPeople => set_active_view.set(AppView::People),
             ActionId::NavSearch => set_active_view.set(AppView::Search),
@@ -734,6 +828,7 @@ pub fn CommandBar() -> impl IntoView {
             ActionId::CopyResumeCommand => thread_export.run(ThreadExport::ResumeCommand),
             ActionId::CopyThreadMarkdown => thread_export.run(ThreadExport::Markdown),
             ActionId::ContinueInT3 => thread_export.run(ThreadExport::ContinueInT3),
+            ActionId::ContinueInWorkbench => thread_export.run(ThreadExport::ContinueInWorkbench),
             ActionId::PinThread => {
                 if let Some(id) = active_thread_id.get_untracked() {
                     toggle_pinned(catalog, set_threads, &id);

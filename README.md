@@ -18,6 +18,13 @@ See [agent runtimes and models](docs/agent-providers.md) for setup and access mo
   that keep running in the background. Threads import from Claude Code,
   Codex, T3 Code and Cursor, and continue in Claude Code, Codex or T3 Code
   (or copy out as Markdown).
+- **Local agent workbench.** Durable delegated tasks, forks, model comparisons,
+  versioned specifications, supervised phone/guest access, reviewed GitHub delivery,
+  browser/device verification, local dictation, ACP runtimes and measured usage.
+  Existing chats can explicitly continue as host-owned work. Runs and evidence stay
+  on your own machine; remote supervision uses your private network or SSH tunnel.
+  See [setup and boundaries](docs/local-agent-workbench.md),
+  [task workspaces](docs/task-workspaces.md) and [GitHub delivery](docs/local-delivery.md).
 - **Rich replies.** Inline images, video, audio, PDFs, and sandboxed
   interactive charts or widgets on web and desktop, with saved widget state,
   durable media, published HTML artifacts, and portable reply bundles. See
@@ -57,6 +64,9 @@ See [agent runtimes and models](docs/agent-providers.md) for setup and access mo
 - **MCP.** `bruhs-mcp` exposes the workspace to MCP clients as typed tools
   that propose changes for you to approve. See
   [local MCP setup](docs/local-mcp-workspace.md).
+- **Pith storage.** Claude and Codex can use Pith for scoped storage scans,
+  cleanup recommendations and reclaimable-space estimates. See the
+  [connection and live acceptance test](docs/pith-storage.md).
 
 Every action is reachable from the command bar (`⌘K`), and most are one
 shortcut away.
@@ -64,6 +74,12 @@ shortcut away.
 The standing [configurability goal](docs/configurability-goal-2026-11-09.md)
 tracks user control over models, project profiles, summaries, privacy,
 recording, automation, memory, and appearance across web and desktop.
+
+The standing [product completion goal](docs/product-completion-goal-2026-11-13.md)
+covers Inbox and every other product pillar, starting with Inbox. Each pillar
+must pass functional, Bruhs design, accessibility, persistence/privacy, and
+web/desktop parity checks before it is called complete. The goal records current
+Inbox gaps and acceptance criteria; it does not claim those features have shipped.
 
 ## Install
 

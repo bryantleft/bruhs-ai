@@ -868,6 +868,8 @@ pub fn Shell() -> impl IntoView {
                     AppView::Calendar => view! { <CalendarPage /> }.into_any(),
                     AppView::Life => view! { <LifePage /> }.into_any(),
                     AppView::Automations => view! { <AutomationsPage /> }.into_any(),
+                    AppView::Workbench => view! { <crate::components::workbench::Workbench /> }.into_any(),
+                    AppView::Whiteboards{board_id}=>view!{<crate::whiteboard::ui::Whiteboards requested=board_id/>}.into_any(),
                     AppView::Meetings => view! { <MeetingsPage /> }.into_any(),
                     AppView::People => view! { <PeoplePage /> }.into_any(),
                     AppView::Settings => view! { <SettingsPage /> }.into_any(),

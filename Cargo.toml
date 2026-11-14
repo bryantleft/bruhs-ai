@@ -28,7 +28,7 @@ members = [
     "claude-sdk-rs",
     "codex-sdk-rs",
 ]
-exclude = ["third_party/gpui-component", "third_party/gpui-windows"]
+exclude = ["third_party/gpui-component", "third_party/taffy", "third_party/axum", "third_party/gpui-windows"]
 
 [workspace.package]
 edition = "2021"
@@ -74,7 +74,7 @@ tracing-subscriber = "0.3"
 # Storage and platform
 # Pinned exactly once: bruhs-core and bruhs-capture both link libsqlite3-sys,
 # which cargo allows only one version of per build.
-rusqlite = { version = "=0.41.0", features = ["bundled"] }
+rusqlite = { version = "=0.41.0", features = ["bundled", "hooks", "limits"] }
 directories = "6"
 rand = "0.9"
 sha2 = "0.10"
@@ -104,6 +104,12 @@ tempfile = "3"
 ztracing = { path = "third_party/ztracing-noop" }
 # Keep native WebView2 child windows above the DirectComposition scene.
 gpui_windows = { path = "third_party/gpui-windows" }
+
+[patch.crates-io]
+# Avoid discarded flex minimum measurements; see third_party/taffy/VENDORED.md.
+taffy = { path = "third_party/taffy" }
+# Borrowed byte writer for bounded task-event encoding; see third_party/axum/VENDORED.md.
+axum = { path = "third_party/axum" }
 
 [workspace.lints.rust]
 future-incompatible = "warn"

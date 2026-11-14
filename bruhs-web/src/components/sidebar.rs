@@ -100,8 +100,12 @@ pub fn is_settled(thread: &Thread, now_ms: f64, active: bool, working: bool, unr
 pub fn sidebar_order(threads: &[Thread], query: &OrderQuery<'_>) -> Vec<Thread> {
     let groups = groups_for(threads, &shelf_clock(query));
     let ids = groups.flattened(query.folds);
+    let by_id = threads
+        .iter()
+        .map(|thread| (thread.id.as_str(), thread))
+        .collect::<HashMap<_, _>>();
     ids.into_iter()
-        .filter_map(|id| threads.iter().find(|thread| thread.id == id).cloned())
+        .filter_map(|id| by_id.get(id.as_str()).map(|thread| (**thread).clone()))
         .collect()
 }
 
@@ -135,22 +139,22 @@ fn shelve(list: Vec<Thread>, searching: bool, query: &OrderQuery<'_>) -> Shelves
         };
     }
     let groups = groups_for(&list, &shelf_clock(query));
+    let by_id = list
+        .iter()
+        .map(|thread| (thread.id.as_str(), thread))
+        .collect::<HashMap<_, _>>();
     Shelves {
-        pinned: take_ids(&list, &groups.pinned),
-        active: take_ids(&list, &groups.active),
-        working: take_ids(&list, &groups.working),
-        snoozed: take_ids(&list, &groups.snoozed),
-        settled: take_ids(&list, &groups.settled),
+        pinned: take_ids(&by_id, &groups.pinned),
+        active: take_ids(&by_id, &groups.active),
+        working: take_ids(&by_id, &groups.working),
+        snoozed: take_ids(&by_id, &groups.snoozed),
+        settled: take_ids(&by_id, &groups.settled),
     }
 }
 
-fn take_ids(list: &[Thread], ids: &[String]) -> Vec<Thread> {
+fn take_ids(by_id: &HashMap<&str, &Thread>, ids: &[String]) -> Vec<Thread> {
     ids.iter()
-        .filter_map(|id| {
-            list.iter()
-                .find(|thread| thread.id.as_str() == id.as_str())
-                .cloned()
-        })
+        .filter_map(|id| by_id.get(id.as_str()).map(|thread| (**thread).clone()))
         .collect()
 }
 
@@ -1115,7 +1119,6 @@ pub fn Sidebar() -> impl IntoView {
                         <Icon name="folder-plus" size=14 />
                     </button>
                 </div>
-                </Show>
             </div>
 
             // Thread cards: fresh first, older seen threads under "Settled".
@@ -1369,6 +1372,7 @@ pub fn Sidebar() -> impl IntoView {
                 {nav_icon(AppView::Knowledge, "book-open", "Knowledge")}
                 {nav_icon(AppView::Tasks, "list-checks", "Tasks")}
                 {nav_icon(AppView::Terminal, "terminal", "Terminal")}
+                {nav_icon(AppView::Workbench, "wrench", "Workbench")}
                 {nav_icon(AppView::Calendar, "calendar", "Calendar")}
                 {nav_icon(AppView::Meetings, "mic", "Meetings")}
                 {nav_icon(AppView::People, "users", "People")}
@@ -1412,6 +1416,50 @@ mod tests {
             instructions_stamp: None,
             import_context: None,
         }
+    }
+
+    #[test]
+    #[ignore = "manual release timing: cargo test -p bruhs-web --release sidebar_navigation_cost -- --ignored --nocapture"]
+    fn sidebar_navigation_cost() {
+        use std::{hint::black_box, time::Instant};
+        let threads = (0..10_000)
+            .map(|index| {
+                t(
+                    &format!("thread-{index}"),
+                    "bruhs",
+                    "Thread",
+                    &index.to_string(),
+                )
+            })
+            .collect::<Vec<_>>();
+        let unread = HashSet::new();
+        let query = OrderQuery {
+            now_ms: 10_000.0,
+            active: None,
+            working: &[],
+            needs_you: &[],
+            unread: &unread,
+            working_section: false,
+            folds: FoldOpen {
+                working: true,
+                snoozed: true,
+                settled: true,
+            },
+        };
+        black_box(sidebar_order(&threads, &query));
+        let mut samples = (0..31)
+            .map(|_| {
+                let start = Instant::now();
+                black_box(sidebar_order(black_box(&threads), black_box(&query)));
+                start.elapsed()
+            })
+            .collect::<Vec<_>>();
+        samples.sort_unstable();
+        println!(
+            "sidebar navigation / 10,000 threads: p50 {:.3} ms, p95 {:.3} ms",
+            samples[15].as_secs_f64() * 1000.0,
+            samples[29].as_secs_f64() * 1000.0
+        );
     }
 
     #[test]

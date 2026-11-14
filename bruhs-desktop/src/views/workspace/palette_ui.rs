@@ -58,6 +58,24 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         hint: "recorded conversations",
     },
     CommandAction {
+        id: "nav-workbench",
+        group: "Navigate",
+        label: "Workbench",
+        hint: "agents, delivery, verification, usage and providers",
+    },
+    CommandAction {
+        id: "nav-whiteboards",
+        group: "Navigate",
+        label: "Whiteboards",
+        hint: "local diagrams for this project",
+    },
+    CommandAction {
+        id: "new-whiteboard",
+        group: "Create",
+        label: "New whiteboard",
+        hint: "draw and link a project diagram",
+    },
+    CommandAction {
         id: "nav-people",
         group: "Navigate",
         label: "People",
@@ -128,6 +146,12 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         group: "Actions",
         label: "Continue in T3 Code",
         hint: "new T3 thread",
+    },
+    CommandAction {
+        id: "continue-in-workbench",
+        group: "Actions",
+        label: "Continue in workbench",
+        hint: "local task with this conversation",
     },
     CommandAction {
         id: "copy-pull-link",
@@ -489,6 +513,9 @@ impl Workspace {
             "nav-calendar" => self.open_calendar_view(&OpenCalendarView, window, cx),
             "nav-life" => self.activate_sidebar_view(AppView::Life, window, cx),
             "nav-automations" => self.activate_sidebar_view(AppView::Automations, window, cx),
+            "nav-workbench" => self.activate_sidebar_view(AppView::Workbench, window, cx),
+            "nav-whiteboards" => self.show_whiteboard(false, window, cx),
+            "new-whiteboard" => self.show_whiteboard(true, window, cx),
             "nav-terminal" => self.open_terminal_view(&OpenTerminalView, window, cx),
             "open-project" => self.open_project_picker(&OpenProjectPicker, window, cx),
             "new-thread" => self.new_thread(&NewThread, window, cx),
@@ -552,6 +579,10 @@ impl Workspace {
             "continue-in-t3" => {
                 self.close_transient_surfaces();
                 self.continue_in_t3(cx);
+            }
+            "continue-in-workbench" => {
+                self.close_transient_surfaces();
+                self.continue_in_workbench(cx);
             }
             "copy-pull-link" => self.copy_open_pull(true, cx),
             "copy-pull-number" => self.copy_open_pull(false, cx),
@@ -665,10 +696,11 @@ impl Workspace {
     }
 
     pub(super) fn matching_thread_items(&self, query: &str, cx: &App) -> Vec<PaletteItem> {
-        let mut threads: Vec<&DesktopThread> = self
+        let mut threads: Vec<(usize, &DesktopThread)> = self
             .threads
             .iter()
-            .filter(|thread| {
+            .enumerate()
+            .filter(|(_, thread)| {
                 if query.is_empty() {
                     return true;
                 }
@@ -681,10 +713,23 @@ impl Workspace {
                         .any(|message| text_matches_query(&message.content, query))
             })
             .collect();
-        threads.sort_by_key(|thread| std::cmp::Reverse(thread.updated_at_ms));
+        // Mixed results only show six threads. Rank that prefix before copying
+        // titles/ids and formatting ages; source position preserves stable ties.
+        let rank = |(left_index, left): &(usize, &DesktopThread),
+                    (right_index, right): &(usize, &DesktopThread)| {
+            right
+                .updated_at_ms
+                .cmp(&left.updated_at_ms)
+                .then_with(|| left_index.cmp(right_index))
+        };
+        if threads.len() > PALETTE_THREAD_LIMIT_MIXED {
+            threads.select_nth_unstable_by(PALETTE_THREAD_LIMIT_MIXED, rank);
+            threads.truncate(PALETTE_THREAD_LIMIT_MIXED);
+        }
+        threads.sort_unstable_by(rank);
         threads
             .into_iter()
-            .map(|thread| self.thread_palette_item(thread, cx))
+            .map(|(_, thread)| self.thread_palette_item(thread, cx))
             .collect()
     }
 
@@ -722,11 +767,7 @@ impl Workspace {
                     .map(PaletteItem::Action)
                     .collect();
                 if !query.is_empty() {
-                    items.extend(
-                        self.matching_thread_items(&query, cx)
-                            .into_iter()
-                            .take(PALETTE_THREAD_LIMIT_MIXED),
-                    );
+                    items.extend(self.matching_thread_items(&query, cx));
                     let thread_ids: HashSet<_> = items
                         .iter()
                         .filter_map(|item| match item {

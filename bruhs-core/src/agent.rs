@@ -550,6 +550,9 @@ impl AgentOrchestrator {
         request_id: &str,
         decision: PermissionDecision,
     ) -> Result<(), PermissionResolveError> {
+        if external::acp::resolve(request_id, &decision) {
+            return Ok(());
+        }
         let pending = self
             .permissions
             .write()
@@ -573,13 +576,16 @@ impl AgentOrchestrator {
 
     /// Ids of permission prompts a thread is currently blocked on.
     pub async fn pending_permissions(&self, thread_id: &ThreadId) -> Vec<String> {
-        self.permissions
+        let mut ids: Vec<String> = self
+            .permissions
             .read()
             .await
             .iter()
             .filter(|(_, p)| &p.owner.thread_id == thread_id)
             .map(|(id, _)| id.clone())
-            .collect()
+            .collect();
+        ids.extend(external::acp::pending(thread_id.as_str()));
+        ids
     }
 
     /// Start `turn`: spawn its provider CLI and return the turn's events.
@@ -709,8 +715,11 @@ impl AgentOrchestrator {
         // only read threads; so does a turn the user limited to reading.
         let threads_read_only = thread_access == ThreadAccess::Read
             || permission_mode == PermissionMode::Plan
-            || (provider != AgentProvider::Claude && permission_mode == PermissionMode::Default);
+            || (!matches!(provider, AgentProvider::Claude | AgentProvider::Acp)
+                && permission_mode == PermissionMode::Default);
         let turn = TurnContext {
+            model: model.clone(),
+            usage_receipt: uuid::Uuid::new_v4().to_string(),
             media_project: artifact_project.clone(),
             response_text: Mutex::new(String::new()),
             _guard: producer_guard,
@@ -778,6 +787,15 @@ impl AgentOrchestrator {
                     }
                 }
             };
+            if let Err(error) = if unattended || !app_tools {
+                Ok(())
+            } else {
+                crate::pith::configure_turn(&mut query_options).await
+            } {
+                turn.send_start_error(format!("Could not connect Pith: {error}"))
+                    .await;
+                return;
+            }
             if !unattended && app_tools {
                 if let Err(error) =
                     crate::artifact_tools::configure(&mut query_options, &artifact_project)
@@ -788,7 +806,25 @@ impl AgentOrchestrator {
                     .await;
                     return;
                 }
-
+                if let Err(error) =
+                    crate::database_tools::configure(&mut query_options, &artifact_project)
+                {
+                    turn.send_start_error(format!("Could not configure database tools: {error}"))
+                        .await;
+                    return;
+                }
+                if let Err(error) = crate::api_client_tools::configure(
+                    &mut query_options,
+                    &artifact_project,
+                    turn.owner.thread_id.as_str(),
+                    permission_mode != PermissionMode::Plan,
+                ) {
+                    turn.send_start_error(format!(
+                        "Could not configure API request tools: {error}"
+                    ))
+                    .await;
+                    return;
+                }
                 if let Err(error) = crate::reactive_tools::configure(
                     &mut query_options,
                     permission_mode == PermissionMode::Plan,
@@ -797,6 +833,19 @@ impl AgentOrchestrator {
                         "Could not configure reactive automation tools: {error}"
                     ))
                     .await;
+                    return;
+                }
+            }
+            if !unattended && app_tools {
+                if let Err(error) = crate::workbench_tools::configure(
+                    &mut query_options,
+                    &artifact_project,
+                    turn.owner.thread_id.as_str(),
+                    threads_read_only,
+                    permission_mode,
+                ) {
+                    turn.send_start_error(format!("Could not configure workbench tools: {error}"))
+                        .await;
                     return;
                 }
             }
@@ -829,9 +878,11 @@ impl AgentOrchestrator {
 
 /// What a producer task needs to forward one turn's events.
 struct TurnContext {
+    model: String,
+    usage_receipt: String,
     media_project: String,
     response_text: Mutex<String>,
-    /// Declared first so it drops before `tx`: by the time the caller's
+    /// Declared before `tx`: by the time the caller's
     /// stream reports its end, the thread is already idle.
     _guard: TurnGuard,
     tx: mpsc::Sender<OrchestratorEvent>,
@@ -1194,7 +1245,8 @@ fn build_query_options(
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => {
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => {
             let mut options = external::Options::new(
                 provider,
                 prompt,
@@ -1478,6 +1530,49 @@ impl TurnContext {
     /// Send `event` (and any background task it starts) to the caller.
     /// False when the caller has dropped the stream.
     async fn forward(&self, mut event: QueryEvent) -> bool {
+        if !cfg!(test) {
+            if let QueryEvent::Result { usage, .. } = &event {
+                if usage.input_tokens != 0
+                    || usage.output_tokens != 0
+                    || usage.cache_read_input_tokens != 0
+                    || usage.cache_creation_input_tokens != 0
+                {
+                    let record = bruhs_models::agent_extensions::UsageRecord {
+                        id: self.usage_receipt.clone(),
+                        thread_id: self.owner.thread_id.as_str().into(),
+                        model: self.model.clone(),
+                        project: self.media_project.clone(),
+                        at: chrono::Utc::now().timestamp(),
+                        input: usage.input_tokens,
+                        output: usage.output_tokens,
+                        cache_read: usage.cache_read_input_tokens,
+                        cache_write: usage.cache_creation_input_tokens,
+                    };
+                    let saved = tokio::task::spawn_blocking(move || {
+                        crate::agent_extensions::record_at(
+                            &crate::agent_extensions::directory()?,
+                            record,
+                        )
+                    })
+                    .await;
+                    if !matches!(saved, Ok(Ok(()))) {
+                        tracing::warn!(?saved, "Could not persist reported turn usage");
+                    }
+                }
+            }
+            if let QueryEvent::Raw(raw) = &event {
+                if raw["type"] == "rate_limit_event" {
+                    let raw = raw.clone();
+                    let saved = tokio::task::spawn_blocking(move || {
+                        crate::agent_extensions::record_claude_limit(&raw)
+                    })
+                    .await;
+                    if !matches!(saved, Ok(Ok(()))) {
+                        tracing::warn!(?saved, "Could not persist reported quota metadata");
+                    }
+                }
+            }
+        }
         match &event {
             QueryEvent::Text(text) => self
                 .response_text
@@ -1531,7 +1626,6 @@ impl TurnContext {
             }
             _ => {}
         }
-
         if let Some(task) =
             maybe_register_background_task(&self.registry, &self.owner.thread_id, &event)
         {
@@ -1677,7 +1771,10 @@ fn map_claude_event(event: claude_sdk_rs::QueryEvent) -> QueryEvent {
         }
         claude_sdk_rs::QueryEvent::Error(message) => QueryEvent::Error(message),
         claude_sdk_rs::QueryEvent::ProcessFailed(failure) => QueryEvent::Error(failure.to_string()),
-        claude_sdk_rs::QueryEvent::Raw(value) => QueryEvent::Raw(value),
+        claude_sdk_rs::QueryEvent::Raw(value) => {
+            crate::prompt_suggestion::observe_claude_quota(&value);
+            QueryEvent::Raw(value)
+        }
         other => unhandled_sdk_event(&other),
     }
 }
@@ -2388,7 +2485,7 @@ mod tests {
     }
 
     /// The producer of turn `turn` on `thread`, as `send_message` builds it.
-    fn turn_context(
+    pub(super) fn turn_context(
         sessions: &Sessions,
         registry: &Arc<BackgroundTaskRegistry>,
         thread: &ThreadId,
@@ -2396,6 +2493,8 @@ mod tests {
     ) -> (TurnContext, mpsc::Receiver<OrchestratorEvent>) {
         let (tx, rx) = mpsc::channel(16);
         let context = TurnContext {
+            model: "test".into(),
+            usage_receipt: "test".into(),
             media_project: "/tmp".into(),
             response_text: Mutex::new(String::new()),
             _guard: TurnGuard {

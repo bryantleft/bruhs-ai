@@ -22,7 +22,9 @@ pub use bruhs_models::{
     TodaySnapshot, TranscriptSegment, WhisperModel, WorkItem, WorkItemStatus,
 };
 
+mod api_client;
 mod calendar;
+pub(crate) use api_client::{ApiClientDraft, ApiClientSession};
 mod chat;
 mod library;
 mod meetings;
@@ -52,6 +54,7 @@ pub fn provide_app_state() {
     workspace::provide();
     settings::provide();
     chat::provide();
+    api_client::provide();
     terminal::provide();
     tasks::provide();
     library::provide();

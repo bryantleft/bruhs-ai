@@ -6,6 +6,25 @@ license.workspace = true
 repository.workspace = true
 rust-version.workspace = true
 publish = false
+default-run = "bruhs-desktop"
+
+[features]
+native-performance = []
+whiteboard-benchmark = []
+
+[[bin]]
+name = "bruhs-whiteboard-performance"
+path = "src/whiteboard_performance_entry.rs"
+required-features = ["whiteboard-benchmark"]
+test = false
+bench = false
+
+[[bin]]
+name = "bruhs-native-performance"
+path = "src/native_performance_entry.rs"
+required-features = ["native-performance"]
+test = false
+bench = false
 
 [lints]
 workspace = true
@@ -27,12 +46,15 @@ futures-util = { workspace = true, features = ["std"] }
 gpui = { workspace = true }
 gpui-component = { path = "../third_party/gpui-component/crates/ui" }
 gpui_platform = { workspace = true, features = ["font-kit"] }
+image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 markdown = "1"
 reqwest = { workspace = true, features = ["stream"] }
 mathjax-svg-rs = "0.4.0"
 mermaid-rs-renderer = { version = "0.2.2", default-features = false }
 serde = { workspace = true, features = ["rc"] }
 serde_json = { workspace = true }
+simdutf8 = "0.1.5"
+memchr = "2"
 sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "sync", "time"] }

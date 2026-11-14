@@ -22,6 +22,7 @@ pub mod keybindings;
 pub mod pages;
 pub mod portable;
 pub mod preview;
+pub mod prompt_suggestion;
 pub mod queue;
 pub mod recall;
 pub mod review;
