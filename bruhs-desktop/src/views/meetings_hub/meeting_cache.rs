@@ -156,12 +156,21 @@ impl MeetingsHub {
         self.segments = cache
             .transcripts
             .iter()
-            .map(|(id, records)| (id.clone(), records.as_ref().clone()))
+            .map(|(id, records)| {
+                let records = match cache.fragments.get(id) {
+                    Some(fragments) if records.is_empty() => fragments.restore_without_base(),
+                    Some(fragments) => fragments.merge_borrowed(records),
+                    None => records.as_ref().clone(),
+                };
+                (id.clone(), records)
+            })
             .collect();
         self.search_cached = cache.transcripts.keys().cloned().collect();
         for (id, fragments) in &cache.fragments {
-            let base = self.segments.remove(id).unwrap_or_default();
-            self.segments.insert(id.clone(), fragments.merge(base));
+            if !cache.transcripts.contains_key(id) {
+                self.segments
+                    .insert(id.clone(), fragments.restore_without_base());
+            }
             self.search_cached.remove(id);
         }
         self.transcript_indexes = self

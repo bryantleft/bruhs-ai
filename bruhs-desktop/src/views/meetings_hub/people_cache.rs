@@ -3,7 +3,7 @@ use super::*;
 #[derive(Clone, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct PeopleSnapshot {
-    pub records: Vec<PersonProfile>,
+    pub records: Vec<Arc<PersonProfile>>,
     pub pending_creates: HashSet<String>,
     pub merge_archives: BTreeMap<String, Arc<PeopleMergeArchive>>,
     pub merge_recoveries: BTreeMap<String, Vec<Arc<PeopleMergeArchive>>>,
@@ -91,13 +91,13 @@ impl MeetingsHub {
             }
             if let Some(&index) = positions.get(&person.id) {
                 let current = &mut self.people[index];
-                if *current != person && current.updated_at <= person.updated_at {
-                    *current = person;
+                if current.as_ref() != &person && current.updated_at <= person.updated_at {
+                    *current = Arc::new(person);
                     changed = true;
                 }
             } else {
                 positions.insert(person.id.clone(), self.people.len());
-                self.people.push(person);
+                self.people.push(Arc::new(person));
                 changed = true;
             }
         }
@@ -154,12 +154,12 @@ impl MeetingsHub {
             return;
         };
         // A completion for an older capture cannot replace a newer local revision.
-        if current != sent {
+        if current.as_ref() != sent {
             return;
         }
         match result {
             Ok(saved) if saved.id == sent.id && saved.display_name == sent.display_name.trim() => {
-                *current = saved;
+                *current = Arc::new(saved);
                 self.pending_person_creates.remove(&sent.id);
                 self.server_online = true;
                 self.people_changed(cx);

@@ -29,6 +29,8 @@ mod people_cache;
 pub use people_cache::{PeopleMergeArchive, PeopleSnapshot};
 mod meeting_cache;
 pub use meeting_cache::MeetingCache;
+mod transcript_map;
+pub use transcript_map::TranscriptMap;
 mod activity_monitor;
 pub mod audio_meter;
 mod local_focus;
@@ -286,7 +288,7 @@ pub struct MeetingsHub {
     started: bool,
 
     pub meetings: Vec<Meeting>,
-    pub people: Vec<PersonProfile>,
+    pub people: Vec<Arc<PersonProfile>>,
     pending_person_creates: HashSet<String>,
     person_creates_in_flight: HashSet<String>,
     person_creates_attempted: HashSet<String>,
@@ -296,7 +298,7 @@ pub struct MeetingsHub {
     people_refreshing: bool,
     people_refresh_again: bool,
     people_refresh_failed: bool,
-    pub segments: BTreeMap<String, Vec<TranscriptSegment>>,
+    pub segments: TranscriptMap,
     /// Chunk ids the user or another client removed. Replays of these ids are ignored.
     removed_chunks: BTreeMap<String, HashSet<String>>,
     meeting_cache: MeetingCache,
@@ -399,7 +401,7 @@ impl MeetingsHub {
             people_refreshing: false,
             people_refresh_again: false,
             people_refresh_failed: false,
-            segments: BTreeMap::new(),
+            segments: TranscriptMap::default(),
             removed_chunks: BTreeMap::new(),
             meeting_cache: MeetingCache::default(),
             transcript_indexes: BTreeMap::new(),
@@ -506,6 +508,13 @@ impl MeetingsHub {
     /// Web `App` mount: hydrate, subscribe to both streams, start the
     /// auto-record watcher. Idempotent.
     pub fn start(&mut self, cx: &mut Context<'_, Self>) {
+        #[cfg(feature = "native-performance")]
+        if crate::native_performance::block_service(
+            cx,
+            crate::native_performance::Service::Meetings,
+        ) {
+            return;
+        }
         // gpui's test scheduler rejects wake-ups from the tokio threads, and
         // tests must not touch the network; the pages render offline states.
         if self.started || cfg!(test) {
@@ -569,13 +578,15 @@ impl MeetingsHub {
             self.notify_notice("This contact identity was merged. Use the surviving contact; no retired identity was recreated.", true, cx);
             return;
         }
-        if let Some(current) = self.people.iter_mut().find(|item| item.id == person.id) {
-            *current = person.clone();
+        let id = person.id.clone();
+        let person = Arc::new(person);
+        if let Some(current) = self.people.iter_mut().find(|item| item.id == id) {
+            *current = person;
         } else {
-            self.people.push(person.clone());
+            self.people.push(person);
         }
-        self.person_creates_attempted.remove(&person.id);
-        self.pending_person_creates.insert(person.id);
+        self.person_creates_attempted.remove(&id);
+        self.pending_person_creates.insert(id);
         self.people_changed(cx);
         self.sync_pending_people(cx);
     }
@@ -1199,6 +1210,7 @@ impl MeetingsHub {
                 match result {
                     Ok(updated) => {
                         if let Some(p) = hub.people.iter_mut().find(|p| p.id == updated.id) {
+                            let p = Arc::make_mut(p);
                             p.display_name = updated.display_name;
                             p.updated_at = updated.updated_at;
                         }
@@ -1224,7 +1236,7 @@ impl MeetingsHub {
                 match result {
                     Ok(updated) => {
                         if let Some(p) = hub.people.iter_mut().find(|p| p.id == updated.id) {
-                            p.tracked = updated.tracked;
+                            Arc::make_mut(p).tracked = updated.tracked;
                         }
                         hub.people_changed(cx);
                     }
@@ -1786,7 +1798,7 @@ impl MeetingsHub {
                 match result {
                     Ok(updated) => {
                         if let Some(p) = hub.people.iter_mut().find(|p| p.id == updated.id) {
-                            *p = updated;
+                            *p = Arc::new(updated);
                         }
                         hub.people_changed(cx);
                         hub.enroll = Some((person_id, EnrollState::Success));

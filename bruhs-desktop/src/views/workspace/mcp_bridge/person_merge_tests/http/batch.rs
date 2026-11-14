@@ -20,7 +20,7 @@ async fn incoming_http_batches_commit_once_and_native_save_retry_preserves_all_o
             .enumerate()
             .map(|(index, target)| PersonMergeResolution {
                 source_id: format!("source-{index:06}"),
-                target: target.clone(),
+                target: target.as_ref().clone(),
             })
             .collect();
         // One intermediate can land in a different, concurrently fetched chunk.
@@ -29,7 +29,7 @@ async fn incoming_http_batches_commit_once_and_native_save_retry_preserves_all_o
             let mut source = PersonProfile::new(format!("Local {}", redirect.source_id));
             source.id = redirect.source_id.clone();
             people.pending_creates.insert(source.id.clone());
-            people.records.push(source);
+            people.records.push(source.into());
         }
         let server = Server::new_batch(
             &cx.global::<super::super::super::super::DesktopState>()

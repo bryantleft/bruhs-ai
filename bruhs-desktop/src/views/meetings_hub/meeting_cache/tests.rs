@@ -1,6 +1,7 @@
 use super::*;
 use gpui::{AppContext, TestAppContext};
 mod http;
+mod overlay_performance;
 
 #[gpui::test]
 fn late_transcript_reply_cannot_restore_older_speaker_annotations(cx: &mut TestAppContext) {

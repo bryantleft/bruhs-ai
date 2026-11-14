@@ -26,7 +26,30 @@ impl Write for BoundedJson {
     }
 }
 
+// An unfiltered page can skip directly through the source iterator. Keeping a
+// filter that always returns true would still visit every preceding record.
+pub(super) fn read_matching_page<R, T: Serialize>(
+    records: impl Iterator<Item = R>,
+    unfiltered: bool,
+    predicate: impl FnMut(&R) -> bool,
+    project: impl FnMut(R) -> T,
+    offset: usize,
+) -> Result<Value, String> {
+    if unfiltered {
+        encode_page(records.skip(offset).map(project), offset)
+    } else {
+        encode_page(records.filter(predicate).skip(offset).map(project), offset)
+    }
+}
+
 pub(super) fn read_page<T: Serialize>(
+    records: impl Iterator<Item = T>,
+    offset: usize,
+) -> Result<Value, String> {
+    encode_page(records.skip(offset), offset)
+}
+
+fn encode_page<T: Serialize>(
     records: impl Iterator<Item = T>,
     offset: usize,
 ) -> Result<Value, String> {
@@ -36,7 +59,7 @@ pub(super) fn read_page<T: Serialize>(
     let mut values = Vec::new();
     let mut remaining = PAGE_BYTES;
     let mut next_offset = None;
-    for record in records.skip(offset) {
+    for record in records {
         if values.len() == RECORD_LIMIT {
             next_offset = Some(offset + values.len());
             break;
@@ -64,6 +87,53 @@ pub(super) fn read_page<T: Serialize>(
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn unfiltered_matching_pages_skip_predicates_and_prior_projections() {
+        let projected = std::cell::Cell::new(0);
+        let page = read_matching_page(
+            0..123,
+            true,
+            |_| panic!("an unfiltered page must not inspect skipped records"),
+            |record| {
+                assert!((50..=100).contains(&record));
+                projected.set(projected.get() + 1);
+                record
+            },
+            50,
+        )
+        .unwrap();
+        assert_eq!(
+            page["records"],
+            serde_json::json!((50..100).collect::<Vec<_>>())
+        );
+        assert_eq!(page["next_offset"], 100);
+        // The existing page reader projects one lookahead without encoding it.
+        assert_eq!(projected.get(), 51);
+    }
+
+    #[test]
+    fn filtered_matching_pages_keep_offsets_relative_to_matches() {
+        let first = read_matching_page(
+            0..123,
+            false,
+            |r| r % 2 == 0,
+            |r| {
+                assert!(r >= 20);
+                r
+            },
+            10,
+        )
+        .unwrap();
+        assert_eq!(
+            first["records"],
+            serde_json::json!((20..120).step_by(2).collect::<Vec<_>>())
+        );
+        assert_eq!(first["next_offset"], 60);
+        let last = read_matching_page(0..123, false, |r| r % 2 == 0, |r| r, 60).unwrap();
+        assert_eq!(last["records"], serde_json::json!([120, 122]));
+        assert!(last["next_offset"].is_null());
+    }
 
     #[test]
     fn unfiltered_pages_skip_encoding_earlier_records_and_lookahead() {

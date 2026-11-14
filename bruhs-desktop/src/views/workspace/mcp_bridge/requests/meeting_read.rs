@@ -1,4 +1,4 @@
-use super::read_page::read_page;
+use super::read_page::{read_matching_page, read_page};
 use super::*;
 use bruhs_core::workspace_bridge::MeetingReadSection;
 use bruhs_models::{Meeting, MeetingStatus};
@@ -38,19 +38,17 @@ impl Workspace {
         if query.len() > 512 {
             return Err("Query is too large.".into());
         }
-        let query = query.to_lowercase();
+        let query = LowercaseQuery::new(query);
+        let mut matcher = query.matcher();
         let hub = self.meetings_hub.read(cx);
         // Search identity only: neither summaries nor audio paths affect discovery.
-        let records = hub
-            .meetings
-            .iter()
-            .filter(|meeting| {
-                query.is_empty()
-                    || meeting.id.to_lowercase().contains(&query)
-                    || meeting.title.to_lowercase().contains(&query)
-            })
-            .map(MeetingIdentity::from);
-        let mut result = read_page(records, offset)?;
+        let mut result = read_matching_page(
+            hub.meetings.iter(),
+            query.is_empty(),
+            |meeting| matcher.matches_fields(&[&meeting.id, &meeting.title]),
+            MeetingIdentity::from,
+            offset,
+        )?;
         result["source"] = "workspace_cache".into();
         Ok(result)
     }
@@ -106,7 +104,8 @@ impl Workspace {
                 let segments = hub.segments.get(id).ok_or("Transcript is not loaded in this workspace. Open the meeting in the app first; no empty transcript is claimed.")?;
                 // Validate borrowed records without cloning transcript text or changing
                 // the live cache. Unknown/foreign/corrupt data never becomes a read receipt.
-                bruhs_models::validate_transcript_records(id, segments)
+                hub.segments
+                    .validate(id)
                     .map_err(|error| error.to_string())?;
                 read_page(segments.iter(), offset)?
             }

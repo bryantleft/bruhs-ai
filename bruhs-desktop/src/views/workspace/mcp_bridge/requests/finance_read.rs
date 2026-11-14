@@ -1,4 +1,4 @@
-use super::{life_read, read_page::read_page, *};
+use super::{life_read, read_page::read_matching_page, *};
 use bruhs_core::workspace_bridge::FinanceReadSection;
 use bruhs_models::FinanceAccountKind;
 
@@ -82,89 +82,85 @@ impl Workspace {
         offset: usize,
     ) -> Result<Value, String> {
         let query = self.authorize_life_read(AgentDomain::Finance, query, offset)?;
+        let mut matcher = query.matcher();
         let finance = &self.life_context.finance;
         let exact = finance.privacy.reveal_exact_amounts_to_agent;
         let page = match section {
-            FinanceReadSection::Accounts => read_page(
-                finance
-                    .accounts
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id, &r.name]))
-                    .map(|r| Account {
-                        id: &r.id,
-                        name: &r.name,
-                        kind: r.kind,
-                        currency: &r.currency,
-                        institution: &r.institution,
-                        updated_at_ms: r.updated_at_ms,
-                        balance_minor: exact.then(|| r.balance_minor.to_string()),
-                    }),
+            FinanceReadSection::Accounts => read_matching_page(
+                finance.accounts.iter(),
+                query.is_empty(),
+                |r| matcher.matches_fields(&[&r.id, &r.name]),
+                |r| Account {
+                    id: &r.id,
+                    name: &r.name,
+                    kind: r.kind,
+                    currency: &r.currency,
+                    institution: &r.institution,
+                    updated_at_ms: r.updated_at_ms,
+                    balance_minor: exact.then(|| r.balance_minor.to_string()),
+                },
                 offset,
             ),
-            FinanceReadSection::Transactions => read_page(
-                finance
-                    .transactions
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id, &r.merchant, &r.category]))
-                    .map(|r| Transaction {
-                        id: &r.id,
-                        account_id: &r.account_id,
-                        merchant: &r.merchant,
-                        category: &r.category,
-                        currency: &r.currency,
-                        occurred_at_ms: r.occurred_at_ms,
-                        amount_minor: exact.then(|| r.amount_minor.to_string()),
-                    }),
+            FinanceReadSection::Transactions => read_matching_page(
+                finance.transactions.iter(),
+                query.is_empty(),
+                |r| matcher.matches_fields(&[&r.id, &r.merchant, &r.category]),
+                |r| Transaction {
+                    id: &r.id,
+                    account_id: &r.account_id,
+                    merchant: &r.merchant,
+                    category: &r.category,
+                    currency: &r.currency,
+                    occurred_at_ms: r.occurred_at_ms,
+                    amount_minor: exact.then(|| r.amount_minor.to_string()),
+                },
                 offset,
             ),
-            FinanceReadSection::Budgets => read_page(
-                finance
-                    .budgets
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id, &r.category]))
-                    .map(|r| Budget {
-                        id: &r.id,
-                        category: &r.category,
-                        currency: &r.currency,
-                        alert_percent: r.alert_percent,
-                        enabled: r.enabled,
-                        monthly_limit_minor: exact.then(|| r.monthly_limit_minor.to_string()),
-                    }),
+            FinanceReadSection::Budgets => read_matching_page(
+                finance.budgets.iter(),
+                query.is_empty(),
+                |r| matcher.matches_fields(&[&r.id, &r.category]),
+                |r| Budget {
+                    id: &r.id,
+                    category: &r.category,
+                    currency: &r.currency,
+                    alert_percent: r.alert_percent,
+                    enabled: r.enabled,
+                    monthly_limit_minor: exact.then(|| r.monthly_limit_minor.to_string()),
+                },
                 offset,
             ),
-            FinanceReadSection::IncomeStreams => read_page(
-                finance
-                    .income_streams
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id, &r.name]))
-                    .map(|r| Income {
-                        id: &r.id,
-                        name: &r.name,
-                        currency: &r.currency,
-                        active: r.active,
-                        expected_monthly_minor: exact.then(|| r.expected_monthly_minor.to_string()),
-                    }),
+            FinanceReadSection::IncomeStreams => read_matching_page(
+                finance.income_streams.iter(),
+                query.is_empty(),
+                |r| matcher.matches_fields(&[&r.id, &r.name]),
+                |r| Income {
+                    id: &r.id,
+                    name: &r.name,
+                    currency: &r.currency,
+                    active: r.active,
+                    expected_monthly_minor: exact.then(|| r.expected_monthly_minor.to_string()),
+                },
                 offset,
             ),
-            FinanceReadSection::Holdings => read_page(
-                finance
-                    .holdings
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id, &r.symbol, &r.name]))
-                    .map(|r| Holding {
-                        id: &r.id,
-                        account_id: &r.account_id,
-                        symbol: &r.symbol,
-                        name: &r.name,
-                        currency: &r.currency,
-                        updated_at_ms: r.updated_at_ms,
-                        quantity: exact.then_some(r.quantity),
-                        current_value_minor: exact.then(|| r.current_value_minor.to_string()),
-                        cost_basis_minor: exact
-                            .then_some(r.cost_basis_minor)
-                            .flatten()
-                            .map(|amount| amount.to_string()),
-                    }),
+            FinanceReadSection::Holdings => read_matching_page(
+                finance.holdings.iter(),
+                query.is_empty(),
+                |r| matcher.matches_fields(&[&r.id, &r.symbol, &r.name]),
+                |r| Holding {
+                    id: &r.id,
+                    account_id: &r.account_id,
+                    symbol: &r.symbol,
+                    name: &r.name,
+                    currency: &r.currency,
+                    updated_at_ms: r.updated_at_ms,
+                    quantity: exact.then_some(r.quantity),
+                    current_value_minor: exact.then(|| r.current_value_minor.to_string()),
+                    cost_basis_minor: exact
+                        .then_some(r.cost_basis_minor)
+                        .flatten()
+                        .map(|amount| amount.to_string()),
+                },
                 offset,
             ),
         }?;

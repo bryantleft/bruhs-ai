@@ -8,11 +8,12 @@ pub(super) struct UniqueRecords<'a, T> {
 
 impl<'a, T> UniqueRecords<'a, T> {
     pub(super) fn new(
-        records: &'a [T],
+        records: impl IntoIterator<Item = &'a T>,
         key: impl Fn(&'a T) -> &'a str,
         duplicate_error: &'static str,
     ) -> Self {
-        let mut entries = HashMap::with_capacity(records.len());
+        let records = records.into_iter();
+        let mut entries = HashMap::with_capacity(records.size_hint().0);
         for record in records {
             entries
                 .entry(key(record))
@@ -55,7 +56,7 @@ impl Workspace {
         });
         let hub = self.meetings_hub.read(cx);
         let people = UniqueRecords::new(
-            &hub.people,
+            hub.people.iter().map(Arc::as_ref),
             |p| p.id.as_str(),
             "Duplicate contact identities prevent safe merge. Originals were retained.",
         );

@@ -1778,23 +1778,18 @@ fn viewed_store_path() -> Option<std::path::PathBuf> {
 }
 
 fn find_in_diff_files(query: &str, files: &[DesktopDiffFile]) -> Vec<DiffHit> {
-    let lines: Vec<Vec<String>> = files
-        .iter()
-        .map(|file| {
-            file.hunks
-                .iter()
-                .flat_map(|hunk| hunk.lines.iter().map(|line| line.text.clone()))
-                .collect()
-        })
-        .collect();
+    if query.is_empty() {
+        return Vec::new();
+    }
     let borrowed: Vec<(&str, Vec<&str>)> = files
         .iter()
-        .zip(&lines)
-        .map(|(file, texts)| {
-            (
-                file.path.as_str(),
-                texts.iter().map(String::as_str).collect(),
-            )
+        .map(|file| {
+            let lines = file
+                .hunks
+                .iter()
+                .flat_map(|hunk| hunk.lines.iter().map(|line| line.text.as_str()))
+                .collect();
+            (file.path.as_str(), lines)
         })
         .collect();
     let pairs: Vec<(&str, &[&str])> = borrowed

@@ -8,6 +8,7 @@ use crate::{
 };
 use bruhs_models::*;
 use gpui::TestAppContext;
+use std::sync::Arc;
 mod bulk;
 mod bulk_cases;
 mod http;
@@ -26,7 +27,7 @@ fn install(w: &mut Workspace, cx: &mut gpui::Context<'_, Workspace>) -> PersonMe
             ServerClient::new("http://127.0.0.1:9", "http://127.0.0.1:9").expect("test client"),
         );
         hub.restore_people(PeopleSnapshot {
-            records: vec![source, target.clone()],
+            records: vec![source.into(), target.clone().into()],
             pending_creates: ["source".into()].into_iter().collect(),
             ..Default::default()
         });
@@ -91,12 +92,15 @@ async fn canonical_contact_and_all_private_links_save_with_exact_originals(
     })
     .await;
     let saved = load_desktop_state_from_path(&path).unwrap().unwrap();
-    assert_eq!(saved.people_cache.records, vec![redirect.target.clone()]);
+    assert_eq!(
+        saved.people_cache.records,
+        vec![Arc::new(redirect.target.clone())]
+    );
     assert!(saved.people_cache.pending_creates.is_empty());
     let archive = &saved.people_cache.merge_archives["source"];
     assert_eq!(
         archive.source.as_ref(),
-        Some(&before.people_cache.records[0])
+        Some(before.people_cache.records[0].as_ref())
     );
     assert_eq!(
         archive.source_relationship.as_ref(),
@@ -138,8 +142,8 @@ async fn canonical_contact_and_all_private_links_save_with_exact_originals(
     workspace.update_in(cx, |w, _, cx| {
         w.meetings_hub.update(cx, |hub, cx| {
             hub.restore_people(saved.people_cache.clone());
-            hub.capture_person(before.people_cache.records[0].clone(), cx);
-            assert_eq!(hub.people, vec![redirect.target.clone()]);
+            hub.capture_person(before.people_cache.records[0].as_ref().clone(), cx);
+            assert_eq!(hub.people, vec![Arc::new(redirect.target.clone())]);
             assert_eq!(hub.pending_people_count(), 0);
         });
         let old = w.snapshot(cx);

@@ -357,6 +357,13 @@ impl PreviewPanelView {
 
     #[cfg(not(test))]
     pub fn refresh_servers(&mut self, cx: &mut Context<'_, Self>) {
+        #[cfg(feature = "native-performance")]
+        if crate::native_performance::block_service(cx, crate::native_performance::Service::Preview)
+        {
+            self.servers_loading = false;
+            cx.notify();
+            return;
+        }
         self.servers_generation += 1;
         let generation = self.servers_generation;
         self.servers_loading = true;

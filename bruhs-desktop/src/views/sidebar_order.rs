@@ -5,6 +5,7 @@
 use bruhs_models::logic::sidebar::{group_threads, FoldOpen, SidebarFacts, SidebarGroups};
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_models::EpochMs;
+use std::collections::HashSet;
 
 /// Idle threads older than this fold into "Settled".
 #[cfg_attr(
@@ -100,14 +101,13 @@ impl<'a> SidebarOrder<'a> {
     }
 
     fn from_groups(groups: &SidebarGroups, threads: &'a [ThreadMeta<'a>]) -> Self {
+        let by_id = threads
+            .iter()
+            .map(|thread| thread.id)
+            .collect::<HashSet<_>>();
         let resolve = |ids: &[String]| {
             ids.iter()
-                .filter_map(|id| {
-                    threads
-                        .iter()
-                        .find(|thread| thread.id == id)
-                        .map(|thread| thread.id)
-                })
+                .filter_map(|id| by_id.get(id.as_str()).copied())
                 .collect()
         };
         Self {

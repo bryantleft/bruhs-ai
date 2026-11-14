@@ -214,28 +214,192 @@ async fn an_oversized_frame_is_answered_and_the_loop_continues() {
 }
 
 #[test]
-fn an_unserializable_response_becomes_an_internal_error_frame_never_an_empty_one() {
+fn a_partly_serialized_response_becomes_one_complete_internal_error_frame() {
     struct Unserializable;
     impl Serialize for Unserializable {
-        fn serialize<S: serde::Serializer>(&self, _: S) -> Result<S::Ok, S::Error> {
+        fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+            use serde::ser::SerializeMap;
+            let mut map = serializer.serialize_map(Some(2))?;
+            map.serialize_entry("partial_response", &"never emit this prefix".repeat(1024))?;
             Err(serde::ser::Error::custom("no"))
         }
     }
-    let frame = encode_frame(&Unserializable, &Some(json!(12)));
+    let mut frame = b"previous response must also be removed".to_vec();
+    encode_frame(&Unserializable, &Some(json!(12)), &mut frame);
     assert_eq!(frame.last(), Some(&b'\n'));
     let reply: Value = serde_json::from_slice(&frame).unwrap();
     assert_eq!(reply["id"], 12);
     assert_eq!(reply["error"]["code"], -32603);
+    assert!(reply.get("partial_response").is_none());
+    encode_frame(&json!({"next":"complete"}), &None, &mut frame);
+    assert_eq!(frame, b"{\"next\":\"complete\"}\n");
 }
 
 #[tokio::test]
 async fn write_frame_emits_one_newline_terminated_json_line() {
     let mut output = Vec::new();
+    let mut buffer = Vec::new();
     write_frame(
         &mut output,
         &JsonRpcResponse::success(Some(json!(1)), json!({})),
+        &mut buffer,
     )
     .await
     .unwrap();
     assert_eq!(output, b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n");
+}
+
+#[tokio::test]
+async fn repeated_frames_keep_the_buffer_allocation_and_replace_complete_output() {
+    let response = JsonRpcResponse::success(
+        Some(json!("call\n1")),
+        json!({"text":"Café ΟΣ 👩🏽‍💻 \"quoted\"\n\\\0".repeat(32768)}),
+    );
+    let mut expected = serde_json::to_vec(&response).unwrap();
+    expected.push(b'\n');
+    let mut output = Vec::new();
+    let mut buffer = Vec::new();
+    write_frame(&mut output, &response, &mut buffer)
+        .await
+        .unwrap();
+    let allocation = buffer.as_ptr();
+    let capacity = buffer.capacity();
+    for _ in 0..3 {
+        output.clear();
+        write_frame(&mut output, &response, &mut buffer)
+            .await
+            .unwrap();
+        assert_eq!(output, expected);
+        assert_eq!(buffer.as_ptr(), allocation);
+        assert_eq!(buffer.capacity(), capacity);
+    }
+    output.clear();
+    write_frame(
+        &mut output,
+        &JsonRpcResponse::success(Some(json!(2)), json!({})),
+        &mut buffer,
+    )
+    .await
+    .unwrap();
+    assert_eq!(output, b"{\"jsonrpc\":\"2.0\",\"id\":2,\"result\":{}}\n");
+    assert_eq!(buffer.as_ptr(), allocation);
+    assert_eq!(buffer.capacity(), capacity);
+}
+
+#[test]
+fn consumed_tool_text_retains_only_one_largest_empty_allocation() {
+    use crate::protocol::{ContentType, ToolContent, ToolResult};
+
+    let mut text = String::with_capacity(1024 * 1024);
+    text.push_str("previous private response ΟΣ");
+    let allocation = text.as_ptr();
+    let capacity = text.capacity();
+    let mut result = ToolResult::ok(text);
+    result.content.push(ToolContent {
+        content_type: ContentType::Text,
+        text: "small block".into(),
+    });
+    let mut buffer = Vec::new();
+    recycle_text(
+        JsonRpcResponse::success(Some(json!(1)), result.into_value()),
+        &mut buffer,
+    );
+    assert!(buffer.is_empty());
+    assert_eq!(buffer.as_ptr(), allocation);
+    assert_eq!(buffer.capacity(), capacity);
+    for result in [json!({}), ToolResult::err("small error").into_value()] {
+        recycle_text(JsonRpcResponse::success(None, result), &mut buffer);
+        assert!(buffer.is_empty());
+        assert_eq!(buffer.as_ptr(), allocation);
+        assert_eq!(buffer.capacity(), capacity);
+    }
+}
+
+#[tokio::test]
+async fn a_flush_failure_stops_before_writing_the_next_response() {
+    #[derive(Default)]
+    struct FlushFailure {
+        bytes: Vec<u8>,
+        flushes: usize,
+    }
+    impl AsyncWrite for FlushFailure {
+        fn poll_write(
+            mut self: Pin<&mut Self>,
+            _: &mut Context<'_>,
+            bytes: &[u8],
+        ) -> Poll<io::Result<usize>> {
+            self.bytes.extend_from_slice(bytes);
+            Poll::Ready(Ok(bytes.len()))
+        }
+        fn poll_flush(mut self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            self.flushes += 1;
+            Poll::Ready(Err(io::ErrorKind::BrokenPipe.into()))
+        }
+        fn poll_shutdown(self: Pin<&mut Self>, _: &mut Context<'_>) -> Poll<io::Result<()>> {
+            Poll::Ready(Ok(()))
+        }
+    }
+    let input = b"{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"ping\"}\n{\"jsonrpc\":\"2.0\",\"id\":2,\"method\":\"ping\"}\n";
+    let mut output = FlushFailure::default();
+    let result = serve(
+        StdioInput::new(BufReader::new(input.as_slice())),
+        &mut output,
+        &standalone(),
+    )
+    .await;
+    assert!(
+        matches!(result, Err(ServeError::Write(ref e)) if e.kind() == io::ErrorKind::BrokenPipe)
+    );
+    assert_eq!(output.flushes, 1);
+    assert_eq!(
+        output.bytes,
+        b"{\"jsonrpc\":\"2.0\",\"id\":1,\"result\":{}}\n"
+    );
+}
+
+#[test]
+#[ignore = "manual optimized frame-encoding comparison; no I/O or providers"]
+fn large_response_frame_encoding_cost() {
+    use std::hint::black_box;
+    use std::time::Instant;
+
+    let pattern = "line Café ΟΣ 👩🏽‍💻 \"quoted\"\n\\\0";
+    for target_bytes in [1024_usize, 64 * 1024, 1024 * 1024, 8 * 1024 * 1024] {
+        let response = JsonRpcResponse::success(
+            Some(json!(1)),
+            json!({"content":[{"type":"text","text":pattern.repeat(target_bytes.div_ceil(pattern.len()))}]}),
+        );
+        let mut expected = serde_json::to_vec(&response).unwrap();
+        expected.push(b'\n');
+        for (order, versions) in [
+            ("forward", ["allocate", "reuse"]),
+            ("reverse", ["reuse", "allocate"]),
+        ] {
+            for version in versions {
+                let mut buffer = Vec::new();
+                let mut samples = Vec::new();
+                for iteration in 0..35 {
+                    let start = Instant::now();
+                    if version == "allocate" {
+                        let mut frame = serde_json::to_vec(black_box(&response)).unwrap();
+                        frame.push(b'\n');
+                        drop(black_box(frame));
+                    } else {
+                        encode_frame(black_box(&response), &response.id, &mut buffer);
+                        black_box(buffer.as_slice());
+                    }
+                    let elapsed_ms = start.elapsed().as_secs_f64() * 1000.0;
+                    if iteration >= 5 {
+                        samples.push(elapsed_ms);
+                    }
+                }
+                encode_frame(&response, &response.id, &mut buffer);
+                assert_eq!(buffer, expected);
+                println!(
+                    "MCP_FRAME_COST {}",
+                    json!({"target_text_bytes":target_bytes,"encoded_bytes":expected.len(),"order":order,"version":version,"samples_ms":samples,"warmups":5,"scope":"Encoding only. Allocating variant includes frame destruction; reused variant retains capacity across requests. Response construction, I/O and cold first allocation excluded."})
+                );
+            }
+        }
+    }
 }

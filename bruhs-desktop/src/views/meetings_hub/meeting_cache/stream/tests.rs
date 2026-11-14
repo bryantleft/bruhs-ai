@@ -149,3 +149,5 @@ fn malformed_or_conflicting_saved_stream_fragments_fail_closed(cx: &mut TestAppC
         );
     }
 }
+
+mod restore;

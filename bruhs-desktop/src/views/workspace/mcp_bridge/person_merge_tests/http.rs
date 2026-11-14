@@ -138,7 +138,7 @@ async fn refresh_resolves_retired_pending_id_before_any_create_and_preserves_unc
         w.meetings_hub.update(cx, |hub, cx| {
             let mut unrelated = PersonProfile::new("Missing is not deletion evidence");
             unrelated.id = "unrelated".into();
-            hub.people.push(unrelated);
+            hub.people.push(unrelated.into());
             hub.set_people_test_client(ServerClient::new(&server.base, &server.base).unwrap());
             hub.refresh_people(cx);
         });

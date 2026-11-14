@@ -27,7 +27,7 @@ pub(super) fn dataset(
                 target_id: target.id.clone(),
             }),
         );
-        people.records.push(target);
+        people.records.push(target.into());
         let mut relationship = RelationshipProfile::new(source_id, 1);
         relationship.notes = format!("Private context {index}");
         relationships.push(relationship);

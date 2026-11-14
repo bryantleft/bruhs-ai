@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 #[gpui::test]
 async fn person_reminder_rechecks_identity_and_write_grant_at_execution(cx: &mut TestAppContext) {
@@ -13,7 +14,7 @@ async fn person_reminder_rechecks_identity_and_write_grant_at_execution(cx: &mut
             w.meetings_hub.update(cx, |hub, _| {
                 hub.people = original_people.clone();
                 match case {
-                    "renamed" => hub.people[0].display_name = "Renamed".into(),
+                    "renamed" => Arc::make_mut(&mut hub.people[0]).display_name = "Renamed".into(),
                     "missing" => {
                         hub.people.remove(0);
                     }

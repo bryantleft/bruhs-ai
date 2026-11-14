@@ -101,12 +101,7 @@ async fn reviewed_life_records_and_receipts_save_together_and_undo_preserves_oth
     original
         .finance
         .transactions
-        .push(FinanceTransaction::manual(
-            "Keep this receipt",
-            "Other",
-            123,
-            1,
-        ));
+        .push(FinanceTransaction::manual("Keep this receipt", "Other", 123, 1).into());
     workspace.update_in(cx, |w, _, _| {
         w.persistence_test_path = Some(path.clone());
         w.life_context = original.clone();

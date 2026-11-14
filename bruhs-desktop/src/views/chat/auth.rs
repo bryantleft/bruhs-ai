@@ -1,6 +1,7 @@
 //! Claude CLI sign-in: status checks, the login flow with polling, and the banner.
 
 use super::*;
+use std::borrow::Cow;
 pub(super) const AUTH_BANNER_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const AUTH_BANNER_TEXT_SIZE_PX: f32 = 14.0;
 pub(super) const AUTH_BANNER_RADIUS_PX: f32 = 8.0;
@@ -82,11 +83,6 @@ impl Default for LoginTiming {
             login_timeout: CLAUDE_LOGIN_TIMEOUT,
         }
     }
-}
-
-#[cfg(not(test))]
-pub(super) async fn fetch_desktop_auth_status() -> DesktopAuthStatus {
-    fetch_auth_status_with(CLAUDE_PROGRAM).await
 }
 
 pub(super) async fn fetch_auth_status_with(program: &str) -> DesktopAuthStatus {
@@ -269,15 +265,145 @@ pub(super) fn normalize_claude_command_error(error: &std::io::Error) -> String {
     }
 }
 
-impl ChatView {
+#[derive(Default)]
+struct InitialAuthChecks {
+    // Keep the flight open until foreground delivery, including synchronous restore.
+    pending: Option<Vec<WeakEntity<ChatView>>>,
+}
+
+impl Global for InitialAuthChecks {}
+
+fn auth_check_program(cx: &App) -> Option<Cow<'static, str>> {
+    #[cfg(feature = "native-performance")]
+    if let Some(program) = crate::native_performance::auth_fixture_program(cx) {
+        return Some(Cow::Owned(program));
+    }
+    #[cfg(feature = "native-performance")]
+    if crate::native_performance::block_service(cx, crate::native_performance::Service::Auth) {
+        return None;
+    }
     #[cfg(not(test))]
+    {
+        let _ = cx;
+        Some(Cow::Borrowed(CLAUDE_PROGRAM))
+    }
+    #[cfg(all(test, unix))]
+    {
+        probe_tests::program(cx).map(Cow::Owned)
+    }
+    #[cfg(all(test, not(unix)))]
+    {
+        let _ = cx;
+        None
+    }
+}
+
+fn spawn_auth_check(program: Cow<'static, str>, cx: &App) -> UnboundedReceiver<DesktopAuthStatus> {
+    #[cfg(feature = "native-performance")]
+    crate::native_performance::auth_probe_started(cx);
+    let runtime = Arc::clone(&cx.global::<DesktopState>().runtime);
+    let (tx, rx) = unbounded_channel();
+    #[cfg(all(test, unix))]
+    let completed = probe_tests::completion(cx);
+    runtime.spawn(async move {
+        let _ = tx.send(fetch_auth_status_with(&program).await);
+        #[cfg(all(test, unix))]
+        if let Some(completed) = completed {
+            let _ = completed.send(());
+        }
+    });
+    rx
+}
+
+impl ChatView {
+    #[cfg(all(test, unix))]
+    pub(crate) fn install_auth_probe_for_test(
+        cx: &mut App,
+        program: String,
+    ) -> std::sync::mpsc::Receiver<()> {
+        probe_tests::install(cx, program)
+    }
+
+    #[cfg(all(test, unix))]
+    pub(crate) fn clear_auth_probe_for_test(cx: &mut App) {
+        probe_tests::clear(cx);
+    }
+
+    pub(super) fn start_initial_claude_auth_check(&mut self, cx: &mut Context<'_, Self>) {
+        let Some(program) = auth_check_program(cx) else {
+            cx.notify();
+            return;
+        };
+        #[cfg(all(test, unix))]
+        if probe_tests::use_original_checks(cx) {
+            self.start_auth_check_with(program, cx);
+            return;
+        }
+        #[cfg(feature = "native-performance")]
+        if crate::native_performance::auth_fixture_original(cx) {
+            self.start_auth_check_with(program, cx);
+            return;
+        }
+
+        self.initial_auth_pending = true;
+        let entity = cx.weak_entity();
+        let pending = &mut cx.default_global::<InitialAuthChecks>().pending;
+        if let Some(waiters) = pending {
+            waiters.push(entity);
+            cx.notify();
+            return;
+        }
+        *pending = Some(vec![entity]);
+        let mut rx = spawn_auth_check(program, cx);
+        // Delivery belongs to the app: closing the first chat must not strand others.
+        cx.spawn(async move |_, cx| {
+            let status = rx.recv().await.unwrap_or_else(|| {
+                parse_desktop_auth_status(
+                    "",
+                    "",
+                    Some("Claude auth status check stopped. Check again to retry."),
+                )
+            });
+            cx.update(|cx| {
+                let waiters = cx
+                    .global_mut::<InitialAuthChecks>()
+                    .pending
+                    .take()
+                    .expect("An initial auth completion must own the pending flight");
+                for entity in waiters {
+                    entity
+                        .update(cx, |view, cx| {
+                            if !view.initial_auth_pending {
+                                return;
+                            }
+                            view.initial_auth_pending = false;
+                            let previous = view.auth_status.message().map(str::to_string);
+                            view.auth_status =
+                                desktop_auth_status_after_check(status.clone(), previous);
+                            cx.notify();
+                            #[cfg(feature = "native-performance")]
+                            crate::native_performance::auth_status_delivered(cx);
+                        })
+                        .ok();
+                }
+            });
+        })
+        .detach();
+        cx.notify();
+    }
+
     pub(super) fn start_claude_auth_check(&mut self, cx: &mut Context<'_, Self>) {
+        self.initial_auth_pending = false;
+        if let Some(program) = auth_check_program(cx) {
+            self.start_auth_check_with(program, cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    fn start_auth_check_with(&mut self, program: Cow<'static, str>, cx: &mut Context<'_, Self>) {
         let previous_message = self.auth_status.message().map(str::to_string);
-        let runtime = Arc::clone(&cx.global::<DesktopState>().runtime);
-        let (tx, mut rx) = unbounded_channel();
-        runtime.spawn(async move {
-            let _ = tx.send(fetch_desktop_auth_status().await);
-        });
+        let mut rx = spawn_auth_check(program, cx);
         cx.spawn(async move |entity, cx| {
             if let Some(status) = rx.recv().await {
                 entity
@@ -285,6 +411,8 @@ impl ChatView {
                         view.auth_status =
                             desktop_auth_status_after_check(status, previous_message);
                         cx.notify();
+                        #[cfg(feature = "native-performance")]
+                        crate::native_performance::auth_status_delivered(cx);
                     })
                     .ok();
             }
@@ -293,21 +421,32 @@ impl ChatView {
         cx.notify();
     }
 
-    #[cfg(test)]
-    pub(super) fn start_claude_auth_check(&mut self, cx: &mut Context<'_, Self>) {
-        cx.notify();
+    fn prepare_claude_login(&mut self) -> bool {
+        // The login button only shows while signed out.
+        let DesktopAuthStatus::SignedOut(signed_out) = &mut self.auth_status else {
+            return false;
+        };
+        if signed_out.login_in_flight {
+            return false;
+        }
+        self.initial_auth_pending = false;
+        signed_out.login_in_flight = true;
+        signed_out.message = Some(CLAUDE_LOGIN_WAITING_MESSAGE.to_string());
+        true
+    }
+
+    #[cfg(all(feature = "native-performance", target_os = "macos"))]
+    pub(crate) fn native_fixture_auth_user(&self) -> Option<&str> {
+        if self.initial_auth_pending {
+            return None;
+        }
+        self.auth_status.user()
     }
 
     pub(super) fn start_claude_login(&mut self, cx: &mut Context<'_, Self>) {
-        // The login button only shows while signed out.
-        let DesktopAuthStatus::SignedOut(signed_out) = &mut self.auth_status else {
-            return;
-        };
-        if signed_out.login_in_flight {
+        if !self.prepare_claude_login() {
             return;
         }
-        signed_out.login_in_flight = true;
-        signed_out.message = Some(CLAUDE_LOGIN_WAITING_MESSAGE.to_string());
         let runtime = Arc::clone(&cx.global::<DesktopState>().runtime);
         let (tx, mut rx) = unbounded_channel();
         runtime.spawn(async move {
@@ -479,3 +618,6 @@ impl ChatView {
         AgentProvider::for_model(&self.model_id) == AgentProvider::Claude
     }
 }
+
+#[cfg(all(test, unix))]
+mod probe_tests;

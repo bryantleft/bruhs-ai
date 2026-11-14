@@ -8,7 +8,12 @@ use gpui::*;
 use gpui_component::input::Input;
 
 use super::knowledge_storage::{self, attachment_path as knowledge_attachment_path};
+use super::library_pages_ui::LibraryPage;
 use super::*;
+
+// Match the web knowledge library's 24-card budget. The native action fixture
+// measures libraries through 10,000 records; paging never truncates stored text.
+pub(super) const KNOWLEDGE_PAGE_SIZE: usize = 24;
 
 impl Workspace {
     pub(super) fn open_knowledge_view(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -37,6 +42,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if let Some(index) = self
+            .knowledge_documents
+            .iter()
+            .position(|document| document.id == id)
+        {
+            self.library_pages
+                .select(LibraryPage::Documents, index / KNOWLEDGE_PAGE_SIZE);
+        }
         let Some(document) = self
             .knowledge_documents
             .iter()
@@ -89,6 +102,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if let Some(index) = self.source_clips.iter().position(|clip| clip.id == id) {
+            self.library_pages
+                .select(LibraryPage::Sources, index / KNOWLEDGE_PAGE_SIZE);
+        }
         let Some(clip) = self.source_clips.iter().find(|clip| clip.id == id).cloned() else {
             return;
         };
@@ -199,6 +216,7 @@ impl Workspace {
                     clip_id: clip.id.clone(),
                 };
                 self.source_clips.insert(0, clip);
+                self.library_pages.sources = 0;
                 self.clip_create_visible = false;
             }
         }
@@ -560,11 +578,23 @@ impl Workspace {
         let documents = self
             .knowledge_documents
             .iter()
+            .skip(self.library_pages.start(
+                LibraryPage::Documents,
+                self.knowledge_documents.len(),
+                KNOWLEDGE_PAGE_SIZE,
+            ))
+            .take(KNOWLEDGE_PAGE_SIZE)
             .map(|document| self.render_document_card(document, cx))
             .collect::<Vec<_>>();
         let clips = self
             .source_clips
             .iter()
+            .skip(self.library_pages.start(
+                LibraryPage::Sources,
+                self.source_clips.len(),
+                KNOWLEDGE_PAGE_SIZE,
+            ))
+            .take(KNOWLEDGE_PAGE_SIZE)
             .map(|clip| self.render_source_card(clip, cx))
             .collect::<Vec<_>>();
         div()
@@ -655,30 +685,43 @@ impl Workspace {
             )
             .child(
                 div()
+                    .id("knowledge-library-scroll")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
+                    .track_scroll(&self.library_pages.knowledge_scroll)
+                    .overflow_y_scroll()
                     .p_5()
                     .flex()
-                    .justify_center()
+                    .flex_col()
+                    .gap_5()
+                    .items_center()
                     .child(
-                        div()
+                        knowledge_section("Documents", documents, "No documents yet.")
                             .w_full()
                             .max_w(px(980.0))
-                            .flex()
-                            .flex_col()
-                            .gap_5()
-                            .child(knowledge_section(
+                            .flex_shrink_0()
+                            .children(self.render_library_pages(
+                                LibraryPage::Documents,
+                                self.knowledge_documents.len(),
+                                KNOWLEDGE_PAGE_SIZE,
                                 "Documents",
-                                documents,
-                                "No documents yet.",
-                            ))
-                            .child(knowledge_section(
-                                "Sources",
-                                clips,
-                                "Save a web source to cite it later.",
+                                cx,
                             )),
-                    ),
+                    )
+                    .child(
+                        knowledge_section("Sources", clips, "Save a web source to cite it later.")
+                            .w_full()
+                            .max_w(px(980.0))
+                            .flex_shrink_0()
+                            .children(self.render_library_pages(
+                                LibraryPage::Sources,
+                                self.source_clips.len(),
+                                KNOWLEDGE_PAGE_SIZE,
+                                "Sources",
+                                cx,
+                            )),
+                    )
+                    .vertical_scrollbar(&self.library_pages.knowledge_scroll),
             )
     }
 
@@ -735,8 +778,10 @@ impl Workspace {
     fn render_source_card(&self, clip: &SourceClip, cx: &Context<'_, Self>) -> AnyElement {
         let id = clip.id.clone();
         let keyboard_id = id.clone();
+        let key = element_key(&id);
         div()
-            .id(("knowledge-source", element_key(&id)))
+            .id(("knowledge-source", key))
+            .debug_selector(move || format!("desktop-knowledge-source-{key}"))
             .rounded(px(6.0))
             .px_3()
             .py_2()

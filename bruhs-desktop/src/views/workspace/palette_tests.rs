@@ -156,15 +156,11 @@ fn native_palette_should_search_hydrated_domains(cx: &mut TestAppContext) {
             vec![],
             1,
         )];
-        workspace.life_context.finance.transactions = vec![FinanceTransaction::manual(
-            "quartz merchant",
-            "food",
-            -100,
-            1,
-        )];
+        workspace.life_context.finance.transactions =
+            vec![FinanceTransaction::manual("quartz merchant", "food", -100, 1).into()];
         workspace.life_context.health.workouts = vec![WorkoutLog::manual("quartz workout", 30, 1)];
         workspace.meetings_hub.update(cx, |hub, _| {
-            hub.people = vec![PersonProfile::new("quartz person")];
+            hub.people = vec![PersonProfile::new("quartz person").into()];
             hub.meetings = vec![Meeting::new("quartz meeting", 1.0)];
             let meeting_id = hub.meetings[0].id.clone();
             hub.segments.insert(

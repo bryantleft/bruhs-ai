@@ -20,6 +20,37 @@ impl Drop for Fixture {
 }
 
 #[test]
+fn disk_versions_keep_standard_sha256_for_buffers_and_streamed_files() {
+    let cases = [
+        (
+            Vec::new(),
+            "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+        ),
+        (
+            b"abc".to_vec(),
+            "ba7816bf8f01cfea414140de5dae2223b00361a396177a9cb410ff61f20015ad",
+        ),
+        (
+            (0..16 * 1024 + 17)
+                .map(|index| u8::try_from(index % 251).unwrap())
+                .collect(),
+            "a4b7d696aaab9dcd79ebccf6e67b3f0a61a0b7c5dff50f9415be6460b7d2d536",
+        ),
+    ];
+    let fixture = Fixture::new();
+    let path = fixture.state();
+    for (bytes, expected) in cases {
+        let hash = std::array::from_fn(|index| {
+            u8::from_str_radix(&expected[index * 2..index * 2 + 2], 16).unwrap()
+        });
+        let expected = DiskVersion::Present(hash);
+        assert_eq!(DiskVersion::of_bytes(&bytes), expected);
+        fs::write(&path, bytes).unwrap();
+        assert_eq!(DiskVersion::read(&path).unwrap(), expected);
+    }
+}
+
+#[test]
 fn stale_save_preserves_newer_bytes_and_its_original_version() {
     let fixture = Fixture::new();
     let path = fixture.state();

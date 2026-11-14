@@ -6,7 +6,7 @@ impl Workspace {
         domain: AgentDomain,
         query: &str,
         offset: usize,
-    ) -> Result<String, String> {
+    ) -> Result<LowercaseQuery, String> {
         if !self
             .automation_state
             .permissions
@@ -25,15 +25,8 @@ impl Workspace {
         if query.len() > 512 || offset > 100_000 {
             return Err("Query or offset is too large.".into());
         }
-        Ok(query.to_lowercase())
+        Ok(LowercaseQuery::new(query))
     }
-}
-
-pub(super) fn matches(query: &str, fields: &[&str]) -> bool {
-    query.is_empty()
-        || fields
-            .iter()
-            .any(|field| field.to_lowercase().contains(query))
 }
 
 pub(super) fn describe(

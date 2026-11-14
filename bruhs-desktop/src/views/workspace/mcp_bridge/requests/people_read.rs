@@ -1,4 +1,4 @@
-use super::read_page::read_page;
+use super::read_page::{read_matching_page, read_page};
 use super::*;
 use bruhs_core::workspace_bridge::PersonReadSection;
 use bruhs_models::{PersonProfile, RelationshipProfile};
@@ -75,22 +75,23 @@ impl Workspace {
         if query.len() > 512 || offset > 100_000 {
             return Err("Query or offset is too large.".into());
         }
-        let query = query.to_lowercase();
+        let query = LowercaseQuery::new(query);
+        let mut matcher = query.matcher();
         // Discovery never serializes or scans histories, private notes or fingerprints.
-        let summaries = self
-            .meetings_hub
-            .read(cx)
-            .people
-            .iter()
-            .filter(|person| {
+        let hub = self.meetings_hub.read(cx);
+        read_matching_page(
+            hub.people.iter(),
+            query.is_empty(),
+            |person| {
                 query.is_empty()
                     || [&person.id, &person.display_name]
                         .into_iter()
                         .chain(&person.aliases)
-                        .any(|field| field.to_lowercase().contains(&query))
-            })
-            .map(PersonSummary::from);
-        read_page(summaries, offset)
+                        .any(|field| matcher.matches(field))
+            },
+            |person| PersonSummary::from(person.as_ref()),
+            offset,
+        )
     }
 
     pub(super) fn read_bridge_person(
@@ -137,7 +138,7 @@ impl Workspace {
         let mut page = match section {
             PersonReadSection::Profile => read_page(
                 std::iter::once(PersonDetails {
-                    person: person.into(),
+                    person: person.as_ref().into(),
                     aliases: &person.aliases,
                     relationship: profile.map(RelationshipDetails::from),
                 }),

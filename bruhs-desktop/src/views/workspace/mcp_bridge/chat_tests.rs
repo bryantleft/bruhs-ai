@@ -133,8 +133,8 @@ async fn reviewed_chat_and_checkpoint_save_together_and_user_approved_undo_remov
             .iter()
             .map(|thread| {
                 Workspace::create_thread_from_persisted(
-                    thread,
-                    w.current_model.clone(),
+                    thread.clone(),
+                    &w.current_model,
                     w.permission_mode,
                     window,
                     cx,

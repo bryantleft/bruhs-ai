@@ -7,6 +7,8 @@ use bruhs_models::*;
 use gpui::TestAppContext;
 use serde_json::Value;
 
+mod stdio;
+
 fn finance(section: FinanceReadSection, query: &str, offset: usize) -> BridgeRequest {
     BridgeRequest::ReadFinance {
         section,
@@ -30,10 +32,87 @@ fn ok(response: BridgeResponse) -> Value {
     }
 }
 
-// Scoped native handler timing: excludes socket/stdio, hydration, file I/O and paint.
-#[cfg(not(debug_assertions))]
+fn large_ledger() -> LifeContext {
+    let mut context = LifeContext::default();
+    context.finance.privacy.allow_agent_context = true;
+    context.finance.transactions = (0..100_001)
+        .map(|i| {
+            let mut record = FinanceTransaction::manual(format!("Merchant {i}"), "Category", i, i);
+            record.id = format!("transaction-{i}");
+            record.into()
+        })
+        .collect();
+    context
+}
+
 #[gpui::test]
-fn life_read_handler_large_ledger_measurement(cx: &mut TestAppContext) {
+#[ignore = "manual optimized Unix-socket round-trip timing; cargo test -p bruhs-desktop --bin bruhs-desktop --release life_read_native_ipc_cost -- --ignored --nocapture"]
+async fn life_read_native_ipc_cost(cx: &mut TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    workspace.update_in(cx, |w, _, _| {
+        w.life_context = large_ledger();
+        w.automation_state
+            .permissions
+            .set(AgentDomain::Finance, AgentAccess::Read, true);
+    });
+    connect(&workspace, cx).await;
+    for (label, query, offset, count, first_id) in [
+        ("first-page", "", 0, 50, Some("transaction-0")),
+        ("deep-page", "", 99_950, 50, Some("transaction-99950")),
+        (
+            "last-match",
+            "Merchant 100000",
+            0,
+            1,
+            Some("transaction-100000"),
+        ),
+        ("no-match", "missing", 0, 0, None),
+    ] {
+        let mut samples = Vec::new();
+        for iteration in 0..55 {
+            let request = finance(FinanceReadSection::Transactions, query, offset);
+            let started = std::time::Instant::now();
+            // The existing helper loads the private connection file, creates a
+            // client, crosses the Unix socket and returns through the test executor.
+            let page = ok(call(&workspace, cx, request).await);
+            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+            assert_eq!(page["records"].as_array().unwrap().len(), count);
+            if let Some(id) = first_id {
+                assert_eq!(page["records"][0]["id"], id);
+            }
+            assert!(page["records"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .all(|record| record.get("amount_minor").is_none()));
+            if iteration >= 5 {
+                samples.push(elapsed);
+            }
+        }
+        eprintln!(
+            "NATIVE_FINANCE_IPC_COST {}",
+            serde_json::json!({"fixture":label, "records":100_001, "samples_ms":samples})
+        );
+    }
+    workspace.update_in(cx, |w, _, _| {
+        w.automation_state
+            .permissions
+            .set(AgentDomain::Finance, AgentAccess::Read, false);
+    });
+    assert!(matches!(
+        call(
+            &workspace,
+            cx,
+            finance(FinanceReadSection::Transactions, "", 0)
+        )
+        .await,
+        BridgeResponse::Error(_)
+    ));
+    workspace.update_in(cx, |w, _, _| w.mcp_bridge = WorkspaceBridge::default());
+}
+
+#[gpui::test]
+fn finance_query_keeps_unicode_casing_and_metadata_field_boundaries(cx: &mut TestAppContext) {
     let (workspace, cx) = fixture(cx);
     workspace.update_in(cx, |w, _, cx| {
         w.life_context = LifeContext::default();
@@ -41,14 +120,46 @@ fn life_read_handler_large_ledger_measurement(cx: &mut TestAppContext) {
             .permissions
             .set(AgentDomain::Finance, AgentAccess::Read, true);
         w.life_context.finance.privacy.allow_agent_context = true;
-        w.life_context.finance.transactions = (0..100_001)
-            .map(|i| {
-                let mut record =
-                    FinanceTransaction::manual(format!("Merchant {i}"), "Category", i, i);
-                record.id = format!("transaction-{i}");
-                record
-            })
-            .collect();
+        let mut transaction = FinanceTransaction::manual("ΟΣ Café İ K", "Category", i64::MIN, 1);
+        transaction.id = "record-0".into();
+        transaction.note = Some("private-memo-not-in-discovery".into());
+        w.life_context.finance.transactions.push(transaction.into());
+        for (query, count) in [
+            ("Σ", 0),
+            ("ς", 1),
+            ("CAFÉ", 1),
+            ("cafe\u{301}", 0),
+            ("i", 1),
+            ("K", 1),
+            ("private-memo-not-in-discovery", 0),
+        ] {
+            let page = ok(
+                w.handle_bridge_request(finance(FinanceReadSection::Transactions, query, 0), cx)
+            );
+            assert_eq!(
+                page["records"].as_array().unwrap().len(),
+                count,
+                "{query:?}"
+            );
+            if count != 0 {
+                assert_eq!(page["records"][0]["id"], "record-0");
+                assert!(page["records"][0].get("amount_minor").is_none());
+                assert!(page["records"][0].get("note").is_none());
+            }
+        }
+    });
+}
+
+// Scoped native handler timing: excludes socket/stdio, hydration, file I/O and paint.
+#[cfg(not(debug_assertions))]
+#[gpui::test]
+fn life_read_handler_large_ledger_measurement(cx: &mut TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    workspace.update_in(cx, |w, _, cx| {
+        w.life_context = large_ledger();
+        w.automation_state
+            .permissions
+            .set(AgentDomain::Finance, AgentAccess::Read, true);
         for (label, query, offset, count) in [
             ("first-page", "", 0, 50),
             ("deep-page", "", 99_950, 50),
@@ -180,7 +291,7 @@ async fn finance_sections_redact_by_default_preserve_exact_money_and_exclude_not
             FinanceTransaction::manual("Merchant", "Category", -9_007_199_254_740_993, 1);
         transaction.note = Some("never-export-this-note".into());
         transaction.currency = "EUR".into();
-        f.transactions.push(transaction);
+        f.transactions.push(transaction.into());
         let mut budget = FinanceBudget::monthly("Category", 1);
         budget.monthly_limit_minor = u64::MAX;
         f.budgets.push(budget);

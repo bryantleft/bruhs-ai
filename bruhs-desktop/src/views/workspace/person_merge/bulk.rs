@@ -30,7 +30,7 @@ impl Workspace {
         }
         ids.sort();
         let people = UniqueRecords::new(
-            &hub.people,
+            hub.people.iter().map(Arc::as_ref),
             |p| p.id.as_str(),
             "Duplicate contact identities prevent safe merge. Originals were retained.",
         );

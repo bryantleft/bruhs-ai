@@ -1,41 +1,9 @@
-use super::super::{
-    load_desktop_state_from_path, AppView, AutomationState, DesktopState, SaveStatus, Workspace,
-};
+use super::super::{load_desktop_state_from_path, DesktopState, SaveStatus, Workspace};
+pub(super) use super::test_fixture::fixture;
 use super::{ConnectionState, WorkspaceBridge};
 use bruhs_core::workspace_bridge::{BridgeClient, BridgeRequest, BridgeResponse};
 use bruhs_models::{AgentAccess, AgentDomain, WorkflowOperation};
-use gpui::{AppContext, Entity, TestAppContext, VisualTestContext};
-use std::{cell::RefCell, rc::Rc};
-
-pub(super) fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
-    // This fixture crosses a real Tokio Unix socket, not the deterministic
-    // test executor's virtual clock.
-    cx.executor().allow_parking();
-    cx.update(|cx| {
-        gpui_component::init(cx);
-        crate::theme::apply_bruhs_theme(cx);
-        cx.set_global(DesktopState::new().expect("desktop state"));
-    });
-    let cell = Rc::new(RefCell::new(None));
-    let capture = cell.clone();
-    let (_, cx) = cx.add_window_view(|window, cx| {
-        let workspace = cx.new(|cx| Workspace::new(window, cx));
-        *capture.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
-    });
-    let workspace = cell.borrow().clone().expect("workspace entity");
-    workspace.update_in(cx, |workspace, _, cx| {
-        workspace.work_items.clear();
-        workspace.calendar_events.clear();
-        workspace.captures.clear();
-        workspace.knowledge_documents.clear();
-        workspace.inbox_conversations.clear();
-        workspace.automation_state = AutomationState::default();
-        workspace.active_view = AppView::Automations;
-        cx.notify();
-    });
-    (workspace, cx)
-}
+use gpui::{Entity, TestAppContext, VisualTestContext};
 
 pub(super) async fn call(
     workspace: &Entity<Workspace>,

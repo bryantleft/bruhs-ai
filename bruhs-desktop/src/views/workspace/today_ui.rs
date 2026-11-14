@@ -87,7 +87,7 @@ impl Workspace {
             &self.planning_work_items(),
             &self.planning_calendar_events(cx),
             &hub.meetings,
-            &hub.people,
+            hub.people.iter().map(Arc::as_ref),
         )
     }
 

@@ -217,7 +217,7 @@ impl MeetingsHub {
         }
         self.people
             .retain(|p| !sources.contains(&p.id) && !targets.contains_key(&p.id));
-        self.people.extend(targets.into_values());
+        self.people.extend(targets.into_values().map(Arc::new));
         self.bump_search_revision();
         cx.notify();
     }

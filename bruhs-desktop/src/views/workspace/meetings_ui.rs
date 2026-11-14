@@ -22,6 +22,7 @@ use gpui::*;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::{Escape as InputEscape, Input, InputEvent, InputState};
 use gpui_component::Disableable;
+use std::sync::Arc;
 
 use super::{
     element_key, is_web_button_activation_key, meetings_client, redraw_on_edit, DesktopLifeTab,
@@ -1005,7 +1006,7 @@ impl Workspace {
         label_text: String,
         text_color: Hsla,
         ring_color: Hsla,
-        people: &[PersonProfile],
+        people: &[Arc<PersonProfile>],
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let Some(sid) = speaker_id else {
@@ -1129,7 +1130,7 @@ impl Workspace {
         &self,
         meeting_id: String,
         speaker_id: String,
-        people: &[PersonProfile],
+        people: &[Arc<PersonProfile>],
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let mut menu = div()
@@ -2408,8 +2409,8 @@ impl Workspace {
     fn render_person_card(
         &self,
         index: usize,
-        profile: PersonProfile,
-        all: &[PersonProfile],
+        profile: Arc<PersonProfile>,
+        all: &[Arc<PersonProfile>],
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let id = profile.id.clone();
@@ -2821,7 +2822,7 @@ impl Workspace {
     fn render_merge_panel(
         &self,
         source_id: &str,
-        all: &[PersonProfile],
+        all: &[Arc<PersonProfile>],
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let options: Vec<DropdownOption> = all

@@ -1,4 +1,5 @@
 use super::*;
+use std::sync::Arc;
 
 #[gpui::test]
 async fn people_read_revocation_precedes_identity_lookup_and_write_does_not_authorize_reads(
@@ -9,7 +10,7 @@ async fn people_read_revocation_precedes_identity_lookup_and_write_does_not_auth
         let mut person = PersonProfile::new("Alex");
         person.id = "existing".into();
         w.meetings_hub
-            .update(cx, |hub, _| hub.people = vec![person]);
+            .update(cx, |hub, _| hub.people = vec![person.into()]);
         w.automation_state
             .permissions
             .set(AgentDomain::People, AgentAccess::Read, false);
@@ -106,7 +107,7 @@ async fn person_history_byte_pages_resume_and_oversized_records_fail_without_los
             })
             .collect();
         w.meetings_hub
-            .update(cx, |hub, _| hub.people = vec![person]);
+            .update(cx, |hub, _| hub.people = vec![person.into()]);
     });
     connect(&workspace, cx).await;
     let first = value(
@@ -132,7 +133,7 @@ async fn person_history_byte_pages_resume_and_oversized_records_fail_without_los
     assert_eq!(second["records"][0]["at_meeting_id"], "m1");
     workspace.update_in(cx, |w, _, cx| {
         w.meetings_hub.update(cx, |hub, _| {
-            hub.people[0].observations[0].text = "x".repeat(600_000)
+            Arc::make_mut(&mut hub.people[0]).observations[0].text = "x".repeat(600_000)
         })
     });
     assert!(matches!(
@@ -171,8 +172,9 @@ async fn duplicate_people_or_relationship_keys_never_select_an_arbitrary_profile
             .set(AgentDomain::People, AgentAccess::Read, true);
         let mut person = PersonProfile::new("Duplicate");
         person.id = "same-id".into();
-        w.meetings_hub
-            .update(cx, |hub, _| hub.people = vec![person.clone(), person]);
+        w.meetings_hub.update(cx, |hub, _| {
+            hub.people = vec![person.clone().into(), person.into()]
+        });
     });
     connect(&workspace, cx).await;
     assert!(matches!(

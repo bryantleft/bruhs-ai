@@ -1,6 +1,12 @@
 //! Tasks page: project sidebar, header, list and board views, and the work-item actions behind them.
 
+use super::library_pages_ui::LibraryPage;
 use super::*;
+
+// Match the web task list/board budgets. The native library action fixture
+// measures 100/1,000/10,000 tasks; complete records remain in work_items.
+pub(super) const TASK_LIST_PAGE_SIZE: usize = 100;
+pub(super) const TASK_BOARD_PAGE_SIZE: usize = 40;
 
 /// GPUI-side colour resolution for shared status / priority enums. Lives in
 /// the desktop crate (rather than bruhs-models) because `Hsla` is a GPUI
@@ -60,6 +66,7 @@ impl Render for DesktopTaskDrag {
     }
 }
 
+#[cfg(test)]
 pub(super) fn work_item_due_on(item: &DesktopWorkItem, date: NaiveDate) -> bool {
     let due = date.format(DESKTOP_DATE_FORMAT).to_string();
     item.due_date.as_deref() == Some(due.as_str())
@@ -353,15 +360,57 @@ impl Workspace {
         selected_project_name_like_web(&self.projects, self.selected_project_id.as_deref())
     }
 
-    pub(super) fn filtered_work_items(&self) -> Vec<DesktopWorkItem> {
+    pub(super) fn filtered_work_items(&self) -> impl Iterator<Item = &DesktopWorkItem> {
         self.work_items
             .iter()
             .filter(|item| match self.selected_project_id.as_deref() {
                 Some(project_id) => item.project_id.as_deref() == Some(project_id),
                 None => true,
             })
-            .cloned()
-            .collect()
+    }
+
+    fn reset_task_pages(&mut self) {
+        self.library_pages.tasks = 0;
+        self.library_pages.columns = [0; 4];
+        self.library_pages
+            .task_scroll
+            .set_offset(point(px(0.0), px(0.0)));
+        for scroll in &self.library_pages.column_scroll {
+            scroll.set_offset(point(px(0.0), px(0.0)));
+        }
+        self.reveal_selected_task_page();
+    }
+
+    pub(super) fn reveal_selected_task_page(&mut self) {
+        let Some(id) = self.selected_work_item_id.as_deref() else {
+            return;
+        };
+        let Some((index, status)) = self
+            .filtered_work_items()
+            .enumerate()
+            .find(|(_, item)| item.id == id)
+            .map(|(index, item)| (index, item.status))
+        else {
+            return;
+        };
+        let column_position = self
+            .filtered_work_items()
+            .filter(|item| item.status == status)
+            .position(|item| item.id == id);
+        self.library_pages.tasks = index / TASK_LIST_PAGE_SIZE;
+        self.library_pages
+            .task_scroll
+            .scroll_to_item(index % TASK_LIST_PAGE_SIZE);
+        if let Some(column) = DesktopWorkItemStatus::board_columns()
+            .iter()
+            .position(|candidate| *candidate == status)
+        {
+            if let Some(position) = column_position {
+                self.library_pages.columns[column] = position / TASK_BOARD_PAGE_SIZE;
+                self.library_pages.column_scroll[column]
+                    .scroll_to_item(position % TASK_BOARD_PAGE_SIZE);
+            }
+        }
     }
 
     pub(super) fn selected_work_item(&self) -> Option<DesktopWorkItem> {
@@ -381,6 +430,7 @@ impl Workspace {
             project_filter_selection_after_change(project_id, self.selected_work_item_id.clone());
         self.selected_project_id = selected_project_id;
         self.selected_work_item_id = selected_work_item_id;
+        self.reset_task_pages();
         self.persist_and_notify(cx);
     }
 
@@ -396,6 +446,7 @@ impl Workspace {
         self.selected_project_id = selected_project_id;
         self.projects.push(project);
         self.selected_work_item_id = selected_work_item_id;
+        self.reset_task_pages();
         self.persist_and_notify(cx);
     }
 
@@ -406,6 +457,7 @@ impl Workspace {
             .retain(|item| item.project_id.as_deref() != Some(project_id));
         if self.selected_project_id.as_deref() == Some(project_id) {
             self.selected_project_id = None;
+            self.reset_task_pages();
         }
         if let Some(selected_item_id) = self.selected_work_item_id.as_deref() {
             if !self
@@ -433,6 +485,7 @@ impl Workspace {
             .cloned()
         {
             self.selected_work_item_id = Some(item_id.to_string());
+            self.reveal_selected_task_page();
             self.task_detail_menu_open = None;
             set_task_detail_inputs(
                 [
@@ -631,6 +684,9 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         if move_work_item_to_status(&mut self.work_items, item_id, status) {
+            if self.selected_work_item_id.as_deref() == Some(item_id) {
+                self.reveal_selected_task_page();
+            }
             self.task_detail_menu_open = None;
             self.persist_and_notify(cx);
         }
@@ -653,6 +709,7 @@ impl Workspace {
             if let Some(next) = recurrence {
                 self.work_items.push(next);
             }
+            self.reveal_selected_task_page();
             self.task_detail_menu_open = None;
             self.persist_and_notify(cx);
         }
@@ -680,6 +737,7 @@ impl Workspace {
                 if let Some(next) = recurrence {
                     self.work_items.push(next);
                 }
+                self.reveal_selected_task_page();
                 self.persist_and_notify(cx);
             } else {
                 cx.notify();
@@ -773,6 +831,7 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         self.task_view_mode = mode;
+        self.reveal_selected_task_page();
         self.persist_and_notify(cx);
     }
 
@@ -1193,9 +1252,15 @@ impl Workspace {
     }
 
     pub(super) fn render_task_list(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let items = self.filtered_work_items();
+        let items = self.filtered_work_items().collect::<Vec<_>>();
+        let total = items.len();
+        let start = self
+            .library_pages
+            .start(LibraryPage::Tasks, total, TASK_LIST_PAGE_SIZE);
         let rows: Vec<AnyElement> = items
             .iter()
+            .skip(start)
+            .take(TASK_LIST_PAGE_SIZE)
             .map(|item| self.render_task_row(item, cx))
             .collect();
 
@@ -1249,9 +1314,11 @@ impl Workspace {
             )
             .child(
                 div()
+                    .id("task-list-scroll")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
+                    .track_scroll(&self.library_pages.task_scroll)
+                    .overflow_y_scroll()
                     .when(rows.is_empty(), |el| {
                         el.child(
                             div()
@@ -1280,8 +1347,17 @@ impl Workspace {
                                 ),
                         )
                     })
-                    .child(div().py(px(TASK_LIST_BODY_Y_PADDING_PX)).children(rows)),
+                    .py(px(TASK_LIST_BODY_Y_PADDING_PX))
+                    .children(rows)
+                    .vertical_scrollbar(&self.library_pages.task_scroll),
             )
+            .children(self.render_library_pages(
+                LibraryPage::Tasks,
+                total,
+                TASK_LIST_PAGE_SIZE,
+                "Task list",
+                cx,
+            ))
             .into_any_element()
     }
 
@@ -1415,9 +1491,21 @@ impl Workspace {
     }
 
     pub(super) fn render_task_board(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let mut items: [Vec<&DesktopWorkItem>; 4] = std::array::from_fn(|_| Vec::new());
+        for item in self.filtered_work_items() {
+            if let Some(column) = DesktopWorkItemStatus::board_columns()
+                .iter()
+                .position(|status| *status == item.status)
+            {
+                items[column].push(item);
+            }
+        }
         let columns: Vec<AnyElement> = DesktopWorkItemStatus::board_columns()
             .iter()
-            .map(|status| self.render_task_board_column(*status, cx))
+            .enumerate()
+            .map(|(column, status)| {
+                self.render_task_board_column(*status, column, &items[column], cx)
+            })
             .collect();
 
         div()
@@ -1435,15 +1523,19 @@ impl Workspace {
     pub(super) fn render_task_board_column(
         &self,
         status: DesktopWorkItemStatus,
+        column: usize,
+        items: &[&DesktopWorkItem],
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let items: Vec<DesktopWorkItem> = self
-            .filtered_work_items()
-            .into_iter()
-            .filter(|item| item.status == status)
-            .collect();
+        let start = self.library_pages.start(
+            LibraryPage::TaskColumn(column),
+            items.len(),
+            TASK_BOARD_PAGE_SIZE,
+        );
         let cards: Vec<AnyElement> = items
             .iter()
+            .skip(start)
+            .take(TASK_BOARD_PAGE_SIZE)
             .map(|item| self.render_task_card(item, cx))
             .collect();
         let opacity = if status.is_completed() {
@@ -1509,9 +1601,11 @@ impl Workspace {
             )
             .child(
                 div()
+                    .id(("task-board-scroll", column))
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
+                    .track_scroll(&self.library_pages.column_scroll[column])
+                    .overflow_y_scroll()
                     .p(px(TASK_BOARD_BODY_PADDING_PX))
                     .flex()
                     .flex_col()
@@ -1544,8 +1638,16 @@ impl Workspace {
                                 ),
                         )
                     })
-                    .children(cards),
+                    .children(cards)
+                    .vertical_scrollbar(&self.library_pages.column_scroll[column]),
             )
+            .children(self.render_library_pages(
+                LibraryPage::TaskColumn(column),
+                items.len(),
+                TASK_BOARD_PAGE_SIZE,
+                status.label(),
+                cx,
+            ))
             .into_any_element()
     }
 

@@ -26,9 +26,30 @@ async fn click(workspace: &Entity<Workspace>, cx: &mut VisualTestContext, select
     cx.condition(workspace, |w, _| w.save_status.is_saved())
         .await;
     cx.run_until_parked();
-    let bounds = cx
+    let mut bounds = cx
         .debug_bounds(selector)
         .unwrap_or_else(|| panic!("Missing {selector}"));
+    let viewport =
+        cx.update(|window, _| gpui::Bounds::new(gpui::Point::default(), window.viewport_size()));
+    if !viewport.contains(&bounds.center()) {
+        // A pending undo review can push the final action below the fold.
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: gpui::point(bounds.center().x, viewport.bottom() - gpui::px(64.0)),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(
+                gpui::px(0.0),
+                viewport.center().y - bounds.center().y,
+            )),
+            ..Default::default()
+        });
+        cx.run_until_parked();
+        bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("Missing {selector} after scrolling"));
+    }
+    assert!(
+        viewport.contains(&bounds.center()),
+        "{selector} at {bounds:?} must be visible inside {viewport:?} before clicking"
+    );
     cx.simulate_click(bounds.center(), gpui::Modifiers::default());
     cx.condition(workspace, |w, _| w.save_status.is_saved())
         .await;

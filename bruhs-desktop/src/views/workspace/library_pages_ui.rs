@@ -1,0 +1,177 @@
+//! Bounded library pages share keyboard controls and retain their full records.
+use super::*;
+
+#[derive(Clone, Copy)]
+pub(super) enum LibraryPage {
+    Tasks,
+    TaskColumn(usize),
+    Documents,
+    Sources,
+}
+
+impl LibraryPage {
+    fn key(self) -> String {
+        match self {
+            Self::Tasks => "task-list".into(),
+            Self::TaskColumn(column) => format!("task-column-{column}"),
+            Self::Documents => "knowledge-documents".into(),
+            Self::Sources => "knowledge-sources".into(),
+        }
+    }
+}
+
+#[derive(Default)]
+pub(super) struct LibraryPages {
+    pub tasks: usize,
+    pub columns: [usize; 4],
+    pub documents: usize,
+    pub sources: usize,
+    pub task_scroll: ScrollHandle,
+    pub column_scroll: [ScrollHandle; 4],
+    pub knowledge_scroll: ScrollHandle,
+}
+
+impl LibraryPages {
+    pub fn start(&self, target: LibraryPage, total: usize, size: usize) -> usize {
+        let page = match target {
+            LibraryPage::Tasks => self.tasks,
+            LibraryPage::TaskColumn(column) => self.columns[column],
+            LibraryPage::Documents => self.documents,
+            LibraryPage::Sources => self.sources,
+        };
+        page.min(total.saturating_sub(1) / size) * size
+    }
+
+    pub fn select(&mut self, target: LibraryPage, page: usize) {
+        match target {
+            LibraryPage::Tasks => {
+                self.tasks = page;
+                self.task_scroll.set_offset(point(px(0.0), px(0.0)));
+            }
+            LibraryPage::TaskColumn(column) => {
+                self.columns[column] = page;
+                self.column_scroll[column].set_offset(point(px(0.0), px(0.0)));
+            }
+            LibraryPage::Documents => {
+                self.documents = page;
+                self.knowledge_scroll.scroll_to_top_of_item(0);
+            }
+            LibraryPage::Sources => {
+                self.sources = page;
+                self.knowledge_scroll.scroll_to_top_of_item(1);
+            }
+        }
+    }
+}
+
+impl Workspace {
+    pub(super) fn render_library_pages(
+        &self,
+        target: LibraryPage,
+        total: usize,
+        size: usize,
+        label: &str,
+        cx: &Context<'_, Self>,
+    ) -> Option<AnyElement> {
+        if total <= size {
+            return None;
+        }
+        let start = self.library_pages.start(target, total, size);
+        let key = target.key();
+        let debug_key = key.clone();
+        Some(
+            div()
+                .id(SharedString::from(format!("{key}-pages")))
+                .debug_selector(move || format!("desktop-{debug_key}-pages"))
+                .role(Role::Navigation)
+                .aria_label(format!("{label} pages"))
+                .flex_shrink_0()
+                .border_t_1()
+                .border_color(theme::longan_800())
+                .px_2()
+                .py_1()
+                .child(
+                    div()
+                        .id("page-status")
+                        .role(Role::Status)
+                        .text_center()
+                        .font(theme::tabular_system_font())
+                        .text_size(px(11.0))
+                        .text_color(theme::rambutan_400())
+                        .child(format!(
+                            "{} to {} of {total}",
+                            start + 1,
+                            (start + size).min(total)
+                        )),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_between()
+                        .child(self.library_page_button(
+                            target,
+                            start / size,
+                            false,
+                            start == 0,
+                            label,
+                            cx,
+                        ))
+                        .child(self.library_page_button(
+                            target,
+                            start / size,
+                            true,
+                            start + size >= total,
+                            label,
+                            cx,
+                        )),
+                )
+                .into_any_element(),
+        )
+    }
+
+    fn library_page_button(
+        &self,
+        target: LibraryPage,
+        page: usize,
+        next: bool,
+        disabled: bool,
+        label: &str,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let direction = if next { "next" } else { "previous" };
+        let id = format!("desktop-{}-{direction}", target.key());
+        let debug_id = id.clone();
+        let next_page = if next {
+            page + 1
+        } else {
+            page.saturating_sub(1)
+        };
+        web_button(
+            SharedString::from(id),
+            WebButtonVariant::Ghost,
+            WebButtonSize::Small,
+            ButtonState::disabled_if(disabled),
+        )
+        .debug_selector(move || debug_id)
+        .aria_label(format!("{direction} {label} page"))
+        .min_h(px(44.0))
+        .when(!disabled, |button| {
+            button
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.library_pages.select(target, next_page);
+                    cx.notify();
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                        window.prevent_default();
+                        cx.stop_propagation();
+                        this.library_pages.select(target, next_page);
+                        cx.notify();
+                    }
+                }))
+        })
+        .child(if next { "Next" } else { "Previous" })
+        .into_any_element()
+    }
+}

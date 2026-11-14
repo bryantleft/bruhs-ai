@@ -12,7 +12,7 @@ fn run<F: std::future::Future>(future: F) -> F::Output {
 fn standalone(name: &str, args: Value) -> ToolResult {
     let state = Arc::new(AppState::new());
     let tool = lookup(Mode::Standalone, name).unwrap_or_else(|| panic!("{name} is not listed"));
-    run(call_standalone(tool, &args, &state))
+    run(call_standalone(tool, &args, &state, &mut Vec::new()))
 }
 
 fn text(result: &ToolResult) -> &str {
@@ -69,11 +69,11 @@ fn standalone_dispatch_never_reaches_the_bridge_only_fallback() {
 fn the_catalog_agrees_with_the_modes_that_can_answer() {
     let standalone: HashSet<_> = list_tools(Mode::Standalone)
         .into_iter()
-        .map(|tool| tool.name)
+        .map(|tool| tool.name.clone())
         .collect();
     let bridge: HashSet<_> = list_tools(Mode::Bridge)
         .into_iter()
-        .map(|tool| tool.name)
+        .map(|tool| tool.name.clone())
         .collect();
     // Only the app has these domains' data.
     for domain in AgentDomain::ALL {
@@ -111,7 +111,7 @@ fn the_catalog_agrees_with_the_modes_that_can_answer() {
 fn registry_names_match_the_shared_tool_definitions() {
     let listed: HashSet<_> = list_tools(Mode::Bridge)
         .into_iter()
-        .map(|tool| tool.name)
+        .map(|tool| tool.name.clone())
         .collect();
     for definition in agent_tool_definitions() {
         assert!(listed.contains(&definition.name), "{}", definition.name);

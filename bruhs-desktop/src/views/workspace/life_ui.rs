@@ -100,7 +100,8 @@ impl Workspace {
                     },
                     if amount < 0 { amount } else { -amount },
                     now,
-                ),
+                )
+                .into(),
             ),
             FinanceEntryKind::Budget => self.life_context.finance.budgets.insert(
                 0,
