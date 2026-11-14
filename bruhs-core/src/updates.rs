@@ -20,7 +20,7 @@ use std::ffi::OsString;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::atomic::{AtomicU64, Ordering};
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 use bruhs_models::agent::AgentProvider;
@@ -445,10 +445,16 @@ fn claude_channel(texts: &[String]) -> String {
 
 /// A version from a URL: npm's JSON (`{"version": …}`) or a bare version.
 async fn http_version(url: &str, json: bool) -> Result<String, String> {
-    let client = reqwest::Client::builder()
-        .timeout(HTTP_TIMEOUT)
-        .build()
-        .map_err(|error| error.to_string())?;
+    static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
+    let client = CLIENT
+        .get_or_init(|| {
+            reqwest::Client::builder()
+                .timeout(HTTP_TIMEOUT)
+                .build()
+                .map_err(|error| error.to_string())
+        })
+        .as_ref()
+        .map_err(Clone::clone)?;
     let body = client
         .get(url)
         .send()

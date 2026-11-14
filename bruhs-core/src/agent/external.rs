@@ -10,6 +10,7 @@ use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
+pub(super) mod acp;
 #[path = "../../../claude-sdk-rs/src/process.rs"]
 mod process;
 
@@ -24,6 +25,7 @@ pub(crate) struct Options {
     resume: Option<String>,
     instructions: String,
     mcp: HashMap<String, Mcp>,
+    unattended: bool,
     agent_defaults: Value,
     permission_defaults: Vec<Value>,
 }
@@ -55,6 +57,7 @@ impl Options {
             resume: resume.map(String::from),
             instructions: String::new(),
             mcp: HashMap::new(),
+            unattended: false,
             agent_defaults: json!({}),
             permission_defaults: Vec::new(),
         }
@@ -67,8 +70,12 @@ impl Options {
         self.instructions.push_str(instructions);
     }
 
+    pub(super) fn unattended(&mut self) {
+        self.unattended = true;
+    }
+
     pub(super) fn supports_mcp(&self) -> bool {
-        self.provider == AgentProvider::OpenCode
+        matches!(self.provider, AgentProvider::OpenCode | AgentProvider::Acp)
     }
 
     pub(crate) fn add_mcp(
@@ -112,6 +119,12 @@ impl Options {
     }
 
     fn prepare(&self) -> io::Result<Prepared> {
+        if self.unattended {
+            return Err(io::Error::other(format!(
+                "{} event runs are unavailable because this adapter cannot isolate inherited hooks and plugins. Choose Claude Code or Codex for unattended agents.",
+                self.provider.label()
+            )));
+        }
         if self.provider == AgentProvider::Antigravity
             && self.mode != PermissionMode::BypassPermissions
         {
@@ -223,7 +236,7 @@ impl Options {
                     command.arg(format!("--session={resume}"));
                 }
             }
-            AgentProvider::Claude | AgentProvider::Codex => {
+            AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Acp => {
                 return Err(io::Error::other(
                     "This provider uses its dedicated SDK adapter.",
                 ));
@@ -252,7 +265,7 @@ fn executable(provider: AgentProvider) -> io::Result<PathBuf> {
         AgentProvider::Antigravity => ("BRUHS_ANTIGRAVITY_BIN", "agy"),
         AgentProvider::Grok => ("BRUHS_GROK_BIN", "grok"),
         AgentProvider::OpenCode => ("BRUHS_OPENCODE_BIN", "opencode"),
-        AgentProvider::Claude | AgentProvider::Codex => {
+        AgentProvider::Claude | AgentProvider::Codex | AgentProvider::Acp => {
             return Err(io::Error::other("Not an external provider."));
         }
     };
@@ -517,12 +530,16 @@ async fn opencode_agent_defaults(
 }
 
 pub(super) async fn stream(mut options: Options, turn: TurnContext) {
+    if options.provider == AgentProvider::Acp {
+        acp::stream(options, turn).await;
+        return;
+    }
     if turn.tx.is_closed() {
         turn.finish(false);
         return;
     }
     let provider = options.provider;
-    if provider == AgentProvider::OpenCode {
+    if provider == AgentProvider::OpenCode && !options.unattended {
         match tokio::time::timeout(CONFIG_TIMEOUT, opencode_agent_defaults(&options, &turn)).await {
             Ok(Ok((agent, permission))) => {
                 options.permission_defaults = vec![permission, agent["permission"].clone()];

@@ -43,7 +43,8 @@ async fn run_login(provider: AgentProvider) -> Result<Json<Value>, WithSuccessFl
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => {
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => {
             return Err(AppError::BadRequest("Sign in through this runtime's CLI.".into()).into())
         }
     };

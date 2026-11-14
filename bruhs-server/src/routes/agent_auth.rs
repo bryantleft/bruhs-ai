@@ -64,7 +64,8 @@ async fn auth_status(provider: AgentProvider) -> AuthStatus {
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => {
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => {
             return AuthStatus::unknown("This runtime manages login in its CLI.")
         }
     };
@@ -81,7 +82,8 @@ async fn auth_status(provider: AgentProvider) -> AuthStatus {
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => AuthStatus::unknown("This runtime manages login in its CLI."),
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => AuthStatus::unknown("This runtime manages login in its CLI."),
     }
 }
 

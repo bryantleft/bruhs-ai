@@ -70,7 +70,8 @@ fn t3_provider(provider: AgentProvider) -> Result<&'static str, String> {
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => Err(format!(
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => Err(format!(
             "T3 export does not yet support the {} runtime. Export the transcript instead.",
             provider.label()
         )),

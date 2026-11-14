@@ -60,6 +60,7 @@ pub fn setup_hint(provider: AgentProvider) -> Option<&'static str> {
         AgentProvider::OpenCode => {
             Some("Run `opencode auth login` in a terminal and configure your provider.")
         }
+        AgentProvider::Acp => Some("Configure the installed ACP command in Workbench → Providers and sign in with its own CLI."),
     }
 }
 

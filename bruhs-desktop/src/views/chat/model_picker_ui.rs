@@ -586,6 +586,7 @@ impl ChatView {
             }
             AgentProvider::Grok => "Uses Grok CLI login. App tools are unavailable.".into(),
             AgentProvider::OpenCode => "Configure providers and models in OpenCode.".into(),
+            AgentProvider::Acp => "Authentication is managed by the configured ACP agent.".into(),
         }
     }
 

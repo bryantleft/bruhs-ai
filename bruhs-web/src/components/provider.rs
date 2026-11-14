@@ -39,6 +39,7 @@ pub fn provider_agent_label_for_model(model_id: &str) -> &'static str {
         AgentProvider::Antigravity => "antigravity agent",
         AgentProvider::Grok => "grok agent",
         AgentProvider::OpenCode => "opencode agent",
+        AgentProvider::Acp => "acp agent",
     }
 }
 

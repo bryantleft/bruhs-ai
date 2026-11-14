@@ -44,7 +44,8 @@ pub fn npm_package(provider: AgentProvider) -> Option<&'static str> {
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => None,
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => None,
     }
 }
 
@@ -57,6 +58,7 @@ pub fn binary_name(provider: AgentProvider) -> &'static str {
         AgentProvider::Antigravity => "agy",
         AgentProvider::Grok => "grok",
         AgentProvider::OpenCode => "opencode",
+        AgentProvider::Acp => "acp",
     }
 }
 
@@ -250,7 +252,8 @@ fn policy(provider: AgentProvider) -> &'static CompatPolicy {
         AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => &CompatPolicy {
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => &CompatPolicy {
             recommended: "Managed externally",
             ranges: &[],
         },
@@ -416,7 +419,8 @@ pub fn detect_install(provider: AgentProvider, on_path: &str, resolved: &str) ->
         | AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => {}
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => {}
     }
     if either("/.vite-plus/bin/") || either("/.local/share/vite-plus/bin/") {
         return install(InstallManager::VitePlus, npm, None);

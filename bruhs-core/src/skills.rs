@@ -74,7 +74,8 @@ fn skill_roots(
             AgentProvider::Cursor
             | AgentProvider::Antigravity
             | AgentProvider::Grok
-            | AgentProvider::OpenCode => return roots,
+            | AgentProvider::OpenCode
+            | AgentProvider::Acp => return roots,
         };
         roots.push(folder);
     }
@@ -88,7 +89,8 @@ fn skill_roots(
             AgentProvider::Cursor
             | AgentProvider::Antigravity
             | AgentProvider::Grok
-            | AgentProvider::OpenCode => {}
+            | AgentProvider::OpenCode
+            | AgentProvider::Acp => {}
         }
     }
     roots
