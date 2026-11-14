@@ -1,8 +1,27 @@
 //! Server-owned event agents; these records never enter browser metadata storage.
 use super::{get_json, segment, send_json, ApiError};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
+use bruhs_models::weekly_reports::{EngineeringReport, WeeklyReportCommand, WeeklyReportsSnapshot};
 use gloo_net::http::Method;
 use serde::Deserialize;
+
+pub async fn weekly_reports(before: Option<&str>) -> Result<WeeklyReportsSnapshot, ApiError> {
+    get_json(&before.map_or_else(
+        || "/api/weekly-reports".into(),
+        |before| format!("/api/weekly-reports?before={}", segment(before)),
+    ))
+    .await
+}
+
+pub async fn weekly_report(id: &str) -> Result<EngineeringReport, ApiError> {
+    get_json(&format!("/api/weekly-reports/{}", segment(id))).await
+}
+
+pub async fn weekly_report_command(
+    command: &WeeklyReportCommand,
+) -> Result<WeeklyReportsSnapshot, ApiError> {
+    send_json(Method::POST, "/api/weekly-reports/commands", Some(command)).await
+}
 
 #[derive(Clone, Debug, Deserialize)]
 pub struct ReactiveHookToken {

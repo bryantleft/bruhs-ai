@@ -297,3 +297,92 @@ fn invalid_checkpoints_fail_instead_of_resetting_and_replaying() {
     )
     .is_err());
 }
+
+#[tokio::test]
+async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
+    use bruhs_models::{
+        reactive::ReactiveChange, reactive::ReactiveCommand, weekly_reports::WEEK_MS,
+    };
+    let dir = tempfile::tempdir().unwrap();
+    let runtime = ReactiveRuntime::open(dir.path().join("weekly-clock.sqlite3"))
+        .await
+        .unwrap();
+    let every_ms = u64::try_from(WEEK_MS).unwrap();
+    let source = EventSource {
+        id: "weekly-clock".into(),
+        name: "Weekly clock".into(),
+        enabled: true,
+        kind: SourceKind::Schedule { every_ms },
+    };
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSource {
+                source: source.clone(),
+            },
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveAgent {
+                agent: bruhs_models::reactive::ReactiveAgent {
+                    id: "weekly-reader".into(),
+                    name: "Weekly reader".into(),
+                    instructions: String::new(),
+                    memory: String::new(),
+                    model: bruhs_models::agent::DEFAULT_AGENT_MODEL.into(),
+                    project_path: dir.path().display().to_string(),
+                    enabled: true,
+                },
+            },
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSubscription {
+                subscription: bruhs_models::reactive::Subscription {
+                    id: "weekly-subscription".into(),
+                    source_id: source.id.clone(),
+                    agent_id: "weekly-reader".into(),
+                    instructions: String::new(),
+                    enabled: true,
+                    auto_run: false,
+                    debounce_ms: 0,
+                    throttle_ms: 0,
+                },
+            },
+        })
+        .await
+        .unwrap();
+    let due = now_ms().unwrap() + 1000;
+    runtime
+        .ingest(
+            &source,
+            vec![],
+            "schedule",
+            json!({"every_ms":every_ms,"next_due_ms":due,"sequence":0}),
+        )
+        .await
+        .unwrap();
+    let mut changes = runtime.watch_changes();
+    let worker = tokio::spawn(drive(runtime.clone(), source, reqwest::Client::new()));
+    let event = tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            let snapshot = runtime.snapshot().await.unwrap();
+            if let Some(event) = snapshot
+                .events
+                .into_iter()
+                .find(|event| event.source_id == "weekly-clock")
+            {
+                break event;
+            }
+            changes.changed().await.unwrap();
+        }
+    })
+    .await;
+    worker.abort();
+    let _ = worker.await;
+    let event=event.expect("A resumed weekly source must wake for its saved due time rather than sleep another seven days");
+    assert_eq!(event.payload["scheduled_at_ms"], due);
+}

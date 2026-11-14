@@ -7,6 +7,7 @@ use crate::{
 };
 use bruhs_models::reactive::*;
 mod setup;
+mod weekly_reports;
 use gpui::{prelude::*, *};
 use gpui_component::input::{Input, InputState};
 use std::{
@@ -87,6 +88,7 @@ pub(crate) struct ReactiveAutomations {
     request: Option<Task<()>>,
     poll: Option<Task<()>>,
     last_render: Instant,
+    weekly: weekly_reports::WeeklyReportsState,
 }
 
 trait ReactiveButton {
@@ -296,6 +298,7 @@ impl ReactiveAutomations {
             request: None,
             poll: None,
             last_render: Instant::now(),
+            weekly: weekly_reports::WeeklyReportsState::default(),
         };
         if cfg!(not(test)) {
             panel.poll = Some(cx.spawn(async move |this, cx| loop {
@@ -315,6 +318,7 @@ impl ReactiveAutomations {
         panel
     }
     fn refresh(&mut self, cx: &mut Context<'_, Self>) {
+        self.refresh_weekly(cx);
         if self.busy || self.reading {
             return;
         }
@@ -333,7 +337,9 @@ impl ReactiveAutomations {
                 this.reading = false;
                 match result {
                     Ok(snapshot) => {
-                        this.snapshot = Some(snapshot);
+                        this.snapshot = Some(
+                            bruhs_models::weekly_reports::editable_automation_snapshot(snapshot),
+                        );
                         this.load_error = None;
                     }
                     Err(error) => this.load_error = Some(reactive_error(error)),
@@ -370,7 +376,9 @@ impl ReactiveAutomations {
                 this.busy = false;
                 match result {
                     Ok(snapshot) => {
-                        this.snapshot = Some(snapshot);
+                        this.snapshot = Some(
+                            bruhs_models::weekly_reports::editable_automation_snapshot(snapshot),
+                        );
                         if closes_automation {
                             this.editor = None;
                         }
@@ -849,6 +857,7 @@ impl Render for ReactiveAutomations {
             self.refresh(cx);
         }
         let disabled = self.busy || self.snapshot.is_none();
+        self.ensure_weekly_inputs(_window, cx);
         let mut panel=div().id("reactive-automations").w_full().min_w_0().mb_4().p_4().rounded(px(8.0)).bg(theme::longan_900()).border_1().border_color(theme::longan_700().opacity(0.5)).flex().flex_col().gap_3()
             .child(div().flex().flex_wrap().items_center().justify_between().gap_2().child(heading("Automations")).child(muted("Drafts only")).child(control("reactive-refresh","Refresh",self.busy||self.reading).on_activate(cx, |this,_,cx|this.refresh(cx))))
             .child(muted("Describe a job and choose what starts it. Review once to enable a complete automation, then pause or resume it with one control."))
@@ -865,6 +874,7 @@ impl Render for ReactiveAutomations {
                 panel = panel.child(editor);
             }
         }
+        panel = panel.child(self.render_weekly_reports(cx));
         panel = panel.child(self.render_automation_cards(cx));
         panel = panel.child(
             control(

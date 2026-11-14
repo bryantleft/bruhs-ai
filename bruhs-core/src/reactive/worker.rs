@@ -76,7 +76,67 @@ async fn execute(
     agent: &ReactiveAgent,
     run: &ReactiveRun,
 ) -> Result<(), ReactiveError> {
-    let mut stream = match app.send_message(turn(agent, run)).await {
+    let mut changes = runtime.watch_changes();
+    let mut effective_run = run.clone();
+    let mut effective_agent = agent.clone();
+    let requested_run = run.clone();
+    let preparation = runtime
+        .call(move |connection| store::reports::prepare(connection, &requested_run))
+        .await;
+    let preparation = match preparation {
+        Ok(preparation) => preparation,
+        Err(error @ ReactiveError::Storage(_)) => return Err(error),
+        Err(error) => {
+            let (id, message) = (run.id.clone(), error.to_string());
+            runtime
+                .call(move |connection| {
+                    store::finish_run(connection, &id, RunStatus::Failed, None, Some(message))
+                })
+                .await?;
+            return Ok(());
+        }
+    };
+    if let Some(mut job) = preparation {
+        if job.coverage.is_none() {
+            let coverage = {
+                let collection = super::report_sources::collect(&job);
+                tokio::pin!(collection);
+                loop {
+                    tokio::select! {
+                        coverage = &mut collection => break coverage,
+                        changed = changes.changed() => {
+                            if changed.is_err() {return Ok(());}
+                            let id=run.id.clone();
+                            if runtime.call(move |connection|store::run_record(connection,&id).map(|run|run.status)).await? != RunStatus::Running {return Ok(());}
+                        }
+                    }
+                }
+            };
+            job.coverage = Some(coverage.clone());
+            let id = run.id.clone();
+            runtime
+                .call(move |connection| store::reports::set_coverage(connection, &id, coverage))
+                .await?;
+        }
+        effective_agent.project_path = job.preset.project_path.clone();
+        effective_agent.model = job.preset.model.clone();
+        effective_run.prompt = super::report_sources::prompt(&job);
+        // A new report uses only the frozen window and evidence, not prior
+        // sessions' stale source context. Its stable thread still reopens activity.
+        effective_run.session_id = None;
+    }
+    let id = run.id.clone();
+    if runtime
+        .call(move |connection| store::run_record(connection, &id).map(|run| run.status))
+        .await?
+        != RunStatus::Running
+    {
+        return Ok(());
+    }
+    let mut stream = match app
+        .send_message(turn(&effective_agent, &effective_run))
+        .await
+    {
         Ok(stream) => stream,
         Err(_) => {
             let id = run.id.clone();
@@ -86,7 +146,6 @@ async fn execute(
             return Ok(());
         }
     };
-    let mut changes = runtime.watch_changes();
     let mut output = String::new();
     let mut output_chars = 0_usize;
     let mut output_truncated = false;
@@ -119,17 +178,19 @@ async fn execute(
                     }
                     OrchestratorEvent::Query(QueryEvent::Init { session_id, .. }) => {
                         let id = run.id.clone();
-                        runtime.call(move |connection| store::record_session(connection, &id, &session_id)).await?;
+                        let model=effective_agent.model.clone();
+                        runtime.call(move |connection| store::record_session(connection, &id, &session_id,&model)).await?;
                     }
                     OrchestratorEvent::Query(QueryEvent::Result { result: text, session_id, is_error, .. }) => {
                         let id = run.id.clone();
-                        runtime.call(move |connection| store::record_session(connection, &id, &session_id)).await?;
+                        let model=effective_agent.model.clone();
+                        runtime.call(move |connection| store::record_session(connection, &id, &session_id,&model)).await?;
                         result = Some(text);
                         if is_error { failure = Some("The provider reported a failed turn.".into()); }
                     }
                     // Codex releases final usage after process settlement. A
                     // following process error still overrides this receipt.
-                    OrchestratorEvent::Query(QueryEvent::Usage(_)) if AgentProvider::for_model(&agent.model) == AgentProvider::Codex => {
+                    OrchestratorEvent::Query(QueryEvent::Usage(_)) if AgentProvider::for_model(&effective_agent.model) == AgentProvider::Codex => {
                         codex_completed = true;
                     }
                     OrchestratorEvent::Query(QueryEvent::Error(error)) => { failure = Some(error); }

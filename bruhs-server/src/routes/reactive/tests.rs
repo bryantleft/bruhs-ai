@@ -220,3 +220,89 @@ async fn oversized_hook_does_not_advance_an_event_receipt() {
     assert_eq!(response.status(), StatusCode::PAYLOAD_TOO_LARGE);
     assert!(fixture.runtime.snapshot().await.unwrap().events.is_empty());
 }
+
+#[tokio::test]
+async fn weekly_report_preset_and_run_retry_use_the_same_http_contract_for_native() {
+    use bruhs_models::weekly_reports::*;
+    let fixture = Fixture::new().await;
+    let native =
+        crate::desktop_server_client::ServerClient::new(&fixture.base, "http://127.0.0.1:9")
+            .unwrap();
+    let mut preset = WeeklyReportPreset {
+        id: uuid::Uuid::new_v4().to_string(),
+        project_path: fixture.directory.path().display().to_string(),
+        model: "claude-haiku-4-5".into(),
+        local_git: false,
+        github_pull_requests: false,
+        github_deployments: false,
+        scheduled: false,
+    };
+    assert!(matches!(
+        native
+            .weekly_report_command(&WeeklyReportCommand::SavePreset {
+                preset: preset.clone()
+            })
+            .await,
+        Err(crate::desktop_server_client::ServerError::Status {
+            code: StatusCode::BAD_REQUEST,
+            ..
+        })
+    ));
+    assert!(native
+        .weekly_reports(None)
+        .await
+        .unwrap()
+        .presets
+        .is_empty());
+    preset.local_git = true;
+    let saved = native
+        .weekly_report_command(&WeeklyReportCommand::SavePreset {
+            preset: preset.clone(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(saved.presets, vec![preset.clone()]);
+    let request = WeeklyReportCommand::RunNow {
+        preset_id: preset.id.clone(),
+        request_id: uuid::Uuid::new_v4().to_string(),
+        window_end_utc: None,
+    };
+    native.weekly_report_command(&request).await.unwrap();
+    native.weekly_report_command(&request).await.unwrap();
+    let snapshot = fixture.runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.runs.len(), 1);
+    assert_eq!(
+        snapshot.runs[0].status,
+        bruhs_models::reactive::RunStatus::Queued
+    );
+    assert!(
+        native
+            .weekly_reports(None)
+            .await
+            .unwrap()
+            .reports
+            .is_empty(),
+        "queued runs are not saved reports"
+    );
+    let response = fixture
+        .client
+        .get(format!("{}/api/weekly-reports", fixture.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.headers().get("cache-control").unwrap(), "no-store");
+    assert!(native
+        .weekly_report("not-a-saved-report")
+        .await
+        .unwrap_err()
+        .is_not_found());
+    let hostile = fixture
+        .client
+        .post(format!("{}/api/weekly-reports/commands", fixture.base))
+        .header("Origin", "https://unrelated.example")
+        .json(&request)
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(hostile.status(), StatusCode::FORBIDDEN);
+}

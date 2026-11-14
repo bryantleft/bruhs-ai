@@ -17,7 +17,7 @@ pub fn is_mcp_helper() -> bool {
     std::env::args_os().any(|arg| arg == HELPER)
 }
 
-fn endpoint() -> io::Result<String> {
+pub(crate) fn endpoint() -> io::Result<String> {
     let address = std::env::var(ENDPOINT_ENV)
         .or_else(|_| std::env::var("BRUHS_SERVER_URL"))
         .unwrap_or_else(|_| {
