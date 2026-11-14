@@ -40,14 +40,14 @@ use crate::components::terminal_panel::{TerminalPanel, TerminalPanelMode};
 use crate::components::timeline::{build_turns, latest_assistant_id, RowBuilder};
 use crate::components::timeline_view::Timeline;
 use crate::state::{
-    auto_title, AgentMessage, BaseBranchSignal, ChipRetargetGuard,
-    ClaudeAutoCompactSignal, ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal,
-    ComposerChips, ComposerDraft, DiffFocusPath, DiffScope, DiffScopeSignal, FollowUpSteerSignal,
-    GitStatusSignal, MessageStatus, OpenFileSignal, PanelSurface, PendingPermissionsSignal,
-    PermissionModeSignal, PreviousWorktreeSignal, PromptQueueSignal, QueueHolds, RightPanelSignal,
-    RunChoiceSignal, ThreadNotice, Turns, UnreadThreads,
+    auto_title, AgentMessage, BaseBranchSignal, ChipRetargetGuard, ClaudeAutoCompactSignal,
+    ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal, ComposerChips, ComposerDraft,
+    DiffFocusPath, DiffScope, DiffScopeSignal, FollowUpSteerSignal, GitStatusSignal, MessageStatus,
+    OpenFileSignal, PanelSurface, PendingPermissionsSignal, PermissionModeSignal,
+    PreviousWorktreeSignal, PromptQueueSignal, QueueHolds, RightPanelSignal, RunChoiceSignal,
+    ThreadNotice, Turns, UnreadThreads,
 };
-use crate::stream::{apply_message, StreamEffect, StreamContext};
+use crate::stream::{apply_message, StreamContext, StreamEffect};
 use crate::ui::Icon;
 use bruhs_models::logic::attachments::{
     append_uploaded_files, upload_label, viewer_target, UploadedFile, SEND_WAITS,

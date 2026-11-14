@@ -160,9 +160,7 @@ pub async fn guard(
     let is_api = request.uri().path() == "/api" || request.uri().path().starts_with("/api/");
     let inline_response = matches!(
         request.uri().path(),
-        "/api/agent/rich-response"
-            | "/api/agent/rich-media"
-            | "/api/agent/media"
+        "/api/agent/rich-response" | "/api/agent/rich-media" | "/api/agent/media"
     ) || request
         .uri()
         .path()

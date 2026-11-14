@@ -61,7 +61,9 @@ fn model_picker_fits_a_short_window_and_reveals_keyboard_selection(cx: &mut Test
     let (chat, cx) = chat_window(cx);
     cx.simulate_resize(size(px(640.0), px(480.0)));
     chat.update_in(cx, |chat, window, cx| {
-        chat.set_model("gpt-5.5", cx);
+        // Start at the first catalog row so count - 1 presses reaches the
+        // last entry regardless of catalog additions or provider ordering.
+        chat.set_model(bruhs_models::agent::MODEL_CATALOG[0].id, cx);
         chat.open_model_picker(window, cx);
     });
     cx.run_until_parked();
@@ -79,8 +81,15 @@ fn model_picker_fits_a_short_window_and_reveals_keyboard_selection(cx: &mut Test
     let list = cx
         .debug_bounds("desktop-model-picker-list")
         .expect("model list");
-    assert!(selected.top() >= list.top());
-    assert!(selected.bottom() <= list.bottom());
+    let offset = chat.read_with(cx, |chat, _| chat.model_picker_scroll.offset());
+    assert!(
+        selected.top() >= list.top(),
+        "selected row {selected:?} above list {list:?}"
+    );
+    assert!(
+        selected.bottom() <= list.bottom(),
+        "selected row {selected:?} below list {list:?}, offset {offset:?}"
+    );
     chat.read_with(cx, |chat, cx| {
         assert_eq!(chat.model_picker_index, count - 1);
         let groups = crate::views::chat::group_models_like_web(&chat.model_picker_matches(cx));
