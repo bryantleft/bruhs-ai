@@ -231,6 +231,26 @@ fn read_only_config_overrides_inherited_write_permissions() {
 }
 
 #[test]
+fn unattended_runs_fail_before_spawning() {
+    let mut options = Options::new(
+        AgentProvider::Grok,
+        "hello",
+        "/tmp",
+        "grok/default",
+        PermissionMode::Plan,
+        None,
+        None,
+    );
+    options.unattended();
+    assert!(options
+        .prepare()
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("unattended"));
+}
+
+#[test]
 fn cursor_does_not_claim_unapproved_per_turn_mcp_servers_are_available() {
     let options = Options::new(
         AgentProvider::Cursor,

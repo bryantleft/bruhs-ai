@@ -90,6 +90,10 @@ pub fn auth_line(
         }
         AgentProvider::Grok => "Uses Grok CLI login. App tools are unavailable.".into(),
         AgentProvider::OpenCode => "Configure providers and models in OpenCode.".into(),
+        AgentProvider::Acp => {
+            "Configure ACP agents in Workbench → Providers; sign in with the agent's own CLI."
+                .into()
+        }
     }
 }
 

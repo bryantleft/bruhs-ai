@@ -149,16 +149,18 @@ pub enum AgentProvider {
     Antigravity,
     Grok,
     OpenCode,
+    Acp,
 }
 
 impl AgentProvider {
-    pub const ALL: [Self; 6] = [
+    pub const ALL: [Self; 7] = [
         Self::Claude,
         Self::Codex,
         Self::Cursor,
         Self::Antigravity,
         Self::Grok,
         Self::OpenCode,
+        Self::Acp,
     ];
 
     /// The wire string.
@@ -170,6 +172,7 @@ impl AgentProvider {
             Self::Antigravity => "antigravity",
             Self::Grok => "grok",
             Self::OpenCode => "opencode",
+            Self::Acp => "acp",
         }
     }
 
@@ -181,13 +184,14 @@ impl AgentProvider {
             Self::Antigravity => "Antigravity",
             Self::Grok => "Grok",
             Self::OpenCode => "OpenCode",
+            Self::Acp => "ACP agent",
         }
     }
 
     pub fn is_external(self) -> bool {
         matches!(
             self,
-            Self::Cursor | Self::Antigravity | Self::Grok | Self::OpenCode
+            Self::Cursor | Self::Antigravity | Self::Grok | Self::OpenCode | Self::Acp
         )
     }
 
@@ -200,6 +204,7 @@ impl AgentProvider {
             Self::Antigravity => "antigravity/",
             Self::Grok => "grok/",
             Self::OpenCode => "opencode/",
+            Self::Acp => "acp/",
         }
     }
 
@@ -224,6 +229,7 @@ impl FromStr for AgentProvider {
             "antigravity" => Ok(Self::Antigravity),
             "grok" => Ok(Self::Grok),
             "opencode" => Ok(Self::OpenCode),
+            "acp" => Ok(Self::Acp),
             _ => Err(UnknownVariant::new("agent provider", s)),
         }
     }
@@ -312,6 +318,11 @@ pub const MODEL_CATALOG: &[ModelInfo] = &[
     ModelInfo {
         id: "gpt-5.3-codex",
         label: "GPT-5.3 Codex",
+        provider: AgentProvider::Codex,
+    },
+    ModelInfo {
+        id: "gpt-6-luna",
+        label: "GPT-6 Luna",
         provider: AgentProvider::Codex,
     },
     ModelInfo {
@@ -593,6 +604,14 @@ impl fmt::Display for ModelId {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn acp_runtime_selection_is_explicit() {
+        assert_eq!(
+            super::AgentProvider::for_model("acp/my-agent/default").as_str(),
+            "acp"
+        );
+        assert!(super::custom_model_selection("acp/my-agent/default").is_some());
+    }
     use super::*;
 
     #[test]
@@ -777,6 +796,7 @@ mod tests {
                 ("gpt-5.5", "GPT-5.5", "codex"),
                 ("gpt-5.4", "GPT-5.4", "codex"),
                 ("gpt-5.3-codex", "GPT-5.3 Codex", "codex"),
+                ("gpt-6-luna", "GPT-6 Luna", "codex"),
                 ("claude-fable-5", "Claude Fable 5", "claude"),
                 ("claude-opus-4-8", "Claude Opus 4.8", "claude"),
                 ("claude-sonnet-4-6", "Claude Sonnet 4.6", "claude"),

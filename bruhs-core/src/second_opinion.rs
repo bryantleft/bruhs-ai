@@ -71,7 +71,8 @@ pub async fn second_opinion(request: ReviewRequest) -> Result<Review, ReviewErro
             AgentProvider::Cursor
             | AgentProvider::Antigravity
             | AgentProvider::Grok
-            | AgentProvider::OpenCode => Err(ReviewError::Failed(
+            | AgentProvider::OpenCode
+            | AgentProvider::Acp => Err(ReviewError::Failed(
                 "Second-opinion reviews require Claude Code or Codex.".into(),
             )),
         }
