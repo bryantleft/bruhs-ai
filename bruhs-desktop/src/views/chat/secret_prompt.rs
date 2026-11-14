@@ -87,6 +87,16 @@ impl ChatView {
 }
 
 impl SecretPrompt {
+    #[cfg(test)]
+    pub(super) fn set_mobile_fixture_value(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.input.update(cx, |input, cx| {
+            input.set_value("PRIVATE_PHONE_FORM_CANARY", window, cx)
+        });
+    }
     fn respond(&mut self, action: &'static str, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.busy {
             return;

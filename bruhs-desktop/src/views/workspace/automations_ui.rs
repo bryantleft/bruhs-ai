@@ -478,7 +478,7 @@ impl Workspace {
                 .life_context
                 .finance
                 .transactions
-                .insert(0, transaction),
+                .insert(0, transaction.into()),
             AutomationRecord::Workout(workout) => {
                 self.life_context.health.workouts.insert(0, workout)
             }
@@ -986,7 +986,8 @@ impl Workspace {
                                             ),
                                     )),
                             ),
-                    ),
+                    )
+                    .child(self.render_mobile(cx).mt_3()),
             )
     }
 }
