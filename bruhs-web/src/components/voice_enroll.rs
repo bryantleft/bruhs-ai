@@ -261,7 +261,7 @@ pub fn VoiceEnrollModal(
 
 /// Why a voice sample could not be recorded.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
-enum VoiceCaptureError {
+pub(crate) enum VoiceCaptureError {
     /// A browser audio API refused (`step` says which); the browser's reason
     /// follows.
     #[error("{step} failed: {reason}")]
@@ -287,7 +287,7 @@ fn browser(step: &'static str) -> impl FnOnce(JsValue) -> VoiceCaptureError {
 /// graph and the callback that fills the sample buffer. Dropping it — on
 /// success, on an error part-way through set-up, or when the enrolling
 /// future is dropped — turns the microphone off and releases them all.
-struct Recorder {
+pub(crate) struct Recorder {
     stream: web_sys::MediaStream,
     context: Option<web_sys::AudioContext>,
     processor: Option<web_sys::ScriptProcessorNode>,
@@ -309,6 +309,22 @@ impl Recorder {
     /// The samples recorded so far, leaving the buffer empty.
     fn take_samples(&self) -> Vec<f32> {
         std::mem::take(&mut *self.samples.borrow_mut())
+    }
+
+    pub(crate) fn finish(self) -> Result<Vec<u8>, VoiceCaptureError> {
+        let sample_rate = self
+            .context
+            .as_ref()
+            .map_or(16_000, |context| context.sample_rate().to_u32_saturating());
+        let pcm = self.take_samples();
+        drop(self);
+        if pcm.is_empty() {
+            return Err(VoiceCaptureError::NoSamples);
+        }
+        Ok(bruhs_models::logic::wav::encode_wav_16bit_mono(
+            &pcm,
+            sample_rate,
+        )?)
     }
 }
 
@@ -339,6 +355,12 @@ impl Drop for Recorder {
 /// 16-bit PCM WAV. The AudioContext requests 16kHz; browsers that round up to
 /// 48kHz still produce valid WAV — the daemon resamples to 16kHz via hound/rubato.
 async fn capture_voice_sample_wav(duration_ms: u32) -> Result<Vec<u8>, VoiceCaptureError> {
+    let recorder = begin_voice_capture().await?;
+    gloo_timers::future::TimeoutFuture::new(duration_ms).await;
+    recorder.finish()
+}
+
+pub(crate) async fn begin_voice_capture() -> Result<Recorder, VoiceCaptureError> {
     let window = web_sys::window().ok_or(VoiceCaptureError::Browser {
         step: "window",
         reason: "no window".into(),
@@ -368,7 +390,6 @@ async fn capture_voice_sample_wav(duration_ms: u32) -> Result<Vec<u8>, VoiceCapt
     ctx_opts.set_sample_rate(16_000.0);
     let context = web_sys::AudioContext::new_with_context_options(&ctx_opts)
         .map_err(browser("AudioContext"))?;
-    let sample_rate = context.sample_rate().to_u32_saturating();
     let context = recorder.context.insert(context);
 
     let source = context
@@ -404,16 +425,5 @@ async fn capture_voice_sample_wav(duration_ms: u32) -> Result<Vec<u8>, VoiceCapt
         .connect_with_audio_node(&destination)
         .map_err(browser("connect processor"))?;
 
-    // Record for requested duration.
-    gloo_timers::future::TimeoutFuture::new(duration_ms).await;
-
-    let pcm = recorder.take_samples();
-    drop(recorder);
-    if pcm.is_empty() {
-        return Err(VoiceCaptureError::NoSamples);
-    }
-    Ok(bruhs_models::logic::wav::encode_wav_16bit_mono(
-        &pcm,
-        sample_rate,
-    )?)
+    Ok(recorder)
 }

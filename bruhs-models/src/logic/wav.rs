@@ -7,6 +7,13 @@ use crate::num::ToIntSaturating;
 /// Bytes in the RIFF/WAVE header [`encode_wav_16bit_mono`] writes.
 pub const WAV_HEADER_LEN: usize = 44;
 
+/// Output frames after resampling, rounded down and clamped to the platform size.
+pub fn resampled_len(frames: usize, from_rate: u32, to_rate: u32) -> usize {
+    let frames = u64::try_from(frames).unwrap_or(u64::MAX);
+    let out = frames.saturating_mul(u64::from(to_rate)) / u64::from(from_rate.max(1));
+    usize::try_from(out).unwrap_or(usize::MAX)
+}
+
 /// The samples do not fit in a WAV file (the RIFF size field is 32-bit).
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 #[error("{samples} samples is too long for a WAV file")]
@@ -58,6 +65,14 @@ pub fn encode_wav_16bit_mono(samples: &[f32], sample_rate: u32) -> Result<Vec<u8
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn resampled_frame_counts_keep_the_capture_rounding_contract() {
+        assert_eq!(resampled_len(48_000, 48_000, 16_000), 16_000);
+        assert_eq!(resampled_len(16_000, 16_000, 48_000), 48_000);
+        assert_eq!(resampled_len(1, 3, 2), 0);
+        assert_eq!(resampled_len(0, 48_000, 16_000), 0);
+    }
 
     fn u16_at(wav: &[u8], at: usize) -> u16 {
         u16::from_le_bytes([wav[at], wav[at + 1]])

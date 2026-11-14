@@ -391,6 +391,40 @@ pub async fn enroll_voice(
     Ok(r.embedding)
 }
 
+/// Transcribe one temporary microphone recording locally without starting a meeting.
+pub async fn transcribe_dictation(
+    daemon: &DaemonEndpoint,
+    options: &bruhs_models::local_tools::DictationOptions,
+    wav: Vec<u8>,
+) -> Result<bruhs_models::local_tools::DictationTranscript, CaptureClientError> {
+    let request = client()?
+        .post(daemon.url(&["dictation"])?)
+        .query(options)
+        .header("Content-Type", "audio/wav")
+        .body(wav);
+    let mut response = daemon
+        .authorize(request)
+        .await
+        .send()
+        .await
+        .map_err(classify_transport)?;
+    let status = response.status();
+    let mut bytes = Vec::new();
+    while let Some(chunk) = response.chunk().await.map_err(classify_transport)? {
+        if bytes.len().saturating_add(chunk.len()) > PROXY_REPLY_LIMIT {
+            return Err(CaptureClientError::ReplyTooLarge);
+        }
+        bytes.extend_from_slice(&chunk);
+    }
+    if !status.is_success() {
+        return Err(CaptureClientError::Status {
+            status: status.as_u16(),
+            body: String::from_utf8_lossy(&bytes).into_owned(),
+        });
+    }
+    serde_json::from_slice(&bytes).map_err(CaptureClientError::Parse)
+}
+
 /// A daemon route bruhs-server forwards for the browser, which never holds
 /// the daemon token.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

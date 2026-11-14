@@ -70,7 +70,7 @@ pub fn transcribe_wav(
             start_ms: seg.start_ms,
             end_ms: seg.end_ms,
             text: seg.text.clone(),
-            confidence: 1.0,
+            confidence: TranscriptSegment::UNKNOWN_CONFIDENCE,
             partial: false,
             speaker_confidence: None,
         };

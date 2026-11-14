@@ -12,6 +12,9 @@ mod worker;
 #[cfg(test)]
 mod tests;
 
+#[cfg(test)]
+mod quality_eval;
+
 /// Typed errors for the diarize/subdiarize/OCR spawn_blocking step.
 /// Replaces `Box<dyn std::error::Error + Send + Sync>` so telemetry and
 /// callers can distinguish which stage failed. Subdiarize/Ocr stages

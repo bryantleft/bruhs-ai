@@ -12,6 +12,26 @@ use cpal::traits::{DeviceTrait, HostTrait, StreamTrait};
 use bruhs_models::logic::wav::encode_wav_16bit_mono;
 
 pub fn capture_voice_sample_wav(duration: Duration) -> Result<Vec<u8>, String> {
+    capture_with_stop(move || {
+        std::thread::sleep(duration);
+        true
+    })
+}
+
+/// `true` stops and returns the recording; `false` or dropping the sender cancels.
+/// The caller runs this on a blocking worker, never the GPUI foreground thread.
+pub fn capture_voice_until_stop(
+    stop: std::sync::mpsc::Receiver<bool>,
+    max_duration: Duration,
+) -> Result<Vec<u8>, String> {
+    capture_with_stop(move || match stop.recv_timeout(max_duration) {
+        Ok(insert) => insert,
+        Err(std::sync::mpsc::RecvTimeoutError::Timeout) => true,
+        Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => false,
+    })
+}
+
+fn capture_with_stop(finish: impl FnOnce() -> bool) -> Result<Vec<u8>, String> {
     let host = cpal::default_host();
     let device = host
         .default_input_device()
@@ -66,8 +86,12 @@ pub fn capture_voice_sample_wav(duration: Duration) -> Result<Vec<u8>, String> {
     stream
         .play()
         .map_err(|e| format!("start input stream: {e}"))?;
-    std::thread::sleep(duration);
+    let insert = finish();
     drop(stream);
+
+    if !insert {
+        return Err("Recording cancelled".into());
+    }
 
     let pcm = samples.lock().map_err(|_| "sample buffer poisoned")?;
     if pcm.is_empty() {

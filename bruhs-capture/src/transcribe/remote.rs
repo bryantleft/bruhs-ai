@@ -235,7 +235,7 @@ impl RemoteJob {
                         start_ms: segment.start_ms,
                         end_ms: segment.end_ms,
                         text: segment.text,
-                        confidence: 1.0,
+                        confidence: TranscriptSegment::UNKNOWN_CONFIDENCE,
                         partial: false,
                         speaker_confidence: None,
                     });
