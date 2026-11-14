@@ -1,0 +1,69 @@
+{
+  "schema": 1,
+  "recordedAt": "2026-11-14T21:53:17.769829+00:00",
+  "scope": "Published documentation of previously adopted mail GET cancellation; historical private default capture and loopback HTTP, not current-root composer or whole-action acceptance",
+  "sealedSourceEvidenceCheckpoint": "target/performance-mail-cancel1/source-evidence-checkpoint.json",
+  "sealedSourceEvidenceSha256": "d9249e3d30aa3f6afe70d2b8edc2435620ed4c96a9978ed27fb39ec738939b90",
+  "finalizationAdoptionReceipt": "target/finalization-performance-doc-adoption-20261114T215219Z.json",
+  "finalizationAdoptionSha256": "9bd7c76204ab1e6dd69db6cff91db487837b3da4969f38613e5f9f7ddb3d428b",
+  "retainedEvidencePinsIndependentlyVerified": 432,
+  "currentSourcePinsIndependentlyVerified": 14,
+  "privateValidation": {
+    "webTestsPassed": 440,
+    "webTestsIgnored": 5,
+    "strictHostAndActualWasm": "passed",
+    "defaultReleaseAssets": 298,
+    "api": "http://127.0.0.1:3001",
+    "NO_COLOR": "true",
+    "transportChecks": 1993,
+    "gmailChecks": 1595,
+    "outlookChecks": 1771,
+    "priorFunctionalChecksRetained": 3240,
+    "addedCancellationChecks": 126
+  },
+  "sourceAdoption": "target/performance-mail-cancel1/adoption.json",
+  "qaAdoption": "target/performance-mail-cancel1/qa-adoption.json",
+  "publishedFiles": {
+    "docs/performance-action-evidence.json": {
+      "from": "target/performance-mail-cancel1/proposed-action-evidence.json",
+      "sha256": "5c412fa97ad66a75eae346571a329d2f7a4a995c0ae90df1ce575fab113ed7b3"
+    },
+    "docs/performance-action-log.json": {
+      "from": "target/performance-mail-cancel1/action-log-preview.json",
+      "sha256": "8a6525d764d6011fd51e4c3193b0120bced14b835f931cda50313d2fbbccdeba"
+    },
+    "docs/performance-action-log.md": {
+      "from": "target/performance-mail-cancel1/action-log-preview.md",
+      "sha256": "ce16ad34937e09041f72e1fbedd44f0c5ded9758ca5c8392e43644ec25a86f07"
+    },
+    "docs/performance-action-catalogue.json": {
+      "from": "target/performance-mail-cancel1/proposed-action-catalogue.json",
+      "sha256": "85ce0be85d821977270237232781349753029a1905b626bc003abdbc97fd5308"
+    }
+  },
+  "counts": {
+    "source_entrypoints": 366,
+    "binding_search_references": 1378,
+    "partial_evidence_records": 244,
+    "normalized_observations": 2236,
+    "request_count_observations": 34,
+    "whole_action_acceptances": 0,
+    "verified_faster_t3_targets": 0,
+    "reviewed_semantic_intents": 62,
+    "response_body_byte_observations": 12
+  },
+  "allPreviouslyPublishedLedgerEntriesTimingGroupsAndRequestCasesPreservedExactly": true,
+  "responseBodyObservations": "Twelve diagnostic body-byte observations kept separately from normalized latency. Fixture padding/gating and loopback exclude representative bandwidth, TLS and full-action conclusions.",
+  "sourceContext": "605 of607 private graph inputs unchanged; two Rust files changed; private package path differs. Fourteen final source pins remain separate from a future combined root graph.",
+  "remaining": [
+    "Complete semantic catalogue and all required client/network/error/cancel/retry variants",
+    "Current combined root graph and compose validation",
+    "Realistic provider/remote/DNS/TLS/proxy paths, physical devices and complete action timings",
+    "All seven equivalent matched T3 workloads and final all-action acceptance"
+  ],
+  "httpStreamingErrorCandidateIncluded": false,
+  "wholeActionAcceptance": false,
+  "matchedT3Win": false,
+  "performanceGoalStatus": "active",
+  "indexHistoryWritten": false
+}

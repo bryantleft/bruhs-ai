@@ -2,8 +2,8 @@
   "version": 1,
   "completion_status": "in_progress",
   "semantic_inventory_complete": false,
-  "scope": "First reviewed semantic group: registered command intents and immediate dispatch, on published main and current working tree. No assertion of downstream behavior parity, complete UI actions or all possible application actions.",
-  "recorded_at": "2026-11-13T21:42:58.284162+00:00",
+  "scope": "Reviewed command intent group plus17 connected-mail intents. Downstream completion boundaries are requirements, not measured acceptance. Source bindings are not an exhaustive semantic denominator.",
+  "recorded_at": "2026-11-14T20:14:00.112876+00:00",
   "source_profiles": {
     "published_main": {
       "base_revision": "53c1f1a365d32d2a93f0831aa5ce2ddaf8a029f6",
@@ -18,20 +18,33 @@
         "bruhs-web/src/components/command_bar.rs": "c5bae39833abc83db5745998c6f05b1c2eee9c5908929902b31e86a6af3b707e",
         "bruhs-desktop/src/views/workspace/palette_ui.rs": "fb45d2745ab9c0ddfcc7de07a351a14c945b454c3ef5fde218b21cadef19bd6c"
       }
+    },
+    "mail_navigation_20261114": {
+      "source_sha256": {
+        "bruhs-desktop/src/views/workspace/connected_inbox.rs": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+        "bruhs-web/src/components/connected_inbox.rs": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+        "bruhs-web/src/components/inbox_page.rs": "ea62e6f644e9acea36be88856d869a887549a1f3c1c0eaf9e3f245db179b7e79",
+        "bruhs-web/src/state/mail.rs": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b"
+      },
+      "build_receipt": "target/outlook-qa/default-build-20261114T193910Z/build.json",
+      "build_receipt_sha256": "8e480529dedd7c84e390098345105256a750604f5ad886c0fd5511f39db604f8",
+      "build_inputs_sha256": "075e24733d44b40d101a8932e13de909fa44134861ba06b0f5d92b9ffafd2333",
+      "scope": "Web bindings byte-match193910 production capture; desktop bindings are current source only, without a paired native build claim."
     }
   },
   "counts": {
     "semantic_palette_intents": 45,
     "palette_entrypoints_per_source_profile": 86,
-    "source_profiles": 2,
-    "source_entrypoints_in_broader_inventory": 276,
-    "binding_search_references_pending_review": 1245,
-    "whole_action_acceptances": 0
+    "source_profiles": 3,
+    "source_entrypoints_in_broader_inventory": 366,
+    "binding_search_references_pending_review": 1378,
+    "whole_action_acceptances": 0,
+    "semantic_connected_mail_intents": 17,
+    "reviewed_semantic_intents": 62
   },
   "discovery_snapshot": {
-    "path": "target/performance-snapshot1-inventory-working-tree.json",
-    "sha256": "25f481597d82a2acf731453cd49f4d8eb16854ea87d67230eab3712571402395",
-    "parser_sha256": "1229141a4d38142670cf3358439db6e007127399a1191498afc9a0dc11ba1890"
+    "path": "target/performance-discovery11-inventory.json",
+    "sha256": "9bcd6819ca4c510294d25eebb7ad46fbbfcc2b31c5206648115e7c838fe3295d"
   },
   "actions": [
     {
@@ -1174,7 +1187,7 @@
           "entrypoint": "desktop:local-servers",
           "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
           "registry_line": 228,
-          "label": "Open a local server…",
+          "label": "Open a local server\u2026",
           "dispatch": {
             "line": 499,
             "sha256": "69094696a1594149e19d7d8ec0a034b6f973499ea15418d10ba94a6e4ae67323"
@@ -1187,7 +1200,7 @@
           "entrypoint": "desktop:local-servers",
           "source": "bruhs-desktop/src/views/workspace/palette_ui.rs",
           "registry_line": 228,
-          "label": "Open a local server…",
+          "label": "Open a local server\u2026",
           "dispatch": {
             "line": 498,
             "sha256": "69094696a1594149e19d7d8ec0a034b6f973499ea15418d10ba94a6e4ae67323"
@@ -2815,6 +2828,1006 @@
       "historical_partial_evidence_ids": [],
       "timing_status": "requires_measurement_mapping",
       "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.open_connected",
+      "label": "Open connected Email",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Account and thread controls reach their loaded, empty or actionable error state.",
+      "required_variants": "Fresh/cached account snapshot; zero/one/multiple accounts; Gmail/Outlook; imported Inbox retained.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/inbox_page.rs",
+          "source_sha256": "ea62e6f644e9acea36be88856d869a887549a1f3c1c0eaf9e3f245db179b7e79",
+          "line": 122,
+          "anchor": "mail.open()",
+          "line_sha256": "8090e0fb36a855cc7598e1c359c6dfdb2fc819f10b7282a58d2bd42376e8e232"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 101,
+          "anchor": "pub(super) fn open_connected_inbox",
+          "line_sha256": "7ced389adfb94f33b4e37c7275d6fb75794573790ca192b696ad8da1964d8733"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 137,
+          "anchor": "pub fn open(",
+          "line_sha256": "4b6810879353a431cf28386d36dce4978bd5f416e0cd33ac3b8345cdef167968"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 31,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::mailboxes",
+          "method": "GET",
+          "route_path": "/api/mail",
+          "path_expression": "\"/api/mail\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.open_imported",
+      "label": "Return to imported conversations",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Imported Inbox and its preserved local search/draft controls are usable.",
+      "required_variants": "Connected list/reader; sync or download in progress remains app-owned.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 21,
+          "anchor": "state.visible.set(false)",
+          "line_sha256": "b62bd3037e9a5d1b6b70c262b3540b3547e561fbe827a39f8907fb7cbd5b34c8"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 484,
+          "anchor": "Action::Imports =>",
+          "line_sha256": "5ebbb1adf35415042e4a1be71b984af5718e4274d2fa9d7aefc32ab6588a66d7"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.open_connections",
+      "label": "Open mail Connections",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Connections view has usable loaded, empty or actionable error controls.",
+      "required_variants": "Connected/disconnected/expired credentials; active sync remains app-owned.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 22,
+          "anchor": "set_view.set(crate::state::AppView::Settings)",
+          "line_sha256": "53f80dc009fed8cb6d844be3e0193d97be29e13052fee391adcf3630c6cb34e0"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 485,
+          "anchor": "Action::Connections =>",
+          "line_sha256": "6601dcbf872a108180954fe651eb6db66e91b020ab2e286bdab885fd86e5a8dc"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.refresh",
+      "label": "Refresh saved accounts and visible mail",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Fresh account state and dependent current list/reader settle with a usable result or error.",
+      "required_variants": "Unchanged/changed host; missing selected mailbox; list/reader; in-flight older reads.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 23,
+          "anchor": "on_click=Callback::new(move |_| state.refresh())>\"Refresh\"",
+          "line_sha256": "072a8a478d522397caa11c1d50c91b29dedc3a2593b1148a2dbc28105272285f"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 486,
+          "anchor": "Action::Refresh =>",
+          "line_sha256": "eb679a334cdfe256349aa10660e7abe59bf17a02c4bf2ee5074e41b6554ce944"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 141,
+          "anchor": "pub fn refresh(",
+          "line_sha256": "7b6995361a44700d21b46871211b790874c16eabc8c866b7376fc373a7a7e1b1"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 31,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::mailboxes",
+          "method": "GET",
+          "route_path": "/api/mail",
+          "path_expression": "\"/api/mail\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads/{external}",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 33,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::thread",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads/{external}",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads/{external}\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.select_account",
+      "label": "Choose a saved mail account",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Selected account's first result page is usable and stale account results cannot replace it.",
+      "required_variants": "Gmail/Outlook; zero/large result set; query/filter retained; older read before headers/during body; disabled during sync.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 47,
+          "anchor": "state.select_mailbox(id.clone())",
+          "line_sha256": "bcc2a7403fd15b71adf2d15d56b8216c48b9d8edc1f3f02bdb0519c9b5b897cb"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 496,
+          "anchor": "Action::Mailbox(id) =>",
+          "line_sha256": "3fa0dc7a2f96213c9f5dbfdb7d0cab1cbfd7c0229fc56e0c85159b1a8d26ed0a"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 201,
+          "anchor": "pub fn select_mailbox(",
+          "line_sha256": "923c941111db2ef9eafe0f79830f4fae6c9015809166a43dc06821b520dcea73"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.search",
+      "label": "Search saved email",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Applied query's first result page, empty state or error is usable.",
+      "required_variants": "Submit/Enter; encoded Unicode; query replacement; older read before headers/during body; database search/provider isolation.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 68,
+          "anchor": "state.search();",
+          "line_sha256": "0ad319bd1df5edcf306ef23931a9f128dc3ed5a704b15d713d29861cbddaee67"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 487,
+          "anchor": "Action::Search =>",
+          "line_sha256": "a39f93052c51f56a494aa035404b602559854e975c58cd89aeb41105977a62d8"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 210,
+          "anchor": "pub fn search(",
+          "line_sha256": "3d7a4c729624bda72eb88e0abc8df41321d4d1934bd7ad5580962378851fb18a"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.filter",
+      "label": "Filter saved email",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Chosen filter's first result page, empty state or error is usable.",
+      "required_variants": "All five InboxFilter values; retained query; filter replacement; stale read cancellation.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 74,
+          "anchor": "state.select_filter(filter)",
+          "line_sha256": "2df08ebd534ac6bb7b1a2599cdf61e16cc0bd9cfe96e49171f965ea8d08a7dd5"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 501,
+          "anchor": "Action::Filter(filter) =>",
+          "line_sha256": "f89467167617704459b340bd328dde6a401b973a8999879f9185581a20394d7c"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 216,
+          "anchor": "pub fn select_filter(",
+          "line_sha256": "d8c6e55650e1a29914492df011728b9c3af7a15fea323875c3310df145172819"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.page",
+      "label": "Page through saved email",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Requested or server-clamped page is usable with correct controls and count.",
+      "required_variants": "Previous/Next; first/last; shrinking count; retained query/filter; stale page read.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 92,
+          "anchor": "state.select_page(page.page.saturating_add(1))",
+          "line_sha256": "7e4ad085599d919e17bb417e2f6cb51c3abc0393d060a7eed0ebdd76c4ff173f"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 505,
+          "anchor": "Action::Page(page) =>",
+          "line_sha256": "b8e19d8a64c091274e316288c06ebd46278e785d0b9e17be64fd68a59210890c"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 221,
+          "anchor": "pub fn select_page(",
+          "line_sha256": "9363b20c1a2f4e0ae9c367948f3298f700b93aef4a5d0ff78d3b385a0755e756"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.open_thread",
+      "label": "Open a saved email thread",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Selected thread's current saved message, envelope and attachment controls or actionable error are usable.",
+      "required_variants": "Gmail/Outlook; empty/large body and many messages; current authorization; supersession before headers/during body; refresh retains message identity.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 108,
+          "anchor": "state.open_thread(id.clone())",
+          "line_sha256": "4c4123536a30337a43a7ca748f1da3dd403dcfb9f0da9ac26757bb81e31db8a6"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 510,
+          "anchor": "Action::Thread(id) =>",
+          "line_sha256": "d6607b22e01b5321c72469b7c1411bbbda820d4b974a9005e5e83f5dae4c7d3a"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 261,
+          "anchor": "pub fn open_thread(",
+          "line_sha256": "d1188c99632557c00b97731e1771ace4466c3583268fc83a147e627920b4fcfc"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads/{external}",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 33,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::thread",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads/{external}",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads/{external}\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.back",
+      "label": "Return from a saved thread to email",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Saved list is usable with restored focus; abandoned detail transport settles without stale feedback.",
+      "required_variants": "Before headers/during body/after response; keyboard/pointer; fast subsequent thread.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 133,
+          "anchor": "state.back();",
+          "line_sha256": "d7cae2f14f073afb261e7e4bbd5918f75374122e99725ae3c414a29bbf03c95b"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 511,
+          "anchor": "Action::Back =>",
+          "line_sha256": "078f3ccadd471501dfc6a883964cfde634d1bc514975d699e440fe44ef0d9abd"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 314,
+          "anchor": "pub fn back(",
+          "line_sha256": "f53d63e55ac7d05359487fa9148c64290473f2ffcd64805f22f5c3a0b2b6f1b7"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.message",
+      "label": "Choose an older or newer saved message",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Correct message text, envelope, attachment controls and index are usable.",
+      "required_variants": "Older/Newer; first/last; body size; no provider read for cached messages.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 159,
+          "anchor": "\"Older message\"</Button>",
+          "line_sha256": "35cf8e0b0894dffd5ef97acd8af62004d39786708bdaf7796e5a1a826e63c26f"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 519,
+          "anchor": "Action::Message(index) =>",
+          "line_sha256": "154d2ee7cecd5dd87a64191c5e25b362d58b9f5fef866a69a8d6ddf7d4552938"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.copy_message",
+      "label": "Copy saved message text",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Clipboard contains exact selected text, or visible failure offers manual copy.",
+      "required_variants": "Permission success/failure; large/Unicode text; browser async acknowledgement/native clipboard.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 200,
+          "anchor": "\"Copy message text\"</Button>",
+          "line_sha256": "99017bc4e4c39aa19cd28148e0cb296453fb329a58712f6871bf8834412a673d"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 520,
+          "anchor": "Action::CopyMessage =>",
+          "line_sha256": "229bf7570ddc1d0f452af42baa748b3febf5d7fd8bddc80489fe58554b4dcefe"
+        }
+      ],
+      "http_entrypoints": [],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.download",
+      "label": "Download an explicit mail attachment",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Validated exact bytes reach browser-owned download completion or native private atomic save; failure is visible.",
+      "required_variants": "Gmail/Outlook file/item/unsupported linked metadata; current connection/ownership; size/truncation/missing MIME bytes; browser download/native picker cancel; route leave during app-owned job.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 219,
+          "anchor": "state.download(attachment.get_value())",
+          "line_sha256": "6e44de9fb9b45951672ff2c88f5614649f40913220b0f6735e33d7fb426cc380"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 530,
+          "anchor": "Action::Download(attachment) =>",
+          "line_sha256": "be6021c9ac006fafc758a04b8f5c99f72a3c3575dffe9ff0bc993dcc840266f7"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 70,
+          "anchor": "pub fn download(",
+          "line_sha256": "51cbd137231047a4829a5ad24a4ab3d370f7fa441b5dfd790f97568612687cc0"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads/{external}/attachments/{attachment}",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 38,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::attachment",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads/{external}/attachments/{attachment}",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads/{external}/attachments/{attachment}\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "GET /api/mail/outlook/mailboxes/{mailbox}/threads/{external}/attachments/{attachment}",
+          "source": "bruhs-server/src/routes/mail/outlook.rs",
+          "line": 34,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::outlook::attachment",
+          "method": "GET",
+          "route_path": "/api/mail/outlook/mailboxes/{mailbox}/threads/{external}/attachments/{attachment}",
+          "path_expression": "\"/api/mail/outlook/mailboxes/{mailbox}/threads/{external}/attachments/{attachment}\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328,
+          "composition_source": "bruhs-server/src/routes/mail.rs",
+          "composition_line": 30
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.sync_gmail",
+      "label": "Sync connected Gmail",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Provider pages and cursor are durably saved, account/list refresh completes, and final status or recoverable error is usable.",
+      "required_variants": "Fresh/resume; multiple pages; expired/revoked/wrong account; rate/network/server failure; route leave; concurrent provider jobs.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 24,
+          "anchor": "state.sync_provider(ServiceProvider::Gmail,false)",
+          "line_sha256": "bafbb8a5e36d60c51a20d61a258f5e7b44aab69210bca9eeb4ddd676dd6d967d"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 489,
+          "anchor": "Action::SyncProvider(provider) =>",
+          "line_sha256": "559295184017d9439ce14245f376b0c4f604a57a6a59418fd66c6fa2e95f8859"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 348,
+          "anchor": "pub fn sync_provider(",
+          "line_sha256": "ffc18f265084e0493019989655a7bd43c54bf6607abeb7871c448ee8762e00eb"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 31,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::mailboxes",
+          "method": "GET",
+          "route_path": "/api/mail",
+          "path_expression": "\"/api/mail\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "POST /api/mail/gmail/sync",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 37,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::sync_gmail",
+          "method": "POST",
+          "route_path": "/api/mail/gmail/sync",
+          "path_expression": "\"/api/mail/gmail/sync\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.sync_outlook",
+      "label": "Sync connected Outlook",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Provider pages and cursor are durably saved, account/list refresh completes, and final status or recoverable error is usable.",
+      "required_variants": "Fresh/resume; delta reset; multiple pages; expired/revoked/wrong account; rate/network/server failure; route leave; concurrent provider jobs.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 25,
+          "anchor": "state.sync_provider(ServiceProvider::Outlook,false)",
+          "line_sha256": "ddedc0640a5d9ef42a3397ae73f14421a4f786d984659a9f82d981459282f6ef"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 489,
+          "anchor": "Action::SyncProvider(provider) =>",
+          "line_sha256": "559295184017d9439ce14245f376b0c4f604a57a6a59418fd66c6fa2e95f8859"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 348,
+          "anchor": "pub fn sync_provider(",
+          "line_sha256": "ffc18f265084e0493019989655a7bd43c54bf6607abeb7871c448ee8762e00eb"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "GET /api/mail",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 31,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::mailboxes",
+          "method": "GET",
+          "route_path": "/api/mail",
+          "path_expression": "\"/api/mail\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "POST /api/mail/outlook/sync",
+          "source": "bruhs-server/src/routes/mail/outlook.rs",
+          "line": 33,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::outlook::sync",
+          "method": "POST",
+          "route_path": "/api/mail/outlook/sync",
+          "path_expression": "\"/api/mail/outlook/sync\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328,
+          "composition_source": "bruhs-server/src/routes/mail.rs",
+          "composition_line": 30
+        },
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.restart_sync",
+      "label": "Restart the selected provider sync",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Selected provider's restarted traversal reaches saved/current results or an actionable error.",
+      "required_variants": "Gmail/Outlook; old cursor; multiple pages; explicit restart intent; app-owned jobs and durable page cursor.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 55,
+          "anchor": "state.sync(true)",
+          "line_sha256": "d9141178d45874c07b1ddd23690d2136edab34efbcc1471174aa0e25f897e33d"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 488,
+          "anchor": "Action::Sync(restart) =>",
+          "line_sha256": "c5aabdb3ba8e56e15d1eb6a76cfb9f4e508d41be5f98d48665b2db025c998f72"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 331,
+          "anchor": "pub fn sync(",
+          "line_sha256": "fb26f9bb97125aa2f6d4f2b47a678b04a277eecfe483c1f18efc4c167192c672"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "POST /api/mail/gmail/sync",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 37,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::sync_gmail",
+          "method": "POST",
+          "route_path": "/api/mail/gmail/sync",
+          "path_expression": "\"/api/mail/gmail/sync\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "POST /api/mail/outlook/sync",
+          "source": "bruhs-server/src/routes/mail/outlook.rs",
+          "line": 33,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::outlook::sync",
+          "method": "POST",
+          "route_path": "/api/mail/outlook/sync",
+          "path_expression": "\"/api/mail/outlook/sync\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328,
+          "composition_source": "bruhs-server/src/routes/mail.rs",
+          "composition_line": 30
+        },
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
+    },
+    {
+      "id": "mail.stop_sync",
+      "label": "Stop sync after the current page",
+      "review_status": "immediate_callbacks_and_state_transitions_reviewed",
+      "completion_boundary_to_verify": "Current provider page commits, no next page starts, resumable cursor is retained, and refreshed list plus stopped status are usable.",
+      "required_variants": "Before connection/page request; during provider page; final page; restart/resume; route leave. Immediate HTTP abort is intentionally not this action's contract.",
+      "entrypoints": [
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web",
+          "source": "bruhs-web/src/components/connected_inbox.rs",
+          "source_sha256": "1fab0d238e4aa8dbc82346b12571c5b40084ea8218028cec676bf07a6a662ed4",
+          "line": 27,
+          "anchor": "state.stop())",
+          "line_sha256": "7832b9d94ee4f446d6275ab82432cfb3e21791275eaadfe6424e62a45c3e5e33"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "desktop",
+          "source": "bruhs-desktop/src/views/workspace/connected_inbox.rs",
+          "source_sha256": "c63fe885393f9e5833bb03e95f0aba209997e03a80cfc5d3930b726f3ef08a1a",
+          "line": 490,
+          "anchor": "Action::Stop =>",
+          "line_sha256": "7d9bb30a43d96d55bd5b89504a549261c498bde8669af9d54320c3a600c485ee"
+        },
+        {
+          "source_profile": "mail_navigation_20261114",
+          "surface": "web_state",
+          "source": "bruhs-web/src/state/mail.rs",
+          "source_sha256": "e83a8f7852a0483abb6b62f794667d1dd8c6bfde8e8b48c9d3836aa5ba75df2b",
+          "line": 323,
+          "anchor": "pub fn stop(",
+          "line_sha256": "2e10a2a92a8e58ee9ccbe95a1875a5c115f2962fbcc65d51f074959a6c700217"
+        }
+      ],
+      "http_entrypoints": [
+        {
+          "kind": "http",
+          "id": "POST /api/mail/gmail/sync",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 37,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::sync_gmail",
+          "method": "POST",
+          "route_path": "/api/mail/gmail/sync",
+          "path_expression": "\"/api/mail/gmail/sync\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        },
+        {
+          "kind": "http",
+          "id": "POST /api/mail/outlook/sync",
+          "source": "bruhs-server/src/routes/mail/outlook.rs",
+          "line": 33,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::outlook::sync",
+          "method": "POST",
+          "route_path": "/api/mail/outlook/sync",
+          "path_expression": "\"/api/mail/outlook/sync\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328,
+          "composition_source": "bruhs-server/src/routes/mail.rs",
+          "composition_line": 30
+        },
+        {
+          "kind": "http",
+          "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+          "source": "bruhs-server/src/routes/mail.rs",
+          "line": 32,
+          "measurement_status": "requires_evidence_mapping",
+          "handler": "routes::mail::browse",
+          "method": "GET",
+          "route_path": "/api/mail/mailboxes/{mailbox}/threads",
+          "path_expression": "\"/api/mail/mailboxes/{mailbox}/threads\"",
+          "listener": "main",
+          "registration_source": "bruhs-server/src/main.rs",
+          "registration_line": 328
+        }
+      ],
+      "historical_partial_evidence_ids": [],
+      "timing_status": "unmeasured_complete_action",
+      "whole_action_acceptance": false
     }
   ],
   "remaining": [
@@ -3169,5 +4182,12 @@
       "entrypoint": "desktop:settings",
       "dispatch_spans_equal": true
     }
+  ],
+  "limitations": [
+    "All45 earlier action records and both earlier source profiles are preserved verbatim.",
+    "No complete-action timing, real-provider/network/mobile or matchedT3 acceptance is added.",
+    "Connection authorization and provider routes depend on parameters; HTTP identity is not proof that all branches were measured.",
+    "Compose/send are being integrated separately and are outside this reviewed captured read-control catalogue.",
+    "Other UI/menu/keyboard/form/OS actions and downstream persistence, network, failure and recovery variants remain to classify."
   ]
 }
