@@ -113,4 +113,22 @@ These need files owned by other pillars. They were not edited.
 | 2026-11-14 | All | Source inventory and fixed acceptance cases recorded. | Implementation and verification of failing cases. |
 | 2026-11-14 | PEOPLE-04, PEOPLE-11 | Red first: 5 of the new core opt-out tests failed (an opted-out `Zoë` let a new tracked `ZOË` profile collect the observation on both stores; legacy index rows missed), then 2 named-speaker tests failed (an alias minted a new profile). Fixed with one Unicode case-folded name key, alias-aware speaker recognition, and a rekey of legacy sqlite name rows on open (no schema version change). `cargo test -p bruhs-core --lib meetings::`: 122 passed, 1 ignored. `cargo test -p bruhs-models --lib person`: 10 passed. | Alias editing UI. |
 | 2026-11-14 | PEOPLE-12 | Red first: the desktop bridge test failed. Fixed in `people_read.rs`; MCP tool descriptions updated. `cargo test -p bruhs-desktop --bin bruhs-desktop people_read`: 8 then 9 passed. | Web has no agent People reads. |
-| 2026-11-14 | PEOPLE-03, PEOPLE-05, PEOPLE-13, PEOPLE-16, PEOPLE-17 | Web and desktop UI fixes: visible rename and opt-out failures, blank-name refusal, opt-out explanation, accessible names, 44px touch sizing on card actions, observation source links, plain copy. Desktop GPUI check for the explanation and source navigation passes. First browser harness run on a debug bundle (`target/people-ui-qa-run1/`): 56 passed, 9 failed. All 9 failures were the source-link checks, 3 per cell: the web hydrates meetings only on the Meetings page, so a cold People visit labeled every source as not stored. Fixed by hydrating meetings from People and withholding the missing-source text until loading finishes. | Rerun of the harness and wasm check after the shared measurement hold. |
+| 2026-11-14 | PEOPLE-03, PEOPLE-05, PEOPLE-13, PEOPLE-16, PEOPLE-17 | Web and desktop UI fixes: visible rename and opt-out failures, blank-name refusal, opt-out explanation, accessible names, 44px touch sizing on card actions, observation source links, plain copy. Desktop GPUI check for the explanation and source navigation passes. First browser harness run on a debug bundle (`target/people-ui-qa-run1/`): 56 passed, 9 failed. All 9 failures were the source-link checks, 3 per cell: the web hydrates meetings only on the Meetings page, so a cold People visit labeled every source as not stored. Fixed by hydrating meetings from People and withholding the missing-source text until loading finishes. | Superseded by the next row. |
+| 2026-11-14 | PEOPLE-03, PEOPLE-05, PEOPLE-13, PEOPLE-16, PEOPLE-17 | Meeting hydration fix rechecked: `cargo clippy -p bruhs-web --target wasm32-unknown-unknown -- -D warnings` passes. Harness rerun: 111 of 111 passed. Visual review of the compact frame found the opt-out badge and count wrapping, then (after a first fix) card actions overflowing the card by about 19px. Neither was caught by the assertions, so a containment assertion was added. It failed red on compact and touch (4 failures), then passed after the header was made to wrap. Final run on a debug bundle: **117 passed, 0 failed** across 1280×800, 640×480 and 390×844 touch, 15 screenshots reviewed in `target/people-ui-qa/`. | Release bundle not built. Desktop same-size comparison not done. |
+| 2026-11-14 | Gate | `scripts/gate.sh --quick` was started and stopped during its first (fmt) step because free disk was 19 GB, below the agreed 20 GB floor for this shared machine. **The workspace gate has not passed on this branch.** Checks that did run: targeted tests above, `cargo check` of bruhs-desktop, wasm32 clippy of bruhs-web, `cargo fmt --all`. | Run `scripts/gate.sh --quick` (and the full gate) when disk allows. |
+
+Reproduce:
+
+```sh
+cargo test -p bruhs-models --lib person --locked
+cargo test -p bruhs-core --lib meetings:: --locked
+cargo test -p bruhs-desktop --bin bruhs-desktop people_read --locked
+(cd bruhs-web && trunk build --dist ../target/people-ui-dist)
+node bruhs-web/tests/people_browser.mjs
+```
+
+The harness uses isolated browser contexts and the real IndexedDB cache. It
+answers People, meeting and status reads with synthetic loopback fixtures,
+fails on any other write or any non-loopback request, and refuses a bundle
+older than the People sources. It is a web check only: no desktop window,
+live provider or physical touch device was exercised.
