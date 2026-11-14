@@ -380,7 +380,7 @@ pub fn TodayPage() -> impl IntoView {
                                 when=move || applied_plan.get().is_some_and(|plan| !plan.saving)
                                 fallback=|| view! { <span class="text-label-sm text-pandan-300/70">"Saving…"</span> }
                             >
-                                <button class="text-button text-pandan-100 hover:text-white cursor-pointer" on:click=undo_plan>"Undo"</button>
+                                <button class="bruhs-control min-h-8 rounded-seed px-2 py-1 text-button text-pandan-100 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer" on:click=undo_plan>"Undo"</button>
                             </Show>
                         </div>
                     </Show>
