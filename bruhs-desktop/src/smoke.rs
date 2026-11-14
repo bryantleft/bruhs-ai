@@ -40,6 +40,8 @@ const DESKTOP_TERMINAL_SMOKE_PREVIEW_DELAY_MS: u64 = 2500;
 const DESKTOP_TERMINAL_SMOKE_PREVIEW_URL_ENV: &str = "BRUHS_DESKTOP_SMOKE_PREVIEW_URL";
 /// Extra time to keep the window up (for a screenshot) before quitting.
 const DESKTOP_SMOKE_HOLD_ENV: &str = "BRUHS_DESKTOP_SMOKE_HOLD_MS";
+/// Give an external native UI driver time to interact after the widget report.
+const DESKTOP_SMOKE_AFTER_REPORT_ENV: &str = "BRUHS_DESKTOP_SMOKE_AFTER_REPORT_MS";
 /// Leave the ⌘J drawer closed (screenshots of the bare chat surface).
 const DESKTOP_SMOKE_SKIP_TERMINAL_ENV: &str = "BRUHS_DESKTOP_SMOKE_SKIP_TERMINAL";
 
@@ -147,6 +149,19 @@ pub(crate) fn schedule_desktop_terminal_smoke(
             .unwrap_or(0);
         if hold_ms > 0 {
             timer(hold_ms, cx).await;
+        }
+        if env::var(DESKTOP_SMOKE_SCENE_ENV).is_ok_and(|scene| scene.starts_with("transcript-rich"))
+        {
+            cx.update(|cx| {
+                if let Some(chat) = workspace.read(cx).smoke_active_chat() {
+                    chat.read(cx).smoke_rich_response_report();
+                }
+            });
+            let after_report_ms = env::var(DESKTOP_SMOKE_AFTER_REPORT_ENV)
+                .ok()
+                .and_then(|value| value.parse::<u64>().ok())
+                .unwrap_or(DESKTOP_TERMINAL_SMOKE_ECHO_DELAY_MS);
+            timer(after_report_ms, cx).await;
         }
         let cleanup_workspace = workspace.clone();
         let _ = window.update(cx, move |_, _window, cx| {

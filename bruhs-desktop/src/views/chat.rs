@@ -69,12 +69,15 @@ mod git_info;
 mod git_ui;
 mod hints_ui;
 mod model_picker_ui;
+mod rich_response;
 mod secret_prompt;
 #[cfg(debug_assertions)]
 mod smoke;
 mod streaming;
+mod svg_cache;
 mod timeline_ui;
 mod tool_output_ui;
+mod viewport;
 use assistant_content::*;
 #[cfg(test)]
 use auth::*;
@@ -106,6 +109,12 @@ const CHAT_MESSAGE_LIST_MAX_WIDTH_PX: f32 = timeline_ui::TRANSCRIPT_MAX_WIDTH_PX
 const CHAT_MESSAGE_LIST_X_PADDING_PX: f32 = timeline_ui::TRANSCRIPT_X_PADDING_PX;
 const CHAT_MESSAGE_LIST_Y_PADDING_PX: f32 = timeline_ui::TRANSCRIPT_TOP_PADDING_PX;
 const CHAT_MESSAGE_LIST_GAP_PX: f32 = 0.0;
+// Initial geometry hint: one text line, bubble padding, actions, gap and footer.
+// Visible messages are always measured at their actual variable height.
+const CHAT_MESSAGE_ROW_HINT_PX: f32 = timeline_ui::TRANSCRIPT_BODY_TEXT_SIZE_PX * 1.5
+    + timeline_ui::USER_BUBBLE_Y_PADDING_PX * 2.0
+    + timeline_ui::TRANSCRIPT_ROW_MIN_HEIGHT_PX
+    + 20.0;
 const CHAT_COMPOSER_MIN_ROWS: usize = 2;
 const CHAT_COMPOSER_MAX_ROWS: usize = 8;
 
@@ -214,13 +223,16 @@ pub struct Message {
     pub checkpoint: Option<String>,
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum DesktopAssistantContentBlock {
     Markdown(String),
     Math(DesktopMathBlock),
     Mermaid(DesktopMermaidBlock),
+    Rich(bruhs_models::logic::rich_response::ResponseBlock),
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DesktopMathBlock {
     source: String,
@@ -234,6 +246,7 @@ enum DesktopMathRender {
     Error(String),
 }
 
+#[cfg(test)]
 #[derive(Clone, Debug, Eq, PartialEq)]
 struct DesktopMermaidBlock {
     source: String,
@@ -387,7 +400,9 @@ enum AgentUiEvent {
         is_error: bool,
     },
     Usage(UsageInfo),
+    ResponseMedia(std::collections::BTreeMap<String, String>),
     Result {
+        result: String,
         duration_ms: u64,
         usage: UsageInfo,
     },
@@ -492,7 +507,11 @@ pub struct ChatView {
     pub thread_id: Option<String>,
     pub thread_title: String,
     pub messages: Vec<Message>,
-    messages_scroll_handle: ScrollHandle,
+    messages_viewport: ListState,
+    messages_focus: FocusHandle,
+    rendered_messages: std::cell::Cell<Option<(usize, usize)>>,
+    #[cfg(test)]
+    rendered_message_rows: std::cell::Cell<usize>,
     pub is_streaming: bool,
     pub spinner_frame: usize,
     stream_started_at: Option<Instant>,
@@ -662,6 +681,8 @@ pub struct ChatView {
     measured_width: std::rc::Rc<std::cell::Cell<f32>>,
     /// Parsed assistant blocks and their SVG images, per message.
     content_blocks: content_cache::ContentBlockCache,
+    response_media_bindings: std::collections::BTreeMap<String, String>,
+    rich_embeds: std::rc::Rc<std::cell::RefCell<rich_response::RichEmbeds>>,
     pub model_picker_open: bool,
     model_picker_index: usize,
     model_picker_scroll: ScrollHandle,
@@ -938,7 +959,16 @@ impl ChatView {
             thread_id: None,
             thread_title: "New thread".to_string(),
             messages: Vec::new(),
-            messages_scroll_handle: ScrollHandle::new(),
+            messages_viewport: {
+                // Match the native meeting transcript's 128px overdraw budget.
+                let state = ListState::new(0, ListAlignment::Top, px(128.0));
+                state.set_follow_mode(FollowMode::Tail);
+                state
+            },
+            messages_focus: cx.focus_handle(),
+            rendered_messages: std::cell::Cell::new(None),
+            #[cfg(test)]
+            rendered_message_rows: std::cell::Cell::new(0),
             is_streaming: false,
             spinner_frame: 0,
             stream_started_at: None,
@@ -1043,6 +1073,8 @@ impl ChatView {
             expanded_rows: HashMap::new(),
             measured_width: std::rc::Rc::new(std::cell::Cell::new(0.0)),
             content_blocks: content_cache::ContentBlockCache::default(),
+            response_media_bindings: Default::default(),
+            rich_embeds: Default::default(),
             model_picker_open: false,
             model_picker_index: 0,
             model_picker_scroll: ScrollHandle::new(),
@@ -1084,6 +1116,10 @@ impl ChatView {
         self.thread_id = Some(id.into());
         self.thread_title = title.into();
         self.messages.clear();
+        self.response_media_bindings.clear();
+        self.rich_embeds.borrow_mut().clear();
+        self.messages_viewport.reset(0);
+        self.messages_viewport.set_follow_mode(FollowMode::Tail);
         self.prompt_queue = PromptQueue::default();
         self.queue_held = false;
         self.queue_edit = None;
@@ -1314,7 +1350,7 @@ impl ChatView {
     }
 
     pub fn scroll_messages_to_bottom(&self) {
-        self.messages_scroll_handle.scroll_to_bottom();
+        self.messages_viewport.set_follow_mode(FollowMode::Tail);
     }
 
     fn open_find(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -1704,6 +1740,19 @@ impl Render for ChatView {
         }
         // Messages can be replaced wholesale (thread restore, `/clear`).
         self.content_blocks.truncate(self.messages.len());
+        self.rich_embeds.borrow_mut().truncate(self.messages.len());
+        self.sync_widget_expansion(window);
+        self.rich_embeds.borrow_mut().set_occluded(
+            self.model_picker_open
+                || self.branch_menu_open
+                || self.workspace_menu_open
+                || self.effort_menu_open
+                || self.composer_options_open
+                || self.composer_hint_popover_open(cx),
+        );
+        self.sync_message_viewport();
+        #[cfg(test)]
+        self.rendered_message_rows.set(0);
         if self.git_info_stale {
             self.refresh_git_branches(cx);
         }
@@ -1714,7 +1763,10 @@ impl Render for ChatView {
         if let Some((hit_index, message_index)) = current_find {
             if self.find_pinned != Some(hit_index) {
                 self.find_pinned = Some(hit_index);
-                self.messages_scroll_handle.scroll_to_item(message_index);
+                self.messages_viewport.scroll_to(ListOffset {
+                    item_ix: message_index,
+                    offset_in_item: px(0.0),
+                });
             }
         }
         let current_message = current_find.map(|(_, message_index)| message_index);
@@ -1792,33 +1844,7 @@ impl Render for ChatView {
                         .relative()
                         .flex_1()
                         .overflow_hidden()
-                        .child(
-                            div()
-                                .id("message-list")
-                                .relative()
-                                .size_full()
-                                .track_scroll(&self.messages_scroll_handle)
-                                .overflow_y_scroll()
-                                .vertical_scrollbar(&self.messages_scroll_handle)
-                                .flex()
-                                .flex_col()
-                                .gap(px(CHAT_MESSAGE_LIST_GAP_PX))
-                                .pt(px(CHAT_MESSAGE_LIST_Y_PADDING_PX))
-                                .pb(px(timeline_ui::TRANSCRIPT_BOTTOM_PADDING_PX))
-                                .children(self.messages.iter().enumerate().map(|(index, msg)| {
-                                    let current = current_message == Some(index);
-                                    div()
-                                        .w(px(self.transcript_column_width()))
-                                        .mx_auto()
-                                        .px(px(CHAT_MESSAGE_LIST_X_PADDING_PX))
-                                        .when(current, |el| {
-                                            el.border_1()
-                                                .border_color(theme::persimmon_400())
-                                                .rounded(px(4.0))
-                                        })
-                                        .child(self.render_message(index, msg, window, cx))
-                                })),
-                        )
+                        .child(self.render_message_viewport(current_message, cx))
                         .when(self.show_scroll_to_bottom_control(), |el| {
                             el.child(self.render_scroll_to_bottom_control(cx))
                         }),
@@ -1837,6 +1863,9 @@ impl Render for ChatView {
                         .flex_shrink_0()
                         .child(self.render_composer_block(ComposerPlacement::Docked, window, cx)),
                 )
+            })
+            .when_some(self.render_expanded_widget(cx), |element, widget| {
+                element.child(widget)
             })
     }
 }

@@ -168,13 +168,24 @@ impl Workspace {
                 self.open_settings(&OpenSettings, window, cx);
                 self.set_settings_section(section, cx);
             }
-            "transcript" | "transcript-diff" | "transcript-tasks" | "transcript-preview" => {
+            "transcript"
+            | "transcript-diff"
+            | "transcript-tasks"
+            | "transcript-preview"
+            | "transcript-rich"
+            | "transcript-rich-save" => {
                 // A throwaway thread, so the fixture never lands in a real one.
                 self.smoke_previous_active_id = self.active_thread_id.clone();
                 self.new_general_thread(window, cx);
                 self.smoke_thread_id = self.active_thread_id.clone();
                 if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
-                    chat.update(cx, |chat, cx| chat.smoke_seed_transcript(cx));
+                    chat.update(cx, |chat, cx| {
+                        if scene.starts_with("transcript-rich") {
+                            chat.smoke_seed_rich_response(cx);
+                        } else {
+                            chat.smoke_seed_transcript(cx);
+                        }
+                    });
                 }
                 match scene {
                     "transcript-diff" => self.toggle_diff(&ToggleDiff, window, cx),
@@ -182,6 +193,28 @@ impl Workspace {
                     "transcript-preview" => self.toggle_preview(&TogglePreview, window, cx),
                     _ => {}
                 }
+                if scene == "transcript-rich-save" {
+                    self.persist_and_notify(cx);
+                    self.smoke_thread_id = None;
+                }
+            }
+            "transcript-rich-reopen" => {
+                let Some(id) = self
+                    .threads
+                    .iter()
+                    .find(|thread| {
+                        thread.chat.read(cx).messages.iter().any(|message| {
+                            message.content.contains("tag:'bruhs-rich-response-smoke'")
+                        })
+                    })
+                    .map(|thread| thread.id.clone())
+                else {
+                    return false;
+                };
+                self.select_thread_by_id(&id, cx);
+                self.active_view = AppView::Chat;
+                self.smoke_thread_id = Some(id);
+                cx.notify();
             }
             _ => return false,
         }

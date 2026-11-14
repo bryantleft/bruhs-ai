@@ -315,9 +315,16 @@ async fn forward_turn_events(
                 let _ = tx.send(AgentUiEvent::Usage(usage));
             }
             OrchestratorEvent::Query(QueryEvent::Result {
-                duration_ms, usage, ..
+                result,
+                duration_ms,
+                usage,
+                ..
             }) => {
-                let _ = tx.send(AgentUiEvent::Result { duration_ms, usage });
+                let _ = tx.send(AgentUiEvent::Result {
+                    result,
+                    duration_ms,
+                    usage,
+                });
             }
             OrchestratorEvent::Query(QueryEvent::Init { session_id, .. }) => {
                 if !session_id.is_empty() {
@@ -341,6 +348,15 @@ async fn forward_turn_events(
                 let _ = tx.send(AgentUiEvent::PermissionCancelled(id));
             }
             OrchestratorEvent::Query(QueryEvent::Raw(value)) => {
+                if value.get("type").and_then(serde_json::Value::as_str) == Some("response_media") {
+                    if let Some(bindings) = value
+                        .get("bindings")
+                        .cloned()
+                        .and_then(|value| serde_json::from_value(value).ok())
+                    {
+                        let _ = tx.send(AgentUiEvent::ResponseMedia(bindings));
+                    }
+                }
                 if let Some(request) = desktop_permission_request_from_raw(&value) {
                     let _ = tx.send(AgentUiEvent::PermissionRequest(request));
                 }
@@ -1183,6 +1199,8 @@ impl ChatView {
         }
         let prompt = message.content.clone();
         self.messages.truncate(index);
+        self.content_blocks.truncate(index);
+        self.rich_embeds.borrow_mut().truncate(index);
         self.forget_message_expansions();
         self.recall = None;
         self.rewind_confirm = None;
@@ -1522,6 +1540,7 @@ impl ChatView {
         checkpoint: Option<String>,
         cx: &mut Context<'_, Self>,
     ) -> Result<AgentTurn, IdError> {
+        self.response_media_bindings.clear();
         let expanded = expand_prompt(&content, &chips);
         let visible = super::files::visible_with_files(&expanded, &attachments, &uploads);
         let title_prompt = if content.trim().is_empty() {
@@ -1671,8 +1690,11 @@ impl ChatView {
                         event => event,
                     };
                     let saved = (view.session_id.clone(), view.import_context.is_some());
+                    let media_update = matches!(&event, AgentUiEvent::ResponseMedia(_));
                     view.apply_agent_event(event);
-                    if saved != (view.session_id.clone(), view.import_context.is_some()) {
+                    if media_update
+                        || saved != (view.session_id.clone(), view.import_context.is_some())
+                    {
                         // Saved now, so a crash mid-turn keeps the session.
                         cx.emit(ChatViewEvent::MessagesChanged);
                     }
@@ -1902,8 +1924,30 @@ impl ChatView {
                     message.usage = Some(keep_window(usage, message.usage.as_ref()));
                 }
             }
-            AgentUiEvent::Result { duration_ms, usage } => {
+            AgentUiEvent::ResponseMedia(bindings) => {
+                self.response_media_bindings.extend(bindings);
+                let bindings = self.response_media_bindings.clone();
                 if let Some(message) = self.active_assistant_message_mut() {
+                    message.content = bruhs_models::logic::rich_response::rewrite_response_media(
+                        &message.content,
+                        &bindings,
+                    );
+                }
+            }
+            AgentUiEvent::Result {
+                result,
+                duration_ms,
+                usage,
+            } => {
+                let bindings = self.response_media_bindings.clone();
+                if let Some(message) = self.active_assistant_message_mut() {
+                    if message.content.trim().is_empty() {
+                        message.content = result;
+                    }
+                    message.content = bruhs_models::logic::rich_response::rewrite_response_media(
+                        &message.content,
+                        &bindings,
+                    );
                     message.duration_ms = Some(duration_ms);
                     message.usage = Some(keep_window(usage, message.usage.as_ref()));
                     message.completed_at_ms = message
@@ -1966,7 +2010,12 @@ impl ChatView {
                 smoke_log("done", "");
             }
         }
-        self.scroll_messages_to_bottom();
+        // Tail following is suspended by a user scroll and resumed by End/↓
+        // or a new send. Receiving a token must not move someone reading history.
+        let count = self.messages_viewport.item_count();
+        if count > 0 {
+            self.messages_viewport.remeasure_items(count - 1..count);
+        }
     }
 
     pub(super) fn respond_to_permission(&mut self, approved: bool, cx: &mut Context<'_, Self>) {

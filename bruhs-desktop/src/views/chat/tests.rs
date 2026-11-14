@@ -64,6 +64,7 @@ use super::{
     TOOL_QUESTION_OPTION_LINE_HEIGHT, TOOL_QUESTION_OPTION_TEXT_SIZE_PX,
     TOOL_QUESTION_TEXT_SIZE_PX,
 };
+use super::{desktop_math_ranges, parse_assistant_content, ParsedAssistantBlock};
 use crate::{app_state::DesktopState, theme};
 use bruhs_core::UsageInfo;
 use gpui::AppContext as _;
@@ -1783,6 +1784,29 @@ fn desktop_assistant_content_blocks_should_render_mermaid_fence() {
 }
 
 #[test]
+fn mermaid_fence_probe_keeps_decoded_info_and_line_endings() {
+    for (fence, language, newline) in [
+        ("```", "mErMaId", "\n"),
+        ("~~~~", "mermaid title", "\r\n"),
+        ("```", "m&#101;rmaid", "\n"),
+        ("```", "mermaid", "\r"),
+    ] {
+        let raw = format!(
+            "Before{newline}{newline}{fence}{language}{newline}graph TD{newline} A --> B{newline}{fence}{newline}{newline}After"
+        );
+        for streaming in [false, true] {
+            let blocks = parse_assistant_content(&raw, streaming);
+            assert!(blocks.iter().any(|block| matches!(block, ParsedAssistantBlock::Mermaid(source) if source.contains("A --> B"))), "closed fence must reach Markdown's decoder, streaming={streaming}: {raw:?}");
+        }
+    }
+    let prose = "A mermaid in **ordinary prose**, not a diagram.";
+    assert_eq!(
+        parse_assistant_content(prose, true),
+        vec![ParsedAssistantBlock::Markdown(prose.to_string())]
+    );
+}
+
+#[test]
 fn desktop_assistant_content_blocks_should_render_math_delimiters() {
     let blocks = desktop_assistant_content_blocks(
         "Inline $E=mc^2$ done\n\n$$\\frac{a}{b}$$\n\nAlso \\(x+y\\) and \\[z^2\\]",
@@ -1802,6 +1826,71 @@ fn desktop_assistant_content_blocks_should_render_math_delimiters() {
             panic!("valid TeX should render as SVG");
         };
         assert!(svg.contains("<svg"));
+    }
+}
+
+#[test]
+fn desktop_math_scanner_preserves_unclosed_sources_and_other_delimiters() {
+    for (opening, closing, other) in [(r"\(", r"\)", r"\[z^2\]"), (r"\[", r"\]", r"\(z^2\)")] {
+        let unfinished = format!("{opening}unfinished ").repeat(5_000);
+        let raw = format!("{unfinished}é escaped \\{closing} {other} and $x$");
+        let ranges = desktop_math_ranges(&raw);
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].source, "z^2");
+        assert_eq!(&raw[ranges[0].start..ranges[0].end], other);
+        assert_eq!(ranges[1].source, "x");
+        assert_eq!(&raw[ranges[1].start..ranges[1].end], "$x$");
+        let blocks = parse_assistant_content(&raw, true);
+        let ParsedAssistantBlock::Markdown(prose) = &blocks[0] else {
+            panic!("unclosed math must remain readable prose");
+        };
+        assert!(prose.starts_with(&unfinished));
+        assert!(prose.contains(&format!("escaped \\{closing}")));
+    }
+}
+
+#[test]
+fn desktop_math_scanner_keeps_the_first_opener_when_a_late_closer_exists() {
+    for (opening, closing) in [(r"\(", r"\)"), (r"\[", r"\]")] {
+        let source = format!("{}λ", format!("{opening}nested ").repeat(5_000));
+        let raw = format!("é {opening}{source}{closing} and $y$");
+        let ranges = desktop_math_ranges(&raw);
+        assert_eq!(ranges.len(), 2);
+        assert_eq!(ranges[0].start, "é ".len());
+        assert_eq!(ranges[0].source, source);
+        assert_eq!(
+            &raw[ranges[0].start..ranges[0].end],
+            format!("{opening}{source}{closing}")
+        );
+        assert_eq!(ranges[1].source, "y");
+    }
+}
+
+#[test]
+#[ignore = "diagnostic timings depend on machine load"]
+fn desktop_math_scanner_cost() {
+    use std::{hint::black_box, time::Instant};
+
+    for (label, pattern) in [
+        ("unclosed parentheses", r"\(unfinished "),
+        ("unclosed brackets", r"\[unfinished "),
+    ] {
+        for count in [50, 500, 5_000, 20_000] {
+            let raw = pattern.repeat(count);
+            let mut samples = Vec::new();
+            for _ in 0..9 {
+                let start = Instant::now();
+                assert!(black_box(desktop_math_ranges(black_box(&raw))).is_empty());
+                samples.push(start.elapsed().as_secs_f64() * 1_000.0);
+            }
+            samples.sort_by(f64::total_cmp);
+            println!(
+                "{label}, {count} openers, {} bytes: p50 {:.3} ms, p95 {:.3} ms",
+                raw.len(),
+                samples[4],
+                samples[8]
+            );
+        }
     }
 }
 
