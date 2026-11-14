@@ -31,10 +31,7 @@ fn thread(title: &str) -> Record {
 fn conversation(text: &str) -> Record {
     let mut message = AgentMessage::user(text.into(), 1.0);
     message.id = "message".into();
-    Record::Conversation(MessagesRecord {
-        thread_id: "a".into(),
-        messages: vec![message],
-    })
+    Record::Conversation(MessagesRecord::new("a".into(), vec![message]))
 }
 
 fn edit(queue: &mut Queue, kind: Kind, original: Option<Record>, draft: Option<Record>) {
@@ -71,7 +68,7 @@ fn conversation_failure_blocks_its_metadata_and_retries_only_latest_turn() {
     assert!(json[1]["original"].is_null());
     assert_eq!(json[1]["unsaved"]["messages"][0]["content"], "Finished");
     assert_eq!(
-        queue.conversation("a").unwrap().unwrap().messages[0].text(),
+        queue.conversation("a").unwrap().unwrap().messages()[0].text(),
         "Finished"
     );
     queue.retry();

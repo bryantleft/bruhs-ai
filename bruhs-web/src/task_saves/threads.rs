@@ -20,7 +20,9 @@ const UNFINISHED_RESPONSE: &str = "This saved response is unfinished, and this t
 /// Older records without ordered parts are rebuilt when they are read
 /// (`state::MessageRecord`), so loaded copies display as they are.
 fn displayed(record: Option<MessagesRecord>) -> Vec<AgentMessage> {
-    record.map(|record| record.messages).unwrap_or_default()
+    record
+        .map(MessagesRecord::into_messages)
+        .unwrap_or_default()
 }
 
 impl TaskSaves {
@@ -104,10 +106,7 @@ impl TaskSaves {
 
     pub fn edit_conversation(self, id: String, messages: Vec<AgentMessage>) {
         let mut original = None;
-        let draft = MessagesRecord {
-            thread_id: id.clone(),
-            messages,
-        };
+        let draft = MessagesRecord::new(id.clone(), messages);
         if self
             .conversations
             .with_value(|state| state.deleted.contains(&id))
@@ -176,10 +175,10 @@ mod tests {
         message
             .parts
             .push(MessagePart::Text("Partial response 日本語 🦀".into()));
-        MessagesRecord {
-            thread_id: "a".into(),
-            messages: vec![AgentMessage::user("Original prompt".into(), 1.0), message],
-        }
+        MessagesRecord::new(
+            "a".into(),
+            vec![AgentMessage::user("Original prompt".into(), 1.0), message],
+        )
     }
 
     #[test]
@@ -188,11 +187,11 @@ mod tests {
         let shown = recovered(Some(raw.clone()));
         assert!(!shown[1].is_streaming());
         assert_eq!(shown[1].error.as_deref(), Some(UNFINISHED_RESPONSE));
-        assert_eq!(shown[1].parts, raw.messages[1].parts);
+        assert_eq!(shown[1].parts, raw.messages()[1].parts);
         assert_eq!(shown[1].status, MessageStatus::Finished { at_ms: None });
-        assert!(raw.messages[1].is_streaming());
-        assert!(raw.messages[1].error.is_none());
-        assert_eq!(shown[0], raw.messages[0]);
+        assert!(raw.messages()[1].is_streaming());
+        assert!(raw.messages()[1].error.is_none());
+        assert_eq!(shown[0], raw.messages()[0]);
     }
 
     #[test]
@@ -204,13 +203,15 @@ mod tests {
 
     #[test]
     fn recovery_preserves_existing_errors_and_completed_responses() {
-        let mut raw = unfinished();
-        raw.messages[1].error = Some("Existing transport error".into());
+        let mut messages = unfinished().into_messages();
+        messages[1].error = Some("Existing transport error".into());
+        let raw = MessagesRecord::new("a".into(), messages.clone());
         let shown = recovered(Some(raw.clone()));
-        assert_eq!(shown[1].error, raw.messages[1].error);
+        assert_eq!(shown[1].error, raw.messages()[1].error);
         assert!(!shown[1].is_streaming());
-        raw.messages[1].status = MessageStatus::Finished { at_ms: None };
-        raw.messages[1].error = None;
+        messages[1].status = MessageStatus::Finished { at_ms: None };
+        messages[1].error = None;
+        let raw = MessagesRecord::new("a".into(), messages);
         assert_eq!(recovered(Some(raw.clone())), displayed(Some(raw)));
     }
 }

@@ -2050,7 +2050,7 @@ pub fn ChatPage() -> impl IntoView {
 
     // Only a different conversation or a hero/transcript transition mounts
     // these subtrees. Metadata and history updates flow through their children.
-    let mounting = ChatMount::new(active_thread_id, threads, messages, is_streaming);
+    let mounting = ChatMount::new(active_thread_id, threads, messages, live_here);
 
     // ── View ─────────────────────────────────────────────────────────────────
     view! {
