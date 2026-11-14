@@ -142,6 +142,18 @@ mod tests {
     }
 
     #[test]
+    fn unknown_confidence_round_trips_through_the_capture_log_as_null() {
+        let file = tempfile::NamedTempFile::new().unwrap();
+        let mut segment = fixture("unknown");
+        segment.confidence = TranscriptSegment::UNKNOWN_CONFIDENCE;
+        append_segment(file.path(), &segment).unwrap();
+        let value: serde_json::Value =
+            serde_json::from_str(&std::fs::read_to_string(file.path()).unwrap()).unwrap();
+        assert!(value["confidence"].is_null());
+        assert_eq!(load_snapshot(file.path()).unwrap(), vec![segment]);
+    }
+
+    #[test]
     fn load_returns_empty_when_missing() {
         let path = std::env::temp_dir().join(format!(
             "bruhs-jsonl-missing-{}.jsonl",

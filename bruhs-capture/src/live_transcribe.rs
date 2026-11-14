@@ -258,7 +258,7 @@ fn run(
                 start_ms: absolute_start,
                 end_ms: absolute_end,
                 text: seg.text.clone(),
-                confidence: 1.0,
+                confidence: TranscriptSegment::UNKNOWN_CONFIDENCE,
                 partial: true,
                 speaker_confidence: None,
             };

@@ -365,6 +365,43 @@ mod tests {
         hex(&Sha256::digest(bytes))
     }
 
+    #[tokio::test]
+    #[ignore = "manual optimized cached-model verification timing; cargo test -p bruhs-capture --release --locked model_checksum_action_cost -- --ignored --nocapture"]
+    async fn model_checksum_action_cost() {
+        use std::io::{Seek, SeekFrom, Write};
+        let root = tempfile::tempdir().unwrap();
+        let path = root.path().join("synthetic-model.bin");
+        let bytes = vec![b'A'; 64 * 1024 * 1024];
+        let len = u64::try_from(bytes.len()).unwrap();
+        // Independently verified with Python hashlib, not computed by this backend.
+        let expected = "dbfaca2662cb70b69dfefd5ac95d1f54a73663092d46cefdc9609dc695a12c98";
+        std::fs::write(&path, bytes).unwrap();
+        let mut samples = Vec::new();
+        for iteration in 0..9 {
+            let started = std::time::Instant::now();
+            let cached = file_matches(&path, expected, len).await.unwrap();
+            let elapsed = started.elapsed().as_secs_f64() * 1000.0;
+            assert!(matches!(cached, Cached::Valid));
+            if iteration >= 2 {
+                samples.push(elapsed);
+            }
+        }
+        let mut file = std::fs::OpenOptions::new().write(true).open(&path).unwrap();
+        file.seek(SeekFrom::End(-1)).unwrap();
+        file.write_all(b"B").unwrap();
+        drop(file);
+        assert!(matches!(
+            file_matches(&path, expected, len).await.unwrap(),
+            Cached::Corrupt
+        ));
+        println!(
+            "MODEL_CHECKSUM_COST {}",
+            serde_json::json!({
+                "bytes": len, "samples_ms": samples, "tail_corruption_rejected": true,
+            })
+        );
+    }
+
     struct Host {
         url: String,
         hits: Arc<AtomicUsize>,

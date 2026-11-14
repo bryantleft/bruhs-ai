@@ -79,6 +79,11 @@ fn router(state: Arc<state::CaptureState>, token: auth::DaemonToken) -> Router {
         )
         .route("/capture/start", post(routes::capture::start_capture))
         .route("/capture/stop", post(routes::capture::stop_capture))
+        .route(
+            "/dictation",
+            post(routes::dictation::transcribe)
+                .layer(axum::extract::DefaultBodyLimit::max(50 << 20)),
+        )
         .route("/events", get(routes::events::get_events))
         .route("/recovery", get(routes::recovery::pending))
         .route("/recovery/failures", get(routes::recovery::failures))

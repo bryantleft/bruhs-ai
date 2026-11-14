@@ -143,7 +143,7 @@ fn resample_mono(input: Vec<f32>, in_rate: u32, out_rate: u32) -> Result<Vec<f32
     .map_err(|e| DecodeError::Resample(format!("{e}")))?;
 
     // How many output samples correspond to exactly `input.len()` input frames.
-    let exact_out = crate::mix::resampled_len(input.len(), in_rate, out_rate);
+    let exact_out = bruhs_models::logic::wav::resampled_len(input.len(), in_rate, out_rate);
     let mut out: Vec<f32> = Vec::with_capacity(exact_out + chunk_size);
 
     let mut cursor = 0;

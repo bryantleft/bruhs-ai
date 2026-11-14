@@ -7,20 +7,13 @@
 //! the meeting was. The output is written to a temporary file and renamed into
 //! place only when complete.
 
+pub(crate) use bruhs_models::logic::wav::resampled_len;
 use bruhs_models::num::{clamp_to_i16, ToIntSaturating};
 use hound::{SampleFormat, WavReader, WavSpec, WavWriter};
 use rubato::{FftFixedIn, Resampler};
 use std::fs::File;
 use std::io::BufReader;
 use std::path::Path;
-
-/// Output length when `frames` samples at `from_rate` are resampled to
-/// `to_rate`, rounded down (the length every resampler here truncates to).
-pub(crate) fn resampled_len(frames: usize, from_rate: u32, to_rate: u32) -> usize {
-    let frames = u64::try_from(frames).unwrap_or(u64::MAX);
-    let out = frames.saturating_mul(u64::from(to_rate)) / u64::from(from_rate.max(1));
-    usize::try_from(out).unwrap_or(usize::MAX)
-}
 
 #[derive(Debug, thiserror::Error)]
 pub enum MixError {

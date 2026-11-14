@@ -42,6 +42,11 @@ pub fn transcribe_samples<F>(
 where
     F: FnMut(&DecodedSegment),
 {
+    // Digital silence contains no speech. Inference on it can invent text;
+    // unlike an energy threshold, exact zero does not discard quiet speech.
+    if samples.iter().all(|sample| *sample == 0.0) {
+        return Ok(Vec::new());
+    }
     let ctx = WhisperContext::new_with_params(
         &model_path.to_string_lossy(),
         WhisperContextParameters::default(),
@@ -123,6 +128,9 @@ impl PersistentContext {
     where
         F: FnMut(&DecodedSegment),
     {
+        if samples.iter().all(|sample| *sample == 0.0) {
+            return Ok(Vec::new());
+        }
         let mut state = self
             .ctx
             .create_state()
@@ -176,6 +184,26 @@ fn centiseconds_to_ms(centiseconds: i64) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn digital_silence_needs_no_model_and_produces_no_segments() {
+        let model = Path::new("/not-a-model-for-the-silence-regression-test.bin");
+        let result = transcribe_samples(model, &[0.0; 16_000], Some("en"), |_| {
+            panic!("digital silence must not publish an invented segment")
+        });
+        assert!(
+            result.is_ok(),
+            "digital silence should bypass inference: {result:?}"
+        );
+        assert!(result.unwrap().is_empty());
+    }
+
+    #[test]
+    fn quiet_nonzero_audio_is_not_classified_as_digital_silence() {
+        let model = Path::new("/not-a-model-for-the-silence-regression-test.bin");
+        let result = transcribe_samples(model, &[f32::MIN_POSITIVE; 16_000], Some("en"), |_| {});
+        assert!(matches!(result, Err(WhisperError::Init(_))));
+    }
 
     #[test]
     fn centiseconds_become_milliseconds_and_clamp() {

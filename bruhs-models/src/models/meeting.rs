@@ -45,6 +45,9 @@ pub struct TranscriptSegment {
     pub start_ms: u32,
     pub end_ms: u32,
     pub text: String,
+    /// A supported confidence estimate, or [`Self::UNKNOWN_CONFIDENCE`].
+    /// Unknown is `null` on the wire; legacy numeric scores remain readable.
+    #[serde(with = "transcript_confidence")]
     pub confidence: f32,
     /// True while Whisper is still producing this segment; replaced once
     /// the final pass completes. UI renders `partial: true` segments with
@@ -57,6 +60,38 @@ pub struct TranscriptSegment {
     /// existing JSONL that predates Voice ID v2.
     #[serde(default)]
     pub speaker_confidence: Option<f32>,
+}
+
+impl TranscriptSegment {
+    /// Internal unknown marker, serialized as `null` rather than a probability.
+    pub const UNKNOWN_CONFIDENCE: f32 = -1.0;
+}
+
+mod transcript_confidence {
+    use super::TranscriptSegment;
+    use serde::{Deserialize, Deserializer, Serialize, Serializer};
+
+    pub fn serialize<S: Serializer>(value: &f32, serializer: S) -> Result<S::Ok, S::Error> {
+        if *value == TranscriptSegment::UNKNOWN_CONFIDENCE {
+            return Option::<f32>::None.serialize(serializer);
+        }
+        if !value.is_finite() || !(0.0..=1.0).contains(value) {
+            return Err(serde::ser::Error::custom(
+                "transcript confidence must be unknown or a finite probability in [0, 1]",
+            ));
+        }
+        value.serialize(serializer)
+    }
+
+    pub fn deserialize<'de, D: Deserializer<'de>>(deserializer: D) -> Result<f32, D::Error> {
+        match Option::<f32>::deserialize(deserializer)? {
+            None => Ok(TranscriptSegment::UNKNOWN_CONFIDENCE),
+            Some(value) if value.is_finite() && (0.0..=1.0).contains(&value) => Ok(value),
+            Some(_) => Err(serde::de::Error::custom(
+                "transcript confidence must be null or a finite probability in [0, 1]",
+            )),
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -324,6 +359,18 @@ mod tests {
         let json = serde_json::to_string(&s).unwrap();
         let back: TranscriptSegment = serde_json::from_str(&json).unwrap();
         assert_eq!(s, back);
+    }
+
+    #[test]
+    fn transcript_confidence_can_be_explicitly_unknown() {
+        let json = r#"{"id":"s","meeting_id":"m","speaker_id":null,"start_ms":0,"end_ms":1000,"text":"hello","confidence":null,"partial":false}"#;
+        let decoded = serde_json::from_str::<TranscriptSegment>(json);
+        assert!(
+            decoded.is_ok(),
+            "unknown confidence must decode: {decoded:?}"
+        );
+        let encoded = serde_json::to_value(decoded.unwrap()).unwrap();
+        assert!(encoded["confidence"].is_null());
     }
 
     #[test]
