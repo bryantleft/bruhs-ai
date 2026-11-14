@@ -34,7 +34,7 @@ web-sys = { version = "0.3", features = [
     "MouseEvent", "EventSource", "MessageEvent",
     "Window", "Document", "History", "EventTarget", "Event",
     "ReadableStream", "ReadableStreamDefaultReader",
-    "TextDecoder", "Request", "RequestInit", "RequestMode", "Response", "Headers",
+    "TextDecoder", "TextDecodeOptions", "Request", "RequestInit", "RequestMode", "Response", "Headers",
     "Blob", "BlobPropertyBag", "File", "FileList", "Url", "Storage",
     "AbortController", "AbortSignal", "IdbTransaction", "HtmlDetailsElement",
     "WebSocket", "BinaryType", "CloseEvent", "ResizeObserver", "ResizeObserverEntry",
