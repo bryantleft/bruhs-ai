@@ -8,10 +8,16 @@
 //! [`ServerError`] that says whether the server was unreachable, answered
 //! with a failure status, or answered with something unexpected.
 
+#[path = "server_client/api_client.rs"]
+mod api_client;
+#[path = "server_client/database.rs"]
+mod database;
 #[path = "server_client/reactive.rs"]
 mod reactive;
 #[path = "server_client/rich_response_io.rs"]
 mod rich_response_io;
+#[path = "server_client/workbench.rs"]
+mod workbench;
 pub use reactive::ReactiveHookToken;
 
 use std::sync::Arc;
@@ -113,6 +119,8 @@ pub struct ServerClient {
     /// `Err` when the client could not be built; every request then fails
     /// with [`ServerError::Client`].
     http: Result<reqwest::Client, Arc<reqwest::Error>>,
+    /// Dedicated policy, shared by clones. Failed initialization can retry.
+    local_context_http: Arc<tokio::sync::OnceCell<reqwest::Client>>,
 }
 
 impl ServerClient {
@@ -146,11 +154,16 @@ impl ServerClient {
     ) -> Result<reqwest::Response, ServerError> {
         const REQUEST: &str = "Local context request";
         let url = self.local_context_url(id)?;
-        let client = reqwest::Client::builder()
-            .no_proxy()
-            .redirect(reqwest::redirect::Policy::none())
-            .timeout(REQUEST_TIMEOUT)
-            .build()
+        let client = self
+            .local_context_http
+            .get_or_try_init(|| async {
+                reqwest::Client::builder()
+                    .no_proxy()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .timeout(REQUEST_TIMEOUT)
+                    .build()
+            })
+            .await
             .map_err(|error| ServerError::Client(Arc::new(error)))?;
         let request = if let Some(sample) = sample {
             client.post(url).json(sample)
@@ -265,6 +278,7 @@ impl ServerClient {
                 None,
             ),
             http,
+            local_context_http: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 
@@ -1129,6 +1143,95 @@ mod tests {
                 "/api/meetings/private%2Fid/local-focus"
             );
         }
+    }
+
+    #[test]
+    fn local_focus_does_not_follow_redirects_or_expose_the_status_body() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        runtime().block_on(async {
+            let canary = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let destination = format!("http://{}/private-sentinel", canary.local_addr().unwrap());
+            let (stop, stopped) = tokio::sync::oneshot::channel();
+            let canary_task = tokio::spawn(async move {
+                tokio::select! {
+                    _ = stopped => false,
+                    accepted = canary.accept() => {
+                        let (mut socket, _) = accepted.unwrap();
+                        socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]").await.unwrap();
+                        true
+                    }
+                }
+            });
+            let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let base = format!("http://{}", listener.local_addr().unwrap());
+            let origin = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut reader = tokio::io::BufReader::new(socket);
+                let mut head = String::new();
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).await.unwrap() > 0);
+                    let end = line == "\r\n";
+                    head.push_str(&line);
+                    if end { break; }
+                }
+                let head = head.to_ascii_lowercase();
+                assert!(head.starts_with("get /api/meetings/private%2fid/local-focus http/1.1\r\n"));
+                assert!(head.contains("\r\nx-bruhs-local-context: 1\r\n"));
+                assert!(!head.contains("\r\norigin:"));
+                assert!(!head.contains("\r\nauthorization:"));
+                reader.into_inner().write_all(format!("HTTP/1.1 302 Found\r\nlocation: {destination}\r\ncontent-length: 0\r\nconnection: close\r\n\r\n").as_bytes()).await.unwrap();
+            });
+            let client = ServerClient::new(&base, &base).unwrap();
+            let error = client.list_local_focus("private/id").await.unwrap_err();
+            assert_eq!(error.to_string(), "Local context request → 302");
+            assert!(matches!(error, ServerError::Status { code, body, .. } if code.as_u16() == 302 && body.is_empty()));
+            origin.await.unwrap();
+            stop.send(()).unwrap();
+            assert!(!canary_task.await.unwrap(), "private redirect target was reached");
+        });
+    }
+
+    #[test]
+    fn local_focus_can_retry_after_status_decode_and_connection_close_errors() {
+        runtime().block_on(async {
+            let base = serve(vec![("503 Unavailable", "private body sentinel"), ("200 OK", "{}"), ("200 OK", "[]")]).await;
+            let client = ServerClient::new(&base, &base).unwrap();
+            let error = client.list_local_focus("private/id").await.unwrap_err();
+            assert_eq!(error.to_string(), "Local context request → 503");
+            assert!(matches!(error, ServerError::Status { code, body, .. } if code.as_u16() == 503 && body.is_empty()));
+            let error = client.list_local_focus("private/id").await.unwrap_err();
+            assert_eq!(error.to_string(), "Local context request: unexpected response");
+            assert!(matches!(error, ServerError::Decode { source, .. } if source.url().is_none()));
+            assert!(client.list_local_focus("private/id").await.unwrap().is_empty());
+        });
+    }
+
+    #[test]
+    fn local_focus_can_retry_after_a_redacted_transport_failure() {
+        use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
+        runtime().block_on(async {
+            let reservation = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+            let address = reservation.local_addr().unwrap();
+            drop(reservation);
+            let base = format!("http://{address}");
+            let client = ServerClient::new(&base, &base).unwrap();
+            let error = client.list_local_focus("private/id").await.unwrap_err();
+            assert!(matches!(error, ServerError::Transport { request, source } if request == "Local context request" && source.url().is_none()));
+            let listener = tokio::net::TcpListener::bind(address).await.unwrap();
+            let server = tokio::spawn(async move {
+                let (socket, _) = listener.accept().await.unwrap();
+                let mut reader = tokio::io::BufReader::new(socket);
+                loop {
+                    let mut line = String::new();
+                    assert!(reader.read_line(&mut line).await.unwrap() > 0);
+                    if line == "\r\n" { break; }
+                }
+                reader.into_inner().write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n[]").await.unwrap();
+            });
+            assert!(client.list_local_focus("private/id").await.unwrap().is_empty());
+            server.await.unwrap();
+        });
     }
     use super::{normalize_base, ServerClient, ServerError, SseParser, SSE_MAX_EVENT_BYTES};
 
