@@ -9,7 +9,7 @@ pub(super) fn people(
     let names: Vec<_> = meeting
         .speakers
         .iter()
-        .map(|speaker| speaker.label.to_ascii_lowercase())
+        .map(|speaker| bruhs_models::person_name_key(&speaker.label))
         .collect();
     let ids: Vec<_> = meeting
         .speakers

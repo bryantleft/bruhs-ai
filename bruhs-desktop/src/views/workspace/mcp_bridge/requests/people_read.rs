@@ -11,7 +11,10 @@ struct PersonSummary<'a> {
     created_at: i64,
     updated_at: i64,
     alias_count: usize,
-    observation_count: usize,
+    /// Withheld (null) for opted-out people, like their observations.
+    observation_count: Option<usize>,
+    #[serde(skip_serializing_if = "std::ops::Not::not")]
+    observations_withheld: bool,
 }
 
 impl<'a> From<&'a PersonProfile> for PersonSummary<'a> {
@@ -23,7 +26,8 @@ impl<'a> From<&'a PersonProfile> for PersonSummary<'a> {
             created_at: person.created_at,
             updated_at: person.updated_at,
             alias_count: person.aliases.len(),
-            observation_count: person.observations.len(),
+            observation_count: person.tracked.then_some(person.observations.len()),
+            observations_withheld: !person.tracked,
         }
     }
 }
@@ -144,6 +148,11 @@ impl Workspace {
                 }),
                 0,
             ),
+            // A per-person opt-out withholds every stored observation from
+            // agent context, not only new extraction.
+            PersonReadSection::Observations if !person.tracked => {
+                Ok(json!({"records": [], "next_offset": null, "observations_withheld": true}))
+            }
             PersonReadSection::Observations => read_page(person.observations.iter(), offset),
             PersonReadSection::RelationshipItems => read_page(
                 profile.into_iter().flat_map(|profile| &profile.items),
