@@ -413,12 +413,17 @@ fn media_pdf(url: Option<String>, name: String) -> AnyView {
 }
 
 fn html_frame(html: String, name: String, policy: &'static str) -> AnyView {
+    // The iframe csp attribute is not supported by every browser. Keep the
+    // viewer's policy ahead of file markup even when the app allows media.
+    let document = format!(
+        "<!doctype html><html><head><meta http-equiv=\"Content-Security-Policy\" content=\"{policy}\"></head><body>{html}</body></html>"
+    );
     view! {
         <iframe
             class="h-full min-h-80 w-full bg-white"
             sandbox=""
             title=name
-            prop:srcdoc=html
+            prop:srcdoc=document
         ></iframe>
     }
     .attr("csp", policy)

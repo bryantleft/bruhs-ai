@@ -8,6 +8,9 @@
 //! turn survives switching threads and finishes in the background, and a
 //! token re-renders only the running turn.
 
+mod mount_state;
+use mount_state::ChatMount;
+
 use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
@@ -37,7 +40,7 @@ use crate::components::terminal_panel::{TerminalPanel, TerminalPanelMode};
 use crate::components::timeline::{build_turns, latest_assistant_id, RowBuilder};
 use crate::components::timeline_view::Timeline;
 use crate::state::{
-    auto_title, ActiveProjectSignal, AgentMessage, BaseBranchSignal, ChipRetargetGuard,
+    auto_title, AgentMessage, BaseBranchSignal, ChipRetargetGuard,
     ClaudeAutoCompactSignal, ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal,
     ComposerChips, ComposerDraft, DiffFocusPath, DiffScope, DiffScopeSignal, FollowUpSteerSignal,
     GitStatusSignal, MessageStatus, OpenFileSignal, PanelSurface, PendingPermissionsSignal,
@@ -87,6 +90,19 @@ fn follow_after_scroll(following: bool, bottom: bool, moved_up: bool) -> (bool, 
         (false, true, _) => (false, false),
         (false, false, following) => (following, following),
     }
+}
+
+fn response_has_focus() -> bool {
+    web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| document.active_element())
+        .and_then(|active| {
+            active
+                .closest("[data-response-interactive], [data-response-media]")
+                .ok()
+                .flatten()
+        })
+        .is_some()
 }
 
 /// How often a turn sent to a thread that is still finishing its previous
@@ -265,7 +281,6 @@ pub fn ChatPage() -> impl IntoView {
         expect_context::<crate::state::PendingSecretsSignal>();
     let current_model = expect_context::<crate::state::CurrentModel>().0;
     let PermissionModeSignal(permission_mode) = expect_context::<PermissionModeSignal>();
-    let ActiveProjectSignal(active_project) = expect_context::<ActiveProjectSignal>();
     let turns = expect_context::<Turns>();
     let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
@@ -354,7 +369,13 @@ pub fn ChatPage() -> impl IntoView {
             return;
         };
         ev.prevent_default();
-        let project = active_project.get_untracked().map(|project| project.path);
+        let project = active_thread_id.get_untracked().and_then(|id| {
+            threads.with_untracked(|rows| {
+                rows.iter()
+                    .find(|thread| thread.id == id)
+                    .and_then(|thread| thread.project_path.clone())
+            })
+        });
         show_open_file(
             open_file,
             panel,
@@ -378,11 +399,7 @@ pub fn ChatPage() -> impl IntoView {
         let id = active_thread_id.get()?;
         threads.with(|ts| ts.iter().find(|t| t.id == id).cloned())
     };
-    let project_root = Memo::new(move |_| {
-        active_thread()
-            .and_then(|t| t.project_path)
-            .or_else(|| active_project.get().map(|p| p.path))
-    });
+    let project_root = Memo::new(move |_| active_thread().and_then(|t| t.project_path));
     // Whether the thread on screen has a running turn. Other threads may be
     // running too; each has its own turn in `turns`.
     let live_here = turns.here(active_thread_id);
@@ -470,9 +487,20 @@ pub fn ChatPage() -> impl IntoView {
     // Follow new rows while the user is at (or near) the bottom; a manual
     // scroll up parks the view and shows the "Scroll to end" pill.
     let at_bottom = RwSignal::new(true);
+    let response_interaction = StoredValue::new(false);
+    provide_context(crate::components::rich_response::ChatInteraction(
+        Callback::new(move |()| {
+            response_interaction.set_value(true);
+            at_bottom.set(false);
+        }),
+    ));
     // Deferred callers may outlive this page (view switch, thread change), so
     // never unwrap the node ref.
     let scroll_to_bottom = move || {
+        // A queued follow must not move a form or player under the pointer.
+        if response_interaction.get_value() || response_has_focus() {
+            return;
+        }
         if let Some(Some(el)) = messages_container.try_get_untracked() {
             let html_el: web_sys::HtmlElement = (*el).clone();
             html_el.set_scroll_top(html_el.scroll_height());
@@ -528,6 +556,7 @@ pub fn ChatPage() -> impl IntoView {
     });
     Effect::new(move |_| {
         active_thread_id.track();
+        response_interaction.set_value(false);
         at_bottom.set(true);
         if !find_cmds.thread_open.get_untracked() {
             scroll_soon();
@@ -911,16 +940,14 @@ pub fn ChatPage() -> impl IntoView {
             compact_full.set(false);
         }
         if here {
+            response_interaction.set_value(false);
             at_bottom.set(true);
         }
         flush_persist();
 
         // A chat without a project sends no path; the server runs it in the
         // home directory.
-        let project_path = thread.project_path.clone().or_else(|| {
-            here.then(|| active_project.get_untracked().map(|p| p.path))
-                .flatten()
-        });
+        let project_path = thread.project_path.clone();
         let session_id = thread.session_id.filter(|_| !restart);
         let fresh_session = thread.fresh_session || restart;
         let choice = run_choice.get_untracked();
@@ -1988,10 +2015,14 @@ pub fn ChatPage() -> impl IntoView {
         })
     });
 
+    // Only a different conversation or a hero/transcript transition mounts
+    // these subtrees. Metadata and history updates flow through their children.
+    let mounting = ChatMount::new(active_thread_id, threads, messages, is_streaming);
+
     // ── View ─────────────────────────────────────────────────────────────────
     view! {
         {move || {
-            match active_thread() {
+            match mounting.thread_id.get() {
                 None => view! {
                     <div class="flex flex-1 flex-col items-center justify-center h-full text-body-sm text-rambutan-500">
                         <p>"Pick a conversation, or start a new one."</p>
@@ -2000,7 +2031,7 @@ pub fn ChatPage() -> impl IntoView {
 
                 Some(thread) => view! {
                     <div class="flex flex-col h-full">
-                        <ChatHeader thread_id=thread.id />
+                        <ChatHeader thread_id=thread />
                         {move || find_cmds.thread_open.get().then(|| view! {
                             <FindBar
                                 label="Find in thread"
@@ -2016,8 +2047,7 @@ pub fn ChatPage() -> impl IntoView {
                         <crate::thread_history::ThreadHistoryStatus />
 
                         {move || {
-                            let empty = messages.with(|m| m.is_empty()) && !live_here.get();
-                            if empty {
+                            if mounting.transcript_empty.get() {
                                 // Empty thread: the draft hero — headline +
                                 // composer centered in the column.
                                 view! {
@@ -2046,6 +2076,10 @@ pub fn ChatPage() -> impl IntoView {
                                         <div
                                             node_ref=messages_container
                                             on:scroll=move |_| {
+                                                if response_interaction.get_value() || response_has_focus() {
+                                                    at_bottom.set(false);
+                                                    return;
+                                                }
                                                 if let Some(Some(el)) = messages_container.try_get_untracked() {
                                                     let html_el: web_sys::HtmlElement = (*el).clone();
                                                     let top = html_el.scroll_top();
@@ -2068,6 +2102,8 @@ pub fn ChatPage() -> impl IntoView {
                                         >
                                             <Timeline
                                                 settled=settled_turns
+                                                project_path=project_root
+                                                thread_id=active_thread_id
                                                 live=live_turn
                                                 is_streaming=live_here
                                                 awaiting_approval=awaiting_approval
@@ -2083,6 +2119,7 @@ pub fn ChatPage() -> impl IntoView {
                                                 <button
                                                     type="button"
                                                     on:click=move |_| {
+                                                        response_interaction.set_value(false);
                                                         at_bottom.set(true);
                                                         scroll_to_bottom();
                                                     }

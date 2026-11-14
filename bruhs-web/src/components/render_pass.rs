@@ -9,9 +9,9 @@ use wasm_bindgen::{JsCast, JsValue};
 
 use crate::state::{AgentMessage, MessagePart};
 
-/// Marks a `.prose-msg` block the pass has already processed. A block whose
-/// markdown changes is a new element (its row re-renders), so it is
-/// processed again.
+/// Marks a `.prose-msg` block the pass has already processed. Markdown DOM
+/// reconciliation removes the marker when its content changes, so it is
+/// processed again without replacing unchanged prose nodes.
 const DONE_ATTR: &str = "data-render-pass";
 
 /// Install the effect once per chat page. KaTeX, Mermaid, and highlight.js

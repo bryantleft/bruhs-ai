@@ -1217,6 +1217,7 @@ dependencies = [
 name = "bruhs-web"
 version = "0.1.0"
 dependencies = [
+ "any_spawner",
  "bruhs-models",
  "console_error_panic_hook",
  "console_log",
@@ -1231,6 +1232,7 @@ dependencies = [
  "serde",
  "serde-wasm-bindgen",
  "serde_json",
+ "tachys",
  "thiserror 2.0.18",
  "uuid",
  "wasm-bindgen",

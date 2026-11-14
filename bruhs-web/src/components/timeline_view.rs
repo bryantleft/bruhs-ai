@@ -19,14 +19,17 @@ use wasm_bindgen::JsCast;
 
 use crate::components::diff_view::DiffView;
 use crate::components::mention_editor::insert_chip_at_caret;
+use crate::components::rich_response::{ArtifactResponse, RichResponse};
 use crate::components::terminal_output::TerminalOutput;
 use crate::components::timeline::{
     work_summary, ChangedFile, TimelineRow, ToolKind, ToolState, ToolView, Turn,
 };
 use crate::format::{format_duration_ms, format_tokens, truncate_chars};
-use crate::markdown;
 use crate::state::{OpenFileSignal, RightPanelSignal, UsageInfo};
 use crate::ui::{CopyButton, Icon, Tooltip};
+
+pub(super) mod row_directory;
+use row_directory::RowDirectory;
 
 /// Long prompts start collapsed behind a "Show full message" toggle.
 pub fn should_collapse_user_message(text: &str) -> bool {
@@ -141,6 +144,8 @@ struct RowCtx {
     in_worktree: Signal<bool>,
     /// `(message id, revert files too)`.
     on_edit_from_here: Callback<(String, bool)>,
+    project_path: Signal<Option<String>>,
+    thread_id: Signal<Option<String>>,
 }
 
 #[component]
@@ -163,6 +168,8 @@ pub fn Timeline(
     on_edit_from_here: Callback<(String, bool)>,
     /// `(user message id of the turn, optional file path to focus)`.
     on_open_diff: Callback<(String, Option<String>)>,
+    #[prop(optional, into)] project_path: Signal<Option<String>>,
+    #[prop(optional, into)] thread_id: Signal<Option<String>>,
 ) -> impl IntoView {
     let expanded = Expanded(RwSignal::new(HashMap::new()));
 
@@ -196,6 +203,8 @@ pub fn Timeline(
         can_rewind,
         in_worktree,
         on_edit_from_here,
+        project_path,
+        thread_id,
     };
     let cite_offer = install_cite_listener();
     // Changes only when a turn starts or ends, not per token.
@@ -243,20 +252,45 @@ pub fn Timeline(
                                 .unwrap_or_default()
                         })
                     });
+                    let directory = RowDirectory::new(turn_rows);
+                    let publications = Memo::new(move |_| turn_rows.with(|rows| {
+                        rows.iter().filter_map(|row| match row { TimelineRow::Work { tools, .. } => Some(tools), _ => None }).flatten().filter(|tool| tool.call.tool.ends_with("publish_artifact")).filter_map(|tool| tool.call.output.as_ref().map(|output| (tool.call.id.clone(), output.clone()))).collect::<Vec<_>>()
+                    }));
+                    let artifacts = Memo::new(move |_| publications.with(|outputs| {
+                        outputs.iter().flat_map(|(tool,output)| bruhs_models::logic::rich_response::response_blocks(output,false).into_iter().filter_map(|block| match block { bruhs_models::logic::rich_response::ResponseBlock::Artifact(artifact) => Some((tool.clone(),artifact)), _ => None })).collect::<Vec<_>>()
+                    }));
+                    let artifact_message = StoredValue::new(mid.clone());
                     let cls = if is_user { "flex flex-col" } else { "group/turn flex flex-col" };
                     view! {
                         <div class=cls data-message-id=mid>
                             <For
-                                each=move || turn_rows.get()
-                                key=|r| r.key().to_string()
-                                children=move |row| {
-                                    let key = row.key().to_string();
-                                    let row_memo = Memo::new(move |_| {
-                                        turn_rows.with(|rs| rs.iter().find(|r| r.key() == key).cloned())
-                                    });
-                                    view! { {move || row_memo.get().map(|r| render_row(r, ctx))} }
+                                each=move || directory.keys.get()
+                                key=|key| key.clone()
+                                children=move |key| {
+                                    let row_memo = directory.row(key.clone());
+                                    // Keep the rich response component mounted while its prose grows.
+                                    // Recreating it per token would reset a playing video or a form.
+                                    if let Some(TimelineRow::AssistantText { message_id, .. }) = row_memo.get_untracked() {
+                                        let scope = format!("{}/{message_id}/{key}", thread_id.get_untracked().unwrap_or_default());
+                                        let markdown = Signal::derive(move || row_memo.with(|row| {
+                                            match row {
+                                                Some(TimelineRow::AssistantText { markdown, .. }) => markdown.clone(),
+                                                _ => String::new(),
+                                            }
+                                        }));
+                                        let streaming = Signal::derive(move || row_memo.with(|row| {
+                                            matches!(row, Some(TimelineRow::AssistantText { streaming: true, .. }))
+                                        }));
+                                        view! { <RichResponse markdown streaming project_path scope /> }.into_any()
+                                    } else {
+                                        view! { {move || row_memo.get().map(|r| render_row(r, ctx))} }.into_any()
+                                    }
                                 }
                             />
+                            <For each=move || artifacts.get() key=|(_,artifact)| artifact.id.clone() children=move |(tool,artifact)| {
+                                let scope=format!("{}/{}/tool/{tool}/{}",thread_id.get_untracked().unwrap_or_default(),artifact_message.get_value(),artifact.id);
+                                view! { <ArtifactResponse artifact scope /> }
+                            } />
                         </div>
                     }
                 }
@@ -448,8 +482,15 @@ fn render_row(row: TimelineRow, ctx: RowCtx) -> AnyView {
         }
         .into_any(),
         TimelineRow::AssistantText {
-            markdown, streaming, ..
-        } => view! { <AssistantTextRow markdown=markdown streaming=streaming /> }.into_any(),
+            markdown, streaming, message_id, key,
+        } => view! {
+            <RichResponse
+                markdown=Signal::stored(markdown)
+                streaming=Signal::stored(streaming)
+                project_path=ctx.project_path
+                scope=format!("{}/{message_id}/{key}", ctx.thread_id.get_untracked().unwrap_or_default())
+            />
+        }.into_any(),
         TimelineRow::Thinking {
             key, text, live, ..
         } => view! { <ThinkingRow key=key text=text live=live expanded=ctx.expanded /> }.into_any(),
@@ -716,23 +757,6 @@ fn UserRow(
 }
 
 // ── Assistant prose + meta ───────────────────────────────────────────────────
-
-#[component]
-fn AssistantTextRow(markdown: String, streaming: bool) -> impl IntoView {
-    if !streaming && markdown.trim().is_empty() {
-        return view! {
-            <p class="px-1 pb-2 text-body-sm text-rambutan-500">"(empty response)"</p>
-        }
-        .into_any();
-    }
-    let html = markdown::render_untrusted(&markdown);
-    view! {
-        <div class="min-w-0 px-1 py-0.5 pb-2">
-            <div class="prose-msg text-body-sm leading-relaxed text-rambutan-200" inner_html=html></div>
-        </div>
-    }
-    .into_any()
-}
 
 #[component]
 fn AssistantMetaRow(
