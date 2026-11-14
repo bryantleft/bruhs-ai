@@ -1,0 +1,14 @@
+node_modules/
+.expo/
+dist/
+ios/
+android/
+*.tsbuildinfo
+build/
+.DS_Store
+*.pem
+*.key
+*.keystore
+*.mobileprovision
+.env*.local
+npm-debug.*

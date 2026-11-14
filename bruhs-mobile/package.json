@@ -1,0 +1,48 @@
+{
+  "name": "bruhs-mobile",
+  "private": true,
+  "type": "module",
+  "version": "0.1.0",
+  "main": "index.ts",
+  "scripts": {
+    "start": "expo start --dev-client",
+    "ios": "expo run:ios",
+    "ios:check": "node scripts/ios-local.mjs check",
+    "ios:device": "node scripts/ios-local.mjs device",
+    "ios:archive": "node scripts/ios-local.mjs archive",
+    "ios:archive:unsigned": "node scripts/ios-local.mjs unsigned-archive",
+    "android": "node scripts/android-local.mjs",
+    "web": "expo start --web",
+    "typecheck": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test test/*.test.ts",
+    "export:web": "expo export --platform web"
+  },
+  "dependencies": {
+    "expo": "~58.0.25",
+    "expo-camera": "~58.0.14",
+    "expo-crypto": "~58.0.8",
+    "expo-dev-client": "~58.0.20",
+    "expo-font": "~58.0.12",
+    "expo-linking": "~58.0.17",
+    "expo-secure-store": "~58.0.3",
+    "expo-speech-recognition": "^58.0.1",
+    "expo-status-bar": "~58.0.5",
+    "expo-system-ui": "~58.0.7",
+    "react": "19.3.0",
+    "react-dom": "19.3.0",
+    "react-native": "0.88.1",
+    "react-native-safe-area-context": "~5.11.1",
+    "react-native-web": "^0.21.4",
+    "zod": "^4.6.7"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.6",
+    "@types/react": "~19.3.0",
+    "typescript": "~6.0.3"
+  },
+  "overrides": {
+    "@expo/fingerprint": {
+      "minimatch": "^11.0.8"
+    }
+  }
+}
