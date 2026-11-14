@@ -11,7 +11,9 @@ use bruhs_core::{
     AgentTurn, OrchestratorEvent, PermissionDecision, QueryEvent, SkillRef, TaskStatus, UsageInfo,
 };
 use bruhs_models::agent::provider_for_model_id;
-use bruhs_models::agent::{AgentProvider, ModelInfo, DEFAULT_AGENT_MODEL, MODEL_CATALOG};
+#[cfg(test)]
+use bruhs_models::agent::DEFAULT_AGENT_MODEL;
+use bruhs_models::agent::{AgentProvider, ModelInfo, MODEL_CATALOG};
 use bruhs_models::ids::{IdError, ThreadId};
 use bruhs_models::logic::attachments::UploadedFile;
 use bruhs_models::logic::commands::ThreadGoal;
@@ -64,11 +66,15 @@ mod auth;
 mod behavior_tests;
 mod composer_ui;
 mod content_cache;
+mod dictation;
 mod files;
 mod git_info;
 mod git_ui;
 mod hints_ui;
+mod mobile;
 mod model_picker_ui;
+pub(crate) use mobile::mobile_label;
+mod prompt_suggestion;
 mod rich_response;
 mod secret_prompt;
 #[cfg(debug_assertions)]
@@ -464,6 +470,9 @@ pub enum ChatViewEvent {
         message_index: usize,
     },
     /// A draft tile or a sent file asked the right panel to read `path`.
+    OpenWhiteboard {
+        source: String,
+    },
     OpenFile {
         path: String,
         label: String,
@@ -533,7 +542,7 @@ pub struct ChatView {
     composer_options_trigger_focus: FocusHandle,
     composer_options_trigger_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     composer_options_scroll: ScrollHandle,
-    composer_options_section_focus: [FocusHandle; 5],
+    composer_options_section_focus: [FocusHandle; 6],
     stash_open: bool,
     /// Parked drafts (⌘S), newest first.
     stash: Vec<StashEntry>,
@@ -545,6 +554,7 @@ pub struct ChatView {
     queue_edit: Option<QueueEdit>,
     /// Composer text applied on the next paint. Stream tasks have no window.
     pending_composer: Option<String>,
+    dictation: dictation::ComposerDictation,
     /// Edit from here focuses the composer after that write.
     focus_pending_composer: bool,
     recall: Option<bruhs_models::logic::recall::RecallCursor>,
@@ -658,6 +668,8 @@ pub struct ChatView {
     /// A branch switch in the background.
     checkout_task: Option<Task<()>>,
     mention_query: Option<String>,
+    prompt_suggestion: bruhs_models::logic::prompt_suggestion::PromptSuggestion,
+    suggestion_task: Option<Task<()>>,
     /// The pending (debounced) `@`-mention search.
     mention_task: Option<Task<()>>,
     mention_items: Vec<DesktopMentionItem>,
@@ -665,6 +677,7 @@ pub struct ChatView {
     composer_hint_scroll: ScrollHandle,
     composer_hints_suppressed_value: Option<String>,
     auth_status: DesktopAuthStatus,
+    initial_auth_pending: bool,
     pending_permission: Option<DesktopPermissionRequest>,
     pending_secret: Option<bruhs_models::secrets::SecretRequest>,
     secret_prompt: Option<Entity<secret_prompt::SecretPrompt>>,
@@ -709,7 +722,31 @@ pub struct ChatView {
 impl EventEmitter<ChatViewEvent> for ChatView {}
 
 impl ChatView {
+    #[cfg(test)]
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+        Self::new_with_project_path(current_dir_string(), window, cx)
+    }
+
+    #[cfg(test)]
+    pub(crate) fn new_with_project_path(
+        project_path: String,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
+        Self::new_with_model_and_project_path(
+            DEFAULT_AGENT_MODEL.to_string(),
+            project_path,
+            window,
+            cx,
+        )
+    }
+
+    pub(crate) fn new_with_model_and_project_path(
+        model_id: String,
+        project_path: String,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> Self {
         let input_state = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder(CHAT_INPUT_PLACEHOLDER)
@@ -728,9 +765,13 @@ impl ChatView {
                     this.composer_hint_selected_index = 0;
                     this.composer_hint_scroll.set_offset(Point::default());
                     this.refresh_mention_hints(cx);
+                    this.sync_prompt_suggestion(cx);
                     cx.notify();
                 }
                 InputEvent::PressEnter { secondary, shift } => {
+                    if this.dictation.active() {
+                        return;
+                    }
                     if *shift {
                         return;
                     }
@@ -743,7 +784,10 @@ impl ChatView {
                     }
                     this.send_follow_up(*secondary, window, cx);
                 }
-                _ => {}
+                InputEvent::Focus | InputEvent::Blur => {
+                    this.sync_prompt_suggestion(cx);
+                    cx.notify();
+                }
             },
         );
         let model_picker_query =
@@ -783,6 +827,9 @@ impl ChatView {
             if key == "tab" && !modifiers.platform && !modifiers.control && !modifiers.alt {
                 if let Some(chat) = chat.upgrade() {
                     let handled = chat.update(cx, |this, cx| {
+                        if !modifiers.shift && this.accept_prompt_suggestion(window, cx) {
+                            return true;
+                        }
                         if this.composer_options_open
                             && (this.composer_options_focus.contains_focused(window, cx)
                                 || this.composer_options_trigger_focus.is_focused(window))
@@ -976,8 +1023,8 @@ impl ChatView {
             diff_panel_visible: false,
             running_tasks_count: 0,
             permission_mode: PermissionMode::Default,
-            model_id: DEFAULT_AGENT_MODEL.to_string(),
-            project_path: current_dir_string(),
+            model_id,
+            project_path,
             project_scoped: false,
             project_name: String::new(),
             right_panel_open: false,
@@ -997,6 +1044,7 @@ impl ChatView {
             queue_held: false,
             queue_edit: None,
             pending_composer: None,
+            dictation: Default::default(),
             focus_pending_composer: false,
             recall: None,
             rewind_confirm: None,
@@ -1059,12 +1107,15 @@ impl ChatView {
             git_task: None,
             checkout_task: None,
             mention_query: None,
+            prompt_suggestion: Default::default(),
+            suggestion_task: None,
             mention_task: None,
             mention_items: Vec::new(),
             composer_hint_selected_index: 0,
             composer_hint_scroll: ScrollHandle::new(),
             composer_hints_suppressed_value: None,
             auth_status: DesktopAuthStatus::default(),
+            initial_auth_pending: false,
             pending_permission: None,
             pending_secret: None,
             secret_prompt: None,
@@ -1090,7 +1141,7 @@ impl ChatView {
             _registry_subscription: registry_subscription,
             _tasks_count_task,
         };
-        view.start_claude_auth_check(cx);
+        view.start_initial_claude_auth_check(cx);
         view
     }
 
@@ -1113,6 +1164,8 @@ impl ChatView {
         title: impl Into<String>,
         cx: &mut Context<'_, Self>,
     ) {
+        self.cancel_dictation(cx);
+        self.dismiss_prompt_suggestion(cx);
         self.thread_id = Some(id.into());
         self.thread_title = title.into();
         self.messages.clear();
@@ -1179,6 +1232,7 @@ impl ChatView {
     }
 
     pub fn set_model(&mut self, model_id: impl Into<String>, cx: &mut Context<'_, Self>) {
+        self.dismiss_prompt_suggestion(cx);
         self.model_id = model_id.into();
         if !self.effort_chip_visible() {
             self.effort_menu_open = false;
@@ -1217,6 +1271,9 @@ impl ChatView {
         self.claude_autocompact = composer.autocompact;
         self.compact_idle = composer.compact_idle;
         self.thread_access = composer.thread_access;
+        if self.task_models != composer.task_models {
+            self.dismiss_prompt_suggestion(cx);
+        }
         self.task_models = composer.task_models;
         if !self.effort_chip_visible() {
             self.effort_menu_open = false;
@@ -1301,6 +1358,20 @@ impl ChatView {
         });
     }
 
+    pub fn append_composer_draft(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let mut draft = self.input_state.read(cx).value().to_string();
+        if !draft.is_empty() {
+            draft.push_str("\n\n");
+        }
+        draft.push_str(text);
+        self.set_composer_draft(draft, window, cx);
+    }
+
     pub fn set_composer_draft(
         &mut self,
         draft: String,
@@ -1369,6 +1440,9 @@ impl ChatView {
     }
 
     fn thread_hits(&self) -> Vec<bruhs_models::logic::find::TextHit> {
+        if self.find_query.is_empty() {
+            return Vec::new();
+        }
         let owned: Vec<(String, String)> = self
             .messages
             .iter()
@@ -1611,6 +1685,7 @@ fn push_json_strings(out: &mut String, value: &serde_json::Value) {
 
 impl Drop for ChatView {
     fn drop(&mut self) {
+        self.dictation.cancel();
         if let Some(task) = self.agent_task.take() {
             task.abort();
         }
@@ -1688,6 +1763,7 @@ struct LoginTiming {
     login_timeout: Duration,
 }
 
+#[cfg(test)]
 fn current_dir_string() -> String {
     std::env::current_dir()
         .ok()
@@ -1721,6 +1797,7 @@ fn element_key(value: &str) -> u64 {
 
 impl Render for ChatView {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
+        self.hide_blocked_prompt_suggestion(cx);
         if let Some(text) = self.pending_composer.take() {
             let focus = self.focus_pending_composer;
             let chips = self.pending_chips.take();

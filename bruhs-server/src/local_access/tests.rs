@@ -162,6 +162,17 @@ async fn hostile_requests_never_reach_handlers_and_local_preflights_work() {
             .header("sec-fetch-site", "cross-site"),
         client
             .get(&endpoint)
+            .header("x-bruhs-verification-browser", "1"),
+        client
+            .get(&endpoint)
+            .header("user-agent", "Mozilla/5.0 BruhsVerification/1"),
+        client
+            .get(&endpoint)
+            .header("user-agent", "Mozilla/5.0 BruhsVerification/1")
+            .header("connection", "upgrade")
+            .header("upgrade", "websocket"),
+        client
+            .get(&endpoint)
             .header("origin", "http://localhost:8088")
             .header("origin", "https://foreign.example"),
         client
@@ -219,6 +230,71 @@ async fn hostile_requests_never_reach_handlers_and_local_preflights_work() {
         );
     }
     assert_eq!(calls.load(Ordering::SeqCst), 4);
+    server.abort();
+    assert!(server.await.unwrap_err().is_cancelled());
+}
+
+#[tokio::test]
+async fn merged_workbench_services_preserve_the_local_origin_boundary() {
+    let root = tempfile::tempdir().unwrap();
+    let delivery = bruhs_core::delivery::DeliveryService::open(root.path().join("delivery.json"))
+        .await
+        .unwrap();
+    let hosts = bruhs_core::remote_hosts::RemoteHostManager::open(root.path().join("hosts.json"))
+        .await
+        .unwrap();
+    let app = crate::workbench_services(delivery, hosts, Policy::default());
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let base = format!("http://{}", listener.local_addr().unwrap());
+    let server = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    for path in [
+        "/api/delivery",
+        "/api/remote-hosts",
+        "/api/delivery/ui",
+        "/api/remote-hosts/ui",
+    ] {
+        for (header, value) in [
+            ("origin", "https://foreign.example"),
+            ("host", "rebinding.example"),
+            ("user-agent", "BruhsVerification/1"),
+        ] {
+            let response = client
+                .get(format!("{base}{path}"))
+                .header(header, value)
+                .send()
+                .await
+                .unwrap();
+            assert_eq!(
+                response.status(),
+                StatusCode::FORBIDDEN,
+                "{path} accepted {header}"
+            );
+        }
+        let response = client
+            .get(format!("{base}{path}"))
+            .header("origin", "http://localhost:3000")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        assert_eq!(response.headers()["cache-control"], "no-store");
+        if path.ends_with("/ui") {
+            assert!(response.headers().contains_key("content-security-policy"));
+        } else {
+            assert_eq!(response.headers()["x-frame-options"], "DENY");
+        }
+    }
+    let response = client
+        .post(format!("{base}/api/delivery/execute-native-stack"))
+        .header("origin", "https://foreign.example")
+        .json(&serde_json::json!({"id":"unreviewed","acknowledge_server_heads":true}))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
     server.abort();
     assert!(server.await.unwrap_err().is_cancelled());
 }

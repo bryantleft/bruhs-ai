@@ -11,18 +11,29 @@ pub(super) fn desktop_state_path() -> Option<PathBuf> {
 pub(super) fn load_desktop_state_from_path(
     path: &Path,
 ) -> Result<Option<PersistedWorkspaceState>, String> {
-    read_desktop_state_snapshot(path).map(|(state, _)| state)
+    read_desktop_state_with(path, |state, _| state)
 }
 
 pub(super) fn read_desktop_state_snapshot(
     path: &Path,
 ) -> Result<(Option<PersistedWorkspaceState>, DiskVersion), String> {
+    read_desktop_state_with(path, |state, contents| {
+        (state, DiskVersion::of_bytes(contents))
+    })
+    .map(|loaded| match loaded {
+        Some((state, version)) => (Some(state), version),
+        None => (None, DiskVersion::Missing),
+    })
+}
+
+fn read_desktop_state_with<T>(
+    path: &Path,
+    finish: impl FnOnce(PersistedWorkspaceState, &[u8]) -> T,
+) -> Result<Option<T>, String> {
     state_file::reject_non_file(path).map_err(|error| error.to_string())?;
     let contents = match fs::read(path) {
         Ok(contents) => contents,
-        Err(err) if err.kind() == io::ErrorKind::NotFound => {
-            return Ok((None, DiskVersion::Missing))
-        }
+        Err(err) if err.kind() == io::ErrorKind::NotFound => return Ok(None),
         Err(err) => {
             return Err(format!(
                 "Could not read saved desktop state at {}: {err}",
@@ -31,14 +42,22 @@ pub(super) fn read_desktop_state_snapshot(
         }
     };
 
-    serde_json::from_slice(&contents)
-        .map(|state| (Some(state), DiskVersion::of_bytes(&contents)))
+    decode_desktop_state(&contents)
+        .map(|state| Some(finish(state, &contents)))
         .map_err(|err| {
             format!(
                 "Saved desktop state at {} is invalid: {err}",
                 path.display()
             )
         })
+}
+
+pub(super) fn decode_desktop_state(contents: &[u8]) -> serde_json::Result<PersistedWorkspaceState> {
+    match simdutf8::basic::from_utf8(contents) {
+        Ok(text) => serde_json::from_str(text),
+        // Keep serde's diagnostics and handling of unknown fields for invalid UTF-8.
+        Err(_) => serde_json::from_slice(contents),
+    }
 }
 
 #[cfg(not(test))]
@@ -185,7 +204,14 @@ pub(super) fn save_desktop_state(
     coordinator: Arc<PersistenceCoordinator>,
     generation: u64,
 ) -> Result<(), SaveError> {
-    let contents = serde_json::to_vec_pretty(&state).map_err(io::Error::other)?;
+    // An obsolete request must not encode a history that cannot be installed.
+    // Keep the locked recheck below: a generation can change during encoding.
+    if coordinator.latest_generation.load(AtomicOrdering::Acquire) != generation {
+        return Ok(());
+    }
+    // Whitespace is not part of the state schema. Compact JSON reduces worker
+    // encoding and disk traffic; the reader still accepts existing pretty files.
+    let contents = serde_json::to_vec(&state).map_err(io::Error::other)?;
     let mut expected = coordinator
         .write_lock
         .lock()
@@ -227,6 +253,7 @@ pub(super) fn initial_permission_mode_from_persisted(
 
 /// A saved thread reopens on its own model; one saved without a model
 /// takes the current one.
+#[cfg(test)]
 pub(super) fn restored_thread_model_id(current_model: &str, persisted_model_id: &str) -> String {
     if persisted_model_id.trim().is_empty() {
         current_model.to_string()
@@ -237,6 +264,7 @@ pub(super) fn restored_thread_model_id(current_model: &str, persisted_model_id: 
 
 /// The saved provider session and its owner. A session whose provider this
 /// build cannot read is dropped: resuming it with the wrong CLI would fail.
+#[cfg(test)]
 pub(super) fn restored_session(
     persisted: &PersistedThread,
 ) -> (Option<String>, Option<bruhs_models::agent::AgentProvider>) {
@@ -245,6 +273,18 @@ pub(super) fn restored_session(
         .as_deref()
         .and_then(|provider| provider.parse().ok());
     match (persisted.session_id.clone(), provider) {
+        (Some(id), Some(provider)) if !id.is_empty() => (Some(id), Some(provider)),
+        _ => (None, None),
+    }
+}
+
+/// Restores a provider-owned session without duplicating its saved id.
+pub(super) fn restored_owned_session(
+    session_id: Option<String>,
+    session_provider: Option<&str>,
+) -> (Option<String>, Option<bruhs_models::agent::AgentProvider>) {
+    let provider = session_provider.and_then(|provider| provider.parse().ok());
+    match (session_id, provider) {
         (Some(id), Some(provider)) if !id.is_empty() => (Some(id), Some(provider)),
         _ => (None, None),
     }
@@ -432,6 +472,7 @@ impl Workspace {
         // Optimistic edits must be searchable even when their save fails or
         // changes neither the collection length nor a coarse timestamp.
         self.universal_search_index.replace(None);
+        self.inbox_directory.get_mut().take();
         #[cfg(not(test))]
         let path = desktop_state_path();
         #[cfg(test)]
@@ -507,6 +548,7 @@ impl Workspace {
 }
 
 /// The records a restart restores from the state file.
+#[derive(Default)]
 pub(super) struct RestoredRecords {
     pub(super) projects: Vec<DesktopProject>,
     pub(super) work_items: Vec<DesktopWorkItem>,
@@ -525,91 +567,80 @@ pub(super) struct RestoredRecords {
 }
 
 impl RestoredRecords {
-    /// The saved records, or empty ones; seeds the focus-block suggestion.
-    pub(super) fn from_persisted(persisted: Option<&PersistedWorkspaceState>) -> Self {
-        let projects = persisted
-            .map(|state| {
-                state
-                    .projects
-                    .iter()
+    /// Transfers loaded records into the workspace; saved preferences remain available.
+    pub(super) fn take_from_persisted(persisted: Option<&mut PersistedWorkspaceState>) -> Self {
+        let mut records = persisted
+            .map(|state| Self {
+                projects: std::mem::take(&mut state.projects)
+                    .into_iter()
                     .map(|project| DesktopProject {
-                        id: project.id.clone(),
-                        name: project.name.clone(),
+                        id: project.id,
+                        name: project.name,
                     })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let work_items = persisted
-            .map(|state| {
-                state
-                    .work_items
-                    .iter()
+                    .collect(),
+                work_items: std::mem::take(&mut state.work_items)
+                    .into_iter()
                     .map(|item| DesktopWorkItem {
-                        id: item.id.clone(),
-                        project_id: item.project_id.clone(),
-                        title: item.title.clone(),
-                        description: item.description.clone(),
+                        id: item.id,
+                        project_id: item.project_id,
+                        title: item.title,
+                        description: item.description,
                         status: item.status,
                         priority: item.priority,
-                        due_date: item.due_date.clone(),
-                        planning: item.planning.clone(),
+                        due_date: item.due_date,
+                        planning: item.planning,
                         updated_at: item.updated_at,
                     })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        let calendar_events = persisted
-            .map(|state| {
-                state
-                    .calendar_events
-                    .iter()
+                    .collect(),
+                calendar_events: std::mem::take(&mut state.calendar_events)
+                    .into_iter()
                     .filter_map(|event| {
+                        let start_at = parse_persisted_datetime(&event.start_at)?;
+                        let end_at = parse_persisted_datetime(&event.end_at)?;
                         Some(DesktopCalendarEvent {
-                            id: event.id.clone(),
-                            title: event.title.clone(),
-                            start_at: parse_persisted_datetime(&event.start_at)?,
-                            end_at: parse_persisted_datetime(&event.end_at)?,
+                            id: event.id,
+                            title: event.title,
+                            start_at,
+                            end_at,
                             all_day: event.all_day,
-                            color: event.color.clone(),
-                            notes: event.notes.clone(),
+                            color: event.color,
+                            notes: event.notes,
                         })
                     })
-                    .collect::<Vec<_>>()
+                    .collect(),
+                captures: std::mem::take(&mut state.captures),
+                knowledge_documents: std::mem::take(&mut state.knowledge_documents),
+                source_clips: std::mem::take(&mut state.source_clips),
+                inbox_conversations: std::mem::take(&mut state.inbox_conversations),
+                meeting_notes: std::mem::take(&mut state.meeting_notes),
+                relationships: std::mem::take(&mut state.relationships),
+                scheduling_preferences: std::mem::take(&mut state.scheduling_preferences),
+                life_context: std::mem::take(&mut state.life_context),
+                automation_state: std::mem::take(&mut state.automation_state),
+                active_project: state
+                    .active_project
+                    .take()
+                    .map(|project| DesktopProjectLocation {
+                        path: project.path,
+                        name: project.name,
+                    }),
+                recent_projects: std::mem::take(&mut state.recent_projects)
+                    .into_iter()
+                    .map(|project| DesktopProjectLocation {
+                        path: project.path,
+                        name: project.name,
+                    })
+                    .collect(),
             })
             .unwrap_or_default();
-        let captures = persisted
-            .map(|state| state.captures.clone())
-            .unwrap_or_default();
-        let knowledge_documents = persisted
-            .map(|state| state.knowledge_documents.clone())
-            .unwrap_or_default();
-        let source_clips = persisted
-            .map(|state| state.source_clips.clone())
-            .unwrap_or_default();
-        let inbox_conversations = persisted
-            .map(|state| state.inbox_conversations.clone())
-            .unwrap_or_default();
-        let meeting_notes = persisted
-            .map(|state| state.meeting_notes.clone())
-            .unwrap_or_default();
-        let relationships = persisted
-            .map(|state| state.relationships.clone())
-            .unwrap_or_default();
-        let scheduling_preferences = persisted
-            .map(|state| state.scheduling_preferences.clone())
-            .unwrap_or_default();
-        let life_context = persisted
-            .map(|state| state.life_context.clone())
-            .unwrap_or_default();
-        let mut automation_state = persisted
-            .map(|state| state.automation_state.clone())
-            .unwrap_or_default();
-        if automation_state
+        if records
+            .automation_state
             .suggestions
             .iter()
             .all(|suggestion| suggestion.id != "protect-focus")
         {
-            automation_state
+            records
+                .automation_state
                 .suggestions
                 .push(bruhs_models::ProactiveSuggestion {
                 id: "protect-focus".into(),
@@ -619,8 +650,8 @@ impl RestoredRecords {
                         .into(),
                 evidence: format!(
                     "{} tasks and {} calendar entries are currently stored locally.",
-                    work_items.len(),
-                    calendar_events.len()
+                    records.work_items.len(),
+                    records.calendar_events.len()
                 ),
                 domain: bruhs_models::AgentDomain::Tasks,
                 operations: vec![
@@ -636,40 +667,7 @@ impl RestoredRecords {
                 last_shown_at_ms: None,
             });
         }
-        let active_project = persisted
-            .and_then(|state| state.active_project.as_ref())
-            .map(|project| DesktopProjectLocation {
-                path: project.path.clone(),
-                name: project.name.clone(),
-            });
-        let recent_projects = persisted
-            .map(|state| {
-                state
-                    .recent_projects
-                    .iter()
-                    .map(|project| DesktopProjectLocation {
-                        path: project.path.clone(),
-                        name: project.name.clone(),
-                    })
-                    .collect::<Vec<_>>()
-            })
-            .unwrap_or_default();
-        Self {
-            projects,
-            work_items,
-            calendar_events,
-            captures,
-            knowledge_documents,
-            source_clips,
-            inbox_conversations,
-            meeting_notes,
-            relationships,
-            scheduling_preferences,
-            life_context,
-            automation_state,
-            active_project,
-            recent_projects,
-        }
+        records
     }
 }
 

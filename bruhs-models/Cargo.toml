@@ -15,14 +15,16 @@ workspace = true
 # anywhere `serde` + `uuid` does (including wasm32-unknown-unknown).
 
 [dependencies]
-serde = { workspace = true }
-uuid = { workspace = true, features = ["js"] }
+serde = { workspace = true, features = ["rc"] }
+uuid = { workspace = true, features = ["js", "serde"] }
 serde_json = { workspace = true }
 serde_bytes = "0.11"
+thiserror = { workspace = true }
 pulldown-cmark = { version = "0.13.3", default-features = false }
 percent-encoding = "2"
 sha2 = { workspace = true }
-thiserror = { workspace = true }
+shell-words = "=1.1.1"
+base64 = "0.22"
 
 [[bench]]
 name = "search"
@@ -50,4 +52,12 @@ harness = false
 
 [[bench]]
 name = "automation"
+harness = false
+
+[[bench]]
+name = "actions"
+harness = false
+
+[[bench]]
+name = "inbox_browse"
 harness = false

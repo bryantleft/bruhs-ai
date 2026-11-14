@@ -23,6 +23,7 @@ serde_json = { workspace = true }
 uuid = { workspace = true }
 tokio = { workspace = true, features = ["rt", "sync", "time", "macros", "process", "net", "io-util", "io-std", "fs"] }
 tokio-stream = { workspace = true }
+tokio-tungstenite = "0.29"
 portable-pty = "0.9"
 # portable-pty reports its errors as anyhow::Error; kept as error sources.
 anyhow = "1"
@@ -38,10 +39,6 @@ base64 = "0.22"
 percent-encoding = "2"
 zip = { version = "2.4.2", default-features = false }
 hmac = "0.12"
-html5ever = "0.27"
-markup5ever_rcdom = "0.3"
-cssparser = "0.36"
-ress = "0.11.7"
 sha2 = { workspace = true }
 rand = { workspace = true }
 chrono = { workspace = true }
@@ -49,11 +46,30 @@ url = "2"
 tracing = { workspace = true }
 thiserror = { workspace = true }
 zeroize = "1"
+html5ever = "0.27"
+markup5ever_rcdom = "0.3"
+cssparser = "0.36"
+ress = "0.11.7"
 libc = "0.2"
 rusqlite = { workspace = true }
+tokio-postgres = "=0.7.18"
+sqlparser = { version = "=0.64.0", features = ["visitor"] }
+tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
+rustls-pemfile = "=2.2.0"
+qrcodegen = "=1.8.0"
+hyper = { version = "1", features = ["server", "http1"] }
+hyper-util = { version = "0.1", features = ["tokio"] }
+tower = { version = "0.5", features = ["util"] }
 # Fresh empty working directory for the summary CLI.
 tempfile = { workspace = true }
 
+[target.'cfg(all(target_os = "macos", target_arch = "aarch64"))'.dependencies]
+# sha2 0.10 otherwise uses its software ARM backend. Save/checksum measurements
+# are recorded in docs/performance-goal-2026-11-09.md; CPU detection retains the
+# portable fallback when SHA instructions are unavailable.
+sha2 = { workspace = true, features = ["asm"] }
+
 [dev-dependencies]
+axum = { workspace = true, features = ["ws"] }
 tokio = { workspace = true, features = ["full", "test-util"] }
 wiremock = "0.6"

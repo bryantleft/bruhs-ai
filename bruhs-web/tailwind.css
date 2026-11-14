@@ -81,3 +81,6 @@
   background-color: rgb(245 237 231 / 0.05);
 }
 :where(button):focus-visible { outline: 2px solid #ec7f2c; outline-offset: 2px; }
+
+.whiteboard-preview { min-width: 0; overflow: hidden; background: #f9fafb; border-radius: 8px; }
+.whiteboard-preview > svg { display: block; width: 100%; height: auto; max-height: 45vh; }

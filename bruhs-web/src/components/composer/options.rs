@@ -176,6 +176,14 @@ pub(super) fn ComposerOptions(
                             <span>"Saved prompts"</span><span data-stash-count=move || stash.with(|items| items.len()) class="tabular-nums text-rambutan-500">{move || stash.with(|items| items.len())}</span>
                         </button>
                     </section>
+                    <section aria-label="Dictation">
+                        <h3 class="mb-1 px-2 text-label-sm text-rambutan-500">"Dictation"</h3>
+                        <crate::components::local_tools_panel::DictationButton on_text=Callback::new(move |text:String| {
+                            let old=value.get_untracked();
+                            let separator=if old.is_empty() || old.ends_with(char::is_whitespace) { "" } else { " " };
+                            set_value.set(format!("{old}{separator}{text}"));
+                        }) />
+                    </section>
                     {move || (last_usage.get().is_some() || return_compact_available.get()).then(|| view! {
                         <section aria-label="Context">
                             <h3 class="mb-1 px-2 text-label-sm text-rambutan-500">"Context"</h3>

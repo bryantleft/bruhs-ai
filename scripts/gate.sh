@@ -40,6 +40,31 @@ step clippy-wasm cargo clippy -p bruhs-web --target wasm32-unknown-unknown --loc
 step test cargo test --workspace --locked
 step web-assets python3 -m unittest discover -s bruhs-web/tests -p 'test_precompress.py'
 
+# The landing page has its own local Node checks.
+if command -v node >/dev/null 2>&1; then
+  step site-test sh -c 'cd bruhs-site && npm test'
+  if [ -d bruhs-site/node_modules ]; then
+    step site-types sh -c 'cd bruhs-site && npm run typecheck'
+  else
+    printf '%-16s skipped (run `npm ci` in bruhs-site)\n' site-types
+  fi
+else
+  printf '%-16s skipped (node not installed)\n' site-test
+fi
+
+mobile_checks() {
+  if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+    echo 'Native companion checks need Node and npm. Install the version documented in docs/native-mobile-app.md.' >&2
+    return 1
+  fi
+  if [ ! -d bruhs-mobile/node_modules ]; then
+    echo 'Native companion dependencies are missing. Run npm ci in bruhs-mobile, then repeat the gate.' >&2
+    return 1
+  fi
+  (cd bruhs-mobile && npm test && npm run typecheck)
+}
+step mobile mobile_checks
+
 # Harness benchmark fixtures: each hidden check fails on the starting repo
 # and passes on its reference solution. No agent runs, so no tokens.
 step bench-check sh -c 'bash -n scripts/task-bench.sh scripts/token-bench.sh && scripts/task-bench.sh --self-check'

@@ -617,22 +617,31 @@ impl Workspace {
         subscriptions.push(cx.subscribe_in(
             &input,
             window,
-            |this, input, event: &InputEvent, _window, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
+            |this, input, event: &InputEvent, window, cx| {
                 let value = input.read(cx).value().to_string();
-                let next = if value.trim().is_empty() {
-                    None
-                } else if let Some(tokens) = autocompact_tokens(&value) {
-                    Some(tokens.to_string())
-                } else {
-                    return;
-                };
-                if this.claude_autocompact != next {
-                    this.claude_autocompact = next;
-                    this.stamp_run_prefs_on_threads(cx);
-                    this.persist_and_notify(cx);
+                match event {
+                    InputEvent::Change => {
+                        let next = if value.trim().is_empty() {
+                            None
+                        } else if let Some(tokens) = autocompact_tokens(&value) {
+                            Some(tokens.to_string())
+                        } else {
+                            return;
+                        };
+                        if this.claude_autocompact != next {
+                            this.claude_autocompact = next;
+                            this.stamp_run_prefs_on_threads(cx);
+                            this.persist_and_notify(cx);
+                        }
+                    }
+                    InputEvent::Blur => {
+                        if value.trim().is_empty() || autocompact_tokens(&value).is_some() {
+                            return;
+                        }
+                        let stored = this.claude_autocompact.clone().unwrap_or_default();
+                        input.update(cx, |state, cx| state.set_value(stored, window, cx));
+                    }
+                    InputEvent::Focus | InputEvent::PressEnter { .. } => {}
                 }
             },
         ));

@@ -96,9 +96,13 @@ impl Workspace {
         let chat_project_name = project_name.clone();
         let card_model_id = model_id.clone();
         let chat = cx.new(|cx| {
-            let mut view = ChatView::new(window, cx);
+            let mut view = ChatView::new_with_model_and_project_path(
+                model_id,
+                chat_project_path.clone(),
+                window,
+                cx,
+            );
             view.start_thread(chat_id, thread_title, cx);
-            view.set_model(model_id, cx);
             view.permission_mode = permission_mode;
             view.set_project_context(chat_project_path, chat_project_name, project_scoped, cx);
             view
@@ -125,56 +129,65 @@ impl Workspace {
     }
 
     pub(super) fn create_thread_from_persisted(
-        persisted: &PersistedThread,
-        current_model: String,
+        persisted: PersistedThread,
+        current_model: &str,
         current_permission_mode: PermissionMode,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> DesktopThread {
-        let id = persisted.id.clone();
+        let id = persisted.id;
         let chat_id = id.clone();
-        let title = persisted.title.clone();
-        let model_id = restored_thread_model_id(&current_model, &persisted.model_id);
+        let title = persisted.title;
+        let model_id = if persisted.model_id.trim().is_empty() {
+            current_model.to_string()
+        } else {
+            persisted.model_id
+        };
         let project_path = persisted
             .project_path
-            .clone()
             .filter(|path| !path.is_empty())
             .unwrap_or_else(current_dir_string);
         let permission_mode =
             restored_thread_permission_mode(current_permission_mode, persisted.permission_mode);
+        let (session_id, session_provider) =
+            restored_owned_session(persisted.session_id, persisted.session_provider.as_deref());
         let messages = persisted
             .messages
-            .iter()
+            .into_iter()
             .map(|message| Message {
                 role: message.role,
-                content: message.content.clone(),
-                model: message.model.clone(),
-                thinking: message.thinking.clone(),
-                usage: message.usage.clone(),
+                content: message.content,
+                model: message.model,
+                thinking: message.thinking,
+                usage: message.usage,
                 duration_ms: message.duration_ms,
                 started_at_ms: message.started_at_ms,
                 completed_at_ms: message.completed_at_ms,
-                tool_calls: message.tool_calls.clone(),
-                files: message.files.clone(),
-                state: TurnState::from_persisted(message.stopped, message.error.clone()),
-                checkpoint: message.checkpoint.clone().filter(|tree| !tree.is_empty()),
+                tool_calls: message.tool_calls,
+                files: message.files,
+                state: TurnState::from_persisted(message.stopped, message.error),
+                checkpoint: message.checkpoint.filter(|tree| !tree.is_empty()),
             })
             .collect::<Vec<_>>();
 
         let card_model_id = model_id.clone();
         let chat = cx.new(|cx| {
-            let mut view = ChatView::new(window, cx);
+            let mut view = ChatView::new_with_model_and_project_path(
+                model_id,
+                project_path.clone(),
+                window,
+                cx,
+            );
             view.start_thread(chat_id, title, cx);
             view.fresh_session = persisted.fresh_session;
-            (view.session_id, view.session_provider) = restored_session(persisted);
-            view.import_context = persisted.import_context.clone();
-            view.goal = persisted.goal.clone();
-            view.worktree_path = persisted.worktree_path.clone();
-            view.effort = persisted.effort.clone();
+            (view.session_id, view.session_provider) = (session_id, session_provider);
+            view.import_context = persisted.import_context;
+            view.goal = persisted.goal;
+            view.worktree_path = persisted.worktree_path;
+            view.effort = persisted.effort;
             view.run_locked = persisted.run_locked;
-            view.role = persisted.role.clone();
-            view.instructions_stamp = persisted.instructions_stamp.clone();
-            view.model_id = model_id;
+            view.role = persisted.role;
+            view.instructions_stamp = persisted.instructions_stamp;
             view.set_project_context(
                 project_path.clone(),
                 persisted.project_name.clone(),
@@ -187,9 +200,8 @@ impl Workspace {
             view.restore_prompt_queue(
                 persisted
                     .prompt_queue
-                    .iter()
-                    .filter(|prompt| prompt.thread_id == persisted.id)
-                    .cloned()
+                    .into_iter()
+                    .filter(|prompt| prompt.thread_id == id)
                     .collect(),
             );
             view.scroll_messages_to_bottom();
@@ -200,7 +212,7 @@ impl Workspace {
 
         DesktopThread {
             id,
-            project_name: persisted.project_name.clone(),
+            project_name: persisted.project_name,
             project_path,
             // Records from before this field count as fresh so nothing jumps
             // into Settled on the first launch after the upgrade.
@@ -214,7 +226,7 @@ impl Workspace {
             pin_rank: persisted.pin_rank,
             active_rank: persisted.active_rank,
             snoozed_until_ms: persisted.snoozed_until_ms,
-            branch: persisted.branch.clone(),
+            branch: persisted.branch,
             model_id: card_model_id,
             chat,
             _chat_observer,
@@ -397,6 +409,22 @@ impl Workspace {
                     );
                     this.set_diff_panel_visible(diff, cx);
                 }
+                ChatViewEvent::OpenWhiteboard { source } => {
+                    let project = this
+                        .whiteboard_request_project(chat, cx)
+                        .unwrap_or_else(|| this.whiteboard_project(cx));
+                    let thread_id = this
+                        .threads
+                        .iter()
+                        .find(|t| t.chat.entity_id() == chat.entity_id())
+                        .map(|t| t.id.clone());
+                    let library = this.whiteboard_library(project, window, cx);
+                    library.update(cx, |library, cx| {
+                        library.open_mermaid(source, thread_id, cx)
+                    });
+                    this.whiteboard_panel = Some(library);
+                    this.activate_sidebar_view(AppView::Whiteboards { board_id: None }, window, cx);
+                }
                 ChatViewEvent::OpenFile {
                     path,
                     label,
@@ -454,6 +482,45 @@ impl Workspace {
         for chat in chats {
             self.stamp_chat_run_prefs(&chat, cx);
         }
+    }
+
+    pub(super) fn sync_thread_catalog(&self, cx: &mut App) {
+        let Some(catalog) = cx.try_global::<crate::app_state::ThreadCatalog>() else {
+            let threads = self
+                .threads
+                .iter()
+                .map(|thread| (thread.id.clone(), thread.chat.read(cx).thread_title.clone()))
+                .collect();
+            cx.set_global(crate::app_state::ThreadCatalog { threads });
+            return;
+        };
+        let unchanged_prefix = self
+            .threads
+            .iter()
+            .zip(&catalog.threads)
+            .take_while(|(thread, (id, title))| {
+                id == &thread.id && title == &thread.chat.read(cx).thread_title
+            })
+            .count();
+        if unchanged_prefix == self.threads.len() && catalog.threads.len() == self.threads.len() {
+            return;
+        }
+        cx.update_global::<crate::app_state::ThreadCatalog, _>(|catalog, cx| {
+            catalog.threads.truncate(self.threads.len());
+            for (index, thread) in self.threads.iter().enumerate().skip(unchanged_prefix) {
+                let title = &thread.chat.read(cx).thread_title;
+                if let Some((saved_id, saved_title)) = catalog.threads.get_mut(index) {
+                    if saved_id != &thread.id {
+                        saved_id.clone_from(&thread.id);
+                    }
+                    if saved_title != title {
+                        saved_title.clone_from(title);
+                    }
+                } else {
+                    catalog.threads.push((thread.id.clone(), title.clone()));
+                }
+            }
+        });
     }
 
     pub(super) fn active_thread(&self) -> Option<&DesktopThread> {
@@ -1122,20 +1189,20 @@ impl Workspace {
                 snoozed_until_ms: thread.snoozed_until_ms,
             })
             .collect();
+        let by_id = candidates
+            .iter()
+            .map(|thread| (thread.id.as_str(), *thread))
+            .collect::<std::collections::HashMap<_, _>>();
         let working = |id: &str| {
-            candidates
-                .iter()
-                .find(|thread| thread.id == id)
+            by_id
+                .get(id)
                 .is_some_and(|thread| thread.chat.read(cx).is_streaming)
         };
         let needs_you = |id: &str| {
-            candidates
-                .iter()
-                .find(|thread| thread.id == id)
-                .is_some_and(|thread| {
-                    let chat = thread.chat.read(cx);
-                    chat.is_streaming && chat.has_pending_permission()
-                })
+            by_id.get(id).is_some_and(|thread| {
+                let chat = thread.chat.read(cx);
+                chat.is_streaming && chat.has_pending_permission()
+            })
         };
         let unread = |id: &str| self.unread_thread_ids.contains(id);
         let order = sidebar_order(
@@ -1147,11 +1214,7 @@ impl Workspace {
             &unread,
             self.sidebar_working_section,
         );
-        let lookup = |ids: &[&str]| {
-            ids.iter()
-                .filter_map(|id| candidates.iter().copied().find(|thread| thread.id == *id))
-                .collect()
-        };
+        let lookup = |ids: &[&str]| ids.iter().filter_map(|id| by_id.get(id).copied()).collect();
         SidebarShelves {
             pinned: lookup(&order.pinned),
             active: lookup(&order.active),
@@ -1315,21 +1378,23 @@ pub(super) struct SidebarShelves<'a> {
 impl Workspace {
     /// The saved threads (or one new general thread) and the one to show first.
     pub(super) fn restore_threads(
-        persisted: Option<&PersistedWorkspaceState>,
+        persisted: Option<&mut PersistedWorkspaceState>,
         current_model: &str,
         permission_mode: PermissionMode,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> (Vec<DesktopThread>, Option<String>) {
+        let saved_active_thread_id = persisted
+            .as_deref()
+            .and_then(|state| state.active_thread_id.clone());
         let mut threads = persisted
             .map(|state| {
-                state
-                    .threads
-                    .iter()
+                std::mem::take(&mut state.threads)
+                    .into_iter()
                     .map(|thread| {
                         Self::create_thread_from_persisted(
                             thread,
-                            current_model.to_string(),
+                            current_model,
                             permission_mode,
                             window,
                             cx,
@@ -1352,10 +1417,8 @@ impl Workspace {
             .iter()
             .map(|thread| thread.id.clone())
             .collect::<Vec<_>>();
-        let active_thread_id = initial_active_thread_id_after_start(
-            persisted.and_then(|state| state.active_thread_id.clone()),
-            &thread_ids,
-        );
+        let active_thread_id =
+            initial_active_thread_id_after_start(saved_active_thread_id, &thread_ids);
 
         // `BRUHS_DESKTOP_SMOKE_PROMPT` auto-submits into a real thread under
         // its saved permission mode, so it exists only in debug builds.

@@ -1,5 +1,7 @@
+pub(crate) mod api_client_panel;
 pub mod braille;
 pub mod chat;
+pub(crate) mod database_panel;
 pub mod diff_panel;
 pub mod dropdown;
 pub mod meeting_dock;
@@ -15,4 +17,6 @@ pub mod tasks_panel;
 pub mod terminal_panel;
 pub mod terminal_view;
 pub mod web_button;
+pub(crate) mod whiteboard;
+pub mod workbench;
 pub mod workspace;

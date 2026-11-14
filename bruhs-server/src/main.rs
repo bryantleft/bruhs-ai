@@ -6,6 +6,17 @@ mod reactive_events;
 mod routes;
 mod static_assets;
 
+#[cfg(test)]
+mod http_performance_tests;
+
+#[cfg(test)]
+mod http_read_performance_tests;
+
+// Exercise the desktop's production HTTP caller through this router without GPUI.
+#[cfg(test)]
+#[path = "../../bruhs-desktop/src/server_client.rs"]
+pub mod desktop_server_client;
+
 use axum::{
     extract::DefaultBodyLimit,
     routing::{delete, get, patch, post},
@@ -34,6 +45,18 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if bruhs_core::api_client_tools::is_mcp_helper() {
+        bruhs_core::api_client_tools::run_mcp_helper().await?;
+        return Ok(());
+    }
+    if bruhs_core::workbench_tools::is_mcp_helper() {
+        bruhs_core::workbench_tools::run_mcp_helper().await?;
+        return Ok(());
+    }
+    if bruhs_core::database_tools::is_mcp_helper() {
+        bruhs_core::database_tools::run_mcp_helper().await?;
+        return Ok(());
+    }
     if bruhs_core::artifact_tools::is_mcp_helper() {
         bruhs_core::artifact_tools::run_mcp_helper().await?;
         return Ok(());
@@ -75,6 +98,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Claim the port before any configured source command or agent can run.
     let addr = format!("127.0.0.1:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
+    bruhs_core::workbench_tools::set_endpoint(format!("http://{}", listener.local_addr()?))?;
     let _reactive_worker = reactive.start(Arc::clone(&state))?;
     let _reactive_events = reactive_events::start(reactive.clone(), Arc::clone(&state));
     // Google Calendar sync (when BRUHS_GOOGLE_* is configured).
@@ -105,7 +129,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         );
     }
     let app = router(ServerState {
-        app: state,
+        app: state.clone(),
         config: Arc::clone(&config),
         updates: bruhs_core::updates::UpdateChecker::new(
             bruhs_core::updates::BuildInfo::new(
@@ -117,9 +141,89 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ),
     })
     .layer(axum::Extension(reactive));
+    let coordination = bruhs_core::coordination::CoordinationRuntime::open(
+        bruhs_core::coordination::CoordinationRuntime::default_path()?,
+        state.clone(),
+    )
+    .await?;
+    let _reset_worker = coordination.start_reset_worker();
+    let _wake_worker = coordination.start_wake_worker();
+    let delivery = bruhs_core::delivery::DeliveryService::open(
+        bruhs_core::delivery::DeliveryService::default_path()?,
+    )
+    .await?;
+    let _delivery_watcher = delivery.start_watcher(state.clone(), Some(coordination.clone()))?;
+    let databases = bruhs_core::database::DatabaseHost::open(
+        bruhs_core::database::DatabaseHost::default_path()?,
+        bruhs_core::secrets::SecretStore::os(),
+    )
+    .await?;
+    let api_client = bruhs_core::api_client::ApiClientHost::with_origins(
+        bruhs_core::secrets::SecretStore::os(),
+        std::iter::once(listener.local_addr()?.port())
+            .chain(
+                reqwest::Url::parse(bruhs_core::capture_client::daemon_base_url())
+                    .ok()
+                    .and_then(|url| url.port_or_known_default()),
+            )
+            .collect(),
+        [
+            std::env::var("BRUHS_API_URL").ok(),
+            std::env::var("BRUHS_WEB_ORIGIN").ok(),
+            Some(bruhs_core::capture_client::daemon_base_url().into()),
+        ]
+        .into_iter()
+        .flatten()
+        .collect(),
+    )?;
+    let tools = bruhs_core::local_tools::LocalToolsHost::new()?;
+    let remote_hosts = bruhs_core::remote_hosts::RemoteHostManager::open(
+        bruhs_core::remote_hosts::RemoteHostManager::default_path()?,
+    )
+    .await?;
+    let app = app
+        .merge(workbench_services(
+            delivery,
+            remote_hosts.clone(),
+            config.access.clone(),
+        ))
+        .layer(axum::Extension(coordination.clone()))
+        .layer(axum::Extension(tools))
+        .layer(axum::Extension(databases))
+        .layer(axum::Extension(api_client));
+    if let Ok(bind) = std::env::var("BRUHS_TASK_BIND") {
+        let address: std::net::SocketAddr = bind.parse()?;
+        let remote = tokio::net::TcpListener::bind(address).await?;
+        let remote_app = routes::coordination::remote_router(coordination);
+        tracing::info!(%address,"Paired task listener enabled; only scoped task access is served");
+        tokio::spawn(async move {
+            if let Err(error) = axum::serve(remote, remote_app).await {
+                tracing::error!(%error,"Paired task listener stopped");
+            }
+        });
+    } else {
+        drop(coordination);
+    }
+
     tracing::info!("bruhs-server listening on http://{addr}");
-    serve(listener, app).await?;
+    let result = serve(listener, app).await;
+    remote_hosts.shutdown();
+    result?;
     Ok(())
+}
+
+fn workbench_services(
+    delivery: bruhs_core::delivery::DeliveryService,
+    hosts: bruhs_core::remote_hosts::RemoteHostManager,
+    policy: local_access::Policy,
+) -> Router {
+    routes::delivery::router(delivery)
+        .merge(routes::remote_hosts::router(hosts))
+        .layer(policy.cors())
+        .layer(axum::middleware::from_fn_with_state(
+            policy,
+            local_access::guard,
+        ))
 }
 
 /// `RUST_LOG` as `target=level` directives (e.g. `info,tower_http=debug`),
@@ -198,6 +302,13 @@ async fn shutdown_signal() {
 }
 
 fn router(state: ServerState) -> Router {
+    router_with_capture_daemon(state, bruhs_core::capture_client::endpoint().clone())
+}
+
+fn router_with_capture_daemon(
+    state: ServerState,
+    capture_daemon: bruhs_core::capture_client::DaemonEndpoint,
+) -> Router {
     let access = state.config.access.clone();
     let cors = access.cors().expose_headers([
         axum::http::HeaderName::from_static("x-bruhs-transcript-source"),
@@ -206,8 +317,149 @@ fn router(state: ServerState) -> Router {
     let spa = static_assets::service(&state.config.spa_dir);
 
     Router::new()
+        .route(
+            "/api/agent-extensions/history/preview",
+            post(routes::agent_extensions::history_preview),
+        )
+        .route(
+            "/api/agent-extensions/history/{id}/commit",
+            post(routes::agent_extensions::history_commit),
+        )
+        .route(
+            "/api/workbench/ui",
+            get(routes::agent_extensions::workbench),
+        )
+        .route(
+            "/api/agent-extensions/ui",
+            get(routes::agent_extensions::ui),
+        )
+        .route(
+            "/api/agent-extensions/config",
+            get(routes::agent_extensions::config).post(routes::agent_extensions::save),
+        )
+        .route(
+            "/api/agent-extensions/usage",
+            get(routes::agent_extensions::usage),
+        )
+        .route(
+            "/api/agent-extensions/usage/refresh",
+            post(routes::agent_extensions::refresh),
+        )
+        .route("/api/coordination", get(routes::coordination::snapshot))
+        .route("/api/coordination/ui", get(routes::coordination::ui))
+        .route(
+            "/api/coordination/commands",
+            post(routes::coordination::command),
+        )
+        .route(
+            "/api/coordination/wait",
+            post(routes::coordination::wait_for_child),
+        )
+        .route(
+            "/api/coordination/changes",
+            get(routes::coordination::changes),
+        )
+        .route(
+            "/api/coordination/access",
+            get(routes::coordination::access_list).post(routes::coordination::issue_access),
+        )
+        .route(
+            "/api/coordination/access/{id}",
+            delete(routes::coordination::revoke_access),
+        )
+        .route("/api/local-tools", get(routes::local_tools::snapshot))
+        .route("/api/local-tools/ui", get(routes::local_tools::ui))
+        .route("/api/local-tools/grants", post(routes::local_tools::grant))
+        .route(
+            "/api/local-tools/grants/{id}",
+            delete(routes::local_tools::revoke),
+        )
+        .route(
+            "/api/local-tools/browser/start",
+            post(routes::local_tools::browser_start),
+        )
+        .route(
+            "/api/local-tools/browser/command",
+            post(routes::local_tools::browser_command),
+        )
+        .route(
+            "/api/local-tools/devices",
+            get(routes::local_tools::devices),
+        )
+        .route(
+            "/api/local-tools/devices/command",
+            post(routes::local_tools::device_command),
+        )
+        .route(
+            "/api/local-tools/devices/video",
+            get(routes::local_tools::device_video),
+        )
+        .route(
+            "/api/local-tools/dictation",
+            post(routes::local_tools::dictation).layer(DefaultBodyLimit::max(UPLOAD_BODY_BYTES)),
+        )
         .route("/api/reactive", get(routes::reactive::snapshot))
         .route("/api/reactive/commands", post(routes::reactive::command))
+        .route(
+            "/api/databases",
+            get(routes::database::list).post(routes::database::save),
+        )
+        .route("/api/databases/grant", post(routes::database::grant))
+        .route(
+            "/api/api-client/collection",
+            get(routes::api_client::collection).post(routes::api_client::save),
+        )
+        .route("/api/api-client/send", post(routes::api_client::send))
+        .route(
+            "/api/whiteboards/source-fingerprint",
+            post(routes::whiteboard::fingerprint),
+        )
+        .route(
+            "/api/api-client/credential",
+            post(routes::api_client::credential),
+        )
+        .route(
+            "/api/api-client/cancel/{id}",
+            post(routes::api_client::cancel),
+        )
+        .route(
+            "/api/api-client/proposals",
+            get(routes::api_client::proposals),
+        )
+        .route("/api/api-client/decision", post(routes::api_client::decide))
+        .route(
+            "/api/api-client/agent/propose",
+            post(routes::api_client::propose),
+        )
+        .route(
+            "/api/api-client/agent/proposals/{id}",
+            get(routes::api_client::result),
+        )
+        .route("/api/databases/query", post(routes::database::query))
+        .route("/api/databases/browse", post(routes::database::browse))
+        .route("/api/databases/describe", post(routes::database::describe))
+        .route(
+            "/api/databases/agent/describe",
+            post(routes::database::agent_describe),
+        )
+        .route("/api/databases/cancel/{id}", post(routes::database::cancel))
+        .route("/api/databases/{id}", delete(routes::database::remove))
+        .route("/api/databases/{id}/tables", get(routes::database::tables))
+        .route("/api/databases/agent", get(routes::database::agent_list))
+        .route(
+            "/api/databases/agent/query",
+            post(routes::database::agent_query),
+        )
+        .route(
+            "/api/databases/agent/{id}/tables",
+            get(routes::database::agent_tables),
+        )
+        .route("/api/weekly-reports", get(routes::reactive::reports))
+        .route(
+            "/api/weekly-reports/commands",
+            post(routes::reactive::report_command),
+        )
+        .route("/api/weekly-reports/{id}", get(routes::reactive::report))
         .route(
             "/api/reactive/sources/{id}/token",
             get(routes::reactive::token),
@@ -219,6 +471,11 @@ fn router(state: ServerState) -> Router {
             )),
         )
         .route("/api/agent", post(routes::agent::post_agent))
+        .route(
+            "/api/agent/prompt-suggestion",
+            post(routes::prompt_suggestion::post_suggestion)
+                .layer(DefaultBodyLimit::max(96 * 1024)),
+        )
         .route("/api/agent/steer", post(routes::agent::post_steer))
         .route(
             "/api/agent/second-opinion",
@@ -508,7 +765,7 @@ fn router(state: ServerState) -> Router {
                 .post(routes::capture_proxy::activity_monitor_command),
         )
         .layer(axum::extract::Extension(std::sync::Arc::new(
-            bruhs_core::capture_client::endpoint().clone(),
+            capture_daemon,
         )))
         .fallback_service(spa)
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))

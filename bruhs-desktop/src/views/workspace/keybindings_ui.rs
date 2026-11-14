@@ -46,6 +46,7 @@ pub(super) struct InstalledBinding {
 
 enum KeyDecision {
     Undo,
+    SidebarFocus(bool),
     Swallow,
     Pass,
 }
@@ -238,6 +239,14 @@ fn intercept_keybinding(
             cx.stop_propagation();
             workspace.update(cx, |this, cx| this.undo_sidebar(window, cx));
         }
+        KeyDecision::SidebarFocus(backwards) => {
+            workspace.update(cx, |this, cx| {
+                if this.sidebar_viewport.borrow().tab(backwards, window, cx) {
+                    cx.stop_propagation();
+                    cx.notify();
+                }
+            });
+        }
         KeyDecision::Swallow => cx.stop_propagation(),
         KeyDecision::Pass => {}
     }
@@ -305,8 +314,22 @@ impl Workspace {
                 }
             }
         }
-        if chord_claimed(&self.keybindings, &chord, mac) && !plain_text_key(event) {
+        let claimed = chord_claimed(&self.keybindings, &chord, mac);
+        if claimed && !plain_text_key(event) {
             return KeyDecision::Swallow;
+        }
+        if !claimed
+            && event.keystroke.key == "tab"
+            && !modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+            && event.context_stack.iter().any(|stack| {
+                stack
+                    .primary()
+                    .is_some_and(|entry| entry.key.as_ref() == "Sidebar")
+            })
+        {
+            return KeyDecision::SidebarFocus(modifiers.shift);
         }
         KeyDecision::Pass
     }

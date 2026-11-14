@@ -29,6 +29,11 @@ pub struct SetMessagesSignal(pub WriteSignal<Vec<AgentMessage>>);
 #[derive(Copy, Clone)]
 pub struct IsStreaming(pub ReadSignal<bool>);
 
+/// Last successful live reply on screen. Stopped and failed turns never
+/// authorize a next-prompt prediction; this is not restored from history.
+#[derive(Copy, Clone)]
+pub struct PromptSuggestionTurn(pub RwSignal<Option<(String, String)>>);
+
 /// Background shells the agent started (`/api/tasks/stream`).
 #[derive(Copy, Clone)]
 pub struct BackgroundTasksSignal(pub ReadSignal<Vec<BackgroundTask>>);
@@ -914,6 +919,7 @@ pub(super) fn provide() {
     provide_context(MessagesSignal(messages));
     provide_context(SetMessagesSignal(set_messages));
     provide_context(IsStreaming(is_streaming));
+    provide_context(PromptSuggestionTurn(RwSignal::new(None)));
     provide_context(turns);
     provide_context(BackgroundTasksSignal(tasks));
     provide_context(SetBackgroundTasksSignal(set_tasks));

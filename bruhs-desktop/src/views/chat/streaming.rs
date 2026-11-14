@@ -22,6 +22,12 @@ use bruhs_models::logic::recall::{
 use bruhs_models::logic::run_place::{first_send, FirstSend, RememberedWorktree};
 use bruhs_models::num::ToFloatLossy;
 
+#[derive(Default)]
+pub(super) struct PreparedPastes {
+    items: Vec<TextAttachment>,
+    files: Vec<(String, String)>,
+}
+
 #[cfg(debug_assertions)]
 pub(super) const DESKTOP_SMOKE_LOG_ENV: &str = "BRUHS_DESKTOP_SMOKE_LOG";
 #[cfg(debug_assertions)]
@@ -590,9 +596,9 @@ impl ChatView {
             self.file_offers = offers;
             return;
         }
-        let paste_files = bruhs_core::write_paste_files(&attachments);
-        let prompt =
-            super::files::turn_prompt(&visible, &paste_files, &uploads, self.goal.as_ref());
+        let goal = self.goal.clone();
+        let prompt_visible = visible.clone();
+        let prompt_uploads = uploads.clone();
         let index = self.messages.len().saturating_sub(1);
         self.messages
             .insert(index, Message::user_with_files(visible.clone(), uploads));
@@ -605,14 +611,19 @@ impl ChatView {
         cx.notify();
 
         let app = Arc::clone(&cx.global::<DesktopState>().app);
-        let job = spawn_tokio(cx, async move {
-            match ThreadId::try_from(thread_id.as_str()) {
-                Ok(id) => app.steer(&id, &prompt).await,
+        let runtime = Arc::clone(&cx.global::<DesktopState>().runtime);
+        let job = cx.background_spawn(async move {
+            let files = bruhs_core::write_paste_files(&attachments);
+            let prompt =
+                super::files::turn_prompt(&prompt_visible, &files, &prompt_uploads, goal.as_ref());
+            let result = match ThreadId::try_from(thread_id.as_str()) {
+                Ok(id) => runtime.block_on(app.steer(&id, &prompt)),
                 Err(error) => Err(bruhs_core::SteerError::Transport(error.to_string())),
-            }
+            };
+            (result, attachments)
         });
         cx.spawn(async move |this, cx| {
-            let result = job.await;
+            let (result, attachments) = job.await;
             let _ = this.update(cx, |this, cx| {
                 let Err(error) = result else {
                     return;
@@ -1445,10 +1456,14 @@ impl ChatView {
         if let Some(task) = &previous_turn {
             task.abort();
         }
-        let Some(dir) = self.checkpoint_dir() else {
+        let worktree = self
+            .worktree_path
+            .clone()
+            .filter(|path| !path.trim().is_empty());
+        if worktree.is_none() && attachments.is_empty() {
             self.finish_launch(
                 content,
-                attachments,
+                PreparedPastes::default(),
                 chips,
                 uploads,
                 None,
@@ -1456,38 +1471,37 @@ impl ChatView {
                 cx,
             );
             return;
-        };
+        }
         self.placing = true;
-        let snap = spawn_tokio(cx, async move {
-            bruhs_core::git::snapshot_worktree(&dir).await.ok()
+        let runtime = Arc::clone(&cx.global::<DesktopState>().runtime);
+        let snap = cx.background_spawn(async move {
+            let files = bruhs_core::write_paste_files(&attachments);
+            let dir = worktree.as_deref().and_then(|path| {
+                bruhs_core::git::ensure_bruhs_worktree(std::path::Path::new(path)).ok()
+            });
+            let tree = match dir {
+                Some(dir) => runtime
+                    .block_on(bruhs_core::git::snapshot_worktree(&dir))
+                    .ok(),
+                None => None,
+            };
+            (
+                PreparedPastes {
+                    items: attachments,
+                    files,
+                },
+                tree,
+            )
         });
         cx.spawn(async move |this, cx| {
-            let tree = snap.await;
+            let (pastes, tree) = snap.await;
             let _ = this.update(cx, |this, cx| {
                 this.placing = false;
-                this.finish_launch(
-                    content,
-                    attachments,
-                    chips,
-                    uploads,
-                    tree,
-                    previous_turn,
-                    cx,
-                );
+                this.finish_launch(content, pastes, chips, uploads, tree, previous_turn, cx);
             });
         })
         .detach();
         cx.notify();
-    }
-
-    /// Worktree path that may be snapshotted. A checkout, or a path outside
-    /// the bruhs worktrees root, sends with no checkpoint.
-    fn checkpoint_dir(&self) -> Option<std::path::PathBuf> {
-        let path = self
-            .worktree_path
-            .as_deref()
-            .filter(|path| !path.trim().is_empty())?;
-        bruhs_core::git::ensure_bruhs_worktree(std::path::Path::new(path)).ok()
     }
 
     #[expect(
@@ -1497,14 +1511,14 @@ impl ChatView {
     fn finish_launch(
         &mut self,
         content: String,
-        attachments: Vec<TextAttachment>,
+        pastes: PreparedPastes,
         chips: Vec<ContextChip>,
         uploads: Vec<UploadedFile>,
         checkpoint: Option<String>,
         previous_turn: Option<JoinHandle<()>>,
         cx: &mut Context<'_, Self>,
     ) {
-        let turn = self.begin_turn(content, attachments, chips, uploads, checkpoint, cx);
+        let turn = self.begin_turn(content, pastes, chips, uploads, checkpoint, cx);
         // Cleared only once a turn is actually handed to the provider. A test
         // that drops the turn keeps the flag so the next real send stays fresh.
         if turn.as_ref().is_ok_and(|turn| turn.fresh_session) {
@@ -1534,15 +1548,16 @@ impl ChatView {
     pub(super) fn begin_turn(
         &mut self,
         content: String,
-        attachments: Vec<TextAttachment>,
+        pastes: PreparedPastes,
         chips: Vec<ContextChip>,
         uploads: Vec<UploadedFile>,
         checkpoint: Option<String>,
         cx: &mut Context<'_, Self>,
     ) -> Result<AgentTurn, IdError> {
         self.response_media_bindings.clear();
+        self.dismiss_prompt_suggestion(cx);
         let expanded = expand_prompt(&content, &chips);
-        let visible = super::files::visible_with_files(&expanded, &attachments, &uploads);
+        let visible = super::files::visible_with_files(&expanded, &pastes.items, &uploads);
         let title_prompt = if content.trim().is_empty() {
             visible.as_str()
         } else {
@@ -1566,7 +1581,6 @@ impl ChatView {
             .map(|role| role.instructions.clone())
             .filter(|text| !text.trim().is_empty());
         let model_id = self.model_id.clone();
-        let paste_files = bruhs_core::write_paste_files(&attachments);
         let provider = provider_for_model_id(&model_id);
         // A handoff turn asks for a brief; when it ends, a fresh thread opens
         // with the brief as its draft (web: `handoff_place`).
@@ -1577,7 +1591,7 @@ impl ChatView {
             }
             _ => {
                 self.handoff_pending = false;
-                super::files::turn_prompt(&visible, &paste_files, &uploads, self.goal.as_ref())
+                super::files::turn_prompt(&visible, &pastes.files, &uploads, self.goal.as_ref())
             }
         };
         // An imported transcript rides along until a session holds it. So
@@ -1704,6 +1718,7 @@ impl ChatView {
                             cx.emit(ChatViewEvent::Handoff { brief });
                         }
                         view.schedule_drain(cx);
+                        view.request_prompt_suggestion(cx);
                     }
                     cx.notify();
                     true
@@ -1718,6 +1733,8 @@ impl ChatView {
     /// Stop listening to the current turn and abort its sender. The aborted
     /// handle stays in `agent_task` for the next submit to wait on.
     pub(super) fn abandon_turn(&mut self) {
+        self.prompt_suggestion.dismiss();
+        self.suggestion_task = None;
         self.pending_secret = None;
         self.secret_prompt = None;
         self.turn_generation = self.turn_generation.wrapping_add(1);
@@ -1740,9 +1757,11 @@ impl ChatView {
             task.abort();
         }
         // The test drives the stream itself; the turn is never sent.
+        // Synthetic completions must not spend real suggestion tokens.
+        self.task_models.prompt_suggestions = false;
         drop(self.begin_turn(
             content.to_string(),
-            Vec::new(),
+            PreparedPastes::default(),
             Vec::new(),
             Vec::new(),
             None,

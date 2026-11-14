@@ -3409,6 +3409,8 @@ fn desktop_command_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppConte
         workspace.focus_command_bar(&FocusCommandBar, window, cx);
     });
     cx.run_until_parked();
+    cx.simulate_input("project folder");
+    cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-command-action-open-project");
     click_debug_selector(cx, "desktop-command-action-open-project");
     cx.run_until_parked();
@@ -3698,12 +3700,12 @@ fn desktop_task_detail_edit_select_close_and_delete_should_match_web_flow(
     assert_rendered_bounds(cx, "desktop-task-detail-select-priority");
 
     click_debug_selector(cx, "desktop-task-detail-title-input");
-    cx.simulate_keystrokes("cmd-a backspace");
+    cx.simulate_keystrokes("secondary-a backspace");
     cx.simulate_input("Updated task");
     cx.run_until_parked();
 
     click_debug_selector(cx, "desktop-task-detail-description-input");
-    cx.simulate_keystrokes("cmd-a backspace");
+    cx.simulate_keystrokes("secondary-a backspace");
     cx.simulate_input("Updated description");
     cx.run_until_parked();
 
@@ -4335,6 +4337,24 @@ fn command_actions_should_match_web_reference() {
                 "Meetings",
                 "recorded conversations"
             ),
+            (
+                "nav-workbench",
+                "Navigate",
+                "Workbench",
+                "agents, delivery, verification, usage and providers"
+            ),
+            (
+                "nav-whiteboards",
+                "Navigate",
+                "Whiteboards",
+                "local diagrams for this project"
+            ),
+            (
+                "new-whiteboard",
+                "Create",
+                "New whiteboard",
+                "draw and link a project diagram"
+            ),
             ("nav-people", "Navigate", "People", "meeting profiles"),
             ("nav-search", "Navigate", "Search", "everything, instantly"),
             (
@@ -4376,6 +4396,12 @@ fn command_actions_should_match_web_reference() {
                 "Actions",
                 "Continue in T3 Code",
                 "new T3 thread"
+            ),
+            (
+                "continue-in-workbench",
+                "Actions",
+                "Continue in workbench",
+                "local task with this conversation"
             ),
             (
                 "copy-pull-link",
@@ -4452,6 +4478,9 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "Life",
             "Agent workflows",
             "Meetings",
+            "Workbench",
+            "Whiteboards",
+            "New whiteboard",
             "People",
             "Search",
             "Terminal",
@@ -4464,6 +4493,7 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "Copy resume command",
             "Copy thread as Markdown",
             "Continue in T3 Code",
+            "Continue in workbench",
             "Copy pull request link",
             "Copy pull request number",
             "New task",
@@ -4549,6 +4579,7 @@ fn desktop_model_settings_options_should_match_web_reference() {
             ("gpt-5.5", "GPT-5.5", "codex"),
             ("gpt-5.4", "GPT-5.4", "codex"),
             ("gpt-5.3-codex", "GPT-5.3 Codex", "codex"),
+            ("gpt-6-luna", "GPT-6 Luna", "codex"),
             ("claude-fable-5", "Claude Fable 5", "claude"),
             ("claude-opus-4-8", "Claude Opus 4.8", "claude"),
             ("claude-sonnet-4-6", "Claude Sonnet 4.6", "claude"),
@@ -4588,7 +4619,13 @@ fn desktop_model_settings_options_should_match_web_reference() {
             ),
             (
                 "codex",
-                vec!["gpt-6.1-sol", "gpt-5.5", "gpt-5.4", "gpt-5.3-codex"],
+                vec![
+                    "gpt-6.1-sol",
+                    "gpt-5.5",
+                    "gpt-5.4",
+                    "gpt-5.3-codex",
+                    "gpt-6-luna"
+                ],
             ),
             ("cursor", vec!["cursor/default"]),
             ("grok", vec!["grok/default"]),

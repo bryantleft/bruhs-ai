@@ -365,9 +365,12 @@ fn composer_options_trap_keyboard_focus_and_restore_the_trigger(cx: &mut TestApp
         for _ in 0..20 {
             cx.simulate_keystrokes(key);
             cx.run_until_parked();
-            let context_focused = chat.update_in(cx, |chat, window, cx| {
+            let (context_focused, dictation_focused) = chat.update_in(cx, |chat, window, cx| {
                 assert!(chat.composer_options_focus.contains_focused(window, cx));
-                chat.composer_options_section_focus[4].contains_focused(window, cx)
+                (
+                    chat.composer_options_section_focus[4].contains_focused(window, cx),
+                    chat.composer_options_section_focus[5].contains_focused(window, cx),
+                )
             });
             if context_focused {
                 let panel = cx.debug_bounds("desktop-composer-options-panel").unwrap();
@@ -378,6 +381,14 @@ fn composer_options_trap_keyboard_focus_and_restore_the_trigger(cx: &mut TestApp
                         "focused context action is clipped"
                     );
                 }
+            }
+            if dictation_focused {
+                let panel = cx.debug_bounds("desktop-composer-options-panel").unwrap();
+                let action = cx.debug_bounds("desktop-composer-dictate").unwrap();
+                assert!(
+                    action.top() >= panel.top() && action.bottom() <= panel.bottom(),
+                    "focused dictation action is clipped"
+                );
             }
         }
     }

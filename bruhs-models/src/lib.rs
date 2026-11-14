@@ -14,22 +14,33 @@
 //!   labels, git parsing, …).
 
 pub mod agent;
+pub mod agent_extensions;
 pub mod api;
+pub mod api_client;
 pub mod calendar;
 pub mod capture_auth;
 pub mod capture_recovery;
 pub mod connections;
+pub mod coordination;
+pub mod database;
+pub mod delivery;
 pub mod ids;
+pub mod local_tools;
 pub mod logic;
+pub mod mobile;
 pub mod models;
 pub mod num;
 pub mod reactive;
+pub mod remote_hosts;
 pub mod roles;
 pub mod secrets;
 pub mod thread_link;
 pub mod time;
 mod unknown_variant;
 pub mod updates;
+pub mod weekly_reports;
+pub mod whiteboard;
+pub mod workbench_handoff;
 
 pub use agent::PermissionMode;
 pub use capture_recovery::*;

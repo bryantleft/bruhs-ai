@@ -3,6 +3,7 @@
 //! components in `SettingsSection` / `SettingsRow` are shared by the panels.
 
 use bruhs_models::agent::{AgentProvider, MODEL_CATALOG};
+use bruhs_models::logic::compact::IdleCompact;
 use bruhs_models::logic::editor::EDITORS;
 use leptos::html::Div;
 use leptos::prelude::*;
@@ -219,9 +220,18 @@ fn FollowUpBehavior() -> impl IntoView {
             description="Steer sends the next message into a running Claude turn. Codex always queues. The send button names the action. Hold Command or Control and press Enter for the other one."
         >
             <Dropdown
-                options=vec![DropdownOption::new("queue", "Queue"), DropdownOption::new("steer", "Steer")]
-                value=Signal::derive(move || if steer.get() { "steer".to_string() } else { "queue".to_string() })
-                on_change=Callback::new(move |v: String| steer.set(v == "steer"))
+                options=vec![
+                    DropdownOption::new("queue", "Queue"),
+                    DropdownOption::new("steer", "Steer"),
+                ]
+                value=Signal::derive(move || {
+                    if steer.get() {
+                        "steer".to_string()
+                    } else {
+                        "queue".to_string()
+                    }
+                })
+                on_change=Callback::new(move |value: String| steer.set(value == "steer"))
                 label="Follow up behavior"
                 class=ROW_CONTROL
                 align_end=true
@@ -242,6 +252,7 @@ fn AutoCompactAfter() -> impl IntoView {
             <input
                 type="text"
                 inputmode="numeric"
+                autocomplete="off"
                 aria-label="Automatically compact after"
                 class="h-8 w-full rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 sm:w-60"
                 placeholder="Claude default"
@@ -251,7 +262,15 @@ fn AutoCompactAfter() -> impl IntoView {
                     match bruhs_models::logic::compact::autocompact_tokens(&raw) {
                         Some(value) => tokens.set(Some(value.to_string())),
                         None if raw.trim().is_empty() => tokens.set(None),
-                        None => {}
+                        None => {
+                            let stored = tokens.get_untracked().unwrap_or_default();
+                            if let Some(input) = ev
+                                .target()
+                                .and_then(|target| target.dyn_into::<web_sys::HtmlInputElement>().ok())
+                            {
+                                input.set_value(&stored);
+                            }
+                        }
                     }
                 }
             />
@@ -275,9 +294,7 @@ fn CompactIdleThreads() -> impl IntoView {
                     DropdownOption::new("never", "Never"),
                 ]
                 value=Signal::derive(move || mode.get().as_str().to_string())
-                on_change=Callback::new(move |v: String| {
-                    mode.set(bruhs_models::logic::compact::IdleCompact::parse(&v));
-                })
+                on_change=Callback::new(move |value: String| mode.set(IdleCompact::parse(&value)))
                 label="Compact idle threads"
                 class=ROW_CONTROL
                 align_end=true
@@ -375,13 +392,17 @@ fn TextGeneration() -> impl IntoView {
         >
             <Dropdown
                 options=Signal::derive(move || {
-                    std::iter::once(DropdownOption::new("", "Choose a project"))
-                        .chain(names.get().into_iter().map(|name| DropdownOption::new(name.clone(), name)))
-                        .collect::<Vec<_>>()
+                    let mut options = vec![DropdownOption::new("", "Choose a project")];
+                    options.extend(
+                        names
+                            .get()
+                            .into_iter()
+                            .map(|name| DropdownOption::new(name.clone(), name)),
+                    );
+                    options
                 })
-                value=project
-                placeholder="Choose a project"
-                on_change=Callback::new(move |v: String| set_project.set(v))
+                value=Signal::derive(move || project.get())
+                on_change=Callback::new(move |value: String| set_project.set(value))
                 label="Project for title instructions"
                 class=ROW_CONTROL
                 align_end=true

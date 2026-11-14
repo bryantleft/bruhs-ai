@@ -272,6 +272,7 @@ pub fn ChatPage() -> impl IntoView {
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
     let messages = expect_context::<crate::state::MessagesSignal>().0;
     let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
+    let suggestion_turn = expect_context::<crate::state::PromptSuggestionTurn>().0;
     let set_threads = expect_context::<crate::state::SetThreadsSignal>().0;
     let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
     let is_streaming = expect_context::<crate::state::IsStreaming>().0;
@@ -355,7 +356,21 @@ pub fn ChatPage() -> impl IntoView {
         context_chips.set(Vec::new());
     });
     let OpenFileSignal(open_file) = expect_context::<OpenFileSignal>();
+    let board_host = expect_context::<crate::whiteboard::host::WhiteboardHost>();
     let link_listener = window_event_listener(leptos::ev::click, move |ev| {
+        if let Some(button) = ev
+            .target()
+            .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
+            .and_then(|t| t.closest("button[data-open-whiteboard]").ok().flatten())
+        {
+            if button.closest(".prose-msg").ok().flatten().is_some() {
+                if let Some(source) = button.get_attribute("data-open-whiteboard") {
+                    ev.prevent_default();
+                    board_host.open_mermaid(source);
+                    return;
+                }
+            }
+        }
         let Some(anchor) = event_anchor(&ev) else {
             return;
         };
@@ -435,29 +450,41 @@ pub fn ChatPage() -> impl IntoView {
             build_turns(ms, root.as_deref(), latest)
         })
     });
-    // Cmd+F over the settled transcript plus the running turn.
-    let find_hits = Memo::new(move |_| {
-        let query = find_query.get();
-        let mut owned: Vec<(String, String)> = Vec::new();
+    let searchable_messages = Memo::new(move |_| {
         messages.with(|ms| {
-            for message in ms {
-                owned.push((message.id.clone(), searchable_text(message)));
-            }
-        });
-        if let Some(live) = live_reply() {
-            live.with(|current| {
-                if let Some(message) = current {
-                    if !owned.iter().any(|(id, _)| id == &message.id) {
-                        owned.push((message.id.clone(), searchable_text(message)));
-                    }
-                }
-            });
+            ms.iter()
+                .map(|message| (message.id.clone(), searchable_text(message)))
+                .collect::<Vec<_>>()
+        })
+    });
+    // Settled text is reused across keystrokes and streaming ticks.
+    let find_hits = Memo::new(move |_| {
+        if !find_cmds.thread_open.get() {
+            return Vec::new();
         }
-        let pairs: Vec<(&str, &str)> = owned
-            .iter()
-            .map(|(id, text)| (id.as_str(), text.as_str()))
-            .collect();
-        search_texts(&query, &pairs)
+        let query = find_query.get();
+        if query.is_empty() {
+            return Vec::new();
+        }
+        let current = live_reply().and_then(|live| {
+            live.with(|current| {
+                current
+                    .as_ref()
+                    .map(|message| (message.id.clone(), searchable_text(message)))
+            })
+        });
+        searchable_messages.with(|owned| {
+            let mut pairs: Vec<(&str, &str)> = owned
+                .iter()
+                .map(|(id, text)| (id.as_str(), text.as_str()))
+                .collect();
+            if let Some((id, text)) = &current {
+                if !pairs.iter().any(|(saved, _)| *saved == id) {
+                    pairs.push((id, text));
+                }
+            }
+            search_texts(&query, &pairs)
+        })
     });
     let find_count = Signal::derive(move || find_hits.with(|hits| hits.len()));
     let find_focus = Signal::derive(move || find_cmds.thread.get());
@@ -498,7 +525,7 @@ pub fn ChatPage() -> impl IntoView {
     // never unwrap the node ref.
     let scroll_to_bottom = move || {
         // A queued follow must not move a form or player under the pointer.
-        if response_interaction.get_value() || response_has_focus() {
+        if response_interaction.try_get_value() != Some(false) || response_has_focus() {
             return;
         }
         if let Some(Some(el)) = messages_container.try_get_untracked() {
@@ -524,7 +551,7 @@ pub fn ChatPage() -> impl IntoView {
             return;
         };
         let callback = Closure::wrap(Box::new(move || {
-            if at_bottom.get_untracked() {
+            if at_bottom.try_get_untracked() == Some(true) {
                 scroll_to_bottom();
             }
         }) as Box<dyn FnMut()>);
@@ -1282,6 +1309,12 @@ pub fn ChatPage() -> impl IntoView {
                 .update(|items| items.retain(|item| item.thread_id.as_str() != thread_id));
             if active_thread_id.get_untracked().as_deref() == Some(thread_id.as_str()) {
                 set_messages.set(settled.clone());
+                suggestion_turn.set(
+                    settled
+                        .last()
+                        .filter(|reply| completed && !stopped && reply.error.is_none())
+                        .map(|reply| (thread_id.clone(), reply.id.clone())),
+                );
             } else {
                 // Finished while the user was elsewhere → mark as ready/unread.
                 unread_threads.update(|set| {
@@ -2029,9 +2062,9 @@ pub fn ChatPage() -> impl IntoView {
                     </div>
                 }.into_any(),
 
-                Some(thread) => view! {
+                Some(thread_id) => view! {
                     <div class="flex flex-col h-full">
-                        <ChatHeader thread_id=thread />
+                        <ChatHeader thread_id=thread_id />
                         {move || find_cmds.thread_open.get().then(|| view! {
                             <FindBar
                                 label="Find in thread"
@@ -2076,7 +2109,7 @@ pub fn ChatPage() -> impl IntoView {
                                         <div
                                             node_ref=messages_container
                                             on:scroll=move |_| {
-                                                if response_interaction.get_value() || response_has_focus() {
+                                                if response_interaction.try_get_value() != Some(false) || response_has_focus() {
                                                     at_bottom.set(false);
                                                     return;
                                                 }
