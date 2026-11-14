@@ -39,6 +39,7 @@ use crate::ui::Icon;
 
 mod autosize;
 mod caret;
+mod suggestion;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 enum PopoverKind {
@@ -253,6 +254,7 @@ pub fn MentionEditor(
     #[prop(optional, into)] placeholder: String,
     #[prop(optional)] rows: Option<u32>,
     #[prop(optional, into)] disabled: Signal<bool>,
+    #[prop(optional, into)] suggestion_blocked: Signal<bool>,
     /// `false` drops the textarea's own ring/background and auto-grows it,
     /// for hosting inside the composer surface. Default `true`.
     #[prop(optional)]
@@ -330,6 +332,13 @@ pub fn MentionEditor(
     // event while the trigger token (`/`, `@`) is still present. Cleared when
     // the value changes via user input.
     let (suppressed_value, set_suppressed_value) = signal::<Option<String>>(None);
+    let suggestion = suggestion::bind(
+        textarea_ref,
+        value,
+        Signal::derive(move || {
+            chrome || disabled.get() || suggestion_blocked.get() || popover_kind.get().is_some()
+        }),
+    );
 
     // Fetch files when query / kind changes.
     Effect::new(move |_| {
@@ -610,6 +619,39 @@ pub fn MentionEditor(
         set_selected_idx.set(0);
     });
 
+    let accept_suggestion = Callback::new(move |_: ()| {
+        let Some(ta) = textarea_ref.get_untracked() else {
+            return;
+        };
+        suggestion::remember_selection(&ta, suggestion.selection);
+        let suffix = suggestion.suffix.get_untracked();
+        if suffix.is_empty() {
+            return;
+        }
+        let original = ta.value();
+        let expected = format!("{original}{suffix}");
+        // Native insertion preserves the browser's undo stack.
+        if let Some(document) = web_sys::window().and_then(|window| window.document()) {
+            if let Ok(command) = js_sys::Reflect::get(&document, &"execCommand".into()) {
+                if let Some(command) = command.dyn_ref::<js_sys::Function>() {
+                    let _ = command.call3(
+                        &document,
+                        &"insertText".into(),
+                        &false.into(),
+                        &suffix.into(),
+                    );
+                }
+            }
+        }
+        // Browsers without execCommand still get acceptance.
+        if ta.value() != expected {
+            write_composer(&ta, &expected, expected.len(), set_value, caret_byte);
+        } else {
+            set_value.set(expected);
+        }
+        suggestion.dismiss.run(());
+    });
+
     let on_input = move |ev: web_sys::Event| {
         let Some(ta) = ev
             .target()
@@ -618,6 +660,7 @@ pub fn MentionEditor(
             return;
         };
         let new_val = ta.value();
+        suggestion::remember_selection(&ta, suggestion.selection);
         // Any edit invalidates an Escape-dismissal: the user typed something
         // new, so the next trigger should open the popover again.
         if suppressed_value.get_untracked().as_deref() != Some(new_val.as_str()) {
@@ -629,9 +672,29 @@ pub fn MentionEditor(
     };
 
     let on_keydown = move |ev: KeyboardEvent| {
+        // IME owns all keys while composing, including Tab and Enter.
+        if ev.is_composing() || ev.key_code() == 229 {
+            return;
+        }
         let key = ev.key();
         let popover_open = popover_kind.get_untracked().is_some();
         let meta = ev.meta_key() || ev.ctrl_key();
+        if !popover_open && !meta && !ev.alt_key() && !ev.shift_key() {
+            if key == "Escape" {
+                suggestion.dismiss.run(());
+            } else if key == "Tab" && !ev.repeat() {
+                if let Some(ta) = textarea_ref.get_untracked() {
+                    suggestion::remember_selection(&ta, suggestion.selection);
+                    let suffix = suggestion.suffix.get_untracked();
+                    if !suffix.is_empty() {
+                        ev.prevent_default();
+                        ev.stop_propagation();
+                        accept_suggestion.run(());
+                        return;
+                    }
+                }
+            }
+        }
         if key == "v" && meta && ev.shift_key() && !ev.alt_key() {
             force_inline.set_value(true);
         }
@@ -791,6 +854,7 @@ pub fn MentionEditor(
             .and_then(|target| target.dyn_into::<HtmlTextAreaElement>().ok())
         {
             remember_caret(&ta, caret_byte);
+            suggestion::remember_selection(&ta, suggestion.selection);
         }
         recompute();
     };
@@ -801,6 +865,7 @@ pub fn MentionEditor(
             .and_then(|target| target.dyn_into::<HtmlTextAreaElement>().ok())
         {
             remember_caret(&ta, caret_byte);
+            suggestion::remember_selection(&ta, suggestion.selection);
         }
         recompute();
     };
@@ -949,7 +1014,15 @@ pub fn MentionEditor(
 
     // ── Render ───────────────────────────────────────────────────────────────
     view! {
-        <div class="relative">
+        <div class="relative grid">
+            {move || {
+                let suffix = suggestion.suffix.get();
+                (!suffix.is_empty()).then(|| view! {
+                    <div aria-hidden="true" data-prompt-suggestion="" class="pointer-events-none col-start-1 row-start-1 max-h-[200px] overflow-hidden whitespace-pre-wrap break-words px-3 pt-2.5 pb-1 text-body leading-relaxed">
+                        <span class="text-transparent">{move || value.get()}</span><span class="text-rambutan-500">{suffix}</span>
+                    </div>
+                })
+            }}
             {(!chrome).then(|| view! {
                 <div
                     node_ref=overlay_ref
@@ -991,8 +1064,9 @@ pub fn MentionEditor(
             <textarea
                 node_ref=textarea_ref
                 id="chat-input"
-                class=textarea_class
-                placeholder=placeholder
+                class=move || format!("col-start-1 row-start-1 {}", textarea_class())
+                placeholder=move || if suggestion.suffix.get().is_empty() { placeholder.clone() } else { String::new() }
+                aria-describedby="prompt-suggestion-help"
                 rows=rows
                 disabled=move || disabled.get()
                 on:input=on_input
@@ -1002,7 +1076,19 @@ pub fn MentionEditor(
                 on:paste=on_paste
                 on:copy=on_copy
                 on:scroll=on_scroll
+                on:focus=move |_| suggestion.focused.set(true)
+                on:blur=move |_| suggestion.focused.set(false)
+                on:compositionstart=move |_| suggestion.composing.set(true)
+                on:compositionend=move |_| suggestion.composing.set(false)
+                on:select=move |_| { if let Some(ta) = textarea_ref.get_untracked() { suggestion::remember_selection(&ta, suggestion.selection); } }
             />
+            <span id="prompt-suggestion-help" class="sr-only">{move || if suggestion.suffix.get().is_empty() { "" } else { "Next prompt suggested. Press Tab to accept or Escape to dismiss." }}</span>
+            {move || (!suggestion.suffix.get().is_empty()).then(|| view! {
+                <button type="button" class="col-start-1 px-3 py-1 text-left text-label-sm text-rambutan-500 hover:text-rambutan-200 focus-visible:outline-persimmon-400 cursor-pointer" aria-label="Accept suggested prompt"
+                    tabindex="-1"
+                    on:pointerdown=move |event| event.prevent_default()
+                    on:click=move |_| accept_suggestion.run(())>"Tab to accept suggestion"</button>
+            })}
             {move || fence_languages(chrome, value, set_value, textarea_ref, scroll_top)}
 
             // Floating popover (anchored above the textarea, full width).

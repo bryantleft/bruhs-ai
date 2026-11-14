@@ -488,8 +488,15 @@ pub fn role_command(
 
 /// Models for the jobs that are not threads. `None` keeps the built-in
 /// default for that job.
-#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskModels {
+    /// One next-prompt prediction per completed answer. An explicit false is
+    /// always serialized, so a saved opt-out survives future default changes.
+    #[serde(default = "suggestions_on", skip_serializing_if = "suggestions_are_on")]
+    pub prompt_suggestions: bool,
+    /// None uses a lightweight model on the thread's provider.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub suggestion_model: Option<String>,
     /// Meeting summaries. A Claude model: summaries run on the Claude CLI.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub summary: Option<String>,
@@ -501,12 +508,38 @@ pub struct TaskModels {
     pub review_codex: Option<String>,
 }
 
+fn suggestions_on() -> bool {
+    true
+}
+fn suggestions_are_on(value: &bool) -> bool {
+    *value
+}
+
+impl Default for TaskModels {
+    fn default() -> Self {
+        Self {
+            prompt_suggestions: true,
+            suggestion_model: None,
+            summary: None,
+            review_claude: None,
+            review_codex: None,
+        }
+    }
+}
+
 /// A model the pickers offer that `provider` runs, or `None`.
 fn provider_model(model: Option<String>, provider: AgentProvider) -> Option<String> {
     model.filter(|id| model_info(id).is_some_and(|info| info.provider == provider))
 }
 
 impl TaskModels {
+    pub fn suggestion(&self, thread_model: &str) -> &str {
+        self.suggestion_model.as_deref().unwrap_or_else(|| {
+            crate::logic::prompt_suggestion::default_suggestion_model(AgentProvider::for_model(
+                thread_model,
+            ))
+        })
+    }
     pub fn is_default(&self) -> bool {
         *self == Self::default()
     }
@@ -519,7 +552,8 @@ impl TaskModels {
             AgentProvider::Cursor
             | AgentProvider::Antigravity
             | AgentProvider::Grok
-            | AgentProvider::OpenCode => None,
+            | AgentProvider::OpenCode
+            | AgentProvider::Acp => None,
         }
     }
 
@@ -529,6 +563,12 @@ impl TaskModels {
     pub fn sanitized(self) -> Self {
         Self {
             summary: provider_model(self.summary, AgentProvider::Claude),
+            prompt_suggestions: self.prompt_suggestions,
+            suggestion_model: self.suggestion_model.filter(|id| {
+                model_info(id).is_some_and(|model| {
+                    matches!(model.provider, AgentProvider::Claude | AgentProvider::Codex)
+                })
+            }),
             review_claude: provider_model(self.review_claude, AgentProvider::Claude),
             review_codex: provider_model(self.review_codex, AgentProvider::Codex),
         }
@@ -560,11 +600,14 @@ mod tests {
             );
             let tasks = TaskModels {
                 summary: Some(model.into()),
+                suggestion_model: Some(model.into()),
                 review_claude: Some(model.into()),
                 review_codex: Some(model.into()),
+                ..Default::default()
             }
             .sanitized();
             assert_eq!(tasks.summary, None);
+            assert_eq!(tasks.suggestion_model, None);
             assert_eq!(tasks.review_claude, None);
             assert_eq!(tasks.review_codex, None);
         }
@@ -573,6 +616,34 @@ mod tests {
 
     const CLAUDE: &str = "claude-sonnet-4-6";
     const CODEX: &str = "gpt-6.1-sol";
+
+    #[test]
+    fn prompt_suggestions_default_on_with_lightweight_provider_models() {
+        let models: TaskModels = serde_json::from_str("{}").unwrap();
+        assert!(models.prompt_suggestions);
+        assert_eq!(models, TaskModels::default());
+        assert_eq!(models.suggestion(CLAUDE), "claude-haiku-4-5");
+        assert_eq!(models.suggestion(CODEX), "gpt-6-luna");
+        for model in [models.suggestion(CLAUDE), models.suggestion(CODEX)] {
+            assert!(model_info(model).is_some());
+        }
+    }
+
+    #[test]
+    fn prompt_suggestion_opt_out_and_explicit_model_survive_serialization() {
+        let models: TaskModels = serde_json::from_str(
+            r#"{"prompt_suggestions":false,"suggestion_model":"gpt-6.1-sol"}"#,
+        )
+        .unwrap();
+        let restored: TaskModels =
+            serde_json::from_str(&serde_json::to_string(&models).unwrap()).unwrap();
+        assert!(!restored.prompt_suggestions);
+        assert_eq!(
+            restored.suggestion(CLAUDE),
+            CODEX,
+            "an explicit override wins"
+        );
+    }
 
     fn book() -> (RoleBook, String, String) {
         let mut book = RoleBook::default();
@@ -820,6 +891,7 @@ mod tests {
             summary: Some(CODEX.into()),
             review_claude: Some(CLAUDE.into()),
             review_codex: Some(CLAUDE.into()),
+            ..TaskModels::default()
         };
         let models = stored.sanitized();
         assert_eq!(models.summary, None, "summaries run on Claude");

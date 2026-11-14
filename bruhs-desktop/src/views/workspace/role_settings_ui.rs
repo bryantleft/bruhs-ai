@@ -21,6 +21,7 @@ pub(super) const SETTINGS_ROLE_PROJECT_ACCESS_DROPDOWN_ID: &str = "desktop-role-
 pub(super) const SETTINGS_SUMMARY_MODEL_DROPDOWN_ID: &str = "desktop-summary-model";
 pub(super) const SETTINGS_REVIEW_CLAUDE_DROPDOWN_ID: &str = "desktop-review-claude-model";
 pub(super) const SETTINGS_REVIEW_CODEX_DROPDOWN_ID: &str = "desktop-review-codex-model";
+pub(super) const SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID: &str = "desktop-suggestion-model";
 
 /// Dropdown value that keeps what the control inherits.
 const INHERIT: &str = "inherit";
@@ -223,6 +224,16 @@ fn model_groups(inherit: &str, only: Option<AgentProvider>) -> Vec<DropdownGroup
             )
             .collect(),
     )
+}
+
+fn suggestion_model_groups() -> Vec<DropdownGroup> {
+    let mut groups = model_groups("Automatic", None);
+    for group in &mut groups {
+        group
+            .options
+            .retain(|option| !AgentProvider::for_model(option.value).is_external());
+    }
+    groups
 }
 
 fn role_model_groups(inherit: &str, current: Option<&str>, default: &str) -> Vec<DropdownGroup> {
@@ -577,6 +588,9 @@ impl Workspace {
             SETTINGS_REVIEW_CODEX_DROPDOWN_ID => {
                 self.set_task_models(cx, |models| models.review_codex = chosen(value));
             }
+            SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID => {
+                self.set_task_models(cx, |models| models.suggestion_model = chosen(value));
+            }
             _ => return false,
         }
         true
@@ -828,6 +842,21 @@ impl Workspace {
     pub(super) fn render_task_model_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
         vec![
             self.settings_row(
+                "desktop-settings-row-prompt-suggestions", "Suggest next prompt",
+                bruhs_models::logic::prompt_suggestion::SUGGESTION_HELP,
+                settings_ui::switch("desktop-prompt-suggestions", self.task_models.prompt_suggestions, false, "Suggest next prompt", cx,
+                    |this, _, cx| this.set_task_models(cx, |models| models.prompt_suggestions = !models.prompt_suggestions)),
+            ),
+            self.settings_row(
+                "desktop-settings-row-suggestion-model", "Prompt suggestion model",
+                "Automatic uses Haiku for Claude chats and Luna for Codex chats. Choose a model to override it.",
+                settings_ui::control_column(self.role_dropdown(
+                    SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID, "Prompt suggestion model",
+                    self.task_models.suggestion_model.as_deref().unwrap_or(INHERIT),
+                    suggestion_model_groups(), cx,
+                )),
+            ),
+            self.settings_row(
                 "desktop-settings-row-summary-model",
                 "Meeting summary model",
                 "The Claude model that writes meeting summaries. Summaries run on Claude.",
@@ -871,8 +900,8 @@ impl Workspace {
 mod tests {
     use super::{
         access_groups, chosen, chosen_access, model_groups, role_model_groups, role_model_value,
-        AgentProvider, PermissionMode, CUSTOM_ROLE_MODEL, DEFAULT_ROLE_MODEL, INHERIT, MAX_ROLES,
-        MODEL_CATALOG, ROLE_SLOTS,
+        suggestion_model_groups, AgentProvider, PermissionMode, CUSTOM_ROLE_MODEL,
+        DEFAULT_ROLE_MODEL, INHERIT, MAX_ROLES, MODEL_CATALOG, ROLE_SLOTS,
     };
 
     #[test]
@@ -917,6 +946,10 @@ mod tests {
             .all(|option| option.value.starts_with("claude-")));
         let all = &model_groups("The sender's model", None)[0].options;
         assert_eq!(all.len(), MODEL_CATALOG.len() + 1);
+        assert!(suggestion_model_groups()[0]
+            .options
+            .iter()
+            .all(|option| !AgentProvider::for_model(option.value).is_external()));
         assert_eq!(ROLE_SLOTS.len(), MAX_ROLES);
     }
 }

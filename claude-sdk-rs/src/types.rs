@@ -71,6 +71,9 @@ pub struct QueryOptions {
     /// Session id to resume (`--resume`). Ids starting with `-` are rejected
     /// with [`Error::InvalidSessionId`](crate::Error::InvalidSessionId).
     pub resume: Option<String>,
+    /// Save this session to disk. Disable for disposable text generation
+    /// (`--no-session-persistence`). Defaults to `true`.
+    pub persist_session: bool,
     /// Stop after this many agentic turns (`--max-turns`); the result then
     /// has subtype `error_max_turns`.
     pub max_turns: Option<u32>,
@@ -124,6 +127,7 @@ impl Default for QueryOptions {
             model: None,
             effort: None,
             resume: None,
+            persist_session: true,
             max_turns: None,
             system_prompt: None,
             append_system_prompt: None,
@@ -219,6 +223,12 @@ impl QueryOptions {
     /// Set [`accept_input`](Self::accept_input).
     pub fn accept_input(mut self, enabled: bool) -> Self {
         self.accept_input = enabled;
+        self
+    }
+
+    /// Set [`persist_session`](Self::persist_session).
+    pub fn persist_session(mut self, enabled: bool) -> Self {
+        self.persist_session = enabled;
         self
     }
 

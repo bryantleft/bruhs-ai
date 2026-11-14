@@ -201,6 +201,9 @@ fn command(options: &QueryOptions) -> Command {
     if let Some(ref session_id) = options.resume {
         cmd.arg(format!("--resume={session_id}"));
     }
+    if !options.persist_session {
+        cmd.arg("--no-session-persistence");
+    }
 
     if let Some(max_turns) = options.max_turns {
         cmd.arg(format!("--max-turns={max_turns}"));

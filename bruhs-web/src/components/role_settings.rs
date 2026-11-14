@@ -12,7 +12,7 @@ use leptos::prelude::*;
 use crate::components::provider::provider_label;
 use crate::components::settings_page::{SettingsRow, SettingsRowBody, ROW_CONTROL};
 use crate::state::{RolesSignal, TaskModelsSignal, ThreadsSignal};
-use crate::ui::{Dropdown, DropdownOption};
+use crate::ui::{Dropdown, DropdownOption, Switch};
 
 const TEXT_INPUT: &str = "h-8 w-full rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 transition-colors hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 sm:w-60";
 const TEXT_AREA: &str = "min-h-[6rem] w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500";
@@ -38,6 +38,13 @@ fn model_options(inherit: &str, only: Option<AgentProvider>) -> Vec<DropdownOpti
                         .in_group(provider_label(model.provider))
                 })
         }))
+        .collect()
+}
+
+fn suggestion_model_options() -> Vec<DropdownOption> {
+    model_options("Automatic", None)
+        .into_iter()
+        .filter(|option| !AgentProvider::for_model(&option.value).is_external())
         .collect()
 }
 
@@ -359,6 +366,16 @@ pub fn RoleSettings() -> impl IntoView {
 pub fn TaskModelSettings() -> impl IntoView {
     let TaskModelsSignal(models) = expect_context::<TaskModelsSignal>();
     view! {
+        <SettingsRow title="Suggest next prompt" description=bruhs_models::logic::prompt_suggestion::SUGGESTION_HELP>
+            <Switch label="Suggest next prompt" checked=Signal::derive(move || models.with(|models| models.prompt_suggestions))
+                on_change=Callback::new(move |enabled: bool| models.update(|models| models.prompt_suggestions = enabled)) />
+        </SettingsRow>
+        <SettingsRow title="Prompt suggestion model" description="Automatic uses Haiku for Claude chats and Luna for Codex chats. Choose a model to override it.">
+            <Dropdown options=suggestion_model_options()
+                value=Signal::derive(move || models.with(|models| models.suggestion_model.clone().unwrap_or_default()))
+                on_change=Callback::new(move |value: String| models.update(|models| models.suggestion_model = some(value)))
+                label="Prompt suggestion model" class=ROW_CONTROL align_end=true />
+        </SettingsRow>
         <SettingsRow
             title="Meeting summary model"
             description="The Claude model that writes meeting summaries. Summaries run on Claude."
@@ -450,6 +467,9 @@ mod tests {
             .all(|option| !option.value.starts_with("claude-")));
         let all = model_options("The sender's model", None);
         assert_eq!(all.len(), MODEL_CATALOG.len() + 1);
+        assert!(suggestion_model_options()
+            .iter()
+            .all(|option| !AgentProvider::for_model(&option.value).is_external()));
         assert_eq!(
             effort_options("Your default").len(),
             CLAUDE_EFFORTS.len() + 1

@@ -7,6 +7,18 @@ use tokio_stream::StreamExt;
 
 const SUCCESS: &str = r#"{"type":"result","subtype":"success","is_error":false,"result":"ok"}"#;
 
+#[tokio::test]
+async fn disposable_generation_does_not_persist_a_session() {
+    let directory = tempfile::tempdir().unwrap();
+    recording_fixture(directory.path(), SUCCESS);
+    collect(query(options(directory.path(), "hi").persist_session(false)).unwrap()).await;
+    assert!(arguments(directory.path()).contains(&"--no-session-persistence".to_string()));
+    assert!(
+        QueryOptions::default().persist_session,
+        "ordinary conversations retain their sessions"
+    );
+}
+
 fn fixture(directory: &Path, body: &str) {
     let path = directory.join("claude");
     std::fs::write(&path, format!("#!/bin/sh\n{body}\n")).expect("write owned fixture CLI");
