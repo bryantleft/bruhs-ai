@@ -831,13 +831,21 @@ impl MeetingsHub {
 
     /// Web `calendar_sync_stream.rs` reducer.
     pub fn apply_calendar_event(&mut self, event: CalendarSyncEvent, cx: &mut Context<'_, Self>) {
+        // Shared with the web: only a completed sync advances the sync time.
+        if self.google_sync.apply_status(&event) {
+            cx.notify();
+            return;
+        }
         match event {
-            CalendarSyncEvent::SyncStarted { .. } => {
-                self.google_sync.last_error = None;
-            }
-            CalendarSyncEvent::StreamOpened => {}
+            CalendarSyncEvent::StreamOpened
+            | CalendarSyncEvent::SyncStarted { .. }
+            | CalendarSyncEvent::SyncCompleted { .. }
+            | CalendarSyncEvent::SyncFailed { .. }
+            | CalendarSyncEvent::Disconnected => {}
             CalendarSyncEvent::EventUpserted { event } => {
-                let remote = *event;
+                let mut remote = *event;
+                // Provider dates arrive as UTC midnights; keep local ones.
+                remote.normalize_provider_all_day(local_offset_minutes_east);
                 let existing = remote.google_event_id.as_ref().and_then(|google_id| {
                     self.google_events
                         .iter()
@@ -868,19 +876,6 @@ impl MeetingsHub {
             }
             CalendarSyncEvent::CalendarsRefreshed { calendars } => {
                 self.calendars = calendars;
-            }
-            CalendarSyncEvent::SyncCompleted { at_ms, .. } => {
-                self.google_sync.last_synced_at =
-                    Some(EpochMs::saturating_from_f64(at_ms).as_millis());
-                self.google_sync.last_error = None;
-            }
-            CalendarSyncEvent::SyncFailed { at_ms, message } => {
-                self.google_sync.last_synced_at =
-                    Some(EpochMs::saturating_from_f64(at_ms).as_millis());
-                self.google_sync.last_error = Some(message);
-            }
-            CalendarSyncEvent::Disconnected => {
-                self.google_sync = GoogleCalendarSyncState::default();
             }
         }
         cx.notify();
@@ -1882,6 +1877,17 @@ pub fn capture_start_body(
         max_speakers: Some(d.max_speakers),
         video_ocr_enabled: Some(d.video_ocr_enabled),
     })
+}
+
+/// The machine zone's offset east of UTC, in minutes, at the UTC instant
+/// `ms`: the `offset_at` the shared `bruhs_models::calendar::zone` helpers
+/// take, read per instant so a daylight-saving change is honored.
+pub fn local_offset_minutes_east(ms: i64) -> i32 {
+    use chrono::{Offset, TimeZone};
+    chrono::Local
+        .timestamp_millis_opt(ms)
+        .single()
+        .map_or(0, |at| at.offset().fix().local_minus_utc() / 60)
 }
 
 pub fn upsert_google_event(list: &mut Vec<CalendarEvent>, event: CalendarEvent) {

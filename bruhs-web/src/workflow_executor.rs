@@ -205,7 +205,33 @@ impl WorkflowExecutor {
                 Ok((tasks, events, captures, knowledge, inbox, notes, sources, projects)) => {
                     let (tasks, captures) = task_saves.finish_loading(tasks, captures);
                     self.tasks.0.set(tasks);
-                    self.events.0.set(task_saves.finish_loading_events(events));
+                    let events = task_saves.finish_loading_events(events);
+                    // Provider all-day events stored before normalization
+                    // sit on UTC midnights; move them to local midnights and
+                    // save the move like any other edit.
+                    let migrated = events
+                        .iter()
+                        .filter_map(|original| {
+                            let mut event = original.clone();
+                            event
+                                .normalize_provider_all_day(crate::clock::offset_minutes_east)
+                                .then(|| (event.id.clone(), Some(original.clone()), Some(event)))
+                        })
+                        .collect::<Vec<_>>();
+                    let events = events
+                        .into_iter()
+                        .map(|event| {
+                            migrated
+                                .iter()
+                                .find(|(id, _, _)| *id == event.id)
+                                .and_then(|(_, _, normalized)| normalized.clone())
+                                .unwrap_or(event)
+                        })
+                        .collect();
+                    self.events.0.set(events);
+                    if !migrated.is_empty() {
+                        task_saves.edit_events(migrated);
+                    }
                     self.captures.0.set(captures);
                     self.knowledge
                         .0

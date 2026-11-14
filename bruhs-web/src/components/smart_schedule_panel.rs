@@ -1,6 +1,5 @@
 //! Local scheduling controls layered onto the calendar.
 
-use bruhs_models::num::ToIntSaturating;
 use bruhs_models::{
     AvailabilityRule, CalendarEvent, ConflictResolution, EventSource, FocusProtection,
     SchedulingLink, WorkItem,
@@ -55,12 +54,17 @@ pub fn SmartSchedulePanel(open: RwSignal<bool>) -> impl IntoView {
         };
         let duration = task.planning.estimate_minutes.unwrap_or(60).max(15);
         let now = crate::clock::now_ms();
-        let offset = -js_sys::Date::new_0()
-            .get_timezone_offset()
-            .to_i16_saturating();
+        // Per-instant offsets keep working hours right after a DST change
+        // inside the 30-day search.
         let slot = preferences.with_untracked(|prefs| {
             events.with_untracked(|evs| {
-                prefs.first_available_slot(evs, now, now + 30 * 86_400_000, duration, offset)
+                prefs.first_available_slot_in_zone(
+                    evs,
+                    now,
+                    now + 30 * 86_400_000,
+                    duration,
+                    crate::clock::offset_minutes_east,
+                )
             })
         });
         let Some((start, end)) = slot else {

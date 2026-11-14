@@ -1,6 +1,5 @@
 //! Local-first booking surface for a saved scheduling link.
 
-use bruhs_models::num::ToIntSaturating;
 use bruhs_models::{CalendarEvent, EventSource, SchedulingLink, SchedulingPreferences};
 use leptos::prelude::*;
 
@@ -19,7 +18,7 @@ fn available_slots(
     link: &SchedulingLink,
     events: &[CalendarEvent],
     now_ms: i64,
-    utc_offset_minutes: i16,
+    offset_at: impl Fn(i64) -> i32 + Copy,
 ) -> Vec<(i64, i64)> {
     let mut slots = Vec::new();
     let mut cursor = now_ms + i64::from(link.minimum_notice_hours) * 60 * MINUTE_MS;
@@ -29,12 +28,12 @@ fn available_slots(
         .saturating_add(link.duration_minutes)
         .saturating_add(link.buffer_after_minutes);
     while slots.len() < 6 {
-        let Some((reserved_start, reserved_end)) = preferences.first_available_slot(
+        let Some((reserved_start, reserved_end)) = preferences.first_available_slot_in_zone(
             events,
             cursor,
             through,
             reserved_minutes,
-            utc_offset_minutes,
+            offset_at,
         ) else {
             break;
         };
@@ -89,10 +88,14 @@ pub fn BookingPage(slug: String) -> impl IntoView {
     let slots = Signal::derive(move || {
         link.get().map_or_else(Vec::new, |link| {
             let now = crate::clock::now_ms();
-            let offset = -js_sys::Date::new_0()
-                .get_timezone_offset()
-                .to_i16_saturating();
-            available_slots(&preferences.get(), &link, &events.get(), now, offset)
+            // Per-instant offsets: a booking window can cross a DST change.
+            available_slots(
+                &preferences.get(),
+                &link,
+                &events.get(),
+                now,
+                crate::clock::offset_minutes_east,
+            )
         })
     });
 
@@ -177,7 +180,7 @@ mod tests {
         link.buffer_before_minutes = 15;
         link.buffer_after_minutes = 15;
         let monday = 4 * DAY_MS;
-        let slots = available_slots(&preferences, &link, &[], monday + 4 * 60 * MINUTE_MS, 0);
+        let slots = available_slots(&preferences, &link, &[], monday + 4 * 60 * MINUTE_MS, |_| 0);
         assert_eq!(slots[0].0, monday + 9 * 60 * MINUTE_MS + 15 * MINUTE_MS);
         assert_eq!(slots[0].1 - slots[0].0, 30 * MINUTE_MS);
     }

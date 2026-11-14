@@ -206,7 +206,13 @@ impl SchedulingPreferences {
             ConflictResolution::DuplicateLocal => {
                 let mut copy = events[index].clone();
                 copy.id = Uuid::new_v4().to_string();
+                // The copy is the user's own local event: editable and
+                // deletable, with no provider identity or link.
+                copy.source = crate::EventSource::Local;
                 copy.google_event_id = None;
+                copy.calendar_id = None;
+                copy.recurring_event_id = None;
+                copy.html_link = None;
                 copy.title = format!("{} (local copy)", copy.title);
                 copy.updated_at = now_ms;
                 events.push(copy);
@@ -220,8 +226,10 @@ impl SchedulingPreferences {
         true
     }
 
-    /// Finds the first available slot on a 15-minute grid. Timestamp days are
-    /// interpreted in the caller's local-day coordinate system.
+    /// Finds the first available slot on a 15-minute grid in a zone with one
+    /// fixed UTC offset (minutes east). Use
+    /// [`Self::first_available_slot_in_zone`] for a real zone: a fixed offset
+    /// misreads availability after a daylight-saving change.
     pub fn first_available_slot(
         &self,
         events: &[CalendarEvent],
@@ -229,6 +237,23 @@ impl SchedulingPreferences {
         through_ms: i64,
         duration_minutes: u16,
         utc_offset_minutes: i16,
+    ) -> Option<(i64, i64)> {
+        self.first_available_slot_in_zone(events, from_ms, through_ms, duration_minutes, |_| {
+            i32::from(utc_offset_minutes)
+        })
+    }
+
+    /// Finds the first available slot on a 15-minute grid. Availability
+    /// rules are wall-clock times, read through `offset_at` (minutes east
+    /// of UTC at a UTC instant), so a search window that crosses a
+    /// daylight-saving change keeps 09:00 at 09:00 on both sides.
+    pub fn first_available_slot_in_zone(
+        &self,
+        events: &[CalendarEvent],
+        from_ms: i64,
+        through_ms: i64,
+        duration_minutes: u16,
+        offset_at: impl Fn(i64) -> i32 + Copy,
     ) -> Option<(i64, i64)> {
         let duration_ms = i64::from(duration_minutes.max(15)) * MINUTE_MS;
         let step_ms = 15 * MINUTE_MS;
@@ -246,7 +271,7 @@ impl SchedulingPreferences {
         let mut busy_index = 0;
         let mut cursor = ((from_ms + step_ms - 1) / step_ms) * step_ms;
         while cursor + duration_ms <= through_ms {
-            let local_cursor = cursor + i64::from(utc_offset_minutes) * MINUTE_MS;
+            let local_cursor = crate::calendar::zone::wall_clock_ms(cursor, offset_at);
             let day_start = local_cursor.div_euclid(DAY_MS) * DAY_MS;
             // rem_euclid(7) is 0..=6 and a day has 1,440 minutes: both fit.
             let weekday = u8::try_from((local_cursor.div_euclid(DAY_MS) + 4).rem_euclid(7))
@@ -380,6 +405,47 @@ mod tests {
         assert_eq!(slot.0, monday + 10 * 60 * MINUTE_MS);
     }
 
+    /// US Pacific for late 2026: PDT until 2026-11-01 09:00 UTC, then PST.
+    fn pacific_fall_2026(instant: i64) -> i32 {
+        // 2026-11-01T09:00:00Z
+        if instant < 1_793_523_600_000 {
+            -7 * 60
+        } else {
+            -8 * 60
+        }
+    }
+
+    #[test]
+    fn slot_search_keeps_working_hours_across_daylight_saving_end() {
+        // Friday 2026-10-30 09:00 PDT through Monday 2026-11-02 23:00 PST,
+        // with Friday fully booked: the first opening is Monday 09:00 PST.
+        let friday_nine = 1_793_376_000_000; // 2026-10-30T16:00:00Z
+        let monday_nine_pst = 1_793_638_800_000; // 2026-11-02T17:00:00Z
+        let busy = event("friday", friday_nine, friday_nine + 8 * 60 * MINUTE_MS);
+        let preferences = SchedulingPreferences::default();
+        let slot = preferences
+            .first_available_slot_in_zone(
+                std::slice::from_ref(&busy),
+                friday_nine,
+                monday_nine_pst + 14 * 60 * MINUTE_MS,
+                30,
+                pacific_fall_2026,
+            )
+            .expect("Monday has working hours");
+        assert_eq!(slot.0, monday_nine_pst);
+        // The fixed offset captured on Friday reads Monday 08:00 PST as 09:00.
+        let fixed = preferences
+            .first_available_slot(
+                &[busy],
+                friday_nine,
+                monday_nine_pst + 14 * 60 * MINUTE_MS,
+                30,
+                -7 * 60,
+            )
+            .unwrap();
+        assert_eq!(fixed.0, monday_nine_pst - 60 * MINUTE_MS);
+    }
+
     #[test]
     fn conflict_resolution_preserves_local_copy_when_requested() {
         let mut prefs = SchedulingPreferences::default();
@@ -404,6 +470,41 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].start_at_ms, 30.0);
         assert_eq!(events[1].start_at_ms, 10.0);
+    }
+
+    #[test]
+    fn a_duplicated_provider_event_becomes_an_editable_local_event() {
+        let mut prefs = SchedulingPreferences::default();
+        prefs.conflicts.push(SchedulingConflict {
+            id: "conflict".into(),
+            event_id: "event".into(),
+            event_title: "Review".into(),
+            local_start_at_ms: 10.0,
+            local_end_at_ms: 20.0,
+            remote_start_at_ms: 30.0,
+            remote_end_at_ms: 40.0,
+            detected_at_ms: 5,
+            resolution: None,
+        });
+        let mut provider = event("event", 10, 20);
+        provider.source = EventSource::Google;
+        provider.google_event_id = Some("g-1".into());
+        provider.calendar_id = Some("cal".into());
+        provider.html_link = Some("https://calendar.google.com/event?eid=g-1".into());
+        let mut events = vec![provider];
+        assert!(prefs.resolve_conflict(
+            "conflict",
+            ConflictResolution::DuplicateLocal,
+            &mut events,
+            50
+        ));
+        let copy = &events[1];
+        assert!(!copy.is_provider_read_only(), "{:?}", copy.source);
+        assert_eq!(copy.google_event_id, None);
+        assert_eq!(copy.calendar_id, None);
+        assert_eq!(copy.html_link, None);
+        assert!(events[0].is_provider_read_only());
+        assert_eq!(events[0].google_event_id.as_deref(), Some("g-1"));
     }
 
     #[test]

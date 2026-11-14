@@ -48,10 +48,79 @@ pub struct CalendarEvent {
     pub html_link: Option<String>,
 }
 
+impl CalendarEvent {
+    /// Whether the event belongs to a read-only provider calendar. Its
+    /// time, title and details come from the provider; bruhs never writes
+    /// them back, so the apps must not offer to move or edit it.
+    pub fn is_provider_read_only(&self) -> bool {
+        !matches!(self.source, EventSource::Local)
+    }
+
+    /// Move a provider all-day event from the UTC midnights the sync engine
+    /// carries (`date` fields are zone-less) to local midnights of the same
+    /// dates, the way local all-day events are stored. Without it a
+    /// 2026-05-15 event starts on May 14 west of UTC and spills into May 16
+    /// east of it. `offset_at` is minutes east of UTC at an instant.
+    /// Idempotent; returns whether the event changed.
+    pub fn normalize_provider_all_day(&mut self, offset_at: impl Fn(i64) -> i32 + Copy) -> bool {
+        use crate::calendar::zone::{is_unnormalized_provider_all_day, provider_all_day_to_local};
+        use crate::EpochMs;
+        if !self.all_day || !self.is_provider_read_only() {
+            return false;
+        }
+        let start = EpochMs::saturating_from_f64(self.start_at_ms).as_millis();
+        let end = EpochMs::saturating_from_f64(self.end_at_ms).as_millis();
+        if !is_unnormalized_provider_all_day(start, offset_at) {
+            return false;
+        }
+        self.start_at_ms =
+            EpochMs::saturating_from_i64(provider_all_day_to_local(start, offset_at)).as_f64();
+        if is_unnormalized_provider_all_day(end, offset_at) {
+            self.end_at_ms =
+                EpochMs::saturating_from_i64(provider_all_day_to_local(end, offset_at)).as_f64();
+        }
+        true
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::models::attendee::{AttendeeResponse, EventAttendee, EventSource};
+
+    fn google_all_day(start: f64, end: f64) -> CalendarEvent {
+        let mut event: CalendarEvent = serde_json::from_str(
+            r#"{"id":"g","title":"Holiday","start_at_ms":0.0,"end_at_ms":0.0,"all_day":true,
+                "color":null,"notes":null,"created_at":0,"updated_at":0,"source":"google",
+                "google_event_id":"evt"}"#,
+        )
+        .unwrap();
+        event.start_at_ms = start;
+        event.end_at_ms = end;
+        event
+    }
+
+    #[test]
+    fn provider_all_day_events_move_to_local_midnight_once() {
+        let pacific = |_: i64| -7 * 60;
+        // 2026-05-15 and 2026-05-16 at UTC midnight.
+        let mut event = google_all_day(1_778_803_200_000.0, 1_778_889_600_000.0);
+        assert!(event.is_provider_read_only());
+        assert!(event.normalize_provider_all_day(pacific));
+        assert_eq!(event.start_at_ms, 1_778_803_200_000.0 + 7.0 * 3_600_000.0);
+        assert_eq!(event.end_at_ms - event.start_at_ms, 86_400_000.0);
+        let normalized = event.clone();
+        assert!(!event.normalize_provider_all_day(pacific), "idempotent");
+        assert_eq!(event, normalized);
+
+        let mut timed = google_all_day(1_778_803_200_000.0, 1_778_806_800_000.0);
+        timed.all_day = false;
+        assert!(!timed.normalize_provider_all_day(pacific));
+        let mut local = google_all_day(1_778_803_200_000.0, 1_778_889_600_000.0);
+        local.source = EventSource::Local;
+        assert!(!local.is_provider_read_only());
+        assert!(!local.normalize_provider_all_day(pacific));
+    }
 
     /// Records written by DB_VERSION 2 had no source/google/attendees
     /// fields. Verify they still deserialize with defaults.

@@ -33,9 +33,14 @@ pub enum ClassifyError {
     UnparseableEnd(String),
 }
 
+/// Map one `events.list` item. `synced_at_ms` is the sync tick's time: it
+/// stamps `created_at`/`updated_at`, so a delivered record is never newer
+/// than the sync that clients record for it and cannot pass for a local
+/// edit (see `bruhs_models::should_defer_remote_event`).
 pub fn classify(
     raw: &RawEvent,
     calendar_local_id: Option<&str>,
+    synced_at_ms: i64,
 ) -> Result<ClassifiedEvent, ClassifyError> {
     if raw.status.as_deref() == Some("cancelled") {
         return Ok(ClassifiedEvent::Delete {
@@ -56,7 +61,7 @@ pub fn classify(
     let (end_ms, _) =
         event_time_to_ms(end).ok_or_else(|| ClassifyError::UnparseableEnd(raw.id.clone()))?;
 
-    let now = Utc::now().timestamp_millis();
+    let now = synced_at_ms;
     let event = CalendarEvent {
         id: Uuid::new_v4().to_string(),
         title: raw.summary.clone().unwrap_or_else(|| "(no title)".into()),
@@ -180,7 +185,7 @@ mod tests {
             status: Some("cancelled".into()),
             ..fixture("evt-1")
         };
-        let got = classify(&raw, None).unwrap();
+        let got = classify(&raw, None, 1_700_000_000_000).unwrap();
         assert_eq!(
             got,
             ClassifiedEvent::Delete {
@@ -192,7 +197,7 @@ mod tests {
     #[test]
     fn confirmed_event_classifies_as_upsert_with_source_google() {
         let raw = fixture("evt-1");
-        let got = classify(&raw, Some("cal-local")).unwrap();
+        let got = classify(&raw, Some("cal-local"), 1_700_000_000_000).unwrap();
         match got {
             ClassifiedEvent::Upsert(ev) => {
                 assert_eq!(ev.google_event_id.as_deref(), Some("evt-1"));
@@ -222,7 +227,7 @@ mod tests {
             }),
             ..fixture("evt-day")
         };
-        let got = classify(&raw, None).unwrap();
+        let got = classify(&raw, None, 1_700_000_000_000).unwrap();
         match got {
             ClassifiedEvent::Upsert(ev) => {
                 assert!(ev.all_day);
@@ -237,7 +242,7 @@ mod tests {
             start: None,
             ..fixture("evt-bad")
         };
-        let err = classify(&raw, None).unwrap_err();
+        let err = classify(&raw, None, 1_700_000_000_000).unwrap_err();
         assert_eq!(err, ClassifyError::NoStart("evt-bad".into()));
         assert_eq!(err.to_string(), "event evt-bad has no start");
     }
@@ -265,7 +270,7 @@ mod tests {
             ],
             ..fixture("evt-1")
         };
-        let got = classify(&raw, None).unwrap();
+        let got = classify(&raw, None, 1_700_000_000_000).unwrap();
         let ev = match got {
             ClassifiedEvent::Upsert(ev) => ev,
             _ => panic!(),
@@ -291,7 +296,7 @@ mod tests {
             }),
             ..fixture("evt-1")
         };
-        let got = classify(&raw, None).unwrap();
+        let got = classify(&raw, None, 1_700_000_000_000).unwrap();
         let ev = match got {
             ClassifiedEvent::Upsert(ev) => ev,
             _ => panic!(),
