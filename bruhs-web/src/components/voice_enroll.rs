@@ -195,7 +195,7 @@ pub fn VoiceEnrollModal(
                             }.into_any(),
                             EnrollState::Success => view! {
                                 <div class="text-body-sm text-pandan-400">
-                                    "✓ Voice enrolled successfully"
+                                    "Voice enrolled"
                                 </div>
                             }.into_any(),
                             EnrollState::Error => view! {
