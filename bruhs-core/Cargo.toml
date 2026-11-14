@@ -37,7 +37,7 @@ keyring = { workspace = true }
 directories = { workspace = true }
 base64 = "0.22"
 percent-encoding = "2"
-zip = { version = "2.4.2", default-features = false }
+zip = { version = "9.5.1", default-features = false }
 hmac = "0.12"
 sha2 = { workspace = true }
 rand = { workspace = true }
@@ -55,7 +55,6 @@ rusqlite = { workspace = true }
 tokio-postgres = "=0.7.18"
 sqlparser = { version = "=0.64.0", features = ["visitor"] }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
-rustls-pemfile = "=2.2.0"
 qrcodegen = "=1.8.0"
 hyper = { version = "1", features = ["server", "http1"] }
 hyper-util = { version = "0.1", features = ["tokio"] }
