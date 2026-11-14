@@ -202,7 +202,8 @@ pub fn MeetingLive() -> impl IntoView {
                     let Some(m) = current.get() else { return ().into_any(); };
                     let segments = segments_memo.get();
                     let speakers = m.speakers.clone();
-                    let groups = group_by_speaker(&segments);
+                    let empty = segments.is_empty();
+                    let groups = group_by_speaker(segments);
                     view! {
                         <div class="min-h-0 flex-1 overflow-auto rounded-grape bg-longan-900 inset-ring inset-ring-longan-700 px-3 py-2 space-y-3">
                             <p class="text-label text-rambutan-100 break-words">{m.title.clone()}</p>
@@ -210,7 +211,7 @@ pub fn MeetingLive() -> impl IntoView {
                             <p class="text-label-sm text-rambutan-400">"Latest 50 segments, full transcript in Meetings"</p>
                             {move || stop_error.get().map(|error| view! { <p role="alert" class="text-body-sm text-lychee-400 break-words">{error}</p> })}
                             {move || chunk_note.get().map(|note| view! { <p role="status" class="text-body-sm text-lychee-400 break-words">{note}</p> })}
-                            {segments.is_empty().then(|| view! { <p class="text-body-sm text-rambutan-400">"Waiting for transcript…"</p> })}
+                            {empty.then(|| view! { <p class="text-body-sm text-rambutan-400">"Waiting for transcript…"</p> })}
                             {groups.into_iter().map(|(speaker_id, segs)| {
                                 let label = speaker_label(&speakers, speaker_id.as_deref());
                                 let (text_class, ring_class) = speaker_colors(speaker_id.as_deref());

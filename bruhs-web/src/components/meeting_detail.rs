@@ -9,7 +9,6 @@
 //! - Clicking a chip opens an inline text editor; blur/Enter commits via PATCH,
 //!   Escape cancels. Optimistic update reverts on API failure.
 
-use bruhs_models::num::ToIntSaturating;
 use leptos::prelude::*;
 
 use crate::ui::Checkbox;
@@ -18,10 +17,14 @@ use web_sys::{HtmlInputElement, KeyboardEvent};
 
 use crate::api;
 use crate::state::{
-    AppView, ColorIndex, Meeting, MeetingSegmentsSignal, MeetingsSignal, PeopleSignal,
-    PersonalitySettingsSignal, SetActiveView, SetMeetingsSignal, Speaker, SpeakerIdentity,
-    TranscriptSegment,
+    AppView, ColorIndex, Meeting, MeetingsSignal, PeopleSignal, PersonalitySettingsSignal,
+    SetActiveView, SetMeetingsSignal, Speaker, SpeakerIdentity, TranscriptSegment,
 };
+
+#[cfg(test)]
+mod grouping_tests;
+mod transcript_projection;
+mod transcript_view;
 
 // ── MeetingDetailPage ─────────────────────────────────────────────────────────
 
@@ -31,7 +34,6 @@ use crate::state::{
 #[component]
 pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
     let MeetingsSignal(meetings) = expect_context::<MeetingsSignal>();
-    let MeetingSegmentsSignal(meeting_segments) = expect_context::<MeetingSegmentsSignal>();
     let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
     let PersonalitySettingsSignal(personality) = expect_context::<PersonalitySettingsSignal>();
@@ -61,15 +63,6 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                 .map(|meeting| (meeting.id.clone(), meeting.speakers.clone()))
         })
     });
-
-    let segments_memo: Memo<Vec<TranscriptSegment>> = Memo::new(move |_| {
-        let id = mid.get_value();
-        meeting_segments.with(|map| map.get(&id).cloned().unwrap_or_default())
-    });
-
-    // Memoize the grouping so it only recomputes when segments change,
-    // not on every render (chip-edit signals, busy flags, etc.).
-    let groups_memo = Memo::new(move |_| group_by_speaker(&segments_memo.get()));
 
     let on_resummarize = move |_: web_sys::MouseEvent| {
         let Some(m) = current.get() else { return };
@@ -127,64 +120,23 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                             <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-6 text-label-sm cursor-pointer disabled:opacity-40" disabled=move || transcript_status.get().loading on:click=move |_| transcript_sync.refresh(mid.get_value())>"Retry loading transcript"</button>
                         </section>
                     })}
-                    {move || {
-                        let Some((meeting_id, speakers)) = transcript_identity.get() else {
-                            return ().into_any();
-                        };
-                        let groups = groups_memo.get();
-                        if groups.is_empty() {
-                            view! {
-                                <div class="rounded-grape inset-ring inset-ring-longan-800 bg-longan-900/40 px-3 py-2 text-body-sm text-rambutan-500">
-                                    {move || if transcript_status.get().loading { "Loading transcript…" } else if transcript_status.get().warning.is_some() { "Transcript is unavailable. Use Retry loading transcript to try again." } else { "No transcript yet. Segments appear after Stop while Whisper processes the audio." }}
-                                </div>
-                            }.into_any()
-                        } else {
-                            view! {
-                                <div class="space-y-3">
-                                    {groups.into_iter().map(|(speaker_id, segs)| {
-                                        let label = speaker_label(&speakers, speaker_id.as_deref());
-                                        let (text_class, ring_class) = speaker_colors(speaker_id.as_deref());
-                                        let chip_meeting_id = meeting_id.clone();
-                                        let chip_speaker_id = speaker_id.clone();
-                                        view! {
-                                            <div class="space-y-1">
-                                                <div class="flex items-center">
-                                                    <SpeakerChip
-                                                        meeting_id=chip_meeting_id
-                                                        speaker_id=chip_speaker_id
-                                                        label=label
-                                                        text_class=text_class
-                                                        ring_class=ring_class
-                                                    />
-                                                </div>
-                                                <div class="space-y-1 pl-3">
-                                                    {segs.into_iter().map(|seg| {
-                                                        let opacity = if seg.partial { " opacity-50" } else { "" };
-                                                        let conf_badge = seg.speaker_confidence
-                                                            .filter(|&c| c < 0.85)
-                                                            .map(|c| {
-                                                                let pct = (c * 100.0).to_u32_saturating();
-                                                                view! {
-                                                                    <span class="text-label-sm text-rambutan-500 ml-1">
-                                                                        {format!("{pct}%")}
-                                                                    </span>
-                                                                }
-                                                            });
-                                                        view! {
-                                                            <div class=format!("flex items-baseline text-body-sm text-rambutan-200 leading-snug{opacity}")>
-                                                                <span>{seg.text}</span>
-                                                                {conf_badge}
-                                                            </div>
-                                                        }
-                                                    }).collect_view()}
-                                                </div>
-                                            </div>
-                                        }
-                                    }).collect_view()}
-                                </div>
-                            }.into_any()
-                        }
-                    }}
+                    <Show when=move || transcript_identity.with(Option::is_some)>
+                        <transcript_view::TranscriptContents
+                            meeting_id=mid.get_value()
+                            speakers=Memo::new(move |_| transcript_identity.with(|identity| {
+                                identity.as_ref().map(|(_, speakers)| speakers.clone()).unwrap_or_default()
+                            }))
+                            empty_label=Signal::derive(move || {
+                                if transcript_status.get().loading {
+                                    "Loading transcript…"
+                                } else if transcript_status.get().warning.is_some() {
+                                    "Transcript is unavailable. Use Retry loading transcript to try again."
+                                } else {
+                                    "No transcript yet. Segments appear after Stop while Whisper processes the audio."
+                                }
+                            })
+                        />
+                    </Show>
                 </section>
 
                 // ── Summary ────────────────────────────────────────────────
@@ -408,18 +360,17 @@ pub fn speaker_label(speakers: &[Speaker], id: Option<&str>) -> String {
 /// Group a flat segment list into contiguous runs of the same speaker.
 /// Each entry is `(speaker_id, Vec<TranscriptSegment>)`.
 pub fn group_by_speaker(
-    segments: &[TranscriptSegment],
+    segments: impl IntoIterator<Item = TranscriptSegment>,
 ) -> Vec<(Option<String>, Vec<TranscriptSegment>)> {
     let mut groups: Vec<(Option<String>, Vec<TranscriptSegment>)> = Vec::new();
     for seg in segments {
-        let id = seg.speaker_id.clone();
         if let Some(last) = groups.last_mut() {
-            if last.0 == id {
-                last.1.push(seg.clone());
+            if last.0 == seg.speaker_id {
+                last.1.push(seg);
                 continue;
             }
         }
-        groups.push((id, vec![seg.clone()]));
+        groups.push((seg.speaker_id.clone(), vec![seg]));
     }
     groups
 }

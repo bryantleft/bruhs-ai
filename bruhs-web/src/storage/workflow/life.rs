@@ -82,13 +82,13 @@ mod tests {
         let id = record.id.clone();
         let expected = serde_json::to_string(&record).unwrap();
         let mut context = LifeContext::default();
-        context.finance.transactions.push(record);
+        context.finance.transactions.push(record.into());
         assert_eq!(
             snapshot(&context, AgentDomain::Finance, &id),
             Some(expected)
         );
         assert_eq!(snapshot(&context, AgentDomain::Health, &id), None);
-        context.finance.transactions[0].note = Some("Edit".into());
+        std::sync::Arc::make_mut(&mut context.finance.transactions[0]).note = Some("Edit".into());
         assert!(snapshot(&context, AgentDomain::Finance, &id)
             .unwrap()
             .contains("Edit"));

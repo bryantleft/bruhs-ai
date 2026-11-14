@@ -8,7 +8,7 @@ use crate::state::{ActiveThreadId, OpenFileSignal, RightPanelSignal, ThreadsSign
 use crate::ui::Icon;
 use bruhs_models::logic::branch_pull::parent_dir;
 
-fn project_path() -> Option<String> {
+pub(super) fn project_path() -> Option<String> {
     let id = expect_context::<ActiveThreadId>().0.get_untracked()?;
     expect_context::<ThreadsSignal>()
         .0
@@ -27,7 +27,7 @@ fn project_path() -> Option<String> {
 }
 
 #[component]
-pub fn FilesPanel() -> impl IntoView {
+fn FileTree() -> impl IntoView {
     let open_file = expect_context::<OpenFileSignal>().0;
     let panel = expect_context::<RightPanelSignal>().0;
     let threads = expect_context::<ThreadsSignal>().0;
@@ -38,11 +38,14 @@ pub fn FilesPanel() -> impl IntoView {
     let loading = RwSignal::new(false);
     let ticket = StoredValue::new(0u32);
     let seen_project = StoredValue::new(None::<Option<String>>);
+    let project = Memo::new(move |_| {
+        threads.track();
+        active.track();
+        project_path()
+    });
 
     Effect::new(move |_| {
-        let _ = threads.get();
-        let _ = active.get();
-        let path = project_path();
+        let path = project.get();
         let project_changed = seen_project.with_value(|seen| seen.as_ref() != Some(&path));
         if project_changed {
             seen_project.set_value(Some(path.clone()));
@@ -155,4 +158,10 @@ pub fn FilesPanel() -> impl IntoView {
             </div>
         </div>
     }
+}
+
+#[component]
+pub fn FilesPanel() -> impl IntoView {
+    let mode = RwSignal::new(0u8);
+    view! {<div class="flex h-full min-h-0 flex-col"><div class="flex shrink-0 gap-2 border-b border-longan-800 p-2" role="tablist" aria-label="Project tools">{[(0u8,"Files"),(1,"Databases"),(2,"API")].into_iter().map(move |(index,label)|view!{<button type="button" role="tab" aria-selected=move ||(mode.get()==index).to_string() class=move ||if mode.get()==index{"min-h-8 rounded-grape bg-longan-800 px-2 text-label-sm text-rambutan-100 max-md:min-h-11"}else{"min-h-8 rounded-grape px-2 text-label-sm hover:bg-longan-800 max-md:min-h-11"} on:click=move |_|mode.set(index)>{label}</button>}).collect_view()}</div><div class="min-h-0 flex-1">{move ||match mode.get(){1=>view!{<super::database_panel::DatabasePanel />}.into_any(),2=>view!{<super::api_client_panel::ApiClientPanel />}.into_any(),_=>view!{<FileTree />}.into_any()}}</div></div>}
 }

@@ -102,7 +102,7 @@ pub async fn execute_step(
                     .value
                     .finance
                     .transactions
-                    .insert(0, record.as_ref().clone()),
+                    .insert(0, record.as_ref().clone().into()),
                 CreatedRecord::Workout(record) => life
                     .value
                     .health
