@@ -4,7 +4,7 @@ use super::{
     person_changes::{next_version, validate_person},
     MeetingStoreError, MeetingStoreResult,
 };
-use bruhs_models::{CentroidsFile, Meeting, PersonProfile, Speaker};
+use bruhs_models::{person_names_match, CentroidsFile, Meeting, PersonProfile, Speaker};
 use std::collections::{BTreeMap, HashSet};
 
 pub(super) struct LinkUpdate {
@@ -68,9 +68,13 @@ pub(super) fn plan(
             if name.trim().is_empty() {
                 return Err(MeetingStoreError::InvalidInput("Empty speaker name".into()));
             }
-            let normalized = name.to_lowercase();
-            let mut matches = profiles(saved, &changed)
-                .filter(|person| person.display_name.to_lowercase() == normalized);
+            // Aliases count: a merged-away name still identifies its contact,
+            // whose opt-out must keep covering it.
+            let mut matches = profiles(saved, &changed).filter(|person| {
+                std::iter::once(&person.display_name)
+                    .chain(&person.aliases)
+                    .any(|known| person_names_match(known, name))
+            });
             let first = matches.next().cloned();
             if matches.next().is_some() {
                 return Err(MeetingStoreError::Conflict(

@@ -14,8 +14,9 @@ use crate::components::metadata_status::MetadataStatus;
 use crate::components::voice_enroll::VoiceEnrollModal;
 use crate::relationship_store::{profile_fields, EditorDraft, RelationshipStore};
 use crate::state::{
-    AppView, InboxConversationsSignal, ObservationKind, PeopleSignal, PersonObservation,
-    PersonProfile, RelationshipsSignal, SelectedPersonSignal, SetActiveView,
+    AppView, InboxConversationsSignal, MeetingsSignal, ObservationKind, PeopleSignal,
+    PersonObservation, PersonProfile, RelationshipsSignal, SelectedPersonSignal, SetActiveView,
+    SetMeetingsSignal,
 };
 use crate::ui::{Dropdown, DropdownOption, Textarea};
 mod directory;
@@ -75,6 +76,53 @@ pub fn PeoplePage() -> impl IntoView {
     let (merge_target_id, set_merge_target_id) = signal::<String>(String::new());
     // Which profile has the voice-enroll modal open (Some(id)) or None.
     let (enroll_open_id, set_enroll_open_id) = signal::<Option<String>>(None);
+    // A failed profile change stays visible: a silently failed opt-out would
+    // look applied while observations keep being collected.
+    let notice = RwSignal::new(Option::<String>::None);
+    // Observation provenance needs the meeting list, which is otherwise only
+    // hydrated by the Meetings page. Load it the same way (server, then the
+    // local cache) so a cold People visit never claims a stored meeting is gone.
+    let MeetingsSignal(meetings) = expect_context::<MeetingsSignal>();
+    let SetMeetingsSignal(set_meetings) = expect_context::<SetMeetingsSignal>();
+    let meeting_sources_ready = RwSignal::new(meetings.with_untracked(|list| !list.is_empty()));
+    if !meeting_sources_ready.get_untracked() {
+        wasm_bindgen_futures::spawn_local(async move {
+            match api::fetch_meetings().await {
+                Ok(fetched) if !fetched.is_empty() => set_meetings.set(fetched),
+                _ => {
+                    if let Ok(local) = crate::storage::load_meetings().await {
+                        if !local.is_empty() {
+                            set_meetings.set(local);
+                        }
+                    }
+                }
+            }
+            // The page may have closed while loading.
+            meeting_sources_ready.try_set(true);
+        });
+    }
+    provide_context(MeetingSourcesReady(meeting_sources_ready.read_only()));
+    let commit_rename = move |pid: String, name: String, current: String| {
+        let name = name.trim().to_string();
+        if name.is_empty() {
+            notice.set(Some(
+                "A name is required. The profile kept its previous name.".into(),
+            ));
+            return;
+        }
+        if name == current {
+            return;
+        }
+        notice.set(None);
+        wasm_bindgen_futures::spawn_local(async move {
+            match api::rename_person(&pid, &name).await {
+                Ok(updated) => workflow_executor.cache_people(vec![updated]).await,
+                Err(error) => notice.set(Some(format!(
+                    "The profile was not renamed. Try again. Details: {error}"
+                ))),
+            }
+        });
+    };
 
     view! {
         <div class="flex h-full flex-col bg-longan-950">
@@ -86,6 +134,9 @@ pub fn PeoplePage() -> impl IntoView {
             </div>
             <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-6">
             <merge_status::ContactMergeStatus />
+            {move || notice.get().map(|message| view! {
+                <p role="alert" aria-label="Profile change failed" class="text-body-sm text-lychee-300">{message}</p>
+            })}
             <Show when=move || workflow_executor.loading_people()>
                 <p role="status" aria-label="Local contact loading" class="text-label-sm text-rambutan-400">"Loading cached contacts…"</p>
             </Show>
@@ -161,12 +212,13 @@ pub fn PeoplePage() -> impl IntoView {
 
                             view! {
                                 <li class=card_class>
-                                    <div class="flex items-center justify-between w-full">
+                                    // Narrow cards wrap the actions under the name instead of overflowing.
+                                    <div class="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1">
                                         // Left side: expand toggle OR inline rename input
                                         <button
                                             id=format!("person-record-{person_id}")
                                             aria-expanded={let is_expanded = is_expanded.clone(); move || is_expanded().to_string()}
-                                            class="flex items-center gap-2 flex-1 text-left cursor-pointer"
+                                            class="flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 text-left cursor-pointer"
                                             on:click=move |_| {
                                                 let id = id_for_button.clone();
                                                 // Don't toggle expand if rename is active.
@@ -195,6 +247,7 @@ pub fn PeoplePage() -> impl IntoView {
                                                 // stops click propagation so the expand-toggle doesn't fire.
                                                 <input
                                                     type="text"
+                                                    aria-label="Profile name"
                                                     class="bg-longan-800 inset-ring inset-ring-longan-600 rounded-seed px-1 py-0.5 text-body-sm text-rambutan-100 focus:outline-none w-full"
                                                     prop:value=rename_value
                                                     on:input=move |e| {
@@ -205,17 +258,9 @@ pub fn PeoplePage() -> impl IntoView {
                                                         move |e: web_sys::KeyboardEvent| {
                                                             match e.key().as_str() {
                                                                 "Enter" => {
-                                                                    let pid = id_commit.clone();
                                                                     let name = rename_value.get_untracked();
                                                                     set_renaming_id.set(None);
-                                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                                        match api::rename_person(&pid, &name).await {
-                                                                            Ok(updated) => {
-                                                                                workflow_executor.cache_people(vec![updated]).await;
-                                                                            }
-                                                                            Err(e) => log::warn!("rename_person failed: {e}"),
-                                                                        }
-                                                                    });
+                                                                    commit_rename(id_commit.clone(), name, display_name.get_untracked());
                                                                 }
                                                                 "Escape" => {
                                                                     set_renaming_id.set(None);
@@ -230,17 +275,9 @@ pub fn PeoplePage() -> impl IntoView {
                                                             // Blur commits (same as Enter). Only commit if
                                                             // still renaming this card (re-entry guard).
                                                             if renaming_id.get_untracked().as_deref() == Some(id_blur.as_str()) {
-                                                                let pid = id_blur.clone();
                                                                 let name = rename_value.get_untracked();
                                                                 set_renaming_id.set(None);
-                                                                wasm_bindgen_futures::spawn_local(async move {
-                                                                    match api::rename_person(&pid, &name).await {
-                                                                        Ok(updated) => {
-                                                                            workflow_executor.cache_people(vec![updated]).await;
-                                                                        }
-                                                                        Err(e) => log::warn!("rename_person (blur) failed: {e}"),
-                                                                    }
-                                                                });
+                                                                commit_rename(id_blur.clone(), name, display_name.get_untracked());
                                                             }
                                                         }
                                                     }
@@ -250,23 +287,24 @@ pub fn PeoplePage() -> impl IntoView {
                                             </Show>
                                             {move || if !tracked.get() {
                                                 view! {
-                                                    <span class="text-label-sm uppercase tracking-wide text-rambutan-300 bg-longan-800 inset-ring inset-ring-longan-600 rounded-seed px-1 py-0.5">
-                                                        "untracked"
+                                                    <span class="shrink-0 whitespace-nowrap text-label-sm uppercase tracking-wide text-rambutan-300 bg-longan-800 inset-ring inset-ring-longan-600 rounded-seed px-1 py-0.5">
+                                                        "Not tracked"
                                                     </span>
                                                 }.into_any()
                                             } else {
                                                 ().into_any()
                                             }}
                                         </button>
-                                        <div class="flex items-center gap-2">
-                                            <span class="text-label-sm text-rambutan-500">
+                                        <div class="flex flex-wrap items-center justify-end gap-x-2">
+                                            <span class="whitespace-nowrap text-label-sm text-rambutan-500">
                                                 {move || obs_count.get().to_string()}" obs"
                                             </span>
                                             // Rename trigger button (pencil / edit name)
                                             <button
                                                 type="button"
                                                 title="Rename profile"
-                                                class="text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
+                                                aria-label=move || format!("Rename {}", display_name.get())
+                                                class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
                                                 on:click={
                                                     let dn = display_name_for_rename;
                                                     let pid = id_for_rename_btn;
@@ -285,32 +323,38 @@ pub fn PeoplePage() -> impl IntoView {
                                             // Tracked toggle button
                                             <button
                                                 type="button"
-                                                title=move || if tracked.get() { "Disable observation tracking" } else { "Enable observation tracking" }
+                                                title=move || if tracked.get() { "Stop collecting observations about this person and hide saved ones from agents" } else { "Collect observations about this person again" }
+                                                aria-label=move || format!("{} {}", if tracked.get() { "Untrack" } else { "Track" }, display_name.get())
                                                 class=move || if tracked.get() {
-                                                    "text-label-sm text-pandan-400 hover:text-pandan-200 cursor-pointer"
+                                                    "bruhs-control inline-flex items-center justify-center text-label-sm text-pandan-400 hover:text-pandan-200 cursor-pointer"
                                                 } else {
-                                                    "text-label-sm text-rambutan-500 hover:text-rambutan-400 cursor-pointer"
+                                                    "bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-400 cursor-pointer"
                                                 }
                                                 on:click=move |_| {
                                                     let pid = id_for_toggle.clone();
                                                     let new_tracked = !tracked.get_untracked();
+                                                    notice.set(None);
                                                     wasm_bindgen_futures::spawn_local(async move {
                                                         match api::set_person_tracked(&pid, new_tracked).await {
                                                             Ok(updated) => {
                                                                 workflow_executor.cache_people(vec![updated]).await;
                                                             }
-                                                            Err(e) => log::warn!("set_person_tracked failed: {e}"),
+                                                            Err(error) => notice.set(Some(format!(
+                                                                "Observation tracking was not changed. Try again. Details: {error}"
+                                                            ))),
                                                         }
                                                     });
                                                 }
                                             >
-                                                {move || if tracked.get() { "track" } else { "untrack" }}
+                                                {move || if tracked.get() { "untrack" } else { "track" }}
                                             </button>
                                             // ⋯ merge menu button
                                             <button
                                                 type="button"
                                                 title="Merge this profile into another"
-                                                class="text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
+                                                aria-label=move || format!("Merge {} into another profile", display_name.get())
+                                                aria-expanded={let is_merge_open = is_merge_open.clone(); move || is_merge_open().to_string()}
+                                                class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
                                                 on:click={
                                                     let pid = id_for_merge_toggle;
                                                     move |_| {
@@ -334,7 +378,8 @@ pub fn PeoplePage() -> impl IntoView {
                                                     <button
                                                         type="button"
                                                         title="Record voice sample for this person"
-                                                        class="text-label-sm text-rambutan-500 hover:text-pandan-300 cursor-pointer"
+                                                        aria-label=move || format!("Enroll voice for {}", display_name.get())
+                                                        class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-pandan-300 cursor-pointer"
                                                         on:click=move |_| {
                                                             set_enroll_open_id.set(Some(enroll_btn_pid.clone()));
                                                         }
@@ -388,6 +433,11 @@ pub fn PeoplePage() -> impl IntoView {
                                             let relationship_id = id_for_relationship.clone();
                                             move || view! {
                                                 <div class="space-y-4 border-t border-longan-700/70 pt-3">
+                                                    <Show when=move || !tracked.get()>
+                                                        <p class="text-label-sm text-rambutan-400" data-people-opt-out>
+                                                            "Observation tracking is off. Summaries add no observations about this person, and agents cannot read the saved ones."
+                                                        </p>
+                                                    </Show>
                                                     <RelationshipPanel person_id=relationship_id.clone() />
                                                     {move || view! { <ObservationsByKind observations=observations.get() /> }}
                                                 </div>
@@ -562,7 +612,7 @@ fn RelationshipPanel(person_id: String) -> impl IntoView {
                     view! {
                         <button
                             type="button"
-                            class="block w-full truncate text-left text-body-sm text-rambutan-200 hover:text-persimmon-200 cursor-pointer"
+                            class="block w-full truncate text-left text-body-sm text-rambutan-200 hover:text-blueberry-200 cursor-pointer"
                             on:click=open
                         >
                             {suggestion.reason}
@@ -571,8 +621,8 @@ fn RelationshipPanel(person_id: String) -> impl IntoView {
                 })
                 .collect_view();
             view! {
-                <div class="rounded-grape bg-persimmon-500/8 p-2.5 inset-ring inset-ring-persimmon-500/20">
-                    <p class="text-label-sm uppercase tracking-wide text-persimmon-300">"Suggested follow ups"</p>
+                <div class="rounded-grape bg-blueberry-500/8 p-2.5 inset-ring inset-ring-blueberry-500/20">
+                    <p class="text-label-sm uppercase tracking-wide text-blueberry-300">"Suggested follow ups"</p>
                     <div class="mt-1 space-y-1">{rows}</div>
                 </div>
             }
@@ -798,14 +848,14 @@ fn MergePanel(
             <div class="flex gap-2 justify-end">
                 <button
                     type="button"
-                    class="text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
+                    class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
                     on:click=move |_| on_cancel()
                 >
                     "Cancel"
                 </button>
                 <button
                     type="button"
-                    class="text-label-sm text-persimmon-400 hover:text-persimmon-200 cursor-pointer disabled:opacity-40"
+                    class="bruhs-control inline-flex items-center justify-center text-label-sm text-persimmon-400 hover:text-persimmon-200 cursor-pointer disabled:opacity-40"
                     prop:disabled=move || merge_target_id.get().is_empty()
                     on:click=move |_| on_confirm()
                 >
@@ -813,6 +863,52 @@ fn MergePanel(
                 </button>
             </div>
         </div>
+    }
+}
+
+/// Whether the People page has finished loading meetings for provenance.
+#[derive(Clone, Copy)]
+struct MeetingSourcesReady(ReadSignal<bool>);
+
+/// Provenance for one observation: open the meeting it came from, or say that
+/// the source meeting is no longer stored once meetings have loaded.
+#[component]
+fn ObservationSource(meeting_id: String) -> impl IntoView {
+    let MeetingsSignal(meetings) = expect_context::<MeetingsSignal>();
+    let ready = use_context::<MeetingSourcesReady>()
+        .map_or_else(|| Signal::stored(true), |ready| ready.0.into());
+    let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
+    let title = {
+        let meeting_id = meeting_id.clone();
+        move || {
+            meetings.with(|meetings| {
+                meetings
+                    .iter()
+                    .find(|meeting| meeting.id == meeting_id)
+                    .map(|meeting| meeting.title.clone())
+            })
+        }
+    };
+    let meeting_id = StoredValue::new(meeting_id);
+    move || {
+        match title() {
+        Some(title) => view! {
+            <button
+                type="button"
+                class="bruhs-control inline-flex items-center justify-center ml-2 text-label-sm text-blueberry-300 hover:text-blueberry-200 underline-offset-2 hover:underline cursor-pointer"
+                aria-label=format!("Open source meeting {title}")
+                on:click=move |_| set_active_view.set(AppView::MeetingDetail { meeting_id: meeting_id.get_value() })
+            >
+                {format!("From {title}")}
+            </button>
+        }
+        .into_any(),
+        None if ready.get() => view! {
+            <span class="ml-2 text-label-sm text-rambutan-500">"Source meeting is not stored"</span>
+        }
+        .into_any(),
+        None => ().into_any(),
+    }
     }
 }
 
@@ -847,16 +943,16 @@ fn ObservationsByKind(observations: Vec<PersonObservation>) -> impl IntoView {
                     view! {
                         <div class="space-y-1">
                             <div class="text-label-sm uppercase tracking-wide text-rambutan-500">{kind_label}</div>
+                            // One summary stamps all its observations with one
+                            // time, so (meeting, time) keys collided and rows
+                            // vanished. The list is static: render it in order.
                             <ul role="list" class="space-y-1">
-                                <For
-                                    each=move || items.clone()
-                                    key=|o| (o.at_meeting_id.clone(), o.created_at)
-                                    let:obs
-                                >
-                                    <li class="text-label text-rambutan-300 leading-snug">
-                                        {obs.text}
+                                {items.into_iter().map(|obs| view! {
+                                    <li class="text-label text-rambutan-300 leading-snug" data-person-observation>
+                                        <span>{obs.text}</span>
+                                        <ObservationSource meeting_id=obs.at_meeting_id />
                                     </li>
-                                </For>
+                                }).collect_view()}
                             </ul>
                         </div>
                     }

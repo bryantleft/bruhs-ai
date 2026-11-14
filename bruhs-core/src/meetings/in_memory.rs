@@ -5,7 +5,7 @@ use std::collections::{BTreeMap, HashMap, HashSet};
 
 use tokio::sync::RwLock;
 
-use bruhs_models::{Meeting, PersonProfile, TranscriptSegment};
+use bruhs_models::{person_names_match, Meeting, PersonProfile, TranscriptSegment};
 
 use super::error::{MeetingStoreError, MeetingStoreResult};
 use super::person_changes::{merged_profile, next_version, validate_person};
@@ -594,8 +594,8 @@ impl PeopleStore for InMemoryMeetingStore {
                 .filter(|p| !updated.contains_key(&p.id))
                 .chain(updated.values())
                 .filter(|p| {
-                    p.display_name.eq_ignore_ascii_case(&label)
-                        || p.aliases.iter().any(|a| a.eq_ignore_ascii_case(&label))
+                    person_names_match(&p.display_name, &label)
+                        || p.aliases.iter().any(|a| person_names_match(a, &label))
                 })
                 .take(2)
                 .cloned()
