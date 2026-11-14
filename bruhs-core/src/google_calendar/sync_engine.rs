@@ -120,6 +120,8 @@ struct CalendarOutcome {
     deleted: usize,
     /// Every change event reached at least one subscriber.
     delivered: bool,
+    /// The calendar could not be listed; a `SyncFailed` was emitted.
+    failed: bool,
 }
 
 impl SyncEngine {
@@ -193,6 +195,7 @@ impl SyncEngine {
         let mut total_upserted = 0usize;
         let mut total_deleted = 0usize;
         let mut all_delivered = true;
+        let mut any_failed = false;
         for (local_id, provider_id) in &enabled {
             let outcome = self
                 .sync_one_calendar(
@@ -207,10 +210,17 @@ impl SyncEngine {
             total_upserted += outcome.upserted;
             total_deleted += outcome.deleted;
             all_delivered &= outcome.delivered;
+            any_failed |= outcome.failed;
         }
         // A replay nobody heard has to happen again for the next listener.
         self.restore_full_resync(full && !all_delivered);
 
+        // A failed calendar already reported SyncFailed. Completing the tick
+        // would clear that error and advance the client's sync time past
+        // changes it never received.
+        if any_failed {
+            return;
+        }
         self.emit(CalendarSyncEvent::SyncCompleted {
             at_ms: EpochMs::saturating_from_i64(now_ms).as_f64(),
             upserted: total_upserted,
@@ -268,16 +278,18 @@ impl SyncEngine {
                         format!("sync token expired ({provider_id}): {body}"),
                     );
                     outcome.delivered = false;
+                    outcome.failed = true;
                     return outcome;
                 }
                 Err(e) => {
                     self.emit_failed(now_ms, format!("events.list ({provider_id}): {e}"));
                     outcome.delivered = false;
+                    outcome.failed = true;
                     return outcome;
                 }
             };
             for raw in &resp.items {
-                match classify(raw, Some(local_id)) {
+                match classify(raw, Some(local_id), now_ms) {
                     Ok(ClassifiedEvent::Upsert(event)) => {
                         outcome.upserted += 1;
                         outcome.delivered &= self.emit(CalendarSyncEvent::EventUpserted { event });
@@ -686,6 +698,108 @@ mod tick_tests {
         assert!(drain(&mut rx)
             .iter()
             .any(|e| matches!(e, CalendarSyncEvent::SyncFailed { .. })));
+    }
+
+    /// A record the sync engine delivered is not a local edit. Its stamps
+    /// must not be newer than the sync time the tick reports, or the next
+    /// remote change to it is mistaken for a conflict with local intent.
+    #[tokio::test]
+    async fn synced_records_are_not_newer_than_the_sync_that_delivered_them() {
+        let f = fixture().await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .respond_with(one_event_page("tok-1"))
+            .mount(&f.server)
+            .await;
+
+        let mut rx = f.engine.subscribe();
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        let events = drain(&mut rx);
+        let synced = events
+            .iter()
+            .find_map(|e| match e {
+                CalendarSyncEvent::EventUpserted { event } => Some(event.as_ref().clone()),
+                _ => None,
+            })
+            .expect("an upsert");
+        let completed_at = events
+            .iter()
+            .find_map(|e| match e {
+                CalendarSyncEvent::SyncCompleted { at_ms, .. } => {
+                    Some(EpochMs::saturating_from_f64(*at_ms).as_millis())
+                }
+                _ => None,
+            })
+            .expect("a completed sync");
+        assert!(
+            synced.updated_at <= completed_at,
+            "{} > {completed_at}",
+            synced.updated_at
+        );
+        assert!(synced.created_at <= completed_at);
+
+        let mut remote = synced.clone();
+        remote.start_at_ms += 3_600_000.0;
+        assert!(
+            !bruhs_models::should_defer_remote_event(&synced, &remote, Some(completed_at)),
+            "an untouched synced event must take the remote change"
+        );
+    }
+
+    /// A calendar that failed must leave the failure visible; a trailing
+    /// SyncCompleted would clear the error and report a stale success.
+    #[tokio::test]
+    async fn a_failed_calendar_does_not_report_a_completed_sync() {
+        let f = fixture().await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .respond_with(ResponseTemplate::new(503).set_body_string("backend unavailable"))
+            .mount(&f.server)
+            .await;
+
+        let mut rx = f.engine.subscribe();
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        let events = drain(&mut rx);
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, CalendarSyncEvent::SyncFailed { message, .. } if message.contains("503"))));
+        assert!(
+            !events
+                .iter()
+                .any(|e| matches!(e, CalendarSyncEvent::SyncCompleted { .. })),
+            "{events:?}"
+        );
+        assert_eq!(stored_token(&f).await, None);
+    }
+
+    /// The provider boundary is read-only: a sync issues only GET requests
+    /// to the Calendar API, never an insert, patch, update or delete.
+    #[tokio::test]
+    async fn a_sync_only_reads_from_the_provider() {
+        let f = fixture().await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .respond_with(one_event_page("tok-1"))
+            .mount(&f.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/users/me/calendarList"))
+            .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                "items": [{ "id": "primary", "summary": "Me", "primary": true }]
+            })))
+            .mount(&f.server)
+            .await;
+
+        let _rx = f.engine.subscribe();
+        f.engine.refresh_calendars(&f.client).await;
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        f.engine.force_full_sync();
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        let requests = f.server.received_requests().await.unwrap();
+        assert!(requests.len() >= 3, "{}", requests.len());
+        for request in requests {
+            assert_eq!(request.method.as_str(), "GET", "{}", request.url);
+        }
     }
 
     #[tokio::test]

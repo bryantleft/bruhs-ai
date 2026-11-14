@@ -57,6 +57,34 @@ impl GoogleCalendarSyncState {
             GoogleConnection::Disconnected => None,
         }
     }
+
+    /// Apply a status frame of the sync stream; both apps share this
+    /// reducer. Returns whether `event` was a status frame (event and
+    /// calendar-list frames are the caller's).
+    ///
+    /// Only a completed sync advances `last_synced_at`: that time bounds
+    /// the remote changes a client has seen, and conflict detection treats
+    /// local edits after it as local intent. A failure keeps the previous
+    /// sync time and records the error, so the settings never show a failed
+    /// attempt as a fresh sync.
+    pub fn apply_status(&mut self, event: &CalendarSyncEvent) -> bool {
+        match event {
+            CalendarSyncEvent::StreamOpened => {}
+            CalendarSyncEvent::SyncStarted { .. } => self.last_error = None,
+            CalendarSyncEvent::SyncCompleted { at_ms, .. } => {
+                self.last_synced_at = Some(crate::EpochMs::saturating_from_f64(*at_ms).as_millis());
+                self.last_error = None;
+            }
+            CalendarSyncEvent::SyncFailed { message, .. } => {
+                self.last_error = Some(message.clone());
+            }
+            CalendarSyncEvent::Disconnected => *self = Self::default(),
+            CalendarSyncEvent::EventUpserted { .. }
+            | CalendarSyncEvent::EventDeleted { .. }
+            | CalendarSyncEvent::CalendarsRefreshed { .. } => return false,
+        }
+        true
+    }
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -249,6 +277,42 @@ mod tests {
         let e = CalendarSyncEvent::Disconnected;
         let json = serde_json::to_string(&e).unwrap();
         assert_eq!(json, "{\"kind\":\"disconnected\"}");
+    }
+
+    #[test]
+    fn a_failed_sync_keeps_the_last_completed_sync_time() {
+        let mut state = GoogleCalendarSyncState::connected(None);
+        assert!(state.apply_status(&CalendarSyncEvent::SyncStarted { at_ms: 90.0 }));
+        assert!(state.apply_status(&CalendarSyncEvent::SyncCompleted {
+            at_ms: 100.0,
+            upserted: 1,
+            deleted: 0,
+        }));
+        assert_eq!(state.last_synced_at, Some(100));
+        assert!(state.apply_status(&CalendarSyncEvent::SyncFailed {
+            at_ms: 400.0,
+            message: "events.list (primary): offline".into(),
+        }));
+        assert_eq!(state.last_synced_at, Some(100), "a failure is not a sync");
+        assert_eq!(
+            state.last_error.as_deref(),
+            Some("events.list (primary): offline")
+        );
+        assert!(state.is_connected());
+        // Reconnecting: the next attempt clears the error, success advances.
+        state.apply_status(&CalendarSyncEvent::SyncStarted { at_ms: 500.0 });
+        assert_eq!(state.last_error, None);
+        state.apply_status(&CalendarSyncEvent::SyncCompleted {
+            at_ms: 500.0,
+            upserted: 0,
+            deleted: 0,
+        });
+        assert_eq!(state.last_synced_at, Some(500));
+        assert!(!state.apply_status(&CalendarSyncEvent::EventDeleted {
+            google_event_id: "g".into()
+        }));
+        state.apply_status(&CalendarSyncEvent::Disconnected);
+        assert_eq!(state, GoogleCalendarSyncState::default());
     }
 
     #[test]

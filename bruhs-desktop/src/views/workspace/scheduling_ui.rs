@@ -171,13 +171,14 @@ impl Workspace {
             .unwrap_or(60)
             .max(15);
         let now = EpochMs::now().as_millis();
-        let offset = i16::try_from(Local::now().offset().local_minus_utc() / 60).unwrap_or(0);
-        let Some((start_ms, end_ms)) = self.scheduling_preferences.first_available_slot(
+        // Per-instant offsets keep working hours right after a DST change
+        // inside the 30-day search.
+        let Some((start_ms, end_ms)) = self.scheduling_preferences.first_available_slot_in_zone(
             &self.planning_calendar_events(cx),
             now,
             now + 30 * 86_400_000,
             duration,
-            offset,
+            crate::views::meetings_hub::local_offset_minutes_east,
         ) else {
             self.scheduling_error =
                 Some("No open slot matches your availability in the next 30 days.".to_string());

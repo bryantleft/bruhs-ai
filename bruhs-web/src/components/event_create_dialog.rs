@@ -272,12 +272,14 @@ pub fn EventCreateDialog() -> impl IntoView {
             on_close=on_close_cb
             max_width="max-w-md".to_string()
             label="Calendar event"
+            padding_top="1rem"
         >
             <div class="border-b border-longan-800 px-4 py-3">
                 <h2 class="text-h4 text-rambutan-100">{header_text}</h2>
             </div>
 
-            <div class="px-4 py-3 space-y-3">
+            // The fields scroll so the actions stay reachable at 640×480.
+            <div class="max-h-[calc(100dvh-10rem)] overflow-y-auto px-4 py-3 space-y-3">
                 <div class="space-y-1.5">
                     <label class="text-label-sm text-rambutan-400">"Title"</label>
                     <Input

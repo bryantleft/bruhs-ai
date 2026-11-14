@@ -6,7 +6,9 @@
 //!   - `EventUpserted` — insert/replace by `google_event_id`
 //!   - `EventDeleted`  — remove the matching event
 //!   - `SyncStarted` / `SyncCompleted` / `SyncFailed` — update the
-//!     GoogleCalendarSyncState (last_synced_at, last_error)
+//!     GoogleCalendarSyncState through the shared
+//!     `GoogleCalendarSyncState::apply_status` (only a completed sync
+//!     advances last_synced_at)
 //!   - `Disconnected` — mark disconnected, do NOT delete events
 //!     (the user explicitly clears them via "Remove all Google events"
 //!     in Phase 3+)
@@ -15,7 +17,6 @@ use crate::live_events::LiveEvents;
 use crate::state::{Calendar, CalendarEvent, GoogleCalendarSyncState, SchedulingPreferences};
 use bruhs_models::api::live_events::CALENDAR;
 use bruhs_models::CalendarSyncEvent;
-use bruhs_models::EpochMs;
 use leptos::prelude::*;
 
 #[derive(Clone, Copy)]
@@ -83,15 +84,31 @@ fn apply_event(event: CalendarSyncEvent, state: CalendarState) {
         scheduling_preferences,
         saves,
     } = state;
+    if matches!(
+        event,
+        CalendarSyncEvent::StreamOpened
+            | CalendarSyncEvent::SyncStarted { .. }
+            | CalendarSyncEvent::SyncCompleted { .. }
+            | CalendarSyncEvent::SyncFailed { .. }
+            | CalendarSyncEvent::Disconnected
+    ) {
+        // Shared with the desktop: only a completed sync advances the sync
+        // time; a failure keeps it and shows the error.
+        set_sync_state.update(|state| {
+            state.apply_status(&event);
+        });
+        return;
+    }
     match event {
-        CalendarSyncEvent::StreamOpened => {}
-        CalendarSyncEvent::SyncStarted { at_ms: _ } => {
-            set_sync_state.update(|s| {
-                s.last_error = None;
-            });
-        }
+        CalendarSyncEvent::StreamOpened
+        | CalendarSyncEvent::SyncStarted { .. }
+        | CalendarSyncEvent::SyncCompleted { .. }
+        | CalendarSyncEvent::SyncFailed { .. }
+        | CalendarSyncEvent::Disconnected => {}
         CalendarSyncEvent::EventUpserted { event } => {
-            let event = *event;
+            let mut event = *event;
+            // Provider dates arrive as UTC midnights; store local ones.
+            event.normalize_provider_all_day(crate::clock::offset_minutes_east);
             let google_id = event.google_event_id.clone();
             let existing_event = google_id.as_ref().and_then(|gid| {
                 events_read.with_untracked(|events| {
@@ -102,8 +119,12 @@ fn apply_event(event: CalendarSyncEvent, state: CalendarState) {
                 })
             });
             let locally_changed = existing_event.as_ref().is_some_and(|existing| {
+                // A record stored before all-day normalization differs from
+                // the incoming one only by that move; compare like for like.
+                let mut existing = existing.clone();
+                existing.normalize_provider_all_day(crate::clock::offset_minutes_east);
                 bruhs_models::should_defer_remote_event(
-                    existing,
+                    &existing,
                     &event,
                     sync_state_read.get_untracked().last_synced_at,
                 )
@@ -166,21 +187,6 @@ fn apply_event(event: CalendarSyncEvent, state: CalendarState) {
                 crate::storage::persist_calendar(c.clone());
             }
             set_calendars.set(calendars);
-        }
-        CalendarSyncEvent::SyncCompleted { at_ms, .. } => {
-            set_sync_state.update(|s| {
-                s.last_synced_at = Some(EpochMs::saturating_from_f64(at_ms).as_millis());
-                s.last_error = None;
-            });
-        }
-        CalendarSyncEvent::SyncFailed { at_ms, message } => {
-            set_sync_state.update(|s| {
-                s.last_synced_at = Some(EpochMs::saturating_from_f64(at_ms).as_millis());
-                s.last_error = Some(message);
-            });
-        }
-        CalendarSyncEvent::Disconnected => {
-            set_sync_state.set(GoogleCalendarSyncState::default());
         }
     }
 }
