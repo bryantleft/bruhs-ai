@@ -1,4 +1,6 @@
 pub mod agent;
+pub mod artifact_tools;
+pub mod artifacts;
 pub mod capture_client;
 mod codex_lean;
 pub mod connections;
@@ -15,6 +17,7 @@ pub mod pulls;
 pub mod reactive;
 pub mod reactive_tools;
 pub mod registry;
+pub mod rich_responses;
 pub mod second_opinion;
 pub mod secrets;
 pub mod skills;

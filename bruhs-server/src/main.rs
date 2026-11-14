@@ -34,6 +34,10 @@ const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    if bruhs_core::artifact_tools::is_mcp_helper() {
+        bruhs_core::artifact_tools::run_mcp_helper().await?;
+        return Ok(());
+    }
     if bruhs_core::reactive_tools::is_mcp_helper() {
         bruhs_core::reactive_tools::run_mcp_helper().await?;
         return Ok(());
@@ -291,6 +295,52 @@ fn router(state: ServerState) -> Router {
             post(routes::uploads::post_upload).layer(DefaultBodyLimit::max(UPLOAD_BODY_BYTES)),
         )
         .route("/api/agent/uploads/open", get(routes::uploads::get_open))
+        .route(
+            "/api/agent/artifacts/{id}",
+            get(routes::artifacts::get_artifact),
+        )
+        .route(
+            "/api/agent/artifacts/{id}/preview",
+            get(routes::artifacts::get_preview),
+        )
+        .route(
+            "/api/agent/artifacts/{id}/diagnostics",
+            get(routes::artifacts::get_diagnostics).post(routes::artifacts::post_diagnostics),
+        )
+        .route("/api/agent/media", get(routes::rich_response::get_media))
+        .route(
+            "/api/agent/rich-response/remote-media",
+            post(routes::rich_response::post_remote_media),
+        )
+        .route(
+            "/api/agent/rich-response/state",
+            get(routes::rich_response::get_state).put(routes::rich_response::put_state),
+        )
+        .route(
+            "/api/agent/rich-response/media",
+            post(routes::rich_response::post_capture),
+        )
+        .route(
+            "/api/agent/rich-response/asset/{name}",
+            get(routes::rich_response::get_asset),
+        )
+        .route(
+            "/api/agent/rich-response/export",
+            post(routes::rich_response::post_export)
+                .layer(DefaultBodyLimit::max(UPLOAD_BODY_BYTES)),
+        )
+        .route(
+            "/api/agent/rich-response/download",
+            post(routes::rich_response::post_download),
+        )
+        .route(
+            "/api/agent/rich-response",
+            get(routes::rich_response::get_host),
+        )
+        .route(
+            "/api/agent/rich-media",
+            get(routes::rich_response::get_media_host),
+        )
         .route("/api/agent/git-branches", post(routes::git::get_branches))
         .route("/api/agent/git-checkout", post(routes::git::post_checkout))
         .route("/api/agent/worktree", post(routes::git::post_worktree))
