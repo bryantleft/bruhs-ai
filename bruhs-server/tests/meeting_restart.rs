@@ -21,6 +21,13 @@ impl Server {
         let child = Command::new(env!("CARGO_BIN_EXE_bruhs-server"))
             .env("BRUHS_SERVER_PORT", port.to_string())
             .env("BRUHS_MEETING_DB", database)
+            .env(
+                "BRUHS_REACTIVE_DB",
+                database.with_extension("reactive.sqlite3"),
+            )
+            .env("BRUHS_WORKBENCH_DIR", database.with_extension("workbench"))
+            .env("BRUHS_DELIVERY_DIR", database.with_extension("delivery"))
+            .env_remove("BRUHS_TASK_BIND")
             .env("BRUHS_CAPTURE_URL", "http://127.0.0.1:0")
             // Never read the real daemon token: point at a file that is absent.
             .env(

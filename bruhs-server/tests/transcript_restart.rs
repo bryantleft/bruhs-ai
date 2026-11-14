@@ -87,6 +87,13 @@ impl Server {
         let child = command
             .env("BRUHS_SERVER_PORT", port.to_string())
             .env("BRUHS_MEETING_DB", database)
+            .env(
+                "BRUHS_REACTIVE_DB",
+                database.with_extension("reactive.sqlite3"),
+            )
+            .env("BRUHS_WORKBENCH_DIR", database.with_extension("workbench"))
+            .env("BRUHS_DELIVERY_DIR", database.with_extension("delivery"))
+            .env_remove("BRUHS_TASK_BIND")
             .env("BRUHS_CAPTURE_URL", capture_url)
             // Never read the real daemon token: point at a file that is absent.
             .env(
