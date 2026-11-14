@@ -12,6 +12,8 @@ use std::sync::Arc;
 
 use crate::error::AppError;
 
+mod snapshot_event;
+
 #[derive(Deserialize)]
 pub struct ThreadQuery {
     thread_id: Option<String>,
@@ -60,7 +62,7 @@ pub(crate) fn task_snapshots(
             // Mark the current version seen before reading, so a change made
             // while this snapshot is built triggers another one.
             changes.borrow_and_update();
-            match Event::default().json_data(registry.get_all()) {
+            match snapshot_event::encode(registry.get_all()) {
                 Ok(event) => yield Ok(event),
                 // Never send an empty frame the client cannot parse.
                 Err(error) => tracing::error!("task snapshot not serializable: {error}"),

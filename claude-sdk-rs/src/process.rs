@@ -161,13 +161,31 @@ impl CliProcess {
     /// replaced, not fatal), or why there is none. Notices a dropped receiver
     /// even while the CLI is silent.
     pub(crate) async fn next_line<E>(&mut self, tx: &mpsc::Sender<E>) -> Result<String, Ending> {
+        self.next_line_with_limit(tx, None).await
+    }
+
+    /// Read at most the caller's frame budget plus one byte, so a malformed
+    /// peer cannot allocate an unlimited line before the size check runs.
+    pub(crate) async fn next_line_with_limit<E>(
+        &mut self,
+        tx: &mpsc::Sender<E>,
+        limit: Option<u64>,
+    ) -> Result<String, Ending> {
         let mut buf = Vec::new();
+        let mut input =
+            (&mut self.stdout).take(limit.map_or(u64::MAX, |limit| limit.saturating_add(1)));
         let read = tokio::select! {
             () = tx.closed() => return Err(Ending::ConsumerGone),
-            read = self.stdout.read_until(b'\n', &mut buf) => read,
+            read = input.read_until(b'\n', &mut buf) => read,
         };
         match read {
             Ok(0) => Err(Ending::Eof),
+            Ok(n) if limit.is_some_and(|limit| u64::try_from(n).map_or(true, |n| n > limit)) => {
+                Err(Ending::Failed(format!(
+                    "{} output exceeded the configured frame budget",
+                    self.program
+                )))
+            }
             Ok(_) => {
                 if buf.last() == Some(&b'\n') {
                     buf.pop();
@@ -309,6 +327,21 @@ fn push_tail(tail: &Mutex<VecDeque<u8>>, bytes: &[u8]) {
 #[cfg(test)]
 mod process_tests {
     use super::*;
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn oversized_frame_fails_before_a_silent_writer_reaches_eof() {
+        let mut command = Command::new("sh");
+        command.args(["-c", "printf 123456789; sleep 30"]);
+        let mut process = CliProcess::spawn("fixture", &mut command).unwrap();
+        let (tx, _rx) = mpsc::channel::<()>(1);
+        let result =
+            tokio::time::timeout(EXIT_GRACE, process.next_line_with_limit(&tx, Some(8))).await;
+        assert!(
+            matches!(result, Ok(Err(Ending::Failed(message))) if message.contains("frame budget"))
+        );
+        assert!(process.finish(Ending::ConsumerGone).await.is_none());
+    }
 
     #[test]
     fn stderr_tail_keeps_only_the_most_recent_bytes() {

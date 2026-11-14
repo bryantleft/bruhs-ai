@@ -62,7 +62,7 @@ pub(super) fn events(daemon: DaemonEndpoint, retry: RetryPolicy) -> impl Stream<
                         }
                         frames.push(&chunk);
                         while let Some(frame) = frames.next_frame() {
-                            if let Some(payload) = parse_sse_data(&frame) {
+                            if let Some(payload) = parse_sse_data(frame) {
                                 delay = retry.initial;
                                 yield payload;
                             }
@@ -83,28 +83,36 @@ pub(super) fn events(daemon: DaemonEndpoint, retry: RetryPolicy) -> impl Stream<
 #[derive(Default)]
 struct FrameBuffer {
     buffer: Vec<u8>,
+    consumed: usize,
     /// Bytes before this offset hold no frame end.
     scanned: usize,
 }
 
 impl FrameBuffer {
     fn len(&self) -> usize {
-        self.buffer.len()
+        self.buffer.len() - self.consumed
     }
 
     fn push(&mut self, chunk: &[u8]) {
+        // Move an incomplete tail once per chunk, rather than after every frame.
+        if self.consumed != 0 {
+            self.buffer.drain(..self.consumed);
+            self.scanned -= self.consumed;
+            self.consumed = 0;
+        }
         self.buffer.extend_from_slice(chunk);
     }
 
     /// The next complete frame, including its terminator.
-    fn next_frame(&mut self) -> Option<Vec<u8>> {
-        // A terminator can straddle the previous scan's end by up to three
-        // bytes (`\r\n\r` | `\n`).
-        let from = self.scanned.saturating_sub(3);
-        match frame_end(&self.buffer, from) {
+    fn next_frame(&mut self) -> Option<&[u8]> {
+        let remaining = &self.buffer[self.consumed..];
+        let from = self.scanned - self.consumed;
+        match frame_end(remaining, from) {
             Some(end) => {
-                self.scanned = 0;
-                Some(self.buffer.drain(..end).collect())
+                let start = self.consumed;
+                self.consumed += end;
+                self.scanned = self.consumed;
+                Some(&self.buffer[start..self.consumed])
             }
             None => {
                 self.scanned = self.buffer.len();
@@ -114,18 +122,20 @@ impl FrameBuffer {
     }
 }
 
-/// End (exclusive) of the first blank-line terminator at or after `from`.
+/// Scan new bytes, checking a terminator only when its final LF arrives.
 fn frame_end(buffer: &[u8], from: usize) -> Option<usize> {
-    (from..buffer.len()).find_map(|i| {
-        let rest = &buffer[i..];
-        if rest.starts_with(b"\n\n") {
-            Some(i + 2)
-        } else if rest.starts_with(b"\r\n\r\n") {
-            Some(i + 4)
-        } else {
-            None
-        }
-    })
+    buffer
+        .get(from..)?
+        .iter()
+        .enumerate()
+        .find_map(|(i, &byte)| {
+            if byte != b'\n' {
+                return None;
+            }
+            let end = from + i + 1;
+            let prefix = &buffer[..end];
+            (prefix.ends_with(b"\n\n") || prefix.ends_with(b"\r\n\r\n")).then_some(end)
+        })
 }
 
 fn parse_sse_data(frame: &[u8]) -> Option<String> {
@@ -175,7 +185,7 @@ mod tests {
         for chunk in chunks {
             buffer.push(chunk);
             while let Some(frame) = buffer.next_frame() {
-                out.push(parse_sse_data(&frame));
+                out.push(parse_sse_data(frame));
             }
         }
         out
@@ -220,4 +230,55 @@ mod tests {
         );
         assert_eq!(parse_sse_data(b": heartbeat\n\n"), None);
     }
+
+    fn reference_frames(mut input: &[u8]) -> (Vec<Vec<u8>>, usize) {
+        let mut frames = Vec::new();
+        loop {
+            let lf = input.windows(2).position(|bytes| bytes == b"\n\n");
+            let crlf = input.windows(4).position(|bytes| bytes == b"\r\n\r\n");
+            let end = match (lf, crlf) {
+                (Some(lf), Some(crlf)) if crlf < lf => crlf + 4,
+                (Some(lf), _) => lf + 2,
+                (None, Some(crlf)) => crlf + 4,
+                (None, None) => break,
+            };
+            frames.push(input[..end].to_vec());
+            input = &input[end..];
+        }
+        (frames, input.len())
+    }
+
+    #[test]
+    fn fragmented_binary_input_matches_the_whole_input_framing_oracle() {
+        for length in 0..=6_u32 {
+            for encoded in 0..4_usize.pow(length) {
+                let mut encoded = encoded;
+                let mut input: Vec<_> = (0..length)
+                    .map(|_| {
+                        let byte = [b'x', b'\r', b'\n', 0xff][encoded % 4];
+                        encoded /= 4;
+                        byte
+                    })
+                    .collect();
+                input.extend_from_slice(b"\n\n");
+                let expected = reference_frames(&input);
+                for chunk_bytes in [1, 2, 3, input.len()] {
+                    let mut buffer = FrameBuffer::default();
+                    let mut actual = Vec::new();
+                    for chunk in input.chunks(chunk_bytes) {
+                        buffer.push(chunk);
+                        while let Some(frame) = buffer.next_frame() {
+                            actual.push(frame.to_vec());
+                        }
+                        assert!(buffer.next_frame().is_none());
+                    }
+                    assert_eq!(actual, expected.0, "input {input:?}, chunk {chunk_bytes}");
+                    assert_eq!(buffer.len(), expected.1);
+                }
+            }
+        }
+    }
 }
+
+#[cfg(test)]
+mod performance;
