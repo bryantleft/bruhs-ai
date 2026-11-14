@@ -1,0 +1,173 @@
+{
+  "ticket": "BNLE-68",
+  "date_local": "2026-11-13",
+  "delivery": "local_working_tree",
+  "release_published": false,
+  "checks": {
+    "models": {
+      "passed": 1
+    },
+    "core": {
+      "passed": 24,
+      "ignored": 1,
+      "ignored_helper_exercised_by_parent": true
+    },
+    "native_gpui_https": {
+      "passed": 2,
+      "ignored_browser_test_run_separately": 1
+    },
+    "browser": {
+      "passed": 33,
+      "checks": [
+        "pairing fragment removed before exchange",
+        "actual native project thread list",
+        "nonproject chats excluded",
+        "credential action remains laptop-only",
+        "exact native approval consumed",
+        "phone draft does not cross threads",
+        "phone thread draft restored",
+        "exact HTTP retry returns receipt without another native dispatch",
+        "older native history pages",
+        "streamed HTML is inert text",
+        "inert content did not execute",
+        "diff resolves actual native thread worktree",
+        "diff pages retain revision",
+        "phone draft survives a diff round trip",
+        "ambiguous command committed before response loss",
+        "reload reconciles stored command without replay",
+        "terminal receipt clears tab command storage",
+        "stale sequence reconciles and unlocks second tab",
+        "offline disables mutation controls",
+        "offline retains marked stale snapshot",
+        "reconnect resnapshots native state",
+        "read-only phone cannot send prompts",
+        "diff is an independent scope",
+        "approval is an independent scope",
+        "backend rejects read-only phone writes",
+        "no horizontal overflow at tested viewport",
+        "no horizontal overflow at tested viewport",
+        "no horizontal overflow at tested viewport",
+        "revocation clears phone token and displayed data",
+        "revocation clears stale chat content",
+        "phone disconnect revokes its own device",
+        "real bounded HTTPS snapshots observed",
+        "browser errors: "
+      ],
+      "snapshots": 55,
+      "commands": [
+        {
+          "sequence": 1,
+          "kind": "permission"
+        },
+        {
+          "sequence": 2,
+          "kind": "prompt"
+        },
+        {
+          "sequence": 2,
+          "kind": "prompt"
+        },
+        {
+          "sequence": 3,
+          "kind": "prompt"
+        },
+        {
+          "sequence": 4,
+          "kind": "prompt"
+        },
+        {
+          "sequence": 4,
+          "kind": "prompt"
+        },
+        {
+          "sequence": 5,
+          "kind": "prompt"
+        },
+        {
+          "sequence": 1,
+          "kind": "prompt"
+        }
+      ],
+      "viewports": [
+        {
+          "width": 390,
+          "height": 844,
+          "touch": true
+        },
+        {
+          "width": 640,
+          "height": 480,
+          "touch": true
+        }
+      ],
+      "transport": "actual desktop GPUI broker over trusted isolated HTTPS",
+      "browser": "158.0.8127.18"
+    },
+    "strict_clippy": {
+      "packages": [
+        "bruhs-models",
+        "bruhs-core",
+        "bruhs-desktop"
+      ],
+      "all_targets": true,
+      "deny_warnings": true,
+      "passed": true
+    },
+    "reactive_ownership": {
+      "passed": 67,
+      "ignored": 2
+    }
+  },
+  "fixtures": {
+    "real_user_device": false,
+    "system_certificate_install": false,
+    "tls_client_ca_verification": true,
+    "chromium_test_leaf_spki_pin": true,
+    "playwright_request_helper_test_ca": true,
+    "native_state_owner": "Workspace/ChatView",
+    "native_gpu_rendering_verified": false,
+    "physical_camera_scan_verified": false,
+    "deployed_proxy_or_certificate_verified": false
+  },
+  "artifacts": {
+    "browser.log": "6442f2ddeba1bd80a897f7bc44176447e4ca52c1816851dbe751f78b88133a37",
+    "core.log": "4f1b9ef472c151a2a65b8ade4c5d1a2601238bb8ea2cf3c9955f905b2707aae6",
+    "compact-readonly.png": "26197a31be423a71711dc18a3ede1b43c9ac963935ff82b5e971a52901bfb020",
+    "clippy.log": "6b4d0756718d172f4decf020eb65868155b2ede23dc9d28d081b875f59a78a29",
+    "browser-validation.json": "9c5b0b4bb1fea0cda5cab6d52bb1fdf8430839a7c543a517e2fd7d19ba114b65",
+    "native.log": "392996b461aceedabe044f2b3b6e219fed6e93cc8d1f7eb3300aa0db53141ba1",
+    "touch-thread.png": "7f600baf87cbaa83a9cad4dfb7d52b8f68cbbfe8e7938895af49f1e675b2afb2",
+    "reactive_ownership.log": "ec79d0c3a8fbca223a1508b6a786b2475d5b00c564598cff3f4a52d1fbba0c32",
+    "models.log": "6f1cda479131000ccd3b76414c17d1a345f61f413464ca663feca7f13d536045"
+  },
+  "source_sha256": {
+    "bruhs-models/src/mobile.rs": "c70decadeeddebecd1dbeb180bcb51fe6bfff239bbe3310e994b86f2619c0854",
+    "bruhs-core/src/mobile.rs": "fbe268a35f8007dedb79db5c6237c4ade4e4c24c8db7be18936d6eecf6b8dc5b",
+    "bruhs-core/src/mobile/authority/storage.rs": "07a19718cf906386dd4bc4d59d3fa92e6e2619893de307c203672449e7fd3dfb",
+    "bruhs-core/src/mobile/authority/tests.rs": "b5957c9fd67a685eeecf580285d3caec1408751c5d1d12cc184def2fcca10ebd",
+    "bruhs-core/src/mobile/authority.rs": "cd041a6be2f76c29d84d2e1c108a8c6ef8390dd870083c69a53e8dea47b2c33d",
+    "bruhs-core/src/mobile/broker/tests.rs": "18a21f9c2d8e14e874a00b4d0211cdafb0dfab847f8ef8dd9f3912f76f79d5f4",
+    "bruhs-core/src/mobile/broker.rs": "a64a5b58c77a7083e12edbfbd46c918ae8623071e7054378cb2aa545313833a4",
+    "bruhs-core/src/mobile/diff/tests.rs": "40e8ec05f66eedca2da1e404ecdca44345d4b8e19cc62112b857a4b3bea0c5d7",
+    "bruhs-core/src/mobile/diff.rs": "bee5e70896fdcfc773ce3112f7ec19bc53b6aecaac064f7815ea1dfe15336f0b",
+    "bruhs-core/src/mobile/server/io.rs": "a1bdb0e6b0ad6525ade4af7d8b7aa5177af52ec2efeb46f331b1075a0fad128a",
+    "bruhs-core/src/mobile/server/tests.rs": "c704a16c9f80e7b58fb101719d9312c5db1c4311f5cfcb0fb09af873e76fc612",
+    "bruhs-core/src/mobile/server.rs": "3973baa7eb01e4ec46a195478f926e5bd0574369aa46cd48c02ddacd745ff2fc",
+    "bruhs-core/src/mobile/web/index.html": "2bf40b73f7362eaa0fcfd5d51d17d44763d4eca8b53cf5434ffc1b8d307a6886",
+    "bruhs-core/src/mobile/web/mobile.css": "a5679726d01ca3159f95f8f758b13cde7178627eaf4057c8432cfca3a0155709",
+    "bruhs-core/src/mobile/web/mobile.js": "2fb959b71a3ecef240a849088d384a6542200669014de3ad005ef5f5c3c08262",
+    "bruhs-desktop/src/views/workspace/mobile/controls.rs": "3cc3c7551d470f27b52ba9117dc85ebbbe36df2d16ad59ec7b216e2f6f9907bd",
+    "bruhs-desktop/src/views/workspace/mobile/tests.rs": "60334d756d7e9d685c4d9e52bae40a62094221469f20811327993156a5bf6ccf",
+    "bruhs-desktop/src/views/workspace/mobile.rs": "2e12816c84c819d65ddf3392c9656d71b3ecfbd42008070c31c943a61fb90cb9",
+    "bruhs-desktop/src/views/chat/mobile.rs": "d7b17b18727117f5cc8032b04c0107ef9e4abe6ee7dccff323b9ee1010fce6e9",
+    "bruhs-desktop/tests/mobile_browser.mjs": "fc9d6c28da85916ea6bc149ce8dd77b21c634eb578a4c9b9a6a01a5044adcb13",
+    "bruhs-core/src/reactive/mod.rs": "24d752bfbcdc1040108cc80c8d93caf3f2fae7a845450058ffd72176e54653e6",
+    "bruhs-core/src/reactive/store.rs": "542bc1aa100ab2209b57b381916e418421410fd19e17c8abcf3cc9c2622b4195",
+    "bruhs-core/src/reactive/store/ownership_tests.rs": "120dd7409780322a8988a8fe697d219753d5a16d277d3ee1342ac9edeb3c1a65",
+    "bruhs-core/src/reactive/tests.rs": "fed10f684db3c9872aa626c7fd371aff6adefa937c8ad52cc0421415ab7e2a1f",
+    "bruhs-core/src/reactive/store/reports/tests.rs": "63ee6c1669d8bf89d1b83b3c5bb851abecb75f80d02245991f63af81684af86e",
+    "Cargo.lock": "6a16dc422d66444b780a3002f7090f449f71cf0444c7ec773a17de04eedefbb6"
+  },
+  "test_ca_sha256": "164167f63b310d59492bbcafb047e65ba9f9a04b8f8e7fd69f129d38834459be",
+  "test_leaf_sha256": "b427fa9237c4224ef31ae01ae7904818555114f210fdd7263c2ff9d4c18ad981"
+}

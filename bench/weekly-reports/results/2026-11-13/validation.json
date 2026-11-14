@@ -1,0 +1,74 @@
+{
+  "core": {
+    "status": "passed",
+    "test_summaries": [
+      "test result: ok. 58 passed; 0 failed; 2 ignored; 0 measured; 461 filtered out; finished in 1.14s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s"
+    ],
+    "log_sha256": "6802654a95963001a1c4b92d4948180b13a6adc2bf3b50f8126b9445e1cbece3"
+  },
+  "native": {
+    "status": "passed",
+    "test_summaries": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 819 filtered out; finished in 0.03s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 2 filtered out; finished in 0.00s"
+    ],
+    "log_sha256": "6024fa25497d08d57fb8f4dca52366629f958ccacb3dcc424165a9aade149f6d"
+  },
+  "http": {
+    "status": "passed",
+    "test_summaries": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 192 filtered out; finished in 0.04s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 6 filtered out; finished in 0.00s"
+    ],
+    "log_sha256": "5ac190f711149ed3f37b808618b90a10cae7f14816fe83de0f1a4594b7a2ca2b"
+  },
+  "clippy": {
+    "status": "passed",
+    "test_summaries": [],
+    "log_sha256": "7afd43c33a910875373e94db2369e2d1f4c653a6dda90701ad568afdc121e885"
+  },
+  "live_provider": {
+    "status": "passed",
+    "test_summaries": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 517 filtered out; finished in 34.19s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s"
+    ],
+    "log_sha256": "f2a6b290e55502092c79c9e31718347a7d45bc494c89bbdcd754b652a3519dba"
+  },
+  "live_github": {
+    "status": "passed",
+    "test_summaries": [
+      "test result: ok. 1 passed; 0 failed; 0 ignored; 0 measured; 520 filtered out; finished in 3.83s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s",
+      "test result: ok. 0 passed; 0 failed; 0 ignored; 0 measured; 1 filtered out; finished in 0.00s"
+    ],
+    "log_sha256": "3d525e1b52d37d5f174613aa905234c6eeba23d09dbd5b2cd833c9be4276006a"
+  },
+  "browser": {
+    "status": "passed",
+    "checks": 39,
+    "viewports": [
+      [
+        640,
+        480
+      ],
+      [
+        390,
+        844
+      ]
+    ],
+    "api": "mocked",
+    "artifacts": "target/weekly-reports-ui-qa"
+  },
+  "notes": [
+    "Local unpublished working tree. Live provider/SQLite delivery, authenticated GitHub reads, HTTP native-client contract, native controls, and browser UI are separate checks.",
+    "live-report.json captures the generated synthetic report before the test edits it and asserts revision 2 after reopening.",
+    "GitHub receipt counts represent collected lifecycle/request evidence, not incident or reliability metrics."
+  ]
+}

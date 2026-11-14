@@ -1,0 +1,355 @@
+{
+  "cases": [
+    {
+      "finalization_ms": 2594.692792,
+      "first_segment_ms": 2555.271667,
+      "id": "clean",
+      "segments": [
+        {
+          "confidence": null,
+          "end_ms": 3840,
+          "id": "56174a16-b051-48e7-8dd1-55270d7ce23c",
+          "meeting_id": "clean",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "me",
+          "start_ms": 0,
+          "text": "deployment past its tests, we can release the update tomorrow."
+        }
+      ],
+      "word_error": {
+        "errors": 2,
+        "reference_words": 11,
+        "hypothesis_words": 10,
+        "word_error_rate": 0.18181818181818182,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 3910.0625,
+        "missed_ms": 70.0625,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 70.0625,
+        "error_rate": 0.01791851153274404
+      }
+    },
+    {
+      "finalization_ms": 300.871625,
+      "first_segment_ms": 256.659292,
+      "id": "technical",
+      "segments": [
+        {
+          "confidence": null,
+          "end_ms": 3120,
+          "id": "15574d88-90bc-4d29-8688-314f8e3216fa",
+          "meeting_id": "technical",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "them",
+          "start_ms": 0,
+          "text": "Bryant reviewed the Post-Garescual migration."
+        },
+        {
+          "confidence": null,
+          "end_ms": 7200,
+          "id": "a3ea7e4d-17c9-472c-8f1c-f4602053fb2b",
+          "meeting_id": "technical",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "them",
+          "start_ms": 3120,
+          "text": "The API returns a JSO and responds after authentication."
+        }
+      ],
+      "word_error": {
+        "errors": 5,
+        "reference_words": 13,
+        "hypothesis_words": 15,
+        "word_error_rate": 0.38461538461538464,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 7227.625,
+        "missed_ms": 27.625,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 27.625,
+        "error_rate": 0.0038221407447121287
+      }
+    },
+    {
+      "finalization_ms": 261.376208,
+      "first_segment_ms": 227.291791,
+      "id": "accent",
+      "segments": [
+        {
+          "confidence": null,
+          "end_ms": 4960,
+          "id": "41ec8ebc-96d9-4656-ac5d-2dceef7c35a3",
+          "meeting_id": "accent",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "them",
+          "start_ms": 0,
+          "text": "Please review the pull request before merging, the database backup completed successfully."
+        }
+      ],
+      "word_error": {
+        "errors": 0,
+        "reference_words": 12,
+        "hypothesis_words": 12,
+        "word_error_rate": 0.0,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 4966.0625,
+        "missed_ms": 6.0625,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 6.0625,
+        "error_rate": 0.0012207860855557094
+      }
+    },
+    {
+      "finalization_ms": 294.97125,
+      "first_segment_ms": 261.031458,
+      "id": "spanish",
+      "segments": [
+        {
+          "confidence": null,
+          "end_ms": 5080,
+          "id": "58fdd210-296f-4ef0-a14a-df328adc047f",
+          "meeting_id": "spanish",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "me",
+          "start_ms": 0,
+          "text": "And that's it for today's video. I'll see you in the next video."
+        }
+      ],
+      "word_error": {
+        "errors": 14,
+        "reference_words": 14,
+        "hypothesis_words": 13,
+        "word_error_rate": 1.0,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 5050.625,
+        "missed_ms": 0.0,
+        "false_alarm_ms": 29.375,
+        "confusion_ms": 0.0,
+        "error_ms": 29.375,
+        "error_rate": 0.005816111867343151
+      }
+    },
+    {
+      "finalization_ms": 276.39324999999997,
+      "first_segment_ms": 245.41674999999998,
+      "id": "french",
+      "segments": [
+        {
+          "confidence": null,
+          "end_ms": 4580,
+          "id": "add6be1d-c106-423a-ab49-497d0475a68c",
+          "meeting_id": "french",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "them",
+          "start_ms": 0,
+          "text": "Let's see what happens in the next video."
+        }
+      ],
+      "word_error": {
+        "errors": 15,
+        "reference_words": 15,
+        "hypothesis_words": 8,
+        "word_error_rate": 1.0,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 4604.5,
+        "missed_ms": 24.5,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 24.5,
+        "error_rate": 0.005320881746117928
+      }
+    },
+    {
+      "finalization_ms": 248.66075,
+      "first_segment_ms": 216.899542,
+      "id": "noise-10db",
+      "segments": [
+        {
+          "confidence": null,
+          "end_ms": 3840,
+          "id": "285049b9-e5e4-4699-a580-22588cbeb5f6",
+          "meeting_id": "noise-10db",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "me",
+          "start_ms": 0,
+          "text": "deployment pass its test. We can release the update tomorrow."
+        }
+      ],
+      "word_error": {
+        "errors": 3,
+        "reference_words": 11,
+        "hypothesis_words": 10,
+        "word_error_rate": 0.2727272727272727,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 3913.0,
+        "missed_ms": 73.0,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 73.0,
+        "error_rate": 0.018655762841809354
+      }
+    },
+    {
+      "finalization_ms": 354.57412500000004,
+      "first_segment_ms": 300.215375,
+      "id": "turns",
+      "segments": [
+        {
+          "confidence": null,
+          "end_ms": 4440,
+          "id": "82ca2831-bda6-449e-a08a-6d0336569b38",
+          "meeting_id": "turns",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "me",
+          "start_ms": 0,
+          "text": "deployment past its tests, we can release the update tomorrow."
+        },
+        {
+          "confidence": null,
+          "end_ms": 11560,
+          "id": "2eaa43d1-4b6e-441a-bd12-e47699be8fb2",
+          "meeting_id": "turns",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "them",
+          "start_ms": 4440,
+          "text": "Bryant reviewed the Postgresql migration, the API returns a JSON response after authentication."
+        }
+      ],
+      "word_error": {
+        "errors": 2,
+        "reference_words": 24,
+        "hypothesis_words": 23,
+        "word_error_rate": 0.08333333333333333,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 11148.3125,
+        "missed_ms": 88.3125,
+        "false_alarm_ms": 500.0,
+        "confusion_ms": 27.0,
+        "error_ms": 615.3125,
+        "error_rate": 0.05519333082921743
+      }
+    },
+    {
+      "finalization_ms": 287.45875,
+      "first_segment_ms": 242.326292,
+      "id": "overlap",
+      "segments": [
+        {
+          "confidence": null,
+          "end_ms": 9280,
+          "id": "d24346ce-ecb8-4d7e-95ed-bec1a78ba2dc",
+          "meeting_id": "overlap",
+          "partial": false,
+          "speaker_confidence": null,
+          "speaker_id": "them",
+          "start_ms": 0,
+          "text": "deployment past its tests."
+        }
+      ],
+      "word_error": {
+        "errors": 21,
+        "reference_words": 24,
+        "hypothesis_words": 4,
+        "word_error_rate": 0.875,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 11148.3125,
+        "missed_ms": 1956.5,
+        "false_alarm_ms": 88.1875,
+        "confusion_ms": 1956.5,
+        "error_ms": 4001.1875,
+        "error_rate": 0.3589052154754363
+      }
+    },
+    {
+      "finalization_ms": 92.012167,
+      "first_segment_ms": null,
+      "id": "silence-8s",
+      "segments": [],
+      "word_error": {
+        "errors": 0,
+        "reference_words": 0,
+        "hypothesis_words": 0,
+        "word_error_rate": null,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 0.0,
+        "missed_ms": 0.0,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 0.0,
+        "error_rate": null
+      }
+    },
+    {
+      "finalization_ms": 307.563,
+      "first_segment_ms": null,
+      "id": "silence-30s",
+      "segments": [],
+      "word_error": {
+        "errors": 0,
+        "reference_words": 0,
+        "hypothesis_words": 0,
+        "word_error_rate": null,
+        "false_silence_words": 0
+      },
+      "speaker_error": {
+        "reference_speaker_ms": 0.0,
+        "missed_ms": 0.0,
+        "false_alarm_ms": 0.0,
+        "confusion_ms": 0.0,
+        "error_ms": 0.0,
+        "error_rate": null
+      }
+    }
+  ],
+  "manifest_sha256": "741fa98dbb33f02fb05194e29c797d6f0d921b905cb07790b0547af5ee1658f1",
+  "model_sha256": "a03779c86df3323075f5e796cb2ce5029f00ec8869eee3fdfb897afe36c6d002",
+  "schema_version": 1,
+  "scope": "Post-recording mix, cache verification, final ASR, Me/Them attribution, transcript persistence and completion receipt. First case includes cold cache verification. No device shutdown, live preview, remote-speaker clustering, summary or model download.",
+  "settings": {
+    "cross_meeting_linking_auto": false,
+    "language": "en",
+    "model": "base.en",
+    "subspeaker_enabled": false,
+    "video_ocr_enabled": false
+  },
+  "recorded_at": "2026-11-13T19:42:13.061240+00:00",
+  "binary_sha256": "6f2b48af5dd36dc8b55005efd506537a703251490f5b500ea5e85699f9ddb91d",
+  "scorer_sha256": "56a894922bbe216fe624f007a774686013f030331a0f0bc0378e77316b8d41b6",
+  "hardware": {
+    "platform": "macOS-26.3-arm64-arm-64bit",
+    "machine": "arm64"
+  },
+  "runtime": {
+    "wall_seconds": 11.890679167001508,
+    "cpu_seconds": 10.001434,
+    "peak_rss_bytes": 374603776
+  }
+}

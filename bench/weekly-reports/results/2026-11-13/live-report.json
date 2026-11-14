@@ -1,0 +1,60 @@
+{
+  "id": "ddccc2df-50d6-42e0-8193-46dcbffb3354",
+  "preset_id": "d4d4dcf3-d75d-4a68-97bf-ad2a6dec5898",
+  "run_id": "ddccc2df-50d6-42e0-8193-46dcbffb3354",
+  "thread_id": "a260c993-fcc8-4e99-b1d6-5a2908ba574d",
+  "project_path": "/var/folders/2p/hwpnst4x41g1jqgt3hrbz_680000gp/T/.tmp6ZFfWU/project",
+  "model": "claude-haiku-4-5",
+  "window_start": 1793998884049,
+  "window_end": 1794603684049,
+  "title": "Engineering report 2026-11-13",
+  "body": "Based on the provided data and the reporting parameters for the window 2026-11-06 through 2026-11-13, here is the weekly engineering report:\n\n---\n\n# Weekly Engineering Report\n**Week of November 6–13, 2026**\n\n## Reporting Window\nNovember 6, 2026 (21:01:24 UTC) through November 13, 2026 (21:01:24 UTC)\n\n## Completed Work\n\n### Repository Changes\n- **Commit: [9e166cc](https://github.com/search?q=9e166cc)** — \"Add synthetic report delivery fixture\" (November 13, 2026)\n  - This fixture addition supports report delivery testing and validation infrastructure\n\n**Note:** Git feed shows 1 commit in the reporting window; further details require access to commit content or branch history.\n\n## Open Risks & Issues\n\nNo risk indicators available from incident or alert feeds. These data sources are not connected to this reporting preset.\n\n## Next Week's Focus\n\nUnable to determine planned priorities. GitHub pull requests and deployment scheduling data are not selected for this report.\n\n## Repository Activity Summary\n\n- **Active branches:** main (current)\n- **Commits in window:** 1\n- **PR activity:** Not selected for this report\n- **Recent deployments:** Not selected for this report\n\n## Deployment Status\n\nDeployment request data is not selected for this reporting period. No deployment transitions or outcomes can be inferred.\n\n## Incidents & Alerts\n\n| Feed | Status |\n|------|--------|\n| Incidents | Unavailable — no feed connected |\n| Alerts | Unavailable — no feed connected |\n\nNo incident or alert data is available for this period.\n\n## Reliability & Service Health\n\nReliability measurements are unavailable. No feed is connected in this preset.\n\n## Trends & Comparative Analysis\n\nTrend analysis requires comparable previous-period measurements. No such data is available in this preset.\n\n---\n\n**Report Limitations:** This report reflects only available sources. Incident, alert, reliability, deployment, and pull request data are not included in this preset configuration. Recommendations based on comprehensive operational metrics cannot be established without these feeds.",
+  "coverage": [
+    {
+      "status": "available",
+      "source": "Local Git commits",
+      "facts": [
+        {
+          "title": "Add synthetic report delivery fixture",
+          "reference": "commit 9e166cc10e042650a119ac9b11fd95e127a70e09",
+          "url": null,
+          "occurred_at": 1794603684000
+        }
+      ],
+      "truncated": false
+    },
+    {
+      "status": "unavailable",
+      "source": "GitHub pull requests",
+      "reason": "Not selected for this report."
+    },
+    {
+      "status": "unavailable",
+      "source": "GitHub deployment requests created in window",
+      "reason": "Not selected for this report."
+    },
+    {
+      "status": "unavailable",
+      "source": "Incidents",
+      "reason": "No feed is connected in this preset. No zero count or trend can be inferred."
+    },
+    {
+      "status": "unavailable",
+      "source": "Alerts",
+      "reason": "No feed is connected in this preset. No zero count or trend can be inferred."
+    },
+    {
+      "status": "unavailable",
+      "source": "Reliability measurements",
+      "reason": "No feed is connected in this preset. No zero count or trend can be inferred."
+    },
+    {
+      "status": "unavailable",
+      "source": "Comparable previous-period measurements",
+      "reason": "No feed is connected in this preset. No zero count or trend can be inferred."
+    }
+  ],
+  "created_at": 1794603718178,
+  "updated_at": 1794603718178,
+  "revision": 1
+}

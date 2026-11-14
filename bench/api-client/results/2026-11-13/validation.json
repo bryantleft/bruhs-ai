@@ -1,0 +1,92 @@
+{
+  "ticket": "BNLE-67",
+  "recorded_at": "2026-11-14T01:16:22.807959+00:00",
+  "scope": "local working tree; no published release or PR",
+  "profile": "development profile; actual application implementations, not release binaries",
+  "base_head": "c543e865b01ace7b0e29fa110cdc7dfb38aa032d",
+  "platform": {
+    "architecture": "arm64",
+    "macos": "26.3",
+    "rustc": "1.95.0 (59807616e 2026-04-14)",
+    "browser": "Chrome Headless Shell 158.0.8127.18, Playwright Chromium build1254"
+  },
+  "checks": [
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo test -p bruhs-models api_client --locked --quiet",
+      "passed": 4,
+      "log": "models.log"
+    },
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo test -p bruhs-core api_client --locked --quiet",
+      "passed": 11,
+      "log": "core.log"
+    },
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo test -p bruhs-desktop api_client_native_controls --locked --quiet",
+      "passed": 1,
+      "log": "native-controls.log"
+    },
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo build -p bruhs-server --locked; BRUHS_API_MCP_EXECUTABLE=<built server executable> CARGO_INCREMENTAL=0 cargo test -p bruhs-server api_client_native_http --locked -- --nocapture",
+      "passed": 1,
+      "log": "native-http-and-mcp.log"
+    },
+    {
+      "command": "CARGO_INCREMENTAL=0 cargo clippy -p bruhs-models -p bruhs-core -p bruhs-server -p bruhs-desktop --all-targets --locked -- -D warnings",
+      "success": true,
+      "log": "clippy.log"
+    },
+    {
+      "cwd": "bruhs-web",
+      "command": "CARGO_INCREMENTAL=0 env -u NO_COLOR trunk build --dist ../target/api-client-ui-dist",
+      "success": true,
+      "log": "wasm-build.log"
+    },
+    {
+      "command": "BRUHS_CHROME=<compatible Chromium executable> node bruhs-web/tests/api_client_browser.mjs",
+      "passed": 49,
+      "viewports": [
+        "640x480",
+        "390x844 touch"
+      ],
+      "log": "browser.log"
+    }
+  ],
+  "boundaries": [
+    "Application WASM UI uses mocked APIs; actual HTTP and stdio checks are separate.",
+    "Native UI uses a GPUI control harness, not a launched desktop session.",
+    "Secret tests use an isolated in-memory adapter, not actual OS keychain writes.",
+    "Owner HTTP controls inherit existing trust of arbitrary code under the same OS account; the feature MCP tools expose no approval/direct-send action.",
+    "Redaction covers credentials used by this request and their listed encodings, not arbitrary endpoint transformations.",
+    "Cancel cannot undo remote effects.",
+    "Collections use one working environment and detect external changes observed before atomic replacement."
+  ],
+  "source_sha256": {
+    "Cargo.toml": "672a0f20190675979eb3a021d24303052509aeb901b34705a380f4204a01bb82",
+    "Cargo.lock": "42a18e8cadc649441bb41928d50ba4fc1fe4bbac26e271b20e56cb1cbe1910de",
+    "bruhs-models/Cargo.toml": "c11e4545f90b9a0320557a1eb80e936d19ab0410eb5721a55422a7c5216eb710",
+    "bruhs-models/src/api_client.rs": "98c0f1e9f9984757acbeaa88898c62ba93c98fc1dc1a790a7b7273176141aa1d",
+    "bruhs-core/src/api_client.rs": "5a9db2902e68477fa1274e513eaf052722f30781bf3f5ea9d6626e2ca78020a1",
+    "bruhs-core/src/api_client/validation.rs": "df7af17aca8e6010197e9ded9871c4a3d362c56bbc74bb098fbb83db567bac23",
+    "bruhs-core/src/api_client/collection.rs": "d6cabfe384b8b9e425f2c98ed43a9b30908fc1b8e4b797a0543f53cd1dadd6d5",
+    "bruhs-core/src/api_client/tests.rs": "e4da04181299fdc61792c2a074b61f670c578c1c8135301370520ea1e7cd434b",
+    "bruhs-core/src/secrets/api_client.rs": "9d2137247882869151bd6b88914e1f5513d4e424b192d798a0b9e6f28926565f",
+    "bruhs-core/src/api_client_tools.rs": "e360b423842eb895af88b8366abec509fca28d3af41c2094789a244d4c2b29f3",
+    "bruhs-core/src/agent.rs": "4f73a0ea92690794ad5e28b12b3f17ff745c4fa36c3e185ec367117987e785a5",
+    "bruhs-server/src/main.rs": "4df962d4d70a0aee622c9cfde5ea0c59c11d22a78df69b179ac7dbc6845fd5d4",
+    "bruhs-server/src/routes/api_client.rs": "4ec71b1a177dada7cfa6a1b2576bbd5ea4c41ea66e83b0407d349e170ea29b44",
+    "bruhs-server/src/routes/api_client/tests.rs": "1a91fa2848919212565dfb1427acf9119adcc46c461e0649385f95633474d1c8",
+    "bruhs-desktop/src/main.rs": "0308ff9a775af4d4a0421e64f88c69d95928d90044b767e438f25f3cdbdf3498",
+    "bruhs-desktop/src/server_client/api_client.rs": "56c380cbf2f09b853e8d0fdfb67e1b429b4fccaf65b4c021d016eb354549fbb8",
+    "bruhs-desktop/src/views/api_client_panel.rs": "188a4289f81d8be3838c465fc9cc1c32690e37ff1f42e09c5de0f6499d67a48b",
+    "bruhs-desktop/src/views/api_client_panel/tests.rs": "9238ea484f1e6dda707ebc1fcc7c29239378dd3a36059ababb1959bfb2855186",
+    "bruhs-desktop/src/views/workspace.rs": "2ed92673e74987dc44dc3af40e2aa50498addb3c050105a6a05fe1d0725aef67",
+    "bruhs-desktop/src/views/workspace/panels_ui.rs": "d45bfed066d7cf6c6c2073b9b9a11d156fca38e0f391a07bf4ab75c8c2c2bbdb",
+    "bruhs-web/src/api/api_client.rs": "27dfd5c3b36fb5769ad108ba6d1266cb1aae9cf490c14bd3ad63c12ab9de34bc",
+    "bruhs-web/src/components/api_client_panel.rs": "cc52c5172813910433729657ad76abc53dda720ed4778db1dd30e3826a16ec57",
+    "bruhs-web/src/components/files_panel.rs": "cd81502b2bfbf4206977894cb18133e4ea61f5ce0af6aad7e79d9ca0fcf28e5e",
+    "bruhs-web/src/state/api_client.rs": "179c7575f0526438e80ad3f651e98e10f2c5f02b060882a1fa9890caf151b2b2",
+    "bruhs-web/src/state/mod.rs": "3887533e176fda60805a49acb2b62a3647c8b08bbaedb1e31c593a31026e95c6",
+    "bruhs-web/tests/api_client_browser.mjs": "1d1cf950051881a22861413676730b3d146154ca2e1e2e580f0fa84fabd28137"
+  }
+}

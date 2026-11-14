@@ -1,0 +1,18 @@
+2026-11-14T01:00:16.994862Z  INFO 🚀 Starting trunk 0.21.14
+2026-11-14T01:00:16.995184Z  INFO 📦 starting build
+2026-11-14T01:00:16.995376Z  INFO ⏫ Found an update of trunk: 0.21.14 -> 0.22.1
+    Blocking waiting for file lock on artifact directory
+Browserslist: caniuse-lite is outdated. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+
+Rebuilding...
+
+Done in 568ms.
+   Compiling bruhs-web v0.1.0 (bruhs-web)
+    Finished `dev` profile [unoptimized + debuginfo] target(s) in 1m 57s
+2026-11-14T01:04:05.376297Z  INFO spawned hook python3 command_arguments=["-c", "import os, runpy; runpy.run_path(os.path.join(os.environ['TRUNK_SOURCE_DIR'], 'precompress.py'), run_name='__main__')"]
+2026-11-14T01:04:05.376329Z  INFO spawning hook stage=PostBuild command=python3
+2026-11-14T01:04:05.439552Z  INFO finished hook python3
+2026-11-14T01:04:05.439595Z  INFO applying new distribution
+2026-11-14T01:04:05.457723Z  INFO ✅ success
