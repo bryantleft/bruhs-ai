@@ -7,6 +7,9 @@
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
+mod directory;
+pub use directory::{InboxCard, InboxCounts, InboxDirectory, InboxFilter, INBOX_PAGE_SIZE};
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InboxSource {
