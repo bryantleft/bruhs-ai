@@ -4,8 +4,8 @@
 
 use super::{
     initial_permission_mode_from_persisted, AppView, DesktopCalendarMode, DesktopPriority,
-    DesktopSidebarTab, DesktopTaskViewMode, DesktopWorkItemStatus, EpochMs, MessageRole,
-    PermissionMode, PersistedWorkspaceState,
+    DesktopTaskViewMode, DesktopWorkItemStatus, EpochMs, MessageRole, PermissionMode,
+    PersistedWorkspaceState,
 };
 
 const FIXTURE_2026_10_03: &str =
@@ -25,7 +25,6 @@ fn state_file_from_2026_10_03_loads() {
         PermissionMode::AcceptEdits
     );
     assert_eq!(state.sidebar_visible, Some(true));
-    assert_eq!(state.sidebar_tab, Some(DesktopSidebarTab::Code));
     assert_eq!(state.active_view, Some(AppView::Calendar));
     assert_eq!(state.active_thread_id.as_deref(), Some("thread-b"));
     assert_eq!(state.task_view_mode, Some(DesktopTaskViewMode::Board));
@@ -78,10 +77,13 @@ fn state_file_from_2026_10_03_loads() {
 #[test]
 fn state_file_from_2026_10_03_saves_the_same_enum_strings() {
     let written = serde_json::to_value(fixture()).expect("serializes");
+    assert!(
+        written.get("sidebar_tab").is_none(),
+        "The retired mode is ignored when saving old records"
+    );
     let original: serde_json::Value = serde_json::from_str(FIXTURE_2026_10_03).expect("json");
     for key in [
         "permission_mode",
-        "sidebar_tab",
         "active_view",
         "task_view_mode",
         "calendar_mode",
@@ -147,7 +149,6 @@ fn unknown_enum_strings_fall_back_instead_of_failing_the_file() {
     )
     .expect("tolerant load");
     assert_eq!(state.permission_mode, Some(PermissionMode::Default));
-    assert_eq!(state.sidebar_tab, Some(DesktopSidebarTab::Chat));
     assert_eq!(state.active_view, Some(AppView::Chat));
     assert_eq!(state.task_view_mode, Some(DesktopTaskViewMode::List));
     assert_eq!(state.calendar_mode, Some(DesktopCalendarMode::Month));

@@ -2,11 +2,6 @@
 
 use super::*;
 
-pub(super) fn project_session_surface_after_create_like_web(
-    active_view: AppView,
-) -> (AppView, DesktopSidebarTab) {
-    (active_view, DesktopSidebarTab::Code)
-}
 pub(super) const PROJECT_PICKER_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const PROJECT_PICKER_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const PROJECT_PICKER_PATH_FONT_FAMILY: &str = "Monaspace Neon";
@@ -236,8 +231,7 @@ impl Workspace {
         });
         self.active_thread_id = Some(thread.id.clone());
         self.threads.push(thread);
-        (self.active_view, self.sidebar_tab) =
-            project_session_surface_after_create_like_web(self.active_view.clone());
+        self.active_view = AppView::Chat;
         self.sidebar_filter = sidebar_ui::SidebarFilter::All;
         self.close_transient_surfaces();
         self.active_project = Some(project.clone());

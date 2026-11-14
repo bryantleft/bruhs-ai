@@ -21,7 +21,7 @@ use super::{
 use crate::views::sidebar_order::relative_age;
 use crate::{assets, theme};
 use bruhs_models::logic::sidebar::{snooze_after, snooze_presets, SnoozeUnit};
-use bruhs_models::{AppView, EpochMs, SidebarTab};
+use bruhs_models::{AppView, EpochMs};
 
 /// Shared app drawer width.
 pub const SIDEBAR_WIDTH_PX: f32 = 248.0;
@@ -80,8 +80,8 @@ const RING_WHITE_10: f32 = 0.10;
 
 pub const SIDEBAR_BRAND_LABEL: &str = "bruhs.ai";
 pub const SIDEBAR_SEARCH_PLACEHOLDER: &str = "Search";
-pub const SIDEBAR_FILTER_ALL_LABEL: &str = "All projects";
-pub const SIDEBAR_FILTER_CHAT_LABEL: &str = "Chat";
+pub const SIDEBAR_FILTER_ALL_LABEL: &str = "All threads";
+pub const SIDEBAR_FILTER_NONE_LABEL: &str = "No project";
 pub const SIDEBAR_EMPTY_LABEL: &str = "No threads yet. Press ⌘⇧O to start one.";
 pub const SIDEBAR_NO_MATCH_LABEL: &str = "No threads match.";
 pub const SIDEBAR_NEW_THREAD_LABEL: &str = "New thread (⌘⇧O)";
@@ -98,8 +98,7 @@ pub enum CardStatus {
     Idle,
 }
 
-/// Web `SidebarProjectFilter` for the Code tab: every project's threads, or
-/// one project's. (The web's "general chats" choice is the Chat tab here.)
+/// Every thread or the threads attached to one project.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub enum SidebarFilter {
     #[default]
@@ -119,6 +118,7 @@ impl SidebarFilter {
     pub fn label(&self) -> String {
         match self {
             Self::All => SIDEBAR_FILTER_ALL_LABEL.to_string(),
+            Self::Project(name) if name.is_empty() => SIDEBAR_FILTER_NONE_LABEL.to_string(),
             Self::Project(name) => name.clone(),
         }
     }
@@ -332,80 +332,72 @@ impl Workspace {
                         cx,
                     )),
             )
-            .when(self.sidebar_tab == SidebarTab::Code, |el| {
-                el.child(
-                    div()
-                        .flex()
-                        .items_center()
-                        .gap(px(SIDEBAR_CONTROLS_GAP_PX))
-                        .child(
-                            div()
-                                .id("sidebar-filter")
-                                .debug_selector(|| "desktop-sidebar-filter".to_string())
-                                .h(px(SIDEBAR_FILTER_HEIGHT_PX))
-                                .max_w(px(SIDEBAR_FILTER_MAX_WIDTH_PX))
-                                .px_2()
-                                .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
-                                .flex()
-                                .items_center()
-                                .gap(px(SIDEBAR_CARD_ROW_GAP_PX))
-                                .text_size(px(SIDEBAR_LABEL_TEXT_PX))
-                                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                .text_color(theme::rambutan_300())
-                                .hover(|el| {
-                                    el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_50))
-                                        .text_color(theme::rambutan_100())
-                                })
-                                .tab_index(0)
-                                .role(Role::Button)
-                                .aria_label(SIDEBAR_FILTER_LABEL)
-                                .aria_expanded(self.sidebar_filter_open)
-                                .border_1()
-                                .border_color(gpui::transparent_black())
-                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .cursor_pointer()
-                                .on_click(cx.listener(|this, _ev, _window, cx| {
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .gap(px(SIDEBAR_CONTROLS_GAP_PX))
+                    .child(
+                        div()
+                            .id("sidebar-filter")
+                            .debug_selector(|| "desktop-sidebar-filter".to_string())
+                            .h(px(SIDEBAR_FILTER_HEIGHT_PX))
+                            .max_w(px(SIDEBAR_FILTER_MAX_WIDTH_PX))
+                            .px_2()
+                            .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
+                            .flex()
+                            .items_center()
+                            .gap(px(SIDEBAR_CARD_ROW_GAP_PX))
+                            .text_size(px(SIDEBAR_LABEL_TEXT_PX))
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .text_color(theme::rambutan_300())
+                            .hover(|el| {
+                                el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_50))
+                                    .text_color(theme::rambutan_100())
+                            })
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .aria_label(SIDEBAR_FILTER_LABEL)
+                            .aria_expanded(self.sidebar_filter_open)
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .cursor_pointer()
+                            .on_click(cx.listener(|this, _ev, _window, cx| {
+                                cx.stop_propagation();
+                                this.sidebar_filter_open = !this.sidebar_filter_open;
+                                cx.notify();
+                            }))
+                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                                    window.prevent_default();
                                     cx.stop_propagation();
                                     this.sidebar_filter_open = !this.sidebar_filter_open;
                                     cx.notify();
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.sidebar_filter_open = !this.sidebar_filter_open;
-                                            cx.notify();
-                                        }
-                                    },
-                                ))
-                                .child(icon(
-                                    assets::FOLDER_ICON_PATH,
-                                    SIDEBAR_ICON_PX,
-                                    theme::rambutan_500(),
-                                ))
-                                .child(div().min_w_0().truncate().child(filter_text))
-                                .child(icon(
-                                    assets::CHEVRON_DOWN_ICON_PATH,
-                                    SIDEBAR_SMALL_ICON_PX,
-                                    theme::rambutan_500(),
-                                )),
-                        )
-                        .child(div().flex_1())
-                        .child(self.sidebar_icon_button(
-                            "desktop-sidebar-new-project",
-                            SIDEBAR_NEW_PROJECT_LABEL,
-                            assets::FOLDER_PLUS_ICON_PATH,
-                            SIDEBAR_SMALL_BUTTON_PX,
-                            |this, window, cx| {
-                                this.open_project_picker(&OpenProjectPicker, window, cx)
-                            },
-                            cx,
-                        )),
-                )
-            })
+                                }
+                            }))
+                            .child(icon(
+                                assets::FOLDER_ICON_PATH,
+                                SIDEBAR_ICON_PX,
+                                theme::rambutan_500(),
+                            ))
+                            .child(div().min_w_0().truncate().child(filter_text))
+                            .child(icon(
+                                assets::CHEVRON_DOWN_ICON_PATH,
+                                SIDEBAR_SMALL_ICON_PX,
+                                theme::rambutan_500(),
+                            )),
+                    )
+                    .child(div().flex_1())
+                    .child(self.sidebar_icon_button(
+                        "desktop-sidebar-new-project",
+                        SIDEBAR_NEW_PROJECT_LABEL,
+                        assets::FOLDER_PLUS_ICON_PATH,
+                        SIDEBAR_SMALL_BUTTON_PX,
+                        |this, window, cx| this.open_project_picker(&OpenProjectPicker, window, cx),
+                        cx,
+                    )),
+            )
     }
 
     fn render_sidebar_filter_row(
@@ -469,7 +461,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// Floating project list; Chat/Code navigation lives above the canvas.
+    /// Filter conversations by their optional project.
     fn render_sidebar_filter_menu(&self, cx: &Context<'_, Self>) -> AnyElement {
         let names = project_names(&self.threads);
         let current = self.sidebar_filter.clone();
@@ -481,6 +473,14 @@ impl Workspace {
             SidebarFilter::All,
             cx,
         )];
+        rows.push(self.render_sidebar_filter_row(
+            "desktop-sidebar-filter-none".into(),
+            SIDEBAR_FILTER_NONE_LABEL.into(),
+            None,
+            current == SidebarFilter::Project(String::new()),
+            SidebarFilter::Project(String::new()),
+            cx,
+        ));
         for name in names {
             let key = element_key(&name);
             rows.push(self.render_sidebar_filter_row(
@@ -723,7 +723,7 @@ impl Workspace {
         let row_group: SharedString = format!("desktop-thread-row-{key}").into();
         let age = relative_age(thread.updated_at_ms, EpochMs::now());
         let project_label = if thread.project_name.is_empty() {
-            SIDEBAR_FILTER_CHAT_LABEL.to_string()
+            SIDEBAR_FILTER_NONE_LABEL.to_string()
         } else {
             thread.project_name.clone()
         };
@@ -1531,7 +1531,7 @@ mod tests {
 
     #[test]
     fn filter_labels_match_web() {
-        assert_eq!(SidebarFilter::All.label(), "All projects");
+        assert_eq!(SidebarFilter::All.label(), "All threads");
         assert_eq!(SidebarFilter::Project("bruhs".into()).label(), "bruhs");
     }
 }

@@ -12,7 +12,7 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
     CommandAction {
         id: "nav-chat",
         group: "Navigate",
-        label: "Chat",
+        label: "Threads",
         hint: "conversations",
     },
     CommandAction {

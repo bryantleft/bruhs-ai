@@ -668,29 +668,28 @@ pub fn activate_thread(
     history.load(id, active, set_messages, turns);
 }
 
-/// "New thread" from the sidebar, header, palette or ⌘⇧N: when projects are
-/// known open the picker so the thread gets a workspace; otherwise create a
-/// general thread immediately.
-pub fn new_thread_or_pick(
-    catalog: crate::thread_catalog::ThreadCatalog,
-    has_projects: bool,
-    set_threads: WriteSignal<Vec<Thread>>,
-    set_active: WriteSignal<Option<String>>,
-    set_messages: WriteSignal<Vec<AgentMessage>>,
-    set_picker_open: WriteSignal<bool>,
-) {
-    if has_projects {
-        set_picker_open.set(true);
-    } else {
-        create_thread(
-            catalog,
-            set_threads,
-            set_active,
-            set_messages,
-            String::new(),
-            None,
-        );
-    }
+/// Start a thread in the current conversation's optional project.
+pub fn new_thread_in_context() {
+    let threads = expect_context::<ThreadsSignal>().0;
+    let active = expect_context::<ActiveThreadId>().0;
+    let project = active
+        .get_untracked()
+        .and_then(|id| {
+            threads.with_untracked(|rows| {
+                rows.iter()
+                    .find(|thread| thread.id == id)
+                    .map(|thread| (thread.project_name.clone(), thread.project_path.clone()))
+            })
+        })
+        .unwrap_or_default();
+    create_thread(
+        expect_context(),
+        expect_context::<SetThreadsSignal>().0,
+        expect_context::<SetActiveThreadId>().0,
+        expect_context::<SetMessagesSignal>().0,
+        project.0,
+        project.1,
+    );
 }
 
 /// Toggle a thread's pin and persist it. Returns the new state.

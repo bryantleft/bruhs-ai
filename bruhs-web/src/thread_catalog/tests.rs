@@ -1,5 +1,4 @@
 use super::*;
-use bruhs_models::SidebarTab::{Chat, Code};
 
 #[test]
 fn unresolved_catalog_does_not_claim_the_library_is_empty() {
@@ -45,26 +44,31 @@ fn thread(id: &str, project: &str) -> Thread {
 }
 
 #[test]
-fn exact_link_selects_its_mode_instead_of_default() {
-    let rows = vec![thread("chat", ""), thread("code", "Project")];
+fn exact_link_selects_any_thread() {
+    let rows = vec![thread("general", ""), thread("project", "Project")];
     assert_eq!(
-        initial_selection(&rows, Some("code"), Chat),
-        Some(("code".into(), Some(Code)))
+        initial_selection(&rows, Some("project")),
+        Some("project".into())
+    );
+    assert_eq!(
+        initial_selection(&rows, Some("general")),
+        Some("general".into())
     );
 }
 
 #[test]
-fn missing_link_uses_saved_workspace_mode() {
-    let rows = vec![thread("chat", ""), thread("code", "Project")];
+fn missing_link_selects_first_thread_regardless_of_project() {
+    let rows = vec![thread("project", "Project"), thread("general", "")];
     assert_eq!(
-        initial_selection(&rows, Some("missing"), Code),
-        Some(("code".into(), None))
+        initial_selection(&rows, Some("missing")),
+        Some("project".into())
     );
+    assert_eq!(initial_selection(&rows, None), Some("project".into()));
 }
 
 #[test]
 fn empty_catalog_does_not_select_an_unknown_link() {
-    assert_eq!(initial_selection(&[], Some("missing"), Chat), None);
+    assert_eq!(initial_selection(&[], Some("missing")), None);
 }
 
 #[test]

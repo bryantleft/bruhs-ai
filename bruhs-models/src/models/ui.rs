@@ -153,54 +153,6 @@ impl TaskViewMode {
     }
 }
 
-/// Workspace mode — general conversations or project-scoped coding threads.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
-pub enum SidebarTab {
-    Chat,
-    Code,
-}
-
-impl SidebarTab {
-    pub fn matches_project(self, project_name: &str) -> bool {
-        match self {
-            Self::Chat => project_name.is_empty(),
-            Self::Code => !project_name.is_empty(),
-        }
-    }
-
-    pub fn for_project(project_name: &str) -> Self {
-        if project_name.is_empty() {
-            Self::Chat
-        } else {
-            Self::Code
-        }
-    }
-
-    pub fn label(&self) -> &'static str {
-        match self {
-            Self::Chat => "Chat",
-            Self::Code => "Code",
-        }
-    }
-
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            SidebarTab::Chat => "chat",
-            SidebarTab::Code => "code",
-        }
-    }
-    #[expect(
-        clippy::should_implement_trait,
-        reason = "lenient parse with a default for persisted values; FromStr would have to be fallible"
-    )]
-    pub fn from_str(s: &str) -> Self {
-        match s {
-            "code" => SidebarTab::Code,
-            _ => SidebarTab::Chat,
-        }
-    }
-}
-
 /// Chat mode — Agent (Claude Code with tools) or LLM (plain chat without
 /// tool execution). LLM mode reuses the agent endpoint but submits with
 /// `permission_mode=plan` so no tools fire.
@@ -232,18 +184,6 @@ impl ChatMode {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    #[test]
-    fn workspace_modes_partition_general_and_project_threads() {
-        for project in ["", "bruhs", "project with spaces"] {
-            let mode = SidebarTab::for_project(project);
-            assert!(mode.matches_project(project));
-            assert_ne!(
-                SidebarTab::Chat.matches_project(project),
-                SidebarTab::Code.matches_project(project)
-            );
-        }
-    }
 
     #[test]
     fn appview_meetings_as_str() {

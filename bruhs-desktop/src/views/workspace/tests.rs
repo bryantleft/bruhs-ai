@@ -1,6 +1,5 @@
 use super::threads_ui::{
-    default_thread_title, step_thread_index, thread_link, thread_selection_after_delete,
-    THREAD_TITLE_GENERAL, THREAD_TITLE_PROJECT_GROUP_NEW, THREAD_TITLE_PROJECT_SESSION,
+    step_thread_index, thread_link, thread_selection_after_delete, THREAD_TITLE_GENERAL,
 };
 use super::Overlay;
 use super::TaskGlyph;
@@ -20,21 +19,21 @@ use super::{
     load_desktop_state_from_path, load_desktop_state_with_backup, move_timegrid_event_to,
     move_work_item_to_status, normalize_event_form_times, parse_event_form_datetime,
     permission_mode_after_cycle, project_delete_prompt, project_filter_selection_after_change,
-    project_picker_directory_error_like_web, project_session_surface_after_create_like_web,
-    project_task_count, provider_label, push_recent_project, read_project_directory,
-    resize_timegrid_event_end_to, restored_thread_model_id, restored_thread_permission_mode,
-    right_panel_after_toggle, select_task_detail_priority_option_like_web,
-    select_task_detail_project_option_like_web, select_task_detail_status_option_like_web,
-    selected_project_name_like_web, showing_surface, snap_timegrid_offset_seconds,
-    task_create_selected_work_item_after_submit, task_detail_menu_after_native_select_selection,
-    tasks_panel_visibility_after_toggle, work_item_due_on, write_desktop_state_atomically,
-    AgentProvider, AppView, ClosePanel, DesktopCalendarEvent, DesktopCalendarMode, DesktopPriority,
-    DesktopProject, DesktopProjectLocation, DesktopSidebarTab, DesktopTaskViewMode,
-    DesktopWorkItem, DesktopWorkItemStatus, FocusCommandBar, OpenLocalServers, OpenProjectPicker,
-    OpenSettings, PermissionMode, PersistedThread, PersistedWorkspaceState, RightPanelSurface,
-    TaskCreateMenu, TaskDetailMenu, ToggleDiff, TogglePanel, WorkItemPlanning, Workspace,
-    CALENDAR_ACTION_GROUP_GAP_PX, CALENDAR_BODY_FONT_FAMILY, CALENDAR_CONTROL_RADIUS_PX,
-    CALENDAR_DATE_TEXT_SIZE_PX, CALENDAR_HEADER_BORDER_OPACITY, CALENDAR_HEADER_MIN_HEIGHT_PX,
+    project_picker_directory_error_like_web, project_task_count, provider_label,
+    push_recent_project, read_project_directory, resize_timegrid_event_end_to,
+    restored_thread_model_id, restored_thread_permission_mode, right_panel_after_toggle,
+    select_task_detail_priority_option_like_web, select_task_detail_project_option_like_web,
+    select_task_detail_status_option_like_web, selected_project_name_like_web, showing_surface,
+    snap_timegrid_offset_seconds, task_create_selected_work_item_after_submit,
+    task_detail_menu_after_native_select_selection, tasks_panel_visibility_after_toggle,
+    work_item_due_on, write_desktop_state_atomically, AgentProvider, AppView, ClosePanel,
+    DesktopCalendarEvent, DesktopCalendarMode, DesktopPriority, DesktopProject,
+    DesktopProjectLocation, DesktopTaskViewMode, DesktopWorkItem, DesktopWorkItemStatus,
+    FocusCommandBar, OpenLocalServers, OpenProjectPicker, OpenSettings, PermissionMode,
+    PersistedThread, PersistedWorkspaceState, RightPanelSurface, TaskCreateMenu, TaskDetailMenu,
+    ToggleDiff, TogglePanel, WorkItemPlanning, Workspace, CALENDAR_ACTION_GROUP_GAP_PX,
+    CALENDAR_BODY_FONT_FAMILY, CALENDAR_CONTROL_RADIUS_PX, CALENDAR_DATE_TEXT_SIZE_PX,
+    CALENDAR_HEADER_BORDER_OPACITY, CALENDAR_HEADER_MIN_HEIGHT_PX,
     CALENDAR_HEADER_TITLE_GROUP_GAP_PX, CALENDAR_HEADER_TITLE_MIN_WIDTH_PX,
     CALENDAR_HEADER_TITLE_TEXT_SIZE_PX, CALENDAR_HEADER_X_PADDING_PX, CALENDAR_HEADER_Y_PADDING_PX,
     CALENDAR_MODE_ACTIVE_BG_OPACITY, CALENDAR_MODE_ACTIVE_BORDER_OPACITY,
@@ -1185,7 +1184,6 @@ fn desktop_code_thread_cards_and_settled_fold_should_match_web_sidebar(
                 thread.branch = Some("feature/cards".to_string());
             }
         }
-        workspace.sidebar_tab = DesktopSidebarTab::Code;
         workspace.sidebar_settled_open = false;
         cx.notify();
         (fresh_id, settled_id)
@@ -2443,7 +2441,6 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     workspace.update_in(cx, |workspace, window, cx| {
         workspace.active_view = AppView::Chat;
         workspace.sidebar_visible = true;
-        workspace.sidebar_tab = DesktopSidebarTab::Chat;
         workspace.threads.clear();
         let general = Workspace::create_thread_with_title(
             String::new(),
@@ -2475,14 +2472,14 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     assert_rendered_bounds(cx, "desktop-sidebar-header");
     assert_rendered_bounds(cx, "desktop-sidebar-search");
     assert_rendered_bounds(cx, "desktop-sidebar-new-thread");
-    assert_rendered_bounds(cx, "desktop-workspace-modes");
-    assert_rendered_bounds(cx, "desktop-workspace-mode-chat");
-    assert_rendered_bounds(cx, "desktop-workspace-mode-code");
-    assert_no_rendered_bounds(cx, "desktop-sidebar-filter");
-    assert_no_rendered_bounds(cx, "desktop-sidebar-new-project");
+    assert_rendered_bounds(cx, "desktop-workspace-navigation");
+    assert_rendered_bounds(cx, "desktop-workspace-threads");
+    assert_no_rendered_bounds(cx, "desktop-workspace-mode-code");
+    assert_rendered_bounds(cx, "desktop-sidebar-filter");
+    assert_rendered_bounds(cx, "desktop-sidebar-new-project");
     assert_rendered_bounds(cx, "desktop-sidebar-footer");
     assert_rendered_bounds(cx, thread_row_debug_selector(&general_id));
-    assert_no_rendered_bounds(cx, thread_row_debug_selector(&code_id));
+    assert_rendered_bounds(cx, thread_row_debug_selector(&code_id));
 
     let original_chat = workspace.update_in(cx, |workspace, window, cx| {
         let chat = workspace
@@ -2495,35 +2492,18 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
         });
         chat.entity_id()
     });
-    click_debug_selector(cx, "desktop-workspace-mode-code");
+    click_debug_selector(cx, "desktop-workspace-threads");
     cx.run_until_parked();
     workspace.update_in(cx, |workspace, _window, cx| {
-        let chat = &workspace
-            .active_thread()
-            .expect("still general thread")
-            .chat;
+        let chat = &workspace.active_thread().expect("same thread").chat;
         assert_eq!(chat.entity_id(), original_chat);
         assert_eq!(
             chat.read(cx).input_state.read(cx).value().as_str(),
             "Keep this draft"
         );
-        assert_eq!(
-            workspace.active_thread_id.as_deref(),
-            Some(general_id.as_str())
-        );
     });
+    assert_rendered_bounds(cx, thread_row_debug_selector(&general_id));
     assert_rendered_bounds(cx, thread_row_debug_selector(&code_id));
-    assert_no_rendered_bounds(cx, thread_row_debug_selector(&general_id));
-    click_debug_selector(cx, "desktop-workspace-mode-chat");
-    cx.run_until_parked();
-    cx.simulate_keystrokes("tab space");
-    workspace.update_in(cx, |workspace, _window, _cx| {
-        assert_eq!(workspace.sidebar_tab, DesktopSidebarTab::Code);
-    });
-    cx.simulate_keystrokes("shift-tab enter");
-    workspace.update_in(cx, |workspace, _window, _cx| {
-        assert_eq!(workspace.sidebar_tab, DesktopSidebarTab::Chat);
-    });
 
     // The square-pen button from a general chat starts another general chat.
     click_debug_selector(cx, "desktop-sidebar-new-thread");
@@ -2553,11 +2533,7 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
             .all(|thread| thread.id != new_general_id));
     });
 
-    // Mode controls are above the workspace, not duplicated in the filter.
-    assert_rendered_bounds(cx, thread_row_debug_selector(&general_id));
-    assert_no_rendered_bounds(cx, thread_row_debug_selector(&code_id));
-    click_debug_selector(cx, "desktop-workspace-mode-code");
-    cx.run_until_parked();
+    // Project filters narrow the unified list.
     assert_rendered_bounds(cx, "desktop-sidebar-filter");
     click_debug_selector(cx, "desktop-sidebar-filter");
     cx.run_until_parked();
@@ -2565,7 +2541,6 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     assert_no_rendered_bounds(cx, "desktop-sidebar-filter-chat");
     click_debug_selector(cx, "desktop-sidebar-filter-all");
     workspace.update_in(cx, |workspace, _window, cx| {
-        assert_eq!(workspace.sidebar_tab, DesktopSidebarTab::Code);
         workspace.sidebar_filter = super::sidebar_ui::SidebarFilter::Project("Alpha".to_string());
         cx.notify();
     });
@@ -2986,8 +2961,8 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-workspace-sidebar");
     assert_rendered_bounds(cx, "desktop-collapsed-sidebar-strip");
-    assert_rendered_bounds(cx, "desktop-workspace-mode-chat");
-    assert_rendered_bounds(cx, "desktop-workspace-mode-code");
+    assert_rendered_bounds(cx, "desktop-workspace-threads");
+    assert_no_rendered_bounds(cx, "desktop-workspace-mode-code");
 }
 
 #[gpui::test]
@@ -4314,7 +4289,7 @@ fn command_actions_should_match_web_reference() {
         actions,
         [
             ("nav-today", "Navigate", "Today", "plan & focus"),
-            ("nav-chat", "Navigate", "Chat", "conversations"),
+            ("nav-chat", "Navigate", "Threads", "conversations"),
             ("nav-inbox", "Navigate", "Inbox", "messages and replies"),
             (
                 "nav-knowledge",
@@ -4640,16 +4615,6 @@ fn desktop_model_settings_options_should_match_web_reference() {
 }
 
 #[test]
-fn desktop_sidebar_tabs_should_match_web_reference() {
-    let tabs = [DesktopSidebarTab::Chat, DesktopSidebarTab::Code]
-        .iter()
-        .map(|tab| (tab.as_str(), tab.label()))
-        .collect::<Vec<_>>();
-
-    assert_eq!(tabs, vec![("chat", "Chat"), ("code", "Code")]);
-}
-
-#[test]
 fn tasks_panel_shortcut_should_toggle_state_like_web_reference() {
     assert!(tasks_panel_visibility_after_toggle(false));
     assert!(!tasks_panel_visibility_after_toggle(true));
@@ -4803,27 +4768,6 @@ fn desktop_sidebar_copy_should_match_web_reference() {
     );
     assert_eq!(CHAT_NO_ACTIVE_THREAD_TEXT_SIZE_PX, 13.0);
     assert_eq!(THREAD_TITLE_GENERAL, "New thread");
-    assert_eq!(THREAD_TITLE_PROJECT_SESSION, "New session");
-    assert_eq!(THREAD_TITLE_PROJECT_GROUP_NEW, "New thread");
-}
-
-#[test]
-fn project_thread_titles_should_match_web_creation_paths() {
-    assert_eq!(default_thread_title(""), "New thread");
-    assert_eq!(default_thread_title("bruhs-ai"), "New session");
-    assert_eq!(THREAD_TITLE_PROJECT_GROUP_NEW, "New thread");
-}
-
-#[test]
-fn project_session_create_should_preserve_current_surface_like_web_reference() {
-    assert_eq!(
-        project_session_surface_after_create_like_web(AppView::Chat),
-        (AppView::Chat, DesktopSidebarTab::Code)
-    );
-    assert_eq!(
-        project_session_surface_after_create_like_web(AppView::Tasks),
-        (AppView::Tasks, DesktopSidebarTab::Code)
-    );
 }
 
 #[test]

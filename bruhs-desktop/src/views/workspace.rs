@@ -85,7 +85,7 @@ mod mobile;
 mod modal_ui;
 #[cfg(all(feature = "native-performance", target_os = "macos"))]
 pub(crate) mod native_fixture;
-mod modes_ui;
+mod navigation_ui;
 #[cfg(test)]
 mod notification_tests;
 #[cfg(test)]
@@ -259,7 +259,6 @@ fn focused_input_should_receive_plain_shortcut(shortcut: &str, has_focused_input
 pub use bruhs_models::AppView;
 pub use bruhs_models::CalendarMode as DesktopCalendarMode;
 pub use bruhs_models::Priority as DesktopPriority;
-pub use bruhs_models::SidebarTab as DesktopSidebarTab;
 pub use bruhs_models::TaskViewMode as DesktopTaskViewMode;
 pub use bruhs_models::WorkItemStatus as DesktopWorkItemStatus;
 
@@ -724,8 +723,6 @@ struct PersistedWorkspaceState {
     permission_mode: Option<PermissionMode>,
     sidebar_visible: Option<bool>,
     #[serde(with = "persisted_enum::optional")]
-    sidebar_tab: Option<DesktopSidebarTab>,
-    #[serde(with = "persisted_enum::optional")]
     active_view: Option<AppView>,
     active_thread_id: Option<String>,
     #[serde(with = "persisted_enum::optional")]
@@ -1157,7 +1154,6 @@ pub struct Workspace {
     persistence: Arc<PersistenceCoordinator>,
     save_queue: save_queue::SaveQueue,
 
-    sidebar_tab: DesktopSidebarTab,
     sidebar_filter: sidebar_ui::SidebarFilter,
     sidebar_filter_open: bool,
     /// Title search box in the sidebar (web: the `Search` input).
@@ -1770,10 +1766,6 @@ impl Workspace {
                 ..Default::default()
             }),
             save_queue: save_queue::SaveQueue::default(),
-            sidebar_tab: persisted
-                .as_ref()
-                .and_then(|state| state.sidebar_tab)
-                .unwrap_or(DesktopSidebarTab::Chat),
             unread_thread_ids: HashSet::new(),
             sidebar_filter: sidebar_ui::SidebarFilter::All,
             sidebar_filter_open: false,
@@ -2628,7 +2620,7 @@ impl Render for Workspace {
                     .min_h_0()
                     .flex()
                     .flex_col()
-                    .child(self.render_workspace_modes(compact, cx))
+                    .child(self.render_workspace_navigation(compact, cx))
                     .child(
                         div()
                             .flex_1()
