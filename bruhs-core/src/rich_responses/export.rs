@@ -359,7 +359,9 @@ mod tests {
             .read_to_string(&mut source)
             .unwrap();
         assert!(source.contains("media/"));
-        assert!(archive.file_names().any(|name| name.starts_with("media/")));
+        assert!(archive.file_names().any(|name| name
+            .expect("generated bundle entry name should be valid")
+            .starts_with("media/")));
     }
 }
 
