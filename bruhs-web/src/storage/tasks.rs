@@ -149,7 +149,8 @@ pub async fn save(writes: &[Write<'_>]) -> Result<(), SaveError> {
                     Kind::Thread => from_js(raw)
                         .map(Record::Thread)
                         .map_err(|_| SaveError::Corrupt),
-                    Kind::Conversation => super::messages::decode(raw).map(Record::Conversation),
+                    Kind::Conversation => super::messages::decode(raw)
+                        .map(|record| Record::Conversation(std::sync::Arc::new(record))),
                 })
                 .transpose()?;
             if current.as_ref() != write.expected {

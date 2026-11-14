@@ -35,7 +35,9 @@ pub enum Record {
     Person(PersonProfile),
     Project(Project),
     Thread(crate::state::Thread),
-    Conversation(crate::storage::MessagesRecord),
+    Conversation(
+        #[serde(serialize_with = "serialize_conversation")] Arc<crate::storage::MessagesRecord>,
+    ),
 }
 
 fn serialize_attachment<S: serde::Serializer>(
@@ -43,6 +45,13 @@ fn serialize_attachment<S: serde::Serializer>(
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
     attachment.as_ref().serialize(serializer)
+}
+
+fn serialize_conversation<S: serde::Serializer>(
+    conversation: &Arc<crate::storage::MessagesRecord>,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
+    conversation.as_ref().serialize(serializer)
 }
 
 impl Record {
