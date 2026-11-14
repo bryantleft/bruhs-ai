@@ -9,6 +9,8 @@
 use crate::num::{ToFloatLossy, ToIntSaturating};
 use std::{cmp::Reverse, collections::BinaryHeap};
 
+pub mod zone;
+
 /// Default pixels per hour row in the timegrid. Both surfaces start here;
 /// either may override locally if a denser/sparser grid is wanted.
 pub const HOUR_PX_DEFAULT: f32 = 40.0;

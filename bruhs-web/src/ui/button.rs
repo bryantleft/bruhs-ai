@@ -31,11 +31,14 @@ pub fn button_variant_class(v: ButtonVariant) -> &'static str {
 
 pub fn button_size_class(s: ButtonSize) -> &'static str {
     // Desktop controls use compact targets; coarse-pointer overrides retain 44px targets.
+    // Arbitrary values: this Tailwind build has no spacing scale for
+    // min-width/min-height, so `min-h-8` generated no rule and Default
+    // buttons rendered 29.5px tall instead of the 32px standard.
     match s {
-        ButtonSize::Default => "px-2.5 py-[5px] text-button rounded-grape min-h-8",
-        ButtonSize::Small => "px-2 py-1 text-button-sm rounded-grape min-h-7",
-        ButtonSize::IconDefault => "p-2 rounded-grape min-w-8 min-h-8",
-        ButtonSize::IconSmall => "p-1.5 rounded-grape min-w-7 min-h-7",
+        ButtonSize::Default => "px-2.5 py-[5px] text-button rounded-grape min-h-[32px]",
+        ButtonSize::Small => "px-2 py-1 text-button-sm rounded-grape min-h-[28px]",
+        ButtonSize::IconDefault => "p-2 rounded-grape min-w-[32px] min-h-[32px]",
+        ButtonSize::IconSmall => "p-1.5 rounded-grape min-w-[28px] min-h-[28px]",
     }
 }
 

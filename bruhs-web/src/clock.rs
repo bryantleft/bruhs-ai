@@ -48,6 +48,18 @@ pub fn local_day_start(ms: f64) -> f64 {
     add_local_days(ms, 0)
 }
 
+/// The browser zone's offset east of UTC, in minutes, at the instant `ms`
+/// (`Date.getTimezoneOffset` is minutes west). This is the `offset_at`
+/// function the shared `bruhs_models::calendar::zone` helpers take, so
+/// daylight-saving changes inside a range are read per instant.
+pub fn offset_minutes_east(ms: i64) -> i32 {
+    use bruhs_models::num::ToIntSaturating;
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(
+        EpochMs::saturating_from_i64(ms).as_f64(),
+    ));
+    -date.get_timezone_offset().to_i32_saturating()
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
