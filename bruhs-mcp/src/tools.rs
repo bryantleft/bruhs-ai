@@ -139,7 +139,7 @@ fn build_registry() -> Vec<ToolSpec> {
         )),
         spec(Tool::ReadPerson, Bridge, info(
             "bruhs_read_person",
-            "Read native People context by exact ID from bruhs_read_people. Requires current People Read independently of Write. section=profile returns identity, aliases and relationship metadata/notes (offset 0 only); observations and relationship_items return paginated full records, at most 50 within 512 KiB. Follow next_offset, which can advance by less than 50. Voice fingerprints are never exposed. Live local state, not a frozen export or save receipt. No provider request or mutation. Oversized individual records fail explicitly.",
+            "Read native People context by exact ID from bruhs_read_people. Requires current People Read independently of Write. section=profile returns identity, aliases and relationship metadata/notes (offset 0 only); observations and relationship_items return paginated full records, at most 50 within 512 KiB. Observations of a person whose tracked status is false are withheld: the page is empty with observations_withheld true. Follow next_offset, which can advance by less than 50. Voice fingerprints are never exposed. Live local state, not a frozen export or save receipt. No provider request or mutation. Oversized individual records fail explicitly.",
             json!({"type":"object","additionalProperties":false,"required":["person_id"],"properties":{
                 "person_id":{"type":"string","minLength":1,"maxLength":128},
                 "section":{"type":"string","enum":["profile","observations","relationship_items"],"default":"profile"},
@@ -239,7 +239,7 @@ fn build_registry() -> Vec<ToolSpec> {
         } else if definition.domain == AgentDomain::Meetings && definition.access == AgentAccess::Read {
             "Read paginated native meeting identity summaries from the current workspace cache with Meetings Read. query filters ID/title only, never transcript text, summaries or local audio paths. Use bruhs_read_meeting with a returned ID for loaded summary/transcript context. At most 50 records within 512 KiB; follow next_offset. Not a durable receipt. No provider request or mutation.".into()
         } else if definition.domain == AgentDomain::People && definition.access == AgentAccess::Read {
-            "Read paginated native People identity summaries by current People Read grant. query filters ID, display name and aliases. Summaries include tracked status, timestamps and alias/observation counts, not histories, relationship notes or voice fingerprints. Use bruhs_read_person with an exact returned ID for context. At most 50 records within 512 KiB; follow next_offset. Live local state, no mutation or provider request.".into()
+            "Read paginated native People identity summaries by current People Read grant. query filters ID, display name and aliases. Summaries include tracked status, timestamps and alias/observation counts (the observation count is null with observations_withheld true for untracked people), not histories, relationship notes or voice fingerprints. Use bruhs_read_person with an exact returned ID for context. At most 50 records within 512 KiB; follow next_offset. Live local state, no mutation or provider request.".into()
         } else if definition.access == AgentAccess::Read && matches!(definition.domain, AgentDomain::Finance | AgentDomain::Health) {
             life_schema::read_description(definition.domain).into()
         } else {

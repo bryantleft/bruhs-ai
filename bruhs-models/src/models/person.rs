@@ -48,6 +48,20 @@ pub struct PersonMergeResolution {
     pub target: PersonProfile,
 }
 
+/// The case-folded key that identifies a contact name or alias for matching.
+///
+/// Every store and surface must match names through this key. A per-person
+/// opt-out is only as strong as the matcher: an ASCII-only comparison let
+/// `ZOË` miss an opted-out `Zoë` and mint a fresh, tracked profile.
+pub fn person_name_key(name: &str) -> String {
+    name.to_lowercase()
+}
+
+/// Whether two contact names or aliases refer to the same name.
+pub fn person_names_match(left: &str, right: &str) -> bool {
+    left == right || person_name_key(left) == person_name_key(right)
+}
+
 fn default_tracked() -> bool {
     true
 }
@@ -111,6 +125,21 @@ mod tests {
         let json = serde_json::to_string(&p).unwrap();
         let back: PersonProfile = serde_json::from_str(&json).unwrap();
         assert!(!back.tracked);
+    }
+
+    #[test]
+    fn person_name_key_folds_unicode_case_so_opt_outs_match() {
+        assert_eq!(person_name_key("ZOË"), person_name_key("Zoë"));
+        assert_eq!(person_name_key("Ünal Alias"), person_name_key("ünal alias"));
+        assert_eq!(person_name_key("ALICE"), "alice");
+        assert!(person_names_match("ÉMILE", "émile"));
+        assert!(!person_names_match("Zoe", "Zoë"));
+        // Idempotent, so legacy ASCII-lowercased index rows rekey in place.
+        for name in ["ZOË", "Straße", "İstanbul", "ΣΊΣΥΦΟΣ"] {
+            let key = person_name_key(name);
+            assert_eq!(person_name_key(&key), key, "{name}");
+            assert_eq!(person_name_key(&name.to_ascii_lowercase()), key, "{name}");
+        }
     }
 
     #[test]

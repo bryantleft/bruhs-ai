@@ -1,6 +1,9 @@
 //! One generation result, committed only against the input it actually summarized.
 use super::{person_changes::next_version, MeetingStoreError, MeetingStoreResult};
-use bruhs_models::{Meeting, MeetingSummary, PersonObservation, PersonProfile, TranscriptSegment};
+use bruhs_models::{
+    person_names_match, Meeting, MeetingSummary, PersonObservation, PersonProfile,
+    TranscriptSegment,
+};
 use std::collections::{BTreeMap, HashMap};
 
 pub struct SummaryUpdate {
@@ -19,11 +22,11 @@ pub(super) fn is_summary_contact(person: &PersonProfile, meeting: &Meeting) -> b
         .any(|o| o.at_meeting_id == meeting.id)
         || meeting.speakers.iter().any(|s| {
             s.person_id.as_ref() == Some(&person.id)
-                || person.display_name.eq_ignore_ascii_case(&s.label)
+                || person_names_match(&person.display_name, &s.label)
                 || person
                     .aliases
                     .iter()
-                    .any(|alias| alias.eq_ignore_ascii_case(&s.label))
+                    .any(|alias| person_names_match(alias, &s.label))
         })
 }
 
@@ -135,8 +138,8 @@ impl SummaryUpdate {
             let mut matches = people.clone().filter(|p| match &speaker.person_id {
                 Some(id) => &p.id == id,
                 None => {
-                    p.display_name.eq_ignore_ascii_case(label)
-                        || p.aliases.iter().any(|a| a.eq_ignore_ascii_case(label))
+                    person_names_match(&p.display_name, label)
+                        || p.aliases.iter().any(|a| person_names_match(a, label))
                 }
             });
             let matched = matches.next();
@@ -158,7 +161,7 @@ impl SummaryUpdate {
                     // separate contacts in the same generation transaction.
                     let staged = changed
                         .values()
-                        .find(|p| p.display_name.eq_ignore_ascii_case(label))
+                        .find(|p| person_names_match(&p.display_name, label))
                         .map(|p| p.id.clone());
                     match staged.and_then(|id| changed.remove(&id)) {
                         Some(person) => person,

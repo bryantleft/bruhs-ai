@@ -18,6 +18,8 @@ pub mod in_memory;
 mod merge_resolution_tests;
 #[cfg(test)]
 mod merge_retry_tests;
+#[cfg(test)]
+mod opt_out_tests;
 mod person_changes;
 mod speaker_linking;
 #[cfg(test)]
