@@ -264,6 +264,13 @@ fn main() {
                 // the AccessKit window title together; without it VoiceOver
                 // announces an unnamed window.
                 window.set_window_title(DESKTOP_WINDOW_TITLE);
+                #[cfg(target_os = "windows")]
+                window.on_window_should_close(cx, |window, _| {
+                    // Let GPUI release children and own the HWND destruction.
+                    // Default WM_CLOSE would destroy it before that cleanup.
+                    window.remove_window();
+                    false
+                });
                 let workspace = cx.new(|cx| views::workspace::Workspace::new(window, cx));
                 #[cfg(debug_assertions)]
                 {

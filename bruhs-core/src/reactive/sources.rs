@@ -553,11 +553,12 @@ async fn read_limited(
     Ok(bytes)
 }
 
+#[cfg(unix)]
 struct CommandGroup(Option<i32>);
 
+#[cfg(unix)]
 impl Drop for CommandGroup {
     fn drop(&mut self) {
-        #[cfg(unix)]
         if let Some(pid) = self.0.filter(|pid| *pid > 0) {
             // SAFETY: this is our child's positive PID, assigned a fresh process group
             // with process_group(0). The negative PID targets only that group.
@@ -593,6 +594,7 @@ async fn read_command(
         .kill_on_drop(true)
         .spawn()
         .map_err(|error| source_error("Could not start the configured source command", error))?;
+    #[cfg(unix)]
     let group = CommandGroup(child.id().and_then(|id| i32::try_from(id).ok()));
     let stdout = child.stdout.take().ok_or_else(|| {
         ReactiveError::Invalid("The source command stdout pipe was not created.".into())
@@ -613,6 +615,7 @@ async fn read_command(
         )
     })
     .await;
+    #[cfg(unix)]
     drop(group);
     match result {
         Ok(Ok((status, stdout, _stderr))) if status.success() => Ok(stdout),

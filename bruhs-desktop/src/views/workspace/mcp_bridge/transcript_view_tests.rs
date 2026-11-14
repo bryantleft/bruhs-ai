@@ -1,4 +1,4 @@
-use super::tests::fixture;
+use super::test_fixture::fixture;
 use bruhs_models::{AppView, Meeting, MeetingEvent, Speaker, TranscriptSegment};
 use gpui::{px, size, Focusable, ListOffset, TestAppContext};
 
@@ -323,7 +323,7 @@ fn native_transcript_editor_stays_focused_offscreen_and_keeps_draft(cx: &mut Tes
         .debug_bounds("desktop-speaker-chip-0")
         .expect("first speaker chip");
     cx.simulate_click(chip.center(), gpui::Modifiers::default());
-    cx.simulate_keystrokes("cmd-a d r a f t");
+    cx.simulate_keystrokes("secondary-a d r a f t");
     workspace.update_in(cx, |w, _, cx| {
         assert_eq!(
             w.speaker_rename_input.read(cx).value().as_str(),

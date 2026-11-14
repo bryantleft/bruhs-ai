@@ -2,6 +2,7 @@
 //! dies without stopping it (a crash, a force quit), the server is
 //! reparented and exits instead of holding the port for the next launch.
 
+#[cfg(unix)]
 use std::time::Duration;
 
 pub fn exit_with_parent() {

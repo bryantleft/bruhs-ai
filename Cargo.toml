@@ -28,7 +28,7 @@ members = [
     "claude-sdk-rs",
     "codex-sdk-rs",
 ]
-exclude = ["third_party/gpui-component"]
+exclude = ["third_party/gpui-component", "third_party/gpui-windows"]
 
 [workspace.package]
 edition = "2021"
@@ -102,6 +102,8 @@ tempfile = "3"
 # sum_tree only uses its no-op `#[instrument]`. This keeps the distributed
 # binaries MIT. See third_party/ztracing-noop/README.md.
 ztracing = { path = "third_party/ztracing-noop" }
+# Keep native WebView2 child windows above the DirectComposition scene.
+gpui_windows = { path = "third_party/gpui-windows" }
 
 [workspace.lints.rust]
 future-incompatible = "warn"

@@ -33,6 +33,7 @@ use std::cell::RefCell;
 use std::rc::Rc;
 
 /// Matches the web scrim's `backdrop-blur-sm`, a 4px Gaussian.
+#[cfg(target_os = "macos")]
 const BACKDROP_BLUR_RADIUS: f64 = 4.0;
 
 /// Every dialog has a 1px border, and gpui lays an absolutely positioned
