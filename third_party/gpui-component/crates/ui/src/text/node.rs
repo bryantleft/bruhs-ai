@@ -774,6 +774,8 @@ pub(crate) struct NodeContext {
     /// Used for incremental updates.
     pub(crate) offset: usize,
     pub(crate) link_refs: HashMap<SharedString, LinkMark>,
+    /// Definitions can change parsing in earlier blocks after an append.
+    pub(crate) has_global_definitions: bool,
     pub(crate) style: TextViewStyle,
     pub(crate) code_block_actions: Option<Arc<CodeBlockActionsFn>>,
     pub(crate) markdown_extensions: Arc<MarkdownExtensions>,
@@ -787,7 +789,9 @@ impl NodeContext {
 
 impl PartialEq for NodeContext {
     fn eq(&self, other: &Self) -> bool {
-        self.link_refs == other.link_refs && self.style == other.style
+        self.link_refs == other.link_refs
+            && self.has_global_definitions == other.has_global_definitions
+            && self.style == other.style
         // Note: code_block_actions and markdown_extensions are intentionally
         // not compared (closures can't be compared)
     }

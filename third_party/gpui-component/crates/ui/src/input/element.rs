@@ -1523,7 +1523,7 @@ impl Element for TextElement {
         let disabled = state.disabled;
         let dim = |color: Hsla| if disabled { color.opacity(0.5) } else { color };
         let fg = dim(text_style.color);
-        let (display_text, text_color) = if is_empty {
+        let (display_text, text_color) = if is_empty && !state.has_inline_completion() {
             (
                 &Rope::from(placeholder.as_str()),
                 dim(cx.theme().muted_foreground),

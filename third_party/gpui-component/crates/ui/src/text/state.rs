@@ -14,13 +14,14 @@ use crate::{
     input::{self, SelectAll},
     scroll::AutoScroll,
     text::{
-        CodeBlockActionsFn, MarkdownExtensions, TextViewStyle,
-        document::ParsedDocument,
-        format,
-        node::{self, NodeContext},
+        CodeBlockActionsFn, MarkdownExtensions, TextViewStyle, document::ParsedDocument, format,
+        node,
     },
     v_flex,
 };
+
+mod replacement;
+use replacement::parse_replacement;
 
 const CONTEXT: &'static str = "TextView";
 // Keep coalescing bounded so sustained streams still render intermediate updates.
@@ -75,6 +76,8 @@ pub struct TextViewState {
     format: TextViewFormat,
     text: String,
     revision: usize,
+    /// Last revision queued to the worker; synchronous replacements invalidate it.
+    queued_revision: Option<usize>,
     parsed_error: Option<SharedString>,
     tx: Sender<UpdateOptions>,
     _parse_task: Task<()>,
@@ -154,11 +157,12 @@ impl TextViewState {
             parsed_error: None,
             text: text.to_string(),
             revision: 0,
+            queued_revision: None,
             tx,
             _parse_task,
             _receive_task,
         };
-        this.increment_update(&text, false, cx);
+        this.increment_update(text, cx);
         this
     }
 
@@ -203,7 +207,7 @@ impl TextViewState {
         self.text.clear();
         self.text.push_str(text);
         self.parsed_error = None;
-        self.increment_update(text, false, cx);
+        self.increment_update(text, cx);
     }
 
     /// Append partial text content to the existing text.
@@ -211,8 +215,28 @@ impl TextViewState {
         if new_text.is_empty() {
             return;
         }
+        let needs_base = self.queued_revision != Some(self.revision);
+        let base = (needs_base && self.parsed_content.document.source.as_str() == self.text)
+            .then(|| Box::new(self.parsed_content.clone()));
         self.text.push_str(new_text);
-        self.increment_update(new_text, true, cx);
+        let text = if needs_base && base.is_none() {
+            // A failed parse has no matching parsed base. Keep the complete
+            // source so a later append can recover without losing failed text.
+            TextUpdate::Replace(self.text.clone())
+        } else {
+            TextUpdate::Append {
+                delta: new_text.to_string(),
+                base,
+            }
+        };
+        self.revision += 1;
+        self.queued_revision = Some(self.revision);
+        _ = self.tx.try_send(UpdateOptions {
+            revision: self.revision,
+            text,
+            highlight_theme: cx.theme().highlight_theme.clone(),
+            markdown_extensions: self.markdown_extensions.clone(),
+        });
     }
 
     pub(crate) fn set_markdown_extensions(
@@ -227,7 +251,7 @@ impl TextViewState {
         self.markdown_extensions = markdown_extensions;
         if self.format == TextViewFormat::Markdown {
             let text = self.text.clone();
-            self.increment_update(&text, false, cx);
+            self.increment_update(&text, cx);
         }
     }
 
@@ -244,43 +268,44 @@ impl TextViewState {
         self.parsed_content.document.selected_text()
     }
 
-    fn increment_update(&mut self, text: &str, append: bool, cx: &mut Context<Self>) {
-        self.revision += 1;
-        let update_options = UpdateOptions {
-            revision: self.revision,
-            append,
-            pending_text: text.to_string(),
-            highlight_theme: cx.theme().highlight_theme.clone(),
-            markdown_extensions: self.markdown_extensions.clone(),
-        };
+    /// Compare parsed source, blocks and reference context, ignoring view caches.
+    #[cfg(feature = "test-support")]
+    pub fn parsed_content_eq(&self, other: &Self) -> bool {
+        self.parsed_content == other.parsed_content
+    }
 
-        // Full-replace updates (initial content / `set_text`) parse
+    fn increment_update(&mut self, text: &str, cx: &mut Context<Self>) {
+        self.revision += 1;
+        self.queued_revision = None;
+
+        // Initial content / `set_text` updates parse
         // synchronously on the main thread so the first layout already has the
         // correct height. Otherwise parsing finishes later on a background task
         // and the first layout sees an empty `parsed_content` (~0 height); when
         // this `TextView` is an item inside an outer `list` with `measure_all`,
         // off-screen items get measured at that empty height and the total
         // content height keeps growing as items scroll into view; the scrollbar
-        // thumb jitters. Streaming appends stay async to avoid re-parsing the
-        // whole document on every chunk.
-        if !append {
-            match parse_content(self.format, ParsedContent::default(), &update_options) {
-                Ok(content) => {
-                    self.parsed_content = content;
-                    self.parsed_error = None;
-                    if !self.is_selecting {
-                        self.reset_selection();
-                    }
-                }
-                Err(err) => {
-                    self.parsed_error = Some(err);
+        // thumb jitters. Safe paragraph-tail replacements reuse prior blocks;
+        // explicit push_str updates still run on the background worker.
+        match parse_replacement(
+            self.format,
+            &self.parsed_content,
+            text,
+            &cx.theme().highlight_theme,
+            &self.markdown_extensions,
+        ) {
+            Ok(content) => {
+                self.parsed_content = content;
+                self.parsed_error = None;
+                if !self.is_selecting {
+                    self.reset_selection();
                 }
             }
-            cx.notify();
-            return;
+            Err(err) => {
+                self.parsed_error = Some(err);
+            }
         }
-
-        _ = self.tx.try_send(update_options);
+        cx.notify();
     }
 
     /// Save bounds and unselect if bounds changed.
@@ -492,6 +517,7 @@ pub(crate) struct ParsedContent {
 struct UpdateFuture {
     format: TextViewFormat,
     content: ParsedContent,
+    source: String,
     rx: Pin<Box<Receiver<UpdateOptions>>>,
     tx_result: Sender<ParsedUpdate>,
 }
@@ -505,6 +531,7 @@ impl UpdateFuture {
         Self {
             format,
             content: Default::default(),
+            source: String::new(),
             rx: Box::pin(rx),
             tx_result,
         }
@@ -521,7 +548,23 @@ impl Future for UpdateFuture {
                     let hit_coalesce_budget =
                         merge_pending_options(&mut options, self.rx.as_ref().get_ref());
 
-                    let res = parse_content(self.format, self.content.clone(), &options);
+                    match options.text {
+                        TextUpdate::Replace(source) => self.source = source,
+                        TextUpdate::Append { delta, base } => {
+                            if let Some(base) = base {
+                                self.source = base.document.source.to_string();
+                                self.content = *base;
+                            }
+                            self.source.push_str(&delta);
+                        }
+                    }
+                    let res = parse_replacement(
+                        self.format,
+                        &self.content,
+                        &self.source,
+                        &options.highlight_theme,
+                        &options.markdown_extensions,
+                    );
                     if let Ok(content) = &res {
                         self.content = content.clone();
                     }
@@ -545,20 +588,34 @@ impl Future for UpdateFuture {
 #[derive(Clone)]
 struct UpdateOptions {
     revision: usize,
-    pending_text: String,
-    append: bool,
+    text: TextUpdate,
     highlight_theme: std::sync::Arc<HighlightTheme>,
     markdown_extensions: Arc<MarkdownExtensions>,
 }
 
+#[derive(Clone)]
+enum TextUpdate {
+    Replace(String),
+    Append {
+        delta: String,
+        base: Option<Box<ParsedContent>>,
+    },
+}
+
 impl UpdateOptions {
-    fn merge(&mut self, next: UpdateOptions) {
-        if next.append {
-            self.pending_text.push_str(&next.pending_text);
-            self.revision = next.revision;
-            self.highlight_theme = next.highlight_theme;
-        } else {
-            *self = next;
+    fn merge(&mut self, next: Self) {
+        match next.text {
+            TextUpdate::Append { delta, base: None } => {
+                match &mut self.text {
+                    TextUpdate::Replace(text) | TextUpdate::Append { delta: text, .. } => {
+                        text.push_str(&delta)
+                    }
+                }
+                self.revision = next.revision;
+                self.highlight_theme = next.highlight_theme;
+                self.markdown_extensions = next.markdown_extensions;
+            }
+            _ => *self = next,
         }
     }
 }
@@ -582,47 +639,6 @@ fn merge_pending_options(options: &mut UpdateOptions, rx: &Receiver<UpdateOption
     }
 
     true
-}
-
-fn parse_content(
-    format: TextViewFormat,
-    mut content: ParsedContent,
-    options: &UpdateOptions,
-) -> Result<ParsedContent, SharedString> {
-    let mut node_cx = NodeContext {
-        markdown_extensions: options.markdown_extensions.clone(),
-        ..NodeContext::default()
-    };
-
-    let mut source = String::new();
-    if options.append
-        && let Some(last_block) = content.document.blocks.pop()
-        && let Some(span) = last_block.span()
-    {
-        node_cx.offset = span.start;
-        let last_source = &content.document.source[span.start..];
-        source.push_str(last_source);
-        source.push_str(&options.pending_text);
-    } else {
-        source = options.pending_text.to_string();
-    }
-
-    let new_document = match format {
-        TextViewFormat::Markdown => {
-            format::markdown::parse(&source, &mut node_cx, &options.highlight_theme)
-        }
-        TextViewFormat::Html => format::html::parse(&source, &mut node_cx),
-    }?;
-
-    if options.append {
-        content.document.source =
-            format!("{}{}", content.document.source, options.pending_text).into();
-        content.document.blocks.extend(new_document.blocks);
-    } else {
-        content.document = new_document;
-    }
-
-    Ok(content)
 }
 
 #[cfg(test)]
@@ -661,37 +677,6 @@ mod tests {
     }
 
     #[test]
-    fn update_options_merge_keeps_latest_full_text() {
-        let theme = HighlightTheme::default_light();
-        let mut options = UpdateOptions {
-            revision: 1,
-            pending_text: "old".to_string(),
-            append: true,
-            highlight_theme: theme.clone(),
-            markdown_extensions: Arc::default(),
-        };
-
-        options.merge(UpdateOptions {
-            revision: 2,
-            pending_text: "new".to_string(),
-            append: false,
-            highlight_theme: theme.clone(),
-            markdown_extensions: Arc::default(),
-        });
-        options.merge(UpdateOptions {
-            revision: 3,
-            pending_text: " text".to_string(),
-            append: true,
-            highlight_theme: theme,
-            markdown_extensions: Arc::default(),
-        });
-
-        assert_eq!(options.revision, 3);
-        assert_eq!(options.pending_text, "new text");
-        assert!(!options.append);
-    }
-
-    #[test]
     fn update_future_yields_before_coalescing_all_queued_updates() {
         let theme = HighlightTheme::default_light();
         let (tx, rx) = unbounded::<UpdateOptions>();
@@ -701,8 +686,14 @@ mod tests {
         for revision in 1..=total_updates {
             tx.try_send(UpdateOptions {
                 revision,
-                pending_text: format!("{revision}\n"),
-                append: revision != 1,
+                text: if revision == 1 {
+                    TextUpdate::Replace(format!("{revision}\n"))
+                } else {
+                    TextUpdate::Append {
+                        delta: format!("{revision}\n"),
+                        base: None,
+                    }
+                },
                 highlight_theme: theme.clone(),
                 markdown_extensions: Arc::default(),
             })
