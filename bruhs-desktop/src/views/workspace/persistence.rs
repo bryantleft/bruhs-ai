@@ -408,6 +408,7 @@ impl Workspace {
                     notes: event.notes.clone(),
                 })
                 .collect(),
+            day_plan_undo: self.day_plan_undo.clone(),
             captures: self.captures.clone(),
             knowledge_documents: self.knowledge_documents.clone(),
             source_clips: self.source_clips.clone(),
