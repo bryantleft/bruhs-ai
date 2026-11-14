@@ -5,12 +5,27 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use std::path::Path;
 
+#[cfg(all(test, unix))]
+mod ownership_tests;
+
 /// A full review page across the runtime; overflow never hides unresolved work.
 const MAX_PENDING_RUNS: usize = HISTORY_LIMIT;
 /// Bounds source tasks and profile/subscription scans in the local runtime.
 const MAX_CONFIGURATIONS: usize = 128;
 
-pub(super) fn open(path: &Path) -> Result<(Connection, std::fs::File), ReactiveError> {
+/// Unlock explicitly when the last runtime owner leaves. A fork-before-exec child
+/// can retain an inherited descriptor after the parent's File has closed.
+#[derive(Debug)]
+pub(super) struct RuntimeLock(std::fs::File);
+impl Drop for RuntimeLock {
+    fn drop(&mut self) {
+        if let Err(error) = self.0.unlock() {
+            tracing::error!(%error,"Reactive runtime ownership could not be released");
+        }
+    }
+}
+
+pub(super) fn open(path: &Path) -> Result<(Connection, RuntimeLock), ReactiveError> {
     if let Some(parent) = path.parent().filter(|path| !path.as_os_str().is_empty()) {
         std::fs::create_dir_all(parent).map_err(|_| {
             ReactiveError::Storage("Could not create the database directory.".into())
@@ -43,6 +58,7 @@ pub(super) fn open(path: &Path) -> Result<(Connection, std::fs::File), ReactiveE
         .open(lock_path)
         .map_err(|_| ReactiveError::Storage("Could not open the runtime ownership lock.".into()))?;
     lock.try_lock().map_err(|_| ReactiveError::Conflict("Another reactive runtime already owns this database. Stop that server before opening it here.".into()))?;
+    let lock = RuntimeLock(lock);
     #[cfg(unix)]
     {
         use std::{
