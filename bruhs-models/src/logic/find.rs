@@ -26,9 +26,10 @@ pub fn search_texts(query: &str, sources: &[(&str, &str)]) -> Vec<TextHit> {
     if query.is_empty() {
         return Vec::new();
     }
+    let needle = query.chars().collect::<Vec<_>>();
     let mut hits = Vec::new();
     for (id, text) in sources {
-        for (start, end) in spans(text, query) {
+        for (start, end) in spans(text, &needle) {
             hits.push(TextHit {
                 source_id: (*id).to_string(),
                 start,
@@ -47,9 +48,10 @@ pub fn search_diff(query: &str, files: &[(&str, &[&str])]) -> Vec<DiffHit> {
     if query.is_empty() {
         return Vec::new();
     }
+    let needle = query.chars().collect::<Vec<_>>();
     let mut hits = Vec::new();
     for (path, lines) in files {
-        for (start, end) in spans(path, query) {
+        for (start, end) in spans(path, &needle) {
             hits.push(DiffHit {
                 path: (*path).to_string(),
                 line: None,
@@ -58,7 +60,7 @@ pub fn search_diff(query: &str, files: &[(&str, &[&str])]) -> Vec<DiffHit> {
             });
         }
         for (line_index, line) in lines.iter().enumerate() {
-            for (start, end) in spans(line, query) {
+            for (start, end) in spans(line, &needle) {
                 hits.push(DiffHit {
                     path: (*path).to_string(),
                     line: Some(line_index),
@@ -84,9 +86,8 @@ pub fn cycle(len: usize, index: usize, forward: bool) -> usize {
     }
 }
 
-fn spans(text: &str, query: &str) -> Vec<(usize, usize)> {
+fn spans(text: &str, needle: &[char]) -> Vec<(usize, usize)> {
     let haystack: Vec<char> = text.chars().collect();
-    let needle: Vec<char> = query.chars().collect();
     if needle.is_empty() || needle.len() > haystack.len() {
         return Vec::new();
     }
@@ -95,7 +96,7 @@ fn spans(text: &str, query: &str) -> Vec<(usize, usize)> {
     while i + needle.len() <= haystack.len() {
         let matched = haystack[i..i + needle.len()]
             .iter()
-            .zip(&needle)
+            .zip(needle)
             .all(|(hay, needle_char)| same_letter(*hay, *needle_char));
         if matched {
             out.push((i, i + needle.len()));
@@ -108,12 +109,10 @@ fn spans(text: &str, query: &str) -> Vec<(usize, usize)> {
 }
 
 fn same_letter(hay: char, needle: char) -> bool {
-    if hay == needle {
-        return true;
+    if hay.is_ascii() && needle.is_ascii() {
+        return hay.eq_ignore_ascii_case(&needle);
     }
-    let hay: Vec<char> = hay.to_lowercase().collect();
-    let needle: Vec<char> = needle.to_lowercase().collect();
-    hay == needle
+    hay == needle || hay.to_lowercase().eq(needle.to_lowercase())
 }
 
 #[cfg(test)]
@@ -124,6 +123,21 @@ mod tests {
     fn empty_query_matches_nothing() {
         assert!(search_texts("", &[("a", "hello")]).is_empty());
         assert!(search_diff("", &[("src/a.rs", &["let x = 1"][..])]).is_empty());
+    }
+
+    #[test]
+    fn unicode_case_expansion_keeps_original_scalar_offsets() {
+        let hits = search_texts("İÉ🦀", &[("unicode", "aİé🦀b")]);
+        assert_eq!(
+            hits,
+            vec![TextHit {
+                source_id: "unicode".into(),
+                start: 1,
+                end: 4
+            }]
+        );
+        assert!(search_texts("i\u{307}", &[("unicode", "İ")]).is_empty());
+        assert_eq!(search_texts("K", &[("unicode", "KkK")]).len(), 3);
     }
 
     #[test]

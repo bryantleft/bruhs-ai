@@ -7,6 +7,7 @@
 //! convert into a common scratch unit (typically seconds) at the call site.
 
 use crate::num::{ToFloatLossy, ToIntSaturating};
+use std::{cmp::Reverse, collections::BinaryHeap};
 
 /// Default pixels per hour row in the timegrid. Both surfaces start here;
 /// either may override locally if a denser/sparser grid is wanted.
@@ -43,12 +44,56 @@ pub struct LanePlacement {
 /// Result of laying out a day's events into lanes.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct LaneLayout {
-    /// Per-event lane assignment, in input order.
+    /// Placements in start-time order, with stable input order for ties.
     pub placements: Vec<LanePlacement>,
     /// Number of lanes the day uses (max concurrent overlap). All events
     /// on the day share this width factor (`1.0 / lanes`) so columns
     /// align cleanly.
     pub lanes: usize,
+}
+
+// Scanning wins on ordinary small lane sets; measured crossover is around 64.
+// This switches the lookup algorithm, without limiting events or lanes.
+const LINEAR_LANE_COUNT: usize = 64;
+
+struct IndexedLanes {
+    busy: BinaryHeap<Reverse<(i64, usize)>>,
+    available: BinaryHeap<Reverse<usize>>,
+    count: usize,
+}
+
+impl IndexedLanes {
+    fn new(ends: &[i64]) -> Self {
+        Self {
+            busy: ends
+                .iter()
+                .enumerate()
+                .map(|(lane, end)| Reverse((*end, lane)))
+                .collect(),
+            available: BinaryHeap::new(),
+            count: ends.len(),
+        }
+    }
+
+    fn place(&mut self, start: i64, end: i64) -> usize {
+        while let Some(Reverse((until, lane))) = self.busy.peek().copied() {
+            if until > start {
+                break;
+            }
+            let _ = self.busy.pop();
+            self.available.push(Reverse(lane));
+        }
+        let lane = match self.available.pop() {
+            Some(Reverse(lane)) => lane,
+            None => {
+                let lane = self.count;
+                self.count += 1;
+                lane
+            }
+        };
+        self.busy.push(Reverse((end, lane)));
+        lane
+    }
 }
 
 /// Greedy left-to-right lane assignment. Sorts events by start time, then
@@ -67,34 +112,49 @@ pub fn assign_lanes(events: &[(i64, i64)]) -> LaneLayout {
     sorted.sort_by_key(|(_, start, _)| *start);
 
     let mut lane_ends: Vec<i64> = Vec::new();
+    let mut indexed: Option<IndexedLanes> = None;
     let mut placements: Vec<LanePlacement> = Vec::with_capacity(sorted.len());
 
     for (index, start, end) in sorted {
-        let lane = match lane_ends
-            .iter_mut()
-            .enumerate()
-            .find_map(|(lane, lane_end)| {
-                if start >= *lane_end {
-                    *lane_end = end;
-                    Some(lane)
-                } else {
-                    None
+        let lane = if let Some(indexed) = &mut indexed {
+            indexed.place(start, end)
+        } else {
+            let lane = match lane_ends
+                .iter_mut()
+                .enumerate()
+                .find_map(|(lane, lane_end)| {
+                    if start >= *lane_end {
+                        *lane_end = end;
+                        Some(lane)
+                    } else {
+                        None
+                    }
+                }) {
+                Some(lane) => lane,
+                None => {
+                    lane_ends.push(end);
+                    lane_ends.len() - 1
                 }
-            }) {
-            Some(lane) => lane,
-            None => {
-                lane_ends.push(end);
-                lane_ends.len() - 1
+            };
+            if lane_ends.len() > LINEAR_LANE_COUNT {
+                indexed = Some(IndexedLanes::new(&lane_ends));
             }
+            lane
         };
         placements.push(LanePlacement { index, lane });
     }
 
     LaneLayout {
-        lanes: lane_ends.len().max(1),
+        lanes: indexed
+            .as_ref()
+            .map_or(lane_ends.len(), |index| index.count)
+            .max(1),
         placements,
     }
 }
+
+#[cfg(test)]
+mod regression_tests;
 
 #[cfg(test)]
 mod tests {

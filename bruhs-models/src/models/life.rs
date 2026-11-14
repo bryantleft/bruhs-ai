@@ -2,6 +2,7 @@
 
 use crate::num::ToFloatLossy;
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use serde::{Deserialize, Serialize};
 use uuid::Uuid;
@@ -238,7 +239,8 @@ pub fn finance_provider_adapters() -> Vec<LifeProviderAdapter> {
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize, Default)]
 pub struct FinanceLedger {
     pub accounts: Vec<FinanceAccount>,
-    pub transactions: Vec<FinanceTransaction>,
+    /// Snapshots retain record contents while edits replace or copy one record.
+    pub transactions: Vec<Arc<FinanceTransaction>>,
     pub budgets: Vec<FinanceBudget>,
     pub income_streams: Vec<IncomeStream>,
     pub holdings: Vec<Holding>,
@@ -722,7 +724,7 @@ mod tests {
         context
             .finance
             .transactions
-            .push(FinanceTransaction::manual("Market", "Food", -9_000, 100));
+            .push(FinanceTransaction::manual("Market", "Food", -9_000, 100).into());
         let insights = context.insights(&[], 100);
         assert_eq!(insights.len(), 1);
         assert!(insights[0].evidence.contains("9000"));

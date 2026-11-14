@@ -1,4 +1,47 @@
 use bruhs_models::*;
+use std::sync::Arc;
+
+#[test]
+fn finance_snapshots_retain_exact_records_across_edits_and_legacy_json() {
+    let mut context = LifeContext::default();
+    let mut original = FinanceTransaction::manual("Café 👩🏽‍💻", "Food", i64::MIN, 1);
+    original.note = Some("Complete original memo".into());
+    let untouched = FinanceTransaction::manual("Second record", "Other", i64::MAX, 2);
+    context.finance.transactions = vec![original.clone().into(), untouched.clone().into()];
+    let frozen = context.clone();
+    let expected = serde_json::to_string(&frozen).unwrap();
+    for (current, saved) in context
+        .finance
+        .transactions
+        .iter()
+        .zip(&frozen.finance.transactions)
+    {
+        assert!(Arc::ptr_eq(current, saved));
+    }
+    Arc::make_mut(&mut context.finance.transactions[0]).note = Some("Edited memo".into());
+    context.finance.transactions.remove(1);
+    context
+        .finance
+        .transactions
+        .push(FinanceTransaction::manual("New record", "Other", 3, 3).into());
+    assert_eq!(frozen.finance.transactions[0].as_ref(), &original);
+    assert_eq!(frozen.finance.transactions[1].as_ref(), &untouched);
+    assert_eq!(serde_json::to_string(&frozen).unwrap(), expected);
+    assert!(!Arc::ptr_eq(
+        &context.finance.transactions[0],
+        &frozen.finance.transactions[0]
+    ));
+    assert_eq!(
+        serde_json::to_value(&frozen.finance.transactions).unwrap(),
+        serde_json::to_value([&original, &untouched]).unwrap()
+    );
+    let mut legacy = serde_json::to_value(&frozen).unwrap();
+    legacy["finance"]["transactions"][0]["amount_minor"] = serde_json::json!(i64::MIN);
+    let restored: LifeContext = serde_json::from_value(legacy).unwrap();
+    assert_eq!(restored, frozen);
+    let restored: LifeContext = serde_json::from_str(&expected).unwrap();
+    assert_eq!(restored, frozen);
+}
 
 #[test]
 fn exact_amount_parser_preserves_every_cent_through_i64_boundaries() {
@@ -69,10 +112,10 @@ fn spend_handles_minimum_integer_and_excludes_future_entries() {
     let mut ledger = FinanceLedger::default();
     ledger
         .transactions
-        .push(FinanceTransaction::manual("past", "Food", i64::MIN, 0));
+        .push(FinanceTransaction::manual("past", "Food", i64::MIN, 0).into());
     ledger
         .transactions
-        .push(FinanceTransaction::manual("future", "Food", -100, 2));
+        .push(FinanceTransaction::manual("future", "Food", -100, 2).into());
     assert_eq!(
         ledger
             .trailing_spend_totals(1, i64::MAX)
@@ -96,12 +139,12 @@ fn budget_evidence_only_counts_matching_currency_and_does_not_overflow() {
         .push(FinanceBudget::monthly("Food", i64::MAX));
     let mut euro = FinanceTransaction::manual("Euro", "Food", i64::MIN, 0);
     euro.currency = "EUR".into();
-    context.finance.transactions.push(euro);
+    context.finance.transactions.push(euro.into());
     assert!(context.insights(&[], 1).is_empty());
     context
         .finance
         .transactions
-        .push(FinanceTransaction::manual("USD", "Food", i64::MIN, 0));
+        .push(FinanceTransaction::manual("USD", "Food", i64::MIN, 0).into());
     let insights = context.insights(&[], 1);
     assert_eq!(insights.len(), 1);
     assert!(insights[0].title.contains("100%"));

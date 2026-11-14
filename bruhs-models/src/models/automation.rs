@@ -599,11 +599,29 @@ impl AutomationState {
         id
     }
 
+    /// Create and preview the newly appended draft without resolving its ID
+    /// through the existing history. ID-based previews keep their usual lookup.
+    pub fn create_workflow_preview(
+        &mut self,
+        title: impl Into<String>,
+        operations: Vec<WorkflowOperation>,
+        now_ms: i64,
+    ) -> (String, Option<WorkflowPreview>) {
+        let id = self.create_workflow(title, operations, now_ms);
+        let preview = self.preview_at(self.workflows.len() - 1, now_ms);
+        (id, preview)
+    }
+
     pub fn preview(&mut self, workflow_id: &str, now_ms: i64) -> Option<WorkflowPreview> {
-        let workflow = self
+        let index = self
             .workflows
-            .iter_mut()
-            .find(|workflow| workflow.id == workflow_id)?;
+            .iter()
+            .position(|workflow| workflow.id == workflow_id)?;
+        self.preview_at(index, now_ms)
+    }
+
+    fn preview_at(&mut self, index: usize, now_ms: i64) -> Option<WorkflowPreview> {
+        let workflow = self.workflows.get_mut(index)?;
         if !matches!(
             workflow.status,
             WorkflowStatus::Draft | WorkflowStatus::Previewed
@@ -614,7 +632,7 @@ impl AutomationState {
                 .steps
                 .iter()
                 .any(|step| step.status != WorkflowStepStatus::Pending)
-            || self.jobs.iter().any(|job| job.workflow_id == workflow_id)
+            || self.jobs.iter().any(|job| job.workflow_id == workflow.id)
         {
             return None;
         }
@@ -642,8 +660,9 @@ impl AutomationState {
                 .map(|step| step.operation.clone())
                 .collect()
         });
+        let workflow_id = workflow.id.clone();
         self.push_audit(
-            Some(workflow_id.to_string()),
+            Some(workflow_id),
             AuditKind::Previewed,
             if allowed {
                 "Dry run passed every capability check.".into()
@@ -1066,6 +1085,92 @@ impl AutomationState {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    fn compare_new_preview_with_id_lookup(operations: Vec<WorkflowOperation>, allowed: bool) {
+        let mut expected = AutomationState::default();
+        for domain in AgentDomain::ALL {
+            expected
+                .permissions
+                .set(domain, AgentAccess::Write, allowed);
+        }
+        expected.create_workflow(
+            "Existing history",
+            vec![WorkflowOperation::CreateTask {
+                title: "Old".into(),
+            }],
+            1,
+        );
+        let mut actual = expected.clone();
+        let expected_id = expected.create_workflow("New preview", operations.clone(), 42);
+        let expected_preview = expected.preview(&expected_id, 42);
+        let (actual_id, actual_preview) =
+            actual.create_workflow_preview("New preview", operations, 42);
+        assert_eq!(actual_preview, expected_preview);
+        let appended = actual.workflows.last_mut().expect("new draft");
+        assert_eq!(appended.id, actual_id);
+        appended.id = expected_id.clone();
+        if expected_preview.is_some() {
+            let event = actual.audit.last_mut().expect("preview audit");
+            assert_eq!(event.workflow_id.as_deref(), Some(actual_id.as_str()));
+            event.workflow_id = Some(expected_id);
+            event.id = expected.audit.last().expect("reference audit").id.clone();
+        }
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn appended_previews_match_id_based_state_and_capability_checks() {
+        for allowed in [false, true] {
+            compare_new_preview_with_id_lookup(
+                vec![
+                    WorkflowOperation::CreateTask {
+                        title: "Task ΟΣ".into(),
+                    },
+                    WorkflowOperation::CreateKnowledgeNote {
+                        title: "Café".into(),
+                        body: "Reviewed content".into(),
+                    },
+                ],
+                allowed,
+            );
+        }
+    }
+
+    #[test]
+    fn invalid_appended_previews_preserve_the_unpreviewed_draft() {
+        for operations in [
+            vec![],
+            vec![WorkflowOperation::CreateTask { title: " ".into() }],
+            vec![
+                WorkflowOperation::CreateTask {
+                    title: "Too many steps".into()
+                };
+                129
+            ],
+        ] {
+            compare_new_preview_with_id_lookup(operations, true);
+        }
+    }
+
+    #[test]
+    fn id_based_preview_keeps_first_match_behavior_for_duplicate_ids() {
+        let mut state = AutomationState::default();
+        for title in ["First", "Second"] {
+            let mut workflow = Workflow::draft(
+                title,
+                vec![WorkflowOperation::CreateTask {
+                    title: title.into(),
+                }],
+                1,
+            );
+            workflow.id = "duplicate".into();
+            state.workflows.push(workflow);
+        }
+        state.preview("duplicate", 2).expect("first workflow");
+        assert_eq!(state.workflows[0].status, WorkflowStatus::Previewed);
+        assert_eq!(state.workflows[1].status, WorkflowStatus::Draft);
+        assert_eq!(state.audit.len(), 1);
+    }
 
     #[test]
     fn finance_workflow_amounts_are_exact_strings_and_accept_legacy_integers() {

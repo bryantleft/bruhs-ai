@@ -120,6 +120,19 @@ pub fn lcs_diff(old: &str, new: &str) -> Vec<DiffLine> {
         return pairwise(&a, &b);
     }
 
+    // The LCS walk always emits an equal prefix as context. Keep it out of
+    // the quadratic table, especially for unchanged files and appended output.
+    let prefix = a.iter().zip(&b).take_while(|(a, b)| a == b).count();
+    let mut out = Vec::with_capacity(n.max(m));
+    out.extend(
+        a[..prefix]
+            .iter()
+            .enumerate()
+            .map(|(index, text)| context(index + 1, index + 1, text)),
+    );
+    let (a, b) = (&a[prefix..], &b[prefix..]);
+    let (n, m) = (a.len(), b.len());
+
     // dp[i][j] = LCS length of a[i..] and b[j..]
     let mut dp = vec![vec![0usize; m + 1]; n + 1];
     for i in (0..n).rev() {
@@ -132,9 +145,8 @@ pub fn lcs_diff(old: &str, new: &str) -> Vec<DiffLine> {
         }
     }
 
-    let mut out = Vec::with_capacity(n.max(m));
     let (mut i, mut j) = (0, 0);
-    let (mut old_no, mut new_no) = (0usize, 0usize);
+    let (mut old_no, mut new_no) = (prefix, prefix);
     while i < n && j < m {
         if a[i] == b[j] {
             old_no += 1;
@@ -374,6 +386,23 @@ mod tests {
         assert_eq!(kinds(&d), "   ");
         assert_eq!(d[2].old_no, Some(3));
         assert_eq!(d[2].new_no, Some(3));
+    }
+
+    #[test]
+    fn long_equal_prefix_preserves_line_numbers_and_removal_ties() {
+        let prefix = "same\n".repeat(1500);
+        let lines = lcs_diff(&format!("{prefix}a\nb"), &format!("{prefix}b\na"));
+        assert!(lines[..1500]
+            .iter()
+            .all(|line| line.kind == LineKind::Context));
+        assert_eq!(
+            &lines[1500..],
+            &[
+                removed(1501, "a"),
+                context(1502, 1501, "b"),
+                added(1502, "a"),
+            ]
+        );
     }
 
     #[test]

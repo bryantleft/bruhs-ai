@@ -172,14 +172,18 @@ impl SearchIndex {
             })
             .collect::<Vec<_>>();
 
-        ranked.sort_unstable_by(|left, right| {
+        let by_rank = |left: &(usize, u64, i64), right: &(usize, u64, i64)| {
             right
                 .1
                 .cmp(&left.1)
                 .then_with(|| right.2.cmp(&left.2))
                 .then_with(|| left.0.cmp(&right.0))
-        });
-        ranked.truncate(limit);
+        };
+        if ranked.len() > limit {
+            ranked.select_nth_unstable_by(limit, by_rank);
+            ranked.truncate(limit);
+        }
+        ranked.sort_unstable_by(by_rank);
         ranked
             .into_iter()
             .map(|(index, score, _)| SearchHit {
@@ -333,6 +337,28 @@ mod tests {
         assert_eq!(index.search("plan", 1).len(), 1);
         assert!(index.search("   ", 10).is_empty());
         assert!(index.search("plan", 0).is_empty());
+    }
+
+    #[test]
+    fn limited_search_preserves_full_ranking_including_ties() {
+        let index = SearchIndex::new((0..200).map(|i| {
+            document(
+                &format!("record-{i}"),
+                SearchKind::Task,
+                if i % 3 == 0 {
+                    "Plan"
+                } else {
+                    "Plan the launch"
+                },
+                "",
+                "",
+                (i * 17) % 11,
+            )
+        }));
+        let all = index.search("plan", usize::MAX);
+        for limit in [0, 1, 2, 49, 50, 199, 200, 201, usize::MAX] {
+            assert_eq!(index.search("plan", limit), all[..limit.min(all.len())]);
+        }
     }
 
     #[test]

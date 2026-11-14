@@ -373,6 +373,7 @@ pub fn resume_command(provider: AgentProvider, session_id: &str, cwd: Option<&st
         AgentProvider::Antigravity => format!("agy --conversation {}", shell_quote(session_id)),
         AgentProvider::Grok => format!("~/.grok/bin/agent --resume {}", shell_quote(session_id)),
         AgentProvider::OpenCode => format!("opencode --session {}", shell_quote(session_id)),
+        AgentProvider::Acp => format!("printf '%s\\n' {}", shell_quote("Resume this ACP session from Bruhs; ACP agents have no portable CLI resume command.")),
     };
     match (cwd.filter(|dir| !dir.is_empty()), provider) {
         (Some(dir), _) => format!("cd {} && {resume}", shell_quote(dir)),

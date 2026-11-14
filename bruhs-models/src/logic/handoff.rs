@@ -90,7 +90,8 @@ pub fn reviewer_for(provider: AgentProvider) -> AgentProvider {
         | AgentProvider::Cursor
         | AgentProvider::Antigravity
         | AgentProvider::Grok
-        | AgentProvider::OpenCode => AgentProvider::Claude,
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => AgentProvider::Claude,
     }
 }
 
@@ -103,6 +104,7 @@ pub fn provider_name(provider: AgentProvider) -> &'static str {
         AgentProvider::Antigravity => "Antigravity",
         AgentProvider::Grok => "Grok",
         AgentProvider::OpenCode => "OpenCode",
+        AgentProvider::Acp => "ACP agent",
     }
 }
 
