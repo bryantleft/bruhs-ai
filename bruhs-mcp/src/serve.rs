@@ -1,6 +1,6 @@
 //! The stdio request loop. A read or write failure on the transport ends the
 //! loop with an error (and a non-zero exit), never a silent drop.
-use crate::protocol::{ErrorCode, JsonRpcRequest, JsonRpcResponse};
+use crate::protocol::{ErrorCode, JsonRpcRequest, JsonRpcResponse, ToolInfo};
 use crate::stdio_input::{Frame, StdioInput};
 use crate::tools::{self, Mode};
 use bruhs_core::AppState;
@@ -45,20 +45,27 @@ where
     R: AsyncBufRead + Unpin,
     W: AsyncWrite + Unpin,
 {
+    let mut buffer = Vec::new();
+    let mut text_buffer = Vec::new();
     while let Some(frame) = input.next().await.map_err(ServeError::Read)? {
-        let Some(response) = respond(frame, backend).await else {
+        let Some(response) = respond(frame, backend, &mut text_buffer).await else {
             continue;
         };
-        write_frame(output, &response)
+        write_frame(output, &response, &mut buffer)
             .await
             .map_err(ServeError::Write)?;
+        recycle_text(response, &mut text_buffer);
     }
     Ok(())
 }
 
 /// The response to one frame, or `None` when none is owed (blank lines and
 /// notifications).
-async fn respond(frame: Frame<'_>, backend: &Backend) -> Option<JsonRpcResponse> {
+async fn respond(
+    frame: Frame<'_>,
+    backend: &Backend,
+    text_buffer: &mut Vec<u8>,
+) -> Option<JsonRpcResponse> {
     let line = match frame {
         Frame::Message(line) => line,
         Frame::Oversized => {
@@ -80,39 +87,75 @@ async fn respond(frame: Frame<'_>, backend: &Backend) -> Option<JsonRpcResponse>
     if request.id.is_none() && request.method.starts_with("notifications/") {
         return None;
     }
-    Some(handle_request(&request, backend).await)
+    Some(handle_request(request, backend, text_buffer).await)
+}
+
+/// Retain one consumed tool text allocation after its frame has been flushed.
+/// The next audit serializes current state into it; no response data is cached.
+fn recycle_text(response: JsonRpcResponse, buffer: &mut Vec<u8>) {
+    let Some(Value::Object(mut result)) = response.result else {
+        return;
+    };
+    let Some(Value::Array(content)) = result.remove("content") else {
+        return;
+    };
+    for block in content {
+        let Value::Object(mut block) = block else {
+            continue;
+        };
+        if let Some(Value::String(text)) = block.remove("text") {
+            if text.capacity() > buffer.capacity() {
+                *buffer = text.into_bytes();
+                buffer.clear();
+            }
+        }
+    }
 }
 
 /// Writes one response as a single newline-terminated frame and flushes it.
 pub async fn write_frame<W: AsyncWrite + Unpin>(
     output: &mut W,
     response: &JsonRpcResponse,
+    buffer: &mut Vec<u8>,
 ) -> io::Result<()> {
-    let bytes = encode_frame(response, &response.id);
-    output.write_all(&bytes).await?;
+    encode_frame(response, &response.id, buffer);
+    output.write_all(buffer).await?;
     output.flush().await
 }
 
 /// A response that cannot be serialized becomes a JSON-RPC internal error for
 /// the same request, never an empty frame.
-fn encode_frame<T: Serialize>(response: &T, id: &Option<Value>) -> Vec<u8> {
+fn encode_frame<T: Serialize>(response: &T, id: &Option<Value>, buffer: &mut Vec<u8>) {
     /// Used only if even the error response cannot be encoded.
     const LAST_RESORT: &[u8] =
         br#"{"jsonrpc":"2.0","id":null,"error":{"code":-32603,"message":"Internal error"}}"#;
-    let mut bytes = serde_json::to_vec(response).unwrap_or_else(|error| {
+    buffer.clear();
+    if let Err(error) = serde_json::to_writer(&mut *buffer, response) {
+        buffer.clear();
         let fallback = JsonRpcResponse::error(
             id.clone(),
             ErrorCode::InternalError,
             format!("Internal error: cannot encode the response: {error}"),
         );
-        serde_json::to_vec(&fallback).unwrap_or_else(|_| LAST_RESORT.to_vec())
-    });
-    bytes.push(b'\n');
-    bytes
+        if serde_json::to_writer(&mut *buffer, &fallback).is_err() {
+            buffer.clear();
+            buffer.extend_from_slice(LAST_RESORT);
+        }
+    }
+    buffer.push(b'\n');
 }
 
-async fn handle_request(request: &JsonRpcRequest, backend: &Backend) -> JsonRpcResponse {
-    let id = request.id.clone();
+#[derive(Serialize)]
+struct ToolsList {
+    tools: Vec<&'static ToolInfo>,
+}
+
+async fn handle_request(
+    request: JsonRpcRequest,
+    backend: &Backend,
+    text_buffer: &mut Vec<u8>,
+) -> JsonRpcResponse {
+    let id = request.id;
     match request.method.as_str() {
         "initialize" => JsonRpcResponse::success(
             id,
@@ -125,8 +168,13 @@ async fn handle_request(request: &JsonRpcRequest, backend: &Backend) -> JsonRpcR
                 }
             }),
         ),
-        "tools/list" => encoded(id, &json!({ "tools": tools::list_tools(backend.mode()) })),
-        "tools/call" => call_tool(request, backend).await,
+        "tools/list" => encoded(
+            id,
+            &ToolsList {
+                tools: tools::list_tools(backend.mode()),
+            },
+        ),
+        "tools/call" => call_tool(id, request.params, backend, text_buffer).await,
         "ping" => JsonRpcResponse::success(id, json!({})),
         method => JsonRpcResponse::error(
             id,
@@ -154,13 +202,13 @@ struct CallParams {
     arguments: Value,
 }
 
-async fn call_tool(request: &JsonRpcRequest, backend: &Backend) -> JsonRpcResponse {
-    let id = request.id.clone();
-    let params = if request.params.is_null() {
-        json!({})
-    } else {
-        request.params.clone()
-    };
+async fn call_tool(
+    id: Option<Value>,
+    params: Value,
+    backend: &Backend,
+    text_buffer: &mut Vec<u8>,
+) -> JsonRpcResponse {
+    let params = if params.is_null() { json!({}) } else { params };
     let params: CallParams = match serde_json::from_value(params) {
         Ok(params) => params,
         Err(error) => {
@@ -179,13 +227,15 @@ async fn call_tool(request: &JsonRpcRequest, backend: &Backend) -> JsonRpcRespon
         );
     };
     let result = match backend {
-        Backend::Standalone(state) => tools::call_standalone(tool, &params.arguments, state).await,
+        Backend::Standalone(state) => {
+            tools::call_standalone(tool, &params.arguments, state, text_buffer).await
+        }
         #[cfg(unix)]
         Backend::Bridge(client) => {
             crate::workspace_bridge::call(tool, &params.arguments, client).await
         }
     };
-    encoded(id, &result)
+    JsonRpcResponse::success(id, result.into_value())
 }
 
 #[cfg(test)]

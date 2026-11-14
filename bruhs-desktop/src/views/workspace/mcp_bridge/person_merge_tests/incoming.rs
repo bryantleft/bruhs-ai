@@ -166,7 +166,7 @@ fn incoming_contact_batch_timing(cx: &mut TestAppContext) {
         .enumerate()
         .map(|(index, target)| PersonMergeResolution {
             source_id: format!("source-{index:06}"),
-            target: target.clone(),
+            target: target.as_ref().clone(),
         })
         .collect();
     let mut times = Vec::new();
@@ -245,8 +245,8 @@ fn incoming_shared_survivor_keeps_newest_profile_and_conflicting_source_until_re
         let (mut people, mut relationships, documents) = super::bulk::dataset(3, 3);
         people.merge_archives.clear();
         people.records.truncate(1);
-        people.records[0].display_name = "Newer cached survivor".into();
-        people.records[0].updated_at = 30;
+        Arc::make_mut(&mut people.records[0]).display_name = "Newer cached survivor".into();
+        Arc::make_mut(&mut people.records[0]).updated_at = 30;
         let original = people.records[0].clone();
         let mut incoming: Vec<_> = (0..3)
             .map(|index| redirect(&format!("source-{index:06}"), "target-000000"))

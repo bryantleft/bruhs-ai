@@ -14,6 +14,7 @@ use bruhs_models::{
 use serde::Deserialize;
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex, OnceLock};
+mod audit;
 mod life_schema;
 mod workflow_schema;
 
@@ -76,11 +77,11 @@ fn registry() -> &'static [ToolSpec] {
 }
 
 /// The tools `tools/list` advertises in `mode`.
-pub fn list_tools(mode: Mode) -> Vec<ToolInfo> {
+pub fn list_tools(mode: Mode) -> Vec<&'static ToolInfo> {
     registry()
         .iter()
         .filter(|spec| spec.availability.includes(mode))
-        .map(|spec| spec.info.clone())
+        .map(|spec| &spec.info)
         .collect()
 }
 
@@ -272,7 +273,12 @@ fn granted(domain: AgentDomain, access: AgentAccess) -> bool {
 
 /// Answers a standalone-mode tool call. Argument problems and execution
 /// failures are both tool results with `isError: true`.
-pub async fn call_standalone(tool: Tool, args: &Value, state: &Arc<AppState>) -> ToolResult {
+pub async fn call_standalone(
+    tool: Tool,
+    args: &Value,
+    state: &Arc<AppState>,
+    text_buffer: &mut Vec<u8>,
+) -> ToolResult {
     match tool {
         Tool::ListThreads => {
             with_grant(AgentDomain::Chat, AgentAccess::Read, || list_threads(state)).await
@@ -289,7 +295,7 @@ pub async fn call_standalone(tool: Tool, args: &Value, state: &Arc<AppState>) ->
         }
         Tool::ReadDomain(domain) => read_domain(domain, args, state).await,
         Tool::WriteDomain(domain) => write_domain(domain, args),
-        Tool::AgentAudit => agent_audit(),
+        Tool::AgentAudit => agent_audit(std::mem::take(text_buffer)),
         // The registry never offers these in standalone mode; answer rather
         // than panic if a future edit lets one through.
         Tool::ReadMeetingNotes
@@ -358,12 +364,12 @@ fn preview(domain: AgentDomain, operation: WorkflowOperation) -> ToolResult {
     let mut state = automation_state()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let workflow_id = state.create_workflow(
+    let (workflow_id, preview) = state.create_workflow_preview(
         format!("MCP {} write", domain.label()),
         vec![operation],
         now_ms,
     );
-    let Some(preview) = state.preview(&workflow_id, now_ms) else {
+    let Some(preview) = preview else {
         return ToolResult::err("Workflow could not be previewed");
     };
     drop(state);
@@ -379,16 +385,11 @@ fn preview(domain: AgentDomain, operation: WorkflowOperation) -> ToolResult {
     )
 }
 
-fn agent_audit() -> ToolResult {
+fn agent_audit(buffer: Vec<u8>) -> ToolResult {
     let state = automation_state()
         .lock()
         .unwrap_or_else(std::sync::PoisonError::into_inner);
-    let encoded = serde_json::to_string_pretty(&json!({
-        "permissions": state.permissions,
-        "workflows": state.workflows,
-        "jobs": state.jobs,
-        "audit": state.audit,
-    }));
+    let encoded = audit::encode(&state, buffer);
     drop(state);
     match encoded {
         Ok(text) => ToolResult::ok(text),

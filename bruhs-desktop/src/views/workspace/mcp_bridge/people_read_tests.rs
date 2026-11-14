@@ -34,7 +34,7 @@ async fn granted_people_read_discovers_identity_without_voice_fingerprint(cx: &m
         person.id = "exact-ada".into();
         person.voice_embedding = Some(vec![0.125; 512]);
         w.meetings_hub
-            .update(cx, |hub, _| hub.people = vec![person]);
+            .update(cx, |hub, _| hub.people = vec![person.into()]);
         w.automation_state
             .permissions
             .set(AgentDomain::People, AgentAccess::Read, true);
@@ -85,7 +85,7 @@ async fn people_summary_search_skips_large_histories_and_private_relationship_no
         profile.notes = "Secret-relationship".repeat(50_000);
         w.relationships = vec![profile];
         w.meetings_hub
-            .update(cx, |hub, _| hub.people = vec![person]);
+            .update(cx, |hub, _| hub.people = vec![person.into()]);
     });
     connect(&workspace, cx).await;
     for query in ["PERSON-ADA", "ADÁ", "enchantress", ""] {
@@ -174,7 +174,7 @@ async fn person_profile_and_paginated_history_preserve_context_without_mutating_
         );
         w.relationships = vec![relationship];
         w.meetings_hub
-            .update(cx, |hub, _| hub.people = vec![person]);
+            .update(cx, |hub, _| hub.people = vec![person.into()]);
         expected
     });
     connect(&workspace, cx).await;

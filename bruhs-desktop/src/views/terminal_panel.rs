@@ -4,7 +4,7 @@
 
 use std::sync::Arc;
 
-use bruhs_core::terminal::{TerminalManager, TerminalSpec};
+use bruhs_core::terminal::{TerminalInfo, TerminalManager, TerminalSpec};
 use gpui::prelude::*;
 use gpui::*;
 
@@ -107,6 +107,21 @@ pub struct TerminalPanelView {
     context_project: Option<(String, String)>,
     recent_projects: Vec<(String, String)>,
     error: Option<String>,
+    open_generation: u64,
+}
+
+struct PendingTerminal {
+    info: TerminalInfo,
+    manager: TerminalManager,
+    adopted: bool,
+}
+
+impl Drop for PendingTerminal {
+    fn drop(&mut self) {
+        if !self.adopted {
+            self.manager.close(&self.info.id);
+        }
+    }
 }
 
 impl EventEmitter<TerminalPanelEvent> for TerminalPanelView {}
@@ -127,6 +142,7 @@ impl TerminalPanelView {
             context_project: None,
             recent_projects: Vec::new(),
             error: None,
+            open_generation: 0,
         }
     }
 
@@ -204,26 +220,49 @@ impl TerminalPanelView {
             project_name,
             ..TerminalSpec::default()
         };
-        match self.manager.create(spec) {
-            Ok(info) => {
-                let manager = self.manager.clone();
-                let runtime = Arc::clone(&self.runtime);
-                let id = info.id.clone();
-                let view = cx.new(|cx| TerminalView::new(info, manager, runtime, cx));
-                cx.observe(&view, |_, _, cx| cx.notify()).detach();
-                self.sessions.push(view);
-                self.active = Some(id);
-                self.error = None;
-                let focus_view = self.active_session(cx);
-                cx.defer_in(window, move |_this, window, cx| {
-                    if let Some(view) = focus_view {
-                        let handle = view.focus_handle(cx);
-                        window.focus(&handle, cx);
+        self.open_generation = self.open_generation.wrapping_add(1);
+        let generation = self.open_generation;
+        let manager = self.manager.clone();
+        let created = cx.background_spawn(async move {
+            manager.create(spec).map(|info| PendingTerminal {
+                info,
+                manager,
+                adopted: false,
+            })
+        });
+        cx.spawn_in(window, async move |this, cx| {
+            let result = created.await;
+            let _ = this.update_in(cx, |this, window, cx| {
+                match result {
+                    Ok(mut pending) => {
+                        let info = pending.info.clone();
+                        let id = info.id.clone();
+                        let manager = this.manager.clone();
+                        let runtime = Arc::clone(&this.runtime);
+                        let view = cx.new(|cx| TerminalView::new(info, manager, runtime, cx));
+                        cx.observe(&view, |_, _, cx| cx.notify()).detach();
+                        this.sessions.push(view.clone());
+                        pending.adopted = true;
+                        if this.open_generation == generation {
+                            this.active = Some(id);
+                            this.error = None;
+                            cx.defer_in(window, move |this, window, cx| {
+                                if this.open_generation == generation {
+                                    let handle = view.focus_handle(cx);
+                                    window.focus(&handle, cx);
+                                }
+                            });
+                        }
                     }
-                });
-            }
-            Err(err) => self.error = Some(err.to_string()),
-        }
+                    Err(error) if this.open_generation == generation => {
+                        this.error = Some(error.to_string())
+                    }
+                    Err(_) => {}
+                }
+                cx.notify();
+            });
+        })
+        .detach();
         cx.notify();
     }
 
@@ -260,6 +299,9 @@ impl TerminalPanelView {
 
     pub fn close(&mut self, id: &str, cx: &mut Context<'_, Self>) {
         let ids = self.session_ids(cx);
+        if ids.iter().any(|existing| existing == id) {
+            self.open_generation = self.open_generation.wrapping_add(1);
+        }
         let next = next_active_after_close(&ids, id, self.active.as_deref());
         self.sessions.retain(|s| s.read(cx).info.id != id);
         self.manager.close(id);
@@ -269,6 +311,7 @@ impl TerminalPanelView {
 
     pub fn select(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.sessions.iter().any(|s| s.read(cx).info.id == id) {
+            self.open_generation = self.open_generation.wrapping_add(1);
             self.active = Some(id.to_string());
             self.focus_active(window, cx);
             cx.notify();
@@ -853,6 +896,96 @@ mod tests {
 
     fn ids(list: &[&str]) -> Vec<String> {
         list.iter().map(|s| s.to_string()).collect()
+    }
+
+    #[gpui::test]
+    fn terminal_launch_errors_arrive_without_blocking_the_action(cx: &mut gpui::TestAppContext) {
+        use gpui::AppContext as _;
+        use std::sync::Arc;
+        cx.update(gpui_component::init);
+        let runtime = Arc::new(tokio::runtime::Runtime::new().unwrap());
+        let panel = cx.new(|cx| {
+            super::TerminalPanelView::new(bruhs_core::terminal::TerminalManager::new(), runtime, cx)
+        });
+        let host = panel.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| gpui_component::Root::new(host, window, cx));
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory
+            .path()
+            .join("missing")
+            .to_string_lossy()
+            .into_owned();
+        panel.update_in(cx, |panel, window, cx| {
+            panel.open(Some(missing), None, window, cx);
+            assert!(panel.last_error().is_none(), "launch must run on a worker");
+            assert!(!panel.has_sessions());
+        });
+        cx.run_until_parked();
+        panel.read_with(cx, |panel, _| {
+            assert!(panel
+                .last_error()
+                .is_some_and(|error| error.contains("directory")));
+            assert!(!panel.has_sessions());
+        });
+    }
+
+    #[gpui::test]
+    fn pending_terminal_launch_cannot_override_later_selection_or_close(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::AppContext as _;
+        use std::sync::Arc;
+        cx.update(gpui_component::init);
+        let runtime = Arc::new(tokio::runtime::Runtime::new().unwrap());
+        let panel = cx.new(|cx| {
+            super::TerminalPanelView::new(bruhs_core::terminal::TerminalManager::new(), runtime, cx)
+        });
+        let host = panel.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| gpui_component::Root::new(host, window, cx));
+        let directory = tempfile::tempdir().unwrap();
+        let missing = directory
+            .path()
+            .join("missing")
+            .to_string_lossy()
+            .into_owned();
+        panel.update_in(cx, |panel, window, cx| {
+            for id in ["a", "b"] {
+                panel.push_detached(
+                    bruhs_core::terminal::TerminalInfo {
+                        id: id.into(),
+                        cwd: None,
+                        title: id.into(),
+                        project_name: None,
+                        cols: 80,
+                        rows: 24,
+                        created_at_ms: 0,
+                    },
+                    cx,
+                );
+            }
+            panel.open(Some(missing.clone()), None, window, cx);
+            panel.select("a", window, cx);
+        });
+        cx.run_until_parked();
+        panel.read_with(cx, |panel, _| {
+            assert_eq!(panel.active_id(), Some("a"));
+            assert!(
+                panel.last_error().is_none(),
+                "a previous launch must not publish after selecting another tab"
+            );
+        });
+        panel.update_in(cx, |panel, window, cx| {
+            panel.open(Some(missing), None, window, cx);
+            panel.close("a", cx);
+        });
+        cx.run_until_parked();
+        panel.read_with(cx, |panel, _| {
+            assert_eq!(panel.active_id(), Some("b"));
+            assert!(
+                panel.last_error().is_none(),
+                "a previous launch must not publish after closing a tab"
+            );
+        });
     }
 
     #[test]

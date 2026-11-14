@@ -1,4 +1,4 @@
-use super::read_page::read_page;
+use super::read_page::{read_matching_page, read_page};
 use super::*;
 
 impl Workspace {
@@ -22,27 +22,25 @@ impl Workspace {
         if query.len() > 512 || offset > 100_000 {
             return Err("Query or offset is too large.".into());
         }
-        let query = query.to_lowercase();
+        let query = LowercaseQuery::new(query);
+        let mut matcher = query.matcher();
         #[derive(Serialize)]
         struct Identity<'a> {
             id: &'a str,
             title: &'a str,
             updated_at: i64,
         }
-        let records = self
-            .meeting_notes
-            .iter()
-            .filter(|note| {
-                query.is_empty()
-                    || note.id.to_lowercase().contains(&query)
-                    || note.title.to_lowercase().contains(&query)
-            })
-            .map(|note| Identity {
+        let mut result = read_matching_page(
+            self.meeting_notes.iter(),
+            query.is_empty(),
+            |note| matcher.matches_fields(&[&note.id, &note.title]),
+            |note| Identity {
                 id: &note.id,
                 title: &note.title,
                 updated_at: note.updated_at,
-            });
-        let mut result = read_page(records, offset)?;
+            },
+            offset,
+        )?;
         result["source"] = "workspace_local_notes".into();
         Ok(result)
     }

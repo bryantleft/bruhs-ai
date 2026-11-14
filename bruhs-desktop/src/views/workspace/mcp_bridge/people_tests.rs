@@ -65,7 +65,7 @@ async fn started(
                 .map(|id| {
                     let mut person = PersonProfile::new("Alex");
                     person.id = id.into();
-                    person
+                    person.into()
                 })
                 .collect();
         });

@@ -195,10 +195,10 @@ impl Workspace {
 }
 
 fn unique_person<'a>(
-    people: &'a [PersonProfile],
+    people: &'a [Arc<PersonProfile>],
     id: &str,
 ) -> Result<Option<&'a PersonProfile>, &'static str> {
-    let mut matches = people.iter().filter(|p| p.id == id);
+    let mut matches = people.iter().map(Arc::as_ref).filter(|p| p.id == id);
     let first = matches.next();
     if matches.next().is_some() {
         return Err("Duplicate contact identities prevent safe merge. Originals were retained.");

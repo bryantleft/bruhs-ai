@@ -43,7 +43,7 @@ async fn discovered_person_identity_flows_through_user_approved_durable_reminder
             .set(AgentDomain::People, AgentAccess::Write, true);
         let person = PersonProfile::new("Discovered Alex");
         w.meetings_hub
-            .update(cx, |hub, _| hub.people = vec![person]);
+            .update(cx, |hub, _| hub.people = vec![person.into()]);
     });
     connect(&workspace, cx).await;
     let discovered = value(

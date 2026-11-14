@@ -58,24 +58,12 @@ impl StreamFragments {
         {
             return Err("Saved transcript fragments have invalid pages.");
         }
-        let fragments: Vec<_> = self.iter().cloned().collect();
-        bruhs_models::validate_transcript_records(id, &fragments)
-            .map_err(bruhs_models::TranscriptValidationError::message)?;
-        let existing: HashMap<_, _> = base
-            .iter()
-            .map(|record| (record.id.as_str(), record))
-            .collect();
-        if fragments.iter().any(|record| {
-            existing
-                .get(record.id.as_str())
-                .is_some_and(|saved| !saved.partial && *saved != record)
-        }) {
-            return Err("Saved stream fragments cannot rewrite finalized speech.");
-        }
-        bruhs_models::validate_transcript_records(id, &self.merge(base.to_vec()))
-            .map_err(bruhs_models::TranscriptValidationError::message)
+        let fragments: Vec<_> = self.iter().collect();
+        bruhs_models::validate_transcript_overlay(id, base, &fragments)
     }
 
+    // Original owned merge retained as the test oracle.
+    #[cfg(test)]
     pub(super) fn merge(&self, mut records: Vec<TranscriptSegment>) -> Vec<TranscriptSegment> {
         let mut positions: HashMap<_, _> = records
             .iter()
@@ -87,6 +75,35 @@ impl StreamFragments {
                 records[*index] = record.clone();
             } else {
                 positions.insert(record.id.clone(), records.len());
+                records.push(record.clone());
+            }
+        }
+        records.sort_unstable_by(|a, b| (a.start_ms, &a.id).cmp(&(b.start_ms, &b.id)));
+        records
+    }
+
+    /// A validated cache has unique fragment IDs; no base needs merging here.
+    pub(super) fn restore_without_base(&self) -> Vec<TranscriptSegment> {
+        let mut records: Vec<_> = self.iter().cloned().collect();
+        records.sort_unstable_by(|a, b| (a.start_ms, &a.id).cmp(&(b.start_ms, &b.id)));
+        records
+    }
+
+    /// Select borrowed fragments before cloning the final active rows.
+    /// The saved base/fragments and their receipt ownership stay unchanged.
+    pub(super) fn merge_borrowed(&self, base: &[TranscriptSegment]) -> Vec<TranscriptSegment> {
+        let mut fragments: HashMap<_, _> = self
+            .iter()
+            .map(|record| (record.id.as_str(), record))
+            .collect();
+        let mut records: Vec<_> = base
+            .iter()
+            .map(|saved| fragments.remove(saved.id.as_str()).unwrap_or(saved).clone())
+            .collect();
+        // Preserve fragment traversal order before the original owned-row sort.
+        // Removing from the lookup also preserves last-fragment-wins behavior.
+        for fragment in self.iter() {
+            if let Some(record) = fragments.remove(fragment.id.as_str()) {
                 records.push(record.clone());
             }
         }

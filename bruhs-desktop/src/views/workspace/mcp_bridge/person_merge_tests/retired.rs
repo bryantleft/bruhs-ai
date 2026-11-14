@@ -17,7 +17,7 @@ async fn retired_person_reconciliation_repairs_late_references_without_replacing
             let mut snapshot = hub.people_snapshot();
             let mut late_person = PersonProfile::new("Later recovered name");
             late_person.id = "source".into();
-            snapshot.records.push(late_person);
+            snapshot.records.push(late_person.into());
             snapshot.pending_creates.insert("source".into());
             hub.restore_people(snapshot);
         });

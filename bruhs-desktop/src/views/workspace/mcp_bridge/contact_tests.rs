@@ -63,7 +63,7 @@ async fn workspace_snapshot_retains_contact_records_for_offline_restore(cx: &mut
         let mut person = PersonProfile::new("Offline contact");
         person.id = "owned-contact".into();
         w.meetings_hub
-            .update(cx, |hub, _| hub.people.push(person.clone()));
+            .update(cx, |hub, _| hub.people.push(person.clone().into()));
         let saved = serde_json::to_value(w.snapshot(cx)).unwrap();
         assert_eq!(
             saved["people_cache"]["records"][0],

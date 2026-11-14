@@ -10,7 +10,11 @@ mod chat_tests;
 #[cfg(all(test, unix))]
 mod contact_tests;
 #[cfg(all(test, unix))]
+mod context_read_tests;
+#[cfg(all(test, unix))]
 mod domain_tests;
+#[cfg(all(test, unix))]
+mod generic_read_tests;
 #[cfg(all(test, unix))]
 mod history_tests;
 #[cfg(all(test, unix))]
@@ -31,6 +35,8 @@ mod people_read_tests;
 mod people_tests;
 #[cfg(all(test, unix))]
 mod person_merge_tests;
+#[cfg(all(test, unix))]
+mod projected_read_tests;
 #[cfg(unix)]
 mod requests;
 mod rollback_review;
@@ -40,6 +46,8 @@ mod rollback_tests;
 mod test_fixture;
 #[cfg(test)]
 mod transcript_view_tests;
+#[cfg(all(test, unix))]
+mod workflow_performance_tests;
 use rollback_review::RollbackReview;
 #[cfg(all(test, unix))]
 mod tests;
@@ -135,14 +143,41 @@ impl WorkspaceBridge {
     /// A proposal waiting for its preview to be reviewed.
     #[cfg(unix)]
     fn pending_proposal_id<'a>(&'a self, state: &AutomationState) -> Option<&'a str> {
-        self.proposals
-            .values()
-            .find(|(id, _)| {
-                state.workflows.iter().any(|workflow| {
-                    workflow.id == *id && workflow.status == bruhs_models::WorkflowStatus::Previewed
+        // Zero or one owner already needs at most one history pass.
+        if self.proposals.len() <= 1 {
+            return self
+                .proposals
+                .values()
+                .find(|(id, _)| {
+                    state.workflows.iter().any(|workflow| {
+                        workflow.id == *id
+                            && workflow.status == bruhs_models::WorkflowStatus::Previewed
+                    })
                 })
-            })
-            .map(|(id, _)| id.as_str())
+                .map(|(id, _)| id.as_str());
+        }
+        // Inactive history needs one pass, not one per session proposal. Keep
+        // the existing proposal iteration priority when several previews exist.
+        let mut first: Option<(usize, &str)> = None;
+        for workflow in state
+            .workflows
+            .iter()
+            .filter(|workflow| workflow.status == bruhs_models::WorkflowStatus::Previewed)
+        {
+            for (rank, (id, _)) in self.proposals.values().enumerate() {
+                if first.is_some_and(|(best, _)| rank >= best) {
+                    break;
+                }
+                if workflow.id == *id {
+                    if rank == 0 {
+                        return Some(id);
+                    }
+                    first = Some((rank, id.as_str()));
+                    break;
+                }
+            }
+        }
+        first.map(|(_, id)| id)
     }
 
     /// Proposals need the local socket, which only unix builds open.

@@ -25,7 +25,7 @@ fn assert_opens_detail(fixture: Fixture, cx: &mut TestAppContext) {
     let before = workspace.update_in(cx, |workspace, window, cx| {
         match fixture {
             Fixture::Finance => workspace.life_context.finance.transactions.push(
-                FinanceTransaction::manual("routequartz", "Fixture category", -1234, 1),
+                FinanceTransaction::manual("routequartz", "Fixture category", -1234, 1).into(),
             ),
             Fixture::Health => workspace.life_context.health.workouts.push(
                 WorkoutLog::manual("routequartz", 37, 1),
@@ -156,8 +156,8 @@ fn stale_record_hit_keeps_its_id_instead_of_opening_another_record(cx: &mut Test
     let (workspace, cx) = workspace(cx);
     let selected_id = workspace.update_in(cx, |workspace, window, cx| {
         workspace.life_context.finance.transactions = vec![
-            FinanceTransaction::manual("routequartz", "Selected", -100, 1),
-            FinanceTransaction::manual("Other merchant", "Unrelated", -200, 2),
+            FinanceTransaction::manual("routequartz", "Selected", -100, 1).into(),
+            FinanceTransaction::manual("Other merchant", "Unrelated", -200, 2).into(),
         ];
         let hit = workspace.universal_search("routequartz", cx).1.remove(0);
         let selected_id = hit.document.id.clone();

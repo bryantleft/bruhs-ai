@@ -2,6 +2,7 @@
 
 use super::*;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
+use std::collections::HashMap;
 
 impl DesktopTimegridDrag {
     pub(super) fn new(event: &DesktopCalendarEvent, kind: DesktopTimegridDragKind) -> Self {
@@ -130,6 +131,68 @@ pub(super) fn event_overlaps_day(event: &DesktopCalendarEvent, date: NaiveDate) 
     let start = at_hour(date, 0);
     let end = at_hour(date + Duration::days(1), 0);
     event.start_at < end && event.end_at > start
+}
+
+/// The month already displays at most three event/task pills per day. Keep
+/// borrowed picks and complete counts, rather than cloning hidden records.
+pub(super) struct CalendarMonthDay<'a> {
+    pub date: NaiveDate,
+    pub(super) start: NaiveDateTime,
+    pub(super) end: NaiveDateTime,
+    pub events: Vec<&'a DesktopCalendarEvent>,
+    pub tasks: Vec<&'a DesktopWorkItem>,
+    pub total_records: usize,
+}
+
+pub(super) fn calendar_month_days<'a>(
+    events: &'a [DesktopCalendarEvent],
+    tasks: &'a [DesktopWorkItem],
+    start: NaiveDate,
+) -> Vec<CalendarMonthDay<'a>> {
+    let mut days = (0..42)
+        .map(|index| {
+            let date = start + Duration::days(index);
+            CalendarMonthDay {
+                date,
+                start: at_hour(date, 0),
+                end: at_hour(date + Duration::days(1), 0),
+                events: Vec::new(),
+                tasks: Vec::new(),
+                total_records: 0,
+            }
+        })
+        .collect::<Vec<_>>();
+    for event in events {
+        let first = days.partition_point(|day| day.end <= event.start_at);
+        let end = days.partition_point(|day| day.start < event.end_at);
+        if first >= end {
+            continue;
+        }
+        for day in &mut days[first..end] {
+            day.total_records += 1;
+            if day.events.len() < 3 {
+                day.events.push(event);
+            }
+        }
+    }
+    // Preserve exact date-string matching, including rejecting noncanonical
+    // strings, while formatting each grid date once instead of once per task.
+    let by_date = days
+        .iter()
+        .enumerate()
+        .map(|(index, day)| (day.date.format(DESKTOP_DATE_FORMAT).to_string(), index))
+        .collect::<HashMap<_, _>>();
+    for task in tasks {
+        let Some(index) = task.due_date.as_ref().and_then(|due| by_date.get(due)) else {
+            continue;
+        };
+        let day = &mut days[*index];
+        day.total_records += 1;
+        if day.tasks.len() < 3 {
+            day.tasks.push(task);
+        }
+    }
+    days
 }
 
 pub(super) fn timegrid_total_height_px() -> f32 {
@@ -539,9 +602,19 @@ impl Workspace {
         &self,
         cx: &Context<'_, Self>,
     ) -> Vec<DesktopCalendarEvent> {
+        #[cfg(test)]
+        if self.calendar_legacy_preparation.get() {
+            return self.legacy_visible_calendar_events(cx);
+        }
+        let hub = self.meetings_hub.read(cx);
+        let mut seen = self
+            .calendar_events
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect::<HashSet<_>>();
         let mut events = self.calendar_events.clone();
-        for event in &self.meetings_hub.read(cx).google_events {
-            if events.iter().any(|existing| existing.id == event.id) {
+        for event in &hub.google_events {
+            if seen.contains(event.id.as_str()) {
                 continue;
             }
             let (Some(start_at), Some(end_at)) = (
@@ -550,6 +623,8 @@ impl Workspace {
             ) else {
                 continue;
             };
+            // Invalid entries must not hide a later valid entry with this ID.
+            seen.insert(event.id.as_str());
             events.push(DesktopCalendarEvent {
                 id: event.id.clone(),
                 title: event.title.clone(),
@@ -914,8 +989,22 @@ impl Workspace {
     }
 
     pub(super) fn render_calendar_month(&self, cx: &Context<'_, Self>) -> Div {
+        #[cfg(test)]
+        let legacy = self.calendar_legacy_preparation.get();
+        #[cfg(not(test))]
+        let legacy = false;
         let start = month_grid_start(self.calendar_anchor);
         let today = today_date();
+        let events = if legacy {
+            Vec::new()
+        } else {
+            self.visible_calendar_events(cx)
+        };
+        let days = if legacy {
+            Vec::new()
+        } else {
+            calendar_month_days(&events, &self.work_items, start)
+        };
         let weekday_headers: Vec<AnyElement> = WEEKDAY_NAMES
             .iter()
             .map(|day| {
@@ -940,9 +1029,20 @@ impl Workspace {
                     .map(|day| {
                         let index = week * 7 + day;
                         let date = start + Duration::days(i64::try_from(index).unwrap_or(0));
+                        #[cfg(test)]
+                        if legacy {
+                            return self.legacy_render_calendar_month_cell(
+                                index,
+                                date,
+                                date.month() == self.calendar_anchor.month()
+                                    && date.year() == self.calendar_anchor.year(),
+                                date == today,
+                                cx,
+                            );
+                        }
                         self.render_calendar_month_cell(
                             index,
-                            date,
+                            &days[index],
                             date.month() == self.calendar_anchor.month()
                                 && date.year() == self.calendar_anchor.year(),
                             date == today,
@@ -989,22 +1089,14 @@ impl Workspace {
     pub(super) fn render_calendar_month_cell(
         &self,
         index: usize,
-        date: NaiveDate,
+        day: &CalendarMonthDay<'_>,
         in_month: bool,
         is_today: bool,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let events: Vec<DesktopCalendarEvent> = self
-            .visible_calendar_events(cx)
-            .into_iter()
-            .filter(|event| event_overlaps_day(event, date))
-            .collect();
-        let tasks: Vec<DesktopWorkItem> = self
-            .work_items
-            .iter()
-            .filter(|item| work_item_due_on(item, date))
-            .cloned()
-            .collect();
+        let date = day.date;
+        let events = &day.events;
+        let tasks = &day.tasks;
         let event_take = events.len().min(3);
         let task_take = (3usize.saturating_sub(event_take)).min(tasks.len());
         let visible_events: Vec<AnyElement> = events
@@ -1018,7 +1110,7 @@ impl Workspace {
             .map(|item| self.render_calendar_task_pill(item, cx))
             .collect();
         let visible_count = event_take + task_take;
-        let extra = (events.len() + tasks.len()).saturating_sub(visible_count);
+        let extra = day.total_records.saturating_sub(visible_count);
         let date_for_new = date;
         let date_for_new_key = date;
         let cell_is_last_col = index % 7 == 6;
@@ -1213,6 +1305,10 @@ impl Workspace {
         columns: usize,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        #[cfg(test)]
+        let legacy = self.calendar_legacy_preparation.get();
+        #[cfg(not(test))]
+        let legacy = false;
         let start = if columns == 7 {
             week_start(self.calendar_anchor)
         } else {
@@ -1246,10 +1342,21 @@ impl Workspace {
                     .into_any_element()
             })
             .collect();
+        let events = if legacy {
+            Vec::new()
+        } else {
+            self.visible_calendar_events(cx)
+        };
         let day_columns: Vec<AnyElement> = days
             .iter()
             .map(|date| {
-                self.render_calendar_timegrid_day_column(*date, cx)
+                #[cfg(test)]
+                if legacy {
+                    return self
+                        .legacy_render_calendar_timegrid_day_column(*date, cx)
+                        .into_any_element();
+                }
+                self.render_calendar_timegrid_day_column(*date, &events, cx)
                     .into_any_element()
             })
             .collect();
@@ -1314,6 +1421,7 @@ impl Workspace {
     pub(super) fn render_calendar_timegrid_day_column(
         &self,
         date: NaiveDate,
+        events: &[DesktopCalendarEvent],
         cx: &Context<'_, Self>,
     ) -> Div {
         let hour_rows: Vec<AnyElement> = (0..24)
@@ -1364,12 +1472,7 @@ impl Workspace {
                     .into_any_element()
             })
             .collect();
-        let day_events: Vec<DesktopCalendarEvent> = self
-            .visible_calendar_events(cx)
-            .into_iter()
-            .filter(|event| event_overlaps_day(event, date))
-            .collect();
-        let event_blocks: Vec<AnyElement> = lay_out_timegrid_events(&day_events, date)
+        let event_blocks: Vec<AnyElement> = lay_out_timegrid_events(events, date)
             .into_iter()
             .map(|event| self.render_calendar_timegrid_event_block(event, cx))
             .collect();

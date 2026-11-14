@@ -123,10 +123,24 @@ async fn agent_cannot_pause_a_running_background_job_to_authorize_undo(cx: &mut 
         assert!(w.mcp_bridge.rollback_reviews.is_empty());
     });
     click(&workspace, cx, "desktop-pause-workflow").await;
+    workspace.update_in(cx, |w, _, _| {
+        assert_eq!(
+            w.automation_state.jobs[0].status,
+            bruhs_models::BackgroundJobStatus::Paused,
+            "The user's Pause click must stop the background job before undo review"
+        );
+    });
     ok(call(&workspace, cx, request(&id, false)).await);
+    workspace.update_in(cx, |w, _, _| {
+        assert!(w.mcp_bridge.rollback_pending(&id));
+    });
     click(&workspace, cx, "desktop-undo-workflow").await;
     workspace.update_in(cx, |w, _, _| {
-        assert!(w.work_items.is_empty());
+        assert!(
+            w.work_items.is_empty(),
+            "User-approved undo after pausing should succeed: {:?}",
+            w.automation_error
+        );
         assert_eq!(
             w.automation_state.jobs[0].status,
             bruhs_models::BackgroundJobStatus::RolledBack

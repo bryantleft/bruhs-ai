@@ -152,6 +152,29 @@ pub struct ToolContent {
 }
 
 impl ToolResult {
+    /// Move owned text into the response instead of serializing it into a copy.
+    pub fn into_value(self) -> Value {
+        let content = self
+            .content
+            .into_iter()
+            .map(|block| {
+                let kind = match block.content_type {
+                    ContentType::Text => "text",
+                };
+                Value::Object(serde_json::Map::from_iter([
+                    ("type".into(), Value::String(kind.into())),
+                    ("text".into(), Value::String(block.text)),
+                ]))
+            })
+            .collect();
+        let mut result = serde_json::Map::new();
+        result.insert("content".into(), Value::Array(content));
+        if let Some(error) = self.is_error {
+            result.insert("isError".into(), Value::Bool(error));
+        }
+        Value::Object(result)
+    }
+
     pub fn ok(text: impl Into<String>) -> Self {
         Self::text(text, None)
     }
@@ -248,6 +271,41 @@ mod tests {
         assert_eq!(
             serde_json::to_value(ToolResult::ok("fine")).unwrap(),
             json!({"content":[{"type":"text","text":"fine"}]})
+        );
+    }
+
+    #[test]
+    fn moved_tool_results_preserve_all_content_and_optional_error_flags() {
+        for flag in [None, Some(false), Some(true)] {
+            for count in [0, 1, 2] {
+                let result = ToolResult {
+                    content: (0..count)
+                        .map(|index| ToolContent {
+                            content_type: ContentType::Text,
+                            text: format!("{index}: ΟΣ Café 👩🏽‍💻 \"quoted\"\n\\\0"),
+                        })
+                        .collect(),
+                    is_error: flag,
+                };
+                let expected = serde_json::to_value(&result).expect("reference result");
+                let moved = result.into_value();
+                assert_eq!(moved, expected);
+                assert_eq!(
+                    serde_json::to_vec(&moved).expect("moved bytes"),
+                    serde_json::to_vec(&expected).expect("reference bytes")
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn moving_a_tool_result_reuses_the_large_text_allocation() {
+        let text = "large result ΟΣ Café 👩🏽‍💻 ".repeat(100_000);
+        let original = text.as_ptr();
+        let value = ToolResult::ok(text).into_value();
+        assert_eq!(
+            value["content"][0]["text"].as_str().expect("text").as_ptr(),
+            original
         );
     }
 }

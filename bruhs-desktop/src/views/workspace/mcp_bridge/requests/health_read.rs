@@ -1,4 +1,4 @@
-use super::{life_read, read_page::read_page, *};
+use super::{life_read, read_page::read_matching_page, *};
 use bruhs_core::workspace_bridge::HealthReadSection;
 
 impl Workspace {
@@ -9,34 +9,35 @@ impl Workspace {
         offset: usize,
     ) -> Result<Value, String> {
         let query = self.authorize_life_read(AgentDomain::Health, query, offset)?;
+        let mut matcher = query.matcher();
         let health = &self.life_context.health;
         let page = match section {
-            HealthReadSection::Workouts => read_page(
-                health
-                    .workouts
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id, &r.activity])),
+            HealthReadSection::Workouts => read_matching_page(
+                health.workouts.iter(),
+                query.is_empty(),
+                |r| matcher.matches_fields(&[&r.id, &r.activity]),
+                std::convert::identity,
                 offset,
             ),
-            HealthReadSection::Sleep => read_page(
-                health
-                    .sleep
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id])),
+            HealthReadSection::Sleep => read_matching_page(
+                health.sleep.iter(),
+                query.is_empty(),
+                |r| matcher.matches(&r.id),
+                std::convert::identity,
                 offset,
             ),
-            HealthReadSection::Recovery => read_page(
-                health
-                    .recovery
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id])),
+            HealthReadSection::Recovery => read_matching_page(
+                health.recovery.iter(),
+                query.is_empty(),
+                |r| matcher.matches(&r.id),
+                std::convert::identity,
                 offset,
             ),
-            HealthReadSection::Habits => read_page(
-                health
-                    .habits
-                    .iter()
-                    .filter(|r| life_read::matches(&query, &[&r.id, &r.title])),
+            HealthReadSection::Habits => read_matching_page(
+                health.habits.iter(),
+                query.is_empty(),
+                |r| matcher.matches_fields(&[&r.id, &r.title]),
+                std::convert::identity,
                 offset,
             ),
         }?;
