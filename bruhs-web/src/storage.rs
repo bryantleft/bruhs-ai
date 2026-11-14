@@ -38,7 +38,10 @@ use crate::state::{
 const DB_NAME: &str = "bruhs";
 // v12 also gates the conversation envelope format. Older tabs must close
 // before a writer can replace a structured record with a JSON envelope.
-const DB_VERSION: u32 = 12;
+const DB_VERSION: u32 = 13;
+const STORE_BOARDS: &str = "whiteboards";
+const STORE_BOARD_INDEX: &str = "whiteboard_index";
+const STORE_BOARD_ASSETS: &str = "whiteboard_assets";
 const STORE_MEETING_GENERATIONS: &str = "meeting_generations";
 const STORE_METADATA: &str = "metadata";
 const STORE_THREADS: &str = "threads";
@@ -188,6 +191,9 @@ async fn open_fresh() -> Result<Database, idb::Error> {
 
         // Upgrade additively without trying to recreate existing stores.
         for (name, key) in [
+            (STORE_BOARDS, "id"),
+            (STORE_BOARD_INDEX, "id"),
+            (STORE_BOARD_ASSETS, "id"),
             (STORE_METADATA, "key"),
             (STORE_THREADS, "id"),
             (STORE_MESSAGES, "thread_id"),
