@@ -11,8 +11,9 @@
 use leptos::prelude::*;
 
 use crate::state::{
-    CalendarAnchor, CalendarEvent, CalendarEventsSignal, EventSource, SetEventCreateOpen,
-    SetEventCreateStart, SetSelectedEventId, SetSelectedWorkItem, WorkItem, WorkItemsSignal,
+    AppView, CalendarAnchor, CalendarEvent, CalendarEventsSignal, EventSource, SetActiveView,
+    SetEventCreateOpen, SetEventCreateStart, SetSelectedEventId, SetSelectedWorkItem, WorkItem,
+    WorkItemsSignal,
 };
 
 #[derive(Clone)]
@@ -126,6 +127,7 @@ pub fn MonthView() -> impl IntoView {
     // Optional: clicking a task marker focuses it in the Tasks view; we
     // grab the setter so the click handler can wire it up.
     let SetSelectedWorkItem(set_selected_work_item) = expect_context::<SetSelectedWorkItem>();
+    let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
 
     let cells = Signal::derive(move || build_grid(anchor.get()));
 
@@ -202,9 +204,17 @@ pub fn MonthView() -> impl IntoView {
                                             set_event_create_open.set(true);
                                         };
                                         let is_google = matches!(e.source, EventSource::Google);
+                                        let pill_label = if is_google {
+                                            format!("Open Google event {title}, read only")
+                                        } else {
+                                            format!("Edit event {title}")
+                                        };
+                                        let data_event_id = e.id.clone();
                                         view! {
                                             <button
                                                 type="button"
+                                                aria-label=pill_label
+                                                data-event-id=data_event_id
                                                 on:click=on_pill_click
                                                 class="flex items-center gap-1 truncate text-label-sm text-rambutan-400 hover:text-rambutan-200 transition-colors text-left cursor-pointer"
                                             >
@@ -226,21 +236,24 @@ pub fn MonthView() -> impl IntoView {
                                         // dot) + muted color so the eye
                                         // separates them at a glance.
                                         let id = t.id.clone();
+                                        let data_task_id = t.id.clone();
                                         let title = t.title;
+                                        let task_label = format!("Open task {title}, due this day");
                                         let on_task_click = move |ev: web_sys::MouseEvent| {
                                             ev.stop_propagation();
-                                            // Surface the task id for the
-                                            // Tasks view's detail panel.
-                                            // Routing the user there is a
-                                            // separate concern — for now
-                                            // we just record the selection.
+                                            // Open the linked task, as Search
+                                            // and Today do.
                                             set_selected_work_item.set(Some(id.clone()));
+                                            set_active_view.set(AppView::Tasks);
+                                            super::record_focus::focus_record("task-detail-title".into());
                                         };
                                         view! {
                                             <button
                                                 type="button"
                                                 on:click=on_task_click
                                                 title="Task due"
+                                                aria-label=task_label
+                                                data-calendar-task=data_task_id
                                                 class="flex items-center gap-1 truncate text-label-sm text-rambutan-500 italic hover:text-rambutan-300 transition-colors text-left cursor-pointer"
                                             >
                                                 <span class="size-1.5 rounded-orb shrink-0 inset-ring inset-ring-rambutan-500"></span>

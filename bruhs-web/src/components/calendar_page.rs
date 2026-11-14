@@ -159,12 +159,13 @@ pub fn CalendarPage() -> impl IntoView {
         CalendarMode::Day => format_full_date(anchor.get()),
     };
 
-    // Mode pill: persimmon-soft when active; ghost otherwise.
+    // Mode pill: blueberry marks the selected view (persimmon is reserved
+    // for brand actions and focus); compact 28px targets, 44px on touch.
     let mode_btn_class = |is_active: bool| {
         if is_active {
-            "rounded-grape bg-persimmon-500/15 text-persimmon-200 inset-ring inset-ring-persimmon-400/20 px-2 py-0.5 text-label cursor-pointer"
+            "bruhs-control inline-flex min-h-[28px] items-center justify-center rounded-grape bg-blueberry-500/15 text-blueberry-300 inset-ring inset-ring-blueberry-500/30 px-2 text-label cursor-pointer"
         } else {
-            "rounded-grape px-2 py-0.5 text-label text-rambutan-500 hover:bg-longan-800/40 hover:text-rambutan-200 cursor-pointer"
+            "bruhs-control inline-flex min-h-[28px] items-center justify-center rounded-grape px-2 text-label text-rambutan-500 hover:bg-longan-800/40 hover:text-rambutan-200 cursor-pointer"
         }
     };
 
@@ -182,14 +183,14 @@ pub fn CalendarPage() -> impl IntoView {
                                 type="button"
                                 on:click=on_prev
                                 aria-label="Previous"
-                                class="inline-flex items-center justify-center size-6 rounded-grape text-body-sm text-rambutan-500 hover:bg-longan-800/40 hover:text-rambutan-300 cursor-pointer"
+                                class="bruhs-control inline-flex items-center justify-center min-h-[32px] min-w-[32px] rounded-grape text-body-sm text-rambutan-500 hover:bg-longan-800/40 hover:text-rambutan-300 cursor-pointer"
                             >
                                 "‹"
                             </button>
                             <button
                                 type="button"
                                 on:click=on_today
-                                class="rounded-grape px-2 py-0.5 text-label text-rambutan-400 hover:bg-longan-800/40 hover:text-rambutan-200 cursor-pointer"
+                                class="bruhs-control inline-flex min-h-[32px] items-center justify-center rounded-grape px-2 text-label text-rambutan-400 hover:bg-longan-800/40 hover:text-rambutan-200 cursor-pointer"
                             >
                                 "Today"
                             </button>
@@ -197,7 +198,7 @@ pub fn CalendarPage() -> impl IntoView {
                                 type="button"
                                 on:click=on_next
                                 aria-label="Next"
-                                class="inline-flex items-center justify-center size-6 rounded-grape text-body-sm text-rambutan-500 hover:bg-longan-800/40 hover:text-rambutan-300 cursor-pointer"
+                                class="bruhs-control inline-flex items-center justify-center min-h-[32px] min-w-[32px] rounded-grape text-body-sm text-rambutan-500 hover:bg-longan-800/40 hover:text-rambutan-300 cursor-pointer"
                             >
                                 "›"
                             </button>
@@ -206,11 +207,12 @@ pub fn CalendarPage() -> impl IntoView {
 
                     // Mode switcher + New on the right.
                     <div class="flex flex-wrap items-center gap-2">
-                        <button type="button" on:click=move |_| scheduling_open.set(true) class="rounded-grape px-2.5 py-1 text-body-sm text-blueberry-300 inset-ring inset-ring-blueberry-500/20 hover:bg-blueberry-500/10 cursor-pointer">"Schedule"</button>
-                        <div class="flex items-center gap-0.5 rounded-grape bg-longan-900/40 inset-ring inset-ring-longan-800/60 p-0.5">
+                        <button type="button" on:click=move |_| scheduling_open.set(true) class="bruhs-control inline-flex min-h-[32px] items-center rounded-grape px-2.5 py-1 text-body-sm text-blueberry-300 inset-ring inset-ring-blueberry-500/20 hover:bg-blueberry-500/10 cursor-pointer">"Schedule"</button>
+                        <div role="group" aria-label="Calendar view" class="flex items-center gap-0.5 rounded-grape bg-longan-900/40 inset-ring inset-ring-longan-800/60 p-0.5">
                             <button
                                 type="button"
                                 on:click=move |_| set_mode.set(CalendarMode::Day)
+                                aria-pressed=move || matches!(mode.get(), CalendarMode::Day).to_string()
                                 class=move || mode_btn_class(matches!(mode.get(), CalendarMode::Day))
                             >
                                 "Day"
@@ -218,6 +220,7 @@ pub fn CalendarPage() -> impl IntoView {
                             <button
                                 type="button"
                                 on:click=move |_| set_mode.set(CalendarMode::Week)
+                                aria-pressed=move || matches!(mode.get(), CalendarMode::Week).to_string()
                                 class=move || mode_btn_class(matches!(mode.get(), CalendarMode::Week))
                             >
                                 "Week"
@@ -225,6 +228,7 @@ pub fn CalendarPage() -> impl IntoView {
                             <button
                                 type="button"
                                 on:click=move |_| set_mode.set(CalendarMode::Month)
+                                aria-pressed=move || matches!(mode.get(), CalendarMode::Month).to_string()
                                 class=move || mode_btn_class(matches!(mode.get(), CalendarMode::Month))
                             >
                                 "Month"
@@ -234,7 +238,8 @@ pub fn CalendarPage() -> impl IntoView {
                             type="button"
                             on:click=on_new
                             title="New event"
-                            class="rounded-grape bg-persimmon-500/15 text-persimmon-200 inset-ring inset-ring-persimmon-400/20 px-2.5 py-1 text-body-sm hover:bg-persimmon-500/25 cursor-pointer"
+                            aria-label="New event"
+                            class="bruhs-control inline-flex min-h-[32px] items-center rounded-grape bg-persimmon-500/15 text-persimmon-200 inset-ring inset-ring-persimmon-400/20 px-2.5 py-1 text-body-sm hover:bg-persimmon-500/25 cursor-pointer"
                         >
                             "+ New"
                         </button>

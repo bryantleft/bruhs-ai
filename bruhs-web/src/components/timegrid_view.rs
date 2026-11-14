@@ -6,7 +6,9 @@
 //! - Each hour row is a fixed height (HOUR_PX). The whole grid scrolls
 //!   inside its parent.
 //! - Events render as absolutely-positioned blocks per column, sized by
-//!   their duration. Top = (start - day_start) / 1ms × pixels-per-ms.
+//!   their duration. Top is the wall-clock time since local midnight, so a
+//!   10:00 event sits on the 10:00 row on the 23- and 25-hour days of a
+//!   daylight-saving change too (`bruhs_models::calendar::zone`).
 //! - Overlapping events split their column horizontally so neither hides
 //!   the other (simple "lanes" algorithm).
 //! - "Now" line shows when the visible range includes today, anchored to
@@ -18,6 +20,8 @@
 //! - Drag event block → move event (start time changes; duration kept).
 //!   Cross-column drops in Week view are supported (Mon → Wed reschedules).
 //! - Drag bottom-edge handle → resize event (end time changes only).
+//! - Provider (Google) events are read only: they open for inspection but
+//!   cannot be dragged or resized, since bruhs never writes them back.
 
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_models::EpochMs;
@@ -39,6 +43,26 @@ const HOUR_PX: f64 = 40.0;
 const SNAP_MS: f64 = 15.0 * 60.0 * 1000.0;
 /// Minimum event duration enforced during resize.
 const MIN_DURATION_MS: f64 = 15.0 * 60.0 * 1000.0;
+
+/// Wall-clock ms between local midnight `day_start` and `ms`.
+fn wall_offset(ms: f64, day_start: f64) -> f64 {
+    bruhs_models::calendar::zone::wall_offset_in_day(
+        EpochMs::saturating_from_f64(ms).as_millis(),
+        EpochMs::saturating_from_f64(day_start).as_millis(),
+        crate::clock::offset_minutes_east,
+    )
+    .to_f64_lossy()
+}
+
+/// The instant `wall_offset_ms` of wall-clock time after `day_start`.
+fn instant_at(day_start: f64, wall_offset_ms: f64) -> f64 {
+    EpochMs::saturating_from_i64(bruhs_models::calendar::zone::instant_at_wall_offset(
+        EpochMs::saturating_from_f64(day_start).as_millis(),
+        wall_offset_ms.to_i64_saturating(),
+        crate::clock::offset_minutes_east,
+    ))
+    .as_f64()
+}
 
 /// offsetY is relative to the event target, which can be a title or gridline
 /// child. Client coordinates and the handler element's rect share one space,
@@ -120,8 +144,8 @@ fn lay_out(events: &[CalendarEvent], day_start: f64) -> Vec<LaidOutEvent> {
         .into_iter()
         .map(|placement| {
             let ev = timed[placement.index];
-            let from = (ev.start_at_ms.max(day_start) - day_start).max(0.0);
-            let to = (ev.end_at_ms.min(add_local_days(day_start, 1)) - day_start)
+            let from = wall_offset(ev.start_at_ms.max(day_start), day_start).max(0.0);
+            let to = wall_offset(ev.end_at_ms.min(add_local_days(day_start, 1)), day_start)
                 .max(from + HOUR_MS / 2.0);
             let top_px = (from / HOUR_MS) * HOUR_PX;
             let height_px = ((to - from) / HOUR_MS) * HOUR_PX;
@@ -186,7 +210,8 @@ pub fn TimegridView(
     });
     let now_offset_ms = Signal::derive(move || {
         let _ = anchor.get();
-        js_sys::Date::now() - day_start_ms(js_sys::Date::now())
+        let now = js_sys::Date::now();
+        wall_offset(now, day_start_ms(now))
     });
 
     // Move-event helper, captured by every column's `drop` handler.
@@ -198,17 +223,20 @@ pub fn TimegridView(
         move |id: String, drop_offset_y: f64, grab_offset_y: f64, day_start: f64| {
             let mut updated = None;
             set_events.update(|evs| {
-                if let Some(ev) = evs.iter_mut().find(|e| e.id == id) {
+                if let Some(ev) = evs
+                    .iter_mut()
+                    .find(|e| e.id == id && !e.is_provider_read_only())
+                {
                     let duration = ev.end_at_ms - ev.start_at_ms;
-                    // Pixels → ms relative to column top.
+                    // Pixels → wall-clock ms relative to column top.
                     let new_top_px = (drop_offset_y - grab_offset_y).max(0.0);
                     let new_offset_ms = (new_top_px / HOUR_PX) * HOUR_MS;
                     let snapped = snap_ms(new_offset_ms);
-                    // Clamp so the event stays inside the column day.
-                    let day_len = add_local_days(day_start, 1) - day_start;
+                    // Clamp so the event stays inside the column's 24 rows.
+                    let day_len = 24.0 * HOUR_MS;
                     let max_start = day_len - duration.min(day_len);
                     let clamped = snapped.clamp(0.0, max_start.max(0.0));
-                    let new_start = day_start + clamped;
+                    let new_start = instant_at(day_start, clamped);
                     if new_start != ev.start_at_ms {
                         let original = ev.clone();
                         ev.start_at_ms = new_start;
@@ -229,9 +257,12 @@ pub fn TimegridView(
     let resize_event_end = move |id: String, new_end_offset_ms: f64, day_start: f64| {
         let mut updated = None;
         set_events.update(|evs| {
-            if let Some(ev) = evs.iter_mut().find(|e| e.id == id) {
+            if let Some(ev) = evs
+                .iter_mut()
+                .find(|e| e.id == id && !e.is_provider_read_only())
+            {
                 let snapped = snap_ms(new_end_offset_ms);
-                let candidate = day_start + snapped;
+                let candidate = instant_at(day_start, snapped);
                 let min_end = ev.start_at_ms + MIN_DURATION_MS;
                 let max_end = add_local_days(day_start, 1);
                 let new_end = candidate.max(min_end).min(max_end);
@@ -324,7 +355,7 @@ pub fn TimegridView(
                             let on_click_col = move |ev: web_sys::MouseEvent| {
                                 let Some(y) = handler_offset_y(ev.client_y(), ev.current_target()) else { return; };
                                 let hour = (y / HOUR_PX).floor().clamp(0.0, 23.0).to_i32_saturating();
-                                let prefill_ms = day_start + f64::from(hour) * HOUR_MS;
+                                let prefill_ms = instant_at(day_start, f64::from(hour) * HOUR_MS);
                                 set_event_create_start.set(Some(prefill_ms));
                                 set_selected_event_id.set(None);
                                 set_event_create_open.set(true);
@@ -398,6 +429,7 @@ pub fn TimegridView(
                                         let id = loe.ev.id.clone();
                                         let id_for_drag = id.clone();
                                         let id_for_resize = id.clone();
+                                        let data_event_id = id.clone();
                                         let id_for_click = id;
                                         let title = loe.ev.title.clone();
                                         let is_google = matches!(loe.ev.source, EventSource::Google);
@@ -406,10 +438,26 @@ pub fn TimegridView(
                                         let left_pct = pct * loe.lane.to_f64_lossy();
                                         let event_day_start = day_start;
 
+                                        let id_for_key = id_for_click.clone();
                                         let on_block_click = move |ev: web_sys::MouseEvent| {
                                             ev.stop_propagation();
                                             set_selected_event_id.set(Some(id_for_click.clone()));
                                             set_event_create_open.set(true);
+                                        };
+                                        // Keyboard parity with the click and
+                                        // with the desktop's focusable blocks.
+                                        let on_block_key = move |ev: web_sys::KeyboardEvent| {
+                                            if ev.key() == "Enter" || ev.key() == " " {
+                                                ev.prevent_default();
+                                                ev.stop_propagation();
+                                                set_selected_event_id.set(Some(id_for_key.clone()));
+                                                set_event_create_open.set(true);
+                                            }
+                                        };
+                                        let block_label = if is_google {
+                                            format!("Open Google event {title}, read only")
+                                        } else {
+                                            format!("Edit event {title}")
                                         };
                                         // Drag-source: write the event id +
                                         // grab Y-offset (within the block)
@@ -419,6 +467,11 @@ pub fn TimegridView(
                                         // ghost cursor reflects the action.
                                         let on_dragstart = move |ev: web_sys::DragEvent| {
                                             ev.stop_propagation();
+                                            if is_google {
+                                                // Read-only provider event.
+                                                ev.prevent_default();
+                                                return;
+                                            }
                                             if let Some(dt) = ev.data_transfer() {
                                                 let Some(grab_y) = handler_offset_y(ev.client_y(), ev.current_target()) else { return; };
                                                 let payload = format!(
@@ -491,11 +544,18 @@ pub fn TimegridView(
 
                                         view! {
                                             <div
-                                                draggable="true"
+                                                draggable=if is_google { "false" } else { "true" }
+                                                role="button"
+                                                tabindex="0"
+                                                aria-label=block_label
+                                                data-event-id=data_event_id
+                                                data-read-only=if is_google { "true" } else { "false" }
                                                 on:dragstart=on_dragstart
                                                 on:click=on_block_click
+                                                on:keydown=on_block_key
                                                 class=format!(
-                                                    "absolute rounded-grape px-1.5 py-1 text-label-sm text-left truncate {bg} cursor-grab active:cursor-grabbing select-none"
+                                                    "absolute rounded-grape px-1.5 py-1 text-label-sm text-left truncate {bg} {cursor} select-none focus-visible:outline-2 focus-visible:outline-persimmon-400",
+                                                    cursor = if is_google { "cursor-pointer" } else { "cursor-grab active:cursor-grabbing" },
                                                 )
                                                 style=format!(
                                                     "top: {top}px; height: {h}px; left: calc({l}% + 2px); width: calc({w}% - 4px);",
@@ -519,6 +579,8 @@ pub fn TimegridView(
                                                 // strip at the bottom of the
                                                 // block. ns-resize cursor
                                                 // signals the affordance.
+                                                // Read-only events have none.
+                                                {(!is_google).then(|| view! {
                                                 <div
                                                     on:pointerdown=on_resize_pointerdown
                                                     on:pointermove=on_resize_pointermove
@@ -537,6 +599,7 @@ pub fn TimegridView(
                                                     }
                                                     class="absolute left-0 right-0 bottom-0 h-1.5 cursor-ns-resize"
                                                 ></div>
+                                                })}
                                             </div>
                                         }
                                     }).collect_view()}
