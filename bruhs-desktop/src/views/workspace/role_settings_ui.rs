@@ -22,6 +22,9 @@ pub(super) const SETTINGS_SUMMARY_MODEL_DROPDOWN_ID: &str = "desktop-summary-mod
 pub(super) const SETTINGS_REVIEW_CLAUDE_DROPDOWN_ID: &str = "desktop-review-claude-model";
 pub(super) const SETTINGS_REVIEW_CODEX_DROPDOWN_ID: &str = "desktop-review-codex-model";
 pub(super) const SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID: &str = "desktop-suggestion-model";
+pub(super) const SETTINGS_MEETING_SUGGESTIONS_DROPDOWN_ID: &str = "desktop-meeting-suggestions";
+pub(super) const SETTINGS_MEETING_SUGGESTION_MODEL_DROPDOWN_ID: &str =
+    "desktop-meeting-suggestion-model";
 
 /// Dropdown value that keeps what the control inherits.
 const INHERIT: &str = "inherit";
@@ -222,6 +225,15 @@ fn model_groups(inherit: &str, only: Option<AgentProvider>) -> Vec<DropdownGroup
                     .filter(|model| only.is_none_or(|only| only == model.provider))
                     .map(|model| option(model.id, model.label)),
             )
+            .collect(),
+    )
+}
+
+fn proactivity_groups() -> Vec<DropdownGroup> {
+    flat(
+        bruhs_models::meeting_suggestions::Proactivity::ALL
+            .into_iter()
+            .map(|level| option(level.as_str(), level.label()))
             .collect(),
     )
 }
@@ -591,6 +603,14 @@ impl Workspace {
             SETTINGS_SUGGESTION_MODEL_DROPDOWN_ID => {
                 self.set_task_models(cx, |models| models.suggestion_model = chosen(value));
             }
+            SETTINGS_MEETING_SUGGESTIONS_DROPDOWN_ID => {
+                if let Some(level) = bruhs_models::meeting_suggestions::Proactivity::parse(value) {
+                    self.set_meeting_suggestion_prefs(cx, |prefs| prefs.proactivity = level);
+                }
+            }
+            SETTINGS_MEETING_SUGGESTION_MODEL_DROPDOWN_ID => {
+                self.set_meeting_suggestion_prefs(cx, |prefs| prefs.model = chosen(value));
+            }
             _ => return false,
         }
         true
@@ -865,6 +885,30 @@ impl Workspace {
                     "Meeting summary model",
                     self.task_models.summary.as_deref().unwrap_or(INHERIT),
                     model_groups("Default", Some(AgentProvider::Claude)),
+                    cx,
+                )),
+            ),
+            self.settings_row(
+                "desktop-settings-row-meeting-suggestions",
+                "Meeting suggestions",
+                bruhs_models::meeting_suggestions::PROACTIVITY_HELP,
+                settings_ui::control_column(self.role_dropdown(
+                    SETTINGS_MEETING_SUGGESTIONS_DROPDOWN_ID,
+                    "Meeting suggestions",
+                    self.meeting_suggestions.prefs.proactivity.as_str(),
+                    proactivity_groups(),
+                    cx,
+                )),
+            ),
+            self.settings_row(
+                "desktop-settings-row-meeting-suggestion-model",
+                "Meeting suggestion model",
+                "Automatic uses Claude Haiku. Suggestions run on Claude or Codex.",
+                settings_ui::control_column(self.role_dropdown(
+                    SETTINGS_MEETING_SUGGESTION_MODEL_DROPDOWN_ID,
+                    "Meeting suggestion model",
+                    self.meeting_suggestions.prefs.model.as_deref().unwrap_or(INHERIT),
+                    suggestion_model_groups(),
                     cx,
                 )),
             ),

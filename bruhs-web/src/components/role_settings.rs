@@ -389,6 +389,7 @@ pub fn TaskModelSettings() -> impl IntoView {
                 align_end=true
             />
         </SettingsRow>
+        <MeetingSuggestionSettings />
         <SettingsRow
             title="Second opinion by Claude"
             description="The model that reviews a Codex thread's answer when you run /second-opinion there."
@@ -418,9 +419,50 @@ pub fn TaskModelSettings() -> impl IntoView {
     }
 }
 
+fn proactivity_options() -> Vec<DropdownOption> {
+    bruhs_models::meeting_suggestions::Proactivity::ALL
+        .into_iter()
+        .map(|level| DropdownOption::new(level.as_str(), level.label()))
+        .collect()
+}
+
+/// Live meeting suggestions: how much initiative they take and which model
+/// writes them. Stored as `bruhs.meetingSuggestions`.
+#[component]
+fn MeetingSuggestionSettings() -> impl IntoView {
+    let prefs = expect_context::<crate::meeting_suggestions::MeetingSuggestions>().prefs;
+    view! {
+        <SettingsRow title="Meeting suggestions" description=bruhs_models::meeting_suggestions::PROACTIVITY_HELP>
+            <Dropdown options=proactivity_options()
+                value=Signal::derive(move || prefs.with(|prefs| prefs.proactivity.as_str().to_string()))
+                on_change=Callback::new(move |value: String| {
+                    if let Some(level) = bruhs_models::meeting_suggestions::Proactivity::parse(&value) {
+                        prefs.update(|prefs| prefs.proactivity = level);
+                    }
+                })
+                label="Meeting suggestions" class=ROW_CONTROL align_end=true />
+        </SettingsRow>
+        <SettingsRow title="Meeting suggestion model" description="Automatic uses Claude Haiku. Suggestions run on Claude or Codex.">
+            <Dropdown options=suggestion_model_options()
+                value=Signal::derive(move || prefs.with(|prefs| prefs.model.clone().unwrap_or_default()))
+                on_change=Callback::new(move |value: String| prefs.update(|prefs| prefs.model = some(value)))
+                label="Meeting suggestion model" class=ROW_CONTROL align_end=true />
+        </SettingsRow>
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn every_meeting_suggestion_level_is_offered_once() {
+        let values: Vec<String> = proactivity_options()
+            .into_iter()
+            .map(|option| option.value)
+            .collect();
+        assert_eq!(values, ["off", "on_request", "automatic", "alert"]);
+    }
 
     #[test]
     fn custom_role_models_and_the_custom_default_remain_selectable() {

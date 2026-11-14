@@ -801,6 +801,9 @@ struct PersistedWorkspaceState {
     /// built-in defaults.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     task_models: Option<bruhs_models::roles::TaskModels>,
+    /// Live meeting suggestion settings. Absent means the defaults.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    meeting_suggestions: Option<bruhs_models::meeting_suggestions::MeetingSuggestionPrefs>,
     /// Last worktree this client created.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     previous_worktree: Option<RememberedWorktree>,
@@ -1216,6 +1219,8 @@ pub struct Workspace {
     roles: bruhs_models::roles::RoleBook,
     /// Models for the jobs that are not threads.
     task_models: bruhs_models::roles::TaskModels,
+    /// Live meeting suggestions: preferences and the current session.
+    meeting_suggestions: meetings_ui::suggestions::MeetingSuggestionsUi,
     /// Id of the role open in Settings.
     role_selected: Option<String>,
     role_inputs: role_settings_ui::RoleInputs,
@@ -1644,6 +1649,12 @@ impl Workspace {
             .unwrap_or_default()
             .sanitized();
         crate::server_client::set_summary_model(task_models.summary.clone());
+        let meeting_suggestions = meetings_ui::suggestions::MeetingSuggestionsUi::new(
+            persisted
+                .as_ref()
+                .and_then(|state| state.meeting_suggestions.clone())
+                .unwrap_or_default(),
+        );
         let role_inputs = Self::new_role_inputs(window, cx, &mut subscriptions);
         let base_branch = String::new();
         let mut workspace = Self {
@@ -1852,6 +1863,7 @@ impl Workspace {
             thread_waits: Vec::new(),
             roles,
             task_models,
+            meeting_suggestions,
             role_selected: None,
             role_inputs,
             page_history: PageHistory::new(),
@@ -2006,6 +2018,7 @@ impl Workspace {
         workspace.reveal_selected_task_page();
         workspace.stamp_run_prefs_on_threads(cx);
         workspace.sync_keybindings(cx);
+        workspace.start_meeting_suggestions(cx);
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
                 .timer(std::time::Duration::from_secs(30))

@@ -1560,6 +1560,11 @@ impl MeetingsHub {
         self.meetings.iter().find(|m| m.id == id)
     }
 
+    /// The server client, for one-off requests made outside the hub.
+    pub fn client(&self) -> Arc<ServerClient> {
+        Arc::clone(&self.client)
+    }
+
     pub fn live_meeting(&self) -> Option<&Meeting> {
         let id = self.live_meeting_id.as_deref()?;
         self.meeting(id)

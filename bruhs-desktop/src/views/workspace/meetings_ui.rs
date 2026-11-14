@@ -44,6 +44,7 @@ mod actions;
 mod note_detail;
 pub(super) mod note_editor;
 mod notes;
+pub(super) mod suggestions;
 pub(super) mod transcript_view;
 
 // Web type scale on these pages.
@@ -1314,6 +1315,9 @@ impl Workspace {
             .items_center()
             .gap_2()
             .occlude();
+        if let Some(panel) = self.render_meeting_suggestions(cx) {
+            stack = stack.child(panel);
+        }
         if has_segments {
             stack = stack.child(
                 div()
@@ -1375,6 +1379,10 @@ impl Workspace {
                     BODY_SM_PX,
                     theme::rambutan_100(),
                 ))
+                .children(
+                    self.render_meeting_suggestions_toggle(cx)
+                        .unwrap_or_default(),
+                )
                 .child(
                     web_button(
                         "desktop-live-stop",

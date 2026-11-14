@@ -459,6 +459,8 @@ impl Workspace {
                 .then_some(self.thread_hops),
             roles: (!self.roles.is_empty()).then(|| self.roles.clone()),
             task_models: (!self.task_models.is_default()).then(|| self.task_models.clone()),
+            meeting_suggestions: (!self.meeting_suggestions.prefs.is_default())
+                .then(|| self.meeting_suggestions.prefs.clone()),
             previous_worktree: self.previous_worktree.clone(),
             keybindings: self.keybindings.clone(),
         }

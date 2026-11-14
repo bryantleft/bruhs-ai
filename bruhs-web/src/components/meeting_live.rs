@@ -48,6 +48,26 @@ pub fn MeetingLive() -> impl IntoView {
     let transcript_sync = expect_context::<crate::transcript_sync::TranscriptSync>();
     let selected_chunk = RwSignal::new(None::<String>);
     let chunk_note = RwSignal::new(None::<String>);
+    let suggestions = expect_context::<crate::meeting_suggestions::MeetingSuggestions>();
+    let suggestions_on = Memo::new(move |_| {
+        suggestions
+            .prefs
+            .with(|prefs| prefs.proactivity != bruhs_models::meeting_suggestions::Proactivity::Off)
+    });
+    // Only the alert level announces new suggestions on the closed pill: a
+    // count on Open, and the full words for screen readers in the status.
+    let unseen = Memo::new(move |_| {
+        let alert = suggestions.prefs.with(|prefs| {
+            prefs.proactivity == bruhs_models::meeting_suggestions::Proactivity::Alert
+        });
+        if !alert || expanded.get() {
+            return 0;
+        }
+        suggestions.live.with(|live| live.unseen())
+    });
+    let unseen_label = Memo::new(move |_| {
+        crate::components::meeting_suggestions_panel::unseen_label(unseen.get())
+    });
 
     Effect::new(move |_| {
         let _ = live_id.get();
@@ -63,7 +83,7 @@ pub fn MeetingLive() -> impl IntoView {
 
     let dock_style = move || {
         let (width, height) = if expanded.get() {
-            (480, 340)
+            (480, if suggestions_on.get() { 460 } else { 340 })
         } else {
             (280, 52)
         };
@@ -196,6 +216,13 @@ pub fn MeetingLive() -> impl IntoView {
         >
             <div node_ref=dock data-testid="meeting-dock" role="region" aria-label="Live meeting dock"
                 class="fixed z-40 flex flex-col justify-end gap-2" style=dock_style>
+                // Suggestions sit outside the transcript preview so new speech
+                // never re-creates their buttons under the pointer or focus.
+                <Show when=move || expanded.get() && suggestions_on.get()>
+                    <div class="shrink-0 max-h-[50%] overflow-auto">
+                        <crate::components::meeting_suggestions_panel::MeetingSuggestionsPanel />
+                    </div>
+                </Show>
                 // Live segments scroller (shows only when there are segments)
                 {move || {
                     if !expanded.get() { return ().into_any(); }
@@ -381,8 +408,9 @@ pub fn MeetingLive() -> impl IntoView {
                                     <div class="truncate text-[13px] leading-[17px] text-rambutan-100 tabular-nums" title=title>{label}</div>
                                 }
                             })}
-                            <div role="status" class=move || if stop_error.get().is_some() { "truncate text-label-sm leading-4 text-durian-400" } else { "truncate text-label-sm leading-4 text-rambutan-400" }>
+                            <div role="status" data-testid="meeting-dock-status" class=move || if stop_error.get().is_some() { "truncate text-label-sm leading-4 text-durian-400" } else { "truncate text-label-sm leading-4 text-rambutan-400" }>
                                 {move || if stopping.get() { "Stopping" } else if stop_error.get().is_some() { "Needs review" } else { "Live" }}
+                                {move || unseen_label.get().filter(|_| !stopping.get() && stop_error.get().is_none()).map(|label| view! { <span class="sr-only">{format!(". {label}")}</span> })}
                             </div>
                         </div>
                     </div>
@@ -392,6 +420,11 @@ pub fn MeetingLive() -> impl IntoView {
                         class="h-11 w-[52px] shrink-0 rounded-orb text-label-sm text-rambutan-200 hover:bg-longan-800 active:bg-longan-700 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 focus-visible:outline-offset-[-2px]"
                         on:click=move |_| expanded.update(|v| *v = !*v)>
                         {move || if expanded.get() { "Less" } else { "Open" }}
+                        {move || (unseen.get() > 0).then(|| view! {
+                            <span aria-hidden="true" data-testid="meeting-dock-unseen" class="ml-1 inline-flex min-w-[16px] h-4 items-center justify-center rounded-orb bg-blueberry-500/25 px-1 text-[11px] leading-none text-blueberry-200 tabular-nums">
+                                {if unseen.get() > 9 { "9+".to_string() } else { unseen.get().to_string() }}
+                            </span>
+                        })}
                     </button>
                     <button type="button"
                         on:click=on_stop
@@ -455,7 +488,7 @@ fn copy_live_chunk(text: String, note: RwSignal<Option<String>>) {
     });
 }
 
-async fn write_clipboard(text: &str) -> Result<(), ()> {
+pub(crate) async fn write_clipboard(text: &str) -> Result<(), ()> {
     let window = web_sys::window().ok_or(())?;
     let clipboard =
         js_sys::Reflect::get(&window.navigator(), &"clipboard".into()).map_err(|_| ())?;

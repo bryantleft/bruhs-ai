@@ -11,6 +11,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- Added live meeting suggestions. While a meeting records, the meeting dock
+  can offer private action items, open questions, conflicts with your tasks or
+  calendar, and related records. Add one as a task, copy it, or dismiss it;
+  what you keep tunes how selective it is. Choose Off, When I ask (the
+  default), Automatic or Automatic with alerts, and the model, under General.
+  See `docs/meeting-suggestions.md`.
 - Added messages between threads. An agent can list your threads, read one,
   and send one a message or start a new thread; the other thread's agent can
   answer back. A message waits in that thread's queue like one you typed, so

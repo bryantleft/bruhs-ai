@@ -116,6 +116,10 @@ impl Workspace {
                 }
             }
             "people" => self.activate_sidebar_view(AppView::People, window, cx),
+            "meeting-suggestions" => {
+                self.open_meetings_list(cx);
+                self.smoke_meeting_suggestions(cx);
+            }
             "updates" => {
                 self.open_settings(&OpenSettings, window, cx);
                 self.set_settings_section(SettingsSection::Updates, cx);

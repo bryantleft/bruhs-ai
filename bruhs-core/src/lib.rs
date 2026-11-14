@@ -18,6 +18,7 @@ pub mod google_calendar;
 pub mod import;
 pub mod local_tools;
 pub mod mail;
+pub mod meeting_suggestions;
 pub mod meetings;
 pub mod mobile;
 pub mod models;
