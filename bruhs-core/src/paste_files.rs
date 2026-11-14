@@ -11,6 +11,9 @@ use bruhs_models::logic::composer_text::{
 /// The returned pairs are the label and the absolute path. A body that
 /// cannot be written is omitted.
 pub fn write_paste_files(items: &[TextAttachment]) -> Vec<(String, String)> {
+    if items.is_empty() {
+        return Vec::new();
+    }
     static SEQ: AtomicU64 = AtomicU64::new(1);
     let dir = std::env::temp_dir().join("bruhs-pastes");
     if std::fs::create_dir_all(&dir).is_err() {

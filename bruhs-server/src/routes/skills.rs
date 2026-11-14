@@ -64,12 +64,16 @@ pub async fn post_skills(
     };
     let home = std::env::var_os("HOME").map(PathBuf::from);
     let query = body.query.unwrap_or_default();
-    let skills = skills::list_skills(
-        provider,
-        home.as_deref(),
-        project.as_ref().map(HomePath::as_path),
-        &query,
-    );
+    let skills = tokio::task::spawn_blocking(move || {
+        skills::list_skills(
+            provider,
+            home.as_deref(),
+            project.as_ref().map(HomePath::as_path),
+            &query,
+        )
+    })
+    .await
+    .map_err(|error| AppError::internal_in("skill lookup failed", error))?;
     Ok(Json(SkillsResponse {
         skills,
         error: None,

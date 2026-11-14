@@ -41,12 +41,20 @@ pub(super) fn replay(
     receipt: SummaryGenerationReceipt,
     request: &SummaryGenerationRequest,
 ) -> MeetingStoreResult<GenerationReservation> {
+    validate_replay(&receipt, request)?;
+    Ok(GenerationReservation::Existing(receipt))
+}
+
+pub(super) fn validate_replay(
+    receipt: &SummaryGenerationReceipt,
+    request: &SummaryGenerationRequest,
+) -> MeetingStoreResult<()> {
     if &receipt.request != request {
         return Err(MeetingStoreError::Conflict(
             "Generation request identity was already used with different options.".into(),
         ));
     }
-    Ok(GenerationReservation::Existing(receipt))
+    Ok(())
 }
 
 pub(super) fn pending(

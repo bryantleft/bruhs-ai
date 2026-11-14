@@ -110,16 +110,19 @@ pub async fn create_session(
         Some(c) => Some(HomePath::resolve(&c).await?.into_path_buf()),
         None => None,
     };
-    let info = state
-        .terminals()
-        .create(TerminalSpec {
+    let manager = state.terminals().clone();
+    let info = tokio::task::spawn_blocking(move || {
+        manager.create(TerminalSpec {
             cwd,
             title: body.title,
             project_name: body.project_name,
             cols: body.cols,
             rows: body.rows,
         })
-        .map_err(map_terminal_error)?;
+    })
+    .await
+    .map_err(|error| AppError::internal_in("terminal launch failed", error))?
+    .map_err(map_terminal_error)?;
     Ok((StatusCode::CREATED, Json(info)))
 }
 

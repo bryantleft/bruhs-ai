@@ -79,11 +79,10 @@ pub(super) fn save(connection: &Connection, value: &PersonProfile) -> MeetingSto
     let voice = value.voice_embedding.as_ref().map(encode).transpose()?;
     connection.execute("INSERT INTO people(id,payload,voice) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,voice=excluded.voice", rusqlite::params![value.id,encode(value)?,voice])?;
     connection.execute("DELETE FROM person_names WHERE person_id=?1", [&value.id])?;
+    let mut insert_name =
+        connection.prepare("INSERT OR IGNORE INTO person_names(name,person_id) VALUES(?1,?2)")?;
     for name in std::iter::once(&value.display_name).chain(&value.aliases) {
-        connection.execute(
-            "INSERT OR IGNORE INTO person_names(name,person_id) VALUES(?1,?2)",
-            [&name.to_ascii_lowercase(), &value.id],
-        )?;
+        insert_name.execute([&name.to_ascii_lowercase(), &value.id])?;
     }
     Ok(())
 }

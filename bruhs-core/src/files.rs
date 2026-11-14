@@ -18,6 +18,8 @@ use tokio::time::Instant;
 
 use crate::git::{self, GitError};
 
+mod children_order;
+
 /// Most entries one search returns.
 pub const MAX_RESULTS: usize = 30;
 /// How long a repository's file list and ranking are reused.
@@ -355,7 +357,7 @@ pub async fn list_children(root: &Path, relative: &str) -> Result<Vec<FileEntry>
     let mut entries = tokio::fs::read_dir(&target)
         .await
         .map_err(FileSearchError::ReadDir)?;
-    let mut results = Vec::new();
+    let mut results = children_order::Selection::new(CHILDREN_LIMIT);
     while let Some(entry) = entries
         .next_entry()
         .await
@@ -375,27 +377,23 @@ pub async fn list_children(root: &Path, relative: &str) -> Result<Vec<FileEntry>
             .await
             .map_err(FileSearchError::ReadDir)?
             .is_dir();
-        results.push(if is_directory {
-            FileEntry {
-                path: format!("{child}/"),
-                name: format!("{file_name}/"),
-                is_directory,
-            }
-        } else {
-            FileEntry {
-                path: child,
-                name: file_name,
-                is_directory,
-            }
-        });
+        results
+            .push(if is_directory {
+                FileEntry {
+                    path: format!("{child}/"),
+                    name: format!("{file_name}/"),
+                    is_directory,
+                }
+            } else {
+                FileEntry {
+                    path: child,
+                    name: file_name,
+                    is_directory,
+                }
+            })
+            .map_err(FileSearchError::ReadDir)?;
     }
-    results.sort_by(|a, b| {
-        b.is_directory
-            .cmp(&a.is_directory)
-            .then_with(|| a.name.to_lowercase().cmp(&b.name.to_lowercase()))
-    });
-    results.truncate(CHILDREN_LIMIT);
-    Ok(results)
+    Ok(results.finish())
 }
 
 #[cfg(test)]

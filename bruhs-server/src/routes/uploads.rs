@@ -31,7 +31,9 @@ pub async fn post_upload(
     Query(query): Query<UploadQuery>,
     body: axum::body::Bytes,
 ) -> Result<Json<UploadedFile>, AppError> {
-    let uploaded = write_upload(&query.name, &body)
+    let uploaded = tokio::task::spawn_blocking(move || write_upload(&query.name, &body))
+        .await
+        .map_err(|error| AppError::internal_in("attachment writer failed", error))?
         .map_err(|message| AppError::BadRequest(message.to_string()))?;
     Ok(Json(uploaded))
 }
@@ -39,14 +41,17 @@ pub async fn post_upload(
 /// Read a file for the viewer. Relative paths join `project`. Absolute paths
 /// may sit outside that project.
 pub async fn get_open(Query(query): Query<OpenQuery>) -> Result<Response, AppError> {
-    let project =
-        match query.project.as_deref().filter(|path| !path.is_empty()) {
+    let opened = tokio::task::spawn_blocking(move || {
+        let project = match query.project.as_deref().filter(|path| !path.is_empty()) {
             Some(path) => Some(std::fs::canonicalize(path).map_err(|_| {
                 AppError::BadRequest("Open a project to read a relative file.".into())
             })?),
             None => None,
         };
-    let opened = open_for_viewer(&query.path, project.as_deref()).map_err(open_error)?;
+        open_for_viewer(&query.path, project.as_deref()).map_err(open_error)
+    })
+    .await
+    .map_err(|error| AppError::internal_in("file viewer failed", error))??;
     if opened.bytes.is_some() {
         return binary_response(opened);
     }
@@ -63,8 +68,15 @@ pub async fn get_open(Query(query): Query<OpenQuery>) -> Result<Response, AppErr
 }
 
 /// Reject a turn that names a path this app did not write.
-pub fn reject_foreign_uploads(files: &[UploadedFile]) -> Result<(), AppError> {
-    require_uploaded(files).map_err(|message| AppError::BadRequest(message.to_string()))
+pub async fn reject_foreign_uploads(files: &[UploadedFile]) -> Result<(), AppError> {
+    if files.is_empty() {
+        return Ok(());
+    }
+    let files = files.to_vec();
+    tokio::task::spawn_blocking(move || require_uploaded(&files))
+        .await
+        .map_err(|error| AppError::internal_in("attachment validation failed", error))?
+        .map_err(|message| AppError::BadRequest(message.to_string()))
 }
 
 fn open_error(error: OpenError) -> AppError {
@@ -81,4 +93,75 @@ fn binary_response(opened: OpenedFile) -> Result<Response, AppError> {
         .header(header::CONTENT_TYPE, mime)
         .body(Body::from(bytes))
         .map_err(|_| AppError::internal_msg("could not build the file response"))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use axum::{
+        body::{to_bytes, Bytes},
+        http::StatusCode,
+    };
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn uploaded_files_round_trip_and_foreign_paths_stay_rejected() {
+        let Json(file) = post_upload(
+            Query(UploadQuery {
+                name: "performance.txt".into(),
+            }),
+            Bytes::from_static(b"hello from an attachment"),
+        )
+        .await
+        .unwrap();
+        reject_foreign_uploads(std::slice::from_ref(&file))
+            .await
+            .unwrap();
+        let response = get_open(Query(OpenQuery {
+            path: file.path.clone(),
+            project: None,
+        }))
+        .await
+        .unwrap();
+        assert_eq!(response.status(), StatusCode::OK);
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(text["text"], "hello from an attachment");
+        assert_eq!(text["truncated"], false);
+        tokio::fs::remove_file(&file.path).await.unwrap();
+
+        let foreign = UploadedFile {
+            name: "foreign.txt".into(),
+            path: "/not/an/upload".into(),
+        };
+        assert!(matches!(
+            reject_foreign_uploads(&[foreign]).await,
+            Err(AppError::BadRequest(_))
+        ));
+        reject_foreign_uploads(&[]).await.unwrap();
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn viewer_keeps_relative_paths_and_missing_project_errors() {
+        let directory = tempfile::tempdir().unwrap();
+        tokio::fs::write(directory.path().join("file.txt"), b"project file")
+            .await
+            .unwrap();
+        let response = get_open(Query(OpenQuery {
+            path: "file.txt".into(),
+            project: Some(directory.path().to_string_lossy().into_owned()),
+        }))
+        .await
+        .unwrap();
+        let body = to_bytes(response.into_body(), usize::MAX).await.unwrap();
+        let text: serde_json::Value = serde_json::from_slice(&body).unwrap();
+        assert_eq!(text["text"], "project file");
+        assert!(matches!(
+            get_open(Query(OpenQuery {
+                path: "file.txt".into(),
+                project: None
+            }))
+            .await,
+            Err(AppError::BadRequest(_))
+        ));
+    }
 }
