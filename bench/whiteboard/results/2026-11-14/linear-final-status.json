@@ -1,0 +1,68 @@
+{
+  "verified_at": "2026-11-14T09:29:44.061706+00:00",
+  "project_id": "da7bbbae-25ab-4fbc-ac8f-bd39a07f0158",
+  "project_url": "https://linear.app/bnle/project/bruhs-ai-1beacd798399",
+  "project_status": {
+    "id": "710dd349-a084-481e-b78d-8102b57eb9c1",
+    "name": "In Progress",
+    "type": "started"
+  },
+  "description_sha256": "c0845affea266b30f7d0e8f2e3d5f1c95072f46fe3e72c4be2b133e82bbb20f1",
+  "issues": [
+    {
+      "id": "BNLE-66",
+      "title": "whiteboard better than tldraw",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-66/whiteboard-better-than-tldraw"
+    },
+    {
+      "id": "BNLE-68",
+      "title": "mobile app like t3 code: remote into the laptop session",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-68/mobile-app-like-t3-code-remote-into-the-laptop-session"
+    },
+    {
+      "id": "BNLE-67",
+      "title": "api client like insomnia",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-67/api-client-like-insomnia"
+    },
+    {
+      "id": "BNLE-65",
+      "title": "Read-only SQLite and Postgres browser",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-65/read-only-sqlite-and-postgres-browser"
+    },
+    {
+      "id": "BNLE-36",
+      "title": "Weekly engineering report preset",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-36/weekly-engineering-report-preset"
+    },
+    {
+      "id": "BNLE-42",
+      "title": "Measure and improve meeting transcription quality",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-42/measure-and-improve-meeting-transcription-quality"
+    },
+    {
+      "id": "BNLE-39",
+      "title": "Reference Vercel Open Agents for Cloud Agents",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-39/reference-vercel-open-agents-for-cloud-agents"
+    },
+    {
+      "id": "BNLE-38",
+      "title": "Reference Ramp Glass",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-38/reference-ramp-glass"
+    },
+    {
+      "id": "BNLE-37",
+      "title": "Convert to GPUI and Leptos",
+      "status": "Done",
+      "url": "https://linear.app/bnle/issue/BNLE-37/convert-to-gpui-and-leptos"
+    }
+  ],
+  "has_next_page": false
+}

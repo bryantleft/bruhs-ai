@@ -1,0 +1,632 @@
+{
+  "started_at": "2026-11-14T09:05:08.058Z",
+  "cells": [
+    {
+      "name": "desktop",
+      "width": 1280,
+      "height": 900,
+      "checks": [
+        "Command K creates a local project board",
+        "Keyboard creates an editable rectangle",
+        "C creates the next node and a bound arrow",
+        "Both arrow terminals persist their bindings",
+        "Arrow keys move the selected node",
+        "Typed file link and line range persist",
+        "Reload reopens the project board from IndexedDB",
+        "The project catalog reopens its board",
+        "Mouse creates an editable frame",
+        "Undo restores the previous document",
+        "Redo restores the frame",
+        "Mermaid preview does not change the original board",
+        "Owner saves Mermaid as editable shapes in a new private board",
+        "SVG export produces a real artifact",
+        "PNG export waits for fonts and produces encoded pixels",
+        "No horizontal page overflow",
+        "Real tldraw-5.6.0.tldr file has a rendered owner preview",
+        "Legacy import resets agent sharing",
+        "Real excalidraw-v2.excalidraw file has a rendered owner preview",
+        "Legacy import resets agent sharing",
+        "Chat Mermaid opens as editable private shapes with a thread backlink",
+        "Private board is refused by the app-owned agent route",
+        "Shared board reads are paginated in the calling project",
+        "Agent module diagram arrives as an immutable proposal",
+        "Before/after review does not apply edits",
+        "Owner can inspect exact source metadata operations",
+        "Owner acceptance commits one revision with a living source",
+        "The same turn receives accepted status outside chat",
+        "Source drift is flagged without overwriting the diagram",
+        "A second proposal remains pending until owner action",
+        "Owner edits invalidate pending proposals",
+        "Revocation in another tab immediately refuses cached agent reads",
+        "Revoked boards disappear from agent discovery",
+        "A concurrent tab cannot overwrite the committed board",
+        "Save conflict preserves the local draft in a recovery export",
+        "An already loaded board edits and saves with the network offline",
+        "No browser runtime errors"
+      ]
+    },
+    {
+      "name": "compact",
+      "width": 640,
+      "height": 480,
+      "checks": [
+        "Command K creates a local project board",
+        "Keyboard creates an editable rectangle",
+        "C creates the next node and a bound arrow",
+        "Both arrow terminals persist their bindings",
+        "Arrow keys move the selected node",
+        "Typed file link and line range persist",
+        "Reload reopens the project board from IndexedDB",
+        "The project catalog reopens its board",
+        "Mouse creates an editable frame",
+        "Undo restores the previous document",
+        "Redo restores the frame",
+        "Mermaid preview does not change the original board",
+        "Owner saves Mermaid as editable shapes in a new private board",
+        "SVG export produces a real artifact",
+        "PNG export waits for fonts and produces encoded pixels",
+        "No horizontal page overflow",
+        "An already loaded board edits and saves with the network offline",
+        "No browser runtime errors"
+      ]
+    },
+    {
+      "name": "touch",
+      "width": 390,
+      "height": 844,
+      "hasTouch": true,
+      "checks": [
+        "Command K creates a local project board",
+        "Keyboard creates an editable rectangle",
+        "C creates the next node and a bound arrow",
+        "Both arrow terminals persist their bindings",
+        "Arrow keys move the selected node",
+        "Typed file link and line range persist",
+        "Reload reopens the project board from IndexedDB",
+        "The project catalog reopens its board",
+        "Mouse creates an editable frame",
+        "Undo restores the previous document",
+        "Redo restores the frame",
+        "Mermaid preview does not change the original board",
+        "Owner saves Mermaid as editable shapes in a new private board",
+        "SVG export produces a real artifact",
+        "PNG export waits for fonts and produces encoded pixels",
+        "No horizontal page overflow",
+        "A real touch pointer gesture creates durable shape geometry",
+        "An already loaded board edits and saves with the network offline",
+        "No browser runtime errors"
+      ]
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/thread-reply"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-branches"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/thread-reply"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/git-status"
+    },
+    {
+      "method": "POST",
+      "path": "/api/whiteboards/source-fingerprint"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/thread-reply"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/thread-reply"
+    },
+    {
+      "method": "POST",
+      "path": "/api/whiteboards/source-fingerprint"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/thread-reply"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/thread-reply"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/whiteboards/source-fingerprint"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/thread-reply"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/thread-reply"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/whiteboards/source-fingerprint"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "POST",
+      "path": "/api/agent/branch-pull"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "POST",
+      "path": "/api/whiteboards/source-fingerprint"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    }
+  ],
+  "replies": [
+    {
+      "thread_id": "10000000-0000-4000-8000-000000000001",
+      "request_id": "9f2a8294-0a39-4d9b-a0bf-70d778a69b62",
+      "reply": {
+        "ok": false,
+        "text": "This board is private. Its owner must enable Share with agents in the board editor."
+      }
+    },
+    {
+      "thread_id": "10000000-0000-4000-8000-000000000001",
+      "request_id": "050aa6f0-94b0-4959-8415-52f6fbd51958",
+      "reply": {
+        "ok": true,
+        "text": "{\"assets\":{},\"authority\":\"The UI owns this local board. Edits require an immutable proposal and owner acceptance.\",\"background\":{\"a\":255,\"b\":15,\"g\":17,\"r\":16},\"id\":\"d564bf50-f765-4ae3-8188-36e3ba949efd\",\"next_cursor\":\"9bd2fd39-5d8f-4a6e-b395-fdc8cd2c4592\",\"project_path\":\"/fixture/whiteboard\",\"revision\":9,\"shape_count\":4,\"shapes\":[{\"id\":\"76bf7b83-cd80-4e24-98ac-22675fb3d6c6\",\"kind\":{\"end\":{\"binding\":{\"anchor\":{\"x\":0.0,\"y\":0.5},\"offset\":{\"x\":0.0,\"y\":0.0},\"shape_id\":\"9bd2fd39-5d8f-4a6e-b395-fdc8cd2c4592\"},\"point\":{\"x\":0.0,\"y\":0.0}},\"start\":{\"binding\":{\"anchor\":{\"x\":1.0,\"y\":0.5},\"offset\":{\"x\":0.0,\"y\":0.0},\"shape_id\":\"eaaf2e34-ca30-471b-866b-94cbe3d67148\"},\"point\":{\"x\":0.0,\"y\":0.0}},\"type\":\"arrow\"},\"links\":[],\"parent\":null,\"rect\":{\"h\":0.0,\"w\":0.0,\"x\":0.0,\"y\":0.0},\"rotation\":0.0,\"source_id\":null,\"style\":{\"dashed\":false,\"fill\":null,\"font_size\":18.0,\"stroke\":{\"a\":255,\"b\":211,\"g\":222,\"r\":220},\"stroke_width\":2.0},\"text\":\"\",\"z\":3},{\"id\":\"9bd2fd39-5d8f-4a6e-b395-fdc8cd2c4592\",\"kind\":{\"type\":\"rectangle\"},\"links\":[{\"end_line\":2,\"path\":\"src/module.rs\",\"start_line\":1,\"type\":\"file\"}],\"parent\":null,\"rect\":{\"h\":80.0,\"w\":180.0,\"x\":810.0,\"y\":313.5},\"rotation\":0.0,\"source_id\":null,\"style\":{\"dashed\":false,\"fill\":{\"a\":255,\"b\":33,\"g\":42,\"r\":38},\"font_size\":18.0,\"stroke\":{\"a\":255,\"b\":211,\"g\":222,\"r\":220},\"stroke_width\":2.0},\"text\":\"API\",\"z\":2}],\"sources\":{},\"title\":\"Untitled board\"}"
+      }
+    },
+    {
+      "thread_id": "10000000-0000-4000-8000-000000000001",
+      "request_id": "9665b2c7-48a8-477e-acbf-750fb61c4f65",
+      "reply": {
+        "ok": true,
+        "text": "{\"applied\":false,\"board_id\":\"d564bf50-f765-4ae3-8188-36e3ba949efd\",\"owner_action\":\"Open Whiteboards, select this board and review the before/after preview. Only the owner can accept or reject.\",\"proposal_id\":\"068ead89-80a9-4a97-b4ed-72c1187b8823\",\"status\":\"pending\"}"
+      }
+    },
+    {
+      "thread_id": "10000000-0000-4000-8000-000000000001",
+      "request_id": "53843a5d-eb15-42bf-b006-c545e3be6898",
+      "reply": {
+        "ok": true,
+        "text": "{\"proposal_id\":\"068ead89-80a9-4a97-b4ed-72c1187b8823\",\"status\":{\"revision\":10,\"status\":\"accepted\"}}"
+      }
+    },
+    {
+      "thread_id": "10000000-0000-4000-8000-000000000001",
+      "request_id": "d25ba691-8df6-4040-8c7e-89fce991f396",
+      "reply": {
+        "ok": true,
+        "text": "{\"applied\":false,\"board_id\":\"d564bf50-f765-4ae3-8188-36e3ba949efd\",\"owner_action\":\"Open Whiteboards, select this board and review the before/after preview. Only the owner can accept or reject.\",\"proposal_id\":\"0357b055-3eda-401c-a268-69be65c1961d\",\"status\":\"pending\"}"
+      }
+    },
+    {
+      "thread_id": "10000000-0000-4000-8000-000000000001",
+      "request_id": "3aaade86-e2c2-4d56-9f7f-ede1b1f5961b",
+      "reply": {
+        "ok": true,
+        "text": "{\"proposal_id\":\"0357b055-3eda-401c-a268-69be65c1961d\",\"status\":{\"status\":\"stale\"}}"
+      }
+    },
+    {
+      "thread_id": "10000000-0000-4000-8000-000000000001",
+      "request_id": "d01a7880-d783-4246-8546-6a0d728786c8",
+      "reply": {
+        "ok": false,
+        "text": "This board is private. Its owner must enable Share with agents in the board editor."
+      }
+    },
+    {
+      "thread_id": "10000000-0000-4000-8000-000000000001",
+      "request_id": "f86ae9f0-7705-46b9-8e92-3c6ea194365c",
+      "reply": {
+        "ok": true,
+        "text": "{\"boards\":[],\"store\":\"web IndexedDB\"}"
+      }
+    }
+  ],
+  "errors": [],
+  "console_errors": [],
+  "unexpected": [],
+  "assets": [
+    {
+      "name": "bruhs-177889e8322d3722.css",
+      "sha256": "085607056dc3d78710976132ec99290c24c81239938b6bc2a19fcbd2c8055a7d"
+    },
+    {
+      "name": "bruhs-web-56e8081e79bb5481.js",
+      "sha256": "64391a2e09bc1a7cf2034901a5a80c87728022e190f962547120630b10e4e1eb"
+    },
+    {
+      "name": "bruhs-web-56e8081e79bb5481_bg.wasm",
+      "sha256": "e5f76b2bcdb2a7168ab13a085b8f5eeaf9c15ce44f4c14882c739e498c96cb5a"
+    },
+    {
+      "name": "index.html",
+      "sha256": "f5b5779f301f2523f239b41c95e67d24f512c3a9bc11c5cec7c0508a701f32c8"
+    },
+    {
+      "name": "tailwind-9584bd976602b089.css",
+      "sha256": "ea009d88f78ae1930d5e894f3ac20dac5280229aa0cf19022a31d5a44a843254"
+    }
+  ],
+  "completed_at": "2026-11-14T09:05:16.977Z",
+  "checks": 74
+}

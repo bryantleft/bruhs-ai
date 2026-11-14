@@ -1,0 +1,29 @@
+{
+  "state": "all source and documentation frozen; Linear read-back complete",
+  "paths": [
+    {
+      "path": "docs/whiteboard-v1.md",
+      "sha256": "6f45e18dccd42e959c92aaad2f32f1d23e767c7a8ec83cba8eb2fdcffc809bf2"
+    },
+    {
+      "path": "bench/whiteboard/report.py",
+      "sha256": "df3074e9811edc57fe644318665ce09d5720d9c1de617f6dc471f9580fd31446"
+    },
+    {
+      "path": "bench/whiteboard/run.mjs",
+      "sha256": "04cc14c579009ffcbd4cc3cf55529e59001fb11dfcbead631eee9a9cf1fadddd"
+    },
+    {
+      "path": "bench/whiteboard/analyze.py",
+      "sha256": "211478b5009c64a8d19d943b71dc719263c52a11249340d91aee70ed8f368eaa"
+    },
+    {
+      "path": "bench/whiteboard/protocol.md",
+      "sha256": "161d383f7bc8ff24e17912f9cda8b29029b24b7cf14ed1c33c54fa48916d8952"
+    },
+    {
+      "path": "bruhs-web/tests/whiteboard_browser.mjs",
+      "sha256": "b85cd25f50686b41d122cd6214833953fdd0966057d171f357b8c164fa313e4e"
+    }
+  ]
+}

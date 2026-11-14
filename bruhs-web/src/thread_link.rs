@@ -58,6 +58,7 @@ enum Ended {
 
 #[derive(Clone, Copy)]
 pub struct ThreadLink {
+    boards: crate::whiteboard::host::WhiteboardHost,
     threads: ReadSignal<Vec<Thread>>,
     set_threads: WriteSignal<Vec<Thread>>,
     active: ReadSignal<Option<String>>,
@@ -153,6 +154,7 @@ impl ThreadLink {
     pub fn install() {
         let crate::state::PromptQueueSignal(queue) = expect_context();
         let link = Self {
+            boards: expect_context(),
             threads: expect_context::<crate::state::ThreadsSignal>().0,
             set_threads: expect_context::<crate::state::SetThreadsSignal>().0,
             active: expect_context::<crate::state::ActiveThreadId>().0,
@@ -189,6 +191,31 @@ impl ThreadLink {
         leptos::task::spawn_local(async move {
             let caller = request.thread_id.as_str().to_string();
             let reply = match request.operation {
+                ThreadOperation::Whiteboard { turn_id, request } => {
+                    let project = self.threads.with_untracked(|threads| {
+                        threads.iter().find(|t| t.id == caller).and_then(|t| {
+                            t.worktree_path
+                                .clone()
+                                .filter(|p| !p.is_empty())
+                                .or_else(|| t.project_path.clone())
+                        })
+                    });
+                    match project {
+                        Some(project) => {
+                            self.boards
+                                .answer(
+                                    request,
+                                    bruhs_models::whiteboard::BoardRequester {
+                                        thread_id: caller.clone(),
+                                        turn_id,
+                                    },
+                                    project,
+                                )
+                                .await
+                        }
+                        None => ThreadReply::refused("The calling thread has no working folder."),
+                    }
+                }
                 ThreadOperation::List => self.list(&caller),
                 ThreadOperation::Read { thread_id, limit } => self.read(&thread_id, limit).await,
                 ThreadOperation::Message {

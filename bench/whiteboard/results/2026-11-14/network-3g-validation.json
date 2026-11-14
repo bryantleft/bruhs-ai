@@ -1,0 +1,123 @@
+{
+  "started_at": "2026-11-14T08:59:06.814Z",
+  "cells": [
+    {
+      "name": "touch",
+      "width": 390,
+      "height": 844,
+      "hasTouch": true,
+      "checks": [
+        "Command K creates a local project board",
+        "Keyboard creates an editable rectangle",
+        "C creates the next node and a bound arrow",
+        "Both arrow terminals persist their bindings",
+        "Arrow keys move the selected node",
+        "Typed file link and line range persist",
+        "Reload reopens the project board from IndexedDB",
+        "The project catalog reopens its board",
+        "Mouse creates an editable frame",
+        "Undo restores the previous document",
+        "Redo restores the frame",
+        "Mermaid preview does not change the original board",
+        "Owner saves Mermaid as editable shapes in a new private board",
+        "SVG export produces a real artifact",
+        "PNG export waits for fonts and produces encoded pixels",
+        "No horizontal page overflow",
+        "A real touch pointer gesture creates durable shape geometry",
+        "An already loaded board edits and saves with the network offline",
+        "No browser runtime errors"
+      ]
+    }
+  ],
+  "requests": [
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/terminal/sessions"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/claude"
+    },
+    {
+      "method": "GET",
+      "path": "/api/agent/auth/codex"
+    },
+    {
+      "method": "GET",
+      "path": "/api/capture/status"
+    },
+    {
+      "method": "GET",
+      "path": "/api/updates"
+    },
+    {
+      "method": "GET",
+      "path": "/api/events/stream"
+    },
+    {
+      "method": "GET",
+      "path": "/api/people/versions"
+    }
+  ],
+  "replies": [],
+  "errors": [],
+  "console_errors": [],
+  "unexpected": [],
+  "network": {
+    "latency_ms": 400,
+    "download_bytes_per_second": 51200,
+    "upload_bytes_per_second": 51200
+  },
+  "assets": [
+    {
+      "name": "bruhs-177889e8322d3722.css",
+      "sha256": "085607056dc3d78710976132ec99290c24c81239938b6bc2a19fcbd2c8055a7d"
+    },
+    {
+      "name": "bruhs-web-79cfe2d0557ced42.js",
+      "sha256": "64391a2e09bc1a7cf2034901a5a80c87728022e190f962547120630b10e4e1eb"
+    },
+    {
+      "name": "bruhs-web-79cfe2d0557ced42_bg.wasm",
+      "sha256": "594a2bce22ad0b023584a9ff4d6eb8d9c8e22621b581abffbc6abcc3aa69c6e7"
+    },
+    {
+      "name": "index.html",
+      "sha256": "d3450634604de7c18ace26dcf71f30f50e20d53b83eec5790152d75489ce5fc0"
+    },
+    {
+      "name": "tailwind-9584bd976602b089.css",
+      "sha256": "ea009d88f78ae1930d5e894f3ac20dac5280229aa0cf19022a31d5a44a843254"
+    }
+  ],
+  "completed_at": "2026-11-14T09:02:56.685Z",
+  "checks": 19
+}
