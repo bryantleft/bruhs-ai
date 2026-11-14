@@ -1613,7 +1613,9 @@ pub(super) fn transcript_fixture_messages(root: &str) -> Vec<Message> {
             "t1",
             "Read",
             json!({"file_path": format!("{root}/bruhs-cli/src/main.rs")}),
-            Some("1\tuse clap::Parser;\n2\t\n3\t#[derive(Parser)]\n4\tstruct Cli { #[command(subcommand)] cmd: Cmd }\n"),
+            Some(
+                "1\tuse clap::Parser;\n2\t\n3\t#[derive(Parser)]\n4\tstruct Cli { #[command(subcommand)] cmd: Cmd }\n",
+            ),
         ),
         call(
             "t2",
@@ -1644,7 +1646,9 @@ pub(super) fn transcript_fixture_messages(root: &str) -> Vec<Message> {
             "t5",
             "Bash",
             json!({"command": "cd bruhs-cli && cargo test --quiet"}),
-            Some("running 14 tests\n..............\ntest result: ok. 14 passed; 0 failed; 0 ignored\n"),
+            Some(
+                "running 14 tests\n..............\ntest result: ok. 14 passed; 0 failed; 0 ignored\n",
+            ),
         ),
     ];
     let mut failed = message(
