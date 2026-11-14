@@ -3,23 +3,16 @@ use bruhs_models::num::ToIntSaturating;
 use leptos::prelude::*;
 
 use crate::state::{
-    AppView, AutomationStateSignal, CalendarEvent, CalendarEventsSignal, CalendarMode, EventSource,
-    MeetingsSignal, PeopleSignal, PlanDayRequest, SetActiveView, SetCalendarAnchor,
-    SetCalendarEventsSignal, SetCalendarModeSignal, SetSelectedEventId, SetSelectedWorkItem,
-    SetWorkItemsSignal, TodaySnapshot, WorkItem, WorkItemsSignal,
+    AppView, AutomationStateSignal, CalendarEventsSignal, CalendarMode, MeetingsSignal,
+    PeopleSignal, PlanDayRequest, SetActiveView, SetCalendarAnchor, SetCalendarModeSignal,
+    SetSelectedEventId, SetSelectedWorkItem, TodaySnapshot, WorkItem, WorkItemsSignal,
 };
-use crate::storage;
+use crate::task_saves::TaskSaves;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog};
 use bruhs_models::{
-    propose_day_plan, AgentDomain, DayPlanProposal, ProactiveSuggestion, WorkflowOperation,
+    propose_day_plan_in_window, AgentDomain, DayPlanProposal, ProactiveSuggestion,
+    WorkflowOperation,
 };
-
-#[derive(Clone)]
-struct AppliedPlan {
-    previous_tasks: Vec<WorkItem>,
-    event_ids: Vec<String>,
-    saving: bool,
-}
 
 fn local_day_bounds(now_ms: f64) -> (f64, f64) {
     let now = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(now_ms));
@@ -113,12 +106,51 @@ fn empty_row(label: &'static str) -> impl IntoView {
     view! { <p class="py-1 text-body-sm text-rambutan-500">{label}</p> }
 }
 
+fn install_clock(now_ms: RwSignal<f64>) {
+    use wasm_bindgen::JsCast as _;
+    let tick = move || {
+        let _ = now_ms.try_set(js_sys::Date::now());
+    };
+    let timer = StoredValue::new_local(Some(gloo_timers::callback::Interval::new(30_000, tick)));
+    let focus =
+        leptos::leptos_dom::helpers::window_event_listener(leptos::ev::focus, move |_| tick());
+    let pageshow =
+        leptos::leptos_dom::helpers::window_event_listener(leptos::ev::pageshow, move |_| tick());
+    let visibility = web_sys::window()
+        .and_then(|window| window.document())
+        .and_then(|document| {
+            let callback =
+                wasm_bindgen::closure::Closure::<dyn FnMut(web_sys::Event)>::new(move |_| tick());
+            document
+                .add_event_listener_with_callback(
+                    "visibilitychange",
+                    callback.as_ref().unchecked_ref(),
+                )
+                .ok()?;
+            Some((document, callback))
+        });
+    let visibility = StoredValue::new_local(visibility);
+    on_cleanup(move || {
+        timer.try_update_value(|timer| {
+            timer.take();
+        });
+        focus.remove();
+        pageshow.remove();
+        visibility.try_update_value(|listener| {
+            if let Some((document, callback)) = listener.take() {
+                let _ = document.remove_event_listener_with_callback(
+                    "visibilitychange",
+                    callback.as_ref().unchecked_ref(),
+                );
+            }
+        });
+    });
+}
+
 #[component]
 pub fn TodayPage() -> impl IntoView {
     let WorkItemsSignal(work_items) = expect_context::<WorkItemsSignal>();
-    let SetWorkItemsSignal(set_work_items) = expect_context::<SetWorkItemsSignal>();
     let CalendarEventsSignal(events) = expect_context::<CalendarEventsSignal>();
-    let SetCalendarEventsSignal(set_events) = expect_context::<SetCalendarEventsSignal>();
     let MeetingsSignal(meetings) = expect_context::<MeetingsSignal>();
     let PeopleSignal(people) = expect_context::<PeopleSignal>();
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
@@ -130,12 +162,29 @@ pub fn TodayPage() -> impl IntoView {
     let AutomationStateSignal(automation) = expect_context::<AutomationStateSignal>();
 
     let now_ms = RwSignal::new(js_sys::Date::now());
+    install_clock(now_ms);
     let proposal = RwSignal::new(Option::<DayPlanProposal>::None);
-    let applied_plan = RwSignal::new(Option::<AppliedPlan>::None);
-    let persistence_error = RwSignal::new(Option::<String>::None);
-    let (day_start, day_end) = local_day_bounds(now_ms.get_untracked());
-    let today_key = local_date_key(now_ms.get_untracked());
-    let date_label = greeting_date(now_ms.get_untracked());
+    let reviewed_window = RwSignal::new(None::<bruhs_models::DayPlanWindow>);
+    let saves = expect_context::<TaskSaves>();
+    let planning = saves.day_plan;
+    let persistence_error = Signal::derive(move || planning.with(|state| state.error.clone()));
+    let applied_plan = Signal::derive(move || planning.with(|state| state.receipt.clone()));
+    let date_label = Memo::new(move |_| greeting_date(now_ms.get()));
+    Effect::new(move |_| {
+        let window = crate::clock::workday_window(now_ms.get());
+        if proposal.with_untracked(Option::is_some)
+            && reviewed_window
+                .get_untracked()
+                .is_some_and(|reviewed| reviewed != window)
+        {
+            proposal.set(None);
+            reviewed_window.set(None);
+            planning.update(|state| {
+                state.error =
+                    Some("The local date or timezone changed. Review a new day plan.".into())
+            });
+        }
+    });
 
     Effect::new(move |_| {
         if !automation.ready() {
@@ -187,11 +236,13 @@ pub fn TodayPage() -> impl IntoView {
     });
 
     let snapshot = Memo::new(move |_| {
+        let now = now_ms.get();
+        let (day_start, day_end) = local_day_bounds(now);
         TodaySnapshot::build(
-            now_ms.get(),
+            now,
             day_start,
             day_end,
-            &today_key,
+            &local_date_key(now),
             &work_items.read(),
             &events.read(),
             &meetings.read(),
@@ -209,148 +260,48 @@ pub fn TodayPage() -> impl IntoView {
         set_calendar_mode.set(CalendarMode::Day);
         set_active_view.set(AppView::Calendar);
     };
-    let draft_plan = move |_| {
-        let plan = propose_day_plan(
-            now_ms.get_untracked(),
-            day_start,
+    let draft = move || {
+        let now = js_sys::Date::now();
+        now_ms.set(now);
+        let window = crate::clock::workday_window(now);
+        match propose_day_plan_in_window(
+            now,
+            window,
             &work_items.get_untracked(),
             &events.get_untracked(),
-        );
-        proposal.set(Some(plan));
+        ) {
+            Ok(plan) => {
+                reviewed_window.set(Some(window));
+                proposal.set(Some(plan));
+            }
+            Err(error) => planning.update(|state| state.error = Some(error.to_string())),
+        }
     };
+    let draft_plan = move |_| draft();
     Effect::new(move |_| {
         if plan_day_request.take() {
-            let plan = propose_day_plan(
-                now_ms.get_untracked(),
-                day_start,
-                &work_items.get_untracked(),
-                &events.get_untracked(),
-            );
-            proposal.set(Some(plan));
+            draft();
         }
     });
     let close_plan = Callback::new(move |_| proposal.set(None));
-
     let apply_plan = move |_| {
-        let Some(plan) = proposal.get_untracked() else {
+        let (Some(plan), Some(window)) =
+            (proposal.get_untracked(), reviewed_window.get_untracked())
+        else {
             return;
         };
-        let previous_tasks = work_items.with_untracked(|tasks| {
-            tasks
-                .iter()
-                .filter(|task| plan.blocks.iter().any(|block| block.task_id == task.id))
-                .cloned()
-                .collect::<Vec<_>>()
-        });
-        let now = crate::clock::now_ms();
-        let planned_events = plan
-            .blocks
-            .iter()
-            .map(|block| CalendarEvent {
-                id: block.id.clone(),
-                title: format!("Focus: {}", block.task_title),
-                start_at_ms: block.start_at_ms,
-                end_at_ms: block.end_at_ms,
-                all_day: false,
-                color: Some("persimmon".to_string()),
-                notes: Some(format!("Planned from task {}", block.task_id)),
-                created_at: now,
-                updated_at: now,
-                source: EventSource::Local,
-                google_event_id: None,
-                calendar_id: None,
-                attendees: Vec::new(),
-                organizer: None,
-                location: None,
-                conferencing: None,
-                recurring_event_id: None,
-                html_link: None,
-            })
-            .collect::<Vec<_>>();
-        let event_ids = planned_events
-            .iter()
-            .map(|event| event.id.clone())
-            .collect::<Vec<_>>();
-        set_work_items.update(|items| {
-            for block in &plan.blocks {
-                if let Some(task) = items.iter_mut().find(|task| task.id == block.task_id) {
-                    task.planning.time_block_event_ids.push(block.id.clone());
-                    task.updated_at = now;
-                }
-            }
-        });
-        set_events.update(|items| items.extend(planned_events.clone()));
-        let persisted_tasks = work_items.with_untracked(|tasks| {
-            tasks
-                .iter()
-                .filter(|task| plan.blocks.iter().any(|block| block.task_id == task.id))
-                .cloned()
-                .collect::<Vec<_>>()
-        });
-        let applied = AppliedPlan {
-            previous_tasks,
-            event_ids,
-            saving: true,
-        };
-        applied_plan.set(Some(applied.clone()));
-        proposal.set(None);
-        persistence_error.set(None);
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Err(error) = storage::save_day_plan(&persisted_tasks, &planned_events).await {
-                set_work_items.update(|items| {
-                    for previous in &applied.previous_tasks {
-                        if let Some(current) = items.iter_mut().find(|task| task.id == previous.id)
-                        {
-                            *current = previous.clone();
-                        }
-                    }
-                });
-                set_events.update(|items| {
-                    items.retain(|event| !applied.event_ids.contains(&event.id));
-                });
-                applied_plan.set(None);
-                persistence_error.set(Some(format!("Plan could not be saved: {error:?}")));
-            } else {
-                applied_plan.update(|current| {
-                    if let Some(current) = current {
-                        current.saving = false;
-                    }
-                });
-            }
-        });
-    };
-
-    let undo_plan = move |_| {
-        let Some(applied) = applied_plan.get_untracked() else {
-            return;
-        };
-        if applied.saving {
-            return;
+        if saves.apply_day_plan(plan, window) {
+            proposal.set(None);
         }
-        set_work_items.update(|items| {
-            for previous in &applied.previous_tasks {
-                if let Some(current) = items.iter_mut().find(|task| task.id == previous.id) {
-                    *current = previous.clone();
-                }
-            }
-        });
-        set_events.update(|items| items.retain(|event| !applied.event_ids.contains(&event.id)));
-        applied_plan.set(None);
-        let previous_tasks = applied.previous_tasks;
-        let event_ids = applied.event_ids;
-        wasm_bindgen_futures::spawn_local(async move {
-            if let Err(error) = storage::undo_day_plan(&previous_tasks, &event_ids).await {
-                persistence_error.set(Some(format!("Undo could not be saved: {error:?}")));
-            }
-        });
     };
+    let undo_plan = move |_| saves.undo_day_plan();
 
     view! {
         <section class="flex flex-1 min-h-0 min-w-0 flex-col bg-longan-950" aria-labelledby="today-title">
             <header class="flex flex-wrap shrink-0 items-center justify-between gap-3 border-b border-longan-800/50 px-4 py-3 sm:px-6">
                 <div class="min-w-0">
                     <h1 id="today-title" class="text-h3 text-rambutan-100">"Today"</h1>
-                    <p class="mt-0.5 text-body-sm text-rambutan-500">{date_label}</p>
+                    <p class="mt-0.5 text-body-sm text-rambutan-500">{move || date_label.get()}</p>
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| set_active_view.set(AppView::Automations))>
@@ -359,7 +310,7 @@ pub fn TodayPage() -> impl IntoView {
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| set_active_view.set(AppView::Life))>
                         "Life"
                     </Button>
-                    <Button variant=ButtonVariant::Primary size=ButtonSize::Small on_click=Callback::new(draft_plan)>
+                    <Button variant=ButtonVariant::Primary size=ButtonSize::Small disabled=Signal::derive(move || planning.with(|state| state.busy)) on_click=Callback::new(draft_plan)>
                         "Plan my day"
                     </Button>
                 </div>
@@ -367,17 +318,26 @@ pub fn TodayPage() -> impl IntoView {
 
             <div class="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
                 <div class="mx-auto max-w-6xl space-y-4">
-                    <Show when=move || persistence_error.get().is_some() fallback=|| ()>
+                    <Show when=move || persistence_error.get().is_some() && proposal.get().is_none() fallback=|| ()>
                         <div role="alert" class="flex items-center justify-between gap-3 rounded-grape bg-lychee-500/10 inset-ring inset-ring-lychee-400/20 px-3 py-2 text-body-sm text-lychee-200">
                             <span>{move || persistence_error.get().unwrap_or_default()}</span>
-                            <button class="text-button hover:text-lychee-100 cursor-pointer" on:click=move |_| persistence_error.set(None)>"Dismiss"</button>
+                            <button class="text-button hover:text-lychee-100 cursor-pointer" on:click=move |_| planning.update(|state| state.error = None)>"Dismiss"</button>
                         </div>
+                    </Show>
+                    <Show when=move || persistence_error.get().is_some() && proposal.get().is_none() && !planning.with(|state| state.busy) fallback=|| ()>
+                        <button class="bruhs-control rounded-seed px-2 py-2 text-button text-persimmon-300 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400" on:click=move |_| saves.refresh_day_plan_sources()>"Refresh saved tasks and calendar"</button>
+                    </Show>
+                    <Show when=move || planning.with(|state| state.busy) fallback=|| ()>
+                        <p role="status" class="text-body-sm text-rambutan-400">"Saving day plan…"</p>
+                    </Show>
+                    <Show when=move || !planning.with(|state| state.loaded || state.busy) fallback=|| ()>
+                        <button class="bruhs-control text-button text-persimmon-300" on:click=move |_| saves.load_day_plan()>"Retry day-plan recovery"</button>
                     </Show>
                     <Show when=move || applied_plan.get().is_some() fallback=|| ()>
                         <div role="status" class="flex items-center justify-between gap-3 rounded-grape bg-pandan-500/10 inset-ring inset-ring-pandan-400/20 px-3 py-2 text-body-sm text-pandan-200">
                             <span>"Day plan applied."</span>
                             <Show
-                                when=move || applied_plan.get().is_some_and(|plan| !plan.saving)
+                                when=move || !planning.with(|state| state.busy)
                                 fallback=|| view! { <span class="text-label-sm text-pandan-300/70">"Saving…"</span> }
                             >
                                 <button class="bruhs-control min-h-8 rounded-seed px-2 py-1 text-button text-pandan-100 hover:text-white focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer" on:click=undo_plan>"Undo"</button>
@@ -532,6 +492,9 @@ pub fn TodayPage() -> impl IntoView {
                 let unscheduled_count = plan.unscheduled_count;
                 let has_unscheduled = unscheduled_count != 0;
                 view! {
+                <Show when=move || persistence_error.get().is_some() fallback=|| ()>
+                    <p role="alert" class="px-4 pt-3 text-body-sm text-lychee-200">{move || persistence_error.get().unwrap_or_default()}</p>
+                </Show>
                 <div class="border-b border-longan-800 px-4 py-3">
                     <h2 class="text-h4 text-rambutan-100">"Review day plan"</h2>
                     <p class="mt-1 text-body-sm text-rambutan-500">{format!("{} focus block(s), respecting {} calendar commitment(s)", plan.blocks.len(), plan.busy_blocks_respected)}</p>
@@ -554,7 +517,7 @@ pub fn TodayPage() -> impl IntoView {
                 </div>
                 <div class="flex items-center justify-end gap-2 border-t border-longan-800 px-4 py-3">
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Default on_click=Callback::new(move |_| proposal.set(None))>"Cancel"</Button>
-                    <Button variant=ButtonVariant::Primary size=ButtonSize::Default disabled=Signal::derive(move || proposal.get().is_none_or(|plan| plan.blocks.is_empty())) on_click=Callback::new(apply_plan)>"Apply plan"</Button>
+                    <Button variant=ButtonVariant::Primary size=ButtonSize::Default disabled=Signal::derive(move || proposal.get().is_none_or(|plan| plan.blocks.is_empty()) || planning.with(|state| state.busy)) on_click=Callback::new(apply_plan)>"Apply plan"</Button>
                 </div>
                 }
             })}

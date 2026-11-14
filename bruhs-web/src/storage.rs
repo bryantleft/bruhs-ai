@@ -19,6 +19,7 @@ use serde::{Deserialize, Serialize};
 use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::JsValue;
 
+pub mod day_plans;
 pub mod meeting_generations;
 pub mod meeting_notes;
 mod messages;
@@ -291,51 +292,6 @@ pub(crate) async fn load_messages(
 }
 
 // ── Work items ───────────────────────────────────────────────────────────────
-
-/// Commit the task links and their local calendar blocks together. A plan is
-/// either durable in both stores or absent from both stores.
-pub async fn save_day_plan(
-    work_items: &[WorkItem],
-    events: &[CalendarEvent],
-) -> Result<(), idb::Error> {
-    let db = open_db().await?;
-    let tx = db.transaction(
-        &[STORE_WORK_ITEMS, STORE_EVENTS],
-        TransactionMode::ReadWrite,
-    )?;
-    let work_item_store = tx.object_store(STORE_WORK_ITEMS)?;
-    let event_store = tx.object_store(STORE_EVENTS)?;
-    for work_item in work_items {
-        work_item_store.put(&to_js(work_item)?, None)?.await?;
-    }
-    for event in events {
-        event_store.put(&to_js(event)?, None)?.await?;
-    }
-    tx.commit()?.await?;
-    Ok(())
-}
-
-/// Reverse an applied day plan in one IndexedDB transaction.
-pub async fn undo_day_plan(
-    work_items: &[WorkItem],
-    event_ids: &[String],
-) -> Result<(), idb::Error> {
-    let db = open_db().await?;
-    let tx = db.transaction(
-        &[STORE_WORK_ITEMS, STORE_EVENTS],
-        TransactionMode::ReadWrite,
-    )?;
-    let work_item_store = tx.object_store(STORE_WORK_ITEMS)?;
-    let event_store = tx.object_store(STORE_EVENTS)?;
-    for work_item in work_items {
-        work_item_store.put(&to_js(work_item)?, None)?.await?;
-    }
-    for event_id in event_ids {
-        event_store.delete(JsValue::from_str(event_id))?.await?;
-    }
-    tx.commit()?.await?;
-    Ok(())
-}
 
 // ── Projects ─────────────────────────────────────────────────────────────────
 

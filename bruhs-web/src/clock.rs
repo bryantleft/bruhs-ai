@@ -48,6 +48,26 @@ pub fn local_day_start(ms: f64) -> f64 {
     add_local_days(ms, 0)
 }
 
+/// Resolve working hours from local calendar fields, including DST days.
+pub fn workday_window(ms: f64) -> bruhs_models::DayPlanWindow {
+    let date = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(ms));
+    let at = |hour| {
+        js_sys::Date::new_with_year_month_day_hr_min_sec(
+            date.get_full_year(),
+            field(date.get_month()),
+            field(date.get_date()),
+            hour,
+            0,
+            0,
+        )
+        .get_time()
+    };
+    bruhs_models::DayPlanWindow {
+        start_at_ms: at(9),
+        end_at_ms: at(18),
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
