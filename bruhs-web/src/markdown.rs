@@ -20,6 +20,8 @@
 
 use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 
+pub(crate) mod dom;
+
 /// Render untrusted `markdown` to HTML using GFM extensions, without raw
 /// HTML, without links or images to disallowed URL schemes, and with remote
 /// images turned into links.

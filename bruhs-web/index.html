@@ -3,18 +3,21 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta name="referrer" content="no-referrer" />
     <!-- No inline or third-party script runs: scripts come from this origin
          only (the WASM loader is js/boot.js, see Trunk.toml), WebAssembly may
          compile, and the API / terminal sockets may be any loopback or
          *.localhost origin, which is what BRUHS_API_URL can name (see
-         docs/local-server-access.md). Images load only from this origin and
-         data:/blob: URLs: a remote image in rendered markdown would send its
-         URL to that host with no click (markdown.rs renders those as links).
+         docs/local-server-access.md). Images and media permit only local API
+         origins, data, and blob URLs. After Load, external rich media uses a
+         separate sandboxed document. Rich responses offer a Load control for
+         remote images and media before creating a fetching element. Markdown
+         outside that component still converts remote images to links.
          Styles stay inline-capable: Leptos, KaTeX, Mermaid and xterm set
          style attributes. -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://*.localhost:* ws://*.localhost:* https://*.localhost:* wss://*.localhost:* https://*.localhost wss://*.localhost; frame-src http: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
+      content="default-src 'self'; script-src 'self' 'wasm-unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: http://127.0.0.1:* https://127.0.0.1:* http://localhost:* https://localhost:* http://*.localhost:* https://*.localhost:*; media-src 'self' data: blob: http://127.0.0.1:* https://127.0.0.1:* http://localhost:* https://localhost:* http://*.localhost:* https://*.localhost:*; font-src 'self' data:; connect-src 'self' http://127.0.0.1:* https://127.0.0.1:* ws://127.0.0.1:* wss://127.0.0.1:* http://localhost:* https://localhost:* ws://localhost:* wss://localhost:* http://*.localhost:* ws://*.localhost:* https://*.localhost:* wss://*.localhost:* https://*.localhost wss://*.localhost; frame-src http: https:; worker-src 'self' blob:; object-src 'none'; base-uri 'self'; form-action 'self'"
     />
     <title>bruhs.ai</title>
     <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
@@ -59,7 +62,9 @@
     <!-- Typography role classes (bruhs design system) -->
     <style>
       html, body { height: 100dvh; margin: 0; padding: 0; }
-      body > div { height: 100%; }
+      /* The app root already uses h-full. Keep floating library helpers out
+         of document scrolling until they receive their inline position. */
+      .mermaidTooltip { top: 0; left: 0; }
 
       /* Monaspace from this origin (the theme's CDN-relative @font-face src fails
          cross-origin in some browsers, which silently fell back to the system mono). */
