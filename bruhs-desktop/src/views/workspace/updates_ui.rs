@@ -90,6 +90,13 @@ impl DesktopUpdates {
         };
         // Tests drive checks by hand; a real check spawns CLIs and dials out.
         if cfg!(not(test)) {
+            #[cfg(feature = "native-performance")]
+            if crate::native_performance::block_service(
+                cx,
+                crate::native_performance::Service::Updates,
+            ) {
+                return this;
+            }
             this.start_polling(cx);
         }
         this
