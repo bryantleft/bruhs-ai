@@ -18,6 +18,10 @@ See [agent runtimes and models](docs/agent-providers.md) for setup and access mo
   that keep running in the background. Threads import from Claude Code,
   Codex, T3 Code and Cursor, and continue in Claude Code, Codex or T3 Code
   (or copy out as Markdown).
+- **Rich replies.** Inline images, video, audio, PDFs, and sandboxed
+  interactive charts or widgets on web and desktop, with saved widget state,
+  durable media, published HTML artifacts, and portable reply bundles. See
+  [response formats and boundaries](docs/rich-responses.md).
 - **Today.** `⌘⇧Y` combines the schedule, ready focus work, overdue triage,
   waiting-on items, relationship follow-ups and recent meeting decisions.
   "Plan my day" proposes conflict-aware focus blocks, previews every change,

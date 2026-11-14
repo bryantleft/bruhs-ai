@@ -21,8 +21,8 @@ env:
   CARGO_PROFILE_TEST_DEBUG: "0"
 
 jobs:
-  # Crates that build and test on any platform. Everything except the macOS-only
-  # capture/desktop pair (see the `macos` job) and the wasm UI (see `wasm`).
+  # Shared crates. The native desktop has its own Windows/Linux workflow;
+  # macOS capture/desktop and the WASM UI run in their jobs below.
   linux:
     runs-on: ubuntu-24.04
     timeout-minutes: 45
@@ -64,9 +64,9 @@ jobs:
           cargo doc -p bruhs-models -p bruhs-core -p bruhs-server -p bruhs-mcp
           -p claude-sdk-rs -p codex-sdk-rs --no-deps --locked
 
-  # bruhs-capture uses macOS-only frameworks (ScreenCaptureKit via cidre, Metal
-  # whisper, sherpa binaries) and bruhs-desktop is the native GPUI app, so these
-  # two stay on macOS. Their docs are built here for the same reason.
+  # Capture uses macOS frameworks (ScreenCaptureKit, Metal whisper, sherpa).
+  # This also verifies the desktop's WKWebView path; native-platforms.yml
+  # covers the Windows and Linux desktop builds. Capture docs stay here.
   macos:
     runs-on: macos-14
     timeout-minutes: 60

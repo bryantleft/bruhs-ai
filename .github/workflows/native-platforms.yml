@@ -1,0 +1,88 @@
+name: Native desktop platforms
+
+# Manual, like the main CI workflow: no hosted-runner spend on pushes.
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: native-platforms-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  CARGO_INCREMENTAL: "0"
+  CARGO_BUILD_JOBS: "2"
+  CARGO_PROFILE_DEV_DEBUG: "0"
+  CARGO_PROFILE_TEST_DEBUG: "0"
+  CARGO_TERM_COLOR: always
+
+jobs:
+  desktop:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6
+        with:
+          persist-credentials: false
+
+      - name: Install repository-pinned Rust toolchain
+        run: rustup toolchain install
+
+      - name: Cache Cargo
+        uses: Swatinem/rust-cache@6323deb102c322ba6fcbdcafc7e3dddab59af2b6 # v2.9.2
+
+      - name: Linux native libraries
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          clang lld cmake pkg-config libdbus-1-dev libasound2-dev libudev-dev
+          libxkbcommon-x11-dev libx11-dev libxcb1-dev libxcb-shape0-dev
+          libxcb-xfixes0-dev libwayland-dev libfontconfig1-dev libfreetype6-dev
+          libssl-dev libwebkit2gtk-4.1-dev gstreamer1.0-plugins-base
+          gstreamer1.0-plugins-good xvfb xauth fonts-dejavu-core mesa-vulkan-drivers
+
+      - name: Strict native lint
+        run: cargo clippy -p bruhs-desktop --all-targets --locked -- -D warnings
+
+      - name: Build native desktop and companion server
+        run: cargo build -p bruhs-desktop -p bruhs-server --locked
+
+      - name: Linux desktop tests
+        if: runner.os == 'Linux'
+        run: xvfb-run -a cargo test -p bruhs-desktop --bin bruhs-desktop --locked
+
+      - name: Windows desktop tests
+        if: runner.os == 'Windows'
+        run: cargo test -p bruhs-desktop --bin bruhs-desktop --locked
+
+      - name: Prepare Microsoft WebView2 for the native GUI check
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/install-webview2-runtime.ps1
+
+      - name: Validate the native GUI harness
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows-rich-smoke.ps1 -SelfTest
+
+      - name: Windows native interaction, sandbox and saved-state check
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: ./scripts/windows-rich-smoke.ps1
+
+      - name: Preserve Windows GUI screenshots and diagnostics
+        if: always() && runner.os == 'Windows'
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: windows-rich-response-gui
+          path: |
+            out/windows-rich-smoke/*.png
+            out/windows-rich-smoke/*.log
+            out/windows-rich-smoke/result.json
+          if-no-files-found: warn

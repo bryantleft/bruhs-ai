@@ -266,6 +266,29 @@ fn desktop_settings_modal_focus_should_stay_trapped_like_web_dialog(cx: &mut gpu
     assert_provider_logo_bounds(cx, "desktop-provider-logo-claude");
     assert_provider_logo_bounds(cx, "desktop-provider-logo-codex");
 
+    let model_list = rendered_bounds(cx, "desktop-model-list");
+    for _ in 0..20 {
+        let model_option = rendered_bounds(cx, "desktop-model-option-gpt-5.5");
+        if model_option.top() >= model_list.top() && model_option.bottom() <= model_list.bottom() {
+            break;
+        }
+        let delta = if model_option.top() < model_list.top() {
+            40.0
+        } else {
+            -40.0
+        };
+        cx.simulate_event(gpui::ScrollWheelEvent {
+            position: model_list.center(),
+            delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(delta))),
+            ..Default::default()
+        });
+        cx.run_until_parked();
+    }
+    let model_option = rendered_bounds(cx, "desktop-model-option-gpt-5.5");
+    assert!(
+        model_option.top() >= model_list.top() && model_option.bottom() <= model_list.bottom(),
+        "Model option {model_option:?} must be inside list {model_list:?} before clicking"
+    );
     click_debug_selector(cx, "desktop-model-option-gpt-5.5");
     workspace.update_in(cx, |workspace, _window, cx| {
         assert_eq!(workspace.current_model, "gpt-5.5");
