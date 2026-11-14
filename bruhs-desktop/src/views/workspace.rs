@@ -337,10 +337,9 @@ struct DesktopCalendarEvent {
     notes: Option<String>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug, Serialize, Deserialize)]
 struct DesktopAppliedPlan {
-    previous_planning: Vec<(String, WorkItemPlanning)>,
-    event_ids: Vec<String>,
+    ownership: bruhs_models::DayPlanOwnership,
 }
 
 struct DesktopEventFormValues<'a> {
@@ -738,6 +737,8 @@ struct PersistedWorkspaceState {
     projects: Vec<PersistedProject>,
     work_items: Vec<PersistedWorkItem>,
     calendar_events: Vec<PersistedCalendarEvent>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    day_plan_undo: Option<DesktopAppliedPlan>,
     captures: Vec<CaptureRecord>,
     knowledge_documents: Vec<KnowledgeDocument>,
     source_clips: Vec<SourceClip>,
@@ -1152,6 +1153,9 @@ pub struct Workspace {
     persist_requests: usize,
     day_plan_proposal: Option<bruhs_models::DayPlanProposal>,
     day_plan_undo: Option<DesktopAppliedPlan>,
+    day_plan_error: Option<String>,
+    #[cfg(test)]
+    day_plan_test_now: Option<chrono::DateTime<Local>>,
     persistence: Arc<PersistenceCoordinator>,
     save_queue: save_queue::SaveQueue,
 
@@ -1761,7 +1765,12 @@ impl Workspace {
             #[cfg(test)]
             persist_requests: 0,
             day_plan_proposal: None,
-            day_plan_undo: None,
+            day_plan_undo: persisted
+                .as_ref()
+                .and_then(|state| state.day_plan_undo.clone()),
+            day_plan_error: None,
+            #[cfg(test)]
+            day_plan_test_now: None,
             persistence: Arc::new(PersistenceCoordinator {
                 write_lock: Mutex::new(disk_version),
                 ..Default::default()
@@ -1979,7 +1988,12 @@ impl Workspace {
                 .timer(std::time::Duration::from_secs(30))
                 .await;
             if this
-                .update(cx, |this, cx| this.compact_idle_if_due(cx))
+                .update(cx, |this, cx| {
+                    this.compact_idle_if_due(cx);
+                    if matches!(this.active_view, AppView::Today) {
+                        cx.notify();
+                    }
+                })
                 .is_err()
             {
                 break;

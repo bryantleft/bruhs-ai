@@ -31,7 +31,7 @@ fn thread(title: &str) -> Record {
 fn conversation(text: &str) -> Record {
     let mut message = AgentMessage::user(text.into(), 1.0);
     message.id = "message".into();
-    Record::Conversation(MessagesRecord::new("a".into(), vec![message]))
+    Record::Conversation(Arc::new(MessagesRecord::new("a".into(), vec![message])))
 }
 
 fn edit(queue: &mut Queue, kind: Kind, original: Option<Record>, draft: Option<Record>) {

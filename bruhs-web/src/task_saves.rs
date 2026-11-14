@@ -18,9 +18,11 @@ mod attachment_recovery;
 mod events;
 mod knowledge;
 mod people;
+mod planning;
 mod projects;
 mod sources;
 mod threads;
+pub use planning::DayPlanState;
 
 #[derive(Clone, Copy)]
 pub struct TaskSaves {
@@ -35,13 +37,14 @@ pub struct TaskSaves {
     conversations: StoredValue<threads::Conversations>,
     banners: crate::components::banner::BannerStackSignal,
     saving: RwSignal<bool>,
+    pub day_plan: RwSignal<DayPlanState>,
     pub status: RwSignal<SaveState>,
     pub contacts_committed: RwSignal<u64>,
 }
 
 impl TaskSaves {
     pub fn install() {
-        provide_context(Self {
+        let saves = Self {
             queue: RwSignal::new(Queue::default()),
             initial_edits: StoredValue::new(InitialEdits::default()),
             initial_captures: StoredValue::new(InitialEdits::default()),
@@ -53,13 +56,16 @@ impl TaskSaves {
             conversations: StoredValue::new(threads::Conversations::default()),
             banners: expect_context(),
             saving: RwSignal::new(false),
+            day_plan: RwSignal::new(DayPlanState::default()),
             status: RwSignal::new(SaveState::Saved),
             contacts_committed: RwSignal::new(0),
-        });
+        };
+        provide_context(saves);
+        saves.load_day_plan();
     }
 
     pub(crate) fn pending(self) -> bool {
-        self.queue.with(|queue| !queue.is_empty())
+        self.queue.with(|queue| !queue.is_empty()) || self.day_plan.with(|state| state.busy)
     }
 
     pub fn edit(self, id: String, expected: Option<WorkItem>, draft: Option<WorkItem>) {
@@ -210,7 +216,7 @@ impl TaskSaves {
                     message: message.clone(),
                     conflict: *conflict,
                 }
-            } else if queue.is_empty() {
+            } else if queue.is_empty() && !self.day_plan.with_untracked(|state| state.busy) {
                 SaveState::Saved
             } else {
                 SaveState::Saving
@@ -219,7 +225,10 @@ impl TaskSaves {
     }
 
     fn save(self) {
-        if self.saving.get_untracked() {
+        if self.saving.get_untracked()
+            || self.day_plan.with_untracked(|state| state.busy)
+            || self.queue.with_untracked(Queue::is_empty)
+        {
             return;
         }
         self.saving.set(true);

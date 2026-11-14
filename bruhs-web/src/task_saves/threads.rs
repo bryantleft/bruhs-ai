@@ -1,5 +1,6 @@
 //! Conversation originals stay separate from normalized display messages.
 use std::collections::{HashMap, HashSet};
+use std::sync::Arc;
 
 use leptos::prelude::*;
 
@@ -11,7 +12,7 @@ use crate::storage::MessagesRecord;
 
 #[derive(Default)]
 pub(super) struct Conversations {
-    latest: HashMap<String, Option<MessagesRecord>>,
+    latest: HashMap<String, Option<Arc<MessagesRecord>>>,
     deleted: HashSet<String>,
 }
 
@@ -85,7 +86,7 @@ impl TaskSaves {
     pub fn pending_conversation(self, id: &str) -> Option<Vec<AgentMessage>> {
         self.queue
             .with_untracked(|queue| queue.conversation(id))
-            .map(displayed)
+            .map(|record| displayed(record.map(Arc::unwrap_or_clone)))
     }
 
     pub(crate) fn loaded_conversation(
@@ -96,17 +97,19 @@ impl TaskSaves {
         if let Some(pending) = self.pending_conversation(id) {
             return pending;
         }
+        let loaded = loaded.map(Arc::new);
         self.conversations.update_value(|state| {
             if !state.deleted.contains(id) {
                 state.latest.insert(id.to_owned(), loaded.clone());
             }
         });
-        recovered(loaded)
+        recovered(loaded.map(Arc::unwrap_or_clone))
     }
 
     pub fn edit_conversation(self, id: String, messages: Vec<AgentMessage>) {
         let mut original = None;
-        let draft = MessagesRecord::new(id.clone(), messages);
+        // The cache and writer keep immutable snapshots of the same history.
+        let draft = Arc::new(MessagesRecord::new(id.clone(), messages));
         if self
             .conversations
             .with_value(|state| state.deleted.contains(&id))

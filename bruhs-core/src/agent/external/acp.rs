@@ -347,12 +347,12 @@ async fn rpc(
     method: &str,
     params: Value,
 ) -> io::Result<Value> {
-    write(
-        stdin,
-        json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
-    )
-    .await?;
-    let wait = async {
+    let exchange = async {
+        write(
+            stdin,
+            json!({"jsonrpc":"2.0","id":id,"method":method,"params":params}),
+        )
+        .await?;
         loop {
             let line = child
                 .next_line_with_limit(&turn.tx, Some(FRAME_BYTES))
@@ -386,16 +386,25 @@ async fn rpc(
             }
         }
     };
-    if method == "session/prompt" {
-        wait.await
-    } else {
-        tokio::time::timeout(super::CONFIG_TIMEOUT, wait)
-            .await
-            .map_err(|_| {
-                io::Error::other(format!(
-                    "ACP {method} timed out. Check the agent's login and executable."
-                ))
-            })?
+    tokio::select! {
+        biased;
+        () = turn.tx.closed() => Err(io::Error::new(
+            io::ErrorKind::Interrupted,
+            "ACP task was cancelled.",
+        )),
+        result = async {
+            if method == "session/prompt" {
+                exchange.await
+            } else {
+                tokio::time::timeout(super::CONFIG_TIMEOUT, exchange)
+                    .await
+                    .map_err(|_| {
+                        io::Error::other(format!(
+                            "ACP {method} timed out. Check the agent's login and executable."
+                        ))
+                    })?
+            }
+        } => result,
     }
 }
 
@@ -487,6 +496,108 @@ fn events(update: &Value) -> Vec<QueryEvent> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[cfg(unix)]
+    async fn stalled_rpc_input() -> (
+        process::CliProcess,
+        ChildStdin,
+        TurnContext,
+        tokio::sync::mpsc::Receiver<crate::OrchestratorEvent>,
+    ) {
+        let sessions = std::sync::Arc::new(std::sync::Mutex::new(HashMap::new()));
+        let registry = std::sync::Arc::new(crate::BackgroundTaskRegistry::new());
+        let thread = bruhs_models::ids::ThreadId::new_v4();
+        let (turn, events) = crate::agent::tests::turn_context(&sessions, &registry, &thread, 1);
+        let mut command = tokio::process::Command::new("/bin/sh");
+        command
+            .args(["-c", "printf 'ready\\n'; exec 1>&-; /bin/sleep 30"])
+            .env_clear()
+            .stdin(std::process::Stdio::piped());
+        let mut child =
+            process::CliProcess::spawn("ACP stalled-input fixture", &mut command).unwrap();
+        let input = child.take_stdin().unwrap();
+        assert_eq!(
+            child
+                .next_line(&turn.tx)
+                .await
+                .unwrap_or_else(|_| panic!("fixture did not start")),
+            "ready"
+        );
+        // stdout is already closed. A pending RPC with this large payload
+        // cannot be waiting for a response: it has not finished its write.
+        assert!(matches!(
+            child.next_line(&turn.tx).await,
+            Err(process::Ending::Eof)
+        ));
+        (child, input, turn, events)
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn cancellation_interrupts_a_blocked_rpc_write() {
+        let (mut child, mut input, turn, events) = stalled_rpc_input().await;
+        let mut request = Box::pin(rpc(
+            &mut child,
+            &mut input,
+            &turn,
+            PermissionMode::Plan,
+            1,
+            "session/prompt",
+            json!({"text":"x".repeat(1024 * 1024)}),
+        ));
+        let pending = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(std::future::Future::poll(request.as_mut(), cx).is_pending())
+        })
+        .await;
+        drop(events);
+        let result =
+            tokio::time::timeout(std::time::Duration::from_secs(1), request.as_mut()).await;
+        drop(request);
+        drop(input);
+        // Always kill/reap the owned fixture before asserting the result.
+        let cleanup = child.finish(process::Ending::ConsumerGone).await;
+        assert!(cleanup.is_none());
+        assert!(pending, "the pipe did not exercise write backpressure");
+        assert!(
+            matches!(result, Ok(Err(error)) if error.kind() == io::ErrorKind::Interrupted),
+            "cancellation did not interrupt the RPC write"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn configuration_timeout_covers_a_blocked_rpc_write() {
+        let (mut child, mut input, turn, events) = stalled_rpc_input().await;
+        tokio::time::pause();
+        let mut request = Box::pin(rpc(
+            &mut child,
+            &mut input,
+            &turn,
+            PermissionMode::Plan,
+            1,
+            "initialize",
+            json!({"metadata":"x".repeat(1024 * 1024)}),
+        ));
+        let pending = std::future::poll_fn(|cx| {
+            std::task::Poll::Ready(std::future::Future::poll(request.as_mut(), cx).is_pending())
+        })
+        .await;
+        tokio::time::advance(super::super::CONFIG_TIMEOUT).await;
+        let result =
+            tokio::time::timeout(std::time::Duration::from_millis(1), request.as_mut()).await;
+        drop(request);
+        drop(input);
+        tokio::time::resume();
+        let cleanup = child.finish(process::Ending::ConsumerGone).await;
+        drop(events);
+        assert!(cleanup.is_none());
+        assert!(pending, "the pipe did not exercise write backpressure");
+        assert!(
+            matches!(result, Ok(Err(error)) if error.to_string().contains("ACP initialize timed out")),
+            "the configuration deadline did not include the RPC write"
+        );
+    }
+
     #[tokio::test]
     #[ignore = "requires installed OpenCode; creates an isolated local ACP session without a prompt or provider turn"]
     async fn installed_opencode_negotiates_modes_and_reload_without_a_model_turn() {
