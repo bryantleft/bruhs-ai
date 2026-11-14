@@ -1,7 +1,7 @@
 //! Local control plane and separately authenticated event ingress.
 
 use axum::{
-    extract::Path,
+    extract::{Path, Query},
     http::{HeaderMap, StatusCode},
     Extension, Json,
 };
@@ -48,6 +48,40 @@ pub async fn command(
     Json(command): Json<ReactiveCommand>,
 ) -> Result<Json<ReactiveSnapshot>, AppError> {
     Ok(Json(runtime(value)?.command(command).await?))
+}
+
+#[derive(serde::Deserialize)]
+pub struct ReportPage {
+    before: Option<String>,
+}
+
+pub async fn reports(
+    value: Option<Extension<ReactiveRuntime>>,
+    Query(page): Query<ReportPage>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let snapshot = runtime(value)?.weekly_reports(page.before).await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(snapshot),
+    ))
+}
+
+pub async fn report(
+    value: Option<Extension<ReactiveRuntime>>,
+    Path(id): Path<String>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let report = runtime(value)?.weekly_report(id).await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(report),
+    ))
+}
+
+pub async fn report_command(
+    value: Option<Extension<ReactiveRuntime>>,
+    Json(command): Json<bruhs_models::weekly_reports::WeeklyReportCommand>,
+) -> Result<Json<bruhs_models::weekly_reports::WeeklyReportsSnapshot>, AppError> {
+    Ok(Json(runtime(value)?.weekly_report_command(command).await?))
 }
 
 pub async fn token(

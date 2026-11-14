@@ -470,7 +470,9 @@ async fn restart_preserves_queued_work_and_marks_active_work_interrupted() {
     let (_, running) = runtime.call(store::claim_next).await.unwrap().unwrap();
     let id = running.id.clone();
     runtime
-        .call(move |connection| store::record_session(connection, &id, "persistent-session"))
+        .call(move |connection| {
+            store::record_session(connection, &id, "persistent-session", "claude-sonnet-4-6")
+        })
         .await
         .unwrap();
     drop(runtime);
@@ -666,7 +668,9 @@ async fn memory_changes_drop_the_provider_session_and_fence_older_approved_turns
     let (_, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
     let id = run.id.clone();
     runtime
-        .call(move |connection| store::record_session(connection, &id, "old-session"))
+        .call(move |connection| {
+            store::record_session(connection, &id, "old-session", "claude-sonnet-4-6")
+        })
         .await
         .unwrap();
     runtime

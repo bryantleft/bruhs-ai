@@ -89,16 +89,33 @@ async fn drive(runtime: ReactiveRuntime, source: EventSource, client: reqwest::C
         return;
     };
     loop {
-        let error = poll_once(&runtime, &source, &client)
+        let outcome = poll_once_next_deadline(&runtime, &source, &client)
             .await
-            .err()
-            .map(|error| error.to_string());
+            .and_then(|deadline| {
+                deadline.map_or(Ok(interval), |due| {
+                    now_ms().map(|now| Duration::from_millis(due.saturating_sub(now).max(1)))
+                })
+            });
+        let (delay, error) = match outcome {
+            Ok(delay) => (delay, None),
+            Err(error) => (
+                if matches!(source.kind, SourceKind::Schedule { .. }) {
+                    // Match the queue worker's one-second retry resolution when
+                    // capacity/storage failures leave an overdue schedule pending.
+                    Duration::from_secs(1)
+                } else {
+                    interval
+                },
+                Some(error.to_string()),
+            ),
+        };
         if let Err(error) = runtime.source_status(&source.id, error).await {
             tracing::error!(source_id = %source.id, "Could not save event source health: {error}");
             return;
         }
-        // Sleeping after the completed poll prevents overlap and missed-tick bursts.
-        tokio::time::sleep(interval).await;
+        // Schedule wake-ups follow their durable deadline, including a restart
+        // partway through an interval. Other sources sleep after completed work.
+        tokio::time::sleep(delay).await;
     }
 }
 
@@ -119,12 +136,22 @@ pub async fn poll_once(
     source: &EventSource,
     client: &reqwest::Client,
 ) -> Result<(), ReactiveError> {
+    poll_once_next_deadline(runtime, source, client)
+        .await
+        .map(|_| ())
+}
+
+async fn poll_once_next_deadline(
+    runtime: &ReactiveRuntime,
+    source: &EventSource,
+    client: &reqwest::Client,
+) -> Result<Option<u64>, ReactiveError> {
     let cursor_key = match &source.kind {
         SourceKind::Folder { .. } => "folder",
         SourceKind::Http { .. } => "http",
         SourceKind::Command { .. } => "command",
         SourceKind::Schedule { .. } => "schedule",
-        SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(()),
+        SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(None),
     };
     let cursor = runtime.cursor(&source.id, cursor_key).await?;
     let batch = match &source.kind {
@@ -168,7 +195,7 @@ pub async fn poll_once(
             )?
         }
         SourceKind::Schedule { every_ms } => schedule_batch(cursor, now_ms()?, *every_ms)?,
-        SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(()),
+        SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(None),
     };
     for event in &batch.events {
         if serde_json::to_vec(&event.payload)
@@ -180,13 +207,19 @@ pub async fn poll_once(
         }
     }
     let waiting_for_capacity = batch.backpressured && batch.events.is_empty();
+    let next_deadline = if matches!(source.kind, SourceKind::Schedule { .. }) {
+        let cursor: ScheduleCursor = decode_cursor(Some(batch.cursor.clone()))?;
+        Some(cursor.next_due_ms)
+    } else {
+        None
+    };
     runtime
         .ingest(source, batch.events, cursor_key, batch.cursor)
         .await?;
     if waiting_for_capacity {
         return Err(ReactiveError::Conflict("Settled files are waiting for event queue space. Review or cancel pending runs before the next folder scan.".into()));
     }
-    Ok(())
+    Ok(next_deadline)
 }
 
 struct PollBatch {

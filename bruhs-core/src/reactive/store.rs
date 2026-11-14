@@ -7,6 +7,7 @@ use std::path::Path;
 
 #[cfg(all(test, unix))]
 mod ownership_tests;
+pub(super) mod reports;
 
 /// A full review page across the runtime; overflow never hides unresolved work.
 const MAX_PENDING_RUNS: usize = HISTORY_LIMIT;
@@ -91,6 +92,7 @@ pub(super) fn open(path: &Path) -> Result<(Connection, RuntimeLock), ReactiveErr
         CREATE TABLE IF NOT EXISTS reactive_cursors(source_id TEXT NOT NULL,cursor_key TEXT NOT NULL,payload TEXT NOT NULL,PRIMARY KEY(source_id,cursor_key));
         CREATE TABLE IF NOT EXISTS reactive_app_completions(topic TEXT NOT NULL,record_id TEXT NOT NULL,completed INTEGER NOT NULL,PRIMARY KEY(topic,record_id));
         CREATE TABLE IF NOT EXISTS reactive_source_status(id TEXT PRIMARY KEY,payload TEXT NOT NULL);")?;
+    reports::initialize(&mut connection)?;
     transaction(&mut connection, |connection| {
         for mut run in runs_where(connection, "status='running'", None)? {
             run.status = RunStatus::Interrupted;
@@ -684,6 +686,7 @@ pub(super) fn command(
     command: ReactiveCommand,
 ) -> Result<ReactiveSnapshot, ReactiveError> {
     transaction(connection, |connection| {
+        reports::guard_generic_command(connection, &command)?;
         match command {
             ReactiveCommand::SetAutomationEnabled { id, enabled } => {
                 set_automation_enabled(connection, &id, enabled)?
@@ -1187,6 +1190,7 @@ pub(super) fn record_session(
     connection: &mut Connection,
     id: &str,
     session_id: &str,
+    model: &str,
 ) -> Result<(), ReactiveError> {
     if session_id.is_empty() {
         return Ok(());
@@ -1198,8 +1202,8 @@ pub(super) fn record_session(
             return Ok(());
         }
         connection.execute(
-            "UPDATE reactive_agents SET session_id=?2 WHERE id=?1 AND thread_id=?3",
-            params![run.agent_id, session_id, run.thread_id.as_str()],
+            "UPDATE reactive_agents SET session_id=?2 WHERE id=?1 AND thread_id=?3 AND json_extract(payload,'$.model')=?4",
+            params![run.agent_id, session_id, run.thread_id.as_str(), model],
         )?;
         run.session_id = Some(session_id.into());
         save_run(connection, &run)
@@ -1229,6 +1233,9 @@ pub(super) fn finish_run(
             run.error = Some("The output exceeded the saved result budget. The retained answer is partial; inspect it before retrying.".into());
         }
         run.updated_at = EpochMs::now();
+        if run.status == RunStatus::Completed {
+            reports::save_completed(connection, &mut run)?;
+        }
         save_run(connection, &run)
     })
 }

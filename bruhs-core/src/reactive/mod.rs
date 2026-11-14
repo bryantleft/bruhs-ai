@@ -14,6 +14,7 @@ use tokio::sync::{watch, Mutex};
 
 #[cfg(test)]
 mod automation_tests;
+mod report_sources;
 pub mod sources;
 mod store;
 #[cfg(test)]
@@ -66,6 +67,36 @@ struct ActiveCall {
 }
 
 impl ReactiveRuntime {
+    pub async fn weekly_reports(
+        &self,
+        before: Option<String>,
+    ) -> Result<bruhs_models::weekly_reports::WeeklyReportsSnapshot, ReactiveError> {
+        self.call(move |connection| store::reports::snapshot(connection, before.as_deref()))
+            .await
+    }
+
+    pub async fn weekly_report(
+        &self,
+        id: String,
+    ) -> Result<bruhs_models::weekly_reports::EngineeringReport, ReactiveError> {
+        self.call(move |connection| store::reports::read(connection, &id))
+            .await
+    }
+
+    pub async fn weekly_report_command(
+        &self,
+        command: bruhs_models::weekly_reports::WeeklyReportCommand,
+    ) -> Result<bruhs_models::weekly_reports::WeeklyReportsSnapshot, ReactiveError> {
+        let snapshot = self
+            .call(move |connection| {
+                store::reports::command(connection, command)?;
+                store::reports::snapshot(connection, None)
+            })
+            .await?;
+        self.changed();
+        Ok(snapshot)
+    }
+
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, ReactiveError> {
         let path = path.as_ref().to_owned();
         let (connection, lock) = tokio::task::spawn_blocking(move || store::open(&path))

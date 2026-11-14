@@ -4,6 +4,7 @@ use leptos::prelude::*;
 
 use crate::ui::{Button, ButtonSize, ButtonVariant, Input, Textarea};
 mod setup;
+mod weekly_reports;
 
 const SELECT: &str = "bruhs-control min-h-8 w-full rounded-grape bg-longan-950 px-3 py-1.5 text-body text-rambutan-100 inset-ring inset-ring-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400";
 const CARD: &str = "min-w-0 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50";
@@ -103,7 +104,9 @@ pub fn ReactiveAutomations(
             loading.set(false);
             match result {
                 Ok(next) => {
-                    snapshot.set(Some(next));
+                    snapshot.set(Some(
+                        bruhs_models::weekly_reports::editable_automation_snapshot(next),
+                    ));
                     load_error.set(None);
                 }
                 Err(err) => load_error.set(Some(err.to_string())),
@@ -129,7 +132,9 @@ pub fn ReactiveAutomations(
             }
             busy.set(false);
             match result {
-                Ok(next) => snapshot.set(Some(next)),
+                Ok(next) => snapshot.set(Some(
+                    bruhs_models::weekly_reports::editable_automation_snapshot(next),
+                )),
                 Err(err) => error.set(Some(err.to_string())),
             }
         });
@@ -268,6 +273,7 @@ pub fn ReactiveAutomations(
             {move || load_error.get().map(|message| view! { <p role="alert" class="mt-3 rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200">{message}</p> })}
             {move || error.get().map(|message| view! { <p role="alert" class="mt-3 rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200">{message}</p> })}
             <fieldset disabled=move || busy.get() || snapshot.get().is_none() class="m-0 mt-4 min-w-0 space-y-4 border-0 p-0">
+                <weekly_reports::WeeklyReportsPanel on_chat=Callback::new(move |(id,body)|{chat_agent.set(id);chat.set(body);}) />
                 <setup::AutomationSetupPanel snapshot=snapshot busy=busy error=error send=send on_chat=Callback::new(move |id|chat_agent.set(id)) />
                 <Show when=move || !chat_agent.get().is_empty()>
                     <div class=CARD><h3 class="mb-2 text-label text-rambutan-100">{move || snapshot.with(|s| s.as_ref().and_then(|s| s.agents.iter().find(|a| a.id == chat_agent.get())).map_or_else(|| "Agent chat".into(), |a| format!("Chat with {}", a.name)))}</h3><Field label="Message to agent" value=chat multiline=true /><div class="mt-2 flex gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_| { send.run(ReactiveCommand::Chat { agent_id: chat_agent.get_untracked(), message: chat.get_untracked() }); })>"Send message"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| chat_agent.set(String::new()))>"Close"</Button></div><p class="mt-2 text-label-sm text-rambutan-500">"Replies appear in activity below. The agent keeps its conversation across events and restarts."</p></div>
