@@ -12,11 +12,13 @@ use std::{
 use tokio::sync::watch;
 use zeroize::{Zeroize, Zeroizing};
 
-pub(crate) const PRIVATE_ENV: [&str; 4] = [
+pub(crate) const PRIVATE_ENV: [&str; 6] = [
     "BRUHS_CONNECTION_GOOGLE_CLIENT_SECRET",
     "BRUHS_CONNECTION_MICROSOFT_CLIENT_SECRET",
     "BRUHS_CONNECTION_GITHUB_CLIENT_SECRET",
     "BRUHS_GOOGLE_CLIENT_SECRET",
+    "BRUHS_CONNECTION_GMAIL_CLIENT_SECRET",
+    "BRUHS_CONNECTION_OUTLOOK_CLIENT_SECRET",
 ];
 
 pub(crate) fn protect_command(command: &mut tokio::process::Command) {
@@ -41,6 +43,10 @@ pub enum ConnectionError {
     Network,
     #[error("The service returned an invalid authorization response. Connect again.")]
     InvalidResponse,
+    #[error(
+        "Email permissions were not granted. Connect again and approve the requested mail access."
+    )]
+    MissingMailPermissions,
     #[error(
         "This is a different account. Disconnect the existing account before switching accounts."
     )]
@@ -118,12 +124,10 @@ impl Connections {
     }
 
     pub async fn list(&self) -> Result<Vec<ServiceConnection>, ConnectionError> {
-        let (google, microsoft, github) = tokio::join!(
-            self.connection(ServiceProvider::Google),
-            self.connection(ServiceProvider::Microsoft),
-            self.connection(ServiceProvider::Github)
-        );
-        Ok(vec![google?, microsoft?, github?])
+        futures_util::future::try_join_all(
+            ServiceProvider::ALL.map(|provider| self.connection(provider)),
+        )
+        .await
     }
 
     pub async fn connection(
@@ -147,7 +151,8 @@ impl Connections {
                 |m| m.scopes.clone(),
             ),
             state: saved.map_or(ConnectionState::Disconnected, |m| {
-                if config.is_some_and(|c| c.registration() != m.registration)
+                if oauth::require_mail_permissions(provider, &m.scopes).is_err()
+                    || config.is_some_and(|c| c.registration() != m.registration)
                     || (!m.refresh_available
                         && m.expires_at_ms
                             .is_some_and(|expiry| expiry <= chrono::Utc::now().timestamp_millis()))
@@ -249,6 +254,10 @@ impl Connections {
         if tokens.registration != config.registration() || tokens.id != id {
             return Err(ConnectionError::SignIn);
         }
+        if let Err(error) = oauth::require_mail_permissions(provider, &tokens.scopes) {
+            lease.needs_sign_in().await?;
+            return Err(error);
+        }
         if tokens
             .expires_at_ms
             .is_some_and(|expiry| expiry <= chrono::Utc::now().timestamp_millis())
@@ -264,6 +273,10 @@ impl Connections {
                 }
                 Err(error) => return Err(error),
             }
+        }
+        if let Err(error) = oauth::require_mail_permissions(provider, &tokens.scopes) {
+            lease.needs_sign_in().await?;
+            return Err(error);
         }
         Ok(ConnectionAccess {
             value: Zeroizing::new(tokens.access_token.clone()),

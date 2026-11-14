@@ -32,7 +32,7 @@ type Memory = Arc<Mutex<HashMap<ServiceProvider, (Metadata, Option<Zeroizing<Str
 #[derive(Clone)]
 pub(super) struct Store {
     memory: Option<Memory>,
-    locks: Arc<[Arc<AsyncMutex<()>>; 3]>,
+    locks: Arc<[Arc<AsyncMutex<()>>; ServiceProvider::ALL.len()]>,
     #[cfg(test)]
     before_write: Option<Arc<tokio::sync::Notify>>,
 }
@@ -128,6 +128,8 @@ impl Store {
             ServiceProvider::Google => 0,
             ServiceProvider::Microsoft => 1,
             ServiceProvider::Github => 2,
+            ServiceProvider::Gmail => 3,
+            ServiceProvider::Outlook => 4,
         };
         let lock = self.locks[index].clone().lock_owned().await;
         let file = if self.memory.is_none() {
