@@ -12,6 +12,7 @@
 use bruhs_models::logic::context_chip::ChipKind;
 use bruhs_models::num::ToIntSaturating;
 use std::collections::HashMap;
+use std::sync::Arc;
 
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
@@ -562,7 +563,7 @@ fn render_row(row: TimelineRow, ctx: RowCtx) -> AnyView {
 // ── Fold ─────────────────────────────────────────────────────────────────────
 
 /// "Worked for 3m 43s ›" — a settled turn's activity, expandable in place.
-fn fold_row(key: String, label: String, rows: Vec<TimelineRow>, ctx: RowCtx) -> AnyView {
+fn fold_row(key: String, label: String, rows: Arc<Vec<TimelineRow>>, ctx: RowCtx) -> AnyView {
     let k = StoredValue::new(key);
     let is_open = move || ctx.expanded.is(&k.get_value(), false);
     let rows_sv = StoredValue::new(rows);
@@ -588,7 +589,7 @@ fn fold_row(key: String, label: String, rows: Vec<TimelineRow>, ctx: RowCtx) -> 
             </button>
             {move || is_open().then(|| view! {
                 <div class="mt-1 flex flex-col border-l border-longan-800/70 ps-2">
-                    {rows_sv.get_value().into_iter().map(|r| render_row(r, ctx)).collect_view()}
+                    {rows_sv.with_value(|rows| rows.iter().cloned().map(|r| render_row(r, ctx)).collect_view())}
                 </div>
             })}
         </div>

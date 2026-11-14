@@ -3,6 +3,8 @@
 //! activity, working/thinking indicators, changed-files cards, errors and
 //! per-turn metadata). No DOM here so it is unit-testable on the host.
 
+use std::sync::Arc;
+
 use crate::format::format_duration_ms;
 use bruhs_models::agent::Role;
 use bruhs_models::logic::diff::{lcs_diff, stats};
@@ -74,7 +76,7 @@ pub enum TimelineRow {
         key: String,
         message_id: String,
         label: String,
-        rows: Vec<TimelineRow>,
+        rows: Arc<Vec<TimelineRow>>,
     },
     ChangedFiles {
         key: String,
@@ -309,7 +311,7 @@ pub fn fold_settled_turn(
             key: format!("{}:fold", msg.id),
             message_id: msg.id.clone(),
             label,
-            rows: folded,
+            rows: Arc::new(folded),
         },
     );
     out
