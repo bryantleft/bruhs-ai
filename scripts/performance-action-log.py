@@ -33,11 +33,40 @@ assert len(identities)==len([i for i in inventory['items'] if i['kind']!='bindin
 entries={k:[] for k in identities}
 observations=[]
 request_counts=[]
+body_observations=[]
+body_files={}
+body_observation_ids=set()
 raw_cache={}
 environments={}
 for e in ledger['entries']:
     key=(e['kind'],e['id']);assert key in entries
     entries[key].append(e)
+    body_path=e.get('network_body_observation_file')
+    if body_path:
+        if body_path not in body_files:
+            body=read(body_path)
+            assert body['version']==1 and body['status']=='passed'
+            body_files[body_path]=(body,sha(body_path))
+        body=body_files[body_path][0]
+        matching=[o for o in body['observations'] if (o['kind'],o['id'])==key]
+        assert matching, 'No body observations match '+e['evidence_id']
+        for o in matching:
+            assert o['observation_id'] not in body_observation_ids, 'Duplicate body observation'
+            assert o['unit']=='bytes' and o['samples']==1
+            assert o['wire_bytes'] is None and o['latency_ms'] is None
+            for field in ['response_body_bytes_written','browser_response_body_bytes_received','fixture_body_bytes']:
+                assert type(o[field]) is int and o[field]>=0, field
+            assert o['response_body_bytes_written']==o['browser_response_body_bytes_received']<=o['fixture_body_bytes']
+            assert o['whole_action_acceptance'] is False and o['t3_comparable'] is False
+            if o['raw_artifact'] not in raw_cache:
+                raw_cache[o['raw_artifact']]=(read(o['raw_artifact']),sha(o['raw_artifact']))
+            raw,digest=raw_cache[o['raw_artifact']]
+            assert digest==o['raw_sha256']
+            row=raw
+            for part in o['raw_pointer']:row=row[part]
+            assert row==o['response_body_bytes_written'], 'Raw response-body count changed'
+            body_observations.append(o)
+            body_observation_ids.add(o['observation_id'])
     for path in e.get('timing_observation_files',[]):
         normalized=read(path)
         assert normalized['version']==1 and normalized['evidence_id']==e['evidence_id']
@@ -88,6 +117,9 @@ for e in ledger['entries']:
                 assert row[field]==o[field] and isinstance(o[field],int) and o[field]>=0
             assert o['whole_action_acceptance'] is False and o['t3_comparable'] is False
             request_counts.append({**o,'evidence_id':e['evidence_id']})
+for body,_ in body_files.values():
+    assert all(o['observation_id'] in body_observation_ids for o in body['observations']), 'Unmapped body observation'
+body_observations=[o for body,_ in body_files.values() for o in body['observations']]
 actions=[]
 for key,item in identities.items():
     linked=entries[key]
@@ -114,6 +146,10 @@ result={'version':1,'completion_status':'in_progress','semantic_inventory_comple
                  'Verify final build/source context and every required action before declaring completion.']}
 semantic_catalogue=read('docs/performance-action-catalogue.json')
 result['source_profiles']=semantic_catalogue['source_profiles']
+result['counts'].update(reviewed_semantic_intents=len(semantic_catalogue['actions']),response_body_byte_observations=len(body_observations))
+result['response_body_byte_observations']=body_observations
+result['inputs_sha256']['network_body_observations']={path:digest for path,(_,digest) in body_files.items()}
+result['response_body_observation_scope']='Functional response-body observations only. No request/header/TCP/TLS wire total or normalized latency; complete-action and T3 acceptance remain open.'
 result['inputs_sha256']['semantic_catalogue']=sha('docs/performance-action-catalogue.json')
 result['landings']=[{k:v for k,v in landing.items() if k in ['id','pull_request','merge_commit','tested_and_merged_tree','report','root_integration']} for landing in ledger['landings']]
 result['discovery_supplements']=ledger.get('discovery_supplements',[])
@@ -333,6 +369,14 @@ if compression:
             n=select('elapsed_ms','native_loopback');local=select('paint_ms','loopback');mobile=select('paint_ms','mobile_1_6mbps_300ms')
             lines.append(f"| {profile}{' (below final floor)' if n['data']['below_final_policy_floor'] else ''} | {variant} | {n['data']['encoded_body_bytes']} / {n['data']['decoded_body_bytes']} | {n['quantiles']['p50']:.3f} | {local['quantiles']['p50']:.1f} | {mobile['quantiles']['p50']:.1f} |")
     lines += ['', 'Fastest was selected to limit native per-request work while retaining the main impaired-link gain. Default saved more bytes and was about 27ms faster for the largest repetitive UI fixture; it cost more native HTTP work. Small UI differences and overlapping local frame ranges do not prove a universal latency win. A 131-check prototype browser gate, 49 checks on the exact final router and 72 final byte controls pass. Original favicon failures and intermediate negative small-proposal results remain preserved. The router is tested over the older archived backend; the changing root, providers/concurrency and the full integration gate remain open. See the [compression report]('+link('docs/performance-task-compression-2026-11-13.md')+').', '']
+
+if body_observations:
+    lines += ['', '## Functional response-body observations', '',
+              'Each row is one functional diagnostic per case/implementation. Fixture-server response writes match the recorded CDP received-body count; request/header/TCP/TLS overhead and controlled latency are excluded. Input bodies and completion contracts retain their source-specific scope in the linked reports. These rows are not timing samples.', '',
+              '| Case | Implementation | Body bytes | Raw evidence |',
+              '| --- | --- | ---: | --- |']
+    for o in body_observations:
+        lines.append(f"| {escape(o['case'])} | {escape(o['variant'])} | {o['response_body_bytes_written']:,} | [{escape(o['observation_id'])}]({link(o['raw_artifact'])}) |")
 
 lines += ['',
           '## Discovered entrypoints','',
