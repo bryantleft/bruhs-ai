@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 import math
+import os
 from pathlib import Path
 
 ROOT=Path(__file__).resolve().parent.parent
@@ -19,6 +20,7 @@ parser.add_argument('--discovery-receipt',help='Pinned receipt for a newer sourc
 parser.add_argument('--markdown',default='docs/performance-action-log.md')
 parser.add_argument('--json',dest='json_path',default='docs/performance-action-log.json')
 args=parser.parse_args()
+link=lambda p:os.path.relpath(ROOT/p,(ROOT/args.markdown).parent)
 read=lambda p:json.loads((ROOT/p).read_text())
 sha=lambda p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
 ledger,inventory,comparisons=read(args.ledger),read(args.inventory),read(args.comparisons)
@@ -117,7 +119,7 @@ result['landings']=[{k:v for k,v in landing.items() if k in ['id','pull_request'
 result['discovery_supplements']=ledger.get('discovery_supplements',[])
 for supplement in result['discovery_supplements']:
     assert sha(supplement['artifact'])==supplement['sha256'], 'Discovery supplement changed'
-discovery_note='A later current-root scan stopped at an unsupported router composition. A [source-pinned supplement]('+str(ROOT/'target/performance-envelope3-network-discovery-supplement.json')+') records nine delivery routes and seven routes on the optional paired-task listener in unpublished work, outside the frozen 276 identities. These additions remain unmeasured; this is not a complete source refresh.'
+discovery_note='A later current-root scan stopped at an unsupported router composition. A [source-pinned supplement]('+link('target/performance-envelope3-network-discovery-supplement.json')+') records nine delivery routes and seven routes on the optional paired-task listener in unpublished work, outside the frozen 276 identities. These additions remain unmeasured; this is not a complete source refresh.'
 if args.discovery_receipt:
     discovery=read(args.discovery_receipt)
     assert sha(args.inventory)==discovery['inventory_sha256']
@@ -127,9 +129,9 @@ if args.discovery_receipt:
     delivery=sum(i['kind']=='http' and i['source']=='bruhs-server/src/routes/delivery.rs' for i in inventory['items'])
     hosts=sum(i['kind']=='http' and i['source']=='bruhs-server/src/routes/remote_hosts.rs' for i in inventory['items'])
     paired=sum(i['kind']=='http' and i.get('listener')=='paired_task' for i in inventory['items'])
-    discovery_note=f"The [newer source-pinned discovery capture]({ROOT/args.discovery_receipt}) includes {len(actions)} entrypoints from {discovery['source_files']} files: {delivery} delivery routes, {hosts} local remote-host routes and {paired} routes on the optional paired-task listener. Listener identities remain distinct. The isolated replay reproduces discovery fields; historical availability metadata stays separate. Exact source bytes are retained, but this text scan is not an atomic build snapshot, complete semantic action inventory or network acceptance."
+    discovery_note=f"The [newer source-pinned discovery capture]({link(args.discovery_receipt)}) includes {len(actions)} entrypoints from {discovery['source_files']} files: {delivery} delivery routes, {hosts} local remote-host routes and {paired} routes on the optional paired-task listener. Listener identities remain distinct. The isolated replay reproduces discovery fields; historical availability metadata stays separate. Exact source bytes are retained, but this text scan is not an atomic build snapshot, complete semantic action inventory or network acceptance."
     if discovery.get('in_progress_owner_scope'):
-        discovery_note+=' Whiteboards appears as a source declaration while its owner integrates the feature. Whiteboard-owned transient errors are left to that owner; no performance or full-workspace acceptance is inferred.'
+        discovery_note+=' '+discovery['in_progress_owner_scope']
 elif result['discovery_supplements']:
     result['remaining'].insert(0, 'Refresh current-root source discovery, including delivery router composition and the optional paired-task listener; the frozen 276-entrypoint snapshot omits these additions.')
 escape=lambda s:str(s).replace('|','\\|').replace('\n',' ')
@@ -150,14 +152,14 @@ lines += ['', '## Current bounded network timings','',
     '| Variant | Group | p50 ms | p95 ms | p99 ms | Raw evidence |','| --- | --- | ---: | ---: | ---: | --- |']
 for o in observations:
     if o['measurement_level']=='network_variant' and o['workload']=='two-hop/16/fragmented':
-        q=o['quantiles'];lines.append(f"| {o['variant']} | {o['group']} | {q['p50']:.6f} | {q['p95']:.6f} | {q['p99']:.6f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        q=o['quantiles'];lines.append(f"| {o['variant']} | {o['group']} | {q['p50']:.6f} | {q['p95']:.6f} | {q['p99']:.6f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 for title,evidence_id,scope in [
     ('Thread opening trial','web-thread-open-row-index1-2026-11-13','Row-index candidate not adopted. Actual sidebar input through normal IndexedDB history, final-row layout and two frames. Six retained samples per cell; source/payload/visible-row details are preserved in the JSON. No physical paint or matched T3 acceptance.'),
     ('Pin and unpin through local commit','web-pin-chat-mount1-2026-11-13','Default shortcut through real thread-store commit, final-row layout and two frames, with an unsent draft. Six retained samples per cell. Original message/composer nodes and focus are preserved in candidate runs; exact records, transcript and draft match. Partial client/action variants; all-action and T3 acceptance remain open.')]:
     lines += ['', '## '+title,'',scope,'','| History | Action | Implementation | Median ms | Range ms | Raw evidence |','| --- | --- | --- | ---: | ---: | --- |']
     for o in observations:
         if o['evidence_id']==evidence_id:
-            lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {escape(o['variant'])} | {o['quantiles']['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{evidence_id}]({ROOT/o['raw_artifact']}) |")
+            lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {escape(o['variant'])} | {o['quantiles']['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{evidence_id}]({link(o['raw_artifact'])}) |")
 
 lines += ['', '## Resume command UI timings','',
           'Actual mounted web UI with existing synthetic history offscreen in Inbox. Native headless browser-memory Clipboard API; no OS Clipboard or physical paint. Six retained samples after one warmup per implementation/case/trigger. Menu open/filter, injected state setup, storage/history loading and verification are outside clocks. Primary rows end after Clipboard acknowledgement and two animation frames; no-write rows end after two frames. Invocation rows end at native writeText call. Zero readings are below timer resolution, not zero work. CPU work falls, while observed two-frame completion remains similar. No whole-action or matched T3 acceptance.','',
@@ -167,8 +169,8 @@ for o in observations:
     if o['evidence_id']=='web-resume-export-ui1-2026-11-13':
         q=o['quantiles'];clock='Clipboard and two frames' if o['metric']=='elapsedMs' else 'Input to Clipboard call'
         if o['workload'] in {'no-active','no-session-75k'}:clock='Two frames; no write'
-        lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {escape(o['variant'])} | {clock} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
-lines += ['', 'The [semantic action catalogue]('+str(ROOT/'docs/performance-action-catalogue.md')+') starts with 45 intents from 86 web/desktop registered commands. It does not establish downstream parity or complete application coverage. Working-tree search references now include callbacks after inline tests and global desktop app/dock code; comments/tests/lifecycle candidates remain unclassified.','']
+        lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {escape(o['variant'])} | {clock} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
+lines += ['', 'The [semantic action catalogue]('+link('docs/performance-action-catalogue.md')+') starts with 45 intents from 86 web/desktop registered commands. It does not establish downstream parity or complete application coverage. Working-tree search references now include callbacks after inline tests and global desktop app/dock code; comments/tests/lifecycle candidates remain unclassified.','']
 
 lines += ['', 'The JSON companion retains all normalized cases, per-process quantiles, raw pointers, units and measurement scopes. Component decode timings and 128-event delivery diagnostics remain separate from the complete-delivery network rows.','',
           '## Static asset startup timings','',
@@ -178,7 +180,7 @@ lines += ['', 'The JSON companion retains all normalized cases, per-process quan
 for o in observations:
     if o['evidence_id']=='web-static-assets-network-boot1-2026-11-13':
         q=o['quantiles']
-        lines.append(f"| {escape(o['workload'])} | {escape(o['variant'])} | {o['samples']} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {escape(o['variant'])} | {o['samples']} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['', 'Precompression costs about 14 ms at the local reload median and adds 5.31 MB in a web-resource-only ZIP model. Runtime gzip increases the local fresh-start median. Warm compressed WASM used browser cache; raw WASM transferred again. Three samples do not establish population tails. The separate completed-response byte aggregate extends through post-boundary validation and excludes open SSE. These remain partial startup variants; the full/signed update and equivalent T3 workloads are unmeasured.','',
           '## Terminal attach timings','',
           'Fixed, unmounted 1000 by 24 xterm parser with warm assets, exact 512 KiB replay and captured-state parity checks. The impaired connection runs at 5 Mbps with 120 ms round trip; direct runs use loopback. Timers end at the final xterm write callback. Paint, real mobile hardware, remote TCP connection setup, DNS and TLS are excluded. These remain partial action measurements; sample ranges do not establish population tail latency. Superseded prototypes and failed checks remain linked in the evidence record.','',
@@ -187,7 +189,7 @@ lines += ['', 'Precompression costs about 14 ms at the local reload median and a
 for o in observations:
     if o['id']=='GET /api/terminal/ws' and o.get('report_primary'):
         q=o['quantiles']
-        lines.append(f"| {escape(o['group'])} | {escape(o['workload'])} | {escape(o['variant'])} | {o['samples']} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | {o['websocket_payload_bytes']} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['group'])} | {escape(o['workload'])} | {escape(o['variant'])} | {o['samples']} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | {o['websocket_payload_bytes']} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['', '## Conversation storage timings','',
           'Preliminary actual-WASM measurements with synthetic IndexedDB histories, warm connections and three retained observations per row after one warmup. Browser version was not captured. Main application mounting, UI/paint and provider/remote network work are excluded. Load-and-prepare ends after read-only loading, raw-original retention and display recovery. Append times only the conflict-checked local commit; setup, readback verification and restoration are outside that timer. This is not T3’s warm server-history read. Input byte counts describe the JSON representation, not physical disk or network bytes.','',
           '| Synthetic history | Operation | Samples | Median ms | Range ms | Input JSON bytes | Raw evidence |',
@@ -195,7 +197,7 @@ lines += ['', '## Conversation storage timings','',
 for o in observations:
     if o['evidence_id']=='web-history-storage-probe-2026-11-13' and o.get('report_primary') and o['measurement_level']=='local_storage_variant':
         q=o['quantiles']
-        lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {o['samples']} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | {o['data']['jsonBytes']} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {o['samples']} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | {o['data']['jsonBytes']} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['',
           'The JSON companion keeps codec component probes and correlated load/recovery stages separately. Zero stage readings are below the browser clock resolution, not zero work. The batch codec probe is not adopted: its direction varies by workload and operation. Full-record reads and writes still need separate bounded/incremental storage work.','',
           '## Conversation format comparisons','',
@@ -205,7 +207,7 @@ lines += ['',
 for o in observations:
     if o['evidence_id'] in {'web-conversation-history2-envelope-2026-11-13','web-conversation-history3-envelope-2026-11-13'}:
         q=o['quantiles']
-        lines.append(f"| {escape(o['workload'])} | {escape(o['group'])} | {escape(o['variant'])} | {o['samples']} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {escape(o['group'])} | {escape(o['variant'])} | {o['samples']} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['',
           'A formatted row means preparation through the actual writer; the fallback fixture remains structured. First legacy append includes conversion in the checked save. Setup, readback/restoration and wrapper diagnostics are outside the append timer. Small control/legacy/fallback differences overlap clock resolution or observed variation. Six samples do not establish population tails. Bounded history reads, incremental writes, full UI flows and the broader network/action audit remain required.','',
           '## Conversation save-queue completion','',
@@ -214,7 +216,7 @@ lines += ['',
 for o in observations:
     if o['evidence_id']=='web-conversation-snapshot1-2026-11-13' and o['metric']=='drain_ms':
         q=o['quantiles']
-        lines.append(f"| {escape(o['workload'])} | {escape(o['group'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {escape(o['group'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['',
           '### Focused small-case replication','',
           'Same candidate and main binaries, with 32 retained observations per cell after one warmup. The candidate remains withheld: prepared structured fallback median completion is 9.8 ms on main and 26.3 ms on the candidate. Other short-history directions vary. The save loop yields again before noticing an empty queue; causation is unproven and requires a separate commit-boundary/scheduler investigation. All 396 intervals pass full readback, ordered counts and float checks.','',
@@ -222,7 +224,7 @@ lines += ['',
 for o in observations:
     if o['evidence_id']=='web-conversation-snapshot1-small-control1-2026-11-13' and o['metric']=='drain_ms':
         q=o['quantiles']
-        lines.append(f"| {escape(o['workload'])} | {escape(o['group'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {escape(o['group'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['',
           '## Save commit and worker completion','',
           'New release-WASM studies separate the earliest IndexedDB complete event from acknowledgement and worker drain. The early observer registers when the native transaction is created, before Rust handlers; a late observer and frame ordinals check ordering. Existing Rust enqueue/drain times must match the three-clock bridge exactly. These are unmounted private local-store variants; caller draft preparation, loading/recovery, verification, restoration, physical UI and network/provider work are excluded.','',
@@ -230,13 +232,13 @@ lines += ['',
           '| History | Endpoint | Version | Median ms | Range ms | Raw evidence |','| --- | --- | --- | ---: | ---: | --- |']
 for o in observations:
     if o['evidence_id']=='web-conversation-save2-2026-11-13' and o['group']=='formatted' and o['metric'] in {'commit_ms','drain_ms'}:
-        q=o['quantiles'];lines.append(f"| {escape(o['workload'])} | {escape(o['metric'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        q=o['quantiles'];lines.append(f"| {escape(o['workload'])} | {escape(o['metric'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['', '### Balanced requested entry phases','',
           'The independent focused cohort retains 32 samples per cell, eight at each requested fraction of a calibrated frame. Actual scheduling still varies; requested phase balance does not guarantee identical delivery. Keep the unfavorable entry-to-commit cells visible. After-yield short writes remain similar; worker completion improves. Phase setup is outside clocks. All 620 comparison saves pass complete readback/count/float, exact-clock and frame checks; 40 untimed controls pass. This establishes no whole-action or T3 acceptance.','',
           '| History | Endpoint | Version | Median ms | Range ms | Raw evidence |','| --- | --- | --- | ---: | ---: | --- |']
 for o in observations:
     if o['evidence_id']=='web-conversation-save2-phase-control1-2026-11-13' and o['group']=='formatted' and o['metric'] in {'commit_ms','after_yield_commit_ms','drain_ms'}:
-        q=o['quantiles'];lines.append(f"| {escape(o['workload'])} | {escape(o['metric'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        q=o['quantiles'];lines.append(f"| {escape(o['workload'])} | {escape(o['metric'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['', 'The 204-interval diagnostic with the previous Arc-only candidate remains separate. The earlier late-listener experiment and capture-flag preflight are excluded as commit-boundary evidence. Source and observer corrections are retained with the study. Bounded history, actual UI/paint, provider/network and semantic all-action coverage remain open.','',
 ]
 
@@ -246,7 +248,7 @@ lines += ['', '## Direct original-envelope comparison (withheld)', '',
           '| --- | --- | --- | ---: | ---: | --- |']
 for o in observations:
     if o['evidence_id']=='web-conversation-envelope3-2026-11-13' and o['group']=='formatted' and o['metric'] in {'commit_ms','after_yield_commit_ms','drain_ms'}:
-        q=o['quantiles'];lines.append(f"| {escape(o['workload'])} | {escape(o['metric'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        q=o['quantiles'];lines.append(f"| {escape(o['workload'])} | {escape(o['metric'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['', 'The after_yield_commit_ms clock runs from the first pre-save scheduler callback through early transaction completion. commit_ms runs from edit_conversation entry through that same completion event. drain_ms runs from edit entry until the worker clears saving after acknowledgement. The latter two include initial scheduling. Legacy variants and all five clocks remain in JSON. Native differential testing found and fixed an empty-checkpoint normalization difference before timing. Ordinary release UI and a full merge gate remain required if this withheld candidate is reconsidered.', '']
 
 lines += ['', '## Bounded conversation layout (withheld)', '',
@@ -256,14 +258,14 @@ lines += ['', '## Bounded conversation layout (withheld)', '',
           '| --- | --- | --- | ---: | ---: | --- |']
 for o in observations:
     if o['evidence_id']=='web-conversation-bounded3-2026-11-13' and o['measurement_level']=='local_storage_variant':
-        q=o['quantiles'];lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        q=o['quantiles'];lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {escape(o['variant'])} | {q['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['', '### Initial indexed preparation (single intervals)', '',
           'One warm complete sidecar preparation per history, retaining the original legacy blob. These eight observations are outside repeated read/write clocks and are not repeated distributions. The 75,000-message preparation costs about 1.95 seconds. Indexed revision checks require every official writer and reader to migrate together behind a version barrier; web storage changes also leave native desktop persistence work open.', '',
           '| History | Messages | Preparation ms (n=1) | Raw evidence |',
           '| --- | ---: | ---: | --- |']
 for o in observations:
     if o['evidence_id']=='web-conversation-bounded3-2026-11-13' and o['measurement_level']=='local_storage_setup_single_interval':
-        lines.append(f"| {escape(o['workload'])} | {o['data']['messages']} | {o['quantiles']['p50']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {o['data']['messages']} | {o['quantiles']['p50']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 
 lines += ['', '## Fixed message-count chunk sweep (not adopted)', '',
           'One optimized private WASM binary compares whole-record storage with 1, 16, 128 and 1,024 messages per indexed row. All 760 intervals pass; 190 cells have three retained samples after one warmup, with alternating order. This is an exploratory grid, not a selected production budget. Large chunks recover full reads but erase mutation gains on content-heavy histories; small chunks retain bounded mutation work but add full-read overhead. All unfavorable cells remain below.', '',
@@ -272,14 +274,14 @@ lines += ['', '## Fixed message-count chunk sweep (not adopted)', '',
           '| --- | --- | --- | ---: | ---: | --- |']
 for o in observations:
     if o['evidence_id']=='web-conversation-chunk5-2026-11-13' and o['measurement_level']=='local_storage_variant':
-        lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {escape(o['variant'])} | {o['quantiles']['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {escape(o['operation'])} | {escape(o['variant'])} | {o['quantiles']['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['', '### Chunk preparation (n=1 per case and size)', '',
           'Thirty-two single warm preparations retain the legacy blob and are outside repeated operation clocks. They are not repeated migration distributions. No format/schema or application reader/writer from this experiment has merged. Native persistence, complete consumers/recovery/version barriers and full UI/network/T3 acceptance remain open.', '',
           '| History | Version | Preparation ms (n=1) | Raw evidence |',
           '| --- | --- | ---: | --- |']
 for o in observations:
     if o['evidence_id']=='web-conversation-chunk5-2026-11-13' and o['measurement_level']=='local_storage_setup_single_interval':
-        lines.append(f"| {escape(o['workload'])} | {escape(o['variant'])} | {o['quantiles']['p50']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {escape(o['variant'])} | {o['quantiles']['p50']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
 lines += ['', '## Controlled task-stream request counts', '',
           'The task UI now reacts to complete refresh events, ignores keepalives/unrelated events, coalesces events within a chunk and invalidates pending replies on disconnect. This fix is applied to unpublished working-tree task-workspace code and is unmerged. The exact HTML passes 508 parser controls, 32 browser stream cases, 21 behavior checks, nine adversarial checks and two disconnect regressions. Intentional invalid-token 403s are recorded separately; the final browser gate has zero unexpected errors.', '',
           'In the earlier controlled-fragmentation study, real loopback HTTP returns one synthetic specification and no tasks; a browser ReadableStream controls SSE fragmentation. The eight matched remote desktop stream cases trigger 111 baseline snapshot requests and five candidate requests. Narrow-viewport and local-listener candidate cases also pass. These are request/body-byte counts from single controlled cases. That study does not measure latency, production wire bytes, real-runtime/TCP SSE or mobile/T3 acceptance. The separate actual-runtime study below keeps its own source, data and clocks.', '',
@@ -298,12 +300,12 @@ if runtime_observations:
               '| --- | --- | --- | ---: | ---: | ---: | --- |']
     for o in runtime_observations:
         if o['operation']!='manual_refresh' or o['metric'] not in {'paint_ms','fetch_body_ms'}:continue
-        lines.append(f"| {escape(o['workload'])} | {o['variant']} | {'Click through DOM and two frames' if o['metric']=='paint_ms' else 'Fetch through body'} | {o['samples']} | {o['quantiles']['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
+        lines.append(f"| {escape(o['workload'])} | {o['variant']} | {'Click through DOM and two frames' if o['metric']=='paint_ms' else 'Fetch through body'} | {o['samples']} | {o['quantiles']['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
     lines += ['', 'A real Axum keepalive comment produces one snapshot GET before the fix and zero after it (one observed case per version). There is no production wire-byte total. Thirty-five controls pass, including owner/guest scoping, origin/token rejection, expiry, real SaveSpec persistence, draft/focus preservation and revoked-stream reader closure. Four separate notification diagnostics retain their single-interval arming/control-round-trip boundary in JSON and the linked report. The native child and all test browser contexts exit cleanly.', '',
               '| Version | Actual keepalive read chunks | Snapshot GETs | Raw evidence |',
               '| --- | ---: | ---: | --- |']
     for o in request_counts:
-        if o.get('raw_profile')=='real_runtime_sse':lines.append(f"| {o['variant']} | {o['observed_read_chunks']} | {o['snapshot_requests']} | [Native runtime]({ROOT/o['raw_artifact']}) |")
+        if o.get('raw_profile')=='real_runtime_sse':lines.append(f"| {o['variant']} | {o['observed_read_chunks']} | {o['snapshot_requests']} | [Native runtime]({link(o['raw_artifact'])}) |")
 
 pair_observations=[o for o in observations if o['evidence_id']=='web-task-pair1-2026-11-13']
 if pair_observations:
@@ -315,8 +317,8 @@ if pair_observations:
     for o in pair_observations:
         if not o['report_primary']:continue
         endpoint='First usable DOM and two frames' if o['metric']=='first_two_frames_ms' else 'Initial refresh settled and two frames'
-        lines.append(f"| {escape(o['workload'])} | {o['variant']} | {endpoint} | {o['quantiles']['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({ROOT/o['raw_artifact']}) |")
-    lines += ['', 'Every retained fresh-pairing trial uses three snapshot GETs before versus two after, with 264,792 versus 176,528 JSON body bytes. These exclude HTML navigation, HTTP/TCP overhead and the open SSE stream. Saved-token startup still uses two GETs. Independent browser verification passes 23 candidate checks, reproduces four expected baseline failures, and rejects unmatched errors. The existing local/guest project browser flow also passes. Source hashes, exact body parity and terminal process evidence are linked in the [pairing report]('+str(ROOT/'docs/performance-task-pairing-2026-11-13.md')+').', '']
+        lines.append(f"| {escape(o['workload'])} | {o['variant']} | {endpoint} | {o['quantiles']['p50']:.3f} | {o['min']:.3f}–{o['max']:.3f} | [{o['evidence_id']}]({link(o['raw_artifact'])}) |")
+    lines += ['', 'Every retained fresh-pairing trial uses three snapshot GETs before versus two after, with 264,792 versus 176,528 JSON body bytes. These exclude HTML navigation, HTTP/TCP overhead and the open SSE stream. Saved-token startup still uses two GETs. Independent browser verification passes 23 candidate checks, reproduces four expected baseline failures, and rejects unmatched errors. The existing local/guest project browser flow also passes. Source hashes, exact body parity and terminal process evidence are linked in the [pairing report]('+link('docs/performance-task-pairing-2026-11-13.md')+').', '']
 
 compression=[o for o in observations if o['evidence_id']=='web-task-compression3-2026-11-13']
 if compression:
@@ -330,14 +332,14 @@ if compression:
             select=lambda metric,group:next(o for o in compression if o['workload']==profile and o['variant']==variant and o['metric']==metric and o['group']==group)
             n=select('elapsed_ms','native_loopback');local=select('paint_ms','loopback');mobile=select('paint_ms','mobile_1_6mbps_300ms')
             lines.append(f"| {profile}{' (below final floor)' if n['data']['below_final_policy_floor'] else ''} | {variant} | {n['data']['encoded_body_bytes']} / {n['data']['decoded_body_bytes']} | {n['quantiles']['p50']:.3f} | {local['quantiles']['p50']:.1f} | {mobile['quantiles']['p50']:.1f} |")
-    lines += ['', 'Fastest was selected to limit native per-request work while retaining the main impaired-link gain. Default saved more bytes and was about 27ms faster for the largest repetitive UI fixture; it cost more native HTTP work. Small UI differences and overlapping local frame ranges do not prove a universal latency win. A 131-check prototype browser gate, 49 checks on the exact final router and 72 final byte controls pass. Original favicon failures and intermediate negative small-proposal results remain preserved. The router is tested over the older archived backend; the changing root, providers/concurrency and the full integration gate remain open. See the [compression report]('+str(ROOT/'docs/performance-task-compression-2026-11-13.md')+').', '']
+    lines += ['', 'Fastest was selected to limit native per-request work while retaining the main impaired-link gain. Default saved more bytes and was about 27ms faster for the largest repetitive UI fixture; it cost more native HTTP work. Small UI differences and overlapping local frame ranges do not prove a universal latency win. A 131-check prototype browser gate, 49 checks on the exact final router and 72 final byte controls pass. Original favicon failures and intermediate negative small-proposal results remain preserved. The router is tested over the older archived backend; the changing root, providers/concurrency and the full integration gate remain open. See the [compression report]('+link('docs/performance-task-compression-2026-11-13.md')+').', '']
 
 lines += ['',
           '## Discovered entrypoints','',
           'These identities overlap across surfaces and are discovery starting points. A view or binding is not automatically one complete user action. “Extraction pending” means older partial measurements exist but their numeric distributions have not yet been normalized into this log. Functional checks and request counts remain distinct from measured latency.','',
           '| Kind | Entrypoint | Source | Partial records | Timing status |','| --- | --- | --- | ---: | --- |']
 for a in sorted(actions,key=lambda a:(a['kind'],a['id'])):
-    path=ROOT/a['source']
+    path=link(a['source'])
     lines.append(f"| {a['kind']} | {escape(a['id'])} | [{Path(a['source']).name}:{a['line']}]({path}:{a['line']}) | {len(a['evidence_ids'])} | {a['timing_status']} |")
 lines += ['','## Completion requirements','']+[f'{i+1}. {s}' for i,s in enumerate(result['remaining'])]
 assert all(sha(p)==digest for p,(_,digest) in raw_cache.items()),'Timing source changed while rendering the log'
