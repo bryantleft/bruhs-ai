@@ -1,10 +1,10 @@
 //! Native provider-neutral Inbox, sharing the same persisted records and
 //! triage semantics as the web surface.
 
+use bruhs_models::{InboxCard, InboxDirectory, InboxFilter, INBOX_PAGE_SIZE};
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::Input;
-use std::cmp::Reverse;
+use gpui_component::input::{Input, InputEvent};
 
 use super::*;
 
@@ -187,146 +187,176 @@ impl Workspace {
             return self.render_inbox_import(cx);
         }
         let now = EpochMs::now().as_millis();
-        let open = self
-            .inbox_conversations
-            .iter()
-            .filter(|conversation| conversation.is_visible_in_inbox(now))
-            .count();
-        let unread = self
-            .inbox_conversations
-            .iter()
-            .filter(|conversation| conversation.unread && !conversation.archived)
-            .count();
-        let needs_reply = self
-            .inbox_conversations
-            .iter()
-            .filter(|conversation| conversation.needs_reply() && !conversation.archived)
-            .count();
-        let mut conversations = self
-            .inbox_conversations
-            .iter()
-            .filter(|conversation| conversation.is_visible_in_inbox(now))
-            .collect::<Vec<_>>();
-        conversations.sort_unstable_by_key(|conversation| Reverse(conversation.updated_at_ms));
-        let cards = conversations
+        let query = self.inbox_search_input.read(cx).value();
+        let mut cache = self.inbox_directory.borrow_mut();
+        if cache
+            .as_ref()
+            .is_some_and(|(count, _)| *count != self.inbox_conversations.len())
+        {
+            cache.take();
+        }
+        let (_, directory) = cache.get_or_insert_with(|| {
+            (
+                self.inbox_conversations.len(),
+                InboxDirectory::new(&self.inbox_conversations),
+            )
+        });
+        let matches = directory.matching(&query, self.inbox_filter, now);
+        let counts = directory.counts(now);
+        let total = matches.len();
+        let start = InboxDirectory::page_start(total, self.inbox_page);
+        let cards = directory
+            .page(&matches, self.inbox_page)
             .into_iter()
-            .map(|conversation| self.render_inbox_card(conversation, cx))
+            .map(|card| self.render_inbox_card(&card, cx))
             .collect::<Vec<_>>();
+        let empty = if !query.trim().is_empty() {
+            "No matching conversations."
+        } else {
+            self.inbox_filter.empty_message()
+        };
 
-        div()
-            .debug_selector(|| "desktop-inbox-page".to_string())
-            .flex_1()
-            .h_full()
-            .min_w_0()
-            .bg(cx.theme().background)
-            .flex()
-            .flex_col()
-            .child(
-                div()
-                    .px_5()
-                    .py_3()
-                    .border_b_1()
-                    .border_color(theme::longan_800())
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .child(
-                                div()
-                                    .font_family(theme::HEADING_FONT_FAMILY)
-                                    .text_size(px(16.0))
-                                    .text_color(theme::rambutan_100())
-                                    .child("Inbox"),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(theme::rambutan_500())
-                                    .child("Imported conversations and local reply drafts."),
-                            ),
-                    )
-                    .child(
-                        web_button(
-                            "desktop-import-conversation",
-                            WebButtonVariant::Primary,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("+ Import conversation")
-                        .child("+ Import conversation")
-                        .on_click(cx.listener(|this, _event, window, cx| {
-                            this.start_inbox_import(window, cx);
-                        })),
-                    ),
-            )
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scrollbar()
-                    .p_5()
-                    .flex()
-                    .justify_center()
-                    .child(
-                        div()
-                            .w_full()
-                            .max_w(px(900.0))
-                            .flex()
-                            .flex_col()
-                            .gap_3()
-                            .child(
-                                div()
-                                    .flex()
-                                    .gap_2()
-                                    .child(inbox_metric("Open", open))
-                                    .child(inbox_metric("Unread", unread))
-                                    .child(inbox_metric("Needs reply", needs_reply)),
-                            )
-                            .children(cards)
-                            .when(self.inbox_conversations.is_empty(), |element| {
-                                element.child(
-                                    div()
-                                        .py_12()
-                                        .text_center()
-                                        .text_size(px(13.0))
-                                        .text_color(theme::rambutan_500())
-                                        .child("Nothing waiting here. A clear inbox is a good place to be."),
-                                )
-                            })
-,
-                    ),
-            )
+        div().debug_selector(|| "desktop-inbox-page".into())
+            .flex_1().h_full().min_w_0().bg(cx.theme().background).flex().flex_col()
+            .child(div().px_4().py_3().border_b_1().border_color(theme::longan_800())
+                .flex().flex_wrap().gap_3().items_center().justify_between()
+                .child(div().min_w_0()
+                    .child(div().font_family(theme::HEADING_FONT_FAMILY).text_size(px(18.0)).text_color(theme::rambutan_100()).child("Inbox"))
+                    .child(div().mt_0p5().text_size(px(12.0)).text_color(theme::rambutan_500()).child("Imported conversations and local reply drafts.")))
+                .child(web_button("desktop-import-conversation", WebButtonVariant::Primary, WebButtonSize::Small, ButtonState::Enabled)
+                    .aria_label("Import conversation").child("Import conversation")
+                    .on_click(cx.listener(|this, _, window, cx| this.start_inbox_import(window, cx)))))
+            .child(div().flex_1().min_h_0().overflow_y_scrollbar().p_4().flex().justify_center()
+                .child(div().w_full().max_w(px(1024.0)).flex().flex_col().gap_4()
+                    .child(Input::new(&self.inbox_search_input).aria_label("Search inbox"))
+                    .child(div().id("desktop-inbox-filter-group").role(Role::Group).aria_label("Inbox filter").flex().flex_wrap().gap_1()
+                        .children(InboxFilter::ALL.into_iter().map(|value| self.inbox_filter_button(value, cx))))
+                    .child(div().flex().flex_col().rounded(px(8.0)).border_1().border_color(theme::longan_800()).overflow_hidden()
+                        .children(cards)
+                        .when(total == 0, |element| element.child(div().py_12().px_4().text_center()
+                            .child(div().id("desktop-inbox-empty").debug_selector(|| "desktop-inbox-empty".into()).role(Role::Status).text_size(px(13.0)).text_color(theme::rambutan_300()).child(empty))
+                            .child(div().mt_1().text_size(px(12.0)).text_color(theme::rambutan_500())
+                                .child(if !query.trim().is_empty() { "Try another search or choose All." } else { "Import a message or choose another view." })))))
+                    .child(div().id("desktop-inbox-counts").role(Role::Status).aria_label("Inbox counts").flex().flex_wrap().gap_4().text_size(px(12.0)).text_color(theme::rambutan_400())
+                        .child(format!("{} open", counts.open)).child(format!("{} unread", counts.unread))
+                        .child(format!("{} need reply", counts.needs_reply)).child(format!("{} snoozed", counts.snoozed)))
+                    .child(div().text_size(px(12.0)).text_color(theme::rambutan_400())
+                        .child("Imported messages and replies stay on this device. Email sync and delivery are not available yet."))))
+            .when(total > INBOX_PAGE_SIZE, |element| element.child(
+                div().id("desktop-inbox-pages").aria_label("Inbox pages")
+                    .flex().items_center().justify_between().px_3().py_2()
+                    .border_t_1().border_color(theme::longan_800())
+                    .child(self.inbox_page_button("desktop-inbox-previous", "Previous", start == 0, (start / INBOX_PAGE_SIZE).saturating_sub(1), cx))
+                    .child(div().id("desktop-inbox-page-status").role(Role::Status).text_size(px(12.0)).text_color(theme::rambutan_400()).child(format!("{} to {} of {}", start + 1, (start + INBOX_PAGE_SIZE).min(total), total)))
+                    .child(self.inbox_page_button("desktop-inbox-next", "Next", start + INBOX_PAGE_SIZE >= total, start / INBOX_PAGE_SIZE + 1, cx))))
     }
 
-    fn render_inbox_card(
+    fn inbox_filter_button(&self, value: InboxFilter, cx: &Context<'_, Self>) -> AnyElement {
+        let selected = self.inbox_filter == value;
+        web_button(
+            ("inbox-filter", element_key(value.label())),
+            WebButtonVariant::Ghost,
+            WebButtonSize::Default,
+            ButtonState::Enabled,
+        )
+        .debug_selector(move || format!("desktop-inbox-filter-{}", value.label()))
+        .aria_label(if selected {
+            format!("{}, selected", value.label())
+        } else {
+            value.label().into()
+        })
+        .text_size(px(12.0))
+        .rounded(px(4.0))
+        .when(selected, |button| {
+            button
+                .bg(theme::blueberry_500().opacity(0.15))
+                .text_color(theme::blueberry_400())
+        })
+        .child(value.label())
+        .on_click(cx.listener(move |this, _, _, cx| {
+            this.inbox_filter = value;
+            this.inbox_page = 0;
+            cx.notify();
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+            if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                window.prevent_default();
+                this.inbox_filter = value;
+                this.inbox_page = 0;
+                cx.notify();
+            }
+        }))
+        .into_any_element()
+    }
+
+    fn inbox_page_button(
         &self,
-        conversation: &InboxConversation,
+        id: &'static str,
+        label: &'static str,
+        disabled: bool,
+        page: usize,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        web_button(
+            id,
+            WebButtonVariant::Ghost,
+            WebButtonSize::Default,
+            ButtonState::disabled_if(disabled),
+        )
+        .debug_selector(move || id.into())
+        .aria_label(label)
+        .min_h(px(44.0))
+        .when(!disabled, |button| {
+            button
+                .on_click(cx.listener(move |this, _, _, cx| {
+                    this.inbox_page = page;
+                    cx.notify();
+                }))
+                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                        window.prevent_default();
+                        this.inbox_page = page;
+                        cx.notify();
+                    }
+                }))
+        })
+        .child(label)
+        .into_any_element()
+    }
+
+    fn render_inbox_card(&self, conversation: &InboxCard, cx: &Context<'_, Self>) -> AnyElement {
         let id = conversation.id.clone();
         let keyboard_id = id.clone();
-        let sender = conversation
-            .participants
-            .first()
-            .map_or("Unknown", |participant| participant.display_name.as_str())
-            .to_string();
-        let preview = conversation
-            .last_message()
-            .map_or("Draft only", |message| message.body.as_str())
-            .replace('\n', " ");
+        let sender = conversation.sender.clone();
+        let preview = conversation.preview.clone();
+        let key = element_key(&id);
         div()
-            .id(("inbox-card", element_key(&id)))
+            .id(("inbox-card", key))
+            .debug_selector(move || format!("desktop-inbox-card-{key}"))
             .role(Role::Button)
-            .aria_label(format!("Open conversation: {}", conversation.subject))
+            .aria_label(format!(
+                "{} conversation: {}. {}",
+                if conversation.unread {
+                    "Unread"
+                } else {
+                    "Read"
+                },
+                conversation.subject,
+                if conversation.important {
+                    "Important"
+                } else {
+                    ""
+                }
+            ))
             .tab_index(0)
             .cursor_pointer()
-            .rounded(px(6.0))
-            .bg(theme::longan_900().opacity(0.55))
-            .border_1()
+            .w_full()
+            .min_w_0()
+            .bg(theme::longan_900().opacity(0.45))
+            .border_b_1()
             .border_color(theme::longan_800())
             .px_3()
-            .py_2()
+            .py_3()
             .hover(|element| element.bg(theme::longan_800().opacity(0.7)))
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
             .on_click(cx.listener(move |this, _event, window, cx| {
@@ -345,35 +375,60 @@ impl Workspace {
                     .justify_between()
                     .child(
                         div()
+                            .truncate()
                             .text_size(px(13.0))
-                            .text_color(theme::rambutan_100())
+                            .min_w_0()
+                            .flex_1()
+                            .font_weight(if conversation.unread {
+                                FontWeight::SEMIBOLD
+                            } else {
+                                FontWeight::NORMAL
+                            })
+                            .text_color(if conversation.unread {
+                                theme::rambutan_100()
+                            } else {
+                                theme::rambutan_300()
+                            })
                             .child(sender),
                     )
                     .child(
                         div()
-                            .text_size(px(10.0))
-                            .text_color(if conversation.unread {
-                                theme::persimmon_300()
-                            } else {
-                                theme::rambutan_500()
-                            })
-                            .child(conversation.source.label()),
+                            .flex_shrink_0()
+                            .text_size(px(12.0))
+                            .text_color(theme::rambutan_500())
+                            .child(inbox_date(conversation.message_at_ms)),
                     ),
             )
             .child(
                 div()
                     .mt_1()
+                    .truncate()
                     .text_size(px(12.0))
                     .text_color(theme::rambutan_300())
-                    .child(conversation.subject.clone()),
+                    .child(if conversation.subject.trim().is_empty() {
+                        "(No subject)".to_string()
+                    } else {
+                        conversation.subject.clone()
+                    }),
             )
             .child(
                 div()
                     .mt_1()
-                    .text_size(px(11.0))
+                    .truncate()
+                    .text_size(px(12.0))
                     .text_color(theme::rambutan_500())
                     .overflow_hidden()
                     .child(preview),
+            )
+            .child(
+                div()
+                    .mt_1()
+                    .flex()
+                    .gap_3()
+                    .text_size(px(12.0))
+                    .text_color(theme::rambutan_500())
+                    .child(format!("{} import", conversation.source.label()))
+                    .when(conversation.important, |element| element.child("Important")),
             )
             .into_any_element()
     }
@@ -438,7 +493,7 @@ impl Workspace {
                             .gap_3()
                             .child(
                                 div()
-                                    .text_size(px(11.0))
+                                    .text_size(px(12.0))
                                     .text_color(theme::rambutan_500())
                                     .child("Provider"),
                             )
@@ -467,7 +522,7 @@ impl Workspace {
                             .when_some(self.persistence_error.clone(), |element, error| {
                                 element.child(
                                     div()
-                                        .text_size(px(11.0))
+                                        .text_size(px(12.0))
                                         .text_color(theme::lychee_300())
                                         .child(error),
                                 )
@@ -512,15 +567,15 @@ impl Workspace {
                 div()
                     .id(("inbox-message", index))
                     .max_w(px(660.0))
-                    .rounded(px(6.0))
+                    .rounded(px(8.0))
                     .bg(if outgoing {
-                        theme::persimmon_500().opacity(0.10)
+                        theme::longan_800()
                     } else {
                         theme::longan_900()
                     })
                     .border_1()
                     .border_color(if outgoing {
-                        theme::persimmon_500().opacity(0.2)
+                        theme::longan_700()
                     } else {
                         theme::longan_800()
                     })
@@ -528,9 +583,14 @@ impl Workspace {
                     .py_2()
                     .child(
                         div()
-                            .text_size(px(10.0))
+                            .text_size(px(12.0))
                             .text_color(theme::rambutan_500())
-                            .child(message.sender_name.clone()),
+                            .flex()
+                            .flex_wrap()
+                            .justify_between()
+                            .gap_3()
+                            .child(message.sender_name.clone())
+                            .child(inbox_date(message.sent_at_ms)),
                     )
                     .child(
                         div()
@@ -756,33 +816,24 @@ impl Workspace {
     }
 }
 
-fn inbox_metric(label: &'static str, value: usize) -> Div {
-    div()
-        .flex_1()
-        .rounded(px(6.0))
-        .bg(theme::longan_900().opacity(0.55))
-        .border_1()
-        .border_color(theme::longan_800())
-        .px_3()
-        .py_2()
-        .child(
-            div()
-                .text_size(px(10.0))
-                .text_color(theme::rambutan_500())
-                .child(label),
-        )
-        .child(
-            div()
-                .mt_1()
-                .font_family(theme::HEADING_FONT_FAMILY)
-                .text_size(px(18.0))
-                .text_color(theme::rambutan_100())
-                .child(value.to_string()),
-        )
+fn inbox_date(timestamp_ms: i64) -> String {
+    chrono::DateTime::from_timestamp_millis(timestamp_ms).map_or_else(
+        || "Unknown date".into(),
+        |date| {
+            let date = date.with_timezone(&Local);
+            date.format(if date.date_naive() == Local::now().date_naive() {
+                "%H:%M"
+            } else {
+                "%Y-%m-%d"
+            })
+            .to_string()
+        },
+    )
 }
 
 /// The conversation import form and the reply box.
 pub(super) struct InboxInputs {
+    pub(super) inbox_search_input: Entity<InputState>,
     pub(super) inbox_sender_input: Entity<InputState>,
     pub(super) inbox_subject_input: Entity<InputState>,
     pub(super) inbox_body_input: Entity<InputState>,
@@ -796,6 +847,19 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
     ) -> InboxInputs {
+        let inbox_search_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search people, subjects, and messages…")
+        });
+        subscriptions.push(cx.subscribe_in(
+            &inbox_search_input,
+            window,
+            |this: &mut Self, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.inbox_page = 0;
+                    cx.notify();
+                }
+            },
+        ));
         let inbox_sender_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Name or handle"));
         subscriptions.push(redraw_on_edit(&inbox_sender_input, window, cx));
@@ -817,10 +881,96 @@ impl Workspace {
         });
         subscriptions.push(redraw_on_edit(&inbox_reply_input, window, cx));
         InboxInputs {
+            inbox_search_input,
             inbox_sender_input,
             inbox_subject_input,
             inbox_body_input,
             inbox_reply_input,
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{element_key, inbox_date, AppView, InboxConversation, InboxMessage, InboxSource};
+    use gpui::{Modifiers, TestAppContext};
+
+    #[gpui::test]
+    fn inbox_search_and_filters_reach_archived_full_text_and_refresh_after_edits(
+        cx: &mut TestAppContext,
+    ) {
+        let (workspace, cx) = super::super::performance_tests::fixture(cx);
+        workspace.update(cx, |workspace, cx| {
+            workspace.active_view = AppView::Inbox;
+            workspace.inbox_conversations.clear();
+            for (id, archived) in [("open", false), ("archived", true)] {
+                let mut conversation = InboxConversation::new(InboxSource::Email, id, vec![], 10);
+                conversation.id = id.into();
+                conversation.receive(InboxMessage::incoming(
+                    "Ada",
+                    format!("{} Deep CAFÉ 世界", "x".repeat(300)),
+                    20,
+                ));
+                conversation.set_archived(archived);
+                workspace.inbox_conversations.push(conversation);
+            }
+            workspace.persist_and_notify(cx);
+        });
+        cx.run_until_parked();
+        let archived_row =
+            Box::leak(format!("desktop-inbox-card-{}", element_key("archived")).into_boxed_str());
+        let open_row =
+            Box::leak(format!("desktop-inbox-card-{}", element_key("open")).into_boxed_str());
+        assert!(cx.debug_bounds(open_row).is_some());
+        assert!(cx.debug_bounds(archived_row).is_none());
+        let archived = cx.debug_bounds("desktop-inbox-filter-Archived").unwrap();
+        cx.simulate_click(archived.center(), Modifiers::default());
+        cx.run_until_parked();
+        assert!(
+            cx.debug_bounds(archived_row).is_some(),
+            "archived conversations must remain reachable"
+        );
+        assert!(cx.debug_bounds(open_row).is_none());
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.inbox_page = usize::MAX;
+            workspace
+                .inbox_search_input
+                .update(cx, |input, cx| input.focus(window, cx));
+        });
+        cx.simulate_input("deep café 世界");
+        cx.run_until_parked();
+        assert!(
+            cx.debug_bounds(archived_row).is_some(),
+            "search includes full text beyond the row preview"
+        );
+        workspace.read_with(cx, |workspace, _| assert_eq!(workspace.inbox_page, 0));
+        workspace.update(cx, |workspace, cx| {
+            workspace.inbox_conversations[1].messages[0].body =
+                "Changed without changing the record count or timestamp".into();
+            workspace.persist_and_notify(cx);
+        });
+        cx.run_until_parked();
+        assert!(
+            cx.debug_bounds(archived_row).is_none(),
+            "saved edits must invalidate the full-text index"
+        );
+        assert!(cx.debug_bounds("desktop-inbox-empty").is_some());
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace
+                .inbox_search_input
+                .update(cx, |input, cx| input.set_value("", window, cx));
+        });
+        cx.run_until_parked();
+        let all = cx.debug_bounds("desktop-inbox-filter-All").unwrap();
+        cx.simulate_click(all.center(), Modifiers::default());
+        cx.run_until_parked();
+        assert!(cx.debug_bounds(open_row).is_some());
+        assert!(cx.debug_bounds(archived_row).is_some());
+    }
+
+    #[test]
+    fn inbox_rejects_dates_outside_the_calendar_range() {
+        assert_eq!(inbox_date(i64::MAX), "Unknown date");
+        assert_eq!(inbox_date(i64::MIN), "Unknown date");
     }
 }
