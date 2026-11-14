@@ -1,19 +1,15 @@
 //! Render-ready assistant content, kept between frames.
 //!
-//! Splitting a message into prose / math / mermaid blocks parses its
-//! markdown and builds SVG images. A frame used to redo that for every
-//! message, so each streamed token cost O(transcript). [`ContentBlockCache`]
-//! keeps the prepared blocks per message and redoes the work only for a
-//! message whose text (or streaming state) changed.
+//! Cache block boundaries separately from background SVG preparation. Prose
+//! and stable block IDs remain available while cold renderers work.
 
-use super::{
-    desktop_assistant_content_blocks_while, DesktopAssistantContentBlock, DesktopMathRender,
-    DesktopMermaidRender,
-};
+use super::svg_cache::SvgKind;
+use super::{parse_assistant_content, ParsedAssistantBlock};
+use bruhs_models::logic::rich_response::ResponseBlock;
 use gpui::{Image, ImageFormat, SharedString};
 use std::cell::RefCell;
 use std::collections::hash_map::DefaultHasher;
-use std::collections::{HashMap, VecDeque};
+use std::collections::{HashMap, HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
 use std::sync::Arc;
@@ -21,12 +17,13 @@ use std::sync::Arc;
 /// An SVG rendered to an image once, or the error that replaced it.
 #[derive(Clone)]
 pub(super) enum PreparedSvg {
+    Pending,
     Image(Arc<Image>),
     Error(SharedString),
 }
 
 impl PreparedSvg {
-    fn from_svg(svg: String) -> Self {
+    pub(super) fn from_svg(svg: String) -> Self {
         Self::Image(Arc::new(Image::from_bytes(
             ImageFormat::Svg,
             svg.into_bytes(),
@@ -40,37 +37,47 @@ pub(super) enum PreparedBlock {
     Markdown(SharedString),
     Math {
         display: bool,
-        render: PreparedSvg,
         source: SharedString,
     },
     Mermaid {
-        render: PreparedSvg,
         source: SharedString,
+    },
+    Rich {
+        block: Rc<ResponseBlock>,
+        identity: SharedString,
     },
 }
 
-fn prepare(block: DesktopAssistantContentBlock) -> Option<PreparedBlock> {
+impl PreparedBlock {
+    fn svg_source(&self) -> Option<(SvgKind, SharedString)> {
+        match self {
+            Self::Math { display, source } => {
+                Some((SvgKind::Math { display: *display }, source.clone()))
+            }
+            Self::Mermaid { source } => Some((SvgKind::Mermaid, source.clone())),
+            Self::Markdown(_) | Self::Rich { .. } => None,
+        }
+    }
+}
+
+fn prepare(block: ParsedAssistantBlock) -> Option<PreparedBlock> {
     Some(match block {
-        DesktopAssistantContentBlock::Markdown(markdown) => {
+        ParsedAssistantBlock::Markdown(markdown) => {
             if markdown.trim().is_empty() {
                 return None;
             }
             PreparedBlock::Markdown(markdown.into())
         }
-        DesktopAssistantContentBlock::Math(block) => PreparedBlock::Math {
-            display: block.display,
-            render: match block.render {
-                DesktopMathRender::Svg(svg) => PreparedSvg::from_svg(svg),
-                DesktopMathRender::Error(error) => PreparedSvg::Error(error.into()),
-            },
-            source: block.source.into(),
+        ParsedAssistantBlock::Math { source, display } => PreparedBlock::Math {
+            display,
+            source: source.into(),
         },
-        DesktopAssistantContentBlock::Mermaid(block) => PreparedBlock::Mermaid {
-            render: match block.render {
-                DesktopMermaidRender::Svg(svg) => PreparedSvg::from_svg(svg),
-                DesktopMermaidRender::Error(error) => PreparedSvg::Error(error.into()),
-            },
-            source: block.source.into(),
+        ParsedAssistantBlock::Mermaid(source) => PreparedBlock::Mermaid {
+            source: source.into(),
+        },
+        ParsedAssistantBlock::Rich(block) => PreparedBlock::Rich {
+            identity: format!("{block:?}").into(),
+            block: Rc::new(block),
         },
     })
 }
@@ -104,6 +111,7 @@ impl ContentKey {
 #[derive(Default)]
 pub(super) struct ContentBlockCache {
     entries: RefCell<HashMap<usize, (ContentKey, PreparedBlocks)>>,
+    pub(super) svg: super::svg_cache::SvgCache,
     #[cfg(test)]
     pub(super) builds: std::cell::Cell<usize>,
 }
@@ -120,24 +128,61 @@ impl ContentBlockCache {
         }
         #[cfg(test)]
         self.builds.set(self.builds.get() + 1);
-        let blocks: PreparedBlocks = desktop_assistant_content_blocks_while(content, streaming)
+        let blocks: PreparedBlocks = parse_assistant_content(content, streaming)
             .into_iter()
             .enumerate()
             .filter_map(|(index, block)| prepare(block).map(|block| (index, block)))
             .collect();
-        self.entries
+        let previous = self
+            .entries
             .borrow_mut()
             .insert(index, (key, Rc::clone(&blocks)));
+        if previous.is_some_and(|(_, previous)| {
+            let mut old = previous
+                .iter()
+                .filter_map(|(_, block)| block.svg_source())
+                .peekable();
+            if old.peek().is_none() {
+                return false;
+            }
+            let current: HashSet<_> = blocks
+                .iter()
+                .filter_map(|(_, block)| block.svg_source())
+                .collect();
+            old.any(|source| !current.contains(&source))
+        }) {
+            self.prune_unused_svg();
+        }
         blocks
     }
 
     /// Forget messages past `len` (the transcript shrank).
     pub(super) fn truncate(&self, len: usize) {
-        self.entries.borrow_mut().retain(|index, _| *index < len);
+        let removed = {
+            let mut entries = self.entries.borrow_mut();
+            let before = entries.len();
+            entries.retain(|index, _| *index < len);
+            entries.len() != before
+        };
+        if removed {
+            self.prune_unused_svg();
+        }
+    }
+
+    fn prune_unused_svg(&self) {
+        let sources: HashSet<_> = self
+            .entries
+            .borrow()
+            .values()
+            .flat_map(|(_, blocks)| blocks.iter().filter_map(|(_, block)| block.svg_source()))
+            .collect();
+        self.svg
+            .retain_sources(|kind, source| sources.contains(&(kind, source.clone())));
     }
 
     pub(super) fn clear(&self) {
         self.entries.borrow_mut().clear();
+        self.svg.clear();
     }
 }
 
@@ -246,6 +291,33 @@ mod tests {
         assert_eq!(cache.builds.get(), 2);
         cache.blocks(1, "one", false);
         assert_eq!(cache.builds.get(), 3);
+    }
+
+    #[test]
+    fn rich_block_identity_survives_later_streamed_prose() {
+        let cache = ContentBlockCache::default();
+        let raw = "```bruhs-html Counter\n<button>0</button>\n```";
+        let first = cache.blocks(0, raw, true);
+        let appended = cache.blocks(0, &format!("{raw}\n\nAdditional prose."), true);
+        let Some((
+            _,
+            PreparedBlock::Rich {
+                identity: original, ..
+            },
+        )) = first.first()
+        else {
+            panic!("closed HTML should render")
+        };
+        let Some((
+            _,
+            PreparedBlock::Rich {
+                identity: later, ..
+            },
+        )) = appended.first()
+        else {
+            panic!("later prose should preserve HTML")
+        };
+        assert_eq!(original, later);
     }
 }
 

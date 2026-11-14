@@ -1,6 +1,7 @@
 //! Assistant content: splitting markdown into prose, math and mermaid blocks, and rendering those to SVG.
 
 use super::*;
+use bruhs_models::logic::rich_response::{response_blocks, ResponseBlock};
 pub(super) const CHAT_DIAGRAM_ERROR_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const CHAT_DIAGRAM_ERROR_TEXT_SIZE_PX: f32 = 10.5;
 pub(super) const CHAT_DIAGRAM_ERROR_RADIUS_PX: f32 = 8.0;
@@ -56,20 +57,64 @@ pub(super) fn desktop_assistant_content_blocks(raw: &str) -> Vec<DesktopAssistan
     desktop_assistant_content_blocks_while(raw, false)
 }
 
-/// `raw` split into prose, math and mermaid blocks. While `streaming`, a
-/// mermaid fence that is not closed yet stays a code block: rendering every
-/// partial diagram would render (and cache) one per streamed token.
+#[cfg(test)]
 pub(super) fn desktop_assistant_content_blocks_while(
     raw: &str,
     streaming: bool,
 ) -> Vec<DesktopAssistantContentBlock> {
-    // Only a fence tagged `mermaid` needs the markdown tree; skip the parse
-    // (the prose renderer parses the text itself) when no tag can exist.
-    let may_have_mermaid = raw
-        .as_bytes()
-        .windows(MERMAID_LANG.len())
-        .any(|window| window.eq_ignore_ascii_case(MERMAID_LANG.as_bytes()));
-    let parsed = if may_have_mermaid {
+    parse_assistant_content(raw, streaming)
+        .into_iter()
+        .map(|block| match block {
+            ParsedAssistantBlock::Markdown(text) => DesktopAssistantContentBlock::Markdown(text),
+            ParsedAssistantBlock::Math { source, display } => {
+                DesktopAssistantContentBlock::Math(DesktopMathBlock {
+                    render: render_desktop_math(&source, display),
+                    source,
+                    display,
+                })
+            }
+            ParsedAssistantBlock::Mermaid(source) => {
+                DesktopAssistantContentBlock::Mermaid(DesktopMermaidBlock {
+                    render: render_desktop_mermaid(&source),
+                    source,
+                })
+            }
+            ParsedAssistantBlock::Rich(block) => DesktopAssistantContentBlock::Rich(block),
+        })
+        .collect()
+}
+
+/// Text and block boundaries only: SVG generation must never run during layout.
+#[derive(Debug, PartialEq, Eq)]
+pub(super) enum ParsedAssistantBlock {
+    Markdown(String),
+    Math { source: String, display: bool },
+    Mermaid(String),
+    Rich(ResponseBlock),
+}
+
+/// `raw` split into prose, math and mermaid blocks. While `streaming`, a
+/// mermaid fence that is not closed yet stays a code block: rendering every
+/// partial diagram would render (and cache) one per streamed token.
+pub(super) fn parse_assistant_content(raw: &str, streaming: bool) -> Vec<ParsedAssistantBlock> {
+    response_blocks(raw, streaming)
+        .into_iter()
+        .flat_map(|block| match block {
+            ResponseBlock::Markdown(markdown)
+                if markdown.trim().is_empty() && !raw.trim().is_empty() =>
+            {
+                Vec::new()
+            }
+            ResponseBlock::Markdown(markdown) => parse_prose_content(&markdown, streaming),
+            block => vec![ParsedAssistantBlock::Rich(block)],
+        })
+        .collect()
+}
+
+fn parse_prose_content(raw: &str, streaming: bool) -> Vec<ParsedAssistantBlock> {
+    // The prose renderer already parses Markdown. Only parse it here when a
+    // fence's info string could name Mermaid, not when prose mentions the word.
+    let parsed = if may_have_mermaid_fence(raw) {
         markdown::to_mdast(raw, &ParseOptions::gfm()).ok()
     } else {
         None
@@ -78,7 +123,7 @@ pub(super) fn desktop_assistant_content_blocks_while(
         let mut blocks = Vec::new();
         push_markdown_block(&mut blocks, raw);
         if blocks.is_empty() {
-            blocks.push(DesktopAssistantContentBlock::Markdown(raw.to_string()));
+            blocks.push(ParsedAssistantBlock::Markdown(raw.to_string()));
         }
         return blocks;
     };
@@ -93,7 +138,7 @@ pub(super) fn desktop_assistant_content_blocks_while(
         let mut blocks = Vec::new();
         push_markdown_block(&mut blocks, raw);
         if blocks.is_empty() {
-            blocks.push(DesktopAssistantContentBlock::Markdown(raw.to_string()));
+            blocks.push(ParsedAssistantBlock::Markdown(raw.to_string()));
         }
         return blocks;
     }
@@ -108,17 +153,14 @@ pub(super) fn desktop_assistant_content_blocks_while(
         }
 
         push_markdown_block(&mut blocks, &raw[cursor..range.start]);
-        blocks.push(DesktopAssistantContentBlock::Mermaid(DesktopMermaidBlock {
-            render: render_desktop_mermaid(&range.source),
-            source: range.source,
-        }));
+        blocks.push(ParsedAssistantBlock::Mermaid(range.source));
         cursor = range.end;
     }
 
     push_markdown_block(&mut blocks, &raw[cursor..]);
 
     if blocks.is_empty() {
-        blocks.push(DesktopAssistantContentBlock::Markdown(String::new()));
+        blocks.push(ParsedAssistantBlock::Markdown(String::new()));
     }
 
     blocks
@@ -126,17 +168,34 @@ pub(super) fn desktop_assistant_content_blocks_while(
 
 pub(super) const MERMAID_LANG: &str = "mermaid";
 
+fn may_have_mermaid_fence(raw: &str) -> bool {
+    raw.split(['\n', '\r']).any(|line| {
+        let line = line.trim_start_matches([' ', '\t']);
+        let Some(fence) = line.as_bytes().first().filter(|c| matches!(c, b'`' | b'~')) else {
+            return false;
+        };
+        let count = line.bytes().take_while(|c| c == fence).count();
+        if count < 3 {
+            return false;
+        }
+        let language = line[count..].split_whitespace().next().unwrap_or_default();
+        // Markdown decodes escapes and character references in info strings.
+        // Let its parser decide those uncommon cases rather than duplicating it.
+        language.eq_ignore_ascii_case(MERMAID_LANG) || language.contains(['&', '\\'])
+    })
+}
+
 /// Whether the fenced code block `block` (opening fence through the end of
 /// the node) has its closing fence yet.
 pub(super) fn code_fence_closed(block: &str) -> bool {
-    let mut lines = block.trim_end_matches(['\n', '\r']).lines();
+    let mut lines = block.trim_end_matches(['\n', '\r']).split(['\n', '\r']);
     let opening = lines.next().unwrap_or_default().trim_start();
     let Some(fence) = opening.chars().next().filter(|c| matches!(c, '`' | '~')) else {
         // Not a fenced block (indented code has no closing fence).
         return true;
     };
     let open_len = opening.chars().take_while(|c| *c == fence).count();
-    lines.last().is_some_and(|last| {
+    lines.next_back().is_some_and(|last| {
         let last = last.trim();
         last.chars().count() >= open_len && last.chars().all(|c| c == fence)
     })
@@ -188,7 +247,7 @@ pub(super) fn markdown_offset_to_byte(raw: &str, offset: usize) -> Option<usize>
         .nth(offset)
 }
 
-pub(super) fn push_markdown_block(blocks: &mut Vec<DesktopAssistantContentBlock>, markdown: &str) {
+pub(super) fn push_markdown_block(blocks: &mut Vec<ParsedAssistantBlock>, markdown: &str) {
     let markdown = markdown.trim_matches('\n');
     if markdown.trim().is_empty() {
         return;
@@ -196,7 +255,7 @@ pub(super) fn push_markdown_block(blocks: &mut Vec<DesktopAssistantContentBlock>
 
     let math_ranges = desktop_math_ranges(markdown);
     if math_ranges.is_empty() {
-        blocks.push(DesktopAssistantContentBlock::Markdown(markdown.to_string()));
+        blocks.push(ParsedAssistantBlock::Markdown(markdown.to_string()));
         return;
     }
 
@@ -207,23 +266,19 @@ pub(super) fn push_markdown_block(blocks: &mut Vec<DesktopAssistantContentBlock>
         }
 
         push_plain_markdown_block(blocks, &markdown[cursor..range.start]);
-        blocks.push(DesktopAssistantContentBlock::Math(DesktopMathBlock {
-            render: render_desktop_math(&range.source, range.display),
+        blocks.push(ParsedAssistantBlock::Math {
             source: range.source,
             display: range.display,
-        }));
+        });
         cursor = range.end;
     }
 
     push_plain_markdown_block(blocks, &markdown[cursor..]);
 }
 
-pub(super) fn push_plain_markdown_block(
-    blocks: &mut Vec<DesktopAssistantContentBlock>,
-    markdown: &str,
-) {
+pub(super) fn push_plain_markdown_block(blocks: &mut Vec<ParsedAssistantBlock>, markdown: &str) {
     if !markdown.trim().is_empty() {
-        blocks.push(DesktopAssistantContentBlock::Markdown(
+        blocks.push(ParsedAssistantBlock::Markdown(
             markdown.trim_matches('\n').to_string(),
         ));
     }
@@ -232,6 +287,10 @@ pub(super) fn push_plain_markdown_block(
 pub(super) fn desktop_math_ranges(raw: &str) -> Vec<DesktopMathRange> {
     let mut ranges = Vec::new();
     let mut index = 0;
+    // Once a suffix has no closing delimiter, later openers cannot find one
+    // either. Do not rescan that suffix for every unfinished streamed opener.
+    let mut bracket_end_missing = false;
+    let mut parenthesis_end_missing = false;
 
     while index < raw.len() {
         if !raw.is_char_boundary(index) {
@@ -257,18 +316,20 @@ pub(super) fn desktop_math_ranges(raw: &str) -> Vec<DesktopMathRange> {
                 index = end + 2;
                 continue;
             }
-        } else if starts_unescaped(raw, index, "\\[") {
+        } else if !bracket_end_missing && starts_unescaped(raw, index, "\\[") {
             if let Some(end) = find_unescaped(raw, "\\]", index + 2) {
                 push_math_range(&mut ranges, raw, index, end, 2, true);
                 index = end + 2;
                 continue;
             }
-        } else if starts_unescaped(raw, index, "\\(") {
+            bracket_end_missing = true;
+        } else if !parenthesis_end_missing && starts_unescaped(raw, index, "\\(") {
             if let Some(end) = find_unescaped(raw, "\\)", index + 2) {
                 push_math_range(&mut ranges, raw, index, end, 2, false);
                 index = end + 2;
                 continue;
             }
+            parenthesis_end_missing = true;
         } else if starts_single_dollar_math(raw, index) {
             if let Some(end) = find_single_dollar_end(raw, index + 1) {
                 push_math_range(&mut ranges, raw, index, end, 1, false);
@@ -508,6 +569,46 @@ pub(super) fn desktop_block_id(
 }
 
 impl ChatView {
+    fn render_pending_svg(
+        &self,
+        message_index: usize,
+        block_index: usize,
+        kind: &'static str,
+        source: &SharedString,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        // A source containing backticks must remain a single code block.
+        let longest = source.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+        let fence = "`".repeat(longest.max(2) + 1);
+        let markdown = format!("{fence}\n{source}\n{fence}");
+        div()
+            .id(desktop_block_id(
+                "desktop-pending-rich-block",
+                message_index,
+                block_index,
+            ))
+            .debug_selector(move || format!("desktop-pending-{kind}-{message_index}-{block_index}"))
+            .min_w_0()
+            .w_full()
+            .child(
+                div()
+                    .id("render-status")
+                    .role(Role::Status)
+                    .text_size(px(11.0))
+                    .text_color(theme::rambutan_500())
+                    .child(format!("Rendering {kind}…")),
+            )
+            .child(
+                TextView::markdown(
+                    desktop_block_id("desktop-rich-source", message_index, block_index),
+                    markdown,
+                )
+                .style(desktop_markdown_style(cx))
+                .selectable(true),
+            )
+            .into_any_element()
+    }
+
     pub(super) fn render_assistant_content_blocks(
         &self,
         message_index: usize,
@@ -524,22 +625,34 @@ impl ChatView {
             .map(|(block_index, block)| {
                 let block_index = *block_index;
                 match block {
-                    PreparedBlock::Markdown(markdown) => TextView::markdown(
-                        desktop_block_id("desktop-assistant-markdown", message_index, block_index),
-                        markdown.clone(),
-                    )
-                    .style(desktop_markdown_style(cx))
-                    .selectable(true)
-                    .into_any_element(),
-                    PreparedBlock::Math {
-                        display,
-                        render,
-                        source,
-                    } => {
-                        self.render_math_block(message_index, block_index, *display, render, source)
+                    PreparedBlock::Markdown(markdown) => {
+                        self.render_native_prose(message_index, block_index, markdown, cx)
                     }
-                    PreparedBlock::Mermaid { render, source } => {
-                        self.render_mermaid_block(message_index, block_index, render, source)
+                    PreparedBlock::Math { display, source } => {
+                        let render = self.content_blocks.svg.request(
+                            super::svg_cache::SvgKind::Math { display: *display },
+                            source,
+                            cx,
+                        );
+                        self.render_math_block(
+                            message_index,
+                            block_index,
+                            *display,
+                            &render,
+                            source,
+                            cx,
+                        )
+                    }
+                    PreparedBlock::Mermaid { source } => {
+                        let render = self.content_blocks.svg.request(
+                            super::svg_cache::SvgKind::Mermaid,
+                            source,
+                            cx,
+                        );
+                        self.render_mermaid_block(message_index, block_index, &render, source, cx)
+                    }
+                    PreparedBlock::Rich { block, identity } => {
+                        self.render_rich_response(message_index, block_index, block, identity, cx)
                     }
                 }
             })
@@ -553,8 +666,12 @@ impl ChatView {
         display: bool,
         render: &PreparedSvg,
         source: &SharedString,
+        cx: &Context<'_, Self>,
     ) -> AnyElement {
         match render {
+            PreparedSvg::Pending => {
+                self.render_pending_svg(message_index, block_index, "math", source, cx)
+            }
             PreparedSvg::Image(image) => div()
                 .id(desktop_block_id(
                     "desktop-math-block",
@@ -623,8 +740,12 @@ impl ChatView {
         block_index: usize,
         render: &PreparedSvg,
         source: &SharedString,
+        cx: &Context<'_, Self>,
     ) -> AnyElement {
         match render {
+            PreparedSvg::Pending => {
+                self.render_pending_svg(message_index, block_index, "diagram", source, cx)
+            }
             PreparedSvg::Image(image) => div()
                 .id(desktop_block_id(
                     "desktop-mermaid-block",
@@ -656,6 +777,9 @@ impl ChatView {
                     message_index,
                     block_index,
                 ))
+                .debug_selector(move || {
+                    format!("desktop-mermaid-error-{message_index}-{block_index}")
+                })
                 .max_w(relative(CHAT_CONTENT_BLOCK_MAX_WIDTH))
                 .min_w_0()
                 .flex()
@@ -699,6 +823,9 @@ impl ChatView {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
+        #[cfg(test)]
+        self.rendered_message_rows
+            .set(self.rendered_message_rows.get() + 1);
         self.render_transcript_message(index, msg, window, cx)
     }
 

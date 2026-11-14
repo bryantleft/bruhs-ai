@@ -9,9 +9,12 @@ use std::rc::Rc;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedSender};
 use tokio::task::JoinHandle;
 
+mod rich_responses;
 mod ui_audit;
 
-fn chat_window(cx: &mut TestAppContext) -> (Entity<ChatView>, &mut VisualTestContext) {
+pub(in crate::views::chat) fn chat_window(
+    cx: &mut TestAppContext,
+) -> (Entity<ChatView>, &mut VisualTestContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
         gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
@@ -74,6 +77,344 @@ fn assistant_contents(chat: &Entity<ChatView>, cx: &mut VisualTestContext) -> Ve
     })
 }
 
+fn paused_rich_rendering(
+    chat: &Entity<ChatView>,
+    cx: &mut VisualTestContext,
+) -> super::svg_cache::RenderGates {
+    let gates = super::svg_cache::RenderGates {
+        math: std::sync::Arc::new(tokio::sync::Semaphore::new(0)),
+        diagrams: std::sync::Arc::new(tokio::sync::Semaphore::new(0)),
+    };
+    chat.update(cx, |chat, _| {
+        chat.content_blocks.svg = super::svg_cache::SvgCache::with_gates(gates.clone());
+    });
+    gates
+}
+
+pub(in crate::views::chat) fn rich_message(content: &str) -> super::Message {
+    let mut message = super::Message::assistant_streaming(1, None);
+    message.content = content.into();
+    message.state = super::TurnState::Finished;
+    message
+}
+
+#[gpui::test]
+fn cold_math_does_not_block_composing_or_rebuild_on_redraw(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    let gates = paused_rich_rendering(&chat, cx);
+    chat.update(cx, |chat, cx| {
+        chat.messages = vec![rich_message("Formula: $$x^2 + 1$$ remains readable.")];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-pending-math-0-1").is_some());
+    chat.update_in(cx, |chat, window, cx| {
+        chat.input_state
+            .update(cx, |input, cx| input.focus(window, cx));
+    });
+    cx.simulate_input("Still typing while rendering");
+    cx.run_until_parked();
+    for _ in 0..4 {
+        chat.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+    }
+    chat.read_with(cx, |chat, cx| {
+        assert_eq!(
+            chat.input_state.read(cx).value().as_str(),
+            "Still typing while rendering"
+        );
+        assert_eq!(
+            chat.content_blocks.svg.requests.get(),
+            1,
+            "redraws share the in-flight render"
+        );
+        assert_eq!(chat.content_blocks.svg.pending(), 1);
+    });
+    gates.math.add_permits(1);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-pending-math-0-1").is_none());
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.pending(), 0)
+    });
+}
+
+#[gpui::test]
+fn streaming_reuses_diagrams_and_replacing_content_cancels_old_work(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    let gates = paused_rich_rendering(&chat, cx);
+    chat.update(cx, |chat, cx| {
+        let mut message = super::Message::assistant_streaming(1, None);
+        message.content = "Before\n\n```mermaid\ngraph TD\nA-->B".into();
+        chat.messages = vec![message];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(
+            chat.content_blocks.svg.requests.get(),
+            0,
+            "an open fence stays source while streaming"
+        )
+    });
+    chat.update(cx, |chat, cx| {
+        chat.messages[0].content.push_str("\n```\n\nAfter");
+        cx.notify();
+    });
+    cx.run_until_parked();
+    for _ in 0..4 {
+        chat.update(cx, |chat, cx| {
+            chat.messages[0].content.push_str(" more prose");
+            cx.notify();
+        });
+        cx.run_until_parked();
+    }
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(
+            chat.content_blocks.svg.requests.get(),
+            1,
+            "prose tokens do not queue duplicate diagrams"
+        )
+    });
+    chat.update(cx, |chat, cx| {
+        chat.messages[0] = rich_message("Replacement: $$y^2$$");
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(
+            chat.content_blocks.svg.pending(),
+            1,
+            "the obsolete diagram is cancelled"
+        )
+    });
+    gates.diagrams.add_permits(1);
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-pending-math-0-1").is_some(),
+        "a late diagram cannot replace the new math block"
+    );
+    gates.math.add_permits(1);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-pending-math-0-1").is_none());
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.messages[0].content, "Replacement: $$y^2$$")
+    });
+}
+
+#[gpui::test]
+fn rewind_and_thread_reset_cancel_pending_rich_content(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    let _gates = paused_rich_rendering(&chat, cx);
+    chat.update(cx, |chat, cx| {
+        chat.messages = vec![super::Message::user("Earlier"), rich_message("$$x^2$$")];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.pending(), 1)
+    });
+    chat.update(cx, |chat, cx| {
+        chat.messages.truncate(1);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.pending(), 0)
+    });
+    chat.update(cx, |chat, cx| {
+        chat.messages.push(rich_message("$$z^2$$"));
+        chat.scroll_messages_to_bottom();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.pending(), 1)
+    });
+    chat.update(cx, |chat, cx| {
+        chat.start_thread("replacement", "New thread", cx)
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.pending(), 0)
+    });
+}
+
+#[gpui::test]
+fn rich_messages_larger_than_the_global_cache_keep_their_live_jobs(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    let _gates = paused_rich_rendering(&chat, cx);
+    let count = super::MATH_RENDER_CACHE_ENTRIES + 1;
+    let content = (0..count)
+        .map(|index| format!("$$x_{{{index}}}$$"))
+        .collect::<Vec<_>>()
+        .join("\n\n");
+    chat.update(cx, |chat, cx| {
+        chat.messages = vec![rich_message(&content)];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    for _ in 0..3 {
+        chat.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+    }
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(
+            chat.content_blocks.svg.requests.get(),
+            count,
+            "a message must not repeatedly evict and requeue its own live formulas"
+        );
+        assert_eq!(chat.content_blocks.svg.len(), count);
+    });
+    chat.update(cx, |chat, cx| {
+        chat.messages[0].content = "Plain replacement".into();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(
+            chat.content_blocks.svg.len(),
+            0,
+            "replaced sources are released"
+        )
+    });
+}
+
+#[gpui::test]
+fn completed_diagrams_survive_prose_tokens_and_release_obsolete_images(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    let gates = paused_rich_rendering(&chat, cx);
+    chat.update(cx, |chat, cx| {
+        let mut message = super::Message::assistant_streaming(1, None);
+        message.content = "Before\n\n```mermaid\ngraph TD\nA-->B\n```\n\nAfter".into();
+        chat.messages = vec![message];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-pending-diagram-0-1").is_some());
+    gates.diagrams.add_permits(1);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-pending-diagram-0-1").is_none());
+    for _ in 0..3 {
+        chat.update(cx, |chat, cx| {
+            chat.messages[0].content.push_str(" more prose");
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-pending-diagram-0-1").is_none());
+    }
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.requests.get(), 1)
+    });
+    chat.update(cx, |chat, cx| {
+        chat.messages[0] = rich_message("Replacement without a diagram");
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.requests.get(), 1);
+        assert_eq!(
+            chat.content_blocks.svg.len(),
+            0,
+            "obsolete images are released"
+        );
+    });
+}
+
+#[gpui::test]
+fn shared_formulas_keep_their_job_until_the_last_message_releases_them(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    let gates = paused_rich_rendering(&chat, cx);
+    chat.update(cx, |chat, cx| {
+        chat.messages = vec![rich_message("$$x^2$$"), rich_message("$$x^2$$")];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.requests.get(), 1)
+    });
+    chat.update(cx, |chat, cx| {
+        chat.messages[0].content = "Changed first message".into();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(
+            chat.content_blocks.svg.pending(),
+            1,
+            "the second message still owns the formula"
+        )
+    });
+    gates.math.add_permits(1);
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-pending-math-1-0").is_none());
+    chat.read_with(cx, |chat, _| {
+        assert_eq!(chat.content_blocks.svg.requests.get(), 1)
+    });
+    chat.update(cx, |chat, cx| {
+        chat.messages[1].content = "Changed second message".into();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| assert_eq!(chat.content_blocks.svg.len(), 0));
+}
+
+#[gpui::test]
+#[ignore = "manual optimized foreground timing; cargo test -p bruhs-desktop --bin bruhs-desktop --release rich_content_preparation_cost -- --ignored --nocapture"]
+fn rich_content_preparation_cost(cx: &mut TestAppContext) {
+    use std::{hint::black_box, time::Instant};
+    let (chat, cx) = chat_window(cx);
+    let _gates = paused_rich_rendering(&chat, cx);
+    let mut fixtures = vec![(
+        "cold math".to_string(),
+        r"Before $$\sum_{i=0}^{20}\frac{x_i^2 + y_i}{\sqrt{z}}$$ after.".to_string(),
+    )];
+    for count in [10, 100, 500] {
+        let mut source = String::from("Before\n\n```mermaid\ngraph TD\n");
+        for index in 0..count {
+            source.push_str(&format!("N{index}[Step {index}] --> N{}\n", index + 1));
+        }
+        source.push_str("```\n\nAfter");
+        fixtures.push((format!("cold diagram / {count} edges"), source));
+    }
+    for (label, content) in fixtures {
+        let start = Instant::now();
+        black_box(super::desktop_assistant_content_blocks_while(
+            &content, false,
+        ));
+        let legacy = start.elapsed();
+        let start = Instant::now();
+        chat.update_in(cx, |chat, window, cx| {
+            black_box(chat.render_assistant_content_blocks(0, &content, false, window, cx));
+        });
+        let queued = start.elapsed();
+        let start = Instant::now();
+        chat.update(cx, |chat, cx| {
+            chat.content_blocks.clear();
+            chat.messages = vec![rich_message(&content)];
+            chat.scroll_messages_to_bottom();
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let frame = start.elapsed();
+        let marker = if label == "cold math" {
+            "desktop-pending-math-0-1"
+        } else {
+            "desktop-pending-diagram-0-1"
+        };
+        assert!(
+            cx.debug_bounds(marker).is_some(),
+            "the pending source must actually be laid out"
+        );
+        println!(
+            "{label}: legacy foreground SVG preparation {:.3} ms; queued foreground preparation {:.3} ms; initial pending update + test layout {:.3} ms",
+            legacy.as_secs_f64() * 1000.0,
+            queued.as_secs_f64() * 1000.0,
+            frame.as_secs_f64() * 1000.0
+        );
+        chat.update(cx, |chat, _| chat.content_blocks.clear());
+    }
+}
+
 #[gpui::test]
 fn a_message_from_another_threads_agent_shows_its_sender_not_the_header(cx: &mut TestAppContext) {
     let (chat, cx) = chat_window(cx);
@@ -102,6 +443,133 @@ fn a_message_from_another_threads_agent_shows_its_sender_not_the_header(cx: &mut
         cx.debug_bounds("desktop-user-from-thread-1").is_none(),
         "a typed message has no sender caption"
     );
+}
+
+#[gpui::test]
+fn virtual_transcript_reaches_history_by_keyboard_and_find(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    chat.update(cx, |chat, cx| {
+        chat.messages = (0..1000)
+            .map(|index| {
+                super::Message::user(format!(
+                    "Saved message {index}: {}",
+                    "Text to read. ".repeat(5)
+                ))
+            })
+            .collect();
+        chat.scroll_messages_to_bottom();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert!(
+            chat.rendered_message_rows.get() < 100,
+            "only a viewport of the 1,000 records is rendered"
+        );
+    });
+    assert!(cx.debug_bounds("desktop-user-message-999").is_some());
+    assert!(cx.debug_bounds("desktop-user-message-0").is_none());
+    chat.update_in(cx, |chat, window, cx| chat.messages_focus.focus(window, cx));
+    cx.simulate_keystrokes("home");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-user-message-0").is_some());
+    assert!(cx.debug_bounds("desktop-user-message-999").is_none());
+    chat.update(cx, |chat, cx| {
+        chat.find_open = true;
+        chat.find_query = "Saved message 500:".into();
+        chat.find_pinned = None;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-user-message-500").is_some(),
+        "find reaches offscreen history"
+    );
+    chat.update(cx, |chat, cx| {
+        chat.find_open = false;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| chat.messages_focus.focus(window, cx));
+    cx.simulate_keystrokes("end");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-user-message-999").is_some());
+    chat.update(cx, |chat, cx| {
+        chat.messages.truncate(1);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-user-message-0").is_some(),
+        "rewinding clamps the viewport"
+    );
+}
+
+#[gpui::test]
+fn tokens_keep_a_reader_in_history_and_tail_can_resume(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    chat.update(cx, |chat, _| {
+        chat.messages = (0..1000)
+            .map(|index| super::Message::user(format!("Saved message {index}")))
+            .collect();
+    });
+    let turn = start_turn(&chat, "New question", cx);
+    send(&turn, AgentUiEvent::Text("Live answer. ".repeat(100)));
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| chat.messages_focus.focus(window, cx));
+    cx.simulate_keystrokes("home");
+    cx.run_until_parked();
+    send(&turn, AgentUiEvent::Text("A later token.".into()));
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-user-message-0").is_some(),
+        "a token must not scroll a reader away"
+    );
+    chat.update_in(cx, |chat, window, cx| chat.messages_focus.focus(window, cx));
+    cx.simulate_keystrokes("end");
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert!(chat.messages_viewport.is_following_tail())
+    });
+    send(
+        &turn,
+        AgentUiEvent::Text("The answer continues. ".repeat(100)),
+    );
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, _| {
+        assert!(chat.messages_viewport.is_following_tail())
+    });
+}
+
+#[gpui::test]
+fn shrinking_a_message_clamps_the_scroll_anchor(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    chat.update(cx, |chat, cx| {
+        chat.messages = (0..1000)
+            .map(|index| super::Message::user(format!("Message {index}")))
+            .collect();
+        chat.messages[500].content = "A line of expanded text.\n".repeat(1000);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.update(cx, |chat, cx| {
+        chat.messages_viewport.scroll_to(gpui::ListOffset {
+            item_ix: 500,
+            offset_in_item: gpui::px(1000.0),
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.update(cx, |chat, cx| {
+        chat.messages[500].content = "Collapsed text".into();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-user-message-501").is_some(),
+        "shrinking a row must retain the adjacent history instead of skipping ahead"
+    );
+    assert!(cx.debug_bounds("desktop-user-message-0").is_none());
 }
 
 #[gpui::test]

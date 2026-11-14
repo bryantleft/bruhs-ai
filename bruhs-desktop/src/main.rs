@@ -15,6 +15,7 @@ mod synthetic_dock;
 mod theme;
 mod views;
 mod voice_capture;
+mod webview_platform;
 
 use gpui::*;
 use gpui_component::{Root, TitleBar};
@@ -84,6 +85,17 @@ const DESKTOP_WINDOW_TITLE: &str = "bruhs.ai";
 actions!(bruhs, [Quit]);
 
 fn main() {
+    if bruhs_core::artifact_tools::is_mcp_helper() {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .and_then(|runtime| runtime.block_on(bruhs_core::artifact_tools::run_mcp_helper()));
+        if let Err(error) = result {
+            eprintln!("Local artifact helper failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if bruhs_core::reactive_tools::is_mcp_helper() {
         let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
@@ -115,6 +127,7 @@ fn main() {
         }
         return;
     }
+    webview_platform::configure_startup();
     // Bruhs.app opened from Finder has launchd's bare PATH; adopt the login
     // shell's so providers, git and the helpers resolve. Before any thread.
     if bruhs_core::updates::release::current_app_bundle().is_some() {
@@ -307,6 +320,7 @@ mod tests {
         assert_eq!(DESKTOP_WINDOW_TITLE, web_title);
     }
 
+    #[cfg(debug_assertions)]
     use super::smoke::{
         desktop_window_smoke_value_enabled, DESKTOP_WINDOW_SMOKE_DONE, DESKTOP_WINDOW_SMOKE_ENV,
         DESKTOP_WINDOW_SMOKE_READY,
@@ -369,6 +383,7 @@ mod tests {
     }
 
     #[test]
+    #[cfg(debug_assertions)]
     fn desktop_window_smoke_env_should_be_opt_in() {
         assert_eq!(DESKTOP_WINDOW_SMOKE_ENV, "BRUHS_DESKTOP_WINDOW_SMOKE");
         assert_eq!(

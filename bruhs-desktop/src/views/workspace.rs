@@ -2416,6 +2416,9 @@ impl Render for Workspace {
         for thread in &self.threads {
             let visible = self.active_view == AppView::Chat
                 && self.active_thread_id.as_deref() == Some(thread.id.as_str());
+            thread.chat.update(cx, |chat, cx| {
+                chat.set_rich_response_shown(visible && !self.overlay_open(), cx);
+            });
             if !visible && thread.chat.read(cx).has_private_input() {
                 thread.chat.update(cx, |chat, _| chat.clear_private_input());
             }

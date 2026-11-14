@@ -10,6 +10,8 @@
 
 #[path = "server_client/reactive.rs"]
 mod reactive;
+#[path = "server_client/rich_response_io.rs"]
+mod rich_response_io;
 pub use reactive::ReactiveHookToken;
 
 use std::sync::Arc;
@@ -397,6 +399,21 @@ impl ServerClient {
     }
 
     // ── Meetings ────────────────────────────────────────────────────────
+
+    /// Verify the native inline renderer's shell before attaching a webview.
+    pub async fn check_rich_response_host(&self) -> Result<(), ServerError> {
+        let path = "/api/agent/rich-response";
+        let response = Self::check(self.http()?.get(self.url(path)).send().await, path).await?;
+        if response
+            .headers()
+            .get("x-bruhs-rich-response")
+            .and_then(|value| value.to_str().ok())
+            != Some("1")
+        {
+            return Err(ServerError::Invalid("The local server does not support inline responses. Rebuild and restart bruhs-server."));
+        }
+        Ok(())
+    }
 
     pub async fn fetch_meetings(&self) -> Result<Vec<Meeting>, ServerError> {
         self.get_json("/api/meetings").await
@@ -1022,6 +1039,10 @@ fn summary_model() -> Option<bruhs_models::agent::ModelId> {
         .clone()
         .and_then(|model| bruhs_models::agent::ModelId::try_from(model).ok())
 }
+
+#[cfg(test)]
+#[path = "server_client/rich_response_tests.rs"]
+mod rich_response_tests;
 
 #[cfg(test)]
 mod tests {

@@ -873,8 +873,8 @@ impl ChatView {
     }
 
     pub(super) fn show_scroll_to_bottom_control(&self) -> bool {
-        let offset_y = f32::from(self.messages_scroll_handle.offset().y);
-        let max_offset_height = f32::from(self.messages_scroll_handle.max_offset().y);
+        let offset_y = f32::from(self.messages_viewport.scroll_px_offset_for_scrollbar().y);
+        let max_offset_height = f32::from(self.messages_viewport.max_offset_for_scrollbar().y);
         desktop_scroll_to_bottom_control_visible(offset_y, max_offset_height)
     }
 }

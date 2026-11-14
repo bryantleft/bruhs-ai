@@ -675,6 +675,7 @@ impl ChatView {
                     .child("(empty response)"),
             );
         }
+        turn = turn.children(self.render_published_artifacts(index, msg, cx));
 
         let files = changed_files(&msg.tool_calls, root.as_deref());
         if !files.is_empty() {
@@ -1507,6 +1508,7 @@ impl ChatView {
             .debug_selector(move || format!("desktop-usage-meta-{index}"))
             .min_h(px(TRANSCRIPT_ROW_MIN_HEIGHT_PX))
             .flex()
+            .flex_wrap()
             .items_center()
             .gap_2()
             .px_1()
@@ -1555,6 +1557,10 @@ impl ChatView {
                     msg.content.clone(),
                     cx,
                 ))
+                .child(self.render_response_export(index, cx))
+            })
+            .when(!has_text && self.has_published_artifacts(msg), |el| {
+                el.child(self.render_response_export(index, cx))
             })
             .children(msg.model.clone().map(|m| div().truncate().child(m)))
             .children(duration.map(|d| div().child(d)))
