@@ -34,11 +34,14 @@ pub async fn post_open_in_editor(
     }
     let path = HomePath::required(body.path.as_deref()).await?;
     let editor =
-        open_in_editor(&editor_id, path.as_path(), body.line).map_err(|err| match err {
-            EditorError::UnknownEditor => AppError::BadRequest(err.to_string()),
-            EditorError::NotInstalled => AppError::NotFound(err.to_string()),
-            _ => AppError::internal(err),
-        })?;
+        tokio::task::spawn_blocking(move || open_in_editor(&editor_id, path.as_path(), body.line))
+            .await
+            .map_err(|error| AppError::internal_in("editor launch failed", error))?
+            .map_err(|err| match err {
+                EditorError::UnknownEditor => AppError::BadRequest(err.to_string()),
+                EditorError::NotInstalled => AppError::NotFound(err.to_string()),
+                _ => AppError::internal(err),
+            })?;
     Ok(Json(OpenInEditorResponse {
         editor: editor.label.to_string(),
     }))

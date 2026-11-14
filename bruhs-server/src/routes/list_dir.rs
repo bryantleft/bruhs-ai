@@ -35,22 +35,29 @@ pub async fn post_list_dir(
         None => HomePath::home().await?,
     };
 
-    let mut entries = tokio::fs::read_dir(resolved.as_path())
+    // A finite scan needs one worker job rather than Tokio's repeated
+    // directory-batch handoffs. Keep filesystem I/O and sorting off the runtime.
+    let listing = tokio::task::spawn_blocking(move || read_directory(&resolved))
         .await
+        .map_err(|error| AppError::internal_in("read directory worker", error))??;
+    Ok(Json(listing))
+}
+
+fn read_directory(resolved: &HomePath) -> Result<ListDirResponse, AppError> {
+    let entries = std::fs::read_dir(resolved.as_path())
         .map_err(|error| AppError::BadRequest(format!("Cannot read directory: {error}")))?;
 
     let mut dirs: Vec<DirEntryOut> = Vec::new();
-    loop {
-        let entry = match entries.next_entry().await {
-            Ok(Some(entry)) => entry,
-            Ok(None) => break,
+    for entry in entries {
+        let entry = match entry {
+            Ok(entry) => entry,
             Err(error) => return Err(AppError::internal_in("read directory", error)),
         };
         let name = entry.file_name().to_string_lossy().to_string();
         if name.starts_with('.') {
             continue;
         }
-        let is_dir = entry.file_type().await.is_ok_and(|t| t.is_dir());
+        let is_dir = entry.file_type().is_ok_and(|t| t.is_dir());
         if !is_dir {
             continue;
         }
@@ -68,10 +75,10 @@ pub async fn post_list_dir(
         .map_or_else(|| current.clone(), |n| n.to_string_lossy().to_string());
     let parent = resolved.parent().map(|p| p.to_string_lossy().to_string());
 
-    Ok(Json(ListDirResponse {
+    Ok(ListDirResponse {
         current,
         name,
         parent,
         dirs,
-    }))
+    })
 }

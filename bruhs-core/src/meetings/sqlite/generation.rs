@@ -128,15 +128,14 @@ pub(super) fn fence(
         records::meeting(connection, &request.meeting_id)?,
         &request.meeting_id,
     )?;
-    if let Some(receipt) = read(connection, &request.request_id)? {
+    if let Some(mut receipt) = read(connection, &request.request_id)? {
         // The same identity with different options is a conflict, never a cancellation.
-        rules::replay(receipt, &request)?;
-        return finish(
-            connection,
-            &request.meeting_id,
-            &request.request_id,
-            crate::meetings::GenerationOutcome::Cancelled,
-        );
+        rules::validate_replay(&receipt, &request)?;
+        if matches!(receipt.state, SummaryGenerationState::Pending) {
+            receipt.state = SummaryGenerationState::Cancelled;
+            save(connection, &receipt)?;
+        }
+        return Ok(receipt);
     }
     let receipt = SummaryGenerationReceipt {
         request,

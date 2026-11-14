@@ -201,6 +201,22 @@ async fn sqlite_transcript_snapshots_preserve_final_words_and_reject_stale_or_ma
 }
 
 #[tokio::test]
+async fn sqlite_transcript_confidence_stays_unknown_after_reopening() {
+    let directory = tempfile::tempdir().unwrap();
+    let path = directory.path().join("unknown-confidence.sqlite3");
+    let store = SqliteMeetingStore::open(&path).await.unwrap();
+    meeting(&store, "meeting").await;
+    let mut unknown = segment("unknown");
+    unknown.confidence = TranscriptSegment::UNKNOWN_CONFIDENCE;
+    store.append_segment(unknown.clone()).await.unwrap();
+    drop(store);
+    let reopened = SqliteMeetingStore::open(&path).await.unwrap();
+    let saved = reopened.list_segments("meeting").await.unwrap();
+    assert_eq!(saved, vec![unknown]);
+    assert!(serde_json::to_value(&saved[0]).unwrap()["confidence"].is_null());
+}
+
+#[tokio::test]
 async fn sqlite_failed_snapshot_rolls_back_every_annotation_and_new_segment() {
     let directory = tempfile::tempdir().unwrap();
     let path = directory.path().join("transcripts.sqlite3");
