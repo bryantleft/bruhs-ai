@@ -2,7 +2,7 @@ use super::super::{
     desktop_state_backup_path, load_desktop_state_from_path, AppView, DesktopState, SaveStatus,
     Workspace,
 };
-use super::tests::fixture;
+use super::test_fixture::fixture;
 use crate::{server_client::ServerClient, views::meetings_hub::ActionServer};
 use gpui::{Entity, TestAppContext, VisualTestContext};
 

@@ -37,6 +37,8 @@ mod rollback_review;
 #[cfg(all(test, unix))]
 mod rollback_tests;
 #[cfg(test)]
+mod test_fixture;
+#[cfg(test)]
 mod transcript_view_tests;
 use rollback_review::RollbackReview;
 #[cfg(all(test, unix))]

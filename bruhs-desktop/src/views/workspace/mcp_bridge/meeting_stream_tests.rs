@@ -1,7 +1,7 @@
 use super::super::{
     desktop_state_backup_path, load_desktop_state_from_path, SaveStatus, Workspace,
 };
-use super::tests::fixture;
+use super::test_fixture::fixture;
 use bruhs_models::{Meeting, MeetingEvent, TranscriptSegment};
 use gpui::{Entity, TestAppContext, VisualTestContext};
 

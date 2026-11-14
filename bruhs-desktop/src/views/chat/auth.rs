@@ -51,7 +51,7 @@ impl DesktopAuthStatus {
         }
     }
 
-    #[cfg(test)]
+    #[cfg(all(test, unix))]
     pub(super) fn login_in_flight(&self) -> bool {
         matches!(
             self,

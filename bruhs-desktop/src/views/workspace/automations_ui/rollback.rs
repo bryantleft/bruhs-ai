@@ -7,6 +7,7 @@ pub(super) struct AutomationRollback {
 }
 
 impl Workspace {
+    #[cfg(unix)]
     pub(in crate::views::workspace) fn automation_rollback_targets(
         &self,
         id: &str,

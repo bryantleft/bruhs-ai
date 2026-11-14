@@ -73,6 +73,10 @@ mod host {
     }
 
     impl WebViewHost {
+        pub fn new() -> Self {
+            Self::default()
+        }
+
         pub fn available() -> bool {
             true
         }
@@ -171,6 +175,10 @@ mod host {
     pub struct WebViewHost;
 
     impl WebViewHost {
+        pub fn new() -> Self {
+            Self
+        }
+
         pub fn available() -> bool {
             false
         }
@@ -237,7 +245,7 @@ impl PreviewPanelView {
             servers_loading: false,
             servers_generation: 0,
             shown: false,
-            host: WebViewHost::default(),
+            host: WebViewHost::new(),
             host_error: None,
             place_attempts: 0,
         };
@@ -739,6 +747,6 @@ mod tests {
     #[test]
     fn webview_availability_matches_platform() {
         assert_eq!(WebViewHost::available(), cfg!(target_os = "macos"));
-        assert!(!WebViewHost::default().is_live());
+        assert!(!WebViewHost::new().is_live());
     }
 }
