@@ -111,6 +111,47 @@ async fn second_runtime_cannot_recover_or_execute_a_live_database() {
     );
 }
 
+#[tokio::test]
+async fn cancelled_reactive_call_keeps_ownership_until_its_blocking_work_finishes() {
+    struct Finished(Option<tokio::sync::oneshot::Sender<()>>);
+    impl Drop for Finished {
+        fn drop(&mut self) {
+            if let Some(sender) = self.0.take() {
+                let _ = sender.send(());
+            }
+        }
+    }
+    let (dir, runtime) = configured(true).await;
+    let path = dir.path().join("reactive.sqlite3");
+    let (entered_send, entered) = tokio::sync::oneshot::channel();
+    let (resume, wait) = std::sync::mpsc::channel();
+    let (finished_send, finished) = tokio::sync::oneshot::channel();
+    let active = runtime.clone();
+    let task = tokio::spawn(async move {
+        active
+            .call(move |_| {
+                let _ = entered_send.send(());
+                let _ = wait.recv();
+                Ok(Finished(Some(finished_send)))
+            })
+            .await
+    });
+    entered.await.unwrap();
+    task.abort();
+    let _ = task.await;
+    drop(runtime);
+    assert!(matches!(
+        ReactiveRuntime::open(&path).await,
+        Err(ReactiveError::Conflict(_))
+    ));
+    resume.send(()).unwrap();
+    finished.await.unwrap();
+    let recovered = ReactiveRuntime::open(path)
+        .await
+        .expect("the canceled caller's worker has finished and released ownership");
+    assert!(recovered.snapshot().await.is_ok());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn database_symlink_alias_cannot_bypass_runtime_ownership() {

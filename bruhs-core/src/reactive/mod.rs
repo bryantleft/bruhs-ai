@@ -53,9 +53,16 @@ pub struct SourceEmission {
 #[derive(Clone)]
 pub struct ReactiveRuntime {
     connection: Arc<Mutex<Connection>>,
-    _lock: Arc<std::fs::File>,
+    _lock: Arc<store::RuntimeLock>,
     started: Arc<AtomicBool>,
     changes: watch::Sender<u64>,
+}
+
+/// Field order closes the SQLite connection before releasing its ownership lock.
+/// Both survive cancellation of the async caller until the blocking operation ends.
+struct ActiveCall {
+    connection: tokio::sync::OwnedMutexGuard<Connection>,
+    _owner: Arc<store::RuntimeLock>,
 }
 
 impl ReactiveRuntime {
@@ -97,15 +104,22 @@ impl ReactiveRuntime {
         &self,
         operation: impl FnOnce(&mut Connection) -> Result<T, ReactiveError> + Send + 'static,
     ) -> Result<T, ReactiveError> {
-        let mut connection = self.connection.clone().lock_owned().await;
-        tokio::task::spawn_blocking(move || operation(&mut connection))
-            .await
-            .map_err(|_| {
-                ReactiveError::Storage(
-                    "Database worker stopped; reload before retrying an uncertain operation."
-                        .into(),
-                )
-            })?
+        let owner = Arc::clone(&self._lock);
+        let mut work = ActiveCall {
+            connection: self.connection.clone().lock_owned().await,
+            _owner: owner,
+        };
+        tokio::task::spawn_blocking(move || {
+            let result = operation(&mut work.connection);
+            drop(work);
+            result
+        })
+        .await
+        .map_err(|_| {
+            ReactiveError::Storage(
+                "Database worker stopped; reload before retrying an uncertain operation.".into(),
+            )
+        })?
     }
 
     fn changed(&self) {
