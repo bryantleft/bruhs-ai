@@ -2993,11 +2993,18 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
         .borrow()
         .clone()
         .expect("workspace entity should be captured");
-    let now = EpochMs::now();
+    use chrono::TimeZone as _;
+    let clock = chrono::Local
+        .with_ymd_and_hms(2026, 11, 13, 8, 0, 0)
+        .single()
+        .unwrap();
+    let now = EpochMs::saturating_from_i64(clock.timestamp_millis());
     let now_ms = now.as_f64();
 
     workspace.update_in(cx, |workspace, _window, cx| {
         workspace.active_view = AppView::Today;
+        workspace.day_plan_test_now = Some(clock);
+        workspace.calendar_events.clear();
         workspace.work_items = vec![DesktopWorkItem {
             id: "today-task".to_string(),
             project_id: None,
@@ -3017,7 +3024,7 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
                 task_id: "today-task".to_string(),
                 task_title: "Protect focus".to_string(),
                 start_at_ms: now_ms + 3_600_000.0,
-                end_at_ms: now_ms + 5_400_000.0,
+                end_at_ms: now_ms + 6_300_000.0,
             }],
             unscheduled_count: 0,
             unscheduled_task_ids: Vec::new(),
@@ -3030,13 +3037,28 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
     assert_rendered_bounds(cx, "desktop-today-plan-apply");
     click_debug_selector(cx, "desktop-today-plan-apply");
     cx.run_until_parked();
-    workspace.update_in(cx, |workspace, _window, _cx| {
+    workspace.update_in(cx, |workspace, _window, cx| {
         assert!(workspace.day_plan_proposal.is_none());
+        let encoded = serde_json::to_vec(&workspace.snapshot(cx)).unwrap();
+        let restored: PersistedWorkspaceState = serde_json::from_slice(&encoded).unwrap();
+        assert_eq!(
+            restored.day_plan_undo.as_ref().unwrap().ownership,
+            workspace.day_plan_undo.as_ref().unwrap().ownership
+        );
+        assert_eq!(restored.calendar_events.len(), 1);
         assert_eq!(workspace.calendar_events.len(), 1);
         assert_eq!(
             workspace.work_items[0].planning.time_block_event_ids,
             ["today-block"]
         );
+        let task = &mut workspace.work_items[0];
+        task.title = "Newer owner title".into();
+        task.description = Some("Keep the newer description".into());
+        task.status = DesktopWorkItemStatus::Done;
+        task.planning.estimate_minutes = Some(120);
+        task.planning
+            .time_block_event_ids
+            .push("manual-block".into());
     });
 
     assert_rendered_bounds(cx, "desktop-today-plan-undo");
@@ -3044,12 +3066,58 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
     cx.run_until_parked();
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert!(workspace.calendar_events.is_empty());
-        assert!(workspace.work_items[0]
-            .planning
-            .time_block_event_ids
-            .is_empty());
+        assert_eq!(workspace.work_items[0].title, "Newer owner title");
+        assert_eq!(workspace.work_items[0].status, DesktopWorkItemStatus::Done);
+        assert_eq!(workspace.work_items[0].planning.estimate_minutes, Some(120));
+        assert_eq!(
+            workspace.work_items[0].planning.time_block_event_ids,
+            ["manual-block"]
+        );
         assert!(workspace.day_plan_undo.is_none());
     });
+    for kind in ["deleted", "completed", "conflict"] {
+        workspace.update_in(cx, |workspace, _window, cx| {
+            workspace.work_items[0].title = "Protect focus".into();
+            workspace.work_items[0].status = DesktopWorkItemStatus::Todo;
+            workspace.work_items[0].planning = WorkItemPlanning::default();
+            workspace.calendar_events.clear();
+            workspace.draft_desktop_day_plan(cx);
+            let block = workspace.day_plan_proposal.as_ref().unwrap().blocks[0].clone();
+            match kind {
+                "deleted" => workspace.work_items.clear(),
+                "completed" => workspace.work_items[0].status = DesktopWorkItemStatus::Done,
+                _ => workspace.calendar_events.push(DesktopCalendarEvent {
+                    id: "new-independent-commitment".into(),
+                    title: "New commitment".into(),
+                    start_at: super::local_datetime_from_ms(block.start_at_ms).unwrap(),
+                    end_at: super::local_datetime_from_ms(block.end_at_ms).unwrap(),
+                    all_day: false,
+                    color: None,
+                    notes: None,
+                }),
+            }
+            let before_tasks = workspace.planning_work_items();
+            let before_events = workspace.planning_calendar_events(cx);
+            workspace.apply_desktop_day_plan(cx);
+            assert_eq!(workspace.planning_work_items(), before_tasks);
+            assert_eq!(workspace.planning_calendar_events(cx), before_events);
+            assert!(workspace.day_plan_error.is_some());
+            assert!(workspace.day_plan_undo.is_none());
+            if workspace.work_items.is_empty() {
+                workspace.work_items.push(DesktopWorkItem {
+                    id: "today-task".into(),
+                    project_id: None,
+                    title: "Protect focus".into(),
+                    description: None,
+                    status: DesktopWorkItemStatus::Todo,
+                    priority: DesktopPriority::High,
+                    due_date: None,
+                    planning: WorkItemPlanning::default(),
+                    updated_at: now,
+                });
+            }
+        });
+    }
 }
 
 #[gpui::test]

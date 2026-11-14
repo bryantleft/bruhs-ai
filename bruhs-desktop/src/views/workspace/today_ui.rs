@@ -16,7 +16,7 @@ impl Workspace {
                 due_date: item.due_date.clone(),
                 planning: item.planning.clone(),
                 created_at: 0,
-                updated_at: 0,
+                updated_at: item.updated_at.as_millis(),
             })
             .collect()
     }
@@ -63,7 +63,7 @@ impl Workspace {
     }
 
     pub(super) fn today_snapshot(&self, cx: &Context<'_, Self>) -> TodaySnapshot {
-        let now = Local::now();
+        let now = self.planning_now();
         let day_start = now.date_naive().and_time(NaiveTime::MIN);
         let day_end = day_start + Duration::days(1);
         let day_start_ms = Local
@@ -91,77 +91,145 @@ impl Workspace {
         )
     }
 
+    fn planning_now(&self) -> chrono::DateTime<Local> {
+        #[cfg(test)]
+        if let Some(now) = self.day_plan_test_now {
+            return now;
+        }
+        Local::now()
+    }
+
     pub(super) fn draft_desktop_day_plan(&mut self, cx: &mut Context<'_, Self>) {
-        let now = Local::now();
-        let day_start = now.date_naive().and_time(NaiveTime::MIN);
-        let day_start_ms = Local
-            .from_local_datetime(&day_start)
-            .single()
-            .map_or(0.0, |date| {
-                EpochMs::saturating_from_i64(date.timestamp_millis()).as_f64()
-            });
-        self.day_plan_proposal = Some(bruhs_models::propose_day_plan(
-            EpochMs::saturating_from_i64(now.timestamp_millis()).as_f64(),
-            day_start_ms,
-            &self.planning_work_items(),
-            &self.planning_calendar_events(cx),
-        ));
-        self.day_plan_undo = None;
+        let now = self.planning_now();
+        let result = native_workday_window(now.date_naive()).and_then(|window| {
+            bruhs_models::propose_day_plan_in_window(
+                EpochMs::saturating_from_i64(now.timestamp_millis()).as_f64(),
+                window,
+                &self.planning_work_items(),
+                &self.planning_calendar_events(cx),
+            )
+        });
+        match result {
+            Ok(proposal) => {
+                self.day_plan_proposal = Some(proposal);
+                self.day_plan_error = None;
+            }
+            Err(error) => self.day_plan_error = Some(error.to_string()),
+        }
         cx.notify();
     }
 
     pub(super) fn apply_desktop_day_plan(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(proposal) = self.day_plan_proposal.take() else {
+        let Some(proposal) = self.day_plan_proposal.as_ref() else {
             return;
         };
-        let mut previous_planning = Vec::new();
-        let mut event_ids = Vec::new();
-        for block in proposal.blocks {
-            let Some(start_at) = local_datetime_from_ms(block.start_at_ms) else {
-                continue;
-            };
-            let Some(end_at) = local_datetime_from_ms(block.end_at_ms) else {
-                continue;
-            };
-            if let Some(item) = self
+        if !self.save_status.is_saved() {
+            self.day_plan_error =
+                Some("Finish saving current changes before applying the day plan.".into());
+            cx.notify();
+            return;
+        }
+        let now = self.planning_now();
+        let result = native_workday_window(now.date_naive()).and_then(|window| {
+            bruhs_models::prepare_day_plan(
+                proposal,
+                &self.planning_work_items(),
+                &self.planning_calendar_events(cx),
+                window,
+                now.timestamp_millis(),
+            )
+        });
+        let prepared = match result {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.day_plan_error = Some(error.to_string());
+                self.day_plan_proposal = None;
+                cx.notify();
+                return;
+            }
+        };
+        let events = prepared
+            .added_events
+            .iter()
+            .map(|event| {
+                Some(DesktopCalendarEvent {
+                    id: event.id.clone(),
+                    title: event.title.clone(),
+                    start_at: local_datetime_from_ms(event.start_at_ms)?,
+                    end_at: local_datetime_from_ms(event.end_at_ms)?,
+                    all_day: event.all_day,
+                    color: event.color.clone(),
+                    notes: event.notes.clone(),
+                })
+            })
+            .collect::<Option<Vec<_>>>();
+        let Some(events) = events else {
+            self.day_plan_error =
+                Some("A planned time cannot be represented locally. Review a new plan.".into());
+            cx.notify();
+            return;
+        };
+        for changed in prepared.changed_tasks {
+            if let Some(current) = self
                 .work_items
                 .iter_mut()
-                .find(|item| item.id == block.task_id)
+                .find(|task| task.id == changed.id)
             {
-                previous_planning.push((item.id.clone(), item.planning.clone()));
-                item.planning.time_block_event_ids.push(block.id.clone());
-                item.updated_at = EpochMs::now();
+                current.planning = changed.planning;
+                current.updated_at = current
+                    .updated_at
+                    .max(EpochMs::saturating_from_i64(now.timestamp_millis()));
             }
-            event_ids.push(block.id.clone());
-            self.calendar_events.push(DesktopCalendarEvent {
-                id: block.id,
-                title: format!("Focus: {}", block.task_title),
-                start_at,
-                end_at,
-                all_day: false,
-                color: Some("persimmon".to_string()),
-                notes: Some(format!("Planned from task {}", block.task_id)),
-            });
         }
+        self.calendar_events.extend(events);
         self.day_plan_undo = Some(DesktopAppliedPlan {
-            previous_planning,
-            event_ids,
+            ownership: prepared.ownership,
         });
+        self.day_plan_proposal = None;
+        self.day_plan_error = None;
         self.persist_and_notify(cx);
     }
 
     pub(super) fn undo_desktop_day_plan(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(applied) = self.day_plan_undo.take() else {
+        let Some(applied) = self.day_plan_undo.as_ref() else {
             return;
         };
-        for (id, planning) in applied.previous_planning {
-            if let Some(item) = self.work_items.iter_mut().find(|item| item.id == id) {
-                item.planning = planning;
-                item.updated_at = EpochMs::now();
+        if !self.save_status.is_saved() {
+            self.day_plan_error =
+                Some("Finish saving current changes before undoing the day plan.".into());
+            cx.notify();
+            return;
+        }
+        let now = self.planning_now();
+        let prepared = match bruhs_models::prepare_day_plan_undo(
+            &applied.ownership,
+            &self.planning_work_items(),
+            &self.planning_calendar_events(cx),
+            now.timestamp_millis(),
+        ) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                self.day_plan_error = Some(error.to_string());
+                cx.notify();
+                return;
+            }
+        };
+        for changed in prepared.changed_tasks {
+            if let Some(current) = self
+                .work_items
+                .iter_mut()
+                .find(|task| task.id == changed.id)
+            {
+                current.planning = changed.planning;
+                current.updated_at = current
+                    .updated_at
+                    .max(EpochMs::saturating_from_i64(now.timestamp_millis()));
             }
         }
         self.calendar_events
-            .retain(|event| !applied.event_ids.contains(&event.id));
+            .retain(|event| !prepared.removed_event_ids.contains(&event.id));
+        self.day_plan_undo = None;
+        self.day_plan_error = None;
         self.persist_and_notify(cx);
     }
 
@@ -276,7 +344,7 @@ impl Workspace {
 
     pub(super) fn render_today_page(&self, compact: bool, cx: &Context<'_, Self>) -> Div {
         let snapshot = self.today_snapshot(cx);
-        let date = Local::now().format("%A, %B %-d").to_string();
+        let date = self.planning_now().format("%A, %B %-d").to_string();
         let focus_rows = snapshot
             .focus_queue
             .iter()
@@ -660,6 +728,16 @@ impl Workspace {
                             .flex()
                             .flex_col()
                             .gap_4()
+                            .when_some(self.day_plan_error.clone(), |element, error| {
+                                element.child(
+                                    div()
+                                        .id("desktop-day-plan-error")
+                                        .role(Role::Alert)
+                                        .text_size(px(12.0))
+                                        .text_color(theme::lychee_300())
+                                        .child(error),
+                                )
+                            })
                             .children(proposal)
                             .children(suggestion)
                             .when_some(self.day_plan_undo.as_ref(), |element, _| {
@@ -674,20 +752,30 @@ impl Workspace {
                                         .justify_between()
                                         .text_size(px(12.0))
                                         .text_color(theme::pandan_300())
-                                        .child("Day plan applied.")
+                                        .child(if self.save_status.is_saved() {
+                                            "Day plan applied."
+                                        } else {
+                                            "Saving day plan…"
+                                        })
                                         .child(
-                                            div()
-                                                .id("desktop-undo-day-plan")
-                                                .debug_selector(|| {
-                                                    "desktop-today-plan-undo".to_string()
-                                                })
-                                                .cursor_pointer()
-                                                .child("Undo")
-                                                .on_click(cx.listener(
-                                                    |this, _event, _window, cx| {
-                                                        this.undo_desktop_day_plan(cx);
-                                                    },
-                                                )),
+                                            web_button(
+                                                "desktop-undo-day-plan",
+                                                WebButtonVariant::Ghost,
+                                                WebButtonSize::Small,
+                                                ButtonState::disabled_if(
+                                                    !self.save_status.is_saved(),
+                                                ),
+                                            )
+                                            .debug_selector(|| {
+                                                "desktop-today-plan-undo".to_string()
+                                            })
+                                            .aria_label("Undo")
+                                            .child("Undo")
+                                            .on_click(
+                                                cx.listener(|this, _event, _window, cx| {
+                                                    this.undo_desktop_day_plan(cx);
+                                                }),
+                                            ),
                                         ),
                                 )
                             })
@@ -878,5 +966,91 @@ mod audit_tests {
             assert_eq!(workspace.active_view, AppView::Calendar);
             assert!(workspace.workspace_focus_handle.is_focused(window));
         });
+    }
+}
+
+fn native_workday_window(
+    date: NaiveDate,
+) -> Result<bruhs_models::DayPlanWindow, bruhs_models::DayPlanChangeError> {
+    let at = |hour| {
+        date.and_hms_opt(hour, 0, 0)
+            .and_then(|local| Local.from_local_datetime(&local).single())
+            .map(|time| EpochMs::saturating_from_i64(time.timestamp_millis()).as_f64())
+            .ok_or(bruhs_models::DayPlanChangeError::InvalidWindow)
+    };
+    Ok(bruhs_models::DayPlanWindow {
+        start_at_ms: at(9)?,
+        end_at_ms: at(18)?,
+    })
+}
+
+#[cfg(test)]
+mod clock_tests {
+    use super::{native_workday_window, EpochMs, NaiveDate};
+    use chrono::TimeZone as _;
+
+    #[test]
+    fn native_workday_preserves_local_hours_on_dst_transition_dates() {
+        const CHILD: &str = "BRUHS_PLANNING_CLOCK_TEST_CHILD";
+        if let Ok(zone) = std::env::var(CHILD) {
+            for (month, day, la_start, la_end) in [
+                (3, 8, 1_772_985_600_000_i64, 1_773_018_000_000_i64),
+                (11, 1, 1_793_552_400_000_i64, 1_793_584_800_000_i64),
+            ] {
+                let date = NaiveDate::from_ymd_opt(2026, month, day).unwrap();
+                let window = native_workday_window(date).unwrap();
+                let (start, end) = if zone == "America/Los_Angeles" {
+                    (la_start, la_end)
+                } else {
+                    (
+                        chrono::Utc
+                            .with_ymd_and_hms(2026, month, day, 9, 0, 0)
+                            .single()
+                            .unwrap()
+                            .timestamp_millis(),
+                        chrono::Utc
+                            .with_ymd_and_hms(2026, month, day, 18, 0, 0)
+                            .single()
+                            .unwrap()
+                            .timestamp_millis(),
+                    )
+                };
+                assert_eq!(
+                    window.start_at_ms,
+                    EpochMs::saturating_from_i64(start).as_f64(),
+                    "{zone} {date}"
+                );
+                assert_eq!(
+                    window.end_at_ms,
+                    EpochMs::saturating_from_i64(end).as_f64(),
+                    "{zone} {date}"
+                );
+            }
+            return;
+        }
+        // TZ is per child process, never mutated in the parallel test runner.
+        let full_name = concat!(
+            module_path!(),
+            "::native_workday_preserves_local_hours_on_dst_transition_dates"
+        );
+        let (_, name) = full_name.split_once("::").unwrap();
+        for zone in ["America/Los_Angeles", "UTC"] {
+            let result = std::process::Command::new(std::env::current_exe().unwrap())
+                .args(["--exact", name, "--nocapture"])
+                .env(CHILD, zone)
+                .env("TZ", zone)
+                .output()
+                .unwrap();
+            assert!(
+                result.status.success(),
+                "{zone}: {} {}",
+                String::from_utf8_lossy(&result.stdout),
+                String::from_utf8_lossy(&result.stderr)
+            );
+            assert!(
+                String::from_utf8_lossy(&result.stdout).contains("1 passed; 0 failed"),
+                "The timezone child must execute the selected native test."
+            );
+        }
     }
 }
