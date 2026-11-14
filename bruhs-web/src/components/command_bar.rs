@@ -171,8 +171,8 @@ const ACTIONS: &[Action] = &[
     Action {
         id: ActionId::OpenProject,
         group: "Agent",
-        label: "Open project...",
-        hint: "coding agent",
+        label: "Choose project folder",
+        hint: "attach a folder to this thread",
     },
     Action {
         id: ActionId::NewThread,
@@ -431,7 +431,7 @@ mod tests {
                 "People",
                 "Search",
                 "Terminal",
-                "Open project...",
+                "Choose project folder",
                 "New thread",
                 "Import thread...",
                 "Pin / unpin thread",
@@ -533,7 +533,6 @@ pub struct ActiveThreadExport {
     threads: ReadSignal<Vec<crate::state::Thread>>,
     active_thread_id: ReadSignal<Option<String>>,
     messages: ReadSignal<Vec<crate::state::AgentMessage>>,
-    active_project: ReadSignal<Option<crate::state::ActiveProject>>,
     notice: ThreadNotice,
     model: ReadSignal<String>,
     permission_mode: ReadSignal<bruhs_models::PermissionMode>,
@@ -547,7 +546,6 @@ impl ActiveThreadExport {
             threads: expect_context::<crate::state::ThreadsSignal>().0,
             active_thread_id: expect_context::<crate::state::ActiveThreadId>().0,
             messages: expect_context::<crate::state::MessagesSignal>().0,
-            active_project: expect_context::<ActiveProjectSignal>().0,
             notice: expect_context::<ThreadNotice>(),
             model: expect_context::<crate::state::CurrentModel>().0,
             permission_mode: expect_context::<crate::state::PermissionModeSignal>().0,
@@ -575,12 +573,7 @@ impl ActiveThreadExport {
         let portable = self
             .messages
             .with_untracked(|ms| crate::components::import_thread_dialog::portable_messages(ms));
-        // Where its turns run (chat.rs: the thread's project, else the
-        // active one).
-        let run_dir = thread
-            .project_path
-            .clone()
-            .or_else(|| self.active_project.get_untracked().map(|p| p.path));
+        let run_dir = thread.project_path.clone();
         export_thread(export, &thread, run_dir, portable, self);
     }
 }
@@ -898,16 +891,13 @@ pub fn CommandBar() -> impl IntoView {
             }
             ActionId::OpenInEditor => {
                 set_active_view.set(AppView::Chat);
-                let path = active_thread_id
-                    .get_untracked()
-                    .and_then(|id| {
-                        threads.with_untracked(|ts| {
-                            ts.iter()
-                                .find(|t| t.id == id)
-                                .and_then(|t| t.project_path.clone())
-                        })
+                let path = active_thread_id.get_untracked().and_then(|id| {
+                    threads.with_untracked(|ts| {
+                        ts.iter()
+                            .find(|t| t.id == id)
+                            .and_then(|t| t.project_path.clone())
                     })
-                    .or_else(|| active_project.get_untracked().map(|p| p.path));
+                });
                 if let Some(path) = path {
                     let editor = editor_id.get_untracked();
                     wasm_bindgen_futures::spawn_local(async move {

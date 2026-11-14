@@ -13,9 +13,7 @@ use bruhs_models::num::ToIntSaturating;
 use leptos::prelude::*;
 
 use crate::api::{open_attachment, upload_attachment};
-use crate::state::{
-    ActiveProjectSignal, OpenFile, OpenFileSignal, PanelSurface, RightPanel, RightPanelSignal,
-};
+use crate::state::{OpenFile, OpenFileSignal, PanelSurface, RightPanel, RightPanelSignal};
 use crate::ui::Icon;
 
 /// Offers keep file bytes in `Rc`, so the list is pinned to this thread.
@@ -172,7 +170,17 @@ pub fn show_open_file(
 pub fn FileTiles() -> impl IntoView {
     let FileOffers(offers) = expect_context::<FileOffers>();
     let FileGeneration(generation) = expect_context::<FileGeneration>();
-    let ActiveProjectSignal(project) = expect_context::<ActiveProjectSignal>();
+    let active = expect_context::<crate::state::ActiveThreadId>().0;
+    let threads = expect_context::<crate::state::ThreadsSignal>().0;
+    let project = Memo::new(move |_| {
+        active.get().and_then(|id| {
+            threads.with(|rows| {
+                rows.iter()
+                    .find(|thread| thread.id == id)
+                    .and_then(|thread| thread.project_path.clone())
+            })
+        })
+    });
     let OpenFileSignal(open_file) = expect_context::<OpenFileSignal>();
     let RightPanelSignal(panel) = expect_context::<RightPanelSignal>();
     view! {
@@ -205,7 +213,7 @@ pub fn FileTiles() -> impl IntoView {
                                     title=label
                                     on:click=move |_| {
                                         if let Some(path) = ready.clone() {
-                                            let project_path = project.get_untracked().map(|project| project.path);
+                                            let project_path = project.get_untracked();
                                             show_open_file(open_file, panel, path, open_label.clone(), project_path, false);
                                         }
                                     }

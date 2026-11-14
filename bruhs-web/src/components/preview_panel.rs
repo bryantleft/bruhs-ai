@@ -6,9 +6,7 @@
 use leptos::prelude::*;
 
 use crate::api::{list_local_servers, LocalServer};
-use crate::state::{
-    load_pref, normalize_preview_url, preview_pref_key, save_pref, ActiveProjectSignal,
-};
+use crate::state::{load_pref, normalize_preview_url, preview_pref_key, save_pref};
 use crate::ui::{Icon, Input};
 
 /// Sandbox for a page whose origin is `origin` (`None`: it could not be
@@ -101,7 +99,6 @@ fn origin_of(url: &str) -> Option<String> {
 pub fn PreviewPanel() -> impl IntoView {
     let threads = expect_context::<crate::state::ThreadsSignal>().0;
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
-    let ActiveProjectSignal(active_project) = expect_context::<ActiveProjectSignal>();
 
     let project_path = Signal::derive(move || {
         let from_thread = active_thread_id.get().and_then(|id| {
@@ -111,7 +108,7 @@ pub fn PreviewPanel() -> impl IntoView {
                     .and_then(|t| t.project_path.clone())
             })
         });
-        from_thread.or_else(|| active_project.get().map(|p| p.path))
+        from_thread
     });
     let pref_key = move || preview_pref_key(project_path.get_untracked().as_deref());
 

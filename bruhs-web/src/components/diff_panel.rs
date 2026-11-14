@@ -15,8 +15,8 @@ use crate::components::timeline::changed_files;
 use crate::components::timeline_view::split_path;
 use crate::format::truncate_chars;
 use crate::state::{
-    load_json_pref, save_json_pref, ActiveProjectSignal, AgentMessage, DiffFocusPath, DiffScope,
-    DiffScopeSignal, EditorSignal, GitStatusSignal, ThreadNotice, Turns,
+    load_json_pref, save_json_pref, AgentMessage, DiffFocusPath, DiffScope, DiffScopeSignal,
+    EditorSignal, GitStatusSignal, ThreadNotice, Turns,
 };
 use crate::ui::{Checkbox, CopyButton, Icon, Menu, MenuAlign, MenuItem};
 use bruhs_models::logic::diff::{lcs_diff, parse_unified, DiffStats, Hunk};
@@ -229,22 +229,18 @@ pub fn DiffPanel() -> impl IntoView {
     let messages = expect_context::<crate::state::MessagesSignal>().0;
     let threads = expect_context::<crate::state::ThreadsSignal>().0;
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
-    let ActiveProjectSignal(active_project) = expect_context::<ActiveProjectSignal>();
     let DiffScopeSignal(scope) = expect_context::<DiffScopeSignal>();
     let DiffFocusPath(focus) = expect_context::<DiffFocusPath>();
     let GitStatusSignal(git) = expect_context::<GitStatusSignal>();
 
     let project_path = Signal::derive(move || {
-        active_thread_id
-            .get()
-            .and_then(|id| {
-                threads.with(|ts| {
-                    ts.iter()
-                        .find(|t| t.id == id)
-                        .and_then(|t| t.project_path.clone())
-                })
+        active_thread_id.get().and_then(|id| {
+            threads.with(|ts| {
+                ts.iter()
+                    .find(|t| t.id == id)
+                    .and_then(|t| t.project_path.clone())
             })
-            .or_else(|| active_project.get().map(|p| p.path))
+        })
     });
     // "Open" on a file header → the editor from Settings → General.
     let EditorSignal(editor_id) = expect_context::<EditorSignal>();

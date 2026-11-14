@@ -4,7 +4,7 @@
 use leptos::html::Input;
 use leptos::prelude::*;
 
-use crate::state::{create_thread, PanelSurface, RightPanelSignal};
+use crate::state::{PanelSurface, RightPanelSignal};
 use crate::ui::Icon;
 
 /// Trim a rename; `None` means "keep the old title" (empty or unchanged).
@@ -22,8 +22,6 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
     let threads = expect_context::<crate::state::ThreadsSignal>().0;
     let set_threads = expect_context::<crate::state::SetThreadsSignal>().0;
-    let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
-    let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
     let tasks = expect_context::<crate::state::BackgroundTasksSignal>().0;
     let RightPanelSignal(panel) = expect_context::<RightPanelSignal>();
 
@@ -87,41 +85,25 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
     };
     let cancel = move || renaming.set(false);
 
-    let new_in_project = move || {
-        if let Some(t) = thread.get_untracked() {
-            create_thread(
-                catalog,
-                set_threads,
-                set_active_thread_id,
-                set_messages,
-                t.project_name,
-                t.project_path,
-            );
-        }
+    let choose_project = move || {
+        expect_context::<crate::state::SetProjectPickerOpen>()
+            .0
+            .set(true);
     };
 
     view! {
         <header class="group/header flex h-11 shrink-0 items-center gap-3 px-5">
             <nav aria-label="Thread breadcrumb" class="min-w-0 flex-1">
                 <ol class="m-0 flex min-w-0 list-none items-center gap-2 p-0 text-label">
-                    {move || project.get().map(|name| {
-                        let label = format!("New thread in {name}");
-                        view! {
-                            <li class="flex shrink-0 items-center">
-                                <button
-                                    type="button"
-                                    title=label.clone()
-                                    aria-label=label
-                                    class="inline-flex max-w-40 items-center gap-1.5 rounded-seed text-rambutan-400 transition-colors hover:text-rambutan-100"
-                                    on:click=move |_| new_in_project()
-                                >
-                                    <Icon name="folder" size=14 class="shrink-0" />
-                                    <span class="truncate">{name}</span>
-                                </button>
-                            </li>
-                            <li aria-hidden="true" class="flex shrink-0 items-center text-rambutan-600">"/"</li>
-                        }
-                    })}
+                    <li class="flex shrink-0 items-center">
+                        <button type="button" title=move || project.get().unwrap_or_else(|| "Choose project folder".into()) aria-label="Choose project folder"
+                            class="inline-flex size-11 max-w-40 items-center justify-center gap-1.5 rounded-seed text-rambutan-400 transition-colors hover:text-rambutan-100 sm:h-8 sm:w-auto sm:justify-start"
+                            on:click=move |_| choose_project()>
+                            <Icon name="folder" size=14 class="shrink-0" />
+                            <span class="hidden truncate sm:inline">{move || project.get().unwrap_or_else(|| "Add project".into())}</span>
+                        </button>
+                    </li>
+                    <li aria-hidden="true" class="flex shrink-0 items-center text-rambutan-600">"/"</li>
                     <li aria-current="page" class="flex min-w-0 flex-1 items-center gap-1 text-rambutan-100">
                         <Show
                             when=move || renaming.get()

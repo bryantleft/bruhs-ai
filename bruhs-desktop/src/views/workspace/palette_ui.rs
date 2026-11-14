@@ -96,8 +96,8 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
     CommandAction {
         id: "open-project",
         group: "Agent",
-        label: "Open project...",
-        hint: "coding agent",
+        label: "Choose project folder",
+        hint: "attach a folder to this thread",
     },
     CommandAction {
         id: "new-thread",

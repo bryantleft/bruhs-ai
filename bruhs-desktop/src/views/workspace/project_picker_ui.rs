@@ -154,19 +154,6 @@ pub(super) fn push_recent_project(
     recent_projects.truncate(MAX_RECENT_PROJECTS);
 }
 
-pub(super) fn general_thread_project_path_like_web(
-    active_project: Option<&DesktopProjectLocation>,
-    fallback_path: String,
-) -> String {
-    active_project.map_or(fallback_path, |project| project.path.clone())
-}
-
-pub(super) fn general_thread_project_scoped_like_web(
-    active_project: Option<&DesktopProjectLocation>,
-) -> bool {
-    active_project.is_some()
-}
-
 pub(super) fn project_picker_directory_error_like_web(_error: &str) -> String {
     PROJECT_PICKER_LIST_ERROR.to_string()
 }
@@ -239,6 +226,80 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
+    pub(super) fn apply_thread_project(
+        &mut self,
+        project: Option<DesktopProjectLocation>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(TopLayer::ProjectPicker {
+            for_terminal: false,
+            thread: target,
+        }) = self.top_layer
+        else {
+            return;
+        };
+        if let Some(target) = target {
+            let Some(thread) = self
+                .threads
+                .iter_mut()
+                .find(|thread| thread.chat.entity_id() == target)
+            else {
+                self.project_picker_error = Some(
+                    "This thread is no longer available. Close the picker and choose a thread."
+                        .into(),
+                );
+                cx.notify();
+                return;
+            };
+            let name = project.as_ref().map(|p| p.name.clone()).unwrap_or_default();
+            let path = project.as_ref().map_or_else(
+                || path_to_string(&project_picker_start_path()),
+                |p| p.path.clone(),
+            );
+            let changed = thread.project_name != name || thread.project_path != path;
+            let result = thread.chat.update(cx, |chat, cx| {
+                chat.change_project(path.clone(), name.clone(), project.is_some(), cx)
+            });
+            if let Err(error) = result {
+                self.project_picker_error = Some(error.into());
+                cx.notify();
+                return;
+            }
+            thread.project_name = name;
+            thread.project_path = path;
+            if changed {
+                thread.branch = None;
+                self.run_choice = WorkspaceChoice::Checkout;
+                self.previous_worktree = None;
+                self.base_branch.clear();
+            }
+            let chat = thread.chat.clone();
+            self.active_thread_id = Some(thread.id.clone());
+            self.active_view = AppView::Chat;
+            self.stamp_chat_run_prefs(&chat, cx);
+            self.sidebar_filter = sidebar_ui::SidebarFilter::All;
+            self.close_transient_surfaces();
+            if self.diff_panel_visible {
+                self.sync_diff_panel_project(cx);
+            }
+            if self.files_panel_visible {
+                self.load_files(cx);
+            }
+            self.refresh_branch_pull(cx);
+        } else {
+            match project.clone() {
+                Some(project) => self.create_project_thread(project, window, cx),
+                None => self.new_general_thread(window, cx),
+            }
+        }
+        if let Some(project) = project {
+            self.active_project = Some(project.clone());
+            push_recent_project(&mut self.recent_projects, project);
+        }
+        self.persist_and_notify(cx);
+    }
+
     pub(super) fn select_project_location(
         &mut self,
         path: String,
@@ -246,20 +307,21 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        let target = self.top_layer;
         let resolve =
             cx.background_spawn(async move { canonical_project_location(&path, &fallback_name) });
         self.project_picker_task = Some(cx.spawn_in(window, async move |this, cx| {
             let location = resolve.await;
             // The workspace may have closed meanwhile; nothing to open then.
             let _closed = this.update_in(cx, |this, window, cx| {
-                if !this.project_picker_visible() {
+                if !this.project_picker_visible() || this.top_layer != target {
                     return;
                 }
                 match location {
                     Ok(project) if this.project_picker_for_terminal() => {
                         this.open_terminal_in_project(project, window, cx)
                     }
-                    Ok(project) => this.create_project_thread(project, window, cx),
+                    Ok(project) => this.apply_thread_project(Some(project), window, cx),
                     Err(error) => {
                         this.project_picker_error = Some(error);
                         cx.notify();
@@ -275,8 +337,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        self.project_picker_task.take();
+        let thread = self.active_thread().map(|thread| thread.chat.entity_id());
+        self.project_picker_error = None;
         self.open_top_layer(TopLayer::ProjectPicker {
             for_terminal: false,
+            thread,
         });
         self.focus_first_modal_tab_stop(window, cx);
         if self.project_picker_current_path.is_empty() {
@@ -515,7 +581,7 @@ impl Workspace {
                 div()
                     .id("desktop-project-picker-dialog")
                     .role(Role::Dialog)
-                    .aria_label("Open project")
+                    .aria_label("Choose project folder")
                     .child(self.blur_scrim.backdrop())
                     .debug_selector(|| "desktop-project-picker-dialog".to_string())
                     .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
@@ -560,7 +626,7 @@ impl Workspace {
                                             .font_family(theme::UI_SMALL_FONT_FAMILY)
                                             .font_weight(FontWeight::MEDIUM)
                                             .text_color(theme::rambutan_200())
-                                            .child("Open project"),
+                                            .child("Choose project folder"),
                                     )
                                     .when(has_current_path, |el| {
                                         el.child(
@@ -633,6 +699,46 @@ impl Workspace {
                                 )
                             }),
                     )
+                    .when(!self.project_picker_for_terminal(), |el| {
+                        el.child(
+                            div()
+                                .id("desktop-project-none")
+                                .debug_selector(|| "desktop-project-none".to_string())
+                                .mx(px(16.0))
+                                .my(px(4.0))
+                                .px(px(8.0))
+                                .h(px(32.0))
+                                .flex()
+                                .items_center()
+                                .gap(px(8.0))
+                                .rounded(px(8.0))
+                                .text_size(px(12.0))
+                                .text_color(theme::rambutan_300())
+                                .role(Role::Button)
+                                .aria_label("No project")
+                                .tab_index(0)
+                                .border_1()
+                                .border_color(gpui::transparent_black())
+                                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                .hover(|el| el.bg(theme::longan_800().opacity(0.5)))
+                                .cursor_pointer()
+                                .on_click(cx.listener(|this, _, window, cx| {
+                                    this.apply_thread_project(None, window, cx)
+                                }))
+                                .on_key_down(cx.listener(
+                                    |this, event: &KeyDownEvent, window, cx| {
+                                        if is_web_button_activation_key(
+                                            event.keystroke.key.as_str(),
+                                        ) {
+                                            window.prevent_default();
+                                            cx.stop_propagation();
+                                            this.apply_thread_project(None, window, cx);
+                                        }
+                                    },
+                                ))
+                                .child("No project"),
+                        )
+                    })
                     .when(show_recents, |el| {
                         el.child(
                             div()

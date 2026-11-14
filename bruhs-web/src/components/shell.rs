@@ -296,16 +296,13 @@ pub fn Shell() -> impl IntoView {
     // chosen in Settings → General.
     let open_project_in_editor = move || {
         ensure_chat();
-        let path = active_thread_id
-            .get_untracked()
-            .and_then(|id| {
-                threads.with_untracked(|ts| {
-                    ts.iter()
-                        .find(|t| t.id == id)
-                        .and_then(|t| t.project_path.clone())
-                })
+        let path = active_thread_id.get_untracked().and_then(|id| {
+            threads.with_untracked(|ts| {
+                ts.iter()
+                    .find(|t| t.id == id)
+                    .and_then(|t| t.project_path.clone())
             })
-            .or_else(|| active_project.get_untracked().map(|p| p.path));
+        });
         let Some(path) = path else {
             flash("No project to open");
             return;

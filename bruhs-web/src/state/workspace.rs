@@ -106,7 +106,7 @@ pub struct SetRecentProjectsSignal(pub WriteSignal<Vec<ActiveProject>>);
 #[derive(Clone, Copy, PartialEq, Eq, Debug, Default)]
 pub enum ProjectPickerMode {
     #[default]
-    NewThread,
+    Thread,
     NewTerminal,
 }
 
@@ -287,7 +287,7 @@ pub(super) fn provide() {
     });
 
     let (project_picker_open, set_project_picker_open) = signal(false);
-    let project_picker_mode = RwSignal::new(ProjectPickerMode::NewThread);
+    let project_picker_mode = RwSignal::new(ProjectPickerMode::Thread);
 
     let right_panel = RwSignal::new(RightPanel::default());
     let initial_panel_width = load_pref("bruhs.rightPanelWidth")

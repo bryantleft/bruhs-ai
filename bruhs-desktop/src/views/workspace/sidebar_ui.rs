@@ -85,7 +85,7 @@ pub const SIDEBAR_FILTER_NONE_LABEL: &str = "No project";
 pub const SIDEBAR_EMPTY_LABEL: &str = "No threads yet. Press ⌘⇧O to start one.";
 pub const SIDEBAR_NO_MATCH_LABEL: &str = "No threads match.";
 pub const SIDEBAR_NEW_THREAD_LABEL: &str = "New thread (⌘⇧O)";
-pub const SIDEBAR_NEW_PROJECT_LABEL: &str = "New session in a project";
+pub const SIDEBAR_NEW_PROJECT_LABEL: &str = "Choose project folder";
 pub const SIDEBAR_FILTER_LABEL: &str = "Filter threads by project";
 pub const SIDEBAR_DELETE_LABEL: &str = "Delete thread";
 

@@ -419,6 +419,7 @@ enum TopLayer {
         /// Opened from the terminal's "Choose folder…": the pick opens a
         /// shell there instead of a project thread.
         for_terminal: bool,
+        thread: Option<EntityId>,
     },
     /// Import a thread from Claude Code, Codex, T3 Code or Cursor.
     ImportThread,

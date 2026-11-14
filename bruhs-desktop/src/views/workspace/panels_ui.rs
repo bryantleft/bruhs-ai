@@ -145,14 +145,7 @@ impl Workspace {
 
     /// Point the diff panel at the active thread's project and re-read git.
     pub(super) fn sync_diff_panel_project(&mut self, cx: &mut Context<'_, Self>) {
-        let path = self.active_thread().and_then(|thread| {
-            let chat = thread.chat.read(cx);
-            // The chat's scoped project wins (the thread row may lag behind
-            // a project picked mid-thread); otherwise the thread's.
-            (chat.project_scoped && !chat.project_path.is_empty())
-                .then(|| chat.project_path.clone())
-                .or_else(|| (!thread.project_path.is_empty()).then(|| thread.project_path.clone()))
-        });
+        let path = self.active_project_path(cx);
         let turns = self.active_thread().map_or_else(Vec::new, |thread| {
             let chat = thread.chat.read(cx);
             turn_files_from_messages(&chat.messages, path.as_deref())
@@ -804,7 +797,7 @@ impl Workspace {
         let chat = thread.chat.read(cx);
         if chat.project_scoped && !chat.project_path.is_empty() {
             Some(chat.project_path.clone())
-        } else if !thread.project_path.is_empty() {
+        } else if !thread.project_name.is_empty() && !thread.project_path.is_empty() {
             Some(thread.project_path.clone())
         } else {
             None
@@ -838,6 +831,7 @@ impl Workspace {
     }
 
     pub(super) fn load_files(&mut self, cx: &mut Context<'_, Self>) {
+        self.files_generation = self.files_generation.wrapping_add(1);
         let Some(root) = self.active_project_path(cx) else {
             self.files_root = None;
             self.files_dir.clear();
@@ -851,7 +845,6 @@ impl Workspace {
             self.files_dir.clear();
             self.files_root = Some(root.clone());
         }
-        self.files_generation = self.files_generation.wrapping_add(1);
         let generation = self.files_generation;
         let relative = self.files_dir.clone();
         self.files_entries.clear();
@@ -1701,7 +1694,8 @@ impl Workspace {
                 }
                 TerminalPanelEvent::ChooseFolder => {
                     this.open_project_picker(&OpenProjectPicker, window, cx);
-                    if let Some(TopLayer::ProjectPicker { for_terminal }) = &mut this.top_layer {
+                    if let Some(TopLayer::ProjectPicker { for_terminal, .. }) = &mut this.top_layer
+                    {
                         *for_terminal = true;
                     }
                 }

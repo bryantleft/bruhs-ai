@@ -1,7 +1,7 @@
 # bruhs
 
-A local-first, keyboard-native agent for your whole day. Coding and chat
-agents, tasks, calendar, meetings, people, notes, money and health share one
+A local-first, keyboard-native agent for your whole day. Agent conversations,
+tasks, calendar, meetings, people, notes, money and health share one
 window, and your data stays on your machine.
 
 bruhs runs on macOS as a native app (GPUI) and in the browser (a Leptos WASM
@@ -12,7 +12,8 @@ See [agent runtimes and models](docs/agent-providers.md) for setup and access mo
 
 ## What it does
 
-- **Agent threads.** Chat or code with your chosen runtime and model in a project, with
+- **Agent threads.** One conversation can move from discussion to implementation.
+  Attach an optional project folder and use your chosen runtime and model, with
   diffs, a terminal drawer (`⌘J`), a preview pane (`⌘⇧J`), worktrees,
   branch and PR context, a model picker, prompt stash (`⌘S`), and threads
   that keep running in the background. Threads import from Claude Code,
