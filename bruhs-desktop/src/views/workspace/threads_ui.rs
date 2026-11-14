@@ -4,8 +4,6 @@ use super::*;
 use crate::views::sidebar_order::SidebarOrder;
 use bruhs_models::logic::sidebar::FoldOpen;
 pub(super) const THREAD_TITLE_GENERAL: &str = "New thread";
-pub(super) const THREAD_TITLE_PROJECT_SESSION: &str = "New session";
-pub(super) const THREAD_TITLE_PROJECT_GROUP_NEW: &str = "New thread";
 
 pub(super) fn thread_selection_after_delete(
     current_active_thread_id: Option<String>,
@@ -51,14 +49,6 @@ pub(super) fn thread_link(thread_id: &str) -> String {
     format!("bruhs://thread/{thread_id}")
 }
 
-pub(super) fn default_thread_title(project_name: &str) -> &'static str {
-    if project_name.is_empty() {
-        THREAD_TITLE_GENERAL
-    } else {
-        THREAD_TITLE_PROJECT_SESSION
-    }
-}
-
 impl Workspace {
     pub(super) fn create_thread(
         project_name: String,
@@ -68,13 +58,12 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> DesktopThread {
-        let thread_title = default_thread_title(&project_name);
         Self::create_thread_with_title(
             project_name,
             project_path,
             model_id,
             permission_mode,
-            thread_title,
+            THREAD_TITLE_GENERAL,
             window,
             cx,
         )
@@ -542,7 +531,7 @@ impl Workspace {
             project_path,
             self.current_model.clone(),
             self.permission_mode,
-            THREAD_TITLE_PROJECT_GROUP_NEW,
+            THREAD_TITLE_GENERAL,
             window,
             cx,
         );
@@ -554,8 +543,7 @@ impl Workspace {
         });
         self.active_thread_id = Some(thread.id.clone());
         self.threads.push(thread);
-        (self.active_view, self.sidebar_tab) =
-            project_session_surface_after_create_like_web(self.active_view.clone());
+        self.active_view = AppView::Chat;
         self.sidebar_filter = sidebar_ui::SidebarFilter::All;
         self.close_transient_surfaces();
         self.persist_and_notify(cx);
@@ -702,17 +690,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if self.sidebar_tab == DesktopSidebarTab::Chat {
-            self.new_general_thread(window, cx);
-            return;
-        }
         let current = self
             .active_thread()
             .filter(|thread| !thread.project_name.is_empty())
             .map(|thread| (thread.project_name.clone(), thread.project_path.clone()));
         match current {
             Some((name, path)) => self.new_thread_in_project(name, path, window, cx),
-            None => self.open_project_picker(&OpenProjectPicker, window, cx),
+            None => self.new_general_thread(window, cx),
         }
     }
 
@@ -744,7 +728,6 @@ impl Workspace {
         self.active_thread_id = Some(thread.id.clone());
         self.threads.push(thread);
         self.active_view = AppView::Chat;
-        self.sidebar_tab = DesktopSidebarTab::Chat;
         self.close_transient_surfaces();
         self.persist_and_notify(cx);
     }
@@ -753,18 +736,10 @@ impl Workspace {
         self.thread_menu_id = None;
         self.open_shelf_for_thread(id, cx);
         if let Some(thread) = self.threads.iter().find(|thread| thread.id == id) {
-            let sidebar_tab = if thread.project_name.is_empty() {
-                DesktopSidebarTab::Chat
-            } else {
-                DesktopSidebarTab::Code
-            };
             self.active_thread_id = Some(id.to_string());
             self.active_view = AppView::Chat;
             self.compact_sidebar_open = false;
-            self.sidebar_tab = sidebar_tab;
-            if sidebar_tab == DesktopSidebarTab::Code
-                && !self.sidebar_filter.matches(&thread.project_name)
-            {
+            if !self.sidebar_filter.matches(&thread.project_name) {
                 self.sidebar_filter = sidebar_ui::SidebarFilter::All;
             }
             self.unread_thread_ids.remove(id);
@@ -1130,24 +1105,19 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    /// Shelves for the current tab, filter, and search. A search is one list.
+    /// Shelves for the current project filter and search. A search is one list.
     pub(super) fn sidebar_shelves(&self, cx: &App) -> SidebarShelves<'_> {
         let filter = self.sidebar_filter.clone();
         let query = self.sidebar_query(cx);
         let searching = !query.trim().is_empty();
         self.sidebar_buckets(
             |thread| {
-                self.sidebar_tab.matches_project(&thread.project_name)
-                    && sidebar_ui::thread_matches(
-                        &thread.project_name,
-                        &thread.chat.read(cx).thread_title,
-                        if self.sidebar_tab == DesktopSidebarTab::Chat {
-                            &sidebar_ui::SidebarFilter::All
-                        } else {
-                            &filter
-                        },
-                        &query,
-                    )
+                sidebar_ui::thread_matches(
+                    &thread.project_name,
+                    &thread.chat.read(cx).thread_title,
+                    &filter,
+                    &query,
+                )
             },
             searching,
             cx,

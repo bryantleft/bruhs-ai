@@ -235,9 +235,6 @@ pub struct DiffFocusPath(pub RwSignal<Option<String>>);
 #[derive(Copy, Clone)]
 pub struct SidebarProjectFilter(pub RwSignal<Option<String>>);
 
-#[derive(Copy, Clone)]
-pub struct WorkspaceMode(pub RwSignal<bruhs_models::SidebarTab>);
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct GitDirtyFile {
     pub path: String,
@@ -306,19 +303,7 @@ pub(super) fn provide() {
     });
 
     let initial_filter = load_pref("bruhs.sidebarProjectFilter").filter(|s| s != "*");
-    let initial_mode = load_pref("bruhs.workspaceMode").map_or_else(
-        || {
-            if initial_filter.as_ref().is_some_and(|name| !name.is_empty()) {
-                bruhs_models::SidebarTab::Code
-            } else {
-                bruhs_models::SidebarTab::Chat
-            }
-        },
-        |value| bruhs_models::SidebarTab::from_str(&value),
-    );
-    let workspace_mode = RwSignal::new(initial_mode);
-    Effect::new(move |_| save_pref("bruhs.workspaceMode", workspace_mode.get().as_str()));
-    let sidebar_project_filter = RwSignal::new(initial_filter.filter(|name| !name.is_empty()));
+    let sidebar_project_filter = RwSignal::new(initial_filter);
     Effect::new(move |_| {
         let v = sidebar_project_filter.get();
         save_pref("bruhs.sidebarProjectFilter", v.as_deref().unwrap_or("*"));
@@ -345,7 +330,6 @@ pub(super) fn provide() {
     provide_context(DiffScopeSignal(RwSignal::new(Option::<DiffScope>::None)));
     provide_context(DiffFocusPath(RwSignal::new(Option::<String>::None)));
     provide_context(SidebarProjectFilter(sidebar_project_filter));
-    provide_context(WorkspaceMode(workspace_mode));
     provide_context(GitStatusSignal(RwSignal::new(GitStatus::default())));
     provide_context(crate::components::banner::BannerStackSignal(RwSignal::new(
         VecDeque::<crate::components::banner::Banner>::new(),

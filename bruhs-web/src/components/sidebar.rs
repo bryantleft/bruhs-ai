@@ -16,12 +16,11 @@ use crate::components::provider::{
 };
 use crate::format::relative_time;
 use crate::state::{
-    activate_thread, apply_drag, create_thread, effect_for, groups_for, instructions_text,
-    new_thread_or_pick, set_settled, snooze_until, thread_facts, titled, wake, ActiveView, AppView,
-    ComposerDraft, PendingPermissions, PendingPermissionsSignal, SetActiveView,
-    SetProjectPickerOpen, SetSidebarOpen, ShelfClock, SidebarChrome, SidebarProjectFilter,
-    SidebarUndo, Thread, TitleInstructionsSignal, Turns, UndoEntry, UndoRestore, UnreadThreads,
-    WorkspaceMode,
+    activate_thread, apply_drag, effect_for, groups_for, instructions_text, new_thread_in_context,
+    set_settled, snooze_until, thread_facts, titled, wake, ActiveView, AppView, ComposerDraft,
+    PendingPermissions, PendingPermissionsSignal, SetActiveView, SetProjectPickerOpen,
+    SetSidebarOpen, ShelfClock, SidebarChrome, SidebarProjectFilter, SidebarUndo, Thread,
+    TitleInstructionsSignal, Turns, UndoEntry, UndoRestore, UnreadThreads,
 };
 use crate::ui::{Icon, Menu, MenuAlign, MenuItem};
 
@@ -165,35 +164,8 @@ fn updated_ms(thread: &Thread) -> f64 {
 
 /// Threads to show: filtered by project (`Some("")` = general threads),
 /// case-insensitive title search, newest activity first.
-#[cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "sidebar unit tests check project and title filtering"
-    )
-)]
 pub fn visible_threads(threads: &[Thread], filter: Option<&str>, query: &str) -> Vec<Thread> {
     matching_threads(threads.iter(), filter, query)
-}
-
-fn visible_workspace_threads(
-    threads: &[Thread],
-    mode: bruhs_models::SidebarTab,
-    filter: Option<&str>,
-    query: &str,
-) -> Vec<Thread> {
-    let filter = if mode == bruhs_models::SidebarTab::Chat {
-        None
-    } else {
-        filter.filter(|name| !name.is_empty())
-    };
-    matching_threads(
-        threads
-            .iter()
-            .filter(|thread| mode.matches_project(&thread.project_name)),
-        filter,
-        query,
-    )
 }
 
 fn matching_threads<'a>(
@@ -260,7 +232,6 @@ pub fn Sidebar() -> impl IntoView {
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
     let roles = expect_context::<crate::state::RolesSignal>().0;
     let SidebarProjectFilter(project_filter) = expect_context::<SidebarProjectFilter>();
-    let WorkspaceMode(mode) = expect_context::<WorkspaceMode>();
     let SetProjectPickerOpen(set_project_picker_open) = expect_context::<SetProjectPickerOpen>();
     let ActiveView(active_view) = expect_context::<ActiveView>();
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
@@ -276,18 +247,11 @@ pub fn Sidebar() -> impl IntoView {
 
     let (query, set_query) = signal(String::new());
     let filter_open = RwSignal::new(false);
-    Effect::new(move |_| {
-        if mode.get() == bruhs_models::SidebarTab::Chat && filter_open.get_untracked() {
-            filter_open.set(false);
-        }
-    });
-
     let names = Memo::new(move |_| threads.with(|ts| project_names(ts)));
     let visible = Memo::new(move |_| {
         let filter = project_filter.get();
         let q = query.get();
-        let mode = mode.get();
-        threads.with(|ts| visible_workspace_threads(ts, mode, filter.as_deref(), &q))
+        threads.with(|ts| visible_threads(ts, filter.as_deref(), &q))
     });
 
     // Reset a filter that no longer matches any project (e.g. after deletes).
@@ -369,55 +333,15 @@ pub fn Sidebar() -> impl IntoView {
     // and the command bar pick a different project.
     let new_thread = move || {
         dismiss_mobile_navigation();
-        if mode.get_untracked() == bruhs_models::SidebarTab::Chat {
-            create_thread(
-                catalog,
-                set_threads,
-                set_active_thread_id,
-                set_messages,
-                String::new(),
-                None,
-            );
-            if active_view.get_untracked() != AppView::Chat {
-                set_active_view.set(AppView::Chat);
-            }
-            return;
-        }
-        let current = active_thread_id.get_untracked().and_then(|id| {
-            threads.with_untracked(|ts| {
-                ts.iter()
-                    .find(|t| t.id == id && !t.project_name.is_empty())
-                    .map(|t| (t.project_name.clone(), t.project_path.clone()))
-            })
-        });
-        match current {
-            Some((name, path)) => {
-                create_thread(
-                    catalog,
-                    set_threads,
-                    set_active_thread_id,
-                    set_messages,
-                    name,
-                    path,
-                );
-            }
-            None => new_thread_or_pick(
-                catalog,
-                true,
-                set_threads,
-                set_active_thread_id,
-                set_messages,
-                set_project_picker_open,
-            ),
-        }
+        new_thread_in_context();
         if active_view.get_untracked() != AppView::Chat {
             set_active_view.set(AppView::Chat);
         }
     };
 
     let filter_label = Signal::derive(move || match project_filter.get() {
-        None => "All projects".to_string(),
-        Some(f) if f.is_empty() => "All projects".to_string(),
+        None => "All threads".to_string(),
+        Some(f) if f.is_empty() => "No project".to_string(),
         Some(f) => f,
     });
 
@@ -518,7 +442,7 @@ pub fn Sidebar() -> impl IntoView {
     });
     // Thread activation republishes the destination mode even when unchanged.
     // Only an actual filter change should reset a user's scroll position.
-    let viewport_filter = Memo::new(move |_| (query.get(), mode.get(), project_filter.get()));
+    let viewport_filter = Memo::new(move |_| (query.get(), project_filter.get()));
     Effect::new(move |_| {
         viewport_filter.with(|_| ());
         viewport.scroll(0.0);
@@ -684,7 +608,7 @@ pub fn Sidebar() -> impl IntoView {
             live.get()
                 .map(|t| {
                     if t.project_name.is_empty() {
-                        "Chat".to_string()
+                        "No project".to_string()
                     } else {
                         t.project_name
                     }
@@ -1068,7 +992,6 @@ pub fn Sidebar() -> impl IntoView {
                         <Icon name="square-pen" size=14 />
                     </button>
                 </div>
-                <Show when=move || mode.get() == bruhs_models::SidebarTab::Code>
                 <div class="flex items-center gap-1">
                     <Menu open=filter_open align=MenuAlign::Start label="Filter threads by project"
                         trigger=move || view! {
@@ -1089,8 +1012,12 @@ pub fn Sidebar() -> impl IntoView {
                             selected=Signal::derive(move || project_filter.get().is_none())
                             on_select=Callback::new(move |_| { project_filter.set(None); filter_open.set(false); })
                         >
-                            "All projects"
+                            "All threads"
                         </MenuItem>
+                        <MenuItem
+                            selected=Signal::derive(move || project_filter.get().as_deref() == Some(""))
+                            on_select=Callback::new(move |_| { project_filter.set(Some(String::new())); filter_open.set(false); })
+                        >"No project"</MenuItem>
                         <For
                             each=move || names.get()
                             key=|n| n.clone()
@@ -1481,46 +1408,21 @@ mod tests {
     }
 
     #[test]
-    fn chat_mode_ignores_remembered_project_filter() {
-        let rows = vec![
-            t("general", "", "Notes", "100"),
-            t("project", "Alpha", "Notes", "200"),
-        ];
-        let visible = visible_workspace_threads(
-            &rows,
-            bruhs_models::SidebarTab::Chat,
-            Some("Alpha"),
-            "notes",
-        );
-        assert_eq!(
-            visible
-                .iter()
-                .map(|thread| thread.id.as_str())
-                .collect::<Vec<_>>(),
-            ["general"]
-        );
-    }
-
-    #[test]
-    fn code_mode_applies_project_filter_and_excludes_general_threads() {
+    fn unified_threads_include_general_and_project_conversations() {
         let rows = vec![
             t("general", "", "Notes", "300"),
             t("alpha", "Alpha", "Notes", "200"),
             t("beta", "Beta", "Notes", "100"),
         ];
-        let visible = visible_workspace_threads(
-            &rows,
-            bruhs_models::SidebarTab::Code,
-            Some("Alpha"),
-            "notes",
-        );
-        assert_eq!(
-            visible
-                .iter()
-                .map(|thread| thread.id.as_str())
-                .collect::<Vec<_>>(),
-            ["alpha"]
-        );
+        let ids = |filter| {
+            visible_threads(&rows, filter, "notes")
+                .into_iter()
+                .map(|thread| thread.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(ids(None), ["general", "alpha", "beta"]);
+        assert_eq!(ids(Some("Alpha")), ["alpha"]);
+        assert_eq!(ids(Some("")), ["general"]);
     }
 
     #[test]

@@ -351,7 +351,6 @@ impl Workspace {
             current_model: Some(self.current_model.clone()),
             permission_mode: Some(self.permission_mode),
             sidebar_visible: Some(self.sidebar_visible),
-            sidebar_tab: Some(self.sidebar_tab),
             active_view: Some(self.active_view.clone()),
             // A smoke fixture thread is never written to disk.
             active_thread_id: if self.active_thread_id.is_some()

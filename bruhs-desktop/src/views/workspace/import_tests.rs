@@ -7,8 +7,7 @@ use super::import_ui::{
 };
 use super::persistence::restored_session;
 use super::{
-    DesktopSidebarTab, DesktopState, EpochMs, Message, MessageRole, PersistedThread, TopLayer,
-    TurnState, Workspace,
+    DesktopState, EpochMs, Message, MessageRole, PersistedThread, TopLayer, TurnState, Workspace,
 };
 use crate::theme;
 use bruhs_models::agent::{AgentProvider, Role};
@@ -269,7 +268,6 @@ fn an_imported_session_becomes_a_resumable_project_thread(cx: &mut gpui::TestApp
         let thread = workspace.active_thread().expect("the import is open");
         assert_eq!(thread.project_name, "shop");
         assert_eq!(thread.project_path, "/tmp/bruhs-import-test/shop");
-        assert_eq!(workspace.sidebar_tab, DesktopSidebarTab::Code);
         let chat = thread.chat.read(cx);
         assert_eq!(chat.thread_title, "Paging fix");
         assert_eq!(chat.model_id, "claude-opus-4-6");
@@ -330,7 +328,6 @@ fn a_transcript_import_is_a_home_chat_carrying_its_context(cx: &mut gpui::TestAp
         workspace.open_imported_thread(imported, window, cx);
         let thread = workspace.active_thread().expect("the import is open");
         assert!(thread.project_name.is_empty());
-        assert_eq!(workspace.sidebar_tab, DesktopSidebarTab::Chat);
         let chat = thread.chat.read(cx);
         assert_eq!(chat.session_id, None);
         assert!(!chat.run_locked);

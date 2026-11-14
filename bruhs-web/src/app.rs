@@ -11,6 +11,9 @@ use leptos::prelude::*;
 /// Parse a routed hash into an AppView.
 pub(crate) fn parse_hash(hash: &str) -> Option<AppView> {
     let h = hash.trim_start_matches('#');
+    if h.strip_prefix("thread/").is_some_and(|id| !id.is_empty()) {
+        return Some(AppView::Chat);
+    }
     if let Some(id) = h.strip_prefix("/whiteboards/") {
         return uuid::Uuid::parse_str(id)
             .ok()
@@ -80,6 +83,13 @@ pub(crate) fn parse_hash(hash: &str) -> Option<AppView> {
     }
 }
 
+fn thread_route(thread_id: Option<&str>, initial_route: Option<&str>) -> String {
+    thread_id.map_or_else(
+        || initial_route.unwrap_or("#/chat").to_string(),
+        |id| format!("#thread/{id}"),
+    )
+}
+
 #[component]
 pub fn App() -> impl IntoView {
     provide_app_state();
@@ -101,23 +111,39 @@ pub fn App() -> impl IntoView {
     {
         let ActiveView(active_view) = expect_context::<ActiveView>();
         let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
+        let crate::state::ActiveThreadId(active_thread_id) =
+            expect_context::<crate::state::ActiveThreadId>();
 
         // Read initial hash on mount.
-        if let Some(window) = web_sys::window() {
-            let hash = window.location().hash().unwrap_or_default();
-            if let Some(view) = parse_hash(&hash) {
-                set_active_view.set(view);
-            }
+        let initial_hash = web_sys::window()
+            .and_then(|window| window.location().hash().ok())
+            .unwrap_or_default();
+        if let Some(view) = parse_hash(&initial_hash) {
+            set_active_view.set(view);
         }
+        // The catalog needs the incoming thread link until saved threads load.
+        let pending_thread_route = StoredValue::new(
+            initial_hash
+                .strip_prefix("#thread/")
+                .filter(|id| !id.is_empty())
+                .map(|_| initial_hash.clone()),
+        );
 
         // Write hash whenever AppView changes.
         Effect::new(move |_| {
             let view = active_view.get();
+            let thread_id = active_thread_id.get();
+            if thread_id.is_some() {
+                pending_thread_route.set_value(None);
+            }
             let hash = match &view {
                 AppView::Today => "#/today".to_string(),
                 AppView::Inbox => "#/inbox".to_string(),
                 AppView::Knowledge => "#/knowledge".to_string(),
-                AppView::Chat => "#/chat".to_string(),
+                AppView::Chat => thread_route(
+                    thread_id.as_deref(),
+                    pending_thread_route.get_value().as_deref(),
+                ),
                 AppView::Tasks => "#/tasks".to_string(),
                 AppView::Calendar => "#/calendar".to_string(),
                 AppView::Life => "#/life".to_string(),
@@ -147,7 +173,9 @@ pub fn App() -> impl IntoView {
                 AppView::Settings => "#/settings".to_string(),
             };
             if let Some(window) = web_sys::window() {
-                let _ = window.location().set_hash(&hash);
+                if window.location().hash().ok().as_deref() != Some(hash.as_str()) {
+                    let _ = window.location().set_hash(&hash);
+                }
             }
         });
 
@@ -273,11 +301,26 @@ pub fn App() -> impl IntoView {
 
 #[cfg(test)]
 mod tests {
-    use super::parse_hash;
+    use super::{parse_hash, thread_route};
     use crate::state::AppView;
 
     #[test]
+    fn initial_thread_route_survives_until_the_catalog_selects_a_thread() {
+        assert_eq!(
+            thread_route(None, Some("#thread/project")),
+            "#thread/project"
+        );
+        assert_eq!(
+            thread_route(Some("general"), Some("#thread/project")),
+            "#thread/general"
+        );
+        assert_eq!(thread_route(None, None), "#/chat");
+    }
+
+    #[test]
     fn thread_routes_keep_other_workspace_routes_distinct() {
+        assert_eq!(parse_hash("#thread/project"), Some(AppView::Chat));
+        assert_eq!(parse_hash("#thread/"), None);
         assert_eq!(parse_hash("#/settings"), Some(AppView::Settings));
         assert_eq!(
             parse_hash("#/inbox/item"),

@@ -3,10 +3,9 @@ use wasm_bindgen::JsCast;
 use web_sys::KeyboardEvent;
 
 use crate::components::search_page::{preview, scroll_result_into_view, LocalSearch};
-use crate::components::sidebar::project_names;
 use crate::components::terminal_panel::open_terminal_session;
 use crate::state::{
-    new_thread_or_pick, toggle_pinned, toggle_settled, ActiveProjectSignal, ActiveTerminalId,
+    new_thread_in_context, toggle_pinned, toggle_settled, ActiveProjectSignal, ActiveTerminalId,
     ActiveView, AppView, BranchPullSignal, ChipRetargetGuard, CommandBarOpen, ComposerChips,
     ComposerDraft, EditorSignal, InboxCreateRequest, KnowledgeCreateClipRequest, PanelSurface,
     PlanDayRequest, PromptStashSignal, RightPanelSignal, SchedulingOpenRequest, SetActiveView,
@@ -88,7 +87,7 @@ const ACTIONS: &[Action] = &[
     Action {
         id: ActionId::NavChat,
         group: "Navigate",
-        label: "Chat",
+        label: "Threads",
         hint: "conversations",
     },
     Action {
@@ -712,10 +711,8 @@ pub fn CommandBar() -> impl IntoView {
     let ActiveView(active_view) = expect_context::<ActiveView>();
     let threads = expect_context::<crate::state::ThreadsSignal>().0;
     let set_threads = expect_context::<crate::state::SetThreadsSignal>().0;
-    let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
-    let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
     let crate::state::ImportThreadOpen(import_open) =
         expect_context::<crate::state::ImportThreadOpen>();
     let thread_export = ActiveThreadExport::from_context();
@@ -873,15 +870,7 @@ pub fn CommandBar() -> impl IntoView {
             }
             ActionId::NewThread => {
                 set_active_view.set(AppView::Chat);
-                let has_projects = threads.with_untracked(|ts| !project_names(ts).is_empty());
-                new_thread_or_pick(
-                    catalog,
-                    has_projects,
-                    set_threads,
-                    set_active_thread_id,
-                    set_messages,
-                    set_project_picker_open,
-                );
+                new_thread_in_context();
             }
             ActionId::ToggleDiff => {
                 set_active_view.set(AppView::Chat);

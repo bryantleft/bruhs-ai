@@ -6,7 +6,7 @@
 //! earlier builds wrote.
 
 use bruhs_models::agent::{PermissionMode, Role};
-use bruhs_models::{AppView, CalendarMode, Priority, SidebarTab, TaskViewMode, WorkItemStatus};
+use bruhs_models::{AppView, CalendarMode, Priority, TaskViewMode, WorkItemStatus};
 use serde::{Deserialize, Deserializer, Serializer};
 
 pub(super) trait PersistedEnum: Sized {
@@ -24,16 +24,6 @@ impl PersistedEnum for PermissionMode {
     /// Unknown modes ask first.
     fn from_persisted(raw: &str) -> Self {
         Self::parse_lossy(raw)
-    }
-}
-
-impl PersistedEnum for SidebarTab {
-    fn persisted_str(&self) -> &'static str {
-        self.as_str()
-    }
-
-    fn from_persisted(raw: &str) -> Self {
-        Self::from_str(raw)
     }
 }
 
@@ -164,7 +154,7 @@ pub(super) mod optional {
 #[cfg(test)]
 mod tests {
     use super::{PermissionMode, PersistedEnum, Priority, Role, WorkItemStatus};
-    use bruhs_models::{AppView, CalendarMode, SidebarTab, TaskViewMode};
+    use bruhs_models::{AppView, CalendarMode, TaskViewMode};
 
     fn round_trips<T: PersistedEnum + PartialEq + std::fmt::Debug>(values: &[T]) {
         for value in values {
@@ -175,7 +165,6 @@ mod tests {
     #[test]
     fn every_variant_reads_back_as_itself() {
         round_trips(PermissionMode::all());
-        round_trips(&[SidebarTab::Chat, SidebarTab::Code]);
         round_trips(&[TaskViewMode::Board, TaskViewMode::List]);
         round_trips(&[CalendarMode::Day, CalendarMode::Week, CalendarMode::Month]);
         round_trips(&[
@@ -216,7 +205,6 @@ mod tests {
             PermissionMode::from_persisted("yolo"),
             PermissionMode::Default
         );
-        assert_eq!(SidebarTab::from_persisted("Chat"), SidebarTab::Chat);
         assert_eq!(TaskViewMode::from_persisted(""), TaskViewMode::List);
         assert_eq!(CalendarMode::from_persisted("year"), CalendarMode::Month);
         assert_eq!(AppView::from_persisted("meeting_detail"), AppView::Chat);

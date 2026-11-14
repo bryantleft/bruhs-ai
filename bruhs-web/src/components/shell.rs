@@ -29,10 +29,10 @@ use crate::components::terminal_page::TerminalPage;
 use crate::components::terminal_panel::open_terminal_session;
 use crate::components::today_page::TodayPage;
 use crate::state::{
-    activate_thread, create_thread, new_thread_or_pick, toggle_pinned, toggle_settled,
-    ActiveProjectSignal, ActiveTerminalId, ActiveView, AppView, BranchMenuOpen, BranchPullSignal,
-    ChipRetargetGuard, ComposerChips, ComposerDraft, EditorSignal, EffortMenuOpen,
-    KeybindingsSignal, KnowledgeSaveRequest, ModelSelectOpen, PanelSurface, PendingPermissions,
+    activate_thread, new_thread_in_context, toggle_pinned, toggle_settled, ActiveProjectSignal,
+    ActiveTerminalId, ActiveView, AppView, BranchMenuOpen, BranchPullSignal, ChipRetargetGuard,
+    ComposerChips, ComposerDraft, EditorSignal, EffortMenuOpen, KeybindingsSignal,
+    KnowledgeSaveRequest, ModelSelectOpen, PanelSurface, PendingPermissions,
     PendingPermissionsSignal, PreviousWorktreeSignal, PromptStashSignal, RightPanelSignal,
     RunChoiceSignal, SetActiveView, SetCaptureEditId, SetCaptureOpen, SetCommandBarOpen,
     SetModelSelectOpen, SetProjectPickerOpen, SetSidebarOpen, SetTaskCreateOpen, SidebarChrome,
@@ -89,11 +89,8 @@ pub fn Shell() -> impl IntoView {
     let set_threads = expect_context::<crate::state::SetThreadsSignal>().0;
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
     let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
-    let crate::state::WorkspaceMode(workspace_mode) =
-        expect_context::<crate::state::WorkspaceMode>();
     let crate::state::SidebarProjectFilter(project_filter) =
         expect_context::<crate::state::SidebarProjectFilter>();
-    // Only a different thread/project changes mode; streaming and renaming do not.
     let active_project_identity = Memo::new(move |_| {
         active_thread_id.get().and_then(|id| {
             threads.with(|rows| {
@@ -103,21 +100,10 @@ pub fn Shell() -> impl IntoView {
             })
         })
     });
-    let initial_thread_seen = StoredValue::new(false);
     Effect::new(move |_| {
         if let Some((_, project)) = active_project_identity.get() {
-            // Hydration restores the saved mode; only explicit subsequent
-            // thread navigation should follow the destination's mode.
-            if !initial_thread_seen.get_value() {
-                initial_thread_seen.set_value(true);
-                return;
-            }
-            workspace_mode.set(bruhs_models::SidebarTab::for_project(&project));
-            if !project.is_empty()
-                && project_filter
-                    .get_untracked()
-                    .as_ref()
-                    .is_some_and(|filter| filter != &project)
+            if project_filter
+                .with_untracked(|filter| filter.as_ref().is_some_and(|filter| filter != &project))
             {
                 project_filter.set(None);
             }
@@ -179,18 +165,11 @@ pub fn Shell() -> impl IntoView {
                 )
                 .into_iter()
                 .filter(|thread| {
-                    workspace_mode
-                        .get_untracked()
-                        .matches_project(&thread.project_name)
-                })
-                .filter(|thread| {
-                    workspace_mode.get_untracked() == bruhs_models::SidebarTab::Chat
-                        || project_filter.with_untracked(|filter| {
-                            filter
-                                .as_deref()
-                                .filter(|name| !name.is_empty())
-                                .is_none_or(|name| thread.project_name == name)
-                        })
+                    project_filter.with_untracked(|filter| {
+                        filter
+                            .as_deref()
+                            .is_none_or(|name| thread.project_name == name)
+                    })
                 })
                 .collect::<Vec<_>>()
             })
@@ -198,6 +177,9 @@ pub fn Shell() -> impl IntoView {
     };
     let open_thread = move |id: String| {
         ensure_chat();
+        if active_thread_id.get_untracked().as_deref() == Some(id.as_str()) {
+            return;
+        }
         activate_thread(
             history,
             active_thread_id,
@@ -384,46 +366,7 @@ pub fn Shell() -> impl IntoView {
     // for choosing a different one (sidebar folder-plus, command bar).
     let new_thread = move || {
         ensure_chat();
-        if workspace_mode.get_untracked() == bruhs_models::SidebarTab::Chat {
-            create_thread(
-                catalog,
-                set_threads,
-                set_active_thread_id,
-                set_messages,
-                String::new(),
-                None,
-            );
-            return;
-        }
-        let current = active_thread_id.get_untracked().and_then(|id| {
-            threads.with_untracked(|ts| {
-                ts.iter()
-                    .find(|t| t.id == id && !t.project_name.is_empty())
-                    .map(|t| (t.project_name.clone(), t.project_path.clone()))
-            })
-        });
-        match current {
-            Some((name, path)) => {
-                create_thread(
-                    catalog,
-                    set_threads,
-                    set_active_thread_id,
-                    set_messages,
-                    name,
-                    path,
-                );
-            }
-            None => {
-                new_thread_or_pick(
-                    catalog,
-                    true,
-                    set_threads,
-                    set_active_thread_id,
-                    set_messages,
-                    set_project_picker_open,
-                );
-            }
-        }
+        new_thread_in_context();
     };
 
     // One `hashchange` listener for the page: `#thread/<id>` links (⌘⇧C
@@ -854,7 +797,7 @@ pub fn Shell() -> impl IntoView {
             // Center: the active view.
             <main id="app-main" tabindex="-1" class="flex min-w-0 flex-1 flex-col overflow-hidden md:min-w-[360px] focus:outline-none">
                 <Show when=move || !matches!(active_view.get(), AppView::Settings | AppView::Booking { .. })>
-                    <super::workspace_modes::WorkspaceModes />
+                    <super::workspace_navigation::WorkspaceNavigation />
                 </Show>
                 <super::workflow_status::WorkflowStatus />
                 <crate::thread_catalog::ThreadCatalogStatus />

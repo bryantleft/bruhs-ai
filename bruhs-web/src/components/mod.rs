@@ -79,4 +79,4 @@ pub mod whisper_model_settings;
 pub mod workbench;
 pub mod workflow_payload;
 pub mod workflow_status;
-pub mod workspace_modes;
+pub mod workspace_navigation;

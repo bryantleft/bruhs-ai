@@ -1,7 +1,7 @@
 //! Initial thread loading must not replace work started before storage is ready.
 use leptos::prelude::*;
 
-use crate::state::{AgentMessage, Thread, Turns, WorkspaceMode};
+use crate::state::{AgentMessage, Thread, Turns};
 use crate::task_saves::InitialEdits;
 #[cfg(test)]
 mod tests;
@@ -36,7 +36,6 @@ pub struct ThreadCatalog {
     set_active: WriteSignal<Option<String>>,
     messages: WriteSignal<Vec<AgentMessage>>,
     turns: Turns,
-    mode: WorkspaceMode,
     history: crate::thread_history::ThreadHistory,
     workflow_ready: RwSignal<bool>,
     saves: crate::task_saves::TaskSaves,
@@ -58,7 +57,6 @@ impl ThreadCatalog {
             set_active: expect_context::<crate::state::SetActiveThreadId>().0,
             messages: expect_context::<crate::state::SetMessagesSignal>().0,
             turns: expect_context(),
-            mode: expect_context(),
             history: expect_context(),
             workflow_ready: expect_context::<crate::workflow_executor::WorkflowExecutor>()
                 .threads_hydrated,
@@ -126,11 +124,8 @@ impl ThreadCatalog {
         let linked = linked.strip_prefix("#thread/");
         let chosen = self
             .threads
-            .with_untracked(|rows| initial_selection(rows, linked, self.mode.0.get_untracked()));
-        if let Some((id, linked_mode)) = chosen {
-            if let Some(mode) = linked_mode {
-                self.mode.0.set(mode);
-            }
+            .with_untracked(|rows| initial_selection(rows, linked));
+        if let Some(id) = chosen {
             self.set_active.set(Some(id.clone()));
             self.history
                 .load(id, self.active, self.messages, self.turns);
@@ -151,21 +146,11 @@ impl ThreadCatalog {
     }
 }
 
-fn initial_selection(
-    rows: &[Thread],
-    linked: Option<&str>,
-    mode: bruhs_models::SidebarTab,
-) -> Option<(String, Option<bruhs_models::SidebarTab>)> {
-    if let Some(thread) = linked.and_then(|id| rows.iter().find(|thread| thread.id == id)) {
-        return Some((
-            thread.id.clone(),
-            Some(bruhs_models::SidebarTab::for_project(&thread.project_name)),
-        ));
-    }
-    rows.iter()
-        .find(|thread| mode.matches_project(&thread.project_name))
+fn initial_selection(rows: &[Thread], linked: Option<&str>) -> Option<String> {
+    linked
+        .and_then(|id| rows.iter().find(|thread| thread.id == id))
         .or_else(|| rows.first())
-        .map(|thread| (thread.id.clone(), None))
+        .map(|thread| thread.id.clone())
 }
 
 #[component]
