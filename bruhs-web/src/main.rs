@@ -13,6 +13,7 @@ mod highlight;
 mod live_events;
 mod markdown;
 mod meeting_actions;
+mod meeting_suggestions;
 mod meetings_stream;
 mod navigation_guard;
 mod queue;

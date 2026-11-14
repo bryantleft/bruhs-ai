@@ -35,6 +35,7 @@ pub mod meeting_live;
 pub mod meeting_note_detail;
 pub mod meeting_note_editor;
 pub mod meeting_notes;
+pub mod meeting_suggestions_panel;
 pub mod meetings_page;
 pub mod mention_editor;
 pub mod metadata_status;

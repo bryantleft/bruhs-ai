@@ -37,6 +37,8 @@ pub enum SuggestionError {
     Provider(String),
     #[error("The provider returned an invalid prompt suggestion.")]
     InvalidReply,
+    #[error("Paused to keep the rest of your usage for your own chats.")]
+    UsageReserved,
     #[error("Could not prepare prompt suggestion workspace: {0}")]
     Workspace(#[from] std::io::Error),
 }
@@ -68,18 +70,25 @@ pub async fn suggest(request: SuggestionRequest) -> Result<SuggestionReply, Sugg
             .map_err(|error| SuggestionError::Workspace(std::io::Error::other(error)))??;
         let prompt = serde_json::to_string(&request.messages)
             .map_err(|_| SuggestionError::InvalidRequest)?;
-        let reply = match info.provider {
-            AgentProvider::Claude => claude(&prompt, &request.model, workspace.path()).await,
-            AgentProvider::Codex => codex(&prompt, &request.model, workspace.path()).await,
-            AgentProvider::Cursor
-            | AgentProvider::Antigravity
-            | AgentProvider::Grok
-            | AgentProvider::OpenCode
-            | AgentProvider::Acp => Err(SuggestionError::UnsupportedProvider),
-        };
+        let reply = isolated_reply(
+            info.provider,
+            &prompt,
+            &request.model,
+            &Instructions {
+                text: INSTRUCTIONS,
+                think: true,
+            },
+            workspace.path(),
+        )
+        .await;
         // Cleanup must not block an async worker. TempDir also cleans up on cancellation.
         tokio::task::spawn_blocking(move || drop(workspace));
-        parse_reply(&reply?)
+        match reply {
+            Err(SuggestionError::UsageReserved) => Ok(SuggestionReply {
+                suggestion: String::new(),
+            }),
+            reply => parse_reply(&reply?),
+        }
     })
     .await
     .unwrap_or(Err(SuggestionError::TimedOut));
@@ -92,24 +101,60 @@ pub async fn suggest(request: SuggestionRequest) -> Result<SuggestionReply, Sugg
     result
 }
 
+/// One tool-free reply from `model` in the empty `cwd`, with no session,
+/// user configuration or app credentials. Shared by every optional
+/// background job that only needs text back.
+pub(crate) async fn isolated_reply(
+    provider: AgentProvider,
+    prompt: &str,
+    model: &str,
+    instructions: &Instructions<'_>,
+    cwd: &Path,
+) -> Result<String, SuggestionError> {
+    match provider {
+        AgentProvider::Claude => claude(prompt, model, instructions, cwd).await,
+        AgentProvider::Codex => codex(prompt, model, instructions.text, cwd).await,
+        AgentProvider::Cursor
+        | AgentProvider::Antigravity
+        | AgentProvider::Grok
+        | AgentProvider::OpenCode
+        | AgentProvider::Acp => Err(SuggestionError::UnsupportedProvider),
+    }
+}
+
+/// The system instructions for an isolated reply, and whether Claude may
+/// think before answering. A job that writes its reasoning into its reply
+/// gains nothing from hidden thinking but latency and tokens.
+pub(crate) struct Instructions<'a> {
+    pub text: &'a str,
+    pub think: bool,
+}
+
+pub(crate) async fn usage_permits(provider: AgentProvider) -> bool {
+    quota::permits(provider).await
+}
+
+/// Strip one complete enclosing Markdown fence, never prose around it.
+pub(crate) fn unfence(text: &str) -> Option<&str> {
+    let text = text.trim();
+    match text
+        .strip_prefix("```json\n")
+        .or_else(|| text.strip_prefix("```\n"))
+    {
+        Some(body) => body.strip_suffix("\n```"),
+        None => Some(text),
+    }
+}
+
 fn parse_reply(text: &str) -> Result<SuggestionReply, SuggestionError> {
     // 240 Unicode characters need at most 960 UTF-8 bytes, plus JSON escaping
     // and framing. Reject prose and oversized output rather than inserting it.
     if text.len() > 4096 {
         return Err(SuggestionError::InvalidReply);
     }
-    let text = text.trim();
     // Small models sometimes wrap the JSON in a Markdown fence. Accept only
     // a complete enclosing fence, never prose or additional blocks.
-    let text = match text
-        .strip_prefix("```json\n")
-        .or_else(|| text.strip_prefix("```\n"))
-    {
-        Some(body) => body
-            .strip_suffix("\n```")
-            .ok_or(SuggestionError::InvalidReply)?,
-        None => text,
-    };
+    let text = unfence(text).ok_or(SuggestionError::InvalidReply)?;
     let reply: SuggestionReply =
         serde_json::from_str(text).map_err(|_| SuggestionError::InvalidReply)?;
     if !reply.is_valid() {
@@ -118,12 +163,23 @@ fn parse_reply(text: &str) -> Result<SuggestionReply, SuggestionError> {
     Ok(reply)
 }
 
-fn claude_options(prompt: &str, model: &str, cwd: &Path) -> claude_sdk_rs::QueryOptions {
-    crate::agent::claude_query_options_from_env(prompt)
+fn claude_options(
+    prompt: &str,
+    model: &str,
+    instructions: &Instructions<'_>,
+    cwd: &Path,
+) -> claude_sdk_rs::QueryOptions {
+    let options = crate::agent::claude_query_options_from_env(prompt);
+    let options = if instructions.think {
+        options
+    } else {
+        options.env("MAX_THINKING_TOKENS", "0")
+    };
+    options
         .cwd(cwd)
         .model(model)
         .tools(claude_sdk_rs::Tools::None)
-        .system_prompt(INSTRUCTIONS)
+        .system_prompt(instructions.text)
         .effort("low")
         .setting_sources(Vec::<String>::new())
         .persist_session(false)
@@ -131,15 +187,20 @@ fn claude_options(prompt: &str, model: &str, cwd: &Path) -> claude_sdk_rs::Query
         .include_partial_messages(false)
 }
 
-async fn claude(prompt: &str, model: &str, cwd: &Path) -> Result<String, SuggestionError> {
-    let mut stream = claude_sdk_rs::query(claude_options(prompt, model, cwd))
+async fn claude(
+    prompt: &str,
+    model: &str,
+    instructions: &Instructions<'_>,
+    cwd: &Path,
+) -> Result<String, SuggestionError> {
+    let mut stream = claude_sdk_rs::query(claude_options(prompt, model, instructions, cwd))
         .map_err(|error| SuggestionError::Provider(error.to_string()))?;
     while let Some(event) = stream.next().await {
         match event {
             claude_sdk_rs::QueryEvent::Raw(event) => {
                 quota::observe_claude(&event);
                 if !quota::permits(AgentProvider::Claude).await {
-                    return Ok(r#"{"suggestion":""}"#.into());
+                    return Err(SuggestionError::UsageReserved);
                 }
             }
             claude_sdk_rs::QueryEvent::Result {
@@ -169,6 +230,7 @@ async fn claude(prompt: &str, model: &str, cwd: &Path) -> Result<String, Suggest
 fn codex_options(
     prompt: &str,
     model: &str,
+    instructions: &str,
     cwd: &Path,
 ) -> Result<codex_sdk_rs::QueryOptions, SuggestionError> {
     use codex_sdk_rs::{ApprovalPolicy, CodexAccess, ConfigOverride, SandboxMode, Session};
@@ -183,7 +245,7 @@ fn codex_options(
             sandbox: SandboxMode::ReadOnly,
             approval: ApprovalPolicy::Never,
         })
-        .developer_instructions(INSTRUCTIONS);
+        .developer_instructions(instructions);
     // No user MCP servers/plugins/hooks or project instructions in this empty
     // workspace. Retain CLI authentication, but remove app-owned credentials.
     for key in crate::connections::PRIVATE_ENV {
@@ -208,8 +270,13 @@ fn codex_options(
     Ok(options)
 }
 
-async fn codex(prompt: &str, model: &str, cwd: &Path) -> Result<String, SuggestionError> {
-    let mut stream = codex_sdk_rs::query(codex_options(prompt, model, cwd)?)
+async fn codex(
+    prompt: &str,
+    model: &str,
+    instructions: &str,
+    cwd: &Path,
+) -> Result<String, SuggestionError> {
+    let mut stream = codex_sdk_rs::query(codex_options(prompt, model, instructions, cwd)?)
         .map_err(|error| SuggestionError::Provider(error.to_string()))?;
     let mut text = String::new();
     while let Some(event) = stream.next().await {
@@ -264,8 +331,46 @@ mod tests {
     }
 
     #[test]
+    fn only_jobs_that_think_may_think() {
+        let quiet = claude_options(
+            "context",
+            "claude-haiku-4-5",
+            &Instructions {
+                text: "x",
+                think: false,
+            },
+            Path::new("/tmp/empty"),
+        );
+        assert!(quiet
+            .env
+            .iter()
+            .any(|(key, value)| key == "MAX_THINKING_TOKENS" && value == "0"));
+        let thinking = claude_options(
+            "context",
+            "claude-haiku-4-5",
+            &Instructions {
+                text: "x",
+                think: true,
+            },
+            Path::new("/tmp/empty"),
+        );
+        assert!(!thinking
+            .env
+            .iter()
+            .any(|(key, _)| key == "MAX_THINKING_TOKENS"));
+    }
+
+    #[test]
     fn predictions_never_resume_a_session_or_load_project_configuration() {
-        let claude = claude_options("context", "claude-sonnet-4-6", Path::new("/tmp/empty"));
+        let claude = claude_options(
+            "context",
+            "claude-sonnet-4-6",
+            &Instructions {
+                text: INSTRUCTIONS,
+                think: true,
+            },
+            Path::new("/tmp/empty"),
+        );
         assert_eq!(claude.tools, claude_sdk_rs::Tools::None);
         assert_eq!(claude.setting_sources, Some(Vec::new()));
         assert!(claude.resume.is_none() && !claude.permission_prompts);
@@ -273,7 +378,13 @@ mod tests {
             !claude.persist_session,
             "predictions never accumulate saved sessions"
         );
-        let codex = codex_options("context", "gpt-6.1-sol", Path::new("/tmp/empty")).unwrap();
+        let codex = codex_options(
+            "context",
+            "gpt-6.1-sol",
+            INSTRUCTIONS,
+            Path::new("/tmp/empty"),
+        )
+        .unwrap();
         assert_eq!(codex.session, codex_sdk_rs::Session::Ephemeral);
         assert!(codex.ignore_user_config && codex.ignore_rules);
         assert_eq!(

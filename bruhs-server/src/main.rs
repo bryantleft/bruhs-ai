@@ -494,6 +494,10 @@ fn router_with_capture_daemon(
             post(routes::prompt_suggestion::post_suggestion)
                 .layer(DefaultBodyLimit::max(96 * 1024)),
         )
+        .route(
+            "/api/agent/meeting-suggestions",
+            post(routes::meeting_suggestions::post_round).layer(DefaultBodyLimit::max(64 * 1024)),
+        )
         .route("/api/agent/steer", post(routes::agent::post_steer))
         .route(
             "/api/agent/second-opinion",

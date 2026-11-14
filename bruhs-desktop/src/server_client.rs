@@ -50,6 +50,8 @@ const REQUEST_TIMEOUT: Duration = Duration::from_secs(20);
 /// Bytes of a failure response kept for the log.
 const ERROR_BODY_LOG_BYTES: usize = 4 * 1024;
 const SUMMARY_REQUEST_TIMEOUT: Duration = Duration::from_secs(135);
+/// The server's 45 second round budget, plus transport.
+const MEETING_SUGGESTION_TIMEOUT: Duration = Duration::from_secs(55);
 const MEETING_READBACK_TIMEOUT: Duration = Duration::from_secs(15);
 
 use bruhs_models::api::{CancelSummaryGenerationBody, StopMeetingBody, SummarizeRequest};
@@ -584,6 +586,20 @@ impl ServerClient {
                 model: summary_model(),
             }),
             SUMMARY_REQUEST_TIMEOUT,
+        )
+        .await
+    }
+
+    /// One live meeting suggestion round.
+    pub async fn meeting_suggestion_round(
+        &self,
+        request: &bruhs_models::meeting_suggestions::MeetingSuggestionRequest,
+    ) -> Result<bruhs_models::meeting_suggestions::MeetingSuggestionReply, ServerError> {
+        self.send_json_with_timeout(
+            reqwest::Method::POST,
+            "/api/agent/meeting-suggestions",
+            Some(request),
+            MEETING_SUGGESTION_TIMEOUT,
         )
         .await
     }

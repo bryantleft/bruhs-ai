@@ -104,6 +104,7 @@ pub fn App() -> impl IntoView {
     crate::thread_link::ThreadLink::install();
     crate::meeting_actions::MeetingActions::install();
     crate::agent_updates::AgentUpdates::install();
+    crate::meeting_suggestions::MeetingSuggestions::install();
 
     // ── URL hash routing ─────────────────────────────────────────────────────
     // On mount: read window.location.hash and set the initial AppView.

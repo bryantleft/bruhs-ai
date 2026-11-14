@@ -44,6 +44,17 @@ pub async fn prompt_suggestion(
     decode(send_request(request).await?).await
 }
 
+/// One live meeting suggestion round. Aborting drops the browser request.
+pub async fn meeting_suggestion_round(
+    request: &bruhs_models::meeting_suggestions::MeetingSuggestionRequest,
+    signal: &web_sys::AbortSignal,
+) -> Result<bruhs_models::meeting_suggestions::MeetingSuggestionReply, ApiError> {
+    let request = gloo_net::http::Request::post(&url("/api/agent/meeting-suggestions"))
+        .abort_signal(Some(signal))
+        .json(request)?;
+    decode(send_request(request).await?).await
+}
+
 // The API origin is baked at build time. Override via env when building (e.g.
 // `BRUHS_API_URL=https://api.bruhs.localhost trunk build`) to point the WASM
 // bundle at portless named hosts; otherwise defaults to the local dev port.
