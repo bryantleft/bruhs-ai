@@ -1166,9 +1166,12 @@ dependencies = [
 name = "bruhs-models"
 version = "0.1.0"
 dependencies = [
+ "percent-encoding",
+ "pulldown-cmark",
  "serde",
  "serde_bytes",
  "serde_json",
+ "sha2",
  "thiserror 2.0.18",
  "uuid",
 ]

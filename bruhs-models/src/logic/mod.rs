@@ -25,6 +25,7 @@ pub mod preview;
 pub mod queue;
 pub mod recall;
 pub mod review;
+pub mod rich_response;
 pub mod rewind;
 pub mod run_place;
 pub mod sidebar;
