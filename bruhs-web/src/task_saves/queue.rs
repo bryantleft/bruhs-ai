@@ -3,6 +3,8 @@ use std::collections::{btree_map::Entry, BTreeMap, BTreeSet};
 use super::attachment_recovery::{RecoveryAttachment, RecoveryRecord};
 use super::{Kind, Record};
 
+mod planning;
+
 #[derive(Clone)]
 pub(super) struct Pending {
     pub id: String,
