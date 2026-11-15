@@ -75,6 +75,8 @@ impl Config {
                             "profile",
                             "email",
                             "offline_access",
+                            // /me supplies the verified SMTP sender, not just OIDC identity.
+                            "https://graph.microsoft.com/User.Read",
                             "https://graph.microsoft.com/Mail.ReadWrite",
                             "https://graph.microsoft.com/Mail.Send",
                         ]
@@ -352,7 +354,7 @@ pub(super) fn require_mail_permissions(
 ) -> Result<(), Error> {
     let required: &[&str] = match provider {
         ServiceProvider::Gmail => &["https://www.googleapis.com/auth/gmail.modify"],
-        ServiceProvider::Outlook => &["Mail.ReadWrite", "Mail.Send"],
+        ServiceProvider::Outlook => &["User.Read", "Mail.ReadWrite", "Mail.Send"],
         _ => return Ok(()),
     };
     if required.iter().all(|required| {

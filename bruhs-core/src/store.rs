@@ -121,6 +121,7 @@ pub struct AppState {
     terminals: TerminalManager,
     orchestrator: AgentOrchestrator,
     reactive: OnceLock<crate::reactive::ReactiveRuntime>,
+    mail: OnceLock<crate::mail::MailRuntime>,
 }
 
 /// Builds an [`AppState`]; every part not given gets its default.
@@ -186,6 +187,7 @@ impl AppStateBuilder {
             terminals: TerminalManager::new(),
             orchestrator,
             reactive: OnceLock::new(),
+            mail: OnceLock::new(),
         }
     }
 }
@@ -197,6 +199,21 @@ impl Default for AppState {
 }
 
 impl AppState {
+    /// Attach the canonical connected-mail cache to its owning server process.
+    /// Desktop construction remains pure and uses the server for connected mail.
+    pub fn attach_mail(
+        &self,
+        runtime: crate::mail::MailRuntime,
+    ) -> Result<(), crate::mail::MailError> {
+        self.mail
+            .set(runtime)
+            .map_err(|_| crate::mail::MailError::AlreadyAttached)
+    }
+
+    pub fn mail(&self) -> Option<&crate::mail::MailRuntime> {
+        self.mail.get()
+    }
+
     /// Attach the single process-owned automation runtime. Builders stay pure.
     pub fn attach_reactive(
         &self,

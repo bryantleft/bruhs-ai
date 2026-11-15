@@ -2,6 +2,8 @@
 mod login;
 mod oauth;
 mod storage;
+#[cfg(any(test, feature = "test-support"))]
+mod test_support;
 
 use bruhs_models::connections::*;
 use serde::{Deserialize, Serialize};
@@ -91,6 +93,7 @@ struct Inner {
 
 pub(crate) struct ConnectionAccess {
     pub value: Zeroizing<String>,
+    pub mail_authorization: Option<crate::mail::MailAuthorizationRef>,
     _lease: storage::Lease,
 }
 
@@ -278,8 +281,24 @@ impl Connections {
             lease.needs_sign_in().await?;
             return Err(error);
         }
+        let mail_authorization =
+            if matches!(provider, ServiceProvider::Gmail | ServiceProvider::Outlook) {
+                let mailbox = crate::mail::MailboxId::from_broker_identity(
+                    provider,
+                    &tokens.registration,
+                    &tokens.account_id,
+                )
+                .map_err(|_| ConnectionError::IdentityUnavailable)?;
+                Some(
+                    crate::mail::MailAuthorizationRef::from_broker_access(mailbox, &tokens.id)
+                        .map_err(|_| ConnectionError::IdentityUnavailable)?,
+                )
+            } else {
+                None
+            };
         Ok(ConnectionAccess {
             value: Zeroizing::new(tokens.access_token.clone()),
+            mail_authorization,
             _lease: lease,
         })
     }
