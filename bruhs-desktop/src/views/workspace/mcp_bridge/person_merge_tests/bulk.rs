@@ -25,6 +25,7 @@ pub(super) fn dataset(
                 source_relationship: None,
                 target_relationship: None,
                 target_id: target.id.clone(),
+                links: Default::default(),
             }),
         );
         people.records.push(target.into());

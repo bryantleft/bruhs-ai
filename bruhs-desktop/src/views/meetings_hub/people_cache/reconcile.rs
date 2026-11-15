@@ -46,6 +46,7 @@ impl MeetingsHub {
             Ok::<_, String>((people, redirects))
         }, |hub, result, cx| {
             hub.people_refreshing = false;
+            hub.people_settled = true;
             hub.people_refresh_failed = result.is_err();
             match result {
                 Ok((people, redirects)) => {

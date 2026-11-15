@@ -111,6 +111,23 @@ impl ServerError {
         matches!(self, Self::Status { code, .. } if *code == reqwest::StatusCode::NOT_FOUND)
     }
 
+    /// The server's own sentence for a 409 conflict. Conflicts carry
+    /// app-owned review messages (for example an alias another profile uses);
+    /// other failure bodies stay in the log.
+    pub fn conflict_message(&self) -> Option<String> {
+        let Self::Status { code, body, .. } = self else {
+            return None;
+        };
+        if *code != reqwest::StatusCode::CONFLICT {
+            return None;
+        }
+        serde_json::from_str::<serde_json::Value>(body)
+            .ok()?
+            .get("error")?
+            .as_str()
+            .map(str::to_string)
+    }
+
     /// The server answered 502: something behind it (the capture daemon)
     /// answered but could not be used.
     pub fn is_bad_gateway(&self) -> bool {
@@ -753,6 +770,57 @@ impl ServerClient {
             reqwest::Method::PATCH,
             &format!("/api/people/{id}/tracked"),
             Some(&serde_json::json!({ "tracked": tracked })),
+        )
+        .await
+    }
+
+    /// `DELETE /api/people/{id}`: the contact as it was, with the meeting
+    /// links the delete removed. The server keeps it for a restore.
+    pub async fn delete_person(
+        &self,
+        id: &str,
+    ) -> Result<bruhs_models::PersonDeletion, ServerError> {
+        self.send_json::<bruhs_models::PersonDeletion, ()>(
+            reqwest::Method::DELETE,
+            &format!("/api/people/{id}"),
+            None,
+        )
+        .await
+    }
+
+    /// `POST /api/people/{id}/restore`: undo a delete from the server's record.
+    pub async fn restore_person(&self, id: &str) -> Result<PersonProfile, ServerError> {
+        self.send_json::<PersonProfile, ()>(
+            reqwest::Method::POST,
+            &format!("/api/people/{id}/restore"),
+            None,
+        )
+        .await
+    }
+
+    /// `POST /api/people/{source_id}/unmerge`: undo a merge.
+    pub async fn unmerge_person(
+        &self,
+        source_id: &str,
+    ) -> Result<bruhs_models::PersonUnmerge, ServerError> {
+        self.send_json::<bruhs_models::PersonUnmerge, ()>(
+            reqwest::Method::POST,
+            &format!("/api/people/{source_id}/unmerge"),
+            None,
+        )
+        .await
+    }
+
+    /// `PUT /api/people/{id}/aliases` with the complete alias list.
+    pub async fn set_person_aliases(
+        &self,
+        id: &str,
+        aliases: Vec<String>,
+    ) -> Result<PersonProfile, ServerError> {
+        self.send_json(
+            reqwest::Method::PUT,
+            &format!("/api/people/{id}/aliases"),
+            Some(&bruhs_models::PersonAliasesBody { aliases }),
         )
         .await
     }

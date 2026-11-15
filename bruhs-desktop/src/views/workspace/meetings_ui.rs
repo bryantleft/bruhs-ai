@@ -44,6 +44,7 @@ mod actions;
 mod note_detail;
 pub(super) mod note_editor;
 mod notes;
+pub(super) mod people_view;
 pub(super) mod suggestions;
 pub(super) mod transcript_view;
 
@@ -76,6 +77,8 @@ pub(super) struct PersonMergePanel {
     /// The profile picked to merge into, if any yet.
     pub(super) target_id: Option<String>,
     pub(super) dropdown_open: bool,
+    /// The confirmation step is showing; only its button sends the merge.
+    pub(super) confirming: bool,
 }
 
 /// A transcript speaker chip: the one being renamed, or whose link menu is
@@ -2191,892 +2194,6 @@ impl Workspace {
             .into_any_element()
     }
 
-    // ── People page ──────────────────────────────────────────────────────
-
-    fn load_relationship_inputs(
-        &mut self,
-        person_id: &str,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let profile = self
-            .relationships
-            .iter()
-            .find(|profile| profile.person_id == person_id)
-            .cloned()
-            .unwrap_or_else(|| RelationshipProfile::new(person_id, EpochMs::now().as_millis()));
-        for (input, value) in [
-            (&self.relationship_company_input, profile.company),
-            (&self.relationship_role_input, profile.role),
-            (&self.relationship_email_input, profile.email),
-            (&self.relationship_phone_input, profile.phone),
-            (&self.relationship_location_input, profile.location),
-            (&self.relationship_notes_input, profile.notes),
-        ] {
-            input.update(cx, |input, cx| input.set_value(value, window, cx));
-        }
-        self.relationship_item_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.relationship_item_kind = RelationshipItemKind::Interaction;
-    }
-
-    fn relationship_profile_mut(&mut self, person_id: &str) -> &mut RelationshipProfile {
-        if let Some(index) = self
-            .relationships
-            .iter()
-            .position(|profile| profile.person_id == person_id)
-        {
-            &mut self.relationships[index]
-        } else {
-            self.relationships.push(RelationshipProfile::new(
-                person_id,
-                EpochMs::now().as_millis(),
-            ));
-            self.relationships
-                .last_mut()
-                .expect("relationship profile was inserted")
-        }
-    }
-
-    fn save_relationship_details(&mut self, person_id: &str, cx: &mut Context<'_, Self>) {
-        let company = self
-            .relationship_company_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        let role = self
-            .relationship_role_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        let email = self
-            .relationship_email_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        let phone = self
-            .relationship_phone_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        let location = self
-            .relationship_location_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        let notes = self
-            .relationship_notes_input
-            .read(cx)
-            .value()
-            .trim()
-            .to_string();
-        let profile = self.relationship_profile_mut(person_id);
-        profile.company = company;
-        profile.role = role;
-        profile.email = email;
-        profile.phone = phone;
-        profile.location = location;
-        profile.notes = notes;
-        profile.updated_at_ms = EpochMs::now().as_millis();
-        self.persist_and_notify(cx);
-    }
-
-    fn cycle_relationship_item_kind(&mut self, cx: &mut Context<'_, Self>) {
-        self.relationship_item_kind = match self.relationship_item_kind {
-            RelationshipItemKind::Interaction => RelationshipItemKind::Commitment,
-            RelationshipItemKind::Commitment => RelationshipItemKind::Reminder,
-            RelationshipItemKind::Reminder => RelationshipItemKind::Note,
-            RelationshipItemKind::Note => RelationshipItemKind::Interaction,
-        };
-        cx.notify();
-    }
-
-    fn add_relationship_item(
-        &mut self,
-        person_id: &str,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        let text = self.relationship_item_input.read(cx).value().to_string();
-        let now = EpochMs::now().as_millis();
-        let mut item = bruhs_models::RelationshipItem::new(self.relationship_item_kind, text, now);
-        if item.text.is_empty() {
-            return;
-        }
-        if matches!(
-            item.kind,
-            RelationshipItemKind::Commitment | RelationshipItemKind::Reminder
-        ) {
-            item.due_at_ms = Some(now + 86_400_000);
-        }
-        self.relationship_profile_mut(person_id).add_item(item, now);
-        self.relationship_item_input
-            .update(cx, |input, cx| input.set_value("", window, cx));
-        self.persist_and_notify(cx);
-    }
-
-    fn toggle_relationship_item(
-        &mut self,
-        person_id: &str,
-        item_id: &str,
-        cx: &mut Context<'_, Self>,
-    ) {
-        self.relationship_profile_mut(person_id)
-            .toggle_item(item_id, EpochMs::now().as_millis());
-        self.persist_and_notify(cx);
-    }
-
-    /// Web `PeoplePage`.
-    pub(super) fn render_people_page(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let hub = self.meetings_hub.read(cx);
-        let mut people = hub.people.clone();
-        people.sort_by_key(|p| std::cmp::Reverse(p.updated_at));
-        let enroll = hub.enroll.clone();
-        let mut page = div()
-            .id("desktop-people-page")
-            .debug_selector(|| "desktop-people-page".to_string())
-            .relative()
-            .flex_1()
-            .h_full()
-            .min_w_0()
-            .min_h_0()
-            .overflow_y_scroll()
-            .bg(theme::longan_950())
-            .p_4()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .child(label("People", H4_PX, theme::rambutan_100()).font_weight(FontWeight::MEDIUM));
-        if hub.needs_people_retry() {
-            page = page.child(
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_center()
-                    .gap_2()
-                    .child(label(
-                        if hub.pending_people_count() == 0 {
-                            "Contact refresh needs attention. Local records are retained.".into()
-                        } else { format!(
-                            "{} contact(s) awaiting sync or merge recovery. Check local save status.",
-                            hub.pending_people_count()
-                        ) },
-                        LABEL_PX,
-                        theme::rambutan_400(),
-                    ))
-                    .child(
-                        web_button(
-                            "retry-contact-sync",
-                            WebButtonVariant::Outline,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("Retry contact sync")
-                        .debug_selector(|| "desktop-retry-contact-sync".into())
-                        .child("Retry contact sync")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.meetings_hub
-                                .update(cx, |hub, cx| hub.retry_pending_people(cx));
-                        })),
-                    ),
-            );
-        }
-        if people.is_empty() {
-            page = page.child(label(
-                "No people yet. Profiles populate after your first meeting summary completes.",
-                LABEL_PX,
-                theme::rambutan_500(),
-            ));
-        } else {
-            let all = people.clone();
-            page = page.child(
-                div().flex().flex_col().gap_2().children(
-                    people
-                        .into_iter()
-                        .enumerate()
-                        .map(|(i, p)| self.render_person_card(i, p, &all, cx)),
-                ),
-            );
-        }
-        if let Some((person_id, state)) = enroll {
-            let name = hub
-                .people
-                .iter()
-                .find(|p| p.id == person_id)
-                .map_or_else(String::new, |p| p.display_name.clone());
-            page = page.child(self.render_enroll_modal(name, state, cx));
-        }
-        page.into_any_element()
-    }
-
-    fn render_person_card(
-        &self,
-        index: usize,
-        profile: Arc<PersonProfile>,
-        all: &[Arc<PersonProfile>],
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let id = profile.id.clone();
-        let expanded = self.expanded_person_id.as_deref() == Some(id.as_str());
-        let renaming = self.renaming_person_id.as_deref() == Some(id.as_str());
-        let merge_open = self
-            .merge
-            .as_ref()
-            .is_some_and(|merge| merge.person_id == id);
-        let tracked = profile.tracked;
-        let obs_count = profile.observations.len();
-        let display_name = profile.display_name.clone();
-        let expand_label = format!(
-            "{} {display_name}",
-            if expanded { "Collapse" } else { "Expand" }
-        );
-
-        let id_toggle = id.clone();
-        let (id_rename, name_rename) = (id.clone(), display_name.clone());
-        let id_track = id.clone();
-        let id_merge = id.clone();
-        let id_enroll = id.clone();
-
-        let name_slot: AnyElement = if renaming {
-            div()
-                .w_full()
-                .rounded(px(4.0))
-                .bg(theme::longan_800())
-                .border_1()
-                .border_color(theme::longan_600())
-                .px_1()
-                .py(px(2.0))
-                .capture_action(cx.listener(|this, _: &InputEscape, _window, cx| {
-                    this.cancel_person_rename(cx);
-                    cx.stop_propagation();
-                }))
-                .child(
-                    Input::new(&self.person_rename_input)
-                        .appearance(false)
-                        .aria_label("Profile name"),
-                )
-                .into_any_element()
-        } else {
-            body(display_name, BODY_SM_PX, theme::rambutan_200()).into_any_element()
-        };
-
-        let mut card = div()
-            .id(("desktop-person-card", index))
-            .debug_selector(move || format!("desktop-person-card-{index}"))
-            .rounded(px(4.0))
-            .bg(theme::longan_900().opacity(0.5))
-            .border_1()
-            .border_color(theme::longan_700())
-            .p_3()
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .w_full()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .id(("desktop-person-expand", index))
-                            .debug_selector(move || format!("desktop-person-expand-{index}"))
-                            .flex_1()
-                            .min_w_0()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            // Web renders this expander as a <button>.
-                            .role(Role::Button)
-                            .aria_label(expand_label)
-                            .aria_expanded(expanded)
-                            .tab_index(0)
-                            .border_1()
-                            .border_color(gpui::transparent_black())
-                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .cursor_pointer()
-                            .on_click(cx.listener(move |this, _ev, window, cx| {
-                                if this.renaming_person_id.is_some() {
-                                    return;
-                                }
-                                let opening =
-                                    this.expanded_person_id.as_deref() != Some(id_toggle.as_str());
-                                this.expanded_person_id = if !opening {
-                                    None
-                                } else {
-                                    Some(id_toggle.clone())
-                                };
-                                if opening {
-                                    this.load_relationship_inputs(&id_toggle, window, cx);
-                                }
-                                cx.notify();
-                            }))
-                            .child(name_slot)
-                            .when(!tracked, |el| {
-                                el.child(
-                                    div()
-                                        .rounded(px(4.0))
-                                        .bg(theme::longan_800())
-                                        .border_1()
-                                        .border_color(theme::longan_600())
-                                        .px_1()
-                                        .py(px(2.0))
-                                        .font_family(LABEL_FONT)
-                                        .text_size(px(LABEL_SM_PX))
-                                        .text_color(theme::rambutan_300())
-                                        .child("NOT TRACKED"),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .child(label(
-                                format!("{obs_count} obs"),
-                                LABEL_SM_PX,
-                                theme::rambutan_500(),
-                            ))
-                            .child(
-                                text_button(
-                                    ("desktop-person-rename", index),
-                                    "rename",
-                                    theme::rambutan_500(),
-                                    theme::rambutan_300(),
-                                )
-                                .aria_label(format!("Rename {}", profile.display_name))
-                                .on_click(cx.listener(
-                                    move |this, _ev, window, cx| {
-                                        this.begin_person_rename(
-                                            id_rename.clone(),
-                                            name_rename.clone(),
-                                            window,
-                                            cx,
-                                        );
-                                    },
-                                )),
-                            )
-                            .child(
-                                text_button(
-                                    ("desktop-person-track", index),
-                                    if tracked { "Untrack" } else { "Track" },
-                                    if tracked {
-                                        theme::pandan_400()
-                                    } else {
-                                        theme::rambutan_500()
-                                    },
-                                    if tracked {
-                                        theme::pandan_100()
-                                    } else {
-                                        theme::rambutan_400()
-                                    },
-                                )
-                                .aria_label(format!(
-                                    "{} {}",
-                                    if tracked { "Untrack" } else { "Track" },
-                                    profile.display_name
-                                ))
-                                .on_click(cx.listener(
-                                    move |this, _ev, _window, cx| {
-                                        let pid = id_track.clone();
-                                        this.meetings_hub.update(cx, |hub, cx| {
-                                            hub.set_person_tracked(pid, !tracked, cx)
-                                        });
-                                    },
-                                )),
-                            )
-                            .child(
-                                text_button(
-                                    ("desktop-person-merge", index),
-                                    "⋯",
-                                    theme::rambutan_500(),
-                                    theme::rambutan_300(),
-                                )
-                                .aria_label(format!(
-                                    "Merge {} with another profile",
-                                    profile.display_name
-                                ))
-                                .aria_expanded(merge_open)
-                                .on_click(cx.listener(
-                                    move |this, _ev, _window, cx| {
-                                        this.merge = if this
-                                            .merge
-                                            .as_ref()
-                                            .is_some_and(|merge| merge.person_id == id_merge)
-                                        {
-                                            None
-                                        } else {
-                                            Some(PersonMergePanel {
-                                                person_id: id_merge.clone(),
-                                                target_id: None,
-                                                dropdown_open: false,
-                                            })
-                                        };
-                                        cx.notify();
-                                    },
-                                )),
-                            )
-                            .child(
-                                text_button(
-                                    ("desktop-person-enroll", index),
-                                    "enroll",
-                                    theme::rambutan_500(),
-                                    theme::pandan_300(),
-                                )
-                                .aria_label(format!("Enroll voice for {}", profile.display_name))
-                                .on_click(cx.listener(
-                                    move |this, _ev, _window, cx| {
-                                        let pid = id_enroll.clone();
-                                        this.meetings_hub
-                                            .update(cx, |hub, cx| hub.open_enroll(pid, cx));
-                                    },
-                                )),
-                            ),
-                    ),
-            );
-        if merge_open {
-            card = card.child(self.render_merge_panel(&id, all, cx));
-        }
-        if expanded {
-            if !tracked {
-                card = card.child(
-                    label(
-                        "Observation tracking is off. Summaries add no observations about this person, and agents cannot read the saved ones.",
-                        LABEL_SM_PX,
-                        theme::rambutan_400(),
-                    )
-                    .debug_selector(|| "desktop-person-opt-out".into()),
-                );
-            }
-            card = card
-                .child(self.render_relationship_panel(&id, cx))
-                .child(self.render_observations_by_kind(index, &profile.observations, cx));
-        }
-        card.into_any_element()
-    }
-
-    fn render_relationship_panel(&self, person_id: &str, cx: &Context<'_, Self>) -> AnyElement {
-        let person_for_save = person_id.to_string();
-        let person_for_add = person_id.to_string();
-        let profile = self
-            .relationships
-            .iter()
-            .find(|profile| profile.person_id == person_id);
-        let items = profile
-            .map(|profile| profile.items.clone())
-            .unwrap_or_default()
-            .into_iter()
-            .enumerate()
-            .map(|(index, item)| {
-                let person_id = person_id.to_string();
-                let item_id = item.id.clone();
-                let person_id_key = person_id.clone();
-                let item_id_key = item_id.clone();
-                let complete = item.completed_at_ms.is_some();
-                div()
-                    .id(("relationship-item", index))
-                    .debug_selector(move || format!("desktop-relationship-item-{index}"))
-                    .role(Role::Button)
-                    .aria_label(format!("Toggle {}", item.text))
-                    .tab_index(0)
-                    .cursor_pointer()
-                    .rounded(px(4.0))
-                    .px_2()
-                    .py_1()
-                    .hover(|element| element.bg(theme::longan_800().opacity(0.7)))
-                    .border_1()
-                    .border_color(gpui::transparent_black())
-                    .focus_visible(|element| element.border_color(theme::persimmon_400()))
-                    .on_click(cx.listener(move |this, _event, _window, cx| {
-                        this.toggle_relationship_item(&person_id, &item_id, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            this.toggle_relationship_item(&person_id_key, &item_id_key, cx);
-                        }
-                    }))
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(if complete {
-                                theme::rambutan_400()
-                            } else {
-                                theme::rambutan_300()
-                            })
-                            .child(format!(
-                                "{} {}",
-                                if complete { "✓" } else { "○" },
-                                item.text
-                            )),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(theme::rambutan_400())
-                            .child(item.kind.label()),
-                    )
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
-        let suggestions = bruhs_models::suggested_follow_ups(
-            &self.relationships,
-            &self.inbox_conversations,
-            EpochMs::now().as_millis(),
-        )
-        .into_iter()
-        .filter(|suggestion| suggestion.person_id == person_id)
-        .map(|suggestion| {
-            div()
-                .font_family(LABEL_FONT)
-                .text_size(px(LABEL_SM_PX))
-                .text_color(theme::blueberry_200())
-                .child(suggestion.reason)
-                .into_any_element()
-        })
-        .collect::<Vec<_>>();
-
-        div()
-            .mt_2()
-            .pt_3()
-            .border_t_1()
-            .border_color(theme::longan_700())
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(theme::rambutan_200())
-                            .child("Relationship"),
-                    )
-                    .child(
-                        web_button(
-                            ("save-relationship", element_key(person_id)),
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("Save details")
-                        .child("Save details")
-                        .on_click(cx.listener(
-                            move |this, _event, _window, cx| {
-                                this.save_relationship_details(&person_for_save, cx)
-                            },
-                        )),
-                    ),
-            )
-            .child(
-                div()
-                    .grid()
-                    .grid_cols(3)
-                    .gap_2()
-                    .child(Input::new(&self.relationship_company_input))
-                    .child(Input::new(&self.relationship_role_input))
-                    .child(Input::new(&self.relationship_email_input))
-                    .child(Input::new(&self.relationship_phone_input))
-                    .child(Input::new(&self.relationship_location_input))
-                    .child(Input::new(&self.relationship_notes_input)),
-            )
-            .children(suggestions)
-            .child(
-                div()
-                    .flex()
-                    .gap_2()
-                    .child(
-                        web_button(
-                            ("relationship-kind", element_key(person_id)),
-                            WebButtonVariant::Outline,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .child(self.relationship_item_kind.label())
-                        .on_click(cx.listener(
-                            |this, _event, _window, cx| this.cycle_relationship_item_kind(cx),
-                        )),
-                    )
-                    .child(
-                        div()
-                            .flex_1()
-                            .child(Input::new(&self.relationship_item_input)),
-                    )
-                    .child(
-                        web_button(
-                            ("add-relationship-item", element_key(person_id)),
-                            WebButtonVariant::Primary,
-                            WebButtonSize::Small,
-                            ButtonState::disabled_if(
-                                self.relationship_item_input
-                                    .read(cx)
-                                    .value()
-                                    .trim()
-                                    .is_empty(),
-                            ),
-                        )
-                        .aria_label("Add")
-                        .child("Add")
-                        .on_click(cx.listener(
-                            move |this, _event, window, cx| {
-                                this.add_relationship_item(&person_for_add, window, cx)
-                            },
-                        )),
-                    ),
-            )
-            .children(items)
-            .into_any_element()
-    }
-
-    /// Web `MergePanel`.
-    fn render_merge_panel(
-        &self,
-        source_id: &str,
-        all: &[Arc<PersonProfile>],
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let options: Vec<DropdownOption> = all
-            .iter()
-            .filter(|p| p.id != source_id)
-            .map(|p| DropdownOption {
-                value: Box::leak(p.id.clone().into_boxed_str()),
-                label: p.display_name.clone(),
-                description: None,
-            })
-            .collect();
-        let groups = vec![DropdownGroup {
-            label: None,
-            mark: None,
-            options,
-        }];
-        let entity = cx.entity().downgrade();
-        let toggle_entity = entity.clone();
-        let on_toggle: ToggleHandler = Rc::new(move |_window, cx| {
-            let _ = toggle_entity.update(cx, |this, cx| {
-                if let Some(merge) = &mut this.merge {
-                    merge.dropdown_open = !merge.dropdown_open;
-                }
-                cx.notify();
-            });
-        });
-        let on_select: SelectHandler = Rc::new(move |value, _window, cx| {
-            let _ = entity.update(cx, |this, cx| {
-                if let Some(merge) = &mut this.merge {
-                    merge.target_id = Some(value.to_string());
-                    merge.dropdown_open = false;
-                }
-                cx.notify();
-            });
-        });
-        let (value, dropdown_open) = self.merge.as_ref().map_or((String::new(), false), |merge| {
-            (
-                merge.target_id.clone().unwrap_or_default(),
-                merge.dropdown_open,
-            )
-        });
-        let can_merge = !value.is_empty();
-        let source = source_id.to_string();
-        div()
-            .debug_selector(|| "desktop-people-merge-panel".to_string())
-            .mt_1()
-            .p_2()
-            .rounded(px(4.0))
-            .bg(theme::longan_800().opacity(0.8))
-            .border_1()
-            .border_color(theme::longan_700())
-            .flex()
-            .flex_col()
-            .gap_2()
-            .child(label("Merge into:", LABEL_SM_PX, theme::rambutan_400()))
-            .child(dropdown(
-                MERGE_DROPDOWN_ID,
-                "Merge into",
-                &value,
-                groups,
-                Listbox::open_if(dropdown_open),
-                on_toggle,
-                on_select,
-            ))
-            .child(
-                div()
-                    .flex()
-                    .justify_end()
-                    .gap_2()
-                    .child(
-                        text_button(
-                            "desktop-people-merge-cancel",
-                            "Cancel",
-                            theme::rambutan_500(),
-                            theme::rambutan_300(),
-                        )
-                        .on_click(cx.listener(|this, _ev, _window, cx| {
-                            this.merge = None;
-                            cx.notify();
-                        })),
-                    )
-                    .child(
-                        text_button(
-                            "desktop-people-merge-confirm",
-                            "Merge",
-                            theme::persimmon_400(),
-                            theme::persimmon_200(),
-                        )
-                        .when(!can_merge, |el| el.opacity(0.4).cursor_default())
-                        .when(can_merge, |el| {
-                            el.on_click(cx.listener(move |this, _ev, _window, cx| {
-                                let Some(target) = this
-                                    .merge
-                                    .as_ref()
-                                    .and_then(|merge| merge.target_id.clone())
-                                else {
-                                    return;
-                                };
-                                this.merge = None;
-                                let source = source.clone();
-                                this.meetings_hub
-                                    .update(cx, |hub, cx| hub.merge_people(source, target, cx));
-                            }))
-                        }),
-                    ),
-            )
-            .into_any_element()
-    }
-
-    /// Web `ObservationsByKind`.
-    fn render_observations_by_kind(
-        &self,
-        card: usize,
-        observations: &[PersonObservation],
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let hub = self.meetings_hub.read(cx);
-        let title = |meeting_id: &str| {
-            hub.meetings
-                .iter()
-                .find(|meeting| meeting.id == meeting_id)
-                .map(|meeting| meeting.title.clone())
-        };
-        let mut row = 0usize;
-        let mut by_kind: BTreeMap<&'static str, Vec<PersonObservation>> = BTreeMap::new();
-        for obs in observations {
-            by_kind
-                .entry(observation_kind_label(obs.kind))
-                .or_default()
-                .push(obs.clone());
-        }
-        for items in by_kind.values_mut() {
-            items.sort_by_key(|o| std::cmp::Reverse(o.created_at));
-        }
-        div()
-            .pt_2()
-            .flex()
-            .flex_col()
-            .gap_3()
-            .children(by_kind.into_iter().map(|(kind, items)| {
-                div()
-                    .flex()
-                    .flex_col()
-                    .gap_1()
-                    .child(label(
-                        kind.to_ascii_uppercase(),
-                        LABEL_SM_PX,
-                        theme::rambutan_500(),
-                    ))
-                    .children(items.into_iter().map(|o| {
-                        row += 1;
-                        // Provenance: open the meeting this observation came from.
-                        let source = match title(&o.at_meeting_id) {
-                            Some(title) => {
-                                let meeting_id = o.at_meeting_id.clone();
-                                text_button(
-                                    ("desktop-observation-source", card * 10_000 + row),
-                                    format!("From {title}"),
-                                    theme::blueberry_200(),
-                                    theme::rambutan_100(),
-                                )
-                                .aria_label(format!("Open source meeting {title}"))
-                                .debug_selector(move || {
-                                    format!("desktop-observation-source-{card}-{row}")
-                                })
-                                .on_click(cx.listener(move |this, _event, _window, cx| {
-                                    this.open_meeting_detail(meeting_id.clone(), cx)
-                                }))
-                                .into_any_element()
-                            }
-                            None => label(
-                                "Source meeting is not stored",
-                                LABEL_SM_PX,
-                                theme::rambutan_500(),
-                            )
-                            .into_any_element(),
-                        };
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .items_baseline()
-                            .gap_2()
-                            .child(
-                                label(o.text, LABEL_PX, theme::rambutan_300())
-                                    .line_height(relative(1.375)),
-                            )
-                            .child(source)
-                    }))
-            }))
-            .into_any_element()
-    }
-
-    fn begin_person_rename(
-        &mut self,
-        person_id: String,
-        current: String,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if self
-            .merge
-            .as_ref()
-            .is_some_and(|merge| merge.person_id == person_id)
-        {
-            self.merge = None;
-        }
-        self.renaming_person_id = Some(person_id);
-        self.person_rename_input.update(cx, |input, cx| {
-            input.set_value(current, window, cx);
-        });
-        self.person_rename_input
-            .read(cx)
-            .focus_handle(cx)
-            .focus(window, cx);
-        cx.notify();
-    }
-
-    pub(super) fn commit_person_rename(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(person_id) = self.renaming_person_id.take() else {
-            return;
-        };
-        let name = self.person_rename_input.read(cx).value().to_string();
-        if !name.trim().is_empty() {
-            self.meetings_hub.update(cx, |hub, cx| {
-                hub.rename_person(person_id, name.trim().to_string(), cx)
-            });
-        }
-        cx.notify();
-    }
-
-    pub(super) fn cancel_person_rename(&mut self, cx: &mut Context<'_, Self>) {
-        self.renaming_person_id = None;
-        cx.notify();
-    }
-
     /// Web `VoiceEnrollModal`.
     fn render_enroll_modal(
         &self,
@@ -3600,6 +2717,7 @@ pub(super) struct PeopleInputs {
     pub(super) search_query_input: Entity<InputState>,
     pub(super) person_rename_input: Entity<InputState>,
     pub(super) speaker_rename_input: Entity<InputState>,
+    pub(super) people_page: people_view::PeoplePageState,
 }
 
 impl Workspace {
@@ -3694,6 +2812,22 @@ impl Workspace {
                 HubEvent::OpenMeetingChat { meeting_title, .. } => {
                     this.open_meeting_chat_thread(meeting_title.clone(), window, cx)
                 }
+                HubEvent::PersonDeleted { person, local_only } => {
+                    this.finish_person_delete(person.as_ref().clone(), *local_only, cx);
+                }
+                HubEvent::PersonRestored { person_id } => {
+                    this.finish_person_restore(person_id, cx);
+                }
+                HubEvent::PersonUnmerged { source_id } => {
+                    this.finish_person_unmerge(source_id, cx);
+                }
+                HubEvent::PeopleUndoReady(undo) => {
+                    this.people_page.undo = Some(undo.as_ref().clone());
+                    cx.notify();
+                }
+                HubEvent::PeopleUndoFailed(message) => {
+                    this.people_undo_failed(message.clone(), cx);
+                }
             },
         ));
         meetings_hub.update(cx, |hub, cx| hub.start(cx));
@@ -3761,7 +2895,9 @@ impl Workspace {
                 }
             },
         ));
+        let people_page = people_view::PeoplePageState::new(window, cx, subscriptions);
         PeopleInputs {
+            people_page,
             relationship_company_input,
             relationship_role_input,
             relationship_email_input,
@@ -3780,6 +2916,57 @@ impl Workspace {
 mod tests {
     use super::{speaker_colors, speaker_label, status_label};
     use bruhs_models::{MeetingStatus, Speaker};
+
+    struct KeyHarness {
+        focus: gpui::FocusHandle,
+        presses: usize,
+    }
+
+    impl gpui::Render for KeyHarness {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            cx: &mut gpui::Context<'_, Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::{InteractiveElement, ParentElement, StatefulInteractiveElement};
+            gpui::div().child(
+                super::text_button(
+                    "people-key-test",
+                    "rename",
+                    crate::theme::rambutan_500(),
+                    crate::theme::rambutan_300(),
+                )
+                .track_focus(&self.focus)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.presses += 1;
+                    cx.notify();
+                })),
+            )
+        }
+    }
+
+    /// PEOPLE-16: People text buttons (rename, track, merge, enroll, delete,
+    /// alias remove, reminder edit and delete) press with Enter and Space.
+    #[gpui::test]
+    fn people_text_buttons_activate_from_the_keyboard(cx: &mut gpui::TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, cx| KeyHarness {
+            focus: cx.focus_handle(),
+            presses: 0,
+        });
+        view.update_in(cx, |view, window, cx| view.focus.focus(window, cx));
+        cx.run_until_parked();
+        for key in ["enter", "space"] {
+            let keystroke = gpui::Keystroke::parse(key).unwrap();
+            cx.simulate_event(gpui::KeyDownEvent {
+                keystroke: keystroke.clone(),
+                is_held: false,
+                prefer_character_input: false,
+            });
+            cx.simulate_event(gpui::KeyUpEvent { keystroke });
+            cx.run_until_parked();
+        }
+        view.update_in(cx, |view, _, _| assert_eq!(view.presses, 2));
+    }
 
     #[test]
     fn speaker_labels_and_colors_follow_the_shared_grammar() {

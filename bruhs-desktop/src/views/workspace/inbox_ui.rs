@@ -48,7 +48,7 @@ impl Workspace {
         cx.notify();
     }
 
-    fn save_inbox_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn save_inbox_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let sender = self.inbox_sender_input.read(cx).value().trim().to_string();
         let body = self.inbox_body_input.read(cx).value().trim().to_string();
         if sender.is_empty() || body.is_empty() {
@@ -57,13 +57,13 @@ impl Workspace {
             return;
         }
         let now = EpochMs::now().as_millis();
-        let linked_person_id = self
-            .meetings_hub
-            .read(cx)
-            .people
-            .iter()
-            .find(|person| person.display_name.eq_ignore_ascii_case(&sender))
-            .map(|person| person.id.clone());
+        // Display names and aliases, Unicode case folded; a name two
+        // profiles answer to links to neither.
+        let linked_person_id = bruhs_models::unique_person_named(
+            self.meetings_hub.read(cx).people.iter().map(Arc::as_ref),
+            &sender,
+        )
+        .map(|person| person.id.clone());
         let mut conversation = InboxConversation::new(
             self.inbox_import_source,
             self.inbox_subject_input.read(cx).value().to_string(),

@@ -87,18 +87,49 @@ impl Workspace {
         )?;
         // All fallible preflight above; private links and original evidence share
         // the same whole-file save. No remote mutation or workflow re-approval.
+        let source_name = plan
+            .archive
+            .source
+            .as_ref()
+            .map_or_else(|| source_id.clone(), |source| source.display_name.clone());
+        let after_relationship = plan.relationship.clone();
         self.relationships
             .retain(|p| &p.person_id != source_id && &p.person_id != target_id);
         if let Some(relationship) = plan.relationship {
             self.relationships.push(relationship);
         }
+        // Inbox and knowledge links are recorded so an undo moves back exactly
+        // these; captures follow through the shared retarget below.
+        let links = bruhs_models::retarget_person_links(
+            source_id,
+            target_id,
+            &mut self.inbox_conversations,
+            &mut self.knowledge_documents,
+        );
         self.retarget_private_person_links(
             &[(source_id.clone(), target_id.clone())]
                 .into_iter()
                 .collect(),
         );
+        let mut archive = plan.archive;
+        archive.links = links.clone();
+        let confirmed_here = self.people_page.pending_merge.as_ref()
+            == Some(&(source_id.clone(), target_id.clone()));
+        if confirmed_here {
+            self.people_page.pending_merge = None;
+            self.people_page.undo = Some(bruhs_models::PeopleUndo::Merge {
+                source_id: source_id.clone(),
+                source_name,
+                target_id: target_id.clone(),
+                target_name: plan.canonical.display_name.clone(),
+                before_source: archive.source_relationship.clone(),
+                before_target: archive.target_relationship.clone(),
+                after_relationship,
+                links,
+            });
+        }
         self.meetings_hub.update(cx, |hub, cx| {
-            hub.commit_person_merge(source_id.clone(), plan.archive, plan.canonical, cx);
+            hub.commit_person_merge(source_id.clone(), archive, plan.canonical, cx);
             if plan.recovered_local_name {
                 hub.report_person_merge_conflict(RECOVERED_NAME_NOTICE.into(), cx);
             }

@@ -19,8 +19,13 @@ pub struct PeopleMergeArchive {
     pub source_relationship: Option<bruhs_models::RelationshipProfile>,
     pub target_relationship: Option<bruhs_models::RelationshipProfile>,
     pub target_id: String,
+    /// Private Inbox and knowledge links the merge moved to the target, so
+    /// an undo restores exactly those. Older snapshots have none recorded.
+    #[serde(default)]
+    pub links: bruhs_models::PersonLinkSet,
 }
 
+mod actions;
 mod reconcile;
 
 #[cfg(test)]
@@ -42,6 +47,7 @@ impl MeetingsHub {
         self.pending_person_creates = snapshot.pending_creates;
         self.person_merge_archives = snapshot.merge_archives;
         self.person_merge_recoveries = snapshot.merge_recoveries;
+        self.people_settled |= !self.people.is_empty();
         self.person_merges_waiting.clear();
         self.people_refresh_failed = false;
         self.person_creates_in_flight.clear();
@@ -86,6 +92,7 @@ impl MeetingsHub {
             // A refresh is not an acknowledgment of this client's pending create.
             if self.pending_person_creates.contains(&person.id)
                 || self.person_merge_archives.contains_key(&person.id)
+                || self.deleted_person_ids.contains(&person.id)
             {
                 continue;
             }
