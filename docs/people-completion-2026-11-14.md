@@ -126,9 +126,9 @@ apply them.
 | PEOPLE-13 | Toggling the opt-out shows a visible failure when the save fails and does not look applied. A confirmed change survives reload. | **Verified on web** (browser harness). Desktop shows a notice by source review, not exercised. |
 | PEOPLE-14 | Deleting a meeting removes or explicitly retains its derived observations by a documented rule. | **Implemented, unverified.** Rule decided (see Decided rules): both stores delete a meeting's derived observations in the same transaction and the route announces `PeopleUpdated`. No surface offers a meeting delete control. Not yet compiled or run: written under a machine-wide build hold. |
 | PEOPLE-15 | Compare web and desktop People pages with the same records at the same viewport. | **Unverified.** No same-size desktop screenshot was taken. Known gaps listed in the inventory. |
-| PEOPLE-16 | Keyboard and screen reader: every card action has a unique accessible name, focus is visible, and touch targets are 44px. | **Partially verified on web** (names and touch targets for the checked controls, harness). The web rename input still sits inside the expand button. Desktop keyboard activation of text buttons is unverified. |
+| PEOPLE-16 | Keyboard and screen reader: every card action has a unique accessible name, focus is visible, and touch targets are 44px. | **Partially verified on web** (names and touch targets for the checked controls, harness). The web rename field now sits beside the actions, outside the expand button; new controls carry unique accessible names. Desktop text buttons activate from Enter and Space through the gpui fork's focusable click handling; a GPUI test is written. Not yet compiled or run. |
 | PEOPLE-17 | 640×480, 390×844 touch and 1280×800 without horizontal overflow or hidden actions. | **Verified on web** for the checked flows (harness). Desktop unverified. |
-| PEOPLE-18 | Honest states: loading, empty, cache failure, sync failure, merge recovery, failed save. | **Partial.** Web has them; desktop lacks loading and merge recovery UI. Not exercised beyond PEOPLE-03 and PEOPLE-13. |
+| PEOPLE-18 | Honest states: loading, empty, cache failure, sync failure, merge recovery, failed save. | **Partial.** Web has them. Desktop now shows a loading state until the first restore or refresh settles and a merge recovery section with retry; its wording is close to the web's but the desktop keeps different recovery data and has no recovery data viewer. Not yet compiled or run. |
 | PEOPLE-19 | Measure People list and profile performance with a large directory. | **Unverified.** `bruhs-web/tests/people_scale_browser.mjs` measures list, search and profile timings with 5,000 synthetic people; not run yet. |
 
 ## Cross-pillar items
@@ -161,15 +161,22 @@ listed so a landing can merge them with care.
 | 2026-11-14 | PEOPLE-03, PEOPLE-05, PEOPLE-13, PEOPLE-16, PEOPLE-17 | Web and desktop UI fixes: visible rename and opt-out failures, blank-name refusal, opt-out explanation, accessible names, 44px touch sizing on card actions, observation source links, plain copy. Desktop GPUI check for the explanation and source navigation passes. First browser harness run on a debug bundle (`target/people-ui-qa-run1/`): 56 passed, 9 failed. All 9 failures were the source-link checks, 3 per cell: the web hydrates meetings only on the Meetings page, so a cold People visit labeled every source as not stored. Fixed by hydrating meetings from People and withholding the missing-source text until loading finishes. | Superseded by the next row. |
 | 2026-11-14 | PEOPLE-03, PEOPLE-05, PEOPLE-13, PEOPLE-16, PEOPLE-17 | Meeting hydration fix rechecked: `cargo clippy -p bruhs-web --target wasm32-unknown-unknown -- -D warnings` passes. Harness rerun: 111 of 111 passed. Visual review of the compact frame found the opt-out badge and count wrapping, then (after a first fix) card actions overflowing the card by about 19px. Neither was caught by the assertions, so a containment assertion was added. It failed red on compact and touch (4 failures), then passed after the header was made to wrap. Final run on a debug bundle: **117 passed, 0 failed** across 1280×800, 640×480 and 390×844 touch, 15 screenshots reviewed in `target/people-ui-qa/`. | Release bundle not built. Desktop same-size comparison not done. |
 | 2026-11-14 | Gate | `scripts/gate.sh --quick` was started and stopped during its first (fmt) step because free disk was 19 GB, below the agreed 20 GB floor for this shared machine. **The workspace gate has not passed on this branch.** Checks that did run: targeted tests above, `cargo check` of bruhs-desktop, wasm32 clippy of bruhs-web, `cargo fmt --all`. | Run `scripts/gate.sh --quick` (and the full gate) when disk allows. |
+| 2026-11-14 | PEOPLE-01, 02, 04, 06, 07, 08, 09, 10, 14, 16, 18, 19, cross-pillar | Source only, under a machine-wide build hold: nothing below was compiled, formatted or run. Shared rules in `bruhs_models` (`people_directory`, `people_changes`, `people_copy`, reminder edit and remove) with unit tests. Core: `delete_person`, `restore_person`, `unmerge_person`, `set_person_aliases` and the meeting delete cascade on both stores, sqlite schema 6, 15 new store tests in `meetings::people_lifecycle_tests` written against both stores. Server: four People routes and `PeopleUpdated` on meeting delete, with route tests. Web: create, search, aliases, linked records, reminders, confirmations, delete, undo, merge link repointing; People browser harness extended (create, search, aliases, linked records, reminders, merge and delete undo) and a 5,000-person timing run added. Desktop: the same flows in a new People view, 8 GPUI tests, Inbox auto link fix. | Compile, fix, run every queued check below, then move cases to Verified only on that evidence. Same-size desktop screenshots (PEOPLE-15, PEOPLE-17). |
 
 Reproduce:
 
 ```sh
 cargo test -p bruhs-models --lib person --locked
+cargo test -p bruhs-models --lib people_ --locked
+cargo test -p bruhs-models --lib relationship --locked
 cargo test -p bruhs-core --lib meetings:: --locked
-cargo test -p bruhs-desktop --bin bruhs-desktop people_read --locked
+cargo test -p bruhs-server people --locked
+cargo test -p bruhs-server meetings --locked
+cargo test -p bruhs-desktop --bin bruhs-desktop people --locked
+cargo test -p bruhs-desktop --bin bruhs-desktop inbox --locked
 (cd bruhs-web && trunk build --dist ../target/people-ui-dist)
 node bruhs-web/tests/people_browser.mjs
+BRUHS_PEOPLE_SCALE=5000 node bruhs-web/tests/people_scale_browser.mjs
 ```
 
 The harness uses isolated browser contexts and the real IndexedDB cache. It
