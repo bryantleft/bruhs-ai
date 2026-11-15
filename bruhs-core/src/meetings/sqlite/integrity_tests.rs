@@ -12,11 +12,11 @@ async fn cyclic_merge_receipt_fails_resolution_without_hanging_or_changing_origi
     store
         .call(|connection| {
             connection.execute(
-                "INSERT INTO merged_people VALUES('a','b','original-a','original-b')",
+                "INSERT INTO merged_people(source_id,target_id,source_original,target_original) VALUES('a','b','original-a','original-b')",
                 [],
             )?;
             connection.execute(
-                "INSERT INTO merged_people VALUES('b','a','original-b','original-a')",
+                "INSERT INTO merged_people(source_id,target_id,source_original,target_original) VALUES('b','a','original-b','original-a')",
                 [],
             )?;
             Ok(())
