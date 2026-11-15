@@ -404,6 +404,7 @@ pub fn MonthView() -> impl IntoView {
                     let task_rows = day_tasks.into_iter().map(|t| {
                         let id = t.id.clone();
                         let title = t.title;
+                        let label = format!("Open task {title}, due this day");
                         let open_task = move |_| {
                             day_list.set(None);
                             set_selected_work_item.set(Some(id.clone()));
@@ -416,7 +417,7 @@ pub fn MonthView() -> impl IntoView {
                                     type="button"
                                     on:click=open_task
                                     title="Task due"
-                                    aria-label=format!("Open task {title}, due this day")
+                                    aria-label=label
                                     data-day-list-task=t.id
                                     class="bruhs-control flex min-h-[32px] w-full items-center gap-2 rounded-grape px-2 text-left text-label-sm italic text-rambutan-300 hover:bg-longan-700 hover:text-rambutan-100 cursor-pointer"
                                 >

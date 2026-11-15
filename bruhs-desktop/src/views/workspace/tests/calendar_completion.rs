@@ -3,9 +3,9 @@
 //! disk (CAL-13) and fall-back planning, through GPUI test frames.
 
 use super::*;
+use crate::views::workspace::today_ui::planning_calendar_events_in;
 use crate::views::workspace::{
-    persisted_calendar_event, planning_calendar_events_in, restore_calendar_event,
-    DesktopProviderEvent, PersistedCalendarEvent,
+    persisted_calendar_event, restore_calendar_event, DesktopProviderEvent, PersistedCalendarEvent,
 };
 use chrono::{Local, TimeZone};
 
