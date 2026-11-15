@@ -266,13 +266,21 @@ pub async fn delete_meeting(
     State(state): State<Arc<AppState>>,
     Path(id): Path<MeetingId>,
 ) -> Result<StatusCode, AppError> {
-    if state.meetings().delete_meeting(&id).await? {
-        // The store deleted the observations derived from this meeting in the
-        // same commit (PEOPLE-14), so contact caches must refetch.
-        state.emit_meeting_event(bruhs_models::MeetingEvent::PeopleUpdated);
-        Ok(StatusCode::NO_CONTENT)
-    } else {
-        Err(meeting_not_found(&id))
+    match state
+        .meetings()
+        .delete_meeting_and_observations(&id)
+        .await?
+    {
+        Some(dropped) => {
+            // The store deleted the observations derived from this meeting in
+            // the same commit (PEOPLE-14). Contact caches refetch only when
+            // some went; a meeting with none announces nothing.
+            if dropped > 0 {
+                state.emit_meeting_event(bruhs_models::MeetingEvent::PeopleUpdated);
+            }
+            Ok(StatusCode::NO_CONTENT)
+        }
+        None => Err(meeting_not_found(&id)),
     }
 }
 
@@ -343,6 +351,103 @@ mod tests {
             .unwrap()
             .observations
             .is_empty());
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        let error = delete_meeting(State(state.clone()), Path(meeting.id.parse().unwrap()))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status(), StatusCode::NOT_FOUND);
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    /// A meeting with no derived observations is deleted without telling
+    /// contact caches to refetch, and no contact changes.
+    #[tokio::test]
+    async fn deleting_a_meeting_without_observations_announces_nothing() {
+        let state = Arc::new(AppState::new());
+        let Json(meeting) = create_meeting(
+            State(state.clone()),
+            Json(CreateMeetingRequest {
+                title: "Sync".into(),
+                started_at_ms: 1.0,
+                calendar_event_id: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let mut person = bruhs_models::PersonProfile::new("Ada");
+        person.observations.push(bruhs_models::PersonObservation {
+            at_meeting_id: "another-meeting".into(),
+            kind: bruhs_models::ObservationKind::Topic,
+            text: "Derived from a meeting that stays".into(),
+            created_at: 1,
+        });
+        let person = state.meetings().upsert_person(person).await.unwrap();
+        let mut events = state.subscribe_meeting_events();
+        let status = delete_meeting(State(state.clone()), Path(meeting.id.parse().unwrap()))
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert!(state
+            .meetings()
+            .get_meeting(&meeting.id)
+            .await
+            .unwrap()
+            .is_none());
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            state.meetings().get_person(&person.id).await.unwrap(),
+            Some(person)
+        );
+    }
+
+    #[tokio::test]
+    async fn failed_meeting_delete_preserves_data_and_announces_nothing() {
+        let state = Arc::new(AppState::new());
+        let Json(meeting) = create_meeting(
+            State(state.clone()),
+            Json(CreateMeetingRequest {
+                title: "Kept".into(),
+                started_at_ms: 1.0,
+                calendar_event_id: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let mut person = bruhs_models::PersonProfile::new("Ada");
+        person.updated_at = i64::MAX;
+        person.observations.push(bruhs_models::PersonObservation {
+            at_meeting_id: meeting.id.clone(),
+            kind: bruhs_models::ObservationKind::Topic,
+            text: "Kept when deletion fails".into(),
+            created_at: 1,
+        });
+        let person = state.meetings().upsert_person(person).await.unwrap();
+        let mut events = state.subscribe_meeting_events();
+        let error = delete_meeting(State(state.clone()), Path(meeting.id.parse().unwrap()))
+            .await
+            .unwrap_err();
+        assert_eq!(error.status(), StatusCode::CONFLICT);
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+        assert_eq!(
+            state.meetings().get_meeting(&meeting.id).await.unwrap(),
+            Some(meeting)
+        );
+        assert_eq!(
+            state.meetings().get_person(&person.id).await.unwrap(),
+            Some(person)
+        );
     }
 
     #[tokio::test]

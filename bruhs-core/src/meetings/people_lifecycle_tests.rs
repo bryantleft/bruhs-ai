@@ -503,6 +503,101 @@ async fn sqlite_meeting_delete_removes_derived_observations() {
     meeting_delete_contract(&store).await;
 }
 
+/// The count the server uses to decide whether contact caches must refetch.
+async fn meeting_delete_count_contract(store: &dyn MeetingStore) {
+    for id in ["m1", "m2", "m3"] {
+        let mut meeting = Meeting::new(id, 1.0);
+        meeting.id = id.into();
+        store.create_meeting(meeting).await.unwrap();
+    }
+    let ada = contact(
+        store,
+        "ada",
+        "Ada",
+        &[],
+        vec![
+            observation("m1", "One"),
+            observation("m1", "Two"),
+            observation("m3", "Kept"),
+        ],
+    )
+    .await;
+    let unrelated = contact(
+        store,
+        "unrelated",
+        "Unrelated",
+        &[],
+        vec![observation("missing", "Kept even without a meeting")],
+    )
+    .await;
+    assert_eq!(
+        store
+            .delete_meeting_and_observations(&"m1".parse().unwrap())
+            .await
+            .unwrap(),
+        Some(2)
+    );
+    assert!(store.get_meeting("m1").await.unwrap().is_none());
+    let after = store.get_person("ada").await.unwrap().unwrap();
+    assert_eq!(after.observations, vec![observation("m3", "Kept")]);
+    assert!(after.updated_at > ada.updated_at);
+    assert_eq!(
+        store
+            .delete_meeting_and_observations(&"m2".parse().unwrap())
+            .await
+            .unwrap(),
+        Some(0)
+    );
+    assert!(store.get_meeting("m2").await.unwrap().is_none());
+    for id in ["m1", "missing"] {
+        assert_eq!(
+            store
+                .delete_meeting_and_observations(&id.parse().unwrap())
+                .await
+                .unwrap(),
+            None
+        );
+    }
+    assert_eq!(store.get_person("ada").await.unwrap(), Some(after.clone()));
+    assert_eq!(
+        store.get_person("unrelated").await.unwrap(),
+        Some(unrelated.clone())
+    );
+
+    // A later exhausted contact prevents the deletion and every version bump.
+    // SQLite visits `ada` first, so this also checks rollback of its earlier edit.
+    let mut exhausted = PersonProfile::new("Exhausted");
+    exhausted.id = "z-exhausted".into();
+    exhausted.updated_at = i64::MAX;
+    exhausted.observations = vec![observation("m3", "Still present")];
+    let exhausted = store.upsert_person(exhausted).await.unwrap();
+    let meeting = store.get_meeting("m3").await.unwrap();
+    assert!(matches!(
+        store
+            .delete_meeting_and_observations(&"m3".parse().unwrap())
+            .await,
+        Err(MeetingStoreError::Conflict(_))
+    ));
+    assert_eq!(store.get_meeting("m3").await.unwrap(), meeting);
+    for expected in [after, unrelated, exhausted] {
+        assert_eq!(
+            store.get_person(&expected.id).await.unwrap(),
+            Some(expected)
+        );
+    }
+}
+
+#[tokio::test]
+async fn memory_meeting_delete_counts_derived_observations() {
+    meeting_delete_count_contract(&InMemoryMeetingStore::new()).await;
+}
+
+#[tokio::test]
+async fn sqlite_meeting_delete_counts_derived_observations() {
+    let (_directory, store) = sqlite_store().await;
+    meeting_delete_count_contract(&store).await;
+}
+
 /// A version 5 database (no deleted_people table, no merge link record)
 /// upgrades in place. Its legacy merges still undo, restoring profiles only.
 #[tokio::test]

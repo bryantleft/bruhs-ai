@@ -181,7 +181,17 @@ pub trait MeetingRecords: Send + Sync {
     /// Delete a meeting and, in the same commit, every person observation
     /// derived from it (PEOPLE-14). `false` when there was no such meeting,
     /// and then nothing changes.
-    async fn delete_meeting(&self, id: &bruhs_models::ids::MeetingId) -> MeetingStoreResult<bool>;
+    async fn delete_meeting(&self, id: &bruhs_models::ids::MeetingId) -> MeetingStoreResult<bool> {
+        Ok(self.delete_meeting_and_observations(id).await?.is_some())
+    }
+
+    /// [`Self::delete_meeting`], reporting how many derived observations left
+    /// with the meeting in the same commit. `None` when there was no such
+    /// meeting, and then nothing changes.
+    async fn delete_meeting_and_observations(
+        &self,
+        id: &bruhs_models::ids::MeetingId,
+    ) -> MeetingStoreResult<Option<usize>>;
 
     async fn append_segment(&self, segment: TranscriptSegment) -> MeetingStoreResult<()>;
 
