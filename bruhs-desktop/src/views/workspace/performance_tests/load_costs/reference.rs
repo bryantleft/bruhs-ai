@@ -49,6 +49,7 @@ impl RestoredRecords {
                             all_day: event.all_day,
                             color: event.color.clone(),
                             notes: event.notes.clone(),
+                            ..Default::default()
                         })
                     })
                     .collect::<Vec<_>>()

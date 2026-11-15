@@ -229,6 +229,53 @@ pub(super) fn parse_persisted_datetime(value: &str) -> Option<NaiveDateTime> {
     NaiveDateTime::parse_from_str(value, DESKTOP_DATETIME_FORMAT).ok()
 }
 
+/// A saved event in the zone `offset_at` describes. Files written since
+/// CAL-13 carry UTC instants, like the web, so the event keeps its moment
+/// when the machine zone changes. Older files carry only floating wall
+/// times; those are read once in the current zone (a repeated fall-back
+/// hour as its first occurrence) and saved as instants from then on.
+pub(super) fn restore_calendar_event(
+    event: PersistedCalendarEvent,
+    offset_at: impl Fn(i64) -> i32 + Copy,
+) -> Option<DesktopCalendarEvent> {
+    let (start_ms, end_ms) = match (event.start_at_ms, event.end_at_ms) {
+        (Some(start), Some(end)) => (start, end),
+        _ => (
+            instant_from_wall_clock(parse_persisted_datetime(&event.start_at)?, offset_at),
+            instant_from_wall_clock(parse_persisted_datetime(&event.end_at)?, offset_at),
+        ),
+    };
+    DesktopCalendarEvent {
+        id: event.id,
+        title: event.title,
+        all_day: event.all_day,
+        color: event.color,
+        notes: event.notes,
+        ..Default::default()
+    }
+    .with_instants_in(start_ms, end_ms, offset_at)
+}
+
+/// The saved form of a local event: its UTC instants plus the wall times
+/// older builds read.
+pub(super) fn persisted_calendar_event(
+    event: &DesktopCalendarEvent,
+    offset_at: impl Fn(i64) -> i32 + Copy,
+) -> PersistedCalendarEvent {
+    let (start_ms, end_ms) = event.instants_in(offset_at);
+    PersistedCalendarEvent {
+        id: event.id.clone(),
+        title: event.title.clone(),
+        start_at: event.start_at.format(DESKTOP_DATETIME_FORMAT).to_string(),
+        end_at: event.end_at.format(DESKTOP_DATETIME_FORMAT).to_string(),
+        all_day: event.all_day,
+        color: event.color.clone(),
+        notes: event.notes.clone(),
+        start_at_ms: Some(start_ms),
+        end_at_ms: Some(end_ms),
+    }
+}
+
 pub(super) fn initial_permission_mode_from_persisted(
     persisted: Option<&PersistedWorkspaceState>,
 ) -> PermissionMode {
@@ -398,15 +445,7 @@ impl Workspace {
             calendar_events: self
                 .calendar_events
                 .iter()
-                .map(|event| PersistedCalendarEvent {
-                    id: event.id.clone(),
-                    title: event.title.clone(),
-                    start_at: event.start_at.format(DESKTOP_DATETIME_FORMAT).to_string(),
-                    end_at: event.end_at.format(DESKTOP_DATETIME_FORMAT).to_string(),
-                    all_day: event.all_day,
-                    color: event.color.clone(),
-                    notes: event.notes.clone(),
-                })
+                .map(|event| persisted_calendar_event(event, local_offset_minutes_east))
                 .collect(),
             day_plan_undo: self.day_plan_undo.clone(),
             captures: self.captures.clone(),
@@ -596,19 +635,7 @@ impl RestoredRecords {
                     .collect(),
                 calendar_events: std::mem::take(&mut state.calendar_events)
                     .into_iter()
-                    .filter_map(|event| {
-                        let start_at = parse_persisted_datetime(&event.start_at)?;
-                        let end_at = parse_persisted_datetime(&event.end_at)?;
-                        Some(DesktopCalendarEvent {
-                            id: event.id,
-                            title: event.title,
-                            start_at,
-                            end_at,
-                            all_day: event.all_day,
-                            color: event.color,
-                            notes: event.notes,
-                        })
-                    })
+                    .filter_map(|event| restore_calendar_event(event, local_offset_minutes_east))
                     .collect(),
                 captures: std::mem::take(&mut state.captures),
                 knowledge_documents: std::mem::take(&mut state.knowledge_documents),

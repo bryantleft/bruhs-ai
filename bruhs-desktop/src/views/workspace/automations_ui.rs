@@ -400,6 +400,7 @@ impl Workspace {
                     all_day: false,
                     color: Some("persimmon".into()),
                     notes: Some("Created by an approved bruhs workflow.".into()),
+                    ..Default::default()
                 })
             }
             WorkflowOperation::CreateKnowledgeNote { title, body } => {

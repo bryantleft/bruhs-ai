@@ -81,6 +81,7 @@ fn populate(workspace: &mut Workspace, records: usize) {
             all_day: false,
             color: Some("pandan".into()),
             notes: Some(body.clone()),
+            ..Default::default()
         });
         let mut capture =
             CaptureRecord::new(CaptureKind::Note, &format!("Capture {index}\n{body}"), now)

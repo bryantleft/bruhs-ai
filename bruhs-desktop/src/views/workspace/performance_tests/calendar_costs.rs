@@ -19,6 +19,7 @@ fn event(id: &str, date: NaiveDate, hour: u32) -> DesktopCalendarEvent {
         all_day: false,
         color: Some("persimmon".into()),
         notes: Some("Complete saved event context. ".repeat(40)),
+        ..Default::default()
     }
 }
 

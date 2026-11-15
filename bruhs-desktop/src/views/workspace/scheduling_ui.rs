@@ -124,6 +124,7 @@ impl Workspace {
                     all_day: false,
                     color: Some("persimmon".to_string()),
                     notes: Some("Preserved during remote calendar conflict".to_string()),
+                    ..Default::default()
                 });
             }
         }
@@ -204,6 +205,7 @@ impl Workspace {
             all_day: false,
             color: Some("blueberry".to_string()),
             notes: Some(format!("Time block for task {task_id}")),
+            ..Default::default()
         });
         self.scheduling_selected_task_id = None;
         self.scheduling_error = None;

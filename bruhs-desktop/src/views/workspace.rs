@@ -328,7 +328,10 @@ struct DesktopTaskDrag {
     priority: DesktopPriority,
 }
 
-#[derive(Clone, Serialize)]
+/// A calendar event on the desktop grid. `start_at` and `end_at` are the
+/// wall-clock view of the stored instants in the machine zone, as the web
+/// shows `Date`s; the state file stores the instants (CAL-13).
+#[derive(Clone, Default, Serialize)]
 struct DesktopCalendarEvent {
     id: String,
     title: String,
@@ -337,6 +340,21 @@ struct DesktopCalendarEvent {
     all_day: bool,
     color: Option<String>,
     notes: Option<String>,
+    /// Set for a provider (Google) event, which is read only here.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    provider: Option<DesktopProviderEvent>,
+    /// The UTC instants (ms) this event was loaded or received with. While
+    /// the wall times still read the same, saving keeps them, so a time in
+    /// the repeated hour of a fall-back day keeps its own occurrence.
+    #[serde(skip)]
+    loaded_instants: Option<(i64, i64)>,
+}
+
+/// Provider details of a read-only event.
+#[derive(Clone, Debug, Default, PartialEq, Eq, Serialize)]
+struct DesktopProviderEvent {
+    /// The provider's web link, opened instead of editing.
+    html_link: Option<String>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -965,15 +983,23 @@ struct PersistedWorkItem {
     updated_at: EpochMs,
 }
 
-#[derive(Clone, Debug, Serialize, Deserialize)]
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
 struct PersistedCalendarEvent {
     id: String,
     title: String,
+    /// The wall-clock start in the zone at save time. Older builds stored
+    /// only these floating times; they still read them.
     start_at: String,
     end_at: String,
     all_day: bool,
     color: Option<String>,
     notes: Option<String>,
+    /// The UTC instants, as the web stores them. Missing in files written
+    /// before CAL-13; such times are read in the current zone once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    start_at_ms: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    end_at_ms: Option<i64>,
 }
 
 const DESKTOP_DATE_FORMAT: &str = "%Y-%m-%d";
@@ -1248,6 +1274,8 @@ pub struct Workspace {
     calendar_legacy_preparation: std::cell::Cell<bool>,
     selected_calendar_event_id: Option<String>,
     event_create_all_day: bool,
+    /// Set while the event dialog shows a read-only provider event.
+    event_dialog_provider: Option<DesktopProviderEvent>,
     event_create_color: String,
     event_create_error: Option<String>,
     timegrid_drag: Option<DesktopTimegridDragState>,
@@ -1905,6 +1933,7 @@ impl Workspace {
                     .and_then(|state| state.selected_calendar_event_id.clone()),
             ),
             event_create_all_day: false,
+            event_dialog_provider: None,
             event_create_color: "persimmon".to_string(),
             event_create_error: None,
             timegrid_drag: None,

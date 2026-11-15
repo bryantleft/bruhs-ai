@@ -195,6 +195,8 @@ use gpui::px;
 use gpui::{AppContext as _, Entity, Focusable};
 use std::{cell::RefCell, fs, rc::Rc};
 
+mod calendar_completion;
+
 fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
     NaiveDate::from_ymd_opt(year, month, day)
         .and_then(|date| date.and_hms_opt(hour, minute, 0))
@@ -210,6 +212,7 @@ fn event(id: &str, start_at: NaiveDateTime, end_at: NaiveDateTime) -> DesktopCal
         all_day: false,
         color: None,
         notes: None,
+        ..Default::default()
     }
 }
 
@@ -1858,6 +1861,7 @@ fn desktop_event_edit_dialog_save_and_delete_should_match_web_flow(cx: &mut gpui
             all_day: false,
             color: Some("persimmon".to_string()),
             notes: Some("Original notes".to_string()),
+            ..Default::default()
         });
         workspace.open_event_edit("event-1".to_string(), window, cx);
     });
@@ -2146,6 +2150,7 @@ fn desktop_calendar_month_pills_should_match_web_click_flow(cx: &mut gpui::TestA
             all_day: false,
             color: Some("blueberry".to_string()),
             notes: None,
+            ..Default::default()
         }];
         workspace.work_items = vec![DesktopWorkItem {
             id: "task-1".to_string(),
@@ -2195,8 +2200,15 @@ fn desktop_calendar_month_pills_should_match_web_click_flow(cx: &mut gpui::TestA
 
     click_debug_selector(cx, task_pill);
     cx.run_until_parked();
-    workspace.update_in(cx, |workspace, _window, cx| {
-        assert_eq!(workspace.active_view, AppView::Calendar);
+    workspace.update_in(cx, |workspace, window, cx| {
+        // The due marker opens its task in Tasks, as the web does (CAL-14);
+        // selecting it alone left the calendar on screen.
+        assert_eq!(workspace.active_view, AppView::Tasks);
+        assert!(workspace
+            .task_detail_title_input
+            .read(cx)
+            .focus_handle(cx)
+            .contains_focused(window, cx));
         assert!(!workspace.event_create_visible());
         assert_eq!(workspace.selected_calendar_event_id, None);
         assert_eq!(workspace.selected_work_item_id.as_deref(), Some("task-1"));
@@ -2247,6 +2259,7 @@ fn desktop_calendar_timegrid_event_block_should_match_web_click_flow(
             all_day: false,
             color: Some("pandan".to_string()),
             notes: Some("Review resize behavior".to_string()),
+            ..Default::default()
         }];
         cx.notify();
     });
@@ -2330,6 +2343,7 @@ fn desktop_calendar_timegrid_move_and_resize_should_match_web_state_flow(
             all_day: false,
             color: Some("blueberry".to_string()),
             notes: None,
+            ..Default::default()
         }];
         cx.notify();
     });
@@ -3094,6 +3108,7 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
                     all_day: false,
                     color: None,
                     notes: None,
+                    ..Default::default()
                 }),
             }
             let before_tasks = workspace.planning_work_items();
