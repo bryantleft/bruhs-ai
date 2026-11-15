@@ -122,6 +122,62 @@ struct CalendarOutcome {
     delivered: bool,
     /// The calendar could not be listed; a `SyncFailed` was emitted.
     failed: bool,
+    /// The provider rejected the stored sync token (HTTP 410).
+    token_expired: bool,
+}
+
+/// The calendar one `sync_one_calendar` call lists.
+struct CalendarRef<'a> {
+    client: &'a CalendarClient,
+    access_token: &'a str,
+    local_id: &'a str,
+    provider_id: &'a str,
+}
+
+/// The end of one successful listing.
+struct Listed {
+    next_sync_token: Option<String>,
+}
+
+/// Days before now that a window listing covers.
+pub const SYNC_WINDOW_PAST_DAYS: i64 = 7;
+/// Days after now that a window listing covers: the six weeks a month
+/// grid can show from today.
+pub const SYNC_WINDOW_FUTURE_DAYS: i64 = 42;
+/// How old a window listing may get before the window is listed again.
+pub const WINDOW_RELIST_SECS: i64 = 86_400;
+
+/// A `timeMin`..`timeMax` listing range around a tick.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+struct SyncWindow {
+    time_min: chrono::DateTime<Utc>,
+    time_max: chrono::DateTime<Utc>,
+}
+
+impl SyncWindow {
+    fn around(now_ms: i64) -> Self {
+        let now = chrono::DateTime::<Utc>::from_timestamp_millis(now_ms).unwrap_or_else(Utc::now);
+        Self {
+            time_min: now - ChronoDuration::days(SYNC_WINDOW_PAST_DAYS),
+            time_max: now + ChronoDuration::days(SYNC_WINDOW_FUTURE_DAYS),
+        }
+    }
+}
+
+/// One `events.list` request shape.
+#[derive(Debug, Clone, Copy)]
+enum Listing<'a> {
+    /// Changes since a sync token.
+    Changes(&'a str),
+    /// Every event in a range.
+    Window(SyncWindow),
+}
+
+/// Whether the window has not been listed within [`WINDOW_RELIST_SECS`].
+fn window_relist_due(cursor: &SyncCursor, now_ms: i64) -> bool {
+    cursor.window_listed_at_ms.is_none_or(|listed| {
+        now_ms.saturating_sub(listed) >= WINDOW_RELIST_SECS.saturating_mul(1_000)
+    })
 }
 
 impl SyncEngine {
@@ -236,8 +292,16 @@ impl SyncEngine {
     }
 
     /// Sync a single calendar. Never errors; failures are emitted as
-    /// `SyncFailed` events. With `full`, the stored sync token is ignored
-    /// and the whole window is listed again.
+    /// `SyncFailed` events.
+    ///
+    /// Without a stored sync token (first run, after a 410, or with
+    /// `full`) the sync window is listed and its `nextSyncToken` starts the
+    /// incremental chain. With a token, changes since it are listed; then,
+    /// once the last window listing is older than [`WINDOW_RELIST_SECS`],
+    /// the window is listed again so instances of unchanged recurring
+    /// series that slid into it arrive. That relisting only adds upserts:
+    /// the incremental token chain continues untouched, so no change made
+    /// outside the window is skipped.
     async fn sync_one_calendar(
         &self,
         client: &CalendarClient,
@@ -264,32 +328,119 @@ impl SyncEngine {
             delivered: true,
             ..CalendarOutcome::default()
         };
+        let calendar = CalendarRef {
+            client,
+            access_token,
+            local_id,
+            provider_id,
+        };
+
+        let Some(token) = request_token else {
+            let window = SyncWindow::around(now_ms);
+            let Some(listed) = self
+                .list_all_pages(&calendar, Listing::Window(window), now_ms, &mut outcome)
+                .await
+            else {
+                return outcome;
+            };
+            if outcome.delivered {
+                if let Some(ns) = listed.next_sync_token {
+                    cursor.sync_token = Some(ns);
+                }
+                cursor.window_listed_at_ms = Some(now_ms);
+            } else {
+                tracing::info!(
+                    "holding sync token for {provider_id}: changes were not delivered to any subscriber"
+                );
+            }
+            cursor.last_synced_at_ms = Some(now_ms);
+            self.save_cursor(provider_id, cursor).await;
+            return outcome;
+        };
+
+        match self
+            .list_all_pages(&calendar, Listing::Changes(&token), now_ms, &mut outcome)
+            .await
+        {
+            Some(listed) if outcome.delivered => {
+                if let Some(ns) = listed.next_sync_token {
+                    cursor.sync_token = Some(ns);
+                }
+            }
+            Some(_) => tracing::info!(
+                "holding sync token for {provider_id}: changes were not delivered to any subscriber"
+            ),
+            None if outcome.token_expired => {
+                cursor.sync_token = None;
+                self.save_cursor(provider_id, cursor).await;
+                return outcome;
+            }
+            None => return outcome,
+        }
+
+        if window_relist_due(&cursor, now_ms) {
+            let changes_delivered = outcome.delivered;
+            outcome.delivered = true;
+            let window = SyncWindow::around(now_ms);
+            let listed = self
+                .list_all_pages(&calendar, Listing::Window(window), now_ms, &mut outcome)
+                .await;
+            if listed.is_none() {
+                // The changes above were handled; keep their token.
+                self.save_cursor(provider_id, cursor).await;
+                outcome.delivered = false;
+                return outcome;
+            }
+            if outcome.delivered {
+                cursor.window_listed_at_ms = Some(now_ms);
+            }
+            outcome.delivered &= changes_delivered;
+        }
+        cursor.last_synced_at_ms = Some(now_ms);
+        self.save_cursor(provider_id, cursor).await;
+        outcome
+    }
+
+    /// Lists every page of one request, emitting its changes. Returns the
+    /// final page's `nextSyncToken`, or `None` when a request failed (a
+    /// `SyncFailed` was emitted and `outcome` marks the failure).
+    async fn list_all_pages(
+        &self,
+        calendar: &CalendarRef<'_>,
+        listing: Listing<'_>,
+        now_ms: i64,
+        outcome: &mut CalendarOutcome,
+    ) -> Option<Listed> {
+        let provider_id = calendar.provider_id;
         let mut page_token: Option<String> = None;
         loop {
-            let req = build_request_for(provider_id, request_token.as_deref(), page_token.take());
-            let resp = match client.list_events(access_token, &req).await {
+            let req = build_request_for(provider_id, listing, page_token.take());
+            let resp = match calendar
+                .client
+                .list_events(calendar.access_token, &req)
+                .await
+            {
                 Ok(r) => r,
                 Err(OAuthError::Status { status: 410, body }) => {
                     tracing::info!("sync token invalidated for {provider_id}: 410");
-                    cursor.sync_token = None;
-                    self.save_cursor(provider_id, cursor).await;
                     self.emit_failed(
                         now_ms,
                         format!("sync token expired ({provider_id}): {body}"),
                     );
                     outcome.delivered = false;
                     outcome.failed = true;
-                    return outcome;
+                    outcome.token_expired = true;
+                    return None;
                 }
                 Err(e) => {
                     self.emit_failed(now_ms, format!("events.list ({provider_id}): {e}"));
                     outcome.delivered = false;
                     outcome.failed = true;
-                    return outcome;
+                    return None;
                 }
             };
             for raw in &resp.items {
-                match classify(raw, Some(local_id), now_ms) {
+                match classify(raw, Some(calendar.local_id), now_ms) {
                     Ok(ClassifiedEvent::Upsert(event)) => {
                         outcome.upserted += 1;
                         outcome.delivered &= self.emit(CalendarSyncEvent::EventUpserted { event });
@@ -308,18 +459,9 @@ impl SyncEngine {
                 page_token = Some(np);
                 continue;
             }
-            if outcome.delivered {
-                if let Some(ns) = resp.next_sync_token {
-                    cursor.sync_token = Some(ns);
-                }
-            } else {
-                tracing::info!(
-                    "holding sync token for {provider_id}: changes were not delivered to any subscriber"
-                );
-            }
-            cursor.last_synced_at_ms = Some(now_ms);
-            self.save_cursor(provider_id, cursor).await;
-            return outcome;
+            return Some(Listed {
+                next_sync_token: resp.next_sync_token,
+            });
         }
     }
 
@@ -423,25 +565,23 @@ fn merge_calendar_list(
 
 fn build_request_for(
     provider_id: &str,
-    sync_token: Option<&str>,
+    listing: Listing<'_>,
     page_token: Option<String>,
 ) -> ListEventsRequest {
-    if let Some(token) = sync_token {
-        ListEventsRequest {
+    match listing {
+        Listing::Changes(token) => ListEventsRequest {
             calendar_id: provider_id.to_string(),
             sync_token: Some(token.to_string()),
             page_token,
             ..Default::default()
-        }
-    } else {
-        let now = Utc::now();
-        ListEventsRequest {
+        },
+        Listing::Window(window) => ListEventsRequest {
             calendar_id: provider_id.to_string(),
-            time_min_rfc3339: Some((now - ChronoDuration::days(1)).to_rfc3339()),
-            time_max_rfc3339: Some((now + ChronoDuration::days(14)).to_rfc3339()),
+            time_min_rfc3339: Some(window.time_min.to_rfc3339()),
+            time_max_rfc3339: Some(window.time_max.to_rfc3339()),
             page_token,
             ..Default::default()
-        }
+        },
     }
 }
 
@@ -579,6 +719,7 @@ mod tick_tests {
                 SyncCursor {
                     sync_token: Some("tok-old".into()),
                     last_synced_at_ms: Some(1),
+                    window_listed_at_ms: None,
                 },
             )
             .await
@@ -800,6 +941,189 @@ mod tick_tests {
         for request in requests {
             assert_eq!(request.method.as_str(), "GET", "{}", request.url);
         }
+    }
+
+    async fn save_token_cursor(f: &Fixture, window_listed_at_ms: Option<i64>) {
+        f.engine
+            .files
+            .save_cursor(
+                PRIMARY_CALENDAR,
+                SyncCursor {
+                    sync_token: Some("tok-old".into()),
+                    last_synced_at_ms: Some(1),
+                    window_listed_at_ms,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
+    fn empty_changes(next: &str) -> ResponseTemplate {
+        ResponseTemplate::new(200)
+            .set_body_json(serde_json::json!({ "items": [], "nextSyncToken": next }))
+    }
+
+    async fn stored_cursor(f: &Fixture) -> SyncCursor {
+        f.engine.files.load_cursor(PRIMARY_CALENDAR).await.unwrap()
+    }
+
+    /// CAL-12: a sync token only reports changes, so instances of an
+    /// unchanged recurring series that slide into the window would never
+    /// arrive. A day-old window is listed again, and the incremental token
+    /// chain continues from the changes listing, not the window's token.
+    #[tokio::test]
+    async fn a_stale_window_is_listed_again_without_breaking_the_token_chain() {
+        let f = fixture().await;
+        let day_ms = 86_400_000;
+        save_token_cursor(&f, Some(Utc::now().timestamp_millis() - 2 * day_ms)).await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param("syncToken", "tok-old"))
+            .respond_with(empty_changes("tok-2"))
+            .expect(1)
+            .mount(&f.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param_is_missing("syncToken"))
+            .respond_with(one_event_page("tok-window"))
+            .expect(1)
+            .mount(&f.server)
+            .await;
+
+        let mut rx = f.engine.subscribe();
+        let before = Utc::now().timestamp_millis();
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        let events = drain(&mut rx);
+        assert!(
+            events
+                .iter()
+                .any(|e| matches!(e, CalendarSyncEvent::EventUpserted { .. })),
+            "{events:?}"
+        );
+        assert!(events
+            .iter()
+            .any(|e| matches!(e, CalendarSyncEvent::SyncCompleted { upserted: 1, .. })));
+        let cursor = stored_cursor(&f).await;
+        assert_eq!(cursor.sync_token.as_deref(), Some("tok-2"));
+        assert!(cursor.window_listed_at_ms.is_some_and(|at| at >= before));
+
+        // The window request covers the month grid ahead.
+        let requests = f.server.received_requests().await.unwrap();
+        let window = requests
+            .iter()
+            .find(|r| !r.url.query().unwrap_or_default().contains("syncToken"))
+            .expect("a window request");
+        let time_max = window
+            .url
+            .query_pairs()
+            .find(|(k, _)| k == "timeMax")
+            .map(|(_, v)| chrono::DateTime::parse_from_rfc3339(&v).unwrap())
+            .expect("timeMax");
+        assert!(
+            time_max.timestamp_millis() >= before + (SYNC_WINDOW_FUTURE_DAYS - 1) * day_ms,
+            "{time_max}"
+        );
+    }
+
+    /// A window listed within the last day is not listed again.
+    #[tokio::test]
+    async fn a_fresh_window_continues_by_sync_token_only() {
+        let f = fixture().await;
+        let listed_at = Utc::now().timestamp_millis() - 3_600_000;
+        save_token_cursor(&f, Some(listed_at)).await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param("syncToken", "tok-old"))
+            .respond_with(empty_changes("tok-2"))
+            .expect(1)
+            .mount(&f.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param_is_missing("syncToken"))
+            .respond_with(one_event_page("tok-window"))
+            .expect(0)
+            .mount(&f.server)
+            .await;
+
+        let _rx = f.engine.subscribe();
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        let cursor = stored_cursor(&f).await;
+        assert_eq!(cursor.sync_token.as_deref(), Some("tok-2"));
+        assert_eq!(cursor.window_listed_at_ms, Some(listed_at));
+    }
+
+    /// A cursor saved before the sliding window has no listing time, so the
+    /// first tick after an upgrade lists the window once.
+    #[tokio::test]
+    async fn a_cursor_from_before_the_sliding_window_lists_the_window_once() {
+        let f = fixture().await;
+        let cursors = f.dir.path().join("cursors");
+        save_token_cursor(&f, None).await;
+        let files: Vec<_> = std::fs::read_dir(&cursors)
+            .unwrap()
+            .filter_map(Result::ok)
+            .collect();
+        assert_eq!(files.len(), 1);
+        // The shape written by older builds.
+        std::fs::write(
+            files[0].path(),
+            r#"{ "sync_token": "tok-old", "last_synced_at_ms": 1 }"#,
+        )
+        .unwrap();
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param("syncToken", "tok-old"))
+            .respond_with(empty_changes("tok-2"))
+            .expect(1)
+            .mount(&f.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param("syncToken", "tok-2"))
+            .respond_with(empty_changes("tok-3"))
+            .expect(1)
+            .mount(&f.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param_is_missing("syncToken"))
+            .respond_with(one_event_page("tok-window"))
+            .expect(1)
+            .mount(&f.server)
+            .await;
+
+        let _rx = f.engine.subscribe();
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        assert_eq!(stored_cursor(&f).await.sync_token.as_deref(), Some("tok-3"));
+    }
+
+    /// A window listing nobody heard is listed again on the next tick.
+    #[tokio::test]
+    async fn an_undelivered_window_listing_is_retried() {
+        let f = fixture().await;
+        save_token_cursor(&f, None).await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param("syncToken", "tok-old"))
+            .respond_with(empty_changes("tok-old"))
+            .mount(&f.server)
+            .await;
+        Mock::given(method("GET"))
+            .and(path("/calendars/primary/events"))
+            .and(query_param_is_missing("syncToken"))
+            .respond_with(one_event_page("tok-window"))
+            .expect(2)
+            .mount(&f.server)
+            .await;
+
+        f.engine.run_tick(&f.cfg, &f.client).await; // nobody listening
+        assert_eq!(stored_cursor(&f).await.window_listed_at_ms, None);
+        let _rx = f.engine.subscribe();
+        f.engine.run_tick(&f.cfg, &f.client).await;
+        assert!(stored_cursor(&f).await.window_listed_at_ms.is_some());
     }
 
     #[tokio::test]
