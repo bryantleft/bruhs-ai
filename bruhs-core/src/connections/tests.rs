@@ -55,29 +55,6 @@ impl Connections {
         manager.0.store.metadata_only(provider, metadata);
         manager
     }
-
-    pub(crate) async fn test_connected(provider: ServiceProvider, value: &str) -> Self {
-        let manager = manager(provider, "http://127.0.0.1");
-        manager
-            .0
-            .store
-            .lease(provider)
-            .await
-            .unwrap()
-            .write(&Tokens {
-                id: "synthetic-connection".into(),
-                access_token: value.into(),
-                refresh_token: Some("synthetic-refresh".into()),
-                expires_at_ms: None,
-                account_id: "stable-subject".into(),
-                account: "you@example.test".into(),
-                scopes: manager.0.configs[&provider].scopes.clone(),
-                registration: manager.0.configs[&provider].registration(),
-            })
-            .await
-            .unwrap();
-        manager
-    }
 }
 
 async fn setup(provider: ServiceProvider) -> (Connections, MockServer) {
@@ -166,6 +143,10 @@ fn mail_connections_have_separate_scopes_and_registration_identity() {
         .iter()
         .any(|scope| scope.ends_with("Calendars.ReadBasic")));
     assert!(!microsoft.scopes.iter().any(|scope| scope.contains("Mail.")));
+    assert!(!microsoft
+        .scopes
+        .iter()
+        .any(|scope| scope.ends_with("User.Read")));
     assert!(oauth::require_mail_permissions(ServiceProvider::Gmail, &gmail.scopes).is_ok());
     assert!(oauth::require_mail_permissions(ServiceProvider::Outlook, &outlook.scopes).is_ok());
     assert_ne!(google.registration(), gmail.registration());
@@ -175,6 +156,225 @@ fn mail_connections_have_separate_scopes_and_registration_identity() {
         ServiceProvider::Microsoft.id(),
         ServiceProvider::Outlook.id()
     );
+}
+
+#[test]
+fn outlook_requests_and_requires_its_own_profile_read_permission() {
+    let config = oauth::Config::for_client(
+        ServiceProvider::Outlook,
+        "same-client".into(),
+        None,
+        Some("common"),
+    )
+    .unwrap();
+    let mut old = config.clone();
+    old.scopes.retain(|scope| !scope.ends_with("User.Read"));
+    assert_eq!(old.registration(), config.registration());
+    let url = url::Url::parse(
+        &config
+            .auth_url("http://127.0.0.1/callback", "state", "synthetic-verifier")
+            .unwrap(),
+    )
+    .unwrap();
+    let scopes = url.query_pairs().find(|(key, _)| key == "scope").unwrap().1;
+    assert!(scopes
+        .split_whitespace()
+        .any(|scope| scope == "https://graph.microsoft.com/User.Read"));
+    let mail_only: Vec<String> = ["openid", "profile", "email", "Mail.ReadWrite", "Mail.Send"]
+        .map(String::from)
+        .into();
+    assert!(matches!(
+        oauth::require_mail_permissions(ServiceProvider::Outlook, &mail_only),
+        Err(ConnectionError::MissingMailPermissions)
+    ));
+    for profile_scope in ["User.Read", "https://graph.microsoft.com/User.Read"] {
+        let mut complete = mail_only.clone();
+        complete.push(profile_scope.into());
+        assert!(oauth::require_mail_permissions(ServiceProvider::Outlook, &complete).is_ok());
+    }
+}
+
+#[tokio::test]
+async fn outlook_mail_grant_without_profile_read_cannot_complete_authorization() {
+    let provider = ServiceProvider::Outlook;
+    let server = MockServer::builder().start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token":"mail-only-canary", "refresh_token":"mail-only-refresh", "expires_in":3600,
+            "scope":"openid profile email Mail.ReadWrite Mail.Send", "token_type":"Bearer"
+        })))
+        .mount(&server)
+        .await;
+    Mock::given(method("GET"))
+        .and(path("/identity"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(
+                serde_json::json!({"sub":"stable-subject","email":"you@example.test"}),
+            ),
+        )
+        .mount(&server)
+        .await;
+    let manager = manager(provider, &server.uri());
+    let start = manager.start(provider).await.unwrap();
+    reqwest::get(callback(&start)).await.unwrap();
+    assert_eq!(
+        manager.attempt(&start.id).unwrap().state,
+        AttemptState::Failed
+    );
+    assert_eq!(
+        manager.connection(provider).await.unwrap().state,
+        ConnectionState::Disconnected
+    );
+    assert!(manager
+        .0
+        .store
+        .lease(provider)
+        .await
+        .unwrap()
+        .read()
+        .await
+        .unwrap()
+        .is_none());
+}
+
+#[tokio::test]
+async fn renewing_outlook_profile_consent_keeps_mailbox_identity_and_saved_drafts() {
+    let provider = ServiceProvider::Outlook;
+    let (manager, _server) = setup(provider).await;
+    let current = manager.0.configs[&provider].clone();
+    let mut legacy = current.clone();
+    legacy.scopes.retain(|scope| !scope.ends_with("User.Read"));
+    assert_eq!(legacy.registration(), current.registration());
+    let legacy_mailbox = crate::mail::MailboxId::from_broker_identity(
+        provider,
+        &legacy.registration(),
+        "stable-subject",
+    )
+    .unwrap();
+    let start = manager.start(provider).await.unwrap();
+    reqwest::get(callback(&start)).await.unwrap();
+    let connection = manager.connection(provider).await.unwrap();
+    let directory = tempfile::tempdir().unwrap();
+    let runtime = crate::mail::MailRuntime::open(directory.path().join("mail.sqlite3"))
+        .await
+        .unwrap();
+    let session = runtime
+        .session(&manager, provider, connection.id.as_deref().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(session.authorization().mailbox(), &legacy_mailbox);
+    let draft = legacy_mailbox
+        .draft("retained-across-profile-consent", None)
+        .unwrap();
+    let payload = serde_json::json!({"body":"Retain this mailbox draft"}).to_string();
+    session
+        .save_draft(draft.clone(), 0, payload.clone())
+        .await
+        .unwrap();
+    drop(session);
+    let old_id = {
+        let lease = manager.0.store.lease(provider).await.unwrap();
+        let mut tokens = lease.read().await.unwrap().unwrap();
+        tokens.scopes = legacy.scopes.clone();
+        let old_id = tokens.id.clone();
+        lease.write(&tokens).await.unwrap();
+        drop(lease);
+        old_id
+    };
+    assert_eq!(
+        manager.connection(provider).await.unwrap().state,
+        ConnectionState::NeedsSignIn
+    );
+    assert!(matches!(
+        manager.access(provider, &old_id).await,
+        Err(ConnectionError::MissingMailPermissions)
+    ));
+    assert_eq!(
+        runtime
+            .cached_draft(draft.clone())
+            .await
+            .unwrap()
+            .unwrap()
+            .1,
+        payload
+    );
+    let renewed = manager.start(provider).await.unwrap();
+    let auth = url::Url::parse(&renewed.auth_url).unwrap();
+    assert!(auth.query_pairs().any(|(key, value)| key == "scope"
+        && value
+            .split_whitespace()
+            .any(|scope| scope == "https://graph.microsoft.com/User.Read")));
+    reqwest::get(callback(&renewed)).await.unwrap();
+    assert_eq!(
+        manager.attempt(&renewed.id).unwrap().state,
+        AttemptState::Connected
+    );
+    let connection = manager.connection(provider).await.unwrap();
+    assert_eq!(connection.state, ConnectionState::Connected);
+    let session = runtime
+        .session(&manager, provider, connection.id.as_deref().unwrap())
+        .await
+        .unwrap();
+    assert_eq!(session.authorization().mailbox(), &legacy_mailbox);
+    assert_eq!(
+        runtime.cached_draft(draft).await.unwrap().unwrap().1,
+        payload
+    );
+    drop(session);
+}
+
+#[tokio::test]
+async fn refreshed_outlook_grant_without_profile_read_keeps_rotation_but_refuses_access() {
+    let provider = ServiceProvider::Outlook;
+    let server = MockServer::builder().start().await;
+    Mock::given(method("POST"))
+        .and(path("/token"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "access_token":"mail-only-canary", "refresh_token":"rotated-mail-only-canary", "expires_in":3600,
+            "scope":"openid profile email Mail.ReadWrite Mail.Send", "token_type":"Bearer"
+        })))
+        .mount(&server)
+        .await;
+    let manager = manager(provider, &server.uri());
+    manager
+        .0
+        .store
+        .lease(provider)
+        .await
+        .unwrap()
+        .write(&Tokens {
+            id: "mail-connection".into(),
+            access_token: "expired-canary".into(),
+            refresh_token: Some("old-refresh".into()),
+            expires_at_ms: Some(1),
+            account_id: "stable-subject".into(),
+            account: "you@example.test".into(),
+            registration: manager.0.configs[&provider].registration(),
+            scopes: manager.0.configs[&provider].scopes.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(matches!(
+        manager.access(provider, "mail-connection").await,
+        Err(ConnectionError::MissingMailPermissions)
+    ));
+    assert_eq!(
+        manager.connection(provider).await.unwrap().state,
+        ConnectionState::NeedsSignIn
+    );
+    let lease = manager.0.store.lease(provider).await.unwrap();
+    let saved = lease.read().await.unwrap().unwrap();
+    drop(lease);
+    assert_eq!(
+        saved.refresh_token.as_deref(),
+        Some("rotated-mail-only-canary")
+    );
+    assert_eq!(saved.access_token, "mail-only-canary");
+    assert!(saved
+        .scopes
+        .iter()
+        .all(|scope| !scope.ends_with("User.Read")));
 }
 
 #[tokio::test]
