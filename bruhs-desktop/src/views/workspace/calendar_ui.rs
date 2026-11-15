@@ -1,8 +1,8 @@
 //! Calendar page: header, month grid, week/day time grid, event and task pills, time-grid drag, and the date math behind them.
 
 use super::*;
-use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 pub(super) use crate::views::meetings_hub::local_offset_minutes_east;
+use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use std::collections::HashMap;
 
 impl DesktopTimegridDrag {
@@ -1711,34 +1711,36 @@ impl Workspace {
                             this.open_event_edit(event_id_for_key.clone(), window, cx);
                         }
                     }))
-                    .when(!read_only, |el| el.child(
-                        div()
-                            .id(("calendar-time-event-resize", element_key(&event.id)))
-                            .debug_selector(move || {
-                                format!("desktop-calendar-time-event-resize-{debug_key}")
-                            })
-                            .absolute()
-                            .left_0()
-                            .right_0()
-                            .bottom_0()
-                            .h(px(DESKTOP_TIMEGRID_RESIZE_HANDLE_PX))
-                            .cursor_ns_resize()
-                            .on_mouse_down(MouseButton::Left, |_, _, cx| {
-                                cx.stop_propagation();
-                            })
-                            .on_drag(resize_drag, {
-                                move |drag: &DesktopTimegridDrag, _offset, _window, cx| {
-                                    let _ = workspace.update(cx, |this, cx| {
-                                        this.begin_timegrid_drag(drag, 0.0, cx);
-                                    });
+                    .when(!read_only, |el| {
+                        el.child(
+                            div()
+                                .id(("calendar-time-event-resize", element_key(&event.id)))
+                                .debug_selector(move || {
+                                    format!("desktop-calendar-time-event-resize-{debug_key}")
+                                })
+                                .absolute()
+                                .left_0()
+                                .right_0()
+                                .bottom_0()
+                                .h(px(DESKTOP_TIMEGRID_RESIZE_HANDLE_PX))
+                                .cursor_ns_resize()
+                                .on_mouse_down(MouseButton::Left, |_, _, cx| {
                                     cx.stop_propagation();
-                                    cx.new(|_| drag.clone())
-                                }
-                            })
-                            .on_click(|_, _, cx| {
-                                cx.stop_propagation();
-                            }),
-                    ))
+                                })
+                                .on_drag(resize_drag, {
+                                    move |drag: &DesktopTimegridDrag, _offset, _window, cx| {
+                                        let _ = workspace.update(cx, |this, cx| {
+                                            this.begin_timegrid_drag(drag, 0.0, cx);
+                                        });
+                                        cx.stop_propagation();
+                                        cx.new(|_| drag.clone())
+                                    }
+                                })
+                                .on_click(|_, _, cx| {
+                                    cx.stop_propagation();
+                                }),
+                        )
+                    })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
                     }),
