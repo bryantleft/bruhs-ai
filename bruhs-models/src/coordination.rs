@@ -2,6 +2,8 @@
 use crate::{agent::PermissionMode, ids::ThreadId, EpochMs};
 use serde::{Deserialize, Serialize};
 
+pub mod board;
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum TaskState {
@@ -99,6 +101,10 @@ pub struct CoordinatedTask {
     pub auto_resume_on_limit: bool,
     #[serde(default)]
     pub limit_reported: bool,
+    /// Set when the owner archives a finished task; it leaves the board's
+    /// lanes but keeps its record. A new message brings it back.
+    #[serde(default)]
+    pub archived_at: Option<EpochMs>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -263,6 +269,12 @@ pub enum CoordinationCommand {
         enabled: bool,
     },
     DismissWake {
+        id: ThreadId,
+    },
+    Archive {
+        id: ThreadId,
+    },
+    Unarchive {
         id: ThreadId,
     },
 }

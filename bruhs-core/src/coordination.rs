@@ -16,10 +16,12 @@ use tokio::sync::{watch, Mutex, Semaphore};
 use tokio_stream::StreamExt;
 
 mod access;
+mod board;
 mod recovery;
 mod wait;
 mod wakes;
 pub use access::{AccessGrant, AccessScope, IssuedAccess};
+pub use board::{BoardLinks, LinkFuture, LinkSource};
 pub use recovery::ResetWorker;
 pub use wakes::WakeWorker;
 
@@ -422,6 +424,8 @@ impl CoordinationRuntime {
                 self.persist(&mut data).await?;
                 drop(data);
             }
+            CoordinationCommand::Archive { id } => self.set_archived(&id, true).await?,
+            CoordinationCommand::Unarchive { id } => self.set_archived(&id, false).await?,
             CoordinationCommand::AutoResume { id, enabled } => {
                 let mut data = self.0.data.lock().await;
                 let task = data.tasks.get_mut(&id).ok_or_else(|| not_found(&id))?;
@@ -548,12 +552,33 @@ impl CoordinationRuntime {
                 resume_at: None,
                 auto_resume_on_limit: false,
                 limit_reported: false,
+                archived_at: None,
             },
         );
         self.persist(&mut data).await?;
         drop(data);
         self.launch(id.clone()).await;
         Ok(id)
+    }
+
+    /// Archiving only files a finished task away: its record, transcript,
+    /// worktree and branch stay, and a new message brings it back.
+    async fn set_archived(&self, id: &ThreadId, archived: bool) -> Result<(), CoordinationError> {
+        let mut data = self.0.data.lock().await;
+        let task = data.tasks.get_mut(id).ok_or_else(|| not_found(id))?;
+        if archived && (task.state.active() || task.state == TaskState::Ready) {
+            return Err(conflict(
+                "This task is still running or queued. Stop it or let it finish before archiving.",
+            ));
+        }
+        let next = archived.then(|| task.archived_at.unwrap_or_else(EpochMs::now));
+        if task.archived_at == next {
+            return Ok(());
+        }
+        task.archived_at = next;
+        self.persist(&mut data).await?;
+        drop(data);
+        Ok(())
     }
 
     async fn send(&self, id: &ThreadId, prompt: String) -> Result<(), CoordinationError> {
@@ -577,6 +602,7 @@ impl CoordinationRuntime {
         });
         task.resume_at = None;
         task.limit_reported = false;
+        task.archived_at = None;
         task.live_output.clear();
         task.approvals.clear();
         task.error = None;
