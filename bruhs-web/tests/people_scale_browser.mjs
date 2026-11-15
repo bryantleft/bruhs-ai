@@ -41,6 +41,16 @@ const people = Array.from({ length: count }, (_, n) => ({
   created_at: 1_600_000_000_000,
   updated_at: 1_700_000_000_000 - n,
 }));
+// The server pages `/api/people/versions` by id, 256 entries at a time
+// (bruhs_models::PERSON_VERSION_PAGE_SIZE), with `?after=<last id>` and
+// `next_after` set only when more follow. The web refuses a larger page.
+const VERSION_PAGE_SIZE = 256;
+const versions = people.map(({ id, updated_at }) => ({ id, updated_at })).sort((a, b) => a.id < b.id ? -1 : 1);
+const versionPage = after => {
+  const rest = versions.filter(entry => entry.id > after).slice(0, VERSION_PAGE_SIZE + 1);
+  const entries = rest.slice(0, VERSION_PAGE_SIZE);
+  return { entries, next_after: rest.length > VERSION_PAGE_SIZE ? entries[entries.length - 1].id : null };
+};
 const meeting = { id: 'scale-meeting', title: 'Synthetic scale meeting', started_at_ms: 1_700_000_000_000, ended_at_ms: 1_700_000_600_000, status: 'ended', calendar_event_id: null, audio_path: null, language: null, speakers: [], summary: null, thread_id: null, skip_observations: false, created_at: 1_700_000_000_000, updated_at: 1_700_000_600_000 };
 
 const server = createServer(async (request, response) => {
@@ -82,7 +92,7 @@ try {
       if (api) {
         if (url.pathname.endsWith('/stream')) return route.continue({ url: `${origin}/__fixture-stream` });
         if (url.pathname === '/api/people') return json(people);
-        if (url.pathname === '/api/people/versions') return json({ entries: people.map(({ id, updated_at }) => ({ id, updated_at })).sort((a, b) => a.id < b.id ? -1 : 1), next_after: null });
+        if (url.pathname === '/api/people/versions') return json(versionPage(url.searchParams.get('after') ?? ''));
         if (url.pathname === '/api/meetings') return json([meeting]);
         if (url.pathname === '/api/reactive') return json({ agents: [], sources: [], subscriptions: [], events: [], runs: [], proposals: [], source_statuses: [] });
         if (url.pathname === '/api/weekly-reports') return json({ presets: [], reports: [], next_before: null });
