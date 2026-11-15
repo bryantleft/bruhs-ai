@@ -10,7 +10,7 @@ use bruhs_models::whiteboard::*;
 use leptos::{html, prelude::*};
 use std::{collections::BTreeMap, rc::Rc};
 use wasm_bindgen::{JsCast as _, JsValue};
-pub(super) const BUTTON: &str = "min-h-9 shrink-0 rounded-grape border border-longan-700 px-3 py-1 text-label-sm text-rambutan-200 hover:bg-longan-800 focus-visible:outline focus-visible:outline-persimmon-400 disabled:opacity-40 max-md:min-h-11";
+pub(super) const BUTTON: &str = "min-h-[36px] shrink-0 rounded-grape border border-longan-700 px-3 py-1 text-label-sm text-rambutan-200 hover:bg-longan-800 focus-visible:outline focus-visible:outline-persimmon-400 disabled:opacity-40 max-md:min-h-11";
 const FIELD: &str = "min-h-10 w-full rounded-grape border border-longan-700 bg-longan-950 px-3 py-2 text-[16px] text-rambutan-100 outline-none focus:border-persimmon-400";
 
 pub(crate) fn project_path() -> Option<String> {
@@ -100,7 +100,7 @@ pub(crate) fn Whiteboards(requested: Option<String>) -> impl IntoView {
         <Show when=move||selected.get().is_none()>
             <header class="flex flex-wrap items-center justify-between gap-3 border-b border-longan-800 px-5 py-4"><div><h1 class="text-h3 text-rambutan-100">"Whiteboards"</h1><p class="mt-1 text-body-sm text-rambutan-500">{move||project.get().unwrap_or_else(||"Choose a project folder".into())}</p></div><button class=BUTTON disabled=move||project.get().is_none() on:click=move|_|{if let Some(project)=project.get_untracked(){if let Err(e)=host.create_board(project,"Untitled board".into()){error.set(Some(e.to_string()));}}}>"New board"</button></header>
             <Show when=move||project.get().is_none()><div class="p-6 text-body-sm text-rambutan-400"><p>"Choose a project folder to create and reopen its boards."</p><button class=BUTTON on:click=move|_|{expect_context::<SetProjectPickerOpen>().0.set(true)}>"Choose project"</button></div></Show>
-            <div class="min-h-0 overflow-auto p-4"><For each=move||boards.get() key=|b|b.id.clone() children=move|board|{let id=board.id.clone();view!{<button class="mb-2 flex min-h-16 w-full items-center justify-between rounded-grape border border-longan-800 px-4 text-left hover:bg-longan-900" on:click=move|_|host.route(Some(id.clone()))><span class="text-label text-rambutan-200">{board.title}</span><span class="text-label-sm text-rambutan-500">{format!("{} shapes",board.shape_count)}</span></button>}}/></div>
+            <div class="min-h-0 overflow-auto p-4"><For each=move||boards.get() key=|b|b.id.clone() children=move|board|{let id=board.id.clone();view!{<button class="mb-2 flex min-h-[64px] w-full items-center justify-between rounded-grape border border-longan-800 px-4 text-left hover:bg-longan-900" on:click=move|_|host.route(Some(id.clone()))><span class="text-label text-rambutan-200">{board.title}</span><span class="text-label-sm text-rambutan-500">{format!("{} shapes",board.shape_count)}</span></button>}}/></div>
         </Show>
         <Show when=move||!loaded.get()><p role="status" class="p-4 text-body-sm">"Opening local board…"</p></Show>
         {move||selected.get().map(|id|view!{<Editor id=id/>})}

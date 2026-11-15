@@ -23,7 +23,7 @@ pub fn MetadataStatus(
                     SaveState::Error { message, .. } => message,
                     _ => String::new(),
                 }}</p>
-                <button type="button" class="mt-2 min-h-11 rounded-grape bg-longan-800 px-3 py-2 text-rambutan-200 disabled:opacity-40 cursor-pointer sm:min-h-6"
+                <button type="button" class="mt-2 min-h-11 rounded-grape bg-longan-800 px-3 py-2 text-rambutan-200 disabled:opacity-40 cursor-pointer sm:min-h-[24px]"
                     disabled=move || matches!(status.get(), SaveState::Error { conflict: true, .. })
                     on:click=move |_| retry.run(())>"Retry save"</button>
                 <details class="mt-2" on:toggle=move |event| {

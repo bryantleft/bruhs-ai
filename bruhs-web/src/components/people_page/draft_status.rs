@@ -38,8 +38,8 @@ pub(super) fn RelationshipDraftStatus() -> impl IntoView {
                             view! {
                                 <li class="flex flex-wrap items-center gap-2 text-label-sm">
                                     <span class="min-w-0 w-full break-words text-rambutan-300 sm:w-auto sm:flex-1">{move || name.get()}</span>
-                                    <button type="button" disabled=move || !exists() aria-label=move || format!("Open draft for {}", name.get()) class="min-h-11 rounded-grape bg-longan-800 px-3 py-2 disabled:opacity-40 cursor-pointer sm:min-h-6" on:click=move |_| selected.set(Some(id.get_value()))>"Open draft"</button>
-                                    <button type="button" aria-label=move || format!("Discard draft for {}", name.get()) class="min-h-11 rounded-grape px-3 py-2 text-lychee-300 hover:bg-longan-800 cursor-pointer sm:min-h-6" on:click=move |_| store.discard_editor_draft(&id.get_value())>"Discard draft"</button>
+                                    <button type="button" disabled=move || !exists() aria-label=move || format!("Open draft for {}", name.get()) class="min-h-11 rounded-grape bg-longan-800 px-3 py-2 disabled:opacity-40 cursor-pointer sm:min-h-[24px]" on:click=move |_| selected.set(Some(id.get_value()))>"Open draft"</button>
+                                    <button type="button" aria-label=move || format!("Discard draft for {}", name.get()) class="min-h-11 rounded-grape px-3 py-2 text-lychee-300 hover:bg-longan-800 cursor-pointer sm:min-h-[24px]" on:click=move |_| store.discard_editor_draft(&id.get_value())>"Discard draft"</button>
                                 </li>
                             }
                         }
@@ -48,7 +48,7 @@ pub(super) fn RelationshipDraftStatus() -> impl IntoView {
                 <Show when=move || { store.editor_draft_count() > 24 }>
                     <p class="text-label-sm text-rambutan-500">"Showing the first 24 drafts. Save or discard these to reach the rest; private recovery includes all drafts."</p>
                 </Show>
-                <button type="button" aria-expanded=move || show_private.get().to_string() class="min-h-11 rounded-seed px-2 py-1 text-label-sm text-rambutan-400 hover:text-rambutan-200 cursor-pointer sm:min-h-6" on:click=move |_| show_private.update(|show| *show = !*show)>
+                <button type="button" aria-expanded=move || show_private.get().to_string() class="min-h-11 rounded-seed px-2 py-1 text-label-sm text-rambutan-400 hover:text-rambutan-200 cursor-pointer sm:min-h-[24px]" on:click=move |_| show_private.update(|show| *show = !*show)>
                     {move || if show_private.get() { "Hide unsubmitted drafts" } else { "View unsubmitted drafts (private)" }}
                 </button>
                 <Show when=move || show_private.get()>
