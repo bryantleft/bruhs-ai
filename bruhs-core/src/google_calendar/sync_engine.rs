@@ -999,7 +999,7 @@ mod tick_tests {
             events
                 .iter()
                 .any(|e| matches!(e, CalendarSyncEvent::EventUpserted { .. })),
-            "{events:?}"
+            "a day-old window was not listed again: {events:?}"
         );
         assert!(events
             .iter()
@@ -1098,6 +1098,18 @@ mod tick_tests {
         f.engine.run_tick(&f.cfg, &f.client).await;
         f.engine.run_tick(&f.cfg, &f.client).await;
         assert_eq!(stored_cursor(&f).await.sync_token.as_deref(), Some("tok-3"));
+        let window_requests = f
+            .server
+            .received_requests()
+            .await
+            .unwrap()
+            .iter()
+            .filter(|r| !r.url.query().unwrap_or_default().contains("syncToken"))
+            .count();
+        assert_eq!(
+            window_requests, 1,
+            "a cursor from before the sliding window lists the window once"
+        );
     }
 
     /// A window listing nobody heard is listed again on the next tick.
@@ -1123,7 +1135,10 @@ mod tick_tests {
         assert_eq!(stored_cursor(&f).await.window_listed_at_ms, None);
         let _rx = f.engine.subscribe();
         f.engine.run_tick(&f.cfg, &f.client).await;
-        assert!(stored_cursor(&f).await.window_listed_at_ms.is_some());
+        assert!(
+            stored_cursor(&f).await.window_listed_at_ms.is_some(),
+            "a delivered window listing records its time"
+        );
     }
 
     #[tokio::test]
