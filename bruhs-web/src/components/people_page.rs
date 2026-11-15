@@ -266,7 +266,7 @@ fn PersonCard(person_id: String, directory: Memo<Directory>, cards: CardState) -
     let saves = expect_context::<crate::task_saves::TaskSaves>();
     let PeopleSignal(people) = expect_context::<PeopleSignal>();
     let SelectedPersonSignal(expanded) = expect_context::<SelectedPersonSignal>();
-    let id = StoredValue::new(person_id.clone());
+    let id = StoredValue::new(person_id);
     let summary = Memo::new(move |_| {
         directory.with(|directory| {
             directory

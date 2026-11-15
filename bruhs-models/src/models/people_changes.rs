@@ -97,6 +97,10 @@ impl PeopleUndoError {
 /// The latest People change a surface can still undo.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
+#[expect(
+    clippy::large_enum_variant,
+    reason = "each surface holds at most one receipt at a time, so boxing buys nothing"
+)]
 pub enum PeopleUndo {
     Rename {
         person_id: String,

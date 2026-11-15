@@ -164,7 +164,7 @@ fn kind_button(
         .cursor_pointer()
         .when(pressed, |el| {
             el.bg(theme::blueberry_500().opacity(0.15))
-                .text_color(theme::blueberry_300())
+                .text_color(theme::blueberry_200())
         })
         .when(!pressed, |el| {
             el.text_color(theme::rambutan_500())
@@ -1289,7 +1289,7 @@ impl Workspace {
             // Long and Unicode names truncate inside the card; the full name
             // stays in the accessible label.
             body(display_name.clone(), BODY_SM_PX, theme::rambutan_200())
-                .debug_selector(move || name_selector.clone())
+                .debug_selector(move || name_selector)
                 .flex_1()
                 .min_w_0()
                 .truncate()

@@ -15,11 +15,6 @@ impl MeetingsHub {
         self.people.iter().find(|p| p.id == id).map(Arc::as_ref)
     }
 
-    /// Whether a create of this contact is on its way to the server.
-    pub fn person_create_in_flight(&self, id: &str) -> bool {
-        self.person_creates_in_flight.contains(id)
-    }
-
     /// Merges waiting for local recovery, and archived originals kept after a
     /// conflicting recovery.
     pub fn person_merge_recovery_counts(&self) -> (usize, usize) {
@@ -148,13 +143,13 @@ impl MeetingsHub {
                         cx.emit(HubEvent::PersonRestored { person_id });
                     }
                     Ok(_) => {
-                        hub.deleted_person_ids.insert(person.id.clone());
+                        hub.deleted_person_ids.insert(person.id);
                         cx.emit(HubEvent::PeopleUndoFailed(
                             "Undo returned a different contact. Nothing else was changed. Retry contact sync to confirm.".into(),
                         ));
                     }
                     Err(error) => {
-                        hub.deleted_person_ids.insert(person.id.clone());
+                        hub.deleted_person_ids.insert(person.id);
                         cx.emit(HubEvent::PeopleUndoFailed(format!(
                             "Undo did not complete. The profile is still deleted. Details: {error}"
                         )));

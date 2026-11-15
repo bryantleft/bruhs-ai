@@ -248,7 +248,7 @@ async fn unmerge_contract(store: &dyn MeetingStore) {
     source.observations = vec![observation("m1", "Source note")];
     source.voice_embedding = Some(vec![0.6, 0.8]);
     source.updated_at = 10;
-    let source = store.upsert_person(source).await.unwrap();
+    store.upsert_person(source).await.unwrap();
     let source = store
         .patch_person_tracked(&pid("source"), false)
         .await
