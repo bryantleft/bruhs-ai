@@ -15,8 +15,9 @@ use leptos::prelude::*;
 use uuid::Uuid;
 
 use crate::state::{
-    CalendarEvent, CalendarEventsSignal, EventCreateOpen, EventCreateStart, EventSource,
-    SelectedEventId, SetCalendarEventsSignal, SetEventCreateOpen, SetSelectedEventId,
+    AppView, CalendarEvent, CalendarEventsSignal, EventCreateOpen, EventCreateStart, EventSource,
+    SelectedEventId, SetActiveView, SetCalendarEventsSignal, SetEventCreateOpen,
+    SetSelectedEventId, SetSelectedWorkItem, WorkItemsSignal,
 };
 use crate::storage;
 use crate::ui::{
@@ -67,6 +68,10 @@ fn default_start_ms() -> f64 {
     (now / half_hour).ceil() * half_hour
 }
 
+/// Shown for a provider event that carries no color of its own: it uses
+/// its calendar's color, not one of the local choices.
+const PROVIDER_DEFAULT_COLOR_LABEL: &str = "Calendar color";
+
 const COLOR_OPTIONS: &[(&str, &str)] = &[
     ("persimmon", "Persimmon"),
     ("blueberry", "Blueberry"),
@@ -86,6 +91,9 @@ pub fn EventCreateDialog() -> impl IntoView {
     let SetCalendarEventsSignal(set_events) = expect_context::<SetCalendarEventsSignal>();
     let SelectedEventId(selected_event_id) = expect_context::<SelectedEventId>();
     let SetSelectedEventId(set_selected_event_id) = expect_context::<SetSelectedEventId>();
+    let WorkItemsSignal(work_items) = expect_context::<WorkItemsSignal>();
+    let SetSelectedWorkItem(set_selected_work_item) = expect_context::<SetSelectedWorkItem>();
+    let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
     let recording_targets = crate::auto_record::RecordingTargets::from_context();
     let capture_settings = crate::auto_record::CaptureSettings::from_context();
 
@@ -110,7 +118,14 @@ pub fn EventCreateDialog() -> impl IntoView {
                 set_title.set(ev.title);
                 set_notes.set(ev.notes.unwrap_or_default());
                 set_all_day.set(ev.all_day);
-                set_color.set(ev.color.unwrap_or_else(|| "persimmon".to_string()));
+                // A provider event without a color shows its calendar's
+                // color; only local events default to persimmon.
+                let fallback = if matches!(ev.source, EventSource::Google) {
+                    String::new()
+                } else {
+                    "persimmon".to_string()
+                };
+                set_color.set(ev.color.unwrap_or(fallback));
                 set_start_str.set(format_datetime_local(ev.start_at_ms));
                 set_end_str.set(format_datetime_local(ev.end_at_ms));
                 return;
@@ -247,6 +262,26 @@ pub fn EventCreateDialog() -> impl IntoView {
         })
     });
 
+    // The task a focus block was placed from (CAL-14).
+    let source_task_id = Memo::new(move |_| {
+        let id = selected_event_id.get()?;
+        work_items.with(|items| {
+            items
+                .iter()
+                .find(|item| item.planning.has_time_block(&id))
+                .map(|item| item.id.clone())
+        })
+    });
+    let open_source_task = move |_: web_sys::MouseEvent| {
+        let Some(task_id) = source_task_id.get_untracked() else {
+            return;
+        };
+        close_dialog();
+        set_selected_work_item.set(Some(task_id));
+        set_active_view.set(AppView::Tasks);
+        super::record_focus::focus_record("task-detail-title".into());
+    };
+
     // Reactive title + button label based on mode.
     let header_text = move || {
         if is_google_event.get() {
@@ -329,6 +364,7 @@ pub fn EventCreateDialog() -> impl IntoView {
                         value=Signal::derive(move || color.get())
                         on_change=Callback::new(move |v: String| set_color.set(v))
                         disabled=Signal::derive(move || is_google_event.get())
+                        placeholder=PROVIDER_DEFAULT_COLOR_LABEL
                         label="Color"
                         class="w-full"
                     />
@@ -373,6 +409,16 @@ pub fn EventCreateDialog() -> impl IntoView {
                             });
                             view! {
                                 <div class="flex items-center gap-2">
+                                    {move || source_task_id.get().is_some().then(|| view! {
+                                        <button
+                                            type="button"
+                                            on:click=open_source_task
+                                            data-event-source-task="true"
+                                            class="bruhs-control rounded-grape px-3 py-2 text-label-sm text-blueberry-400 hover:bg-blueberry-500/10 cursor-pointer"
+                                        >
+                                            "Open task"
+                                        </button>
+                                    })}
                                     <button
                                         type="button"
                                         on:click=move |_| {
@@ -410,14 +456,30 @@ pub fn EventCreateDialog() -> impl IntoView {
                     >
                         "Cancel"
                     </Button>
-                    <Button
-                        variant=ButtonVariant::Primary
-                        size=ButtonSize::Default
-                        on_click=on_submit_btn
-                        disabled=Signal::derive(move || title.get().trim().is_empty() || is_google_event.get())
-                    >
-                        {submit_label}
-                    </Button>
+                    // A read-only provider event has nothing to save: its
+                    // Save is neutral, not the persimmon primary action.
+                    {move || if is_google_event.get() {
+                        view! {
+                            <Button
+                                variant=ButtonVariant::Outline
+                                size=ButtonSize::Default
+                                disabled=Signal::derive(|| true)
+                            >
+                                {submit_label}
+                            </Button>
+                        }.into_any()
+                    } else {
+                        view! {
+                            <Button
+                                variant=ButtonVariant::Primary
+                                size=ButtonSize::Default
+                                on_click=on_submit_btn
+                                disabled=Signal::derive(move || title.get().trim().is_empty())
+                            >
+                                {submit_label}
+                            </Button>
+                        }.into_any()
+                    }}
                 </div>
             </div>
         </Dialog>
