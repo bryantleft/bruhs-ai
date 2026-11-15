@@ -12,6 +12,10 @@
 mod api_client;
 #[path = "server_client/database.rs"]
 mod database;
+#[path = "server_client/mail.rs"]
+mod mail;
+#[path = "server_client/mail_compose.rs"]
+mod mail_compose;
 #[path = "server_client/reactive.rs"]
 mod reactive;
 #[path = "server_client/rich_response_io.rs"]
@@ -121,6 +125,7 @@ pub struct ServerClient {
     http: Result<reqwest::Client, Arc<reqwest::Error>>,
     /// Dedicated policy, shared by clones. Failed initialization can retry.
     local_context_http: Arc<tokio::sync::OnceCell<reqwest::Client>>,
+    compose_http: Arc<tokio::sync::OnceCell<reqwest::Client>>,
 }
 
 impl ServerClient {
@@ -279,6 +284,7 @@ impl ServerClient {
             ),
             http,
             local_context_http: Arc::new(tokio::sync::OnceCell::new()),
+            compose_http: Arc::new(tokio::sync::OnceCell::new()),
         }
     }
 
