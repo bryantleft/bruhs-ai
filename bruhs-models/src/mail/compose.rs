@@ -442,5 +442,13 @@ pub struct MailSendRequest {
     pub digest: String,
 }
 
+/// Explicit Sent lookup only; provider evidence is constructed inside Core.
+#[derive(Clone, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct MailSentReconcileRequest {
+    pub host_id: String,
+    pub connection_id: String,
+}
+
 #[cfg(test)]
 mod tests;

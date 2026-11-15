@@ -4,7 +4,7 @@ use mail_parser::MimeHeaders;
 use sha2::{Digest as _, Sha256};
 use std::sync::Arc;
 
-async fn reviewed(
+pub(super) async fn reviewed(
     fixture: &Fixture,
     reply_to: bool,
 ) -> (bruhs_models::mail::MailSendRequest, String) {
@@ -104,7 +104,7 @@ async fn reviewed(
     )
 }
 
-async fn send(
+pub(super) async fn send(
     fixture: &Fixture,
     request: bruhs_models::mail::MailSendRequest,
 ) -> Result<bruhs_models::mail::MailSendStatus, crate::mail::compose::ComposeError> {
@@ -120,7 +120,7 @@ async fn send(
         .await
 }
 
-async fn respond(fixture: &Fixture, response: ResponseTemplate) {
+pub(super) async fn respond(fixture: &Fixture, response: ResponseTemplate) {
     Mock::given(method("POST"))
         .and(path(format!("{API}/messages/send")))
         .and(header("authorization", format!("Bearer {TOKEN}")))

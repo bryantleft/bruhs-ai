@@ -4,6 +4,12 @@ use super::*;
 impl Connections {
     #[doc(hidden)]
     pub async fn test_connected(provider: ServiceProvider, value: &str) -> Self {
+        Self::test_connected_with_id(provider, value, "synthetic-connection").await
+    }
+
+    /// Seeds the same synthetic account with a fixture-chosen connection generation.
+    #[doc(hidden)]
+    pub async fn test_connected_with_id(provider: ServiceProvider, value: &str, id: &str) -> Self {
         let mut config = oauth::Config::for_client(
             provider,
             "synthetic-client".into(),
@@ -26,7 +32,7 @@ impl Connections {
             .await
             .expect("lease the synthetic in-memory connection")
             .write(&Tokens {
-                id: "synthetic-connection".into(),
+                id: id.into(),
                 access_token: value.into(),
                 refresh_token: Some("synthetic-refresh".into()),
                 expires_at_ms: None,

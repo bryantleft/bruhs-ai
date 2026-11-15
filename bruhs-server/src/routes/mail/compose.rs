@@ -23,6 +23,7 @@ use serde::Deserialize;
 use std::sync::Arc;
 
 mod prequeue;
+mod reconciliation;
 
 pub(super) fn router() -> axum::Router<crate::config::ServerState> {
     use axum::routing::{get, post};
@@ -58,6 +59,10 @@ pub(super) fn router() -> axum::Router<crate::config::ServerState> {
         .route(
             "/api/mail/mailboxes/{mailbox}/sends/{operation}/cancel",
             post(cancel),
+        )
+        .route(
+            "/api/mail/mailboxes/{mailbox}/sends/{operation}/reconcile",
+            post(reconciliation::reconcile),
         )
         .layer(DefaultBodyLimit::max(8 << 20))
 }

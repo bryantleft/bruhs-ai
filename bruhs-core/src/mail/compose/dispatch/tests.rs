@@ -11,6 +11,7 @@ use std::sync::{
 use tokio::sync::Notify;
 
 mod prequeue;
+mod reconciliation;
 
 struct Fixture {
     runtime: MailRuntime,

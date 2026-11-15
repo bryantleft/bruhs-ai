@@ -6,6 +6,7 @@ mod content;
 pub use attachments::GmailAttachment;
 mod projection;
 mod send;
+mod sent;
 #[cfg(test)]
 mod tests;
 mod wire;
