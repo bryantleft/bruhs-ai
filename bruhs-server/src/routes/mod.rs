@@ -23,6 +23,7 @@ pub mod list_dir;
 pub mod local_focus;
 pub mod local_tools;
 pub mod login;
+pub mod mail;
 pub mod meetings;
 pub mod meetings_stream;
 pub mod meetings_summary;

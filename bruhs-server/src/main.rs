@@ -95,6 +95,11 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
     state.attach_reactive(reactive.clone())?;
+    let mail =
+        bruhs_core::mail::MailRuntime::open(bruhs_core::mail::MailRuntime::default_path()?).await?;
+    state.attach_mail(mail)?;
+    let gmail = Arc::new(bruhs_core::mail::gmail::GmailClient::new()?);
+    let outlook = Arc::new(bruhs_core::mail::outlook::OutlookClient::new()?);
     // Claim the port before any configured source command or agent can run.
     let addr = format!("127.0.0.1:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
@@ -140,7 +145,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             .with_release(env!("BRUHS_RELEASE_VERSION")),
         ),
     })
-    .layer(axum::Extension(reactive));
+    .layer(axum::Extension(reactive))
+    .layer(axum::Extension(gmail))
+    .layer(axum::Extension(outlook));
     let coordination = bruhs_core::coordination::CoordinationRuntime::open(
         bruhs_core::coordination::CoordinationRuntime::default_path()?,
         state.clone(),
@@ -313,10 +320,12 @@ fn router_with_capture_daemon(
     let cors = access.cors().expose_headers([
         axum::http::HeaderName::from_static("x-bruhs-transcript-source"),
         axum::http::HeaderName::from_static("x-bruhs-transcript-refresh"),
+        axum::http::HeaderName::from_static("x-bruhs-mail-export-size"),
     ]);
     let spa = static_assets::service(&state.config.spa_dir);
 
     Router::new()
+        .merge(routes::mail::router())
         .route(
             "/api/agent-extensions/history/preview",
             post(routes::agent_extensions::history_preview),
