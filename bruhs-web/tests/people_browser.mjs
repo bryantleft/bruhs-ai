@@ -1,7 +1,8 @@
 // People page acceptance on the real WASM bundle and IndexedDB cache.
-// Synthetic contacts only: every /api read and the three People mutations
-// (tracked, rename, resolve-merges) are answered by in-process fixtures; any
-// other write or non-loopback request fails the run.
+// Synthetic contacts only: every /api read and the People mutations (create,
+// tracked, rename, aliases, merge, unmerge, delete, restore, resolve-merges)
+// are answered by in-process fixtures; any other write or non-loopback
+// request fails the run.
 // Run after: (cd bruhs-web && trunk build --dist ../target/people-ui-dist)
 //   node bruhs-web/tests/people_browser.mjs
 import assert from 'node:assert/strict';
@@ -25,7 +26,17 @@ const relevantSources = [
   'bruhs-web/src/components/people_page.rs',
   'bruhs-web/src/components/people_page/directory.rs',
   'bruhs-web/src/components/people_page/merge_status.rs',
+  'bruhs-web/src/components/people_page/back.rs',
+  'bruhs-web/src/components/people_page/confirm.rs',
+  'bruhs-web/src/components/people_page/profile.rs',
+  'bruhs-web/src/components/people_page/relationship.rs',
   'bruhs-web/src/storage/people.rs',
+  'bruhs-web/src/storage/people/changes.rs',
+  'bruhs-web/src/storage/people/merge/commit.rs',
+  'bruhs-web/src/storage/people/merge/undo.rs',
+  'bruhs-web/src/workflow_executor/people_actions.rs',
+  'bruhs-models/src/models/people_directory.rs',
+  'bruhs-models/src/models/people_changes.rs',
   'bruhs-web/tailwind.css',
   'bruhs-models/src/models/person.rs',
 ];
@@ -74,7 +85,12 @@ const loopback = hostname => ['127.0.0.1', 'localhost', '[::1]'].includes(hostna
 function fixtures() {
   const meeting = { id: 'source-meeting', title: 'Synthetic planning sync', started_at_ms: 1_700_000_000_000, ended_at_ms: 1_700_000_600_000, status: 'ended', calendar_event_id: null, audio_path: null, language: null, speakers: [], summary: null, thread_id: null, skip_observations: false, created_at: 1_700_000_000_000, updated_at: 1_700_000_600_000 };
   const observation = (at_meeting_id, kind, text) => ({ at_meeting_id, kind, text, created_at: 1_700_000_600_000 });
-  const person = (id, display_name, tracked, observations) => ({ id, display_name, aliases: [], voice_embedding: null, observations, tracked, created_at: 1_700_000_000_000, updated_at: 1_700_000_600_000 });
+  const person = (id, display_name, tracked, observations, updated_at = 1_700_000_600_000, aliases = []) => ({ id, display_name, aliases, voice_embedding: null, observations, tracked, created_at: 1_700_000_000_000, updated_at });
+  // Thirty older directory entries push the alias match onto page two.
+  const directory = Array.from({ length: 30 }, (_, n) => {
+    const label = String(n).padStart(2, '0');
+    return [`dir-${label}`, person(`dir-${label}`, `Directory Person ${label}`, true, [], 1_600_000_000_000 - n)];
+  });
   return {
     meetings: [meeting],
     people: new Map([
@@ -84,10 +100,20 @@ function fixtures() {
         observation('source-meeting', 'decision', 'Synthetic decision two'),
         observation('deleted-meeting', 'tone', 'Synthetic tone from a deleted meeting'),
       ])],
+      ...directory,
+      ['needle', person('needle', 'Quiet Synthetic', true, [], 1_500_000_000_000, ['Lighthouse Keeper'])],
     ]),
     failTrackedOnce: true,
     trackedRequests: [],
     renameRequests: [],
+    createRequests: [],
+    aliasRequests: [],
+    mergeRequests: [],
+    unmergeRequests: [],
+    deleteRequests: [],
+    restoreRequests: [],
+    merged: new Map(),
+    deleted: new Map(),
   };
 }
 
@@ -107,7 +133,7 @@ try {
       const request = route.request();
       const url = new URL(request.url());
       const method = request.method();
-      const json = (value, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS, POST, PATCH', 'Cache-Control': 'no-store' }, body: JSON.stringify(value) });
+      const json = (value, status = 200) => route.fulfill({ status, contentType: 'application/json', headers: { 'Access-Control-Allow-Origin': origin, 'Access-Control-Allow-Headers': '*', 'Access-Control-Allow-Methods': 'GET, HEAD, OPTIONS, POST, PATCH, PUT, DELETE', 'Cache-Control': 'no-store' }, body: JSON.stringify(value) });
       const api = url.pathname.startsWith('/api/') && loopback(url.hostname);
       if (api && method === 'OPTIONS') return json({});
       if (api && method === 'POST' && url.pathname === '/api/people/profiles') {
@@ -134,6 +160,71 @@ try {
         const person = { ...data.people.get(id), display_name: body.display_name, updated_at: data.people.get(id).updated_at + 1 };
         data.people.set(id, person);
         return json(person);
+      }
+      const nameKey = name => name.trim().toLowerCase();
+      if (api && method === 'POST' && url.pathname === '/api/people') {
+        const body = JSON.parse(request.postData() ?? '{}');
+        data.createRequests.push(body);
+        if (data.people.has(body.id)) return json(data.people.get(body.id));
+        const created = { id: body.id, display_name: body.display_name.trim(), aliases: [], voice_embedding: null, observations: [], tracked: true, created_at: body.created_at, updated_at: body.updated_at };
+        data.people.set(body.id, created);
+        return json(created, 201);
+      }
+      const aliases = url.pathname.match(/^\/api\/people\/([^/]+)\/aliases$/);
+      if (api && method === 'PUT' && aliases) {
+        const id = decodeURIComponent(aliases[1]);
+        const body = JSON.parse(request.postData() ?? '{}');
+        data.aliasRequests.push({ id, aliases: body.aliases });
+        const clash = [...data.people.values()].find(other => other.id !== id && body.aliases.some(alias => [other.display_name, ...other.aliases].some(name => nameKey(name) === nameKey(alias))));
+        if (clash) return json({ error: `${clash.display_name} already uses that name. Merge the two profiles or choose another alias. Nothing was added.` }, 409);
+        const updated = { ...data.people.get(id), aliases: body.aliases, updated_at: data.people.get(id).updated_at + 1 };
+        data.people.set(id, updated);
+        return json(updated);
+      }
+      const mergeInto = url.pathname.match(/^\/api\/people\/([^/]+)\/merge_into\/([^/]+)$/);
+      if (api && method === 'POST' && mergeInto) {
+        const [sourceId, targetId] = [decodeURIComponent(mergeInto[1]), decodeURIComponent(mergeInto[2])];
+        data.mergeRequests.push({ sourceId, targetId });
+        const source = data.people.get(sourceId), target = data.people.get(targetId);
+        const merged = { ...target, aliases: [...target.aliases, source.display_name], observations: [...target.observations, ...source.observations], tracked: target.tracked && source.tracked, updated_at: Math.max(target.updated_at, source.updated_at) + 1 };
+        data.merged.set(sourceId, { source, target });
+        data.people.delete(sourceId);
+        data.people.set(targetId, merged);
+        return json(merged);
+      }
+      const unmerge = url.pathname.match(/^\/api\/people\/([^/]+)\/unmerge$/);
+      if (api && method === 'POST' && unmerge) {
+        const sourceId = decodeURIComponent(unmerge[1]);
+        data.unmergeRequests.push(sourceId);
+        const original = data.merged.get(sourceId);
+        if (!original) return json({ error: 'No merge to undo.' }, 404);
+        const version = data.people.get(original.target.id).updated_at + 1;
+        const source = { ...original.source, updated_at: version }, target = { ...original.target, updated_at: version };
+        data.merged.delete(sourceId);
+        data.people.set(source.id, source);
+        data.people.set(target.id, target);
+        return json({ source, target });
+      }
+      const restore = url.pathname.match(/^\/api\/people\/([^/]+)\/restore$/);
+      if (api && method === 'POST' && restore) {
+        const id = decodeURIComponent(restore[1]);
+        data.restoreRequests.push(id);
+        const deleted = data.deleted.get(id);
+        if (!deleted) return json({ error: 'Nothing to restore.' }, 404);
+        const restored = { ...deleted, updated_at: deleted.updated_at + 1 };
+        data.deleted.delete(id);
+        data.people.set(id, restored);
+        return json(restored);
+      }
+      const single = url.pathname.match(/^\/api\/people\/([^/]+)$/);
+      if (api && method === 'DELETE' && single) {
+        const id = decodeURIComponent(single[1]);
+        data.deleteRequests.push(id);
+        const deleted = data.people.get(id);
+        if (!deleted) return json({ error: 'person not found' }, 404);
+        data.people.delete(id);
+        data.deleted.set(id, deleted);
+        return json({ person: deleted, speakers: [], action_items: [], deleted_at: Date.now() });
       }
       if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
         state.blockedWrites.push({ method, url: request.url(), body: request.postData() });
@@ -287,6 +378,138 @@ try {
       await card('opted-out').getByRole('button', { name: 'Open source meeting Synthetic planning sync', exact: true }).first().click();
       await eventually(async () => (await page.evaluate(() => location.hash)) === '#/meetings/source-meeting', 'the source link opens the meeting detail', async () => ({ hash: await page.evaluate(() => location.hash) }));
       await snapshot('source-meeting');
+
+      state.stage = 'create';
+      await page.goto(`${origin}/#/people`);
+      await ready();
+      const createInput = page.getByRole('textbox', { name: 'New person', exact: true });
+      await reachable(button('Add person'), 'Add person action');
+      await createInput.fill('   ');
+      await button('Add person').click();
+      await eventually(async () => await page.getByText('A name is required. No profile was created.', { exact: true }).isVisible(), 'a blank create is refused with a visible message');
+      check(await createInput.inputValue() === '   ', 'a refused create keeps the typed input');
+      check(data.createRequests.length === 0, 'a blank create sends nothing', data.createRequests);
+      const longName = 'Zoë Ångström Łukasiewicz Ōtsuka, a deliberately long synthetic name that keeps going across the card';
+      await createInput.fill(longName);
+      await button('Add person').click();
+      const createdCard = () => page.locator('[id^="person-record-"]').filter({ hasText: longName });
+      await eventually(async () => await createdCard().count() === 1, 'the created profile is listed and opened');
+      await eventually(async () => data.createRequests.some(request => request.display_name === longName), 'the created profile syncs with its Unicode name', async () => data.createRequests);
+      check(await createInput.inputValue() === '', 'a successful create clears the input');
+      await noHorizontalOverflow('Long Unicode profile name');
+      await snapshot('created');
+      await page.reload();
+      await ready();
+      await eventually(async () => await createdCard().count() === 1, 'the created profile survives reload');
+
+      state.stage = 'search';
+      const search = page.getByRole('searchbox', { name: 'Search people', exact: true });
+      check(await page.locator('#person-record-needle').count() === 0, 'the alias match starts beyond the first page');
+      check(await page.getByRole('navigation', { name: 'People pages', exact: true }).getByText('Page 1 of 2', { exact: true }).isVisible(), 'the directory pages at 25 people');
+      await search.fill('LIGHTHOUSE');
+      await eventually(async () => await page.locator('#person-record-needle').count() === 1 && await page.locator('[id^="person-record-"]').count() === 1, 'search by alias finds a person beyond the first page, ignoring case');
+      await search.fill('zoË ÅNGSTRÖM');
+      await eventually(async () => await createdCard().count() === 1 && await page.locator('[id^="person-record-"]').count() === 1, 'search folds Unicode case');
+      await search.fill('nobody by this name');
+      await eventually(async () => await page.getByText('No people match this search.', { exact: true }).isVisible(), 'a search with no match says so');
+      await search.fill('');
+      await eventually(async () => await page.locator('#person-record-ada-synthetic').count() === 1, 'clearing the search restores the directory');
+      await snapshot('search');
+
+      state.stage = 'aliases';
+      await page.locator('#person-record-ada-synthetic').click();
+      const ada = card('ada-synthetic');
+      const aliasInput = ada.getByRole('textbox', { name: 'New alias', exact: true });
+      await aliasInput.fill('opted OUT');
+      await ada.getByRole('button', { name: 'Add alias', exact: true }).click();
+      const aliasAlert = ada.getByRole('alert', { name: 'Alias not added', exact: true });
+      await eventually(async () => (await aliasAlert.count()) === 1 && (await aliasAlert.innerText()).includes('Opted Out already uses that name'), 'an alias another profile uses is refused with a visible message');
+      check(data.aliasRequests.length === 0, 'a refused alias sends nothing', data.aliasRequests);
+      check(await aliasInput.inputValue() === 'opted OUT', 'a refused alias stays in its input');
+      await aliasInput.fill('Countess Ada');
+      await ada.getByRole('button', { name: 'Add alias', exact: true }).click();
+      await eventually(async () => await ada.getByRole('button', { name: 'Remove alias Countess Ada', exact: true }).count() === 1, 'a saved alias is listed with its own remove control');
+      check(data.aliasRequests.at(-1)?.aliases.includes('Countess Ada'), 'the alias list is saved on the server', data.aliasRequests);
+      await reachable(ada.getByRole('button', { name: 'Remove alias Countess Ada', exact: true }), 'Remove alias action');
+      await search.fill('countess');
+      await eventually(async () => await page.locator('#person-record-ada-synthetic').count() === 1 && await page.locator('[id^="person-record-"]').count() === 1, 'search finds the new alias');
+      await search.fill('');
+      await ada.getByRole('button', { name: 'Remove alias Countess Ada', exact: true }).click();
+      await eventually(async () => await ada.getByText('No aliases yet.', { exact: true }).isVisible(), 'removing the alias empties the list');
+      await snapshot('aliases');
+
+      state.stage = 'linked records';
+      check(await ada.getByText('No Inbox conversations with this person yet.', { exact: true }).isVisible(), 'a profile with no conversations says so');
+      const meetingLink = ada.getByRole('button', { name: 'Open meeting Synthetic planning sync', exact: true });
+      await reachable(meetingLink, 'Linked meeting');
+      await meetingLink.click();
+      await eventually(async () => (await page.evaluate(() => location.hash)) === '#/meetings/source-meeting', 'a linked meeting opens from the profile');
+      await button('Back to People').click();
+      await eventually(async () => (await page.evaluate(() => location.hash)) === '#/people' && (await page.locator('#person-record-ada-synthetic').getAttribute('aria-expanded')) === 'true', 'Back to People returns to the open profile');
+
+      state.stage = 'reminders';
+      await ada.getByRole('button', { name: 'Reminder', exact: true }).first().click();
+      await ada.getByRole('checkbox', { name: 'Due tomorrow', exact: true }).check();
+      await ada.getByRole('textbox', { name: 'New relationship item', exact: true }).fill('Send the synthetic brief');
+      await ada.getByRole('button', { name: 'Add', exact: true }).click();
+      await eventually(async () => await ada.getByRole('button', { name: 'Complete Send the synthetic brief', exact: true }).count() === 1, 'a reminder is added');
+      check(await ada.getByText('Reminder, due', { exact: true }).isVisible(), 'the reminder shows its kind and due state');
+      await ada.getByRole('button', { name: 'Edit Send the synthetic brief', exact: true }).click();
+      const itemText = ada.getByRole('textbox', { name: 'Item text', exact: true });
+      await itemText.fill('   ');
+      await ada.getByRole('button', { name: 'Save', exact: true }).click();
+      await eventually(async () => await ada.getByText('Text is required. The item was not changed.', { exact: true }).isVisible(), 'a blank reminder edit is refused');
+      await itemText.fill('Send the revised brief');
+      await ada.getByRole('button', { name: 'Commitment', exact: true }).last().click();
+      await ada.getByRole('button', { name: 'Save', exact: true }).click();
+      await eventually(async () => await ada.getByRole('button', { name: 'Complete Send the revised brief', exact: true }).count() === 1, 'an edited reminder keeps its row with new text');
+      check(await ada.getByText('Commitment, due', { exact: true }).isVisible(), 'the edit changed the kind and kept the due time');
+      await page.reload();
+      await ready();
+      await page.locator('#person-record-ada-synthetic').click();
+      await eventually(async () => await card('ada-synthetic').getByRole('button', { name: 'Complete Send the revised brief', exact: true }).count() === 1, 'an edited reminder survives reload');
+      await card('ada-synthetic').getByRole('button', { name: 'Complete Send the revised brief', exact: true }).click();
+      await eventually(async () => await card('ada-synthetic').getByRole('button', { name: 'Reopen Send the revised brief', exact: true }).count() === 1, 'a reminder can be completed');
+      await reachable(card('ada-synthetic').getByRole('button', { name: 'Delete Send the revised brief', exact: true }), 'Delete reminder action');
+      await card('ada-synthetic').getByRole('button', { name: 'Delete Send the revised brief', exact: true }).click();
+      await eventually(async () => await card('ada-synthetic').locator('[data-relationship-item]').count() === 0, 'a reminder can be deleted');
+      await noHorizontalOverflow('Expanded profile with aliases, links and reminders');
+      await snapshot('reminders');
+      await page.locator('#person-record-ada-synthetic').click();
+
+      state.stage = 'merge';
+      await button('Merge Directory Person 00 into another profile').click();
+      await card('dir-00').getByRole('button', { name: 'Merge into', exact: true }).click();
+      await page.getByRole('option', { name: 'Opted Out', exact: true }).click();
+      await card('dir-00').getByRole('button', { name: 'Merge', exact: true }).click();
+      await eventually(async () => (await card('dir-00').getByText('Merge Directory Person 00 into Opted Out?', { exact: false }).count()) === 1, 'merge asks for confirmation in words');
+      check(data.mergeRequests.length === 0, 'nothing merges before confirmation', data.mergeRequests);
+      await reachable(button('Confirm merge'), 'Confirm merge action');
+      await snapshot('merge-confirm');
+      await button('Confirm merge').click();
+      await eventually(async () => data.mergeRequests.length === 1 && await page.locator('#person-record-dir-00').count() === 0, 'a confirmed merge retires the source profile');
+      await eventually(async () => await button('Undo merge').count() === 1, 'a merge offers undo');
+      await button('Undo merge').click();
+      await eventually(async () => data.unmergeRequests.length === 1 && await page.locator('#person-record-dir-00').count() === 1, 'undo brings the merged profile back');
+      check(await button('Undo merge').count() === 0, 'a finished undo clears its offer');
+
+      state.stage = 'delete';
+      await button('Delete Directory Person 01').click();
+      await eventually(async () => (await card('dir-01').getByText('Delete Directory Person 01?', { exact: false }).count()) === 1, 'delete asks for confirmation with the cascade spelled out');
+      check(data.deleteRequests.length === 0, 'nothing is deleted before confirmation', data.deleteRequests);
+      await reachable(button('Delete profile'), 'Delete profile action');
+      await snapshot('delete-confirm');
+      await button('Delete profile').click();
+      await eventually(async () => data.deleteRequests.length === 1 && await page.locator('#person-record-dir-01').count() === 0, 'a confirmed delete removes the profile');
+      await eventually(async () => await button('Undo delete').count() === 1, 'a delete offers undo');
+      await reachable(button('Undo delete'), 'Undo delete action');
+      await button('Undo delete').click();
+      await eventually(async () => data.restoreRequests.length === 1 && await page.locator('#person-record-dir-01').count() === 1, 'undo restores the deleted profile');
+      await page.reload();
+      await ready();
+      check(await page.locator('#person-record-dir-01').count() === 1 && await page.locator('#person-record-dir-00').count() === 1, 'restored profiles survive reload');
+      await noHorizontalOverflow('Directory after merge and delete undo');
+      await snapshot('after-undo');
     } catch (error) {
       check(false, 'run completed without an uncaught harness error', { error: error.stack ?? String(error) });
       await snapshot('failure').catch(() => {});
