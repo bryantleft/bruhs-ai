@@ -33,6 +33,10 @@ pub struct AudioPromptCooldownSignal(pub RwSignal<f64>);
 pub struct SelectedLifeRecordSignal(pub RwSignal<Option<SelectedLifeRecord>>);
 #[derive(Copy, Clone)]
 pub struct SelectedPersonSignal(pub RwSignal<Option<String>>);
+/// The profile a meeting or conversation was opened from, so its view can
+/// offer a way back to that person on the People page.
+#[derive(Copy, Clone)]
+pub struct ReturnToPersonSignal(pub RwSignal<Option<String>>);
 
 #[derive(Copy, Clone)]
 pub struct CaptureStatusSignal(pub ReadSignal<crate::api::CaptureStatus>);
@@ -101,6 +105,7 @@ pub(super) fn provide() {
     provide_context(PeopleSignal(people));
     provide_context(SetPeopleSignal(set_people));
     provide_context(SelectedPersonSignal(RwSignal::new(None)));
+    provide_context(ReturnToPersonSignal(RwSignal::new(None)));
     provide_context(MeetingSegmentsSignal(meeting_segments));
     provide_context(crate::transcript_sync::TranscriptSync::new(
         meetings,

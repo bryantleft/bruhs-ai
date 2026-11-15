@@ -1,12 +1,11 @@
 use std::collections::HashMap;
 
-use bruhs_models::PersonProfile;
-
-pub const PAGE_SIZE: usize = 25;
+use bruhs_models::{names_match_query, PersonProfile};
 
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Summary {
     pub name: String,
+    pub aliases: Vec<String>,
     pub tracked: bool,
     pub observations: usize,
 }
@@ -46,6 +45,7 @@ impl Directory {
                 person.id.clone(),
                 Summary {
                     name: person.display_name.clone(),
+                    aliases: person.aliases.clone(),
                     tracked: person.tracked,
                     observations: person.observations.len(),
                 },
@@ -54,11 +54,28 @@ impl Directory {
         directory
     }
 
+    #[cfg(test)]
     pub fn page(&self, page: usize) -> Vec<String> {
+        bruhs_models::people_page(&self.order, page).to_vec()
+    }
+
+    /// Ids whose name or alias matches `query`, in directory order. A blank
+    /// query keeps everyone.
+    pub fn matching(&self, query: &str) -> Vec<String> {
+        if query.trim().is_empty() {
+            return self.order.clone();
+        }
         self.order
             .iter()
-            .skip(page.saturating_mul(PAGE_SIZE))
-            .take(PAGE_SIZE)
+            .filter(|id| {
+                self.summaries.get(id.as_str()).is_some_and(|summary| {
+                    names_match_query(
+                        std::iter::once(summary.name.as_str())
+                            .chain(summary.aliases.iter().map(String::as_str)),
+                        query,
+                    )
+                })
+            })
             .cloned()
             .collect()
     }
@@ -91,6 +108,29 @@ mod tests {
         assert!(directory.page(usize::MAX).is_empty());
         assert_eq!(directory.order.first().unwrap(), "p-204");
         assert_eq!(directory.summaries["p-204"].name, "Person 204");
+    }
+
+    #[test]
+    fn search_reaches_aliases_beyond_the_first_page_without_reordering() {
+        let mut people = (0..60)
+            .map(|n| {
+                let mut person = PersonProfile::new(format!("Person {n}"));
+                person.id = format!("p-{n:03}");
+                person.updated_at = 100 + n;
+                person
+            })
+            .collect::<Vec<_>>();
+        let mut late = PersonProfile::new("Zoë Ångström");
+        late.id = "late".into();
+        late.aliases = vec!["The Captain".into()];
+        late.updated_at = 0;
+        people.push(late);
+        let directory = Directory::new(&people, None);
+        assert!(!directory.page(0).contains(&"late".to_string()));
+        assert_eq!(directory.matching("CAPTAIN"), vec!["late".to_string()]);
+        assert_eq!(directory.matching("zoË"), vec!["late".to_string()]);
+        assert_eq!(directory.matching("  "), directory.order);
+        assert!(directory.matching("nobody").is_empty());
     }
 
     #[test]
