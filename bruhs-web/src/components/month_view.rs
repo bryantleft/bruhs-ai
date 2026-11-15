@@ -233,11 +233,13 @@ pub fn MonthView() -> impl IntoView {
                             classes.push("border-b border-longan-800/30");
                         }
                         let class_str = classes.join(" ");
-                        // Cap visible rows at 3 across both events + task
-                        // markers so the grid stays uncluttered.
+                        // Three lines at most, counting +N more, so the
+                        // overflow button stays inside the clipped cell:
+                        // with more records, two pills and +N more.
                         let total = day_events.len() + day_tasks.len();
-                        let event_take = day_events.len().min(3);
-                        let task_take = (3usize.saturating_sub(event_take)).min(day_tasks.len());
+                        let capacity = if total > 3 { 2 } else { 3 };
+                        let event_take = day_events.len().min(capacity);
+                        let task_take = capacity.saturating_sub(event_take).min(day_tasks.len());
                         let extra = total.saturating_sub(event_take + task_take);
                         let (day_label, day_iso) = day_names(day_ms);
                         let open_day = move |ev: web_sys::MouseEvent| {
