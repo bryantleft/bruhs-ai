@@ -1193,8 +1193,15 @@ impl Workspace {
         let date = day.date;
         let events = &day.events;
         let tasks = &day.tasks;
-        let event_take = events.len().min(3);
-        let task_take = (3usize.saturating_sub(event_take)).min(tasks.len());
+        // Three lines at most, so +N more stays inside a clipped cell: with
+        // more records than that, two pills and +N more (as on the web).
+        let capacity = if day.total_records > CALENDAR_MONTH_CELL_LINES {
+            CALENDAR_MONTH_CELL_LINES - 1
+        } else {
+            CALENDAR_MONTH_CELL_LINES
+        };
+        let event_take = events.len().min(capacity);
+        let task_take = capacity.saturating_sub(event_take).min(tasks.len());
         let visible_events: Vec<AnyElement> = events
             .iter()
             .take(event_take)
@@ -1209,6 +1216,8 @@ impl Workspace {
         let extra = day.total_records.saturating_sub(visible_count);
         let date_for_new = date;
         let date_for_new_key = date;
+        let day_key = u64::from(date.num_days_from_ce().cast_unsigned());
+        let day_list_label = calendar_day_list_label(day.total_records, date);
         let cell_is_last_col = index % 7 == 6;
         let cell_is_last_row = index / 7 == 5;
         let date_label = if is_today {
@@ -1238,6 +1247,23 @@ impl Workspace {
                 .child(date.day().to_string())
         };
 
+        // A cell shows three records; the date and +N more open every event
+        // and due task of the day, as the web month does.
+        let date_header = if day.total_records > 0 {
+            div().flex().flex_shrink_0().child(
+                self.calendar_day_list_trigger(
+                    ("calendar-day-open", day_key),
+                    format!("desktop-calendar-day-open-{date}"),
+                    day_list_label.clone(),
+                    date,
+                    cx,
+                )
+                .child(date_label),
+            )
+        } else {
+            div().flex().flex_shrink_0().child(date_label)
+        };
+
         div()
             .id((
                 "calendar-day",
@@ -1246,6 +1272,8 @@ impl Workspace {
             .debug_selector(move || format!("desktop-calendar-day-{date}"))
             .flex_1()
             .min_w_0()
+            .min_h_0()
+            .overflow_hidden()
             .p(px(CALENDAR_MONTH_CELL_PADDING_PX))
             .relative()
             .border_1()
@@ -1280,16 +1308,25 @@ impl Workspace {
                     this.open_event_create(Some(at_hour(date_for_new_key, 9)), window, cx);
                 }
             }))
-            .child(date_label)
+            .child(date_header)
             .children(visible_events)
             .children(visible_tasks)
             .when(extra > 0, |el| {
                 el.child(
-                    div()
+                    div().flex().flex_shrink_0().child(
+                        self.calendar_day_list_trigger(
+                            ("calendar-day-more", day_key),
+                            format!("desktop-calendar-day-more-{date}"),
+                            day_list_label,
+                            date,
+                            cx,
+                        )
                         .text_size(px(CALENDAR_PILL_TEXT_SIZE_PX))
                         .font_family(theme::UI_SMALL_FONT_FAMILY)
                         .text_color(theme::rambutan_500())
+                        .hover(|el| el.text_color(theme::rambutan_300()))
                         .child(format!("+{extra} more")),
+                    ),
                 )
             })
             .into_any_element()
@@ -1308,6 +1345,7 @@ impl Workspace {
             .debug_selector(move || format!("desktop-calendar-task-pill-{debug_key}"))
             .w_full()
             .min_w_0()
+            .flex_shrink_0()
             .flex()
             .items_center()
             .gap_1()
@@ -1360,6 +1398,7 @@ impl Workspace {
             .debug_selector(move || format!("desktop-calendar-event-pill-{debug_key}"))
             .w_full()
             .min_w_0()
+            .flex_shrink_0()
             .flex()
             .items_center()
             .gap_1()
@@ -1746,5 +1785,255 @@ impl Workspace {
                     }),
             )
             .into_any_element()
+    }
+}
+
+pub(super) const CALENDAR_DAY_LIST_LABEL: &str = "Calendar day";
+/// Record lines a month cell shows, counting +N more.
+const CALENDAR_MONTH_CELL_LINES: usize = 3;
+const CALENDAR_DAY_LIST_ROW_GAP_PX: f32 = 2.0;
+const CALENDAR_DAY_LIST_PADDING_PX: f32 = 8.0;
+const CALENDAR_DAY_LIST_ROW_RADIUS_PX: f32 = 8.0;
+const CALENDAR_DAY_LIST_DATE_TEXT_SIZE_PX: f32 = 13.0;
+const CALENDAR_DAY_LIST_HOVER_BG_OPACITY: f32 = 0.6;
+
+/// The accessible name of a day's list triggers, as on the web.
+pub(super) fn calendar_day_list_label(total: usize, date: NaiveDate) -> String {
+    let noun = if total == 1 { "record" } else { "records" };
+    format!("Show {total} {noun} on {}", date.format("%A, %B %-d"))
+}
+
+impl Workspace {
+    /// Every event and due task of `date`, in month order: events (local,
+    /// then provider) and then tasks due that day.
+    pub(super) fn calendar_day_records(
+        &self,
+        date: NaiveDate,
+        cx: &Context<'_, Self>,
+    ) -> (Vec<DesktopCalendarEvent>, Vec<DesktopWorkItem>) {
+        let events = self
+            .visible_calendar_events(cx)
+            .into_iter()
+            .filter(|event| event_overlaps_day(event, date))
+            .collect();
+        let due = date.format(DESKTOP_DATE_FORMAT).to_string();
+        let tasks = self
+            .work_items
+            .iter()
+            .filter(|item| item.due_date.as_deref() == Some(due.as_str()))
+            .cloned()
+            .collect();
+        (events, tasks)
+    }
+
+    pub(super) fn open_calendar_day_list(&mut self, date: NaiveDate, cx: &mut Context<'_, Self>) {
+        self.open_overlay(Overlay::CalendarDay { date });
+        cx.notify();
+    }
+
+    /// The day number or +N more of a month cell: opens the day list
+    /// without creating an event in the cell underneath.
+    fn calendar_day_list_trigger(
+        &self,
+        id: (&'static str, u64),
+        selector: String,
+        label: String,
+        date: NaiveDate,
+        cx: &Context<'_, Self>,
+    ) -> Stateful<Div> {
+        div()
+            .id(id)
+            .debug_selector(move || selector)
+            .flex_shrink_0()
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(label)
+            .rounded(px(CALENDAR_PILL_DOT_RADIUS_PX))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .cursor_pointer()
+            .on_click(cx.listener(move |this, _ev, _window, cx| {
+                cx.stop_propagation();
+                this.open_calendar_day_list(date, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.open_calendar_day_list(date, cx);
+                }
+            }))
+    }
+
+    fn calendar_day_list_row(
+        id: (&'static str, u64),
+        selector: String,
+        label: String,
+    ) -> Stateful<Div> {
+        div()
+            .id(id)
+            .debug_selector(move || selector)
+            .w_full()
+            .min_w_0()
+            .min_h(px(theme::APP_CONTROL_HEIGHT_PX))
+            .flex()
+            .items_center()
+            .gap_2()
+            .px_2()
+            .rounded(px(CALENDAR_DAY_LIST_ROW_RADIUS_PX))
+            .text_size(px(CALENDAR_PILL_TEXT_SIZE_PX))
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .text_color(theme::rambutan_300())
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(label)
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .cursor_pointer()
+            .hover(|el| {
+                el.bg(theme::longan_700().opacity(CALENDAR_DAY_LIST_HOVER_BG_OPACITY))
+                    .text_color(theme::rambutan_100())
+            })
+    }
+
+    fn render_calendar_day_list_event(
+        &self,
+        event: &DesktopCalendarEvent,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let key = element_key(&event.id);
+        let read_only = event.is_read_only();
+        let label = if read_only {
+            format!("Open Google event {}, read only", event.title)
+        } else {
+            format!("Edit event {}", event.title)
+        };
+        let event_id = event.id.clone();
+        let event_id_for_key = event.id.clone();
+        Self::calendar_day_list_row(
+            ("calendar-day-list-event", key),
+            format!("desktop-calendar-day-list-event-{key}"),
+            label,
+        )
+        .on_click(cx.listener(move |this, _ev, window, cx| {
+            this.dismiss_overlay(|overlay| matches!(overlay, Overlay::CalendarDay { .. }));
+            this.open_event_edit(event_id.clone(), window, cx);
+        }))
+        .on_key_down(cx.listener(move |this, key: &KeyDownEvent, window, cx| {
+            if is_web_button_activation_key(key.keystroke.key.as_str()) {
+                window.prevent_default();
+                cx.stop_propagation();
+                this.dismiss_overlay(|overlay| matches!(overlay, Overlay::CalendarDay { .. }));
+                this.open_event_edit(event_id_for_key.clone(), window, cx);
+            }
+        }))
+        .child(
+            div()
+                .size(px(CALENDAR_PILL_DOT_SIZE_PX))
+                .rounded(px(CALENDAR_PILL_DOT_RADIUS_PX))
+                .bg(event_color(event.color.as_deref()))
+                .flex_shrink_0(),
+        )
+        .when(read_only, |el| {
+            el.child(
+                div()
+                    .flex_shrink_0()
+                    .px(px(2.0))
+                    .rounded(px(CALENDAR_PILL_DOT_RADIUS_PX))
+                    .bg(theme::blueberry_500().opacity(0.15))
+                    .text_color(theme::blueberry_200())
+                    .child("G"),
+            )
+        })
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .child(event.title.clone()),
+        )
+        .into_any_element()
+    }
+
+    fn render_calendar_day_list_task(
+        &self,
+        item: &DesktopWorkItem,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let key = element_key(&item.id);
+        let item_id = item.id.clone();
+        let item_id_for_key = item.id.clone();
+        Self::calendar_day_list_row(
+            ("calendar-day-list-task", key),
+            format!("desktop-calendar-day-list-task-{key}"),
+            format!("Open task {}, due this day", item.title),
+        )
+        .italic()
+        .tooltip(|window, cx| Tooltip::new(CALENDAR_TASK_DUE_LABEL).build(window, cx))
+        .on_click(cx.listener(move |this, _ev, window, cx| {
+            this.open_calendar_task(&item_id, window, cx);
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+            if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                window.prevent_default();
+                cx.stop_propagation();
+                this.open_calendar_task(&item_id_for_key, window, cx);
+            }
+        }))
+        .child(
+            div()
+                .size(px(CALENDAR_PILL_DOT_SIZE_PX))
+                .rounded(px(CALENDAR_PILL_DOT_RADIUS_PX))
+                .border_1()
+                .border_color(theme::rambutan_300())
+                .flex_shrink_0(),
+        )
+        .child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .truncate()
+                .child(item.title.clone()),
+        )
+        .into_any_element()
+    }
+
+    /// The web "Calendar day" dialog: every event and due task of `date`,
+    /// each opening its editor, its read-only provider detail or its task.
+    pub(super) fn render_calendar_day_list(
+        &self,
+        date: NaiveDate,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let (events, tasks) = self.calendar_day_records(date, cx);
+        let rows: Vec<AnyElement> = events
+            .iter()
+            .map(|event| self.render_calendar_day_list_event(event, cx))
+            .chain(
+                tasks
+                    .iter()
+                    .map(|item| self.render_calendar_day_list_task(item, cx)),
+            )
+            .collect();
+        let content = div()
+            .debug_selector(|| "desktop-calendar-day-list".to_string())
+            .p(px(CALENDAR_DAY_LIST_PADDING_PX))
+            .flex()
+            .flex_col()
+            .gap(px(CALENDAR_DAY_LIST_ROW_GAP_PX))
+            .child(
+                div()
+                    .px_2()
+                    .pb_1()
+                    .text_size(px(CALENDAR_DAY_LIST_DATE_TEXT_SIZE_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .text_color(theme::rambutan_200())
+                    .child(date.format("%A, %B %-d").to_string()),
+            )
+            .children(rows);
+        self.render_modal_shell(CALENDAR_DAY_LIST_LABEL, content, None, window, cx)
     }
 }
