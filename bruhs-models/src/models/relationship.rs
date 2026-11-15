@@ -108,6 +108,107 @@ impl RelationshipProfile {
         self.updated_at_ms = now_ms;
         true
     }
+
+    /// Replace an item's kind, text and due time. A blank text is refused
+    /// and changes nothing. Completion, source and identity are kept.
+    pub fn edit_item(
+        &mut self,
+        item_id: &str,
+        edit: RelationshipItemEdit,
+        now_ms: i64,
+    ) -> bool {
+        let text = edit.text.trim();
+        if text.is_empty() {
+            return false;
+        }
+        let Some(item) = self.items.iter_mut().find(|item| item.id == item_id) else {
+            return false;
+        };
+        let due_at_ms = edit.due.resolve(edit.kind, item.due_at_ms, now_ms);
+        if item.kind == edit.kind && item.text == text && item.due_at_ms == due_at_ms {
+            return false;
+        }
+        item.kind = edit.kind;
+        item.text = text.to_string();
+        item.due_at_ms = due_at_ms;
+        self.updated_at_ms = now_ms;
+        true
+    }
+
+    /// Remove one item. Other items keep their order.
+    pub fn remove_item(&mut self, item_id: &str, now_ms: i64) -> bool {
+        let before = self.items.len();
+        self.items.retain(|item| item.id != item_id);
+        if self.items.len() == before {
+            return false;
+        }
+        self.updated_at_ms = now_ms;
+        true
+    }
+}
+
+/// The due options both surfaces offer for a relationship item.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RelationshipDue {
+    /// No due time.
+    None,
+    /// Keep the current due time, or set tomorrow if there is none.
+    Tomorrow,
+}
+
+impl RelationshipDue {
+    /// Only commitments and reminders can be due; other kinds never are.
+    pub const fn applies_to(kind: RelationshipItemKind) -> bool {
+        matches!(
+            kind,
+            RelationshipItemKind::Commitment | RelationshipItemKind::Reminder
+        )
+    }
+
+    /// The due time to save for `kind`, given the item's current one.
+    pub fn resolve(
+        self,
+        kind: RelationshipItemKind,
+        current: Option<i64>,
+        now_ms: i64,
+    ) -> Option<i64> {
+        match self {
+            Self::Tomorrow if Self::applies_to(kind) => Some(current.unwrap_or_else(|| {
+                now_ms.saturating_add(super::RELATIONSHIP_DUE_TOMORROW_MS)
+            })),
+            _ => None,
+        }
+    }
+}
+
+/// A reviewed edit of one relationship item.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RelationshipItemEdit {
+    pub kind: RelationshipItemKind,
+    pub text: String,
+    pub due: RelationshipDue,
+}
+
+/// Every kind, in the order both surfaces show them.
+pub const RELATIONSHIP_ITEM_KINDS: [RelationshipItemKind; 4] = [
+    RelationshipItemKind::Interaction,
+    RelationshipItemKind::Commitment,
+    RelationshipItemKind::Reminder,
+    RelationshipItemKind::Note,
+];
+
+impl RelationshipItem {
+    /// A new item with the chosen due option applied.
+    pub fn with_due(
+        kind: RelationshipItemKind,
+        text: impl Into<String>,
+        due: RelationshipDue,
+        now_ms: i64,
+    ) -> Self {
+        let mut item = Self::new(kind, text, now_ms);
+        item.due_at_ms = due.resolve(kind, None, now_ms);
+        item
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -193,5 +294,79 @@ mod tests {
         assert_eq!(suggestions.len(), 2);
         assert_eq!(suggestions[0].reason, "Send the brief");
         assert_eq!(suggestions[1].reason, "Reply to Launch");
+    }
+
+    #[test]
+    fn items_can_be_edited_and_removed_with_the_same_due_options() {
+        let mut profile = RelationshipProfile::new("person-1", 1);
+        let item = RelationshipItem::with_due(
+            RelationshipItemKind::Reminder,
+            "  Call back ",
+            RelationshipDue::Tomorrow,
+            100,
+        );
+        assert_eq!(item.text, "Call back");
+        assert_eq!(item.due_at_ms, Some(100 + crate::RELATIONSHIP_DUE_TOMORROW_MS));
+        let note = RelationshipItem::with_due(
+            RelationshipItemKind::Note,
+            "Likes tea",
+            RelationshipDue::Tomorrow,
+            100,
+        );
+        assert_eq!(note.due_at_ms, None, "notes are never due");
+        let id = item.id.clone();
+        profile.add_item(item, 100);
+        profile.add_item(note.clone(), 101);
+        profile.toggle_item(&id, 102);
+
+        assert!(!profile.edit_item(
+            &id,
+            RelationshipItemEdit {
+                kind: RelationshipItemKind::Commitment,
+                text: "   ".into(),
+                due: RelationshipDue::None,
+            },
+            103,
+        ));
+        assert_eq!(profile.updated_at_ms, 102, "a blank edit changes nothing");
+
+        assert!(profile.edit_item(
+            &id,
+            RelationshipItemEdit {
+                kind: RelationshipItemKind::Commitment,
+                text: "Send the deck".into(),
+                due: RelationshipDue::Tomorrow,
+            },
+            104,
+        ));
+        let edited = profile.items.iter().find(|item| item.id == id).unwrap();
+        assert_eq!(edited.kind, RelationshipItemKind::Commitment);
+        assert_eq!(edited.text, "Send the deck");
+        assert_eq!(
+            edited.due_at_ms,
+            Some(100 + crate::RELATIONSHIP_DUE_TOMORROW_MS),
+            "an existing due time is kept"
+        );
+        assert_eq!(edited.completed_at_ms, Some(102), "completion is kept");
+
+        assert!(profile.edit_item(
+            &id,
+            RelationshipItemEdit {
+                kind: RelationshipItemKind::Interaction,
+                text: "Send the deck".into(),
+                due: RelationshipDue::Tomorrow,
+            },
+            105,
+        ));
+        assert_eq!(
+            profile.items.iter().find(|item| item.id == id).unwrap().due_at_ms,
+            None,
+            "interactions are never due"
+        );
+
+        assert!(profile.remove_item(&id, 106));
+        assert!(!profile.remove_item(&id, 107));
+        assert_eq!(profile.items, vec![note]);
+        assert_eq!(profile.updated_at_ms, 106);
     }
 }
