@@ -5,6 +5,9 @@
 // the run.
 // Run after: (cd bruhs-web && trunk build --dist ../target/calendar-ui-dist)
 //   node bruhs-web/tests/calendar_browser.mjs
+// BRUHS_CALENDAR_UI_DIST picks the bundle and BRUHS_CALENDAR_QA_DIR the
+// output directory, so a later run never overwrites an earlier run's
+// screenshots and results.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
@@ -15,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = path.resolve(process.env.BRUHS_CALENDAR_UI_DIST ?? path.join(root, 'target/calendar-ui-dist'));
-const output = path.join(root, 'target/calendar-qa');
+const output = path.resolve(process.env.BRUHS_CALENDAR_QA_DIR ?? path.join(root, 'target/calendar-qa'));
 const startedAt = new Date().toISOString();
 const cells = [
   { name: 'desktop', width: 1280, height: 800, hasTouch: false },
@@ -172,10 +175,23 @@ try {
     const column = () => page.locator('div.relative.border-l').first();
     const dialog = () => page.getByRole('dialog', { name: 'Calendar event', exact: true });
     const dayList = () => page.getByRole('dialog', { name: 'Calendar day', exact: true });
-    // A month cell shows three records and clips on compact widths; its
-    // date opens every event and due task of that day.
+    // A user can click it: it has a box and is the element at its own
+    // center, so nothing covers it and no overflow clip hides it.
+    async function reachable(locator, label) {
+      await locator.scrollIntoViewIfNeeded();
+      const hit = await locator.evaluate(element => {
+        const r = element.getBoundingClientRect();
+        const at = document.elementFromPoint(r.x + r.width / 2, r.y + r.height / 2);
+        return r.width > 0 && r.height > 0 && Boolean(at && (at === element || element.contains(at)));
+      });
+      check(hit, `${label} is visible and reachable`);
+    }
+    // A month cell shows three lines and clips on compact widths; its day
+    // number stays on top and opens every event and due task of that day.
     async function openDay(iso) {
-      await page.locator(`button[data-calendar-day="${iso}"]`).click();
+      const day = page.locator(`button[data-calendar-day="${iso}"]`);
+      await reachable(day, `the ${iso} day number`);
+      await day.click();
       await dayList().waitFor();
     }
     async function snapshot(name) {
@@ -368,7 +384,18 @@ try {
       await dialog().waitFor({ state: 'hidden' });
       await persisted(records => !records.some(r => r.id === createdTimed.id), 'Delete in the dialog removes the timed event');
       await modeButton('Month').click();
-      check(await page.locator('button[data-calendar-more="2026-11-01"]').count() === 1, 'a day with more than three records offers +N more');
+      const more = page.locator('button[data-calendar-more="2026-11-01"]');
+      check(await more.count() === 1, 'a day with more than three records offers +N more');
+      if (cell.name === 'desktop') {
+        // At 1280x800 a cell fits its three lines, so +N more itself is a
+        // user path; on the compact and touch cells the day number is.
+        await reachable(more, '+N more on a full day');
+        await more.click();
+        await dayList().waitFor();
+        check(await dayList().locator(`button[data-day-list-event="${createdAllDay.id}"]`).count() === 1, '+N more opens the day list with the hidden all-day event');
+        await page.keyboard.press('Escape');
+        await dayList().waitFor({ state: 'hidden' });
+      }
       await openDay('2026-11-02');
       check(await dayList().locator(`button[data-day-list-event="${createdAllDay.id}"]`).count() === 0, 'the created all-day event does not spill into November 2');
       await page.keyboard.press('Escape');

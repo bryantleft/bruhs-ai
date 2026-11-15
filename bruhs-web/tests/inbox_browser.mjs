@@ -12,7 +12,8 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = path.resolve(process.env.BRUHS_INBOX_UI_DIST ?? path.join(root, 'target/inbox-ui-dist'));
-const output = path.join(root, 'target/inbox-ui-qa');
+// BRUHS_INBOX_QA_DIR keeps a later run from overwriting earlier evidence.
+const output = path.resolve(process.env.BRUHS_INBOX_QA_DIR ?? path.join(root, 'target/inbox-ui-qa'));
 const startedAt = new Date().toISOString();
 const cells = [
   { name: 'desktop', width: 1280, height: 800, hasTouch: false },
