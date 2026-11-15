@@ -304,7 +304,10 @@ impl MeetingRecords for InMemoryMeetingStore {
         Ok(updated)
     }
 
-    async fn delete_meeting(&self, id: &bruhs_models::ids::MeetingId) -> MeetingStoreResult<bool> {
+    async fn delete_meeting_and_observations(
+        &self,
+        id: &bruhs_models::ids::MeetingId,
+    ) -> MeetingStoreResult<Option<usize>> {
         let id = id.as_str();
         let mut generations = self.generations.write().await;
         let mut meetings = self.meetings.write().await;
@@ -325,9 +328,10 @@ impl MeetingRecords for InMemoryMeetingStore {
         } else {
             Vec::new()
         };
+        let mut dropped = 0;
         for (person_id, version) in versions {
             if let Some(person) = people.get_mut(&person_id) {
-                bruhs_models::drop_meeting_observations(person, id);
+                dropped += bruhs_models::drop_meeting_observations(person, id);
                 person.updated_at = version;
             }
         }
@@ -342,7 +346,7 @@ impl MeetingRecords for InMemoryMeetingStore {
         // Both locks span every removal, so no reader sees a half-deleted meeting.
         drop(meetings);
         drop(generations);
-        Ok(removed)
+        Ok(removed.then_some(dropped))
     }
 
     async fn append_segment(&self, segment: TranscriptSegment) -> MeetingStoreResult<()> {

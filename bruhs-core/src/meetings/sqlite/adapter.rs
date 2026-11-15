@@ -233,7 +233,10 @@ impl MeetingRecords for SqliteMeetingStore {
         .await
     }
 
-    async fn delete_meeting(&self, id: &bruhs_models::ids::MeetingId) -> MeetingStoreResult<bool> {
+    async fn delete_meeting_and_observations(
+        &self,
+        id: &bruhs_models::ids::MeetingId,
+    ) -> MeetingStoreResult<Option<usize>> {
         let id = id.as_str();
         let id = id.to_owned();
         self.call(move |connection| {
@@ -241,10 +244,11 @@ impl MeetingRecords for SqliteMeetingStore {
                 // PEOPLE-14: the observations derived from a meeting leave
                 // with it, in the same commit. An unknown id changes nothing.
                 if records::meeting(tx, &id)?.is_none() {
-                    return Ok(false);
+                    return Ok(None);
                 }
-                contacts::drop_meeting_observations(tx, &id)?;
-                Ok(tx.execute("DELETE FROM meetings WHERE id=?1", [&id])? != 0)
+                let dropped = contacts::drop_meeting_observations(tx, &id)?;
+                let deleted = tx.execute("DELETE FROM meetings WHERE id=?1", [&id])? != 0;
+                Ok(deleted.then_some(dropped))
             })
         })
         .await
