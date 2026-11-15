@@ -35,7 +35,7 @@ web-sys = { version = "0.3", features = [
     "Window", "Document", "History", "EventTarget", "Event",
     "ReadableStream", "ReadableStreamDefaultReader",
     "TextDecoder", "TextDecodeOptions", "Request", "RequestInit", "RequestMode", "Response", "Headers",
-    "Blob", "BlobPropertyBag", "File", "FileList", "Url", "Storage",
+    "Blob", "BlobPropertyBag", "File", "FileList", "FormData", "Url", "Storage",
     "AbortController", "AbortSignal", "IdbTransaction", "HtmlDetailsElement",
     "WebSocket", "BinaryType", "CloseEvent", "ResizeObserver", "ResizeObserverEntry",
     "DragEvent", "DataTransfer", "ClipboardEvent", "PointerEvent", "DomRect", "CssStyleDeclaration",
