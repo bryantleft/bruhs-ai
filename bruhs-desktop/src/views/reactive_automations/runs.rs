@@ -44,10 +44,22 @@ pub(super) fn run_notes(run: &ReactiveRun) -> Vec<(String, Tone)> {
             Tone::Muted,
         ));
     }
+    // A run handled with another one keeps an explanation, not a failure.
+    if run.status == RunStatus::Merged {
+        notes.extend(run.error.clone().map(|text| (text, Tone::Muted)));
+    }
     if let Some(warning) = &run.report_warning {
         notes.push((format!("Report note: {warning}"), Tone::Warning));
     }
     notes
+}
+
+/// The run's error, if it is one. Text on a merged run is informational
+/// and appears among its notes instead.
+pub(super) fn run_error(run: &ReactiveRun) -> Option<&str> {
+    run.error
+        .as_deref()
+        .filter(|_| run.status != RunStatus::Merged)
 }
 
 pub(super) fn note((text, tone): (String, Tone)) -> Div {
@@ -64,7 +76,7 @@ pub(super) fn note((text, tone): (String, Tone)) -> Div {
 
 #[cfg(test)]
 mod tests {
-    use super::{outcome_label, run_notes, short_id, trigger_label, Tone};
+    use super::{outcome_label, run_error, run_notes, short_id, trigger_label, Tone};
     use bruhs_models::{
         ids::ThreadId,
         reactive::{ReactiveRun, RunOutcome, RunReport, RunStatus, RunTrigger},
@@ -117,6 +129,21 @@ mod tests {
             run_notes(&merged),
             vec![("Handled with run abcdef01".to_string(), Tone::Muted)]
         );
+        // The merge explanation is a muted note, never an error.
+        merged.error = Some("Handled together with an earlier queued item.".into());
+        assert_eq!(run_error(&merged), None);
+        assert_eq!(
+            run_notes(&merged).last(),
+            Some(&(
+                "Handled together with an earlier queued item.".to_string(),
+                Tone::Muted
+            ))
+        );
+        let mut failed = run();
+        failed.status = RunStatus::Failed;
+        failed.error = Some("The provider exited.".into());
+        assert_eq!(run_error(&failed), Some("The provider exited."));
+        assert!(run_notes(&failed).is_empty());
 
         let mut batch = run();
         batch.merged_runs = vec!["a".into(), "b".into()];

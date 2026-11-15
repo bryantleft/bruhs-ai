@@ -49,7 +49,19 @@ pub(super) fn run_notes(run: &ReactiveRun) -> Vec<String> {
     if run.fresh_session {
         notes.push("Started a new conversation; memory carried over.".into());
     }
+    // A run handled with another one keeps an explanation, not a failure.
+    if run.status == RunStatus::Merged {
+        notes.extend(run.error.clone());
+    }
     notes
+}
+
+/// The run's error, if it is one. Text on a merged run is informational
+/// and appears among its notes instead.
+pub(super) fn run_error(run: &ReactiveRun) -> Option<String> {
+    run.error
+        .clone()
+        .filter(|_| run.status != RunStatus::Merged)
 }
 
 pub(super) fn report_warning(run: &ReactiveRun) -> Option<String> {
@@ -117,6 +129,27 @@ mod tests {
                 "Started a new conversation; memory carried over.".to_string(),
             ]
         );
+    }
+
+    #[test]
+    fn a_merged_runs_explanation_is_a_note_and_real_errors_stay_errors() {
+        let mut item = run();
+        item.status = RunStatus::Merged;
+        item.merged_into = Some("abcdef0123456789".into());
+        item.error = Some("Handled together with an earlier queued item.".into());
+        assert_eq!(run_error(&item), None);
+        assert_eq!(
+            run_notes(&item),
+            vec![
+                "Handled with run abcdef01".to_string(),
+                "Handled together with an earlier queued item.".to_string(),
+            ]
+        );
+        item.status = RunStatus::Failed;
+        item.merged_into = None;
+        item.error = Some("The provider exited.".into());
+        assert_eq!(run_error(&item).as_deref(), Some("The provider exited."));
+        assert!(run_notes(&item).is_empty());
     }
 
     #[test]

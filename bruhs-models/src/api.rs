@@ -55,6 +55,19 @@ pub struct BackgroundService {
     pub binary: Option<String>,
     /// Plain-language state or the reason it is unavailable.
     pub detail: String,
+    /// The service's own process is the server answering on the port. Never
+    /// inferred from `loaded`: a loaded job can be stuck before it listens.
+    #[serde(default)]
+    pub serving: bool,
+    /// The process the service manager started, when it reports one.
+    #[serde(default)]
+    pub service_pid: Option<u32>,
+    /// The process that answered this status request, when known.
+    #[serde(default)]
+    pub responder_pid: Option<u32>,
+    /// Where the service writes its output, when it writes to a file.
+    #[serde(default)]
+    pub log_path: Option<String>,
 }
 
 /// `POST /api/service`.

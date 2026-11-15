@@ -29,7 +29,7 @@ pub(super) fn local_time(at: EpochMs) -> String {
         || at.to_string(),
         |time| {
             time.with_timezone(&chrono::Local)
-                .format("%b %-d, %-I:%M %p")
+                .format("%b %-d, %Y, %-I:%M %p")
                 .to_string()
         },
     )
@@ -93,6 +93,10 @@ fn badge(text: &'static str, info: bool) -> Div {
 /// An information-tone badge, shared with run cards.
 pub(super) fn badge_info(text: &'static str) -> Div {
     badge(text, true)
+}
+
+pub(super) fn badge_plain(text: &'static str) -> Div {
+    badge(text, false)
 }
 
 /// The unread count on the Agent workflows navigation entry.
@@ -218,9 +222,17 @@ impl ReactiveAutomations {
                     .flex_wrap()
                     .items_center()
                     .gap_2()
-                    .when(unread, |row| row.child(badge("Unread", true)))
-                    .child(badge(kind, unread || open_question))
+                    // Web order: kind and resolution chips, then the unread label.
+                    .child(badge(kind, false))
                     .children(resolved.map(|label| badge(label, false)))
+                    .when(unread, |row| {
+                        row.child(
+                            div()
+                                .text_size(px(12.0))
+                                .text_color(theme::blueberry_200())
+                                .child("Unread"),
+                        )
+                    })
                     .child(muted(agent))
                     .child(muted(local_time(item.created_at))),
             )
@@ -230,10 +242,22 @@ impl ReactiveAutomations {
                 &item.message,
             ));
         if let Some(answer) = &item.answer {
-            row = row.child(muted("Your reply")).child(selectable_text(
-                SharedString::from(format!("reactive-update-answer-{}", item.id)),
-                answer,
-            ));
+            row = row.child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .p_2()
+                    .rounded(px(6.0))
+                    .bg(theme::longan_900())
+                    .border_1()
+                    .border_color(theme::longan_700().opacity(0.5))
+                    .child(muted("Your reply"))
+                    .child(selectable_text(
+                        SharedString::from(format!("reactive-update-answer-{}", item.id)),
+                        answer,
+                    )),
+            );
         }
         if let SystemDelivery::Failed { error } = &item.system {
             row = row.child(
@@ -249,8 +273,35 @@ impl ReactiveAutomations {
             .filter(|(id, _)| *id == item.id)
             .map(|(_, input)| input);
         let mut actions = div().flex().flex_wrap().gap_2();
+        if item.resolved_at.is_none() {
+            let id = item.id.clone();
+            actions = actions.child(
+                control_as(
+                    SharedString::from(format!("reactive-reply-{}", item.id)),
+                    "Reply",
+                    self.busy,
+                    open_question,
+                )
+                .aria_expanded(replying.is_some())
+                .on_activate(cx, move |this, window, cx| {
+                    if this.reply.as_ref().is_some_and(|(open, _)| *open == id) {
+                        this.reply = None;
+                    } else {
+                        let input = edit_input("", true, window, cx);
+                        this.reply_watch =
+                            Some(cx.subscribe(&input, |_, _, event: &InputEvent, cx| {
+                                if matches!(event, InputEvent::Change) {
+                                    cx.notify();
+                                }
+                            }));
+                        this.reply = Some((id.clone(), input));
+                    }
+                    cx.notify();
+                }),
+            );
+        }
         if unread {
-            actions = actions.child(self.command_in(
+            actions = actions.child(self.ghost_command_in(
                 format!("reactive-read-{}", item.id),
                 "Mark read",
                 ReactiveCommand::MarkOutboxRead {
@@ -261,59 +312,50 @@ impl ReactiveAutomations {
             ));
         }
         if item.resolved_at.is_none() {
-            let id = item.id.clone();
-            actions = actions
-                .child(
-                    control_as(
-                        SharedString::from(format!("reactive-reply-{}", item.id)),
-                        "Reply",
-                        self.busy,
-                        open_question,
-                    )
-                    .aria_expanded(replying.is_some())
-                    .on_activate(cx, move |this, window, cx| {
-                        if this.reply.as_ref().is_some_and(|(open, _)| *open == id) {
-                            this.reply = None;
-                        } else {
-                            this.reply = Some((id.clone(), edit_input("", true, window, cx)));
-                        }
-                        cx.notify();
-                    }),
-                )
-                .child(self.command_in(
-                    format!("reactive-dismiss-{}", item.id),
-                    "Dismiss",
-                    ReactiveCommand::DismissOutbox {
-                        id: item.id.clone(),
-                    },
-                    Scope::Updates,
-                    cx,
-                ));
+            actions = actions.child(self.ghost_command_in(
+                format!("reactive-dismiss-{}", item.id),
+                "Dismiss",
+                ReactiveCommand::DismissOutbox {
+                    id: item.id.clone(),
+                },
+                Scope::Updates,
+                cx,
+            ));
         }
         row = row.child(actions);
         if let Some(input) = replying {
             let id = item.id.clone();
+            let empty = value(input, cx).trim().is_empty();
             row = row.child(field("Reply", input, true, self.busy)).child(
                 div()
                     .flex()
                     .flex_wrap()
                     .gap_2()
                     .child(
-                        control_as("reactive-send-reply", "Send reply", self.busy, true)
-                            .on_activate(cx, move |this, _, cx| {
-                                let Some((_, input)) = &this.reply else {
-                                    return;
-                                };
-                                let message = value(input, cx);
-                                this.send_in(
-                                    ReactiveCommand::AnswerOutbox {
-                                        id: id.clone(),
-                                        message,
-                                    },
-                                    Scope::Updates,
-                                    cx,
-                                );
-                            }),
+                        control_as(
+                            "reactive-send-reply",
+                            "Send reply",
+                            self.busy || empty,
+                            true,
+                        )
+                        .on_activate(cx, move |this, _, cx| {
+                            let Some((_, input)) = &this.reply else {
+                                return;
+                            };
+                            let message = value(input, cx);
+                            // The button only looks disabled; an empty reply never leaves.
+                            if message.trim().is_empty() {
+                                return;
+                            }
+                            this.send_in(
+                                ReactiveCommand::AnswerOutbox {
+                                    id: id.clone(),
+                                    message,
+                                },
+                                Scope::Updates,
+                                cx,
+                            );
+                        }),
                     )
                     .child(
                         control("reactive-cancel-reply", "Cancel", self.busy).on_activate(
@@ -525,6 +567,28 @@ mod tests {
                 Some("question-1")
             );
             assert!(!panel.busy, "opening a reply sends nothing");
+        });
+        // An empty reply is never sent, whatever the click.
+        let send = cx.debug_bounds("reactive-Send reply").expect("send reply");
+        cx.simulate_click(send.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        panel.update_in(cx, |panel, _, _| {
+            assert!(!panel.busy, "an empty reply sends nothing");
+            assert!(panel.reply.is_some(), "the empty reply stays open");
+        });
+        // Notification switches show their state, not just their role.
+        assert!(cx
+            .debug_bounds("reactive-System notification for updates-checked")
+            .is_none());
+        let switch = cx
+            .debug_bounds("reactive-System notification for updates")
+            .expect("updates switch");
+        cx.simulate_click(switch.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        assert!(cx
+            .debug_bounds("reactive-System notification for updates-checked")
+            .is_some());
+        panel.update_in(cx, |panel, _, _| {
             let snapshot = panel.snapshot.as_ref().unwrap();
             let setup =
                 AutomationSetup::from_subscription(snapshot, &snapshot.subscriptions[0]).unwrap();

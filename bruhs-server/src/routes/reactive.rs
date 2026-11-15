@@ -131,7 +131,11 @@ pub async fn hook(
 
 /// `GET /api/service`: whether automations outlive the app.
 pub async fn service_status() -> impl axum::response::IntoResponse {
-    let status = tokio::task::spawn_blocking(crate::service::status)
+    // This server is the process on the port, so it reports itself and never probes.
+    let asker = crate::service::Asker::Server {
+        pid: std::process::id(),
+    };
+    let status = tokio::task::spawn_blocking(move || crate::service::status(asker))
         .await
         .unwrap_or_default();
     (
@@ -146,7 +150,10 @@ pub async fn service_apply(
     Json(action): Json<bruhs_models::api::BackgroundServiceAction>,
 ) -> Result<Json<bruhs_models::api::BackgroundService>, AppError> {
     let dist = config.spa_dir.clone();
-    tokio::task::spawn_blocking(move || crate::service::apply(action, &dist))
+    let asker = crate::service::Asker::Server {
+        pid: std::process::id(),
+    };
+    tokio::task::spawn_blocking(move || crate::service::apply(action, &dist, asker))
         .await
         .map_err(|_| AppError::Unavailable("The service installer stopped.".into()))?
         .map(Json)
