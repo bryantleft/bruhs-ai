@@ -254,6 +254,11 @@ pub enum MeetingEvent {
     PersonMerged {
         source_id: String,
     },
+    /// The contact was deleted. Drop it from local caches; its observations,
+    /// aliases and reminders went with it, and its links were unlinked.
+    PersonDeleted {
+        person_id: String,
+    },
     /// Emitted by the activity monitor when sustained microphone activity
     /// is detected for at least `START_ACTIVITY_SECS` continuously. Fired
     /// BEFORE any meeting is created — carries no meeting_id.
