@@ -257,10 +257,13 @@ fn a_google_block_is_read_only_and_opens_its_provider_detail(cx: &mut gpui::Test
     );
     cx.simulate_mouse_up(from, gpui::MouseButton::Left, gpui::Modifiers::default());
     cx.run_until_parked();
-    workspace.update_in(cx, |workspace, _window, _cx| {
+    // Releasing over the block is a click, which may open the detail: close
+    // it and redraw, so the next click reaches the block, not the scrim.
+    workspace.update_in(cx, |workspace, _window, cx| {
         workspace.dismiss_overlay(|overlay| matches!(overlay, Overlay::EventCreate { .. }));
         workspace.selected_calendar_event_id = None;
         workspace.event_dialog_provider = None;
+        cx.notify();
     });
     cx.run_until_parked();
 
