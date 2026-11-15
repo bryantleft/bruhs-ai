@@ -87,6 +87,7 @@ impl Server {
         let child = command
             .env("BRUHS_SERVER_PORT", port.to_string())
             .env("BRUHS_MEETING_DB", database)
+            .env("BRUHS_MAIL_DB", database.with_extension("mail.sqlite3"))
             .env(
                 "BRUHS_REACTIVE_DB",
                 database.with_extension("reactive.sqlite3"),
