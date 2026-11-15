@@ -23,6 +23,13 @@ use super::paths::default_google_calendar_dir;
 pub struct SyncCursor {
     pub sync_token: Option<String>,
     pub last_synced_at_ms: Option<i64>,
+    /// When the sync window was last listed in full. Sync tokens only
+    /// report changes, so a recurring series that does not change never
+    /// sends the instances that later slide into the window; the window is
+    /// listed again once it is older than a day. Missing on cursors written
+    /// before the sliding window, which therefore relist once.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub window_listed_at_ms: Option<i64>,
 }
 
 #[derive(Debug, thiserror::Error)]
@@ -306,10 +313,12 @@ mod tests {
         let a = SyncCursor {
             sync_token: Some("tok-a".into()),
             last_synced_at_ms: Some(1),
+            window_listed_at_ms: Some(1),
         };
         let b = SyncCursor {
             sync_token: Some("tok-b".into()),
             last_synced_at_ms: Some(2),
+            window_listed_at_ms: None,
         };
         files.save_cursor("a.b", a.clone()).await.unwrap();
         files.save_cursor("a_b", b.clone()).await.unwrap();
@@ -347,6 +356,7 @@ mod tests {
                 SyncCursor {
                     sync_token: Some("new-tok".into()),
                     last_synced_at_ms: Some(6),
+                    window_listed_at_ms: None,
                 },
             )
             .await
