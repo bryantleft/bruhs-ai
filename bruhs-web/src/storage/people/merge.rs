@@ -8,6 +8,8 @@ use crate::relationship_store::ExpectedRelationships;
 use crate::storage::{relationships, STORE_RELATIONSHIPS};
 mod commit;
 pub use commit::complete;
+mod undo;
+pub use undo::unmerge;
 #[cfg(test)]
 mod tests;
 
@@ -67,6 +69,10 @@ pub struct Record {
     pub after_relationship: Option<RelationshipProfile>,
     pub created_at_ms: i64,
     pub phase: Phase,
+    /// Inbox participants and knowledge links the completed merge moved from
+    /// the source to the target, so undo restores exactly those.
+    #[serde(default)]
+    pub relinked: bruhs_models::PersonLinkSet,
 }
 
 impl Record {
@@ -236,6 +242,7 @@ async fn prepare_with_reply(
         phase: reply.map_or(Phase::Prepared, |reply| Phase::Confirmed {
             reply: Box::new(reply),
         }),
+        relinked: bruhs_models::PersonLinkSet::default(),
     };
     record.validate()?;
     let value = to_js(&record)?;

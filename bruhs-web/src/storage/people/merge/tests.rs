@@ -13,6 +13,7 @@ fn prepared() -> Record {
         after_relationship: None,
         created_at_ms: 1,
         phase: Phase::Prepared,
+        relinked: bruhs_models::PersonLinkSet::default(),
     }
 }
 

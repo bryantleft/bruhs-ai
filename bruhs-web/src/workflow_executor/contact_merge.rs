@@ -72,8 +72,23 @@ impl WorkflowExecutor {
                 Ok(record) => self.resume_merge(record).await,
                 Err(error) => Err(error),
             };
+            self.remember_completed_merge(&result);
             self.merge_finished(&result);
         });
+    }
+
+    /// A merge the user started here can be undone right after.
+    fn remember_completed_merge(self, result: &Result<(), SaveError>) {
+        if result.is_err() {
+            return;
+        }
+        if let Some(record) = self
+            .merge_record
+            .get_untracked()
+            .filter(|record| matches!(record.phase, Phase::Completed { .. }))
+        {
+            self.remember_merge(&record);
+        }
     }
 
     pub fn retry_contact_merge(self) {
@@ -88,6 +103,7 @@ impl WorkflowExecutor {
         self.merge_error.set(None);
         wasm_bindgen_futures::spawn_local(async move {
             let result = self.resume_merge(record).await;
+            self.remember_completed_merge(&result);
             self.merge_finished(&result);
         });
     }
@@ -115,6 +131,8 @@ impl WorkflowExecutor {
             return Err(SaveError::Unavailable);
         };
         guard.merged(&completed.source.id, completed.after_relationship.clone());
+        // The commit repointed Inbox participants and knowledge links on disk.
+        self.retarget_links_in_memory(&completed.source.id, &completed.target.id);
         self.set_people.0.update(|people| {
             people.retain(|person| person.id != completed.source.id);
             if let Some(target) = people.iter_mut().find(|person| person.id == reply.id) {

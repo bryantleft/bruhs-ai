@@ -154,6 +154,9 @@ pub fn subscribe(
                     Ok(MeetingEvent::PersonMerged { source_id }) => {
                         workflow_executor.remote_person_merged(source_id);
                     }
+                    Ok(MeetingEvent::PersonDeleted { person_id }) => {
+                        workflow_executor.remote_person_deleted(person_id);
+                    }
                     Ok(MeetingEvent::CaptureWarning {
                         meeting_id,
                         message,
