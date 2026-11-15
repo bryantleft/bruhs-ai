@@ -480,7 +480,7 @@ mod tests {
             "{refused:?}"
         );
 
-        merge_person_into(
+        let Json(_survivor) = merge_person_into(
             State(state.clone()),
             Path(("zoe".parse().unwrap(), "ada".parse().unwrap())),
         )
