@@ -390,6 +390,8 @@ impl CoordinationRuntime {
             task.state = TaskState::Ready;
             task.resume_at = None;
             task.limit_reported = false;
+            // Work that starts again belongs back on the board, as with a message.
+            task.archived_at = None;
             task.error = None;
             task.live_output.clear();
             task.approvals.clear();

@@ -10,8 +10,8 @@ use axum::{
     routing::{get, post},
     Extension, Json, Router,
 };
-use bruhs_core::coordination::{AccessScope, CoordinationError, CoordinationRuntime};
-use bruhs_models::coordination::{CoordinationCommand, CoordinationSnapshot};
+use bruhs_core::coordination::{AccessScope, BoardLinks, CoordinationError, CoordinationRuntime};
+use bruhs_models::coordination::{board::TaskBoard, CoordinationCommand, CoordinationSnapshot};
 use serde::Deserialize;
 use std::{convert::Infallible, sync::Arc};
 use tower_http::compression::{
@@ -45,6 +45,24 @@ pub async fn snapshot(
     Ok((
         [(header::CACHE_CONTROL, "no-store")],
         Json(runtime(value)?.snapshot().await),
+    ))
+}
+
+/// The orchestration board: every task placed in its delivery lane. Branch
+/// and pull request lookups refresh in the background; see `TaskBoard`.
+pub async fn board(
+    value: Option<Extension<CoordinationRuntime>>,
+    links: Option<Extension<BoardLinks>>,
+) -> Result<impl IntoResponse, AppError> {
+    let snapshot = runtime(value)?.snapshot().await;
+    let Some(Extension(links)) = links else {
+        return Err(AppError::Unavailable(
+            "The task board is unavailable. Restart the companion server.".into(),
+        ));
+    };
+    Ok((
+        [(header::CACHE_CONTROL, "no-store")],
+        Json(links.board(&snapshot).await),
     ))
 }
 
@@ -154,11 +172,12 @@ fn change_stream(runtime: CoordinationRuntime, token: Option<String>) -> impl In
 #[derive(Clone)]
 struct RemoteState {
     runtime: CoordinationRuntime,
+    links: BoardLinks,
 }
 
 /// Bind this router only after explicit self-hosted access configuration. It
 /// contains no life, capture, file, credential, or ordinary-agent API routes.
-pub fn remote_router(runtime: CoordinationRuntime) -> Router {
+pub fn remote_router(runtime: CoordinationRuntime, links: BoardLinks) -> Router {
     Router::new().route("/", get(|| async { Html(include_str!("coordination/remote.html")) }))
         .route("/favicon.ico", get(|| async { StatusCode::NO_CONTENT }))
         .route("/manifest.webmanifest", get(|| async {
@@ -168,6 +187,7 @@ pub fn remote_router(runtime: CoordinationRuntime) -> Router {
             ([(header::CONTENT_TYPE, "image/png")], include_bytes!("coordination/icon-512.png").as_slice())
         }))
         .route("/api/tasks", get(remote_snapshot))
+        .route("/api/board", get(remote_board))
         .route("/api/commands", post(remote_command))
         .route("/api/proposals", post(remote_proposal))
         .route("/api/changes", get(remote_changes))
@@ -175,7 +195,7 @@ pub fn remote_router(runtime: CoordinationRuntime) -> Router {
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store")))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, axum::http::HeaderValue::from_static("no-referrer")))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::CONTENT_SECURITY_POLICY, axum::http::HeaderValue::from_static("default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'")))
-        .with_state(Arc::new(RemoteState { runtime }))
+        .with_state(Arc::new(RemoteState { runtime, links }))
         .layer(remote_response_compression())
 }
 
@@ -242,6 +262,17 @@ async fn remote_snapshot(
     Ok(Json(state.runtime.scoped_snapshot(&scope).await?))
 }
 
+/// A guest's scoped snapshot carries no paths, so its board never reads a
+/// branch or pull request; the owner's board matches the local one.
+async fn remote_board(
+    State(state): State<Arc<RemoteState>>,
+    headers: HeaderMap,
+) -> Result<Json<TaskBoard>, AppError> {
+    let scope = state.runtime.authorize(&token(&headers)?).await?;
+    let snapshot = state.runtime.scoped_snapshot(&scope).await?;
+    Ok(Json(state.links.board(&snapshot).await))
+}
+
 async fn remote_command(
     State(state): State<Arc<RemoteState>>,
     headers: HeaderMap,
@@ -291,7 +322,10 @@ mod tests {
         let access = runtime.issue_access(AccessScope::Owner, 60).await.unwrap();
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let base = format!("http://{}", listener.local_addr().unwrap());
-        let app = remote_router(runtime.clone());
+        let delivery = bruhs_core::delivery::DeliveryService::open(root.path().join("delivery"))
+            .await
+            .unwrap();
+        let app = remote_router(runtime.clone(), BoardLinks::new(delivery));
         let server = tokio::spawn(async move {
             axum::serve(listener, app).await.unwrap();
         });
@@ -348,6 +382,24 @@ mod tests {
                 .status(),
             StatusCode::FORBIDDEN
         );
+        assert_eq!(
+            client
+                .get(format!("{base}/api/board"))
+                .send()
+                .await
+                .unwrap()
+                .status(),
+            StatusCode::FORBIDDEN
+        );
+        let board = client
+            .get(format!("{base}/api/board"))
+            .bearer_auth(&access.token)
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(board.status(), StatusCode::OK);
+        let board: TaskBoard = board.json().await.unwrap();
+        assert!(board.cards.is_empty() && !board.refreshing);
         for path in [
             "/api/meetings",
             "/api/secrets",

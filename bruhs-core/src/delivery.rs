@@ -9,6 +9,7 @@ use std::{
 };
 use tokio::sync::{watch, Mutex};
 
+mod branches;
 mod command;
 mod forge;
 mod github;

@@ -1,10 +1,56 @@
 # Local task workspaces
 
 Task workspaces add server-owned agent runs beside the existing client-owned
-chat threads. Open Workbench and choose Tasks. The server keeps running after
+chat threads. Open Workbench and choose Tasks to see them on the board. The server keeps running after
 the view closes; completed output, provider session identity, specification
 revisions and pending owner decisions are stored in the private task store.
 Existing chats and life data are not copied into this store.
+
+## The board
+
+Tasks opens on a board with four lanes: Building, Validating, In review and
+Ready. Nobody moves a card by hand. Its lane comes from what the work is
+doing, so the board cannot disagree with the work:
+
+| Lane | A card is here when |
+| --- | --- |
+| Building | No reviewable pull request yet, a draft, or new work after verification |
+| Validating | A verification child is running or has reported, or the pull request's checks are running or failing |
+| In review | The pull request waits on review, has changes requested, has a conflict, or the forge is still computing mergeability |
+| Ready | Every open pull request can merge now: checks pass and review is approved or not required |
+
+The least advanced open pull request holds a card back. A card whose pull
+requests all merged leaves the lanes for Done and archived at the foot of the
+board. Its status line shows the agent first (Working, Needs approval,
+Failed, Interrupted, Stopped) and otherwise what the pull request waits on.
+Cards that need you sort first in their lane, and the header counts what is
+working, what needs you and what is ready to merge.
+
+Delegates and forks get their own cards and are counted on their parent.
+Verification runs and side chats fold into their parent's card; open the card
+to reach them under Related tasks.
+
+Pull requests link to a card two ways. A task in its own worktree is matched by
+the branch checked out there, so choose New worktree for work you want tracked
+to merge. An approved Resume from pull request events watch also links its pull
+request, which covers tasks in the project folder. The host reads branches with
+`git` and pull requests with `gh` or `glab` in the background: a branch at
+most every 20 seconds, open pull requests every minute and settled ones every
+15 minutes, and only while the board is open. The board answers from that
+cache and never waits on a forge. A failed lookup shows its error above the
+board and keeps what was read last. Guests see their one task without paths,
+branches or pull requests.
+
+Archive files a finished task away from the lanes; it keeps its record,
+transcript, worktree and branch, and Restore or a new message brings it back.
+Running or queued work cannot be archived.
+
+Arrow keys move between cards, Enter opens one, Escape closes the panel and
+returns to the card, and N starts a new task. The rules live in
+`bruhs_models::coordination::board`, the lookups in
+`bruhs_core::coordination::BoardLinks`, and the routes are
+`GET /api/coordination/board` locally and `GET /api/board` on the paired
+listener.
 
 ## Working on a task
 
