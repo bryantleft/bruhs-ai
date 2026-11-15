@@ -14,6 +14,8 @@ use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use std::fmt;
 
+mod prequeue;
+
 #[derive(Debug)]
 pub enum OperationError {
     Cache(CacheError),

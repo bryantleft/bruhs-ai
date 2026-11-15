@@ -22,6 +22,8 @@ use bruhs_models::{connections::ServiceProvider, mail::*};
 use serde::Deserialize;
 use std::sync::Arc;
 
+mod prequeue;
+
 pub(super) fn router() -> axum::Router<crate::config::ServerState> {
     use axum::routing::{get, post};
     axum::Router::new()
@@ -254,13 +256,20 @@ async fn send(
         return Err(MailError::Cache(CacheError::HostChanged).into());
     }
     let provider = provider(&state, &mailbox, gmail, outlook).await?;
-    let session = runtime
+    let session = match runtime
         .session(
             state.secrets().connections(),
             provider.provider(),
             &body.connection_id,
         )
-        .await?;
+        .await
+    {
+        Ok(session) => session,
+        Err(error) => {
+            prequeue::authorization_failed(runtime, &mailbox, &client, &body, &error).await;
+            return Err(error.into());
+        }
+    };
     if session.authorization().mailbox().as_str() != mailbox {
         return Err(
             AppError::Conflict("Choose the account that owns this reviewed email.".into()).into(),
