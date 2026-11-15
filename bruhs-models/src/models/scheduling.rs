@@ -132,6 +132,53 @@ pub struct SchedulingConflict {
     pub detected_at_ms: i64,
     #[serde(default)]
     pub resolution: Option<ConflictResolution>,
+    /// The provider's title and notes. Conflicts are detected on them as
+    /// well as on times, so Accept remote applies them too. Missing on
+    /// conflicts recorded before they were carried; those keep the local
+    /// title and notes.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub remote: Option<RemoteEventDetail>,
+}
+
+/// The provider's text fields at the time a conflict was detected.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemoteEventDetail {
+    pub title: String,
+    #[serde(default)]
+    pub notes: Option<String>,
+}
+
+impl SchedulingConflict {
+    /// A pending conflict between the locally edited `local` and the
+    /// provider's `remote` version of the same event.
+    pub fn detected(local: &CalendarEvent, remote: &CalendarEvent, detected_at_ms: i64) -> Self {
+        Self {
+            id: Uuid::new_v4().to_string(),
+            event_id: local.id.clone(),
+            event_title: local.title.clone(),
+            local_start_at_ms: local.start_at_ms,
+            local_end_at_ms: local.end_at_ms,
+            remote_start_at_ms: remote.start_at_ms,
+            remote_end_at_ms: remote.end_at_ms,
+            detected_at_ms,
+            resolution: None,
+            remote: Some(RemoteEventDetail {
+                title: remote.title.clone(),
+                notes: remote.notes.clone(),
+            }),
+        }
+    }
+
+    /// Replaces `event`'s times, title and notes with the provider's.
+    pub fn apply_remote(&self, event: &mut CalendarEvent, now_ms: i64) {
+        event.start_at_ms = self.remote_start_at_ms;
+        event.end_at_ms = self.remote_end_at_ms;
+        if let Some(remote) = &self.remote {
+            event.title.clone_from(&remote.title);
+            event.notes.clone_from(&remote.notes);
+        }
+        event.updated_at = now_ms;
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
@@ -199,9 +246,7 @@ impl SchedulingPreferences {
         match resolution {
             ConflictResolution::KeepLocal => {}
             ConflictResolution::AcceptRemote => {
-                events[index].start_at_ms = conflict.remote_start_at_ms;
-                events[index].end_at_ms = conflict.remote_end_at_ms;
-                events[index].updated_at = now_ms;
+                conflict.apply_remote(&mut events[index], now_ms);
             }
             ConflictResolution::DuplicateLocal => {
                 let mut copy = events[index].clone();
@@ -216,9 +261,7 @@ impl SchedulingPreferences {
                 copy.title = format!("{} (local copy)", copy.title);
                 copy.updated_at = now_ms;
                 events.push(copy);
-                events[index].start_at_ms = conflict.remote_start_at_ms;
-                events[index].end_at_ms = conflict.remote_end_at_ms;
-                events[index].updated_at = now_ms;
+                conflict.apply_remote(&mut events[index], now_ms);
             }
         }
         conflict.resolution = Some(resolution);
@@ -459,6 +502,7 @@ mod tests {
             remote_end_at_ms: 40.0,
             detected_at_ms: 5,
             resolution: None,
+            remote: None,
         });
         let mut events = vec![event("event", 10, 20)];
         assert!(prefs.resolve_conflict(
@@ -470,6 +514,52 @@ mod tests {
         assert_eq!(events.len(), 2);
         assert_eq!(events[0].start_at_ms, 30.0);
         assert_eq!(events[1].start_at_ms, 10.0);
+    }
+
+    /// Conflicts are detected on title and notes too, so accepting the
+    /// remote version must apply them, not only the times.
+    #[test]
+    fn accepting_remote_applies_the_remote_title_and_notes() {
+        let mut local = event("event", 10, 20);
+        local.title = "Local title".into();
+        local.notes = Some("local notes".into());
+        let mut remote = event("event", 30, 40);
+        remote.title = "Remote title".into();
+        remote.notes = None;
+        let mut prefs = SchedulingPreferences::default();
+        prefs
+            .conflicts
+            .push(SchedulingConflict::detected(&local, &remote, 5));
+        let conflict_id = prefs.conflicts[0].id.clone();
+        let mut events = vec![local];
+        assert!(prefs.resolve_conflict(
+            &conflict_id,
+            ConflictResolution::AcceptRemote,
+            &mut events,
+            50
+        ));
+        assert_eq!(events[0].title, "Remote title");
+        assert_eq!(events[0].notes, None);
+        assert_eq!(events[0].start_at_ms, 30.0);
+        assert_eq!(events[0].end_at_ms, 40.0);
+    }
+
+    /// A conflict saved before remote text was recorded keeps local text.
+    #[test]
+    fn a_legacy_conflict_without_remote_text_keeps_the_local_title() {
+        let legacy: SchedulingConflict = serde_json::from_value(serde_json::json!({
+            "id": "c", "event_id": "event", "event_title": "Review",
+            "local_start_at_ms": 10.0, "local_end_at_ms": 20.0,
+            "remote_start_at_ms": 30.0, "remote_end_at_ms": 40.0,
+            "detected_at_ms": 5
+        }))
+        .unwrap();
+        assert_eq!(legacy.remote, None);
+        let mut target = event("event", 10, 20);
+        target.title = "Kept".into();
+        legacy.apply_remote(&mut target, 50);
+        assert_eq!(target.title, "Kept");
+        assert_eq!(target.start_at_ms, 30.0);
     }
 
     #[test]
@@ -485,6 +575,7 @@ mod tests {
             remote_end_at_ms: 40.0,
             detected_at_ms: 5,
             resolution: None,
+            remote: None,
         });
         let mut provider = event("event", 10, 20);
         provider.source = EventSource::Google;
