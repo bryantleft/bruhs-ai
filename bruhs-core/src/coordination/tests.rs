@@ -1,5 +1,6 @@
 use super::*;
 
+mod board;
 mod wakes;
 
 fn fixture(parent_id: Option<ThreadId>, state: TaskState) -> CoordinatedTask {
@@ -31,6 +32,7 @@ fn fixture(parent_id: Option<ThreadId>, state: TaskState) -> CoordinatedTask {
         resume_at: None,
         auto_resume_on_limit: false,
         limit_reported: false,
+        archived_at: None,
     }
 }
 
@@ -460,5 +462,74 @@ async fn disconnecting_a_parked_wait_stops_the_parent_instead_of_losing_its_slot
     }
     drop(slot);
     assert_eq!(runtime.0.slots.available_permits(), runtime.0.capacity);
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn archive_files_finished_work_away_durably_and_refuses_running_work() {
+    let root = tempfile::tempdir().unwrap();
+    let done = fixture(None, TaskState::Completed);
+    let running = fixture(None, TaskState::Completed);
+    let (done_id, running_id) = (done.id.clone(), running.id.clone());
+    let runtime = runtime(root.path(), vec![done, running]).await;
+
+    runtime
+        .command(CoordinationCommand::Archive {
+            id: done_id.clone(),
+        })
+        .await
+        .unwrap();
+    let archived_at = runtime.task(&done_id).await.unwrap().archived_at;
+    assert!(archived_at.is_some());
+    // Archiving again keeps the original time rather than bumping the revision.
+    let revision = runtime.snapshot().await.revision;
+    runtime
+        .command(CoordinationCommand::Archive {
+            id: done_id.clone(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(runtime.snapshot().await.revision, revision);
+    assert_eq!(
+        runtime.task(&done_id).await.unwrap().archived_at,
+        archived_at
+    );
+
+    // The record survives a restart.
+    drop(runtime);
+    let path = root.path().join("tasks.json");
+    let runtime = CoordinationRuntime::open(path, Arc::new(crate::AppState::new()))
+        .await
+        .unwrap();
+    assert_eq!(
+        runtime.task(&done_id).await.unwrap().archived_at,
+        archived_at
+    );
+    runtime
+        .command(CoordinationCommand::Unarchive {
+            id: done_id.clone(),
+        })
+        .await
+        .unwrap();
+    assert!(runtime.task(&done_id).await.unwrap().archived_at.is_none());
+
+    let mut data = runtime.0.data.lock().await;
+    data.tasks.get_mut(&running_id).unwrap().state = TaskState::Running;
+    drop(data);
+    let refused = runtime
+        .command(CoordinationCommand::Archive {
+            id: running_id.clone(),
+        })
+        .await;
+    assert!(
+        matches!(refused, Err(CoordinationError::Conflict(_))),
+        "{refused:?}"
+    );
+    assert!(runtime
+        .task(&running_id)
+        .await
+        .unwrap()
+        .archived_at
+        .is_none());
     drop(runtime);
 }

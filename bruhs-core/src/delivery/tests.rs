@@ -336,3 +336,25 @@ async fn executing_a_reviewed_script_runs_once_and_saves_its_actual_result() {
     );
     assert!(!repository.path().join("UNREVIEWED").exists());
 }
+
+#[test]
+fn branch_lookup_reads_gh_json_into_board_pull_states() {
+    use bruhs_models::coordination::board::{ChecksState, PullState, TaskPull};
+    let output = r#"[
+      {"number":9,"title":"Save faster","body":"","url":"https://github.com/o/r/pull/9","state":"MERGED","isDraft":false,"isCrossRepository":false,"baseRefName":"main","baseRefOid":"b","headRefName":"perf/save","headRefOid":"h","mergeCommit":{"oid":"m"},"updatedAt":"2026-11-13T00:00:00Z","mergeable":"UNKNOWN","reviewDecision":"","statusCheckRollup":[],"comments":[],"reviews":[],"files":[]},
+      {"number":10,"title":"Draft","body":"","url":"https://github.com/o/r/pull/10","state":"OPEN","isDraft":true,"isCrossRepository":false,"baseRefName":"main","baseRefOid":"b","headRefName":"perf/save","headRefOid":"h","mergeCommit":null,"updatedAt":"2026-11-13T00:00:00Z","mergeable":"MERGEABLE","reviewDecision":"REVIEW_REQUIRED","statusCheckRollup":[{"__typename":"CheckRun","name":"ci","status":"IN_PROGRESS","conclusion":""}],"comments":[{"id":"c","author":{"login":"a"},"body":"hi","url":"u"}],"reviews":[],"files":[]}
+    ]"#;
+    let pulls = super::github::parse_pulls(output)
+        .unwrap()
+        .iter()
+        .map(TaskPull::from_pull)
+        .collect::<Vec<_>>();
+    assert_eq!(pulls[0].state, PullState::Merged);
+    assert_eq!(
+        pulls[0].review_decision, None,
+        "an empty decision means none required"
+    );
+    assert_eq!(pulls[1].state, PullState::Draft);
+    assert_eq!(pulls[1].checks, ChecksState::Pending);
+    assert_eq!(pulls[1].comments, 1);
+}
