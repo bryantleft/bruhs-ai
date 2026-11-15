@@ -2,6 +2,7 @@ use super::*;
 mod attachments;
 mod compose_profile;
 mod send;
+mod sent;
 use crate::{
     connections::Connections,
     mail::{CacheError, MailRuntime},

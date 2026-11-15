@@ -12,6 +12,7 @@ use wiremock::{
 };
 
 mod prequeue;
+mod reconciliation;
 
 const TOKEN: &str = "synthetic-compose-http-token";
 struct Fixture {

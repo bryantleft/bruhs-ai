@@ -4,6 +4,7 @@
 pub(crate) mod dispatch;
 pub(crate) mod drafts;
 mod mime;
+pub mod reconciliation;
 pub(crate) mod record;
 mod transport;
 pub use dispatch::MailSendTask;

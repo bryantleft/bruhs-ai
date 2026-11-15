@@ -578,3 +578,5 @@ async fn sender_preflight_preserves_redacted_recovery_problem_kinds() {
         drop(session);
     }
 }
+
+mod sent;

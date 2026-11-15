@@ -4,6 +4,7 @@
 mod attachments;
 mod projection;
 mod send;
+mod sent;
 mod sync;
 #[cfg(test)]
 mod tests;

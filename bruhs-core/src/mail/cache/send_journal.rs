@@ -15,6 +15,7 @@ use sha2::{Digest as _, Sha256};
 use std::fmt;
 
 mod prequeue;
+mod reconciliation;
 
 #[derive(Debug)]
 pub enum OperationError {
