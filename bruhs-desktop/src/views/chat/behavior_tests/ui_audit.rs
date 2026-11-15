@@ -73,7 +73,7 @@ fn model_picker_fits_a_short_window_and_reveals_keyboard_selection(cx: &mut Test
     cx.simulate_keystrokes(&"down ".repeat(count - 1));
     cx.run_until_parked();
     let selected_key = chat.read_with(cx, |chat, cx| {
-        crate::views::chat::element_key(chat.model_picker_matches(cx)[count - 1].id)
+        crate::views::chat::element_key(&chat.model_picker_matches(cx)[count - 1].id)
     });
     let selector =
         Box::leak(format!("desktop-model-picker-option-{selected_key}").into_boxed_str());
@@ -120,6 +120,134 @@ fn model_picker_fits_a_short_window_and_reveals_keyboard_selection(cx: &mut Test
         assert!(selected.top() >= list.top());
         assert!(selected.bottom() <= list.bottom());
     }
+}
+
+#[gpui::test]
+fn listed_cursor_models_become_picker_rows(cx: &mut TestAppContext) {
+    use bruhs_models::agent::AgentProvider;
+    use bruhs_models::runtime_models::{ModelChoice, RuntimeModels};
+    let (chat, cx) = chat_window(cx);
+    chat.update_in(cx, |chat, window, cx| {
+        chat.set_model("cursor/gpt-5", cx);
+        chat.open_model_picker(window, cx);
+        let custom_row = chat.model_picker_matches(cx).len();
+        assert_eq!(chat.model_picker_index, custom_row, "unlisted: custom row");
+        chat.apply_runtime_listing(
+            AgentProvider::Cursor,
+            RuntimeModels {
+                models: vec![ModelChoice {
+                    id: "cursor/gpt-5".into(),
+                    label: "GPT-5".into(),
+                    provider: AgentProvider::Cursor,
+                }],
+                error: None,
+            },
+            cx,
+        );
+        let matches = chat.model_picker_matches(cx);
+        let row = matches
+            .iter()
+            .position(|model| model.id == "cursor/gpt-5")
+            .expect("listed model row");
+        assert_eq!(matches[row - 1].id, "cursor/default");
+        assert_eq!(chat.model_picker_index, row, "highlight follows the row");
+        assert_eq!(chat.model_picker_custom_match(cx), None);
+        chat.apply_runtime_listing(
+            AgentProvider::Cursor,
+            RuntimeModels {
+                models: Vec::new(),
+                error: Some("Run `cursor-agent update`.".into()),
+            },
+            cx,
+        );
+        assert_eq!(
+            chat.model_picker_status_line(AgentProvider::Cursor),
+            "Cursor models unavailable: Run `cursor-agent update`."
+        );
+    });
+    cx.run_until_parked();
+    let option = Box::leak(
+        format!(
+            "desktop-model-picker-option-{}",
+            crate::views::chat::element_key("cursor/default")
+        )
+        .into_boxed_str(),
+    );
+    assert!(cx.debug_bounds(option).is_some());
+}
+
+#[gpui::test]
+fn arriving_cursor_models_keep_a_moved_highlight_on_its_model(cx: &mut TestAppContext) {
+    use bruhs_models::agent::AgentProvider;
+    use bruhs_models::runtime_models::{ModelChoice, RuntimeModels};
+    let (chat, cx) = chat_window(cx);
+    chat.update_in(cx, |chat, window, cx| {
+        chat.set_model("gpt-5.5", cx);
+        chat.open_model_picker(window, cx);
+        let grok = chat
+            .model_picker_matches(cx)
+            .iter()
+            .position(|model| model.id == "grok/default")
+            .unwrap();
+        chat.model_picker_index = grok;
+        chat.apply_runtime_listing(
+            AgentProvider::Cursor,
+            RuntimeModels {
+                models: vec![ModelChoice {
+                    id: "cursor/gpt-5".into(),
+                    label: "GPT-5".into(),
+                    provider: AgentProvider::Cursor,
+                }],
+                error: None,
+            },
+            cx,
+        );
+        let matches = chat.model_picker_matches(cx);
+        assert_eq!(matches[chat.model_picker_index].id, "grok/default");
+        assert!(chat.handle_model_picker_key("enter", None, window, cx));
+        assert_eq!(chat.model_id, "grok/default");
+    });
+}
+
+/// The picker's fetch path end to end: opening runs the installed lister on
+/// the tokio runtime and the listing becomes rows.
+#[gpui::test]
+fn opening_the_picker_lists_the_accounts_cursor_models(cx: &mut TestAppContext) {
+    use crate::views::chat::model_picker_ui::RuntimeModelLister;
+    use bruhs_models::agent::AgentProvider;
+    use bruhs_models::runtime_models::{ModelChoice, RuntimeModels};
+    let (chat, cx) = chat_window(cx);
+    cx.update(|_, cx| {
+        cx.set_global(RuntimeModelLister(std::sync::Arc::new(|provider| {
+            Box::pin(async move {
+                assert_eq!(provider, AgentProvider::Cursor);
+                RuntimeModels {
+                    models: vec![ModelChoice {
+                        id: "cursor/composer-2".into(),
+                        label: "Composer 2".into(),
+                        provider,
+                    }],
+                    error: None,
+                }
+            })
+        })));
+    });
+    chat.update_in(cx, |chat, window, cx| chat.open_model_picker(window, cx));
+    cx.run_until_parked();
+    chat.read_with(cx, |chat, cx| {
+        assert!(chat
+            .model_picker_matches(cx)
+            .iter()
+            .any(|model| model.id == "cursor/composer-2" && model.label == "Composer 2"));
+    });
+    let option = Box::leak(
+        format!(
+            "desktop-model-picker-option-{}",
+            crate::views::chat::element_key("cursor/composer-2")
+        )
+        .into_boxed_str(),
+    );
+    assert!(cx.debug_bounds(option).is_some());
 }
 
 #[gpui::test]

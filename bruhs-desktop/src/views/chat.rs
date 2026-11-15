@@ -11,9 +11,9 @@ use bruhs_core::{
     AgentTurn, OrchestratorEvent, PermissionDecision, QueryEvent, SkillRef, TaskStatus, UsageInfo,
 };
 use bruhs_models::agent::provider_for_model_id;
+use bruhs_models::agent::AgentProvider;
 #[cfg(test)]
 use bruhs_models::agent::DEFAULT_AGENT_MODEL;
-use bruhs_models::agent::{AgentProvider, ModelInfo, MODEL_CATALOG};
 use bruhs_models::ids::{IdError, ThreadId};
 use bruhs_models::logic::attachments::UploadedFile;
 use bruhs_models::logic::commands::ThreadGoal;
@@ -696,6 +696,8 @@ pub struct ChatView {
     rich_embeds: std::rc::Rc<std::cell::RefCell<rich_response::RichEmbeds>>,
     pub model_picker_open: bool,
     model_picker_index: usize,
+    /// Models each runtime's CLI listed for the account; refreshed on open.
+    runtime_models: Vec<bruhs_models::runtime_models::Listing>,
     model_picker_scroll: ScrollHandle,
     model_picker_query: Entity<InputState>,
     _model_picker_subscription: Subscription,
@@ -1126,6 +1128,7 @@ impl ChatView {
             rich_embeds: Default::default(),
             model_picker_open: false,
             model_picker_index: 0,
+            runtime_models: Vec::new(),
             model_picker_scroll: ScrollHandle::new(),
             model_picker_query,
             _model_picker_subscription,

@@ -42,7 +42,7 @@ use super::{
     DESKTOP_SLASH_COMMANDS, GIT_BRANCH_CURRENT_MARK, GIT_BRANCH_CURRENT_MARK_WIDTH_PX,
     GIT_BRANCH_EMPTY_LABEL, GIT_BRANCH_EMPTY_TEXT_SIZE_PX, GIT_BRANCH_MENU_MAX_HEIGHT_PX,
     GIT_BRANCH_MENU_MIN_WIDTH_PX, GIT_BRANCH_MENU_RADIUS_PX, GIT_BRANCH_MENU_ROW_TEXT_SIZE_PX,
-    GIT_BRANCH_SWITCH_LABEL, MODEL_CATALOG, PERMISSION_PROMPT_ACTION_GAP_PX,
+    GIT_BRANCH_SWITCH_LABEL, PERMISSION_PROMPT_ACTION_GAP_PX,
     PERMISSION_PROMPT_ACTION_HOVER_BG_OPACITY, PERMISSION_PROMPT_BG_OPACITY,
     PERMISSION_PROMPT_BORDER_OPACITY, PERMISSION_PROMPT_DIVIDER_MIN_HEIGHT_PX,
     PERMISSION_PROMPT_DIVIDER_OPACITY, PERMISSION_PROMPT_DIVIDER_WIDTH_PX,
@@ -67,6 +67,7 @@ use super::{
 use super::{desktop_math_ranges, parse_assistant_content, ParsedAssistantBlock};
 use crate::{app_state::DesktopState, theme};
 use bruhs_core::UsageInfo;
+use bruhs_models::agent::MODEL_CATALOG;
 use gpui::AppContext as _;
 use serde_json::json;
 use std::cell::RefCell;
@@ -929,24 +930,25 @@ fn desktop_hero_long_project_name_stays_inside_composer(cx: &mut gpui::TestAppCo
 
 #[test]
 fn filter_models_matches_every_word() {
-    let all = filter_models_like_web(MODEL_CATALOG, "");
+    let catalog = bruhs_models::runtime_models::listed_models(&[]);
+    let all = filter_models_like_web(&catalog, "");
     assert_eq!(all.len(), MODEL_CATALOG.len());
-    let gpt = filter_models_like_web(MODEL_CATALOG, "gpt 5.4");
+    let gpt = filter_models_like_web(&catalog, "gpt 5.4");
     assert_eq!(
-        gpt.iter().map(|m| m.id).collect::<Vec<_>>(),
+        gpt.iter().map(|m| m.id.as_str()).collect::<Vec<_>>(),
         vec!["gpt-5.4"]
     );
-    let anthropic = filter_models_like_web(MODEL_CATALOG, "ANTHROPIC opus");
+    let anthropic = filter_models_like_web(&catalog, "ANTHROPIC opus");
     assert!(anthropic
         .iter()
         .all(|m| m.provider == AgentProvider::Claude));
     assert!(anthropic.iter().all(|m| m.label.contains("Opus")));
-    assert!(filter_models_like_web(MODEL_CATALOG, "gpt claude").is_empty());
+    assert!(filter_models_like_web(&catalog, "gpt claude").is_empty());
 }
 
 #[test]
 fn group_models_keeps_provider_order() {
-    let matches = filter_models_like_web(MODEL_CATALOG, "");
+    let matches = filter_models_like_web(&bruhs_models::runtime_models::listed_models(&[]), "");
     let groups = group_models_like_web(&matches);
     let providers: Vec<AgentProvider> = groups.iter().map(|(p, _)| *p).collect();
     let mut expected: Vec<AgentProvider> = Vec::new();

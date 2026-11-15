@@ -11,6 +11,11 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- The model picker now lists the models your Cursor account can run, under
+  Cursor default, on the web and in the desktop app. Bruhs reads them from
+  `cursor-agent --list-models`. When Cursor cannot list them, the picker says
+  why and how to fix it, such as updating or signing in to the CLI. Typing
+  `cursor/model` still works. See `docs/agent-providers.md`.
 - Added a task board to Workbench Tasks. Agent tasks sit in four lanes,
   Building, Validating, In review and Ready, placed by what the work is doing:
   verification runs, and the branch and pull requests of each task's worktree,
