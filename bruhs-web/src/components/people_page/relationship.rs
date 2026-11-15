@@ -302,11 +302,11 @@ pub fn RelationshipPanel(person_id: String) -> impl IntoView {
                                                     class="flex min-w-0 flex-1 items-start gap-2 rounded-seed px-2 py-1.5 text-left hover:bg-longan-800/70 cursor-pointer"
                                                     on:click=toggle
                                                 >
-                                                    <span class=if complete { "mt-0.5 text-pandan-300" } else { "mt-0.5 text-rambutan-400" }>
+                                                    <span class=move || if complete { "mt-0.5 text-pandan-300" } else { "mt-0.5 text-rambutan-400" }>
                                                         {if complete { "✓" } else { "○" }}
                                                     </span>
                                                     <span class="min-w-0 flex-1">
-                                                        <span class=if complete {
+                                                        <span class=move || if complete {
                                                             "block break-words text-body-sm text-rambutan-400 line-through"
                                                         } else {
                                                             "block break-words text-body-sm text-rambutan-300"
