@@ -399,3 +399,118 @@ fn calendar_views_draw_their_controls_at_the_parity_cell(cx: &mut gpui::TestAppC
         assert!(f32::from(page.size.width) > 0.0 && f32::from(page.size.height) > 0.0);
     }
 }
+
+fn day_list_event_selector(event_id: &str) -> &'static str {
+    leaked_debug_selector(format!(
+        "desktop-calendar-day-list-event-{}",
+        crate::views::workspace::element_key(event_id)
+    ))
+}
+
+fn day_list_task_selector(task_id: &str) -> &'static str {
+    leaked_debug_selector(format!(
+        "desktop-calendar-day-list-task-{}",
+        crate::views::workspace::element_key(task_id)
+    ))
+}
+
+/// A month cell shows three records and its +N more used to be plain
+/// text, so a fourth record could not be opened from Month. The date and
+/// +N more open the day list (web "Calendar day"), whose rows open the
+/// local editor, the read-only Google detail and the task.
+#[gpui::test]
+fn hidden_month_records_are_reachable_through_the_day_list(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = calendar_workspace(cx);
+    let date = NaiveDate::from_ymd_opt(2026, 5, 12).expect("a date");
+    let google_start = Local
+        .from_local_datetime(&dt(2026, 5, 12, 16, 0))
+        .earliest()
+        .expect("a local time")
+        .timestamp_millis();
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.active_view = AppView::Calendar;
+        workspace.calendar_mode = DesktopCalendarMode::Month;
+        workspace.calendar_anchor = date;
+        workspace.calendar_events = (0..3)
+            .map(|hour| {
+                event(
+                    &format!("local-{hour}"),
+                    dt(2026, 5, 12, 9 + hour, 0),
+                    dt(2026, 5, 12, 9 + hour, 30),
+                )
+            })
+            .collect();
+        workspace.meetings_hub.update(cx, |hub, _cx| {
+            hub.google_events = vec![google_event(
+                "google-hidden",
+                "Hidden provider sync",
+                google_start,
+                google_start + HOUR_MS,
+            )];
+        });
+        workspace.work_items = vec![DesktopWorkItem {
+            id: "task-hidden".into(),
+            project_id: None,
+            title: "Hidden due task".into(),
+            description: None,
+            status: DesktopWorkItemStatus::Todo,
+            priority: DesktopPriority::Medium,
+            due_date: Some("2026-05-12".into()),
+            planning: WorkItemPlanning::default(),
+            updated_at: EpochMs::UNIX_EPOCH,
+        }];
+        cx.notify();
+    });
+    cx.run_until_parked();
+
+    // Five records: two pills and +3 more; the third local event, the
+    // Google event and the task are hidden.
+    assert_rendered_bounds(cx, calendar_event_pill_debug_selector("local-1"));
+    assert_no_rendered_bounds(cx, calendar_event_pill_debug_selector("local-2"));
+    assert_no_rendered_bounds(cx, calendar_event_pill_debug_selector("google-hidden"));
+    assert_no_rendered_bounds(cx, calendar_task_pill_debug_selector("task-hidden"));
+    let day_bounds = rendered_bounds(cx, "desktop-calendar-day-2026-05-12");
+    let more_bounds = rendered_bounds(cx, "desktop-calendar-day-more-2026-05-12");
+    assert!(
+        day_bounds.contains(&more_bounds.origin)
+            && more_bounds.bottom() <= day_bounds.bottom() + gpui::px(1.0),
+        "+N more stays inside its cell: {more_bounds:?} in {day_bounds:?}"
+    );
+
+    click_debug_selector(cx, "desktop-calendar-day-more-2026-05-12");
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.overlay, Some(Overlay::CalendarDay { date }));
+        assert!(!workspace.event_create_visible(), "+N more must not create an event");
+    });
+    assert_rendered_bounds(cx, "desktop-calendar-day-list");
+    for id in ["local-0", "local-1", "local-2", "google-hidden"] {
+        assert_rendered_bounds(cx, day_list_event_selector(id));
+    }
+    assert_rendered_bounds(cx, day_list_task_selector("task-hidden"));
+
+    // The hidden Google event opens its read-only detail.
+    click_debug_selector(cx, day_list_event_selector("google-hidden"));
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert!(workspace.event_create_visible());
+        assert!(workspace.event_dialog_read_only());
+        assert_eq!(
+            workspace.selected_calendar_event_id.as_deref(),
+            Some("google-hidden")
+        );
+    });
+    click_debug_selector(cx, "desktop-event-create-cancel");
+    cx.run_until_parked();
+
+    // The date opens the same list; the hidden task opens in Tasks.
+    click_debug_selector(cx, "desktop-calendar-day-open-2026-05-12");
+    cx.run_until_parked();
+    click_debug_selector(cx, day_list_task_selector("task-hidden"));
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.overlay, None);
+        assert_eq!(workspace.active_view, AppView::Tasks);
+        assert_eq!(workspace.selected_work_item_id.as_deref(), Some("task-hidden"));
+    });
+}

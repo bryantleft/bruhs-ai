@@ -409,6 +409,10 @@ enum Overlay {
     EventCreate {
         color_menu_open: bool,
     },
+    /// Every event and due task of one month day (web "Calendar day").
+    CalendarDay {
+        date: NaiveDate,
+    },
     ProjectDeleteConfirm {
         project_id: String,
     },
@@ -2896,6 +2900,9 @@ impl Render for Workspace {
                     Overlay::Settings { .. } => self.render_settings(window, cx),
                     Overlay::TaskCreate { .. } => self.render_task_create_dialog(window, cx),
                     Overlay::EventCreate { .. } => self.render_event_create_dialog(window, cx),
+                    Overlay::CalendarDay { date } => {
+                        self.render_calendar_day_list(date, window, cx)
+                    }
                     Overlay::ProjectDeleteConfirm { .. } => {
                         self.render_project_delete_confirm(window, cx)
                     }
