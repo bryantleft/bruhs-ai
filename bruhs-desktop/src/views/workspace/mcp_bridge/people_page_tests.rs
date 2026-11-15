@@ -91,7 +91,10 @@ async fn people_page_create_refuses_blank_names_and_keeps_unicode_names(cx: &mut
     assert!(cx.debug_bounds("desktop-people-create-error").is_none());
     let card = cx.debug_bounds("desktop-person-card-0").expect("card");
     let page = cx.debug_bounds("desktop-people-page").expect("page");
-    assert!(card.right() <= page.right(), "a long name stays inside its card");
+    assert!(
+        card.right() <= page.right(),
+        "a long name stays inside its card"
+    );
 }
 
 #[gpui::test]
@@ -172,6 +175,7 @@ async fn alias_that_another_profile_uses_is_refused_and_kept(cx: &mut TestAppCon
             w.meetings_hub.read(cx).person("ada").unwrap().aliases,
             vec!["Countess".to_string()]
         );
+        cx.notify();
     });
     cx.run_until_parked();
     assert!(cx.debug_bounds("desktop-person-aliases").is_some());
@@ -256,7 +260,11 @@ async fn delete_needs_confirmation_cascades_and_undo_restores(cx: &mut TestAppCo
     assert!(cx.debug_bounds("desktop-person-delete-confirm").is_some());
     workspace.update_in(cx, |w, _, cx| {
         assert_eq!(w.people_page.confirm_delete.as_deref(), Some("ada"));
-        assert_eq!(w.meetings_hub.read(cx).people.len(), 1, "nothing deleted yet");
+        assert_eq!(
+            w.meetings_hub.read(cx).people.len(),
+            1,
+            "nothing deleted yet"
+        );
         // The server is unreachable here: simulate its confirmed delete.
         w.people_page.confirm_delete = None;
         w.meetings_hub.update(cx, |hub, cx| {
@@ -266,6 +274,7 @@ async fn delete_needs_confirmation_cascades_and_undo_restores(cx: &mut TestAppCo
                 local_only: true,
             });
         });
+        cx.notify();
     });
     cx.run_until_parked();
     workspace.update_in(cx, |w, _, cx| {
@@ -275,7 +284,10 @@ async fn delete_needs_confirmation_cascades_and_undo_restores(cx: &mut TestAppCo
         assert_eq!(w.inbox_conversations[0].participants[0].person_id, None);
         assert_eq!(w.knowledge_documents.len(), 1, "documents stay");
         assert!(w.knowledge_documents[0].links.is_empty());
-        assert!(matches!(w.people_page.undo, Some(PeopleUndo::Delete { .. })));
+        assert!(matches!(
+            w.people_page.undo,
+            Some(PeopleUndo::Delete { .. })
+        ));
     });
     assert!(cx.debug_bounds("desktop-people-undo-bar").is_some());
     click(cx, "desktop-people-undo");
@@ -290,14 +302,13 @@ async fn delete_needs_confirmation_cascades_and_undo_restores(cx: &mut TestAppCo
 }
 
 #[gpui::test]
-async fn reminders_use_kind_and_due_options_and_can_be_edited_and_deleted(
-    cx: &mut TestAppContext,
-) {
+async fn reminders_use_kind_and_due_options_and_can_be_edited_and_deleted(cx: &mut TestAppContext) {
     let (workspace, cx) = fixture(cx);
     offline(&workspace, cx);
     workspace.update_in(cx, |w, window, cx| {
-        w.meetings_hub
-            .update(cx, |hub, _| hub.people = vec![Arc::new(person("ada", "Ada", &[]))]);
+        w.meetings_hub.update(cx, |hub, _| {
+            hub.people = vec![Arc::new(person("ada", "Ada", &[]))]
+        });
         w.expanded_person_id = Some("ada".into());
         w.relationship_item_kind = RelationshipItemKind::Reminder;
         w.people_page.due_tomorrow = true;
@@ -351,11 +362,14 @@ async fn inbox_import_links_by_alias_and_refuses_ambiguous_names(cx: &mut TestAp
         for (sender, expected) in [("COUNTESS", Some("ada")), ("ZOË", None)] {
             w.inbox_sender_input
                 .update(cx, |input, cx| input.set_value(sender, window, cx));
-            w.inbox_body_input
-                .update(cx, |input, cx| input.set_value("Synthetic hello", window, cx));
+            w.inbox_body_input.update(cx, |input, cx| {
+                input.set_value("Synthetic hello", window, cx)
+            });
             w.save_inbox_import(window, cx);
             assert_eq!(
-                w.inbox_conversations[0].participants[0].person_id.as_deref(),
+                w.inbox_conversations[0].participants[0]
+                    .person_id
+                    .as_deref(),
                 expected,
                 "{sender}"
             );
