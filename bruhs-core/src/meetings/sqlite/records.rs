@@ -1,6 +1,6 @@
 use super::*;
-use crate::meetings::person_changes::next_version;
-use bruhs_models::{Meeting, TranscriptSegment};
+use crate::meetings::person_changes::{self, next_version, MergeLinks};
+use bruhs_models::{ActionItemRef, Meeting, MeetingSpeakerRef, TranscriptSegment};
 
 pub(super) fn meeting(connection: &Connection, id: &str) -> MeetingStoreResult<Option<Meeting>> {
     let value: Option<Meeting> = get(connection, "meetings", id)?;
@@ -258,33 +258,102 @@ pub(super) fn cache_transcript(
     Ok(incoming)
 }
 
+/// Merge cascade: every speaker and action item of `source` moves to
+/// `target`. Returns what moved so the merge can be undone.
 pub(super) fn retarget_meetings(
     connection: &Connection,
     source: &bruhs_models::PersonProfile,
     target: &bruhs_models::PersonProfile,
-) -> MeetingStoreResult<()> {
+) -> MeetingStoreResult<MergeLinks> {
+    let mut links = MergeLinks::default();
+    for id in meetings_of(connection, &source.id)? {
+        update_meeting_if(connection, &id, |meeting| {
+            let moved = person_changes::retarget_meeting(meeting, source, target);
+            let changed = !moved.speakers.is_empty() || !moved.action_items.is_empty();
+            links.extend(moved);
+            changed
+        })?;
+    }
+    Ok(links)
+}
+
+/// Meetings that reference `person_id` through a speaker or action item.
+fn meetings_of(connection: &Connection, person_id: &str) -> MeetingStoreResult<Vec<String>> {
     let ids = connection
-        .prepare("SELECT meeting_id FROM meeting_people WHERE person_id=?1")?
-        .query_map([&source.id], |row| row.get::<_, String>(0))?
+        .prepare("SELECT meeting_id FROM meeting_people WHERE person_id=?1 ORDER BY meeting_id")?
+        .query_map([person_id], |row| row.get::<_, String>(0))?
         .collect::<Result<Vec<_>, _>>()?;
+    Ok(ids)
+}
+
+/// Save `edit` with a new version only when it reports a change.
+fn update_meeting_if(
+    connection: &Connection,
+    id: &str,
+    edit: impl FnOnce(&mut Meeting) -> bool,
+) -> MeetingStoreResult<bool> {
+    let Some(mut value) = meeting(connection, id)? else {
+        return Ok(false);
+    };
+    let version = next_version(value.updated_at)?;
+    if !edit(&mut value) {
+        return Ok(false);
+    }
+    value.updated_at = version;
+    save_meeting(connection, &value)?;
+    Ok(true)
+}
+
+/// Delete cascade: unlink `person_id` from every meeting it is referenced in.
+pub(super) fn unlink_person(
+    connection: &Connection,
+    person_id: &str,
+) -> MeetingStoreResult<(Vec<MeetingSpeakerRef>, Vec<ActionItemRef>)> {
+    let mut speakers = Vec::new();
+    let mut items = Vec::new();
+    for id in meetings_of(connection, person_id)? {
+        update_meeting_if(connection, &id, |meeting| {
+            let (lost_speakers, lost_items) = person_changes::unlink_meeting(meeting, person_id);
+            let changed = !lost_speakers.is_empty() || !lost_items.is_empty();
+            speakers.extend(lost_speakers);
+            items.extend(lost_items);
+            changed
+        })?;
+    }
+    Ok((speakers, items))
+}
+
+/// Undo of [`unlink_person`] for a restored contact. The contact must be saved first.
+pub(super) fn relink_person(
+    connection: &Connection,
+    person_id: &str,
+    speakers: &[MeetingSpeakerRef],
+    items: &[ActionItemRef],
+) -> MeetingStoreResult<()> {
+    let ids = speakers
+        .iter()
+        .map(|speaker| speaker.meeting_id.as_str())
+        .chain(items.iter().map(|item| item.meeting_id.as_str()))
+        .collect::<std::collections::BTreeSet<_>>();
     for id in ids {
-        edit_meeting(connection, &id, |meeting| {
-            for speaker in &mut meeting.speakers {
-                if speaker.person_id.as_deref() == Some(&source.id) {
-                    speaker.person_id = Some(target.id.clone());
-                    if speaker.label == source.display_name {
-                        speaker.label.clone_from(&target.display_name);
-                    }
-                }
-            }
-            if let Some(summary) = &mut meeting.summary {
-                for item in &mut summary.action_items {
-                    if item.assignee_person_id.as_deref() == Some(&source.id) {
-                        item.assignee_person_id = Some(target.id.clone());
-                    }
-                }
-            }
-            Ok(())
+        update_meeting_if(connection, id, |meeting| {
+            person_changes::relink_meeting(meeting, person_id, speakers, items)
+        })?;
+    }
+    Ok(())
+}
+
+/// Undo of [`retarget_meetings`]. Both contacts must be saved first.
+pub(super) fn restore_merge_links(
+    connection: &Connection,
+    source_id: &str,
+    target_id: &str,
+    merged_label: &str,
+    links: &MergeLinks,
+) -> MeetingStoreResult<()> {
+    for id in links.meeting_ids() {
+        update_meeting_if(connection, id, |meeting| {
+            person_changes::restore_meeting_links(meeting, source_id, target_id, merged_label, links)
         })?;
     }
     Ok(())

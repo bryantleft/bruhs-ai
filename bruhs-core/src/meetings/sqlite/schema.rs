@@ -2,6 +2,9 @@ use super::*;
 use rusqlite::OpenFlags;
 
 const APPLICATION_ID: i64 = 0x42524853;
+/// The newest layout this build writes. Older layouts upgrade in place; a
+/// newer one is refused and preserved.
+pub(super) const SCHEMA_VERSION: i64 = 6;
 
 pub(super) fn open(path: &Path) -> MeetingStoreResult<Connection> {
     let path = prepare_file(path).map_err(|_| {
@@ -40,7 +43,7 @@ pub(super) fn open(path: &Path) -> MeetingStoreResult<Connection> {
             CREATE TABLE merged_people (source_id TEXT PRIMARY KEY NOT NULL, target_id TEXT NOT NULL, source_original TEXT NOT NULL, target_original TEXT NOT NULL);")?;
         transaction.pragma_update(None, "application_id", APPLICATION_ID)?;
         transaction.pragma_update(None, "user_version", 1)?;
-    } else if app != APPLICATION_ID || ![1, 2, 3, 4, 5].contains(&version) {
+    } else if app != APPLICATION_ID || !(1..=SCHEMA_VERSION).contains(&version) {
         return Err(MeetingStoreError::PersistenceFailed(
             "Unsupported database version; original file was preserved.".into(),
         ));
@@ -75,6 +78,26 @@ pub(super) fn open(path: &Path) -> MeetingStoreResult<Connection> {
             PRIMARY KEY(meeting_id, segment_id));",
         )?;
         transaction.pragma_update(None, "user_version", 5)?;
+    }
+    if version < 6 {
+        // People undo (PEOPLE-09, PEOPLE-10): archives of deleted contacts,
+        // and the meeting links each merge moved. Legacy merge rows keep a
+        // NULL link record. Idempotent so a partially upgraded file reopens.
+        transaction.execute_batch(
+            "CREATE TABLE IF NOT EXISTS deleted_people (
+            id TEXT PRIMARY KEY NOT NULL,
+            deleted INTEGER NOT NULL,
+            payload TEXT NOT NULL);",
+        )?;
+        let has_links: bool = transaction.query_row(
+            "SELECT EXISTS(SELECT 1 FROM pragma_table_info('merged_people') WHERE name='links')",
+            [],
+            |row| row.get(0),
+        )?;
+        if !has_links {
+            transaction.execute_batch("ALTER TABLE merged_people ADD COLUMN links TEXT;")?;
+        }
+        transaction.pragma_update(None, "user_version", SCHEMA_VERSION)?;
     }
     contacts::rekey_names(&transaction)?;
     transaction.commit()?;

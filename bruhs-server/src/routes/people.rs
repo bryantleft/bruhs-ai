@@ -7,7 +7,7 @@ use axum::{
 use bruhs_core::meetings::PersonInsert;
 use bruhs_core::AppState;
 use bruhs_models::ids::PersonId;
-use bruhs_models::{MeetingEvent, PersonProfile};
+use bruhs_models::{MeetingEvent, PersonAliasesBody, PersonDeletion, PersonProfile, PersonUnmerge};
 use serde::{Deserialize, Serialize};
 use std::sync::Arc;
 
@@ -215,6 +215,58 @@ pub async fn enroll_voice(
     Ok(Json(updated))
 }
 
+/// DELETE /api/people/:id — delete a contact (PEOPLE-10). Its observations
+/// and aliases go with it; meeting speakers and action items stay, unlinked.
+/// The reply lists what was unlinked; the server keeps an archive for undo.
+pub async fn delete_person(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<PersonId>,
+) -> Result<Json<PersonDeletion>, AppError> {
+    let deletion = state.meetings().delete_person(&id).await?;
+    state.emit_meeting_event(MeetingEvent::PersonDeleted {
+        person_id: deletion.person.id.clone(),
+    });
+    Ok(Json(deletion))
+}
+
+/// POST /api/people/:id/restore — undo a delete (PEOPLE-09): the contact
+/// returns with a new version and its still unlinked meeting links.
+pub async fn restore_person(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<PersonId>,
+) -> Result<Json<PersonProfile>, AppError> {
+    let person = state.meetings().restore_person(&id).await?;
+    emit_person_changed(&state, &person);
+    Ok(Json(person))
+}
+
+/// POST /api/people/:id/unmerge — undo the merge of `id` into its target
+/// (PEOPLE-09). Both contacts return; edits made after the merge survive.
+pub async fn unmerge_person(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<PersonId>,
+) -> Result<Json<PersonUnmerge>, AppError> {
+    let unmerge = state.meetings().unmerge_person(&id).await?;
+    emit_person_changed(&state, &unmerge.source);
+    emit_person_changed(&state, &unmerge.target);
+    Ok(Json(unmerge))
+}
+
+/// PUT /api/people/:id/aliases — replace a contact's aliases (PEOPLE-04).
+/// A new alias another contact answers to is a 409 with a readable message.
+pub async fn set_person_aliases(
+    State(state): State<Arc<AppState>>,
+    Path(id): Path<PersonId>,
+    Json(body): Json<PersonAliasesBody>,
+) -> Result<Json<PersonProfile>, AppError> {
+    let person = state
+        .meetings()
+        .set_person_aliases(&id, body.aliases)
+        .await?;
+    emit_person_changed(&state, &person);
+    Ok(Json(person))
+}
+
 /// POST /api/people/:source_id/merge_into/:target_id — absorb source into target.
 /// Emits a merge-specific invalidation on success.
 pub async fn merge_person_into(
@@ -343,6 +395,108 @@ mod tests {
                 .0,
             merged
         );
+        assert!(matches!(
+            events.try_recv(),
+            Err(tokio::sync::broadcast::error::TryRecvError::Empty)
+        ));
+    }
+
+    fn contact(id: &str, name: &str) -> PersonProfile {
+        let mut person = PersonProfile::new(name);
+        person.id = id.into();
+        person
+    }
+
+    fn id(value: &str) -> Path<PersonId> {
+        Path(value.parse().unwrap())
+    }
+
+    /// PEOPLE-04, PEOPLE-09, PEOPLE-10: every People change route answers with
+    /// the committed records and emits only the identities it changed.
+    #[tokio::test]
+    async fn delete_restore_unmerge_and_alias_routes_emit_narrow_events() {
+        let state = Arc::new(AppState::new());
+        let ada = state
+            .meetings()
+            .upsert_person(contact("ada", "Ada"))
+            .await
+            .unwrap();
+        state
+            .meetings()
+            .upsert_person(contact("zoe", "Zoë"))
+            .await
+            .unwrap();
+        let mut events = state.subscribe_meeting_events();
+
+        let Json(deletion) = delete_person(State(state.clone()), id("ada"))
+            .await
+            .unwrap();
+        assert_eq!(deletion.person, ada);
+        assert_eq!(
+            serde_json::to_value(events.try_recv().unwrap()).unwrap(),
+            serde_json::json!({"kind": "person_deleted", "person_id": "ada"})
+        );
+        assert!(matches!(
+            delete_person(State(state.clone()), id("ada"))
+                .await
+                .unwrap_err(),
+            AppError::NotFound(_)
+        ));
+
+        let Json(restored) = restore_person(State(state.clone()), id("ada"))
+            .await
+            .unwrap();
+        assert_eq!(restored.display_name, "Ada");
+        assert_changed(events.try_recv().unwrap(), &restored);
+        assert!(matches!(
+            restore_person(State(state.clone()), id("ada"))
+                .await
+                .unwrap_err(),
+            AppError::NotFound(_)
+        ));
+
+        let Json(aliased) = set_person_aliases(
+            State(state.clone()),
+            id("ada"),
+            Json(PersonAliasesBody {
+                aliases: vec![" Countess ".into()],
+            }),
+        )
+        .await
+        .unwrap();
+        assert_eq!(aliased.aliases, ["Countess"]);
+        assert_changed(events.try_recv().unwrap(), &aliased);
+        let refused = set_person_aliases(
+            State(state.clone()),
+            id("ada"),
+            Json(PersonAliasesBody {
+                aliases: vec!["Countess".into(), "ZOË".into()],
+            }),
+        )
+        .await
+        .unwrap_err();
+        assert!(
+            matches!(&refused, AppError::Conflict(message) if message.contains("Zoë already uses that name")),
+            "{refused:?}"
+        );
+
+        merge_person_into(State(state.clone()), Path(("zoe".parse().unwrap(), "ada".parse().unwrap())))
+            .await
+            .unwrap();
+        assert!(events.try_recv().is_ok(), "the merge event");
+        let Json(unmerge) = unmerge_person(State(state.clone()), id("zoe"))
+            .await
+            .unwrap();
+        assert_eq!(unmerge.source.display_name, "Zoë");
+        assert_eq!(unmerge.target.aliases, ["Countess"]);
+        assert_changed(events.try_recv().unwrap(), &unmerge.source);
+        assert_changed(events.try_recv().unwrap(), &unmerge.target);
+        assert!(matches!(
+            unmerge_person(State(state.clone()), id("zoe"))
+                .await
+                .unwrap_err(),
+            AppError::NotFound(_)
+        ));
         assert!(matches!(
             events.try_recv(),
             Err(tokio::sync::broadcast::error::TryRecvError::Empty)
