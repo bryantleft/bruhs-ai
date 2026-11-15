@@ -1,9 +1,12 @@
 # People completion checklist
 
 Recorded 2026-11-14. Parent: [product completion goal](product-completion-goal-2026-11-13.md).
-**Status: in progress.** This inventory records the People capability baseline,
-fixed acceptance cases, the decided rules, and the fixes made against them. It
-does not certify completion. The parent goal's shared gates still apply.
+**Status: in progress (PARTIAL).** This inventory records the People capability
+baseline, fixed acceptance cases, the decided rules, and the fixes made against
+them. As of 2026-11-15 the branch passes the workspace **quick** gate (G3,
+see the evidence log); that is not the full gate and does not certify
+completion. Open items are listed at the end. The parent goal's shared gates
+still apply.
 
 Statuses use the parent's vocabulary. **Verified** means the case passed the
 checks named in the evidence column on the platforms listed there, and nothing
@@ -79,9 +82,13 @@ apply them.
   builds before this one restore the contacts but not their meeting links,
   because those builds did not record them.
 - **Meeting delete (PEOPLE-14).** Deleting a meeting deletes the observations
-  derived from it, in the same store transaction, and announces
-  `PeopleUpdated` so both surfaces refetch. No surface offers a meeting delete
-  control yet; the rule applies to the server route and any future control.
+  derived from it in the same store commit, with the same behavior on the
+  in-memory and SQLite stores. The server announces `PeopleUpdated` only when
+  the delete actually removed derived observations, so both surfaces refetch
+  then. Deleting a missing meeting, a failed delete, or deleting a meeting
+  with no derived observations announces nothing. No surface offers a meeting
+  delete control yet; the rule applies to the server route and any future
+  control.
 - **Alias uniqueness (PEOPLE-04).** A new alias is refused when another
   profile already answers to that name (display name or alias, Unicode case
   folded). The refusal says to merge the two profiles instead. The surface
@@ -111,25 +118,25 @@ apply them.
 
 | Case | Scenario and expected result | Status |
 | --- | --- | --- |
-| PEOPLE-01 | Create a profile from the People page on each surface, with Unicode and long names. Blank names are refused and input is kept. Reload restores it. | **Implemented, unverified.** Web and desktop People pages create a profile; a blank name shows `CREATE_BLANK` and keeps the input. Not yet compiled or run: written under a machine-wide build hold. Browser harness `create` stage and a desktop GPUI test are queued. |
-| PEOPLE-02 | Find a person on the People page by name and alias, case-insensitively, including beyond the first page. | **Implemented, unverified.** Both surfaces search display names and aliases with `person_matches_query` (Unicode case folded) before paging, with the same 25-person pages. Not yet compiled or run: written under a machine-wide build hold. Harness `search` stage reaches page two. |
+| PEOPLE-01 | Create a profile from the People page on each surface, with Unicode and long names. Blank names are refused and input is kept. Reload restores it. | **Verified, scoped.** Web: r2 browser harness (historical, see the evidence log). Desktop: GPUI test frames, not a real window. The desktop `people_page_create_refuses_blank_names_and_keeps_unicode_names` test passes in G3. |
+| PEOPLE-02 | Find a person on the People page by name and alias, case-insensitively, including beyond the first page. | **Verified, scoped.** Web: r2 browser harness (historical, see the evidence log). The harness reaches an alias on page two. Desktop: GPUI test frames, not a real window. Desktop `people_search_finds_an_alias_beyond_the_first_page` passes after the pager test fix (D1, G3). |
 | PEOPLE-03 | Rename with trimming. A blank name is refused with a visible message and sends nothing. A failed save is visible. Reload keeps the new name. | **Verified on web** (browser harness, three cells). Desktop trims and refuses blanks by source review; desktop failure copy changed, not exercised. |
-| PEOPLE-04 | Add, remove and inspect aliases. Aliases match speakers and senders case-insensitively, including non-ASCII names. | **Implemented, unverified** for editing: alias list, add and remove on both surfaces, reviewed by `review_alias` on the surface and again by the server (409 on a name another profile uses). Matching **verified** in core for summaries, appended observations and recognized speaker names. Not yet compiled or run: written under a machine-wide build hold. |
+| PEOPLE-04 | Add, remove and inspect aliases. Aliases match speakers and senders case-insensitively, including non-ASCII names. | **Verified, scoped** for editing. Web: r2 browser harness (historical, see the evidence log). Desktop: GPUI test frames, not a real window. Desktop `alias_that_another_profile_uses_is_refused_and_kept` passes in G3. The server refusal is covered by core and route tests in G3. Matching **verified** in core for summaries, appended observations and recognized speaker names. |
 | PEOPLE-05 | Each observation shows its source meeting and opens it. An observation whose meeting is gone says so. No observation is dropped from the list. | **Verified** on web (browser harness) and desktop (GPUI test-frame check). |
-| PEOPLE-06 | Open a person's meetings and conversations from the profile and return. | **Implemented, unverified.** The profile lists the person's meetings (`person_meetings`) and Inbox conversations (`person_conversations`); opening one shows Back to People, which returns to the open profile. Desktop follow-up suggestions are clickable. Not yet compiled or run: written under a machine-wide build hold. |
-| PEOPLE-07 | Create, edit, complete and delete reminders with the same options on both surfaces. State survives reload. | **Implemented, unverified.** Both surfaces offer the four kinds, the optional Due tomorrow (commitments and reminders only), edit, complete and delete (`edit_item`, `remove_item`). Persistence uses the existing stores. Not yet compiled or run: written under a machine-wide build hold. |
-| PEOPLE-08 | Merge after confirmation. Aliases, observations, reminders, voice and all links move to the target. An opt-out on either side survives. | **Implemented, unverified.** Merge shows a confirmation in words before anything is sent. The web merge commit now repoints Inbox participants and knowledge links in its transaction, as the desktop does. Sticky opt-out **verified** by existing core tests. Not yet compiled or run: written under a machine-wide build hold. |
-| PEOPLE-09 | Undo a merge, rename, opt-out change and deletion; both records come back intact. | **Implemented, unverified.** Undo for rename, opt-out, merge and delete on both surfaces under the unchanged-records rule (`PeopleUndo::check`); server restore and unmerge on both stores. Not yet compiled or run: written under a machine-wide build hold. |
-| PEOPLE-10 | Delete a profile with confirmation or undo; observations, aliases and links follow a documented cascade. | **Implemented, unverified.** Delete with confirmation and the documented cascade on both surfaces and both stores. Not yet compiled or run: written under a machine-wide build hold. |
+| PEOPLE-06 | Open a person's meetings and conversations from the profile and return. | **Verified on web only, scoped.** Web: r2 browser harness (historical, see the evidence log). The harness opens a linked meeting and returns with Back to People. Desktop has no test for the linked records or the way back, and desktop follow-up suggestions are only checked to compile (G3). |
+| PEOPLE-07 | Create, edit, complete and delete reminders with the same options on both surfaces. State survives reload. | **Verified, scoped.** Web: r2 browser harness (historical, see the evidence log). The harness covers add, edit, complete and delete, and reload. Desktop: GPUI test frames, not a real window. Desktop `reminders_use_kind_and_due_options_and_can_be_edited_and_deleted` passes in G3. |
+| PEOPLE-08 | Merge after confirmation. Aliases, observations, reminders, voice and all links move to the target. An opt-out on either side survives. | **Verified, scoped.** Web: r2 browser harness (historical, see the evidence log). The harness checks that nothing merges before confirmation. Desktop: GPUI test frames, not a real window. Desktop `merge_sends_nothing_until_confirmed` passes in G3. The web commit's repointing of Inbox participants and knowledge links compiles (G3) but is not exercised by a browser check. Sticky opt-out **verified** by core tests. |
+| PEOPLE-09 | Undo a merge, rename, opt-out change and deletion; both records come back intact. | **Partial.** Web: r2 browser harness (historical, see the evidence log). The harness undoes a merge and a delete. Desktop: GPUI test frames, not a real window. Desktop delete then undo passes in G3. Server restore and unmerge on both stores and the `PeopleUndo` rules pass in G3; the undo summary punctuation fix passes in M1 and G3. Not exercised in any UI: the rename and opt-out undo round trips, and a desktop merge undo. |
+| PEOPLE-10 | Delete a profile with confirmation or undo; observations, aliases and links follow a documented cascade. | **Verified, scoped.** Web: r2 browser harness (historical, see the evidence log). Desktop: GPUI test frames, not a real window. Desktop `delete_needs_confirmation_cascades_and_undo_restores` passes in G3. The store cascade passes on both stores in G3. |
 | PEOPLE-11 | With a person opted out, generating or regenerating a summary, appending observations, or recognizing their name or alias on screen adds no observation for them under any casing. Reopening a database written by an older build keeps the protection. | **Verified** in core: 8 new tests in `meetings::opt_out_tests` on both stores, plus existing `summary_tests` tracking cases. |
 | PEOPLE-12 | With a person opted out, no agent read returns their observations; identity and the opt-out stay visible to the agent. | **Verified** on desktop (GPUI bridge test). Web has no agent People reads. |
 | PEOPLE-13 | Toggling the opt-out shows a visible failure when the save fails and does not look applied. A confirmed change survives reload. | **Verified on web** (browser harness). Desktop shows a notice by source review, not exercised. |
-| PEOPLE-14 | Deleting a meeting removes or explicitly retains its derived observations by a documented rule. | **Implemented, unverified.** Rule decided (see Decided rules): both stores delete a meeting's derived observations in the same transaction and the route announces `PeopleUpdated`. No surface offers a meeting delete control. Not yet compiled or run: written under a machine-wide build hold. |
+| PEOPLE-14 | Deleting a meeting removes or explicitly retains its derived observations by a documented rule. | **Verified in core and server.** The rule (see Decided rules) passes on both stores, and the route announces `PeopleUpdated` exactly once only when observations were removed (S2, G3). The unchanged meeting-write performance contract passes again. No surface offers a meeting delete control, so there is no UI check. |
 | PEOPLE-15 | Compare web and desktop People pages with the same records at the same viewport. | **Unverified.** No same-size desktop screenshot was taken. Known gaps listed in the inventory. |
-| PEOPLE-16 | Keyboard and screen reader: every card action has a unique accessible name, focus is visible, and touch targets are 44px. | **Partially verified on web** (names and touch targets for the checked controls, harness). The web rename field now sits beside the actions, outside the expand button; new controls carry unique accessible names. Desktop text buttons activate from Enter and Space through the gpui fork's focusable click handling; a GPUI test is written. Not yet compiled or run. |
-| PEOPLE-17 | 640×480, 390×844 touch and 1280×800 without horizontal overflow or hidden actions. | **Verified on web** for the checked flows (harness). Desktop unverified. |
-| PEOPLE-18 | Honest states: loading, empty, cache failure, sync failure, merge recovery, failed save. | **Partial.** Web has them. Desktop now shows a loading state until the first restore or refresh settles and a merge recovery section with retry; its wording is close to the web's but the desktop keeps different recovery data and has no recovery data viewer. Not yet compiled or run. |
-| PEOPLE-19 | Measure People list and profile performance with a large directory. | **Unverified.** `bruhs-web/tests/people_scale_browser.mjs` measures list, search and profile timings with 5,000 synthetic people; not run yet. |
+| PEOPLE-16 | Keyboard and screen reader: every card action has a unique accessible name, focus is visible, and touch targets are 44px. | **Partially verified.** Web: r2 browser harness (historical, see the evidence log). Names and touch targets for the checked controls; the web rename field sits beside the actions, outside the expand button. Desktop: GPUI test frames, not a real window. Desktop `people_text_buttons_activate_from_the_keyboard` passes in G3. No full keyboard or screen reader pass on either surface. |
+| PEOPLE-17 | 640×480, 390×844 touch and 1280×800 without horizontal overflow or hidden actions. | **Verified on web** for the checked flows (harness, 2026-11-14 and the historical r2 run). Desktop native window unverified. |
+| PEOPLE-18 | Honest states: loading, empty, cache failure, sync failure, merge recovery, failed save. | **Partial.** Web has them. Desktop shows a loading state until the first restore or refresh settles and a merge recovery section with retry; its wording is close to the web's but the desktop keeps different recovery data and has no recovery data viewer. Desktop code compiles and the quick gate passes (G3), but no check exercises these states. |
+| PEOPLE-19 | Measure People list and profile performance with a large directory. | **Unverified: diagnostic only.** P3 ran 5,000 profiles × 3 runs on an instrumented debug bundle (see the evidence log). No performance criterion exists and none is claimed. |
 
 ## Cross-pillar items
 
@@ -139,17 +146,20 @@ listed so a landing can merge them with care.
 - **Inbox (desktop auto link).** [`inbox_ui.rs`](../bruhs-desktop/src/views/workspace/inbox_ui.rs)
   used `display_name.eq_ignore_ascii_case` and took the first duplicate. It
   now uses `bruhs_models::unique_person_named`: display names and aliases,
-  Unicode case folded, and no link when two profiles match. Not yet compiled.
+  Unicode case folded, and no link when two profiles match. The desktop
+  `inbox_import_links_by_alias_and_refuses_ambiguous_names` test passes in G3.
 - **Inbox (web merge links).** The web merge commit
   ([`commit.rs`](../bruhs-web/src/storage/people/merge/commit.rs)) now
   repoints Inbox participants and knowledge links to the survivor in the
-  same IndexedDB transaction and records them for undo. Not yet compiled.
+  same IndexedDB transaction and records them for undo. It compiles (G3 wasm
+  clippy) but no browser check exercises it.
 - **Inbox and meetings (Back to People).** The conversation and meeting
   detail headers show a Back to People button only when opened from a
   profile ([`inbox_page.rs`](../bruhs-web/src/components/inbox_page.rs),
   [`meeting_detail.rs`](../bruhs-web/src/components/meeting_detail.rs)).
 - **Meetings (PEOPLE-14).** `delete_meeting` on both stores deletes derived
-  observations; the route announces `PeopleUpdated`.
+  observations in the same commit; the route announces `PeopleUpdated` only
+  when some were removed (S2, G3).
 
 ## Evidence log
 
@@ -162,6 +172,32 @@ listed so a landing can merge them with care.
 | 2026-11-14 | PEOPLE-03, PEOPLE-05, PEOPLE-13, PEOPLE-16, PEOPLE-17 | Meeting hydration fix rechecked: `cargo clippy -p bruhs-web --target wasm32-unknown-unknown -- -D warnings` passes. Harness rerun: 111 of 111 passed. Visual review of the compact frame found the opt-out badge and count wrapping, then (after a first fix) card actions overflowing the card by about 19px. Neither was caught by the assertions, so a containment assertion was added. It failed red on compact and touch (4 failures), then passed after the header was made to wrap. Final run on a debug bundle: **117 passed, 0 failed** across 1280×800, 640×480 and 390×844 touch, 15 screenshots reviewed in `target/people-ui-qa/`. | Release bundle not built. Desktop same-size comparison not done. |
 | 2026-11-14 | Gate | `scripts/gate.sh --quick` was started and stopped during its first (fmt) step because free disk was 19 GB, below the agreed 20 GB floor for this shared machine. **The workspace gate has not passed on this branch.** Checks that did run: targeted tests above, `cargo check` of bruhs-desktop, wasm32 clippy of bruhs-web, `cargo fmt --all`. | Run `scripts/gate.sh --quick` (and the full gate) when disk allows. |
 | 2026-11-14 | PEOPLE-01, 02, 04, 06, 07, 08, 09, 10, 14, 16, 18, 19, cross-pillar | Source only, under a machine-wide build hold: nothing below was compiled, formatted or run. Shared rules in `bruhs_models` (`people_directory`, `people_changes`, `people_copy`, reminder edit and remove) with unit tests. Core: `delete_person`, `restore_person`, `unmerge_person`, `set_person_aliases` and the meeting delete cascade on both stores, sqlite schema 6, 15 new store tests in `meetings::people_lifecycle_tests` written against both stores. Server: four People routes and `PeopleUpdated` on meeting delete, with route tests. Web: create, search, aliases, linked records, reminders, confirmations, delete, undo, merge link repointing; People browser harness extended (create, search, aliases, linked records, reminders, merge and delete undo) and a 5,000-person timing run added. Desktop: the same flows in a new People view, 8 GPUI tests, Inbox auto link fix. | Compile, fix, run every queued check below, then move cases to Verified only on that evidence. Same-size desktop screenshots (PEOPLE-15, PEOPLE-17). |
+| 2026-11-15 | All Rust | **P1, compile only** (run `p1-iterative-20261115T115322Z`): fmt, check of models, core, server, web wasm, web tests and desktop, web wasm clippy and People clippy, all nine clean on one HEAD with zero warnings. No tests ran. | Superseded by the runs below. |
+| 2026-11-15 | PEOPLE-01, 02, 04, 06, 07, 08, 09, 10, 16, 17 | **r2 People browser harness, HISTORICAL** (run `p2-r2-run-20261115T125531Z`, debug bundle `target/people-ui-dist-r2`): 292 passed, 0 failed across 1280×800, 640×480 and 390×844 touch, 36 screenshots. That bundle predates the undo copy change (d24d5ec4), so it is not evidence for the current undo summary text. | Rerun on a current bundle before landing claims beyond this. |
+| 2026-11-15 | Inbox, PEOPLE-19 | **P3** (run `p3-run-20261115T134516Z`): Inbox browser harness 399 passed, 0 failed on the r2 bundle. Scale: 5,000 profiles × 3 runs, debug bundle, instrumented driver, diagnostic only; medians list 578 ms, search 1315 ms, profile 85 ms; page one was in order in all 3 runs. Not performance acceptance. The first scale attempt (r2) timed out because the fixture served all 5,000 versions in one page, over the 256 page limit the web enforces; the fixture was fixed to page like the server in 986fca92. | Performance acceptance needs a criterion and a release bundle. |
+| 2026-11-15 | Seams | Four seams found by the runs and fixed: the legacy `merged_people` column fixture named its columns (test fix, 43123d4e); the desktop pager click landed below the 1080 px test viewport, confirmed by a fixture diagnostic, and the test now scrolls to the pager (test fix, 89d794d8); undo summaries doubled a final period (product copy fix, d24d5ec4); `PeopleUpdated` was announced on every meeting delete and is now announced only when observations were removed (product fix, 087b9518). | None for these seams. |
+| 2026-11-15 | PEOPLE-09 | **M1** (run `people-m1-run-20261115T154156Z`): focused undo copy tests 6/0, default and serial, plus strict native and wasm lints. | |
+| 2026-11-15 | PEOPLE-02 | **D1** (run `pager-d1-run-20261115T145755Z`): diagnostic confirmed the Next centre outside the test viewport; with the fix, the People page test module 7/0, default and serial, plus strict desktop clippy. | |
+| 2026-11-15 | PEOPLE-14 | **S2** (run `people-s2-run-20261115T161912Z`): core meetings 139/0/1, server meeting routes 12/0 (including no event without observations and on a failed delete), unchanged meeting-write performance contract 1/0, each default and serial, plus strict lints. | |
+| 2026-11-15 | Gate | **G3 quick gate** (run `20261115T162756Z`, HEAD 087b9518): unmodified `scripts/gate.sh --quick`, all 9 steps (fmt, clippy, clippy-wasm, test, web-assets, site-test, site-types, mobile, bench-check) passed exactly once; 32 suites, 3446 passed, 0 failed, 54 ignored. This is the quick gate only, not the full gate. | Full gate. Open items below. |
+
+## Open items
+
+Known and still open after G3:
+
+- A profile restored by undo is not brought into view; it joins the end of
+  the directory order.
+- The merge and delete confirmations can read "Delete Ada L.?" for a name
+  that ends in a period.
+- No real desktop window was drawn and no same-size web and desktop
+  screenshots exist (PEOPLE-15, PEOPLE-17 native).
+- No full accessibility or screen reader pass (PEOPLE-16).
+- Live providers and the full product were not exercised.
+- No performance acceptance (PEOPLE-19 is diagnostic only).
+- Undo receipts are lost on reload.
+- Merges made by builds before schema 6 undo without their meeting links.
+- No delete meeting control on either surface.
+- Builds older than schema 6 refuse a database this branch has opened.
 
 Reproduce:
 
