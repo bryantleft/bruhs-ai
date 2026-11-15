@@ -15,6 +15,7 @@ use crate::state::{
     SetEventCreateOpen, SetEventCreateStart, SetSelectedEventId, SetSelectedWorkItem, WorkItem,
     WorkItemsSignal,
 };
+use crate::ui::Dialog;
 
 #[derive(Clone)]
 struct GridCell {
@@ -100,6 +101,52 @@ fn tasks_due_on(items: &[WorkItem], day_ms: f64) -> Vec<WorkItem> {
         .collect()
 }
 
+const WEEKDAYS: [&str; 7] = [
+    "Sunday",
+    "Monday",
+    "Tuesday",
+    "Wednesday",
+    "Thursday",
+    "Friday",
+    "Saturday",
+];
+const MONTHS: [&str; 12] = [
+    "January",
+    "February",
+    "March",
+    "April",
+    "May",
+    "June",
+    "July",
+    "August",
+    "September",
+    "October",
+    "November",
+    "December",
+];
+
+/// "Sunday, November 1" and "2026-11-01" for a local-midnight day.
+fn day_names(day_ms: f64) -> (String, String) {
+    let d = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(day_ms));
+    let weekday = WEEKDAYS
+        .get(usize::try_from(d.get_day()).unwrap_or(0))
+        .copied()
+        .unwrap_or("");
+    let month = MONTHS
+        .get(usize::try_from(d.get_month()).unwrap_or(0))
+        .copied()
+        .unwrap_or("");
+    (
+        format!("{weekday}, {month} {}", d.get_date()),
+        format!(
+            "{:04}-{:02}-{:02}",
+            d.get_full_year(),
+            d.get_month() + 1,
+            d.get_date()
+        ),
+    )
+}
+
 /// Map a stored color token to its bruhs Tailwind bg class. Unknown tokens
 /// fall back to a neutral chrome dot.
 fn color_dot_class(color: Option<&str>) -> &'static str {
@@ -130,6 +177,10 @@ pub fn MonthView() -> impl IntoView {
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
 
     let cells = Signal::derive(move || build_grid(anchor.get()));
+    // The day whose full list is open. A cell shows three records at most
+    // and clips on compact widths, so the date and "+N more" open every
+    // event and due task of that day.
+    let day_list = RwSignal::new(None::<f64>);
 
     view! {
         <div class="flex flex-col flex-1 overflow-hidden">
@@ -174,7 +225,7 @@ pub fn MonthView() -> impl IntoView {
                         // Right/bottom borders only — left and top come from
                         // the previous cell. Last column drops right; last
                         // row drops bottom.
-                        let mut classes = vec!["flex flex-col gap-1 p-1.5 cursor-pointer transition-colors hover:bg-longan-800/20"];
+                        let mut classes = vec!["flex min-h-0 flex-col gap-1 overflow-hidden p-1.5 cursor-pointer transition-colors hover:bg-longan-800/20"];
                         if i % 7 != 6 {
                             classes.push("border-r border-longan-800/30");
                         }
@@ -188,9 +239,30 @@ pub fn MonthView() -> impl IntoView {
                         let event_take = day_events.len().min(3);
                         let task_take = (3usize.saturating_sub(event_take)).min(day_tasks.len());
                         let extra = total.saturating_sub(event_take + task_take);
+                        let (day_label, day_iso) = day_names(day_ms);
+                        let open_day = move |ev: web_sys::MouseEvent| {
+                            ev.stop_propagation();
+                            day_list.set(Some(day_ms));
+                        };
+                        let noun = if total == 1 { "record" } else { "records" };
+                        let date_view = if total > 0 {
+                            view! {
+                                <button
+                                    type="button"
+                                    on:click=open_day
+                                    aria-label=format!("Show {total} {noun} on {day_label}")
+                                    data-calendar-day=day_iso.clone()
+                                    class=format!("{date_class} shrink-0 self-start cursor-pointer rounded-seed hover:text-rambutan-100 focus-visible:outline-2 focus-visible:outline-persimmon-400")
+                                >
+                                    {cell.day_num}
+                                </button>
+                            }.into_any()
+                        } else {
+                            view! { <div class=format!("{date_class} shrink-0 self-start")>{cell.day_num}</div> }.into_any()
+                        };
                         view! {
                             <div class=class_str on:click=on_click_cell>
-                                <div class=date_class>{cell.day_num}</div>
+                                {date_view}
                                 {
                                     let event_pills = day_events.into_iter().take(event_take).map(|e| {
                                         let dot = color_dot_class(e.color.as_deref());
@@ -216,7 +288,7 @@ pub fn MonthView() -> impl IntoView {
                                                 aria-label=pill_label
                                                 data-event-id=data_event_id
                                                 on:click=on_pill_click
-                                                class="flex items-center gap-1 truncate text-label-sm text-rambutan-400 hover:text-rambutan-200 transition-colors text-left cursor-pointer"
+                                                class="flex shrink-0 items-center gap-1 truncate text-label-sm text-rambutan-400 hover:text-rambutan-200 transition-colors text-left cursor-pointer"
                                             >
                                                 <span class=format!("size-1.5 rounded-orb shrink-0 {dot}")></span>
                                                 {if is_google {
@@ -254,7 +326,7 @@ pub fn MonthView() -> impl IntoView {
                                                 title="Task due"
                                                 aria-label=task_label
                                                 data-calendar-task=data_task_id
-                                                class="flex items-center gap-1 truncate text-label-sm text-rambutan-500 italic hover:text-rambutan-300 transition-colors text-left cursor-pointer"
+                                                class="flex shrink-0 items-center gap-1 truncate text-label-sm text-rambutan-500 italic hover:text-rambutan-300 transition-colors text-left cursor-pointer"
                                             >
                                                 <span class="size-1.5 rounded-orb shrink-0 inset-ring inset-ring-rambutan-500"></span>
                                                 <span class="truncate">{title}</span>
@@ -266,7 +338,14 @@ pub fn MonthView() -> impl IntoView {
                                             {event_pills}
                                             {task_pills}
                                             {(extra > 0).then(|| view! {
-                                                <div class="text-label-sm text-rambutan-500">{format!("+{extra} more")}</div>
+                                                <button
+                                                    type="button"
+                                                    on:click=open_day
+                                                    data-calendar-more=day_iso.clone()
+                                                    class="shrink-0 self-start rounded-seed text-left text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                                                >
+                                                    {format!("+{extra} more")}
+                                                </button>
                                             })}
                                         </>
                                     }
@@ -276,6 +355,86 @@ pub fn MonthView() -> impl IntoView {
                     }).collect_view()
                 }}
             </div>
+            <Dialog
+                open=Signal::derive(move || day_list.get().is_some())
+                on_close=Callback::new(move |_| day_list.set(None))
+                max_width="max-w-sm".to_string()
+                label="Calendar day"
+                padding_top="1rem"
+            >
+                {move || day_list.get().map(|day_ms| {
+                    let (day_label, _) = day_names(day_ms);
+                    let day_events = events.with(|evs| events_for_day(evs, day_ms));
+                    let day_tasks = work_items.with(|items| tasks_due_on(items, day_ms));
+                    let event_rows = day_events.into_iter().map(|e| {
+                        let id = e.id.clone();
+                        let is_google = matches!(e.source, EventSource::Google);
+                        let title = e.title.clone();
+                        let label = if is_google {
+                            format!("Open Google event {title}, read only")
+                        } else {
+                            format!("Edit event {title}")
+                        };
+                        let dot = color_dot_class(e.color.as_deref());
+                        let open_event = move |_| {
+                            day_list.set(None);
+                            set_selected_event_id.set(Some(id.clone()));
+                            set_event_create_open.set(true);
+                        };
+                        view! {
+                            <li>
+                                <button
+                                    type="button"
+                                    on:click=open_event
+                                    aria-label=label
+                                    data-day-list-event=e.id
+                                    class="bruhs-control flex min-h-[32px] w-full items-center gap-2 rounded-grape px-2 text-left text-label-sm text-rambutan-300 hover:bg-longan-700 hover:text-rambutan-100 cursor-pointer"
+                                >
+                                    <span class=format!("size-1.5 rounded-orb shrink-0 {dot}")></span>
+                                    {is_google.then(|| view! {
+                                        <span title="Synced from Google Calendar" class="text-label-sm text-blueberry-300/80 bg-blueberry-500/15 inset-ring inset-ring-blueberry-500/40 rounded-seed px-0.5 leading-none shrink-0">"G"</span>
+                                    })}
+                                    <span class="truncate">{title}</span>
+                                </button>
+                            </li>
+                        }
+                    }).collect_view();
+                    let task_rows = day_tasks.into_iter().map(|t| {
+                        let id = t.id.clone();
+                        let title = t.title;
+                        let open_task = move |_| {
+                            day_list.set(None);
+                            set_selected_work_item.set(Some(id.clone()));
+                            set_active_view.set(AppView::Tasks);
+                            super::record_focus::focus_record("task-detail-title".into());
+                        };
+                        view! {
+                            <li>
+                                <button
+                                    type="button"
+                                    on:click=open_task
+                                    title="Task due"
+                                    aria-label=format!("Open task {title}, due this day")
+                                    data-day-list-task=t.id
+                                    class="bruhs-control flex min-h-[32px] w-full items-center gap-2 rounded-grape px-2 text-left text-label-sm italic text-rambutan-300 hover:bg-longan-700 hover:text-rambutan-100 cursor-pointer"
+                                >
+                                    <span class="size-1.5 rounded-orb shrink-0 inset-ring inset-ring-rambutan-300"></span>
+                                    <span class="truncate">{title}</span>
+                                </button>
+                            </li>
+                        }
+                    }).collect_view();
+                    view! {
+                        <div class="border-b border-longan-800 px-4 py-3">
+                            <h2 class="text-h4 text-rambutan-100">{day_label}</h2>
+                        </div>
+                        <ul class="max-h-[calc(100dvh-10rem)] space-y-0.5 overflow-y-auto px-2 py-2">
+                            {event_rows}
+                            {task_rows}
+                        </ul>
+                    }
+                })}
+            </Dialog>
         </div>
     }
 }
