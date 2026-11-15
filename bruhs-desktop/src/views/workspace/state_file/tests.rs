@@ -209,6 +209,8 @@ impl ProcessFixture {
                 "--exact",
                 "views::workspace::state_file::tests::subprocess_fixture",
                 "--nocapture",
+                // Keep libtest labels out of the READY/RESULT stdout protocol.
+                "--format=terse",
             ])
             .env("BRUHS_STATE_TEST_PATH", path)
             .env("BRUHS_STATE_TEST_MODE", mode)
