@@ -27,6 +27,7 @@ pub mod delivery;
 pub mod ids;
 pub mod local_tools;
 pub mod logic;
+pub mod mail;
 pub mod mobile;
 pub mod models;
 pub mod num;

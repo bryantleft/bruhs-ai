@@ -45,8 +45,11 @@ impl ServiceProvider {
             Self::Google => "Read calendar events and identify your account",
             Self::Microsoft => "Read basic calendar details and identify your account",
             Self::Github => "Read your profile and organization memberships",
-            Self::Gmail | Self::Outlook => {
-                "Authorize reading, organizing, composing, and sending email. Inbox sync and delivery are still being built."
+            Self::Gmail => {
+                "Authorize reading, organizing, composing, and sending email. Read and sync Gmail in Email; sending is still being built."
+            }
+            Self::Outlook => {
+                "Authorize reading, organizing, composing, and sending email. Read and sync Outlook in Email; sending is still being built."
             }
         }
     }

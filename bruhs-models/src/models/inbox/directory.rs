@@ -1,6 +1,7 @@
 //! Read projections for browsing/searching without copying conversation history.
 use super::InboxConversation;
 use super::InboxSource;
+use serde::{Deserialize, Serialize};
 
 // Uses the same mounted-row budget as the web task list. The diagnostic native
 // inbox fixture exercises 100/1,000/10,000 records; see the performance goal report.
@@ -9,8 +10,10 @@ pub const INBOX_PAGE_SIZE: usize = 100;
 // 160 scalars cover that line at their 11–14px font sizes; search keeps full text.
 const PREVIEW_CHARS: usize = 160;
 
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
 pub enum InboxFilter {
+    #[default]
     Inbox,
     Unread,
     Snoozed,
@@ -48,7 +51,7 @@ impl InboxFilter {
     }
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub struct InboxCard {
     pub id: String,
     pub source: InboxSource,
