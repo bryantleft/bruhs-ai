@@ -5,6 +5,8 @@
 // budget: it fails only when a step does not finish.
 // Run after: (cd bruhs-web && trunk build --release --dist ../target/people-ui-dist)
 //   BRUHS_PEOPLE_SCALE=5000 node bruhs-web/tests/people_scale_browser.mjs
+// BRUHS_PEOPLE_UI_DIST picks the bundle and BRUHS_PEOPLE_SCALE_DIR the output
+// directory, so a later run never overwrites an earlier run's results.
 import assert from 'node:assert/strict';
 import { mkdir, readFile, readdir, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
@@ -14,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = path.resolve(process.env.BRUHS_PEOPLE_UI_DIST ?? path.join(root, 'target/people-ui-dist'));
-const output = path.join(root, 'target/people-ui-scale');
+const output = path.resolve(process.env.BRUHS_PEOPLE_SCALE_DIR ?? path.join(root, 'target/people-ui-scale'));
 const count = Number(process.env.BRUHS_PEOPLE_SCALE ?? 5000);
 const runs = Number(process.env.BRUHS_PEOPLE_SCALE_RUNS ?? 3);
 assert(Number.isInteger(count) && count >= 100, 'BRUHS_PEOPLE_SCALE must be an integer of at least 100');
