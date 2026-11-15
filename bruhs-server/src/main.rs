@@ -165,6 +165,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
     let _delivery_watcher = delivery.start_watcher(state.clone(), Some(coordination.clone()))?;
+    let board_links = bruhs_core::coordination::BoardLinks::new(delivery.clone());
     let databases = bruhs_core::database::DatabaseHost::open(
         bruhs_core::database::DatabaseHost::default_path()?,
         bruhs_core::secrets::SecretStore::os(),
@@ -200,13 +201,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             config.access.clone(),
         ))
         .layer(axum::Extension(coordination.clone()))
+        .layer(axum::Extension(board_links.clone()))
         .layer(axum::Extension(tools))
         .layer(axum::Extension(databases))
         .layer(axum::Extension(api_client));
     if let Ok(bind) = std::env::var("BRUHS_TASK_BIND") {
         let address: std::net::SocketAddr = bind.parse()?;
         let remote = tokio::net::TcpListener::bind(address).await?;
-        let remote_app = routes::coordination::remote_router(coordination);
+        let remote_app = routes::coordination::remote_router(coordination, board_links);
         tracing::info!(%address,"Paired task listener enabled; only scoped task access is served");
         tokio::spawn(async move {
             if let Err(error) = axum::serve(remote, remote_app).await {
@@ -361,6 +363,7 @@ fn router_with_capture_daemon(
         )
         .route("/api/coordination", get(routes::coordination::snapshot))
         .route("/api/coordination/ui", get(routes::coordination::ui))
+        .route("/api/coordination/board", get(routes::coordination::board))
         .route(
             "/api/coordination/commands",
             post(routes::coordination::command),

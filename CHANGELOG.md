@@ -11,6 +11,13 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- Added a task board to Workbench Tasks. Agent tasks sit in four lanes,
+  Building, Validating, In review and Ready, placed by what the work is doing:
+  verification runs, and the branch and pull requests of each task's worktree,
+  including checks, reviews and conflicts. Each card shows its branch, pull
+  requests, comments, delegates, model and status, and cards that need you
+  sort first. Archive files finished tasks away. The same board appears on the
+  web, the desktop app and a paired phone. See `docs/task-workspaces.md`.
 - Added live meeting suggestions. While a meeting records, the meeting dock
   can offer private action items, open questions, conflicts with your tasks or
   calendar, and related records. Add one as a task, copy it, or dismiss it;

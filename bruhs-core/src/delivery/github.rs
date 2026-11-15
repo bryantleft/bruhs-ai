@@ -11,6 +11,7 @@ const FIELDS: &str = "number,title,body,url,state,isDraft,isCrossRepository,base
 struct GitHubPull {
     number: u64,
     title: String,
+    #[serde(default)]
     body: String,
     url: String,
     state: String,
@@ -120,6 +121,15 @@ impl From<GitHubPull> for Pull {
     }
 }
 
+pub(super) fn parse_pulls(output: &str) -> DeliveryResult<Vec<Pull>> {
+    let pulls: Vec<GitHubPull> = serde_json::from_str(output).map_err(|error| {
+        DeliveryError::Command(format!(
+            "GitHub returned invalid pull request data: {error}"
+        ))
+    })?;
+    Ok(pulls.into_iter().map(Pull::from).collect())
+}
+
 impl DeliveryService {
     pub(super) async fn github_pulls(&self, path: &Path) -> DeliveryResult<Vec<Pull>> {
         // A page has the same 50-record bound as reactive history; all larger result sets
@@ -133,12 +143,7 @@ impl DeliveryService {
                 ],
             )
             .await?;
-        let pulls: Vec<GitHubPull> = serde_json::from_str(&output).map_err(|error| {
-            DeliveryError::Command(format!(
-                "GitHub returned invalid pull request data: {error}"
-            ))
-        })?;
-        Ok(pulls.into_iter().map(Pull::from).collect())
+        parse_pulls(&output)
     }
 
     pub(super) async fn github_pull(&self, path: &Path, number: u64) -> DeliveryResult<Pull> {

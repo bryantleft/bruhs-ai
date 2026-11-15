@@ -213,6 +213,28 @@ impl DeliveryService {
             .map(|mr| pull(mr, Vec::new(), &Value::Null))
             .collect())
     }
+    pub(super) async fn gitlab_pulls_from_branch(
+        &self,
+        path: &Path,
+        repo: &ForgeRepository,
+        branch: &str,
+    ) -> DeliveryResult<Vec<Pull>> {
+        let branch = segment(branch);
+        let data = self
+            .gitlab_json(
+                path,
+                repo,
+                &format!("/merge_requests?state=all&scope=all&source_branch={branch}&order_by=created_at&sort=desc&per_page=5"),
+            )
+            .await?;
+        let mrs: Vec<MergeRequest> = serde_json::from_value(data).map_err(|error| {
+            DeliveryError::Command(format!("GitLab merge requests were invalid: {error}"))
+        })?;
+        Ok(mrs
+            .into_iter()
+            .map(|mr| pull(mr, Vec::new(), &Value::Null))
+            .collect())
+    }
     pub(super) async fn gitlab_pull(
         &self,
         path: &Path,
