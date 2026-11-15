@@ -195,6 +195,15 @@ app quits. The desktop app uses an already running server from the same build.
 go to `logs/bruhs-server.service.log` in the app data directory. Reinstall after
 moving or rebuilding to a different binary path.
 
+Loaded is not the same as working. Status reports the service as serving only
+when the process the service manager started is the one answering on the port:
+a running server reports its own process ID in `GET /api/service`
+(`responder_pid`), and `service status` makes one short loopback request to
+compare it with the job's (`service_pid`). A job that is loaded but has no
+process, a process that does not answer, or an answer that does not name its
+process (an older server, say) is reported as such, never as running. The
+status includes the log path when there is one.
+
 Runs never hold credentials. Approved writes are executed by the app through
 workflow grants, so the agent describes an action and the host performs it with
 your accounts.

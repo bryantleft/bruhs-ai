@@ -14,7 +14,7 @@ mod setup;
 mod updates;
 mod weekly_reports;
 use gpui::{prelude::*, *};
-use gpui_component::input::{Input, InputState};
+use gpui_component::input::{Input, InputEvent, InputState};
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
@@ -123,6 +123,8 @@ pub(crate) struct ReactiveAutomations {
     /// Unread outbox ids already seen; `None` until the first snapshot.
     outbox_seen: Option<HashSet<String>>,
     reply: Option<(String, Entity<InputState>)>,
+    /// Redraws while the reply is typed, so Send tracks whether it is empty.
+    reply_watch: Option<gpui::Subscription>,
     memory_edit: Option<memory::MemoryEdit>,
     notify_form: Option<notifications::NotificationForm>,
     service: notifications::ServiceState,
@@ -200,13 +202,30 @@ fn control_as(
     disabled: bool,
     primary: bool,
 ) -> Stateful<Div> {
-    web_button(
+    styled_control(
         id,
+        label,
+        disabled,
         if primary {
             WebButtonVariant::Primary
         } else {
             WebButtonVariant::Outline
         },
+    )
+}
+/// A quiet text button, like web's ghost actions (Mark read, Dismiss).
+fn ghost_control(id: impl Into<ElementId>, label: &str, disabled: bool) -> Stateful<Div> {
+    styled_control(id, label, disabled, WebButtonVariant::Ghost)
+}
+fn styled_control(
+    id: impl Into<ElementId>,
+    label: &str,
+    disabled: bool,
+    variant: WebButtonVariant,
+) -> Stateful<Div> {
+    web_button(
+        id,
+        variant,
         WebButtonSize::Small,
         ButtonState::disabled_if(disabled),
     )
@@ -386,6 +405,7 @@ impl ReactiveAutomations {
             agent_names: HashMap::new(),
             outbox_seen: None,
             reply: None,
+            reply_watch: None,
             memory_edit: None,
             notify_form: None,
             service: notifications::ServiceState::default(),
@@ -594,6 +614,20 @@ impl ReactiveAutomations {
         control(SharedString::from(key), label, self.busy).on_activate(cx, move |this, _, cx| {
             this.send_in(command.clone(), scope.clone(), cx)
         })
+    }
+    /// `command_in` drawn as a quiet text button.
+    fn ghost_command_in(
+        &self,
+        key: String,
+        label: &str,
+        command: ReactiveCommand,
+        scope: Scope,
+        cx: &Context<'_, Self>,
+    ) -> Stateful<Div> {
+        ghost_control(SharedString::from(key), label, self.busy)
+            .on_activate(cx, move |this, _, cx| {
+                this.send_in(command.clone(), scope.clone(), cx)
+            })
     }
     fn scoped_error(&self, scope: &Scope) -> Option<Stateful<Div>> {
         let (_, message) = self.scoped_error.as_ref().filter(|(at, _)| at == scope)?;
@@ -1097,14 +1131,15 @@ impl Render for ReactiveAutomations {
         self.ensure_weekly_inputs(_window, cx);
         self.ensure_notification_form(_window, cx);
         let mut panel=div().id("reactive-automations").w_full().min_w_0().mb_4().p_4().rounded(px(8.0)).bg(theme::longan_900()).border_1().border_color(theme::longan_700().opacity(0.5)).flex().flex_col().gap_3()
-            .when(self.snapshot.is_some(), |panel| panel.child(self.render_updates(cx)))
-            .child(div().flex().flex_wrap().items_center().justify_between().gap_2().child(heading("Automations")).child(muted("Drafts only")).child(control("reactive-refresh","Refresh",self.busy||self.reading).on_activate(cx, |this,_,cx|this.refresh(cx))))
+            .child(div().flex().flex_wrap().items_center().justify_between().gap_2().child(div().flex().flex_wrap().items_center().gap_2().child(heading("Automations")).child(updates::badge_info("Drafts only"))).child(control("reactive-refresh","Refresh",self.busy||self.reading).on_activate(cx, |this,_,cx|this.refresh(cx))))
             .child(muted("Describe a job and choose what starts it. Review once to enable a complete automation, then pause or resume it with one control."))
             .child(muted("Watches and schedules keep working while the local server runs, even with this page closed."))
+            // Web order: Updates sit inside the Automations card, under its introduction.
+            .when(self.snapshot.is_some(), |panel| panel.child(self.render_updates(cx)))
             .when(self.snapshot.is_none()&&self.reading,|panel|panel.child(muted("Connecting to the local automation server…")))
             .when_some(self.load_error.clone(),|panel,error|panel.child(div().id("reactive-load-error").role(Role::Alert).text_size(px(13.0)).text_color(theme::lychee_300()).child(error)))
             .when_some(self.error.clone(),|panel,error|panel.child(div().id("reactive-error").role(Role::Alert).text_size(px(13.0)).text_color(theme::lychee_300()).child(error)))
-            .child(control("automation-new","New automation",disabled).on_activate(cx,|this,window,cx|this.open_automation(None,window,cx)));
+            .child(div().flex().child(control("automation-new","New automation",disabled).on_activate(cx,|this,window,cx|this.open_automation(None,window,cx))));
         if matches!(
             &self.editor,
             Some(Editor::Automation(_) | Editor::Chat { .. })
@@ -1536,35 +1571,44 @@ impl Render for ReactiveAutomations {
                             .items_center()
                             .justify_between()
                             .gap_2()
-                            .child(heading(name.to_string()))
+                            // Web: name, trigger and outcome on the left; status on the right.
                             .child(
                                 div()
                                     .flex()
                                     .flex_wrap()
                                     .items_center()
                                     .gap_2()
-                                    .child(muted(runs::trigger_label(run)))
-                                    .children(runs::outcome_label(run).map(updates::badge_info))
-                                    .child(muted(run_label(run.status))),
+                                    .child(heading(name.to_string()))
+                                    .child(updates::badge_plain(runs::trigger_label(run)))
+                                    .children(runs::outcome_label(run).map(updates::badge_info)),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(theme::blueberry_200())
+                                    .child(run_label(run.status)),
                             ),
                     )
                     .children(runs::run_notes(run).into_iter().map(runs::note))
                     .child(
-                        control(
-                            SharedString::from(format!("reactive-context-{}", run.id)),
-                            if expanded {
-                                "Hide request and event context"
-                            } else {
-                                "Request and event context"
-                            },
-                            false,
-                        )
-                        .on_activate(cx, move |this, _, cx| {
-                            if !this.expanded.remove(&id) {
-                                this.expanded.insert(id.clone());
-                            }
-                            cx.notify();
-                        }),
+                        div().flex().child(
+                            ghost_control(
+                                SharedString::from(format!("reactive-context-{}", run.id)),
+                                if expanded {
+                                    "Hide request and event context"
+                                } else {
+                                    "Request and event context"
+                                },
+                                false,
+                            )
+                            .aria_expanded(expanded)
+                            .on_activate(cx, move |this, _, cx| {
+                                if !this.expanded.remove(&id) {
+                                    this.expanded.insert(id.clone());
+                                }
+                                cx.notify();
+                            }),
+                        ),
                     );
                 if expanded {
                     row = row.child(muted(run.prompt.clone()));
@@ -1583,14 +1627,21 @@ impl Render for ReactiveAutomations {
                                 ),
                         )
                         .child(
-                            control(
-                                SharedString::from(format!("reactive-copy-run-{}", run.id)),
-                                "Copy draft",
-                                false,
-                            )
-                            .on_activate(cx, move |_, _, cx| {
-                                cx.write_to_clipboard(ClipboardItem::new_string(copy.clone()))
-                            }),
+                            div().flex().child(
+                                ghost_control(
+                                    SharedString::from(format!("reactive-copy-run-{}", run.id)),
+                                    "Copy draft",
+                                    false,
+                                )
+                                .on_activate(
+                                    cx,
+                                    move |_, _, cx| {
+                                        cx.write_to_clipboard(ClipboardItem::new_string(
+                                            copy.clone(),
+                                        ))
+                                    },
+                                ),
+                            ),
                         );
                 }
                 if let Some(draft) = run
@@ -1606,12 +1657,12 @@ impl Render for ReactiveAutomations {
                     };
                     row=row.child(control(SharedString::from(format!("reactive-preview-run-{}",run.id)),"Preview changes",self.busy).on_activate(cx,move |_,_,cx|cx.emit(event.clone()))).child(muted("Creates a separate reviewed workflow. This draft is not marked as applied."));
                 }
-                if let Some(error) = &run.error {
+                if let Some(error) = runs::run_error(run) {
                     row = row.child(
                         div()
                             .text_size(px(13.0))
                             .text_color(theme::lychee_300())
-                            .child(error.clone()),
+                            .child(error.to_owned()),
                     );
                 }
                 let mut actions = div().flex().flex_wrap().gap_2();

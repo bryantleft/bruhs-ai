@@ -64,11 +64,56 @@ pub(super) fn service_action(
     }
 }
 
+/// A labelled switch drawn as web's checkbox row, so its state is visible:
+/// a filled persimmon box with a check when on, an empty outlined box when off.
 fn toggle(id: &'static str, label: &'static str, on: bool, disabled: bool) -> Stateful<Div> {
-    control(id, label, disabled)
+    div()
+        .id(id)
         .role(Role::Switch)
+        .aria_label(label)
         .aria_toggled(if on { Toggled::True } else { Toggled::False })
-        .when(on, |button| button.bg(theme::blueberry_500().opacity(0.15)))
+        .debug_selector(move || format!("reactive-{label}"))
+        .flex()
+        .items_center()
+        .gap_2()
+        .min_h(px(32.0))
+        .px_1()
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        .text_size(px(12.0))
+        .text_color(theme::rambutan_300())
+        .when(disabled, |el| el.opacity(0.5).cursor_not_allowed())
+        .when(!disabled, |el| el.tab_index(0).cursor_pointer())
+        .child(
+            div()
+                .size(px(16.0))
+                .flex_shrink_0()
+                .rounded(px(3.0))
+                .border_1()
+                .border_color(if on {
+                    theme::persimmon_500()
+                } else {
+                    theme::rambutan_500()
+                })
+                .bg(if on {
+                    theme::persimmon_500()
+                } else {
+                    theme::longan_900()
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .when(on, |check| {
+                    check
+                        .debug_selector(move || format!("reactive-{label}-checked"))
+                        .text_size(px(11.0))
+                        .text_color(theme::longan_950())
+                        .child("✓")
+                }),
+        )
+        .child(label)
 }
 
 impl ReactiveAutomations {
@@ -141,8 +186,8 @@ impl ReactiveAutomations {
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
-                    .gap_2()
+                    .flex_col()
+                    .gap_1()
                     .child(
                         toggle(
                             "reactive-notify-updates",
@@ -275,18 +320,23 @@ impl ReactiveAutomations {
             if let Some((action, label)) = service_action(status) {
                 section = section.child(
                     div().flex().child(
-                        control("reactive-background-service", label, self.service.pending)
-                            .on_click(
-                                cx.listener(move |this, _, _, cx| this.apply_service(action, cx)),
-                            )
-                            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
+                        control_as(
+                            "reactive-background-service",
+                            label,
+                            self.service.pending,
+                            true,
+                        )
+                        .on_click(cx.listener(move |this, _, _, cx| this.apply_service(action, cx)))
+                        .on_key_down(cx.listener(
+                            move |this, event: &KeyDownEvent, _, cx| {
                                 if super::super::web_button::is_web_button_activation_key(
                                     event.keystroke.key.as_str(),
                                 ) {
                                     cx.stop_propagation();
                                     this.apply_service(action, cx);
                                 }
-                            })),
+                            },
+                        )),
                     ),
                 );
             }
@@ -338,10 +388,8 @@ mod tests {
     fn service_button_follows_install_state_and_hides_when_unsupported() {
         let mut status = BackgroundService {
             supported: false,
-            installed: false,
-            loaded: false,
-            binary: None,
             detail: "Unavailable on this platform.".into(),
+            ..BackgroundService::default()
         };
         assert_eq!(service_action(&status), None);
         status.supported = true;

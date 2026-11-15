@@ -22,6 +22,14 @@ pub(super) fn badges(item: &OutboxItem) -> Vec<&'static str> {
     badges
 }
 
+/// The answer to send, or nothing for an empty reply (the button is also disabled).
+fn answer_command(id: &str, message: String) -> Option<ReactiveCommand> {
+    (!message.trim().is_empty()).then(|| ReactiveCommand::AnswerOutbox {
+        id: id.to_owned(),
+        message,
+    })
+}
+
 pub(super) fn delivery_error(item: &OutboxItem) -> Option<String> {
     match &item.system {
         SystemDelivery::Failed { error } => Some(format!("System notification failed: {error}")),
@@ -125,7 +133,7 @@ pub(super) fn UpdatesPanel(
                                             <Button variant=reply_variant size=ButtonSize::Small on_click=Callback::new({ let id = reply_id.clone(); move |_| { reply.set(String::new()); replying.set(Some(id.clone())); } })>"Reply"</Button>
                                         }
                                     >
-                                        <Button size=ButtonSize::Small disabled=Signal::derive(move || reply.with(|text| text.trim().is_empty())) on_click=Callback::new({ let id = send_id.clone(); move |_| send.run(ReactiveCommand::AnswerOutbox { id: id.clone(), message: reply.get_untracked() }) })>"Send reply"</Button>
+                                        <Button size=ButtonSize::Small disabled=Signal::derive(move || reply.with(|text| text.trim().is_empty())) on_click=Callback::new({ let id = send_id.clone(); move |_| { if let Some(command) = answer_command(&id, reply.get_untracked()) { send.run(command) } } })>"Send reply"</Button>
                                         <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| replying.set(None))>"Cancel"</Button>
                                     </Show>
                                 })}
@@ -148,6 +156,18 @@ pub(super) fn UpdatesPanel(
 mod tests {
     use super::*;
     use bruhs_models::EpochMs;
+
+    #[test]
+    fn an_empty_reply_is_never_sent() {
+        assert_eq!(answer_command("q", "  \n ".into()), None);
+        assert_eq!(
+            answer_command("q", "Hold it.".into()),
+            Some(ReactiveCommand::AnswerOutbox {
+                id: "q".into(),
+                message: "Hold it.".into(),
+            })
+        );
+    }
 
     fn item(kind: OutboxKind) -> OutboxItem {
         OutboxItem {
