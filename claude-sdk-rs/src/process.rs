@@ -92,11 +92,30 @@ pub(crate) struct CliProcess {
     group: ProcessGroup,
 }
 
+/// The process group a child was spawned into with `process_group(0)`; the
+/// whole group is killed on drop unless [`ProcessGroup::release`]d.
 #[cfg(unix)]
-struct ProcessGroup(Option<i32>);
+pub(crate) struct ProcessGroup(Option<i32>);
 
 #[cfg(unix)]
 impl ProcessGroup {
+    /// The group led by `child`, which must have been spawned with
+    /// `process_group(0)`.
+    pub(crate) fn of(child: &Child) -> Self {
+        Self(
+            child
+                .id()
+                .and_then(|id| i32::try_from(id).ok())
+                .filter(|id| *id > 0),
+        )
+    }
+
+    /// Leave the group running: the child exited on its own, so its id may
+    /// be reused and must not be signalled.
+    pub(crate) fn release(&mut self) {
+        self.0 = None;
+    }
+
     fn terminate(&mut self) {
         if let Some(id) = self.0.take() {
             // SAFETY: spawn creates a new process group whose positive id is
@@ -128,12 +147,7 @@ impl CliProcess {
         cmd.process_group(0);
         let mut child = cmd.spawn()?;
         #[cfg(unix)]
-        let group = ProcessGroup(
-            child
-                .id()
-                .and_then(|id| i32::try_from(id).ok())
-                .filter(|id| *id > 0),
-        );
+        let group = ProcessGroup::of(&child);
         let stdout = child
             .stdout
             .take()
@@ -242,7 +256,7 @@ impl CliProcess {
             // A completed turn may intentionally have started a background task.
             #[cfg(unix)]
             {
-                self.group.0 = None;
+                self.group.release();
             }
             self.stderr.abort();
             return None;

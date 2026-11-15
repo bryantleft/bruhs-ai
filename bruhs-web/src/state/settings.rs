@@ -151,6 +151,18 @@ pub struct CodexAuthSignal(pub ReadSignal<AuthStatus>);
 #[derive(Copy, Clone)]
 pub struct SetCodexAuthSignal(pub WriteSignal<AuthStatus>);
 
+/// Models each runtime's CLI listed for the signed-in account (Cursor), and
+/// why a runtime could not list them. The model picker refreshes it on open.
+#[derive(Copy, Clone)]
+pub struct RuntimeModelsSignal(
+    pub  RwSignal<
+        Vec<(
+            bruhs_models::agent::AgentProvider,
+            bruhs_models::runtime_models::RuntimeModels,
+        )>,
+    >,
+);
+
 /// Model, permission mode, sign-in, editor, transcription and personality
 /// settings; the persisted ones are saved to `localStorage` on change.
 pub(super) fn provide() {
@@ -231,6 +243,7 @@ pub(super) fn provide() {
     provide_context(SetClaudeAuthSignal(set_auth_status));
     provide_context(CodexAuthSignal(codex_auth));
     provide_context(SetCodexAuthSignal(set_codex_auth));
+    provide_context(RuntimeModelsSignal(RwSignal::new(Vec::new())));
     provide_context(WhisperModelSignal(whisper_model));
     provide_context(SetWhisperModelSignal(set_whisper_model));
     provide_context(LiveWhisperModelSignal(live_whisper_model));

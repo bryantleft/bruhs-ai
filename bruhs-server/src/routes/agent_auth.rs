@@ -3,6 +3,7 @@ use std::time::Duration;
 use axum::extract::{rejection::PathRejection, Path};
 use axum::Json;
 use bruhs_models::agent::AgentProvider;
+use bruhs_models::runtime_models::RuntimeModels;
 use serde::Serialize;
 use serde_json::Value;
 
@@ -49,6 +50,16 @@ pub async fn get_auth_for_provider(
     provider: Result<Path<AgentProvider>, PathRejection>,
 ) -> Result<Json<AuthStatus>, AppError> {
     Ok(Json(auth_status(cli::provider(provider)?).await))
+}
+
+/// GET /api/agent/models/{provider}: the models the runtime's CLI lists for
+/// the signed-in account (Cursor), or why it could not list them. Runtimes
+/// that cannot list models answer with an empty list.
+pub async fn get_models_for_provider(
+    provider: Result<Path<AgentProvider>, PathRejection>,
+) -> Result<Json<RuntimeModels>, AppError> {
+    let provider = cli::provider(provider)?;
+    Ok(Json(bruhs_core::agent::list_runtime_models(provider).await))
 }
 
 async fn auth_status(provider: AgentProvider) -> AuthStatus {
@@ -290,6 +301,18 @@ mod tests {
             let message = status.error.unwrap();
             assert!(message.contains(provider.label()));
             assert!(message.contains("terminal"));
+        }
+    }
+
+    #[tokio::test]
+    async fn runtimes_that_cannot_list_models_answer_with_none() {
+        for provider in [
+            AgentProvider::Claude,
+            AgentProvider::Codex,
+            AgentProvider::OpenCode,
+        ] {
+            let Json(models) = get_models_for_provider(Ok(Path(provider))).await.unwrap();
+            assert_eq!(models, RuntimeModels::default());
         }
     }
 

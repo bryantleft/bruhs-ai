@@ -1,6 +1,42 @@
 //! The model picker popover: filtering, grouping by provider, keyboard picking, and the provider mark.
 
 use super::*;
+use bruhs_models::runtime_models::{
+    highlighted_id, listed_models, listing_error_line, reanchor_highlight, replace_listing,
+    ModelChoice, RuntimeModels,
+};
+
+/// A runtime's model listing as a future the desktop's tokio runtime drives.
+type ListingFuture = std::pin::Pin<Box<dyn std::future::Future<Output = RuntimeModels> + Send>>;
+
+/// Lists a runtime's models for the picker: core's CLI listing in the app, or
+/// whatever a test installs, so tests run the real fetch path without a CLI.
+/// Without one installed, tests list nothing.
+#[derive(Clone)]
+pub(crate) struct RuntimeModelLister(
+    pub(crate) std::sync::Arc<dyn Fn(AgentProvider) -> ListingFuture + Send + Sync>,
+);
+
+impl gpui::Global for RuntimeModelLister {}
+
+fn runtime_model_lister(cx: &App) -> Option<RuntimeModelLister> {
+    cx.try_global::<RuntimeModelLister>()
+        .cloned()
+        .or_else(default_model_lister)
+}
+
+#[cfg(not(test))]
+fn default_model_lister() -> Option<RuntimeModelLister> {
+    Some(RuntimeModelLister(std::sync::Arc::new(|provider| {
+        Box::pin(bruhs_core::agent::list_runtime_models(provider))
+    })))
+}
+
+/// Tests never run a CLI unless they install a lister.
+#[cfg(test)]
+fn default_model_lister() -> Option<RuntimeModelLister> {
+    None
+}
 pub(super) const STATUS_CHANGE_MODEL_LABEL: &str = "Change model";
 pub(super) const MODEL_PICKER_WIDTH_PX: f32 = 352.0;
 pub(super) const MODEL_PICKER_LIST_MAX_HEIGHT_PX: f32 = 288.0;
@@ -13,7 +49,9 @@ pub(super) const MODEL_PICKER_SEARCH_PLACEHOLDER: &str = "Search or enter provid
 pub(super) const MODEL_PICKER_EMPTY_LABEL: &str =
     "No models match. Enter provider/model, e.g. cursor/auto.";
 
-pub fn custom_model_match(query: &str, current: &str) -> Option<String> {
+/// A typed provider/model choice, or the current custom model while searching,
+/// unless it is already one of the `listed` rows.
+pub fn custom_model_match(query: &str, current: &str, listed: &[ModelChoice]) -> Option<String> {
     let typed = bruhs_models::agent::custom_model_selection(query.trim());
     let candidate = typed.or_else(|| {
         let hay = current.to_lowercase();
@@ -23,10 +61,7 @@ pub fn custom_model_match(query: &str, current: &str) -> Option<String> {
             .then(|| bruhs_models::agent::custom_model_selection(current))
             .flatten()
     })?;
-    (!MODEL_CATALOG
-        .iter()
-        .any(|model| model.id == candidate.as_str()))
-    .then(|| candidate.into_inner())
+    (!listed.iter().any(|model| model.id == candidate.as_str())).then(|| candidate.into_inner())
 }
 
 /// Web `auth_line` for the Claude provider.
@@ -43,10 +78,7 @@ pub(super) fn model_picker_claude_line(authenticated: bool, user: Option<&str>) 
 
 /// Web `model_picker::filter_models`: every whitespace-separated word must
 /// appear in the id, label, or provider name (case-insensitive).
-pub fn filter_models_like_web(
-    models: &'static [ModelInfo],
-    query: &str,
-) -> Vec<&'static ModelInfo> {
+pub fn filter_models_like_web(models: &[ModelChoice], query: &str) -> Vec<ModelChoice> {
     let words: Vec<String> = query.split_whitespace().map(|w| w.to_lowercase()).collect();
     models
         .iter()
@@ -61,24 +93,23 @@ pub fn filter_models_like_web(
             .to_lowercase();
             words.iter().all(|w| hay.contains(w.as_str()))
         })
+        .cloned()
         .collect()
 }
 
 /// Web `model_picker::group_models`: providers in first-appearance order.
-pub fn group_models_like_web(
-    models: &[&'static ModelInfo],
-) -> Vec<(AgentProvider, Vec<&'static ModelInfo>)> {
-    let mut groups: Vec<(AgentProvider, Vec<&'static ModelInfo>)> = Vec::new();
+pub fn group_models_like_web(models: &[ModelChoice]) -> Vec<(AgentProvider, Vec<ModelChoice>)> {
+    let mut groups: Vec<(AgentProvider, Vec<ModelChoice>)> = Vec::new();
     for model in models {
         match groups.iter_mut().find(|(p, _)| *p == model.provider) {
-            Some((_, list)) => list.push(model),
-            None => groups.push((model.provider, vec![model])),
+            Some((_, list)) => list.push(model.clone()),
+            None => groups.push((model.provider, vec![model.clone()])),
         }
     }
     groups
 }
 
-fn model_picker_row_index(models: &[&'static ModelInfo], selected: usize) -> usize {
+fn model_picker_row_index(models: &[ModelChoice], selected: usize) -> usize {
     let mut option = 0;
     let mut row = 0;
     for (_, models) in group_models_like_web(models) {
@@ -116,16 +147,8 @@ impl ChatView {
         self.branch_menu_open = false;
         self.workspace_menu_open = false;
         self.effort_menu_open = false;
-        let selected_index = MODEL_CATALOG
-            .iter()
-            .position(|model| model.id == self.model_id)
-            .unwrap_or_else(|| {
-                if custom_model_match("", &self.model_id).is_some() {
-                    MODEL_CATALOG.len()
-                } else {
-                    0
-                }
-            });
+        let selected_index = self.model_picker_current_index();
+        self.refresh_runtime_models(cx);
         self.model_picker_scroll.set_offset(Point::default());
         self.model_picker_query.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -144,16 +167,79 @@ impl ChatView {
         self.focus_composer(window, cx);
     }
 
-    pub(super) fn model_picker_matches(&self, cx: &App) -> Vec<&'static ModelInfo> {
+    pub(super) fn model_picker_matches(&self, cx: &App) -> Vec<ModelChoice> {
         let query = self.model_picker_query.read(cx).value().to_string();
-        filter_models_like_web(MODEL_CATALOG, &query)
+        filter_models_like_web(&listed_models(&self.runtime_models), &query)
     }
 
-    fn model_picker_custom_match(&self, cx: &App) -> Option<String> {
+    pub(super) fn model_picker_custom_match(&self, cx: &App) -> Option<String> {
         custom_model_match(
             self.model_picker_query.read(cx).value().as_ref(),
             &self.model_id,
+            &listed_models(&self.runtime_models),
         )
+    }
+
+    /// The current model's row, or the custom row when it is not listed.
+    fn model_picker_current_index(&self) -> usize {
+        let models = listed_models(&self.runtime_models);
+        models
+            .iter()
+            .position(|model| model.id == self.model_id)
+            .unwrap_or_else(|| {
+                if custom_model_match("", &self.model_id, &models).is_some() {
+                    models.len()
+                } else {
+                    0
+                }
+            })
+    }
+
+    /// Ask each runtime that can list models for the account's; core caches
+    /// the CLI's answer. Tests install listings with
+    /// [`Self::apply_runtime_listing`] instead of running a CLI.
+    fn refresh_runtime_models(&self, cx: &mut Context<'_, Self>) {
+        let Some(RuntimeModelLister(lister)) = runtime_model_lister(cx) else {
+            return;
+        };
+        for provider in bruhs_models::runtime_models::DISCOVERABLE_PROVIDERS {
+            let listing = crate::app_state::spawn_tokio(cx, lister(provider));
+            cx.spawn(async move |chat, cx| {
+                let listing = listing.await;
+                let _ = chat.update(cx, |chat, cx| {
+                    chat.apply_runtime_listing(provider, listing, cx);
+                });
+            })
+            .detach();
+        }
+    }
+
+    /// Show `provider`'s listed models, keeping the highlight on the model it
+    /// was on.
+    pub(crate) fn apply_runtime_listing(
+        &mut self,
+        provider: AgentProvider,
+        listing: RuntimeModels,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let rows = self.model_picker_matches(cx);
+        let custom = self.model_picker_custom_match(cx);
+        let count = rows.len() + usize::from(custom.is_some());
+        let index = self.model_picker_index.min(count.saturating_sub(1));
+        let previous = highlighted_id(&rows, custom.as_deref(), index).map(str::to_owned);
+        if !replace_listing(&mut self.runtime_models, provider, listing) {
+            return;
+        }
+        // Arriving rows never move the highlight to another model.
+        let rows = self.model_picker_matches(cx);
+        let custom = self.model_picker_custom_match(cx);
+        self.model_picker_index =
+            reanchor_highlight(previous.as_deref(), &rows, custom.as_deref(), index);
+        if self.model_picker_open {
+            self.model_picker_scroll
+                .scroll_to_item(model_picker_row_index(&rows, self.model_picker_index));
+        }
+        cx.notify();
     }
 
     pub(super) fn select_model_from_picker(
@@ -178,7 +264,7 @@ impl ChatView {
         let count = matches.len() + usize::from(custom.is_some());
         let index = self.model_picker_index.min(count.saturating_sub(1));
         if let Some(model) = matches.get(index) {
-            self.select_model_from_picker(model.id, window, cx);
+            self.select_model_from_picker(model.id.clone(), window, cx);
         } else if let Some(id) = custom {
             self.select_model_from_picker(id, window, cx);
         }
@@ -195,7 +281,7 @@ impl ChatView {
         if let Some(n) = digit {
             let matches = self.model_picker_matches(cx);
             if let Some(model) = matches.get(n - 1) {
-                self.select_model_from_picker(model.id, window, cx);
+                self.select_model_from_picker(model.id.clone(), window, cx);
             } else if n - 1 == matches.len() {
                 if let Some(id) = self.model_picker_custom_match(cx) {
                     self.select_model_from_picker(id, window, cx);
@@ -278,9 +364,9 @@ impl ChatView {
                 flat_index += 1;
                 let is_current = self.model_id == model.id;
                 let is_highlighted = index == highlighted;
-                let key = element_key(model.id);
-                let model_id = model.id;
-                let model_id_for_key = model.id;
+                let key = element_key(&model.id);
+                let model_id = model.id.clone();
+                let model_id_for_key = model.id.clone();
                 rows.push(
                     div()
                         .id(("desktop-model-picker-option", key))
@@ -310,13 +396,13 @@ impl ChatView {
                         }))
                         .on_click(cx.listener(move |this, _ev, window, cx| {
                             cx.stop_propagation();
-                            this.select_model_from_picker(model_id, window, cx);
+                            this.select_model_from_picker(model_id.clone(), window, cx);
                         }))
                         .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                             if is_web_button_activation_key(event.keystroke.key.as_str()) {
                                 window.prevent_default();
                                 cx.stop_propagation();
-                                this.select_model_from_picker(model_id_for_key, window, cx);
+                                this.select_model_from_picker(model_id_for_key.clone(), window, cx);
                             }
                         }))
                         .child(
@@ -330,7 +416,7 @@ impl ChatView {
                                         .truncate()
                                         .text_size(px(MODEL_PICKER_LABEL_TEXT_SIZE_PX))
                                         .text_color(theme::rambutan_100())
-                                        .child(model.label),
+                                        .child(model.label.clone()),
                                 )
                                 .child(
                                     div()
@@ -572,7 +658,10 @@ impl ChatView {
     }
 
     /// Web `auth_line`: who the current provider is signed in as.
-    fn model_picker_status_line(&self, provider: AgentProvider) -> String {
+    pub(super) fn model_picker_status_line(&self, provider: AgentProvider) -> String {
+        if let Some(line) = listing_error_line(&self.runtime_models, provider) {
+            return line;
+        }
         match provider {
             AgentProvider::Claude => model_picker_claude_line(
                 self.auth_status.is_authenticated(),
@@ -625,23 +714,24 @@ impl ChatView {
 
 #[cfg(test)]
 mod provider_model_tests {
-    use super::custom_model_match;
+    use super::{custom_model_match, listed_models};
 
     #[test]
     fn custom_models_accept_explicit_runtimes_and_survive_an_empty_search() {
+        let all = listed_models(&[]);
         assert_eq!(
-            custom_model_match("cursor/my-model", "gpt-5.5"),
+            custom_model_match("cursor/my-model", "gpt-5.5", &all),
             Some("cursor/my-model".into())
         );
         assert_eq!(
-            custom_model_match("", "opencode/local/my-model"),
+            custom_model_match("", "opencode/local/my-model", &all),
             Some("opencode/local/my-model".into())
         );
         assert_eq!(
-            custom_model_match("local", "opencode/local/my-model"),
+            custom_model_match("local", "opencode/local/my-model", &all),
             Some("opencode/local/my-model".into())
         );
-        assert!(custom_model_match("unknown/my-model", "gpt-5.5").is_none());
-        assert!(custom_model_match("cursor/default", "gpt-5.5").is_none());
+        assert!(custom_model_match("unknown/my-model", "gpt-5.5", &all).is_none());
+        assert!(custom_model_match("cursor/default", "gpt-5.5", &all).is_none());
     }
 }
