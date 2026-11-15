@@ -124,6 +124,7 @@ impl Workspace {
                         all_day: false,
                         color: Some("persimmon".to_string()),
                         notes: (!record.body.is_empty()).then(|| record.body.clone()),
+                        ..Default::default()
                     });
                     record.target_id = Some(target_id);
                 }

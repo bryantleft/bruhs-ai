@@ -34,6 +34,8 @@ const TRIGGER_TEXT_PX: f32 = theme::APP_INPUT_TEXT_SIZE_PX;
 const TRIGGER_ICON_PX: f32 = 16.0;
 const POPOVER_WIDTH_PX: f32 = 256.0;
 const POPOVER_GAP_PX: f32 = 4.0;
+/// Web `disabled:opacity-60` on the date-time trigger.
+const DATE_FIELD_DISABLED_OPACITY: f32 = 0.6;
 const CELL_PX: f32 = theme::APP_COMPACT_CONTROL_HEIGHT_PX;
 const GRID_GAP_PX: f32 = 2.0;
 const MONTH_BUTTON_PX: f32 = 28.0;
@@ -315,6 +317,11 @@ impl Workspace {
         let selector = target.selector();
         let open = self.date_picker.filter(|open| open.target == target);
         let align_right = target != DatePickerTarget::EventStart;
+        // A read-only provider event shows its times without a picker.
+        let disabled = matches!(
+            target,
+            DatePickerTarget::EventStart | DatePickerTarget::EventEnd
+        ) && self.event_dialog_read_only();
         let trigger = div()
             .id(selector)
             .debug_selector(move || selector.to_string())
@@ -337,21 +344,24 @@ impl Workspace {
             .role(Role::Button)
             .aria_label(target.aria_label())
             .aria_expanded(open.is_some())
-            .tab_index(0)
-            .focus_visible(focus_ring)
-            .cursor_pointer()
-            .hover(|el| el.border_color(gpui::white().opacity(0.20)))
             .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                this.toggle_date_picker(target, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.toggle_date_picker(target, window, cx);
-                }
-            }))
+            .when(disabled, |el| el.opacity(DATE_FIELD_DISABLED_OPACITY))
+            .when(!disabled, |el| {
+                el.tab_index(0)
+                    .focus_visible(focus_ring)
+                    .cursor_pointer()
+                    .hover(|el| el.border_color(gpui::white().opacity(0.20)))
+                    .on_click(cx.listener(move |this, _ev, window, cx| {
+                        this.toggle_date_picker(target, window, cx);
+                    }))
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.toggle_date_picker(target, window, cx);
+                        }
+                    }))
+            })
             .child(
                 svg()
                     .path(assets::CALENDAR_ICON_PATH)

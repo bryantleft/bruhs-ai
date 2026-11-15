@@ -25,59 +25,23 @@ impl Workspace {
         &self,
         cx: &Context<'_, Self>,
     ) -> Vec<bruhs_models::CalendarEvent> {
-        self.visible_calendar_events(cx)
-            .into_iter()
-            .filter_map(|event| {
-                let start_at_ms = Local
-                    .from_local_datetime(&event.start_at)
-                    .single()
-                    .map(|date| EpochMs::saturating_from_i64(date.timestamp_millis()))?
-                    .as_f64();
-                let end_at_ms = Local
-                    .from_local_datetime(&event.end_at)
-                    .single()
-                    .map(|date| EpochMs::saturating_from_i64(date.timestamp_millis()))?
-                    .as_f64();
-                Some(bruhs_models::CalendarEvent {
-                    id: event.id,
-                    title: event.title,
-                    start_at_ms,
-                    end_at_ms,
-                    all_day: event.all_day,
-                    color: event.color,
-                    notes: event.notes,
-                    created_at: 0,
-                    updated_at: 0,
-                    source: Default::default(),
-                    google_event_id: None,
-                    calendar_id: None,
-                    attendees: Vec::new(),
-                    organizer: None,
-                    location: None,
-                    conferencing: None,
-                    recurring_event_id: None,
-                    html_link: None,
-                })
-            })
-            .collect()
+        planning_calendar_events_in(self.visible_calendar_events(cx), local_offset_minutes_east)
     }
 
     pub(super) fn today_snapshot(&self, cx: &Context<'_, Self>) -> TodaySnapshot {
         let now = self.planning_now();
         let day_start = now.date_naive().and_time(NaiveTime::MIN);
         let day_end = day_start + Duration::days(1);
-        let day_start_ms = Local
-            .from_local_datetime(&day_start)
-            .single()
-            .map_or(0.0, |date| {
-                EpochMs::saturating_from_i64(date.timestamp_millis()).as_f64()
-            });
-        let day_end_ms = Local
-            .from_local_datetime(&day_end)
-            .single()
-            .map_or(day_start_ms + 86_400_000.0, |date| {
-                EpochMs::saturating_from_i64(date.timestamp_millis()).as_f64()
-            });
+        let day_start_ms = EpochMs::saturating_from_i64(instant_from_wall_clock(
+            day_start,
+            local_offset_minutes_east,
+        ))
+        .as_f64();
+        let day_end_ms = EpochMs::saturating_from_i64(instant_from_wall_clock(
+            day_end,
+            local_offset_minutes_east,
+        ))
+        .as_f64();
         let hub = self.meetings_hub.read(cx);
         TodaySnapshot::build(
             EpochMs::saturating_from_i64(now.timestamp_millis()).as_f64(),
@@ -160,6 +124,7 @@ impl Workspace {
                     all_day: event.all_day,
                     color: event.color.clone(),
                     notes: event.notes.clone(),
+                    ..Default::default()
                 })
             })
             .collect::<Option<Vec<_>>>();
@@ -1063,4 +1028,45 @@ mod clock_tests {
             );
         }
     }
+}
+
+/// Events as the shared planners read them, at their UTC instants in the
+/// zone `offset_at` describes. Every event is kept: a time in the repeated
+/// hour of a fall-back day used to have no single local reading and was
+/// dropped from Today and from slot search.
+pub(super) fn planning_calendar_events_in(
+    events: Vec<DesktopCalendarEvent>,
+    offset_at: impl Fn(i64) -> i32 + Copy,
+) -> Vec<bruhs_models::CalendarEvent> {
+    events
+        .into_iter()
+        .map(|event| {
+            let (start_ms, end_ms) = event.instants_in(offset_at);
+            let read_only = event.is_read_only();
+            bruhs_models::CalendarEvent {
+                id: event.id,
+                title: event.title,
+                start_at_ms: EpochMs::saturating_from_i64(start_ms).as_f64(),
+                end_at_ms: EpochMs::saturating_from_i64(end_ms).as_f64(),
+                all_day: event.all_day,
+                color: event.color,
+                notes: event.notes,
+                created_at: 0,
+                updated_at: 0,
+                source: if read_only {
+                    bruhs_models::EventSource::Google
+                } else {
+                    bruhs_models::EventSource::Local
+                },
+                google_event_id: None,
+                calendar_id: None,
+                attendees: Vec::new(),
+                organizer: None,
+                location: None,
+                conferencing: None,
+                recurring_event_id: None,
+                html_link: event.provider.and_then(|provider| provider.html_link),
+            }
+        })
+        .collect()
 }

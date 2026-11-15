@@ -122,6 +122,7 @@ fn saved_state(
                 all_day: index % 2 == 0,
                 color: Some("pandan".into()),
                 notes: Some("Complete calendar notes. ".repeat(16)),
+                ..Default::default()
             });
         let mut capture = CaptureRecord::new(
             CaptureKind::Note,

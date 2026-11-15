@@ -25,6 +25,7 @@ impl Workspace {
                 all_day: event.all_day,
                 color: event.color.clone(),
                 notes: event.notes.clone(),
+                ..Default::default()
             });
         }
         events

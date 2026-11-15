@@ -2,6 +2,7 @@
 
 use super::*;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
+pub(super) use crate::views::meetings_hub::local_offset_minutes_east;
 use std::collections::HashMap;
 
 impl DesktopTimegridDrag {
@@ -125,6 +126,71 @@ pub(super) fn local_datetime_from_ms(ms: f64) -> Option<NaiveDateTime> {
         .timestamp_millis_opt(EpochMs::saturating_from_f64(ms).as_millis())
         .single()
         .map(|dt| dt.naive_local())
+}
+
+/// The wall clock of a UTC instant in the zone `offset_at` describes
+/// (minutes east of UTC at an instant; see `bruhs_models::calendar::zone`).
+pub(super) fn wall_clock_from_instant(
+    instant_ms: i64,
+    offset_at: impl Fn(i64) -> i32,
+) -> Option<NaiveDateTime> {
+    let wall = bruhs_models::calendar::zone::wall_clock_ms(instant_ms, offset_at);
+    chrono::DateTime::from_timestamp_millis(wall).map(|at| at.naive_utc())
+}
+
+/// The instant a wall-clock time names, as the web's `new Date(y, m, d, h,
+/// min)` reads it: a time skipped by spring forward moves past the gap, and
+/// a time repeated by fall back is its first occurrence.
+pub(super) fn instant_from_wall_clock(
+    wall: NaiveDateTime,
+    offset_at: impl Fn(i64) -> i32 + Copy,
+) -> i64 {
+    bruhs_models::calendar::zone::instant_from_wall_clock(
+        wall.and_utc().timestamp_millis(),
+        offset_at,
+    )
+}
+
+impl DesktopCalendarEvent {
+    /// Provider events are read only: no drag, resize, edit or delete.
+    pub(super) fn is_read_only(&self) -> bool {
+        self.provider.is_some()
+    }
+
+    /// The UTC instants of this event in the zone `offset_at` describes.
+    /// The instants it was loaded with win while its wall times still read
+    /// the same; otherwise (after an edit) the wall times are converted.
+    pub(super) fn instants_in(&self, offset_at: impl Fn(i64) -> i32 + Copy) -> (i64, i64) {
+        if let Some((start, end)) = self.loaded_instants {
+            if wall_clock_from_instant(start, offset_at) == Some(self.start_at)
+                && wall_clock_from_instant(end, offset_at) == Some(self.end_at)
+            {
+                return (start, end);
+            }
+        }
+        (
+            instant_from_wall_clock(self.start_at, offset_at),
+            instant_from_wall_clock(self.end_at, offset_at),
+        )
+    }
+
+    /// [`Self::instants_in`] the machine zone.
+    pub(super) fn instants(&self) -> (i64, i64) {
+        self.instants_in(local_offset_minutes_east)
+    }
+
+    /// The event at UTC instants, shown in the zone `offset_at` describes.
+    pub(super) fn with_instants_in(
+        mut self,
+        start_ms: i64,
+        end_ms: i64,
+        offset_at: impl Fn(i64) -> i32 + Copy,
+    ) -> Option<Self> {
+        self.start_at = wall_clock_from_instant(start_ms, offset_at)?;
+        self.end_at = wall_clock_from_instant(end_ms, offset_at)?;
+        self.loaded_instants = Some((start_ms, end_ms));
+        Some(self)
+    }
 }
 
 pub(super) fn event_overlaps_day(event: &DesktopCalendarEvent, date: NaiveDate) -> bool {
@@ -539,6 +605,29 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
+    /// Opens a task from the calendar (a due marker, or a focus block's
+    /// source task) in Tasks with its title focused, as Search and the web
+    /// do. Selecting it alone left the calendar on screen (CAL-14).
+    pub(super) fn open_calendar_task(
+        &mut self,
+        task_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.work_items.iter().any(|item| item.id == task_id) {
+            return;
+        }
+        self.active_view = AppView::Tasks;
+        self.selected_project_id = None;
+        self.close_transient_surfaces();
+        self.select_work_item_by_id(task_id, window, cx);
+        let input = self.task_detail_title_input.clone();
+        cx.defer_in(window, move |_this, window, cx| {
+            input.update(cx, |input, cx| input.focus(window, cx));
+        });
+        cx.notify();
+    }
+
     pub(super) fn begin_timegrid_drag(
         &mut self,
         drag: &DesktopTimegridDrag,
@@ -633,6 +722,13 @@ impl Workspace {
                 all_day: event.all_day,
                 color: event.color.clone(),
                 notes: event.notes.clone(),
+                provider: event.is_provider_read_only().then(|| DesktopProviderEvent {
+                    html_link: event.html_link.clone(),
+                }),
+                loaded_instants: Some((
+                    EpochMs::saturating_from_f64(event.start_at_ms).as_millis(),
+                    EpochMs::saturating_from_f64(event.end_at_ms).as_millis(),
+                )),
             });
         }
         events
@@ -1230,13 +1326,13 @@ impl Workspace {
             .tooltip(|window, cx| Tooltip::new(CALENDAR_TASK_DUE_LABEL).build(window, cx))
             .on_click(cx.listener(move |this, _ev, window, cx| {
                 cx.stop_propagation();
-                this.select_work_item_by_id(&item_id, window, cx);
+                this.open_calendar_task(&item_id, window, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if is_web_button_activation_key(event.keystroke.key.as_str()) {
                     window.prevent_default();
                     cx.stop_propagation();
-                    this.select_work_item_by_id(&item_id_for_key, window, cx);
+                    this.open_calendar_task(&item_id_for_key, window, cx);
                 }
             }))
             .child(
@@ -1272,7 +1368,11 @@ impl Workspace {
             .text_color(theme::rambutan_400())
             .tab_index(0)
             .role(Role::Button)
-            .aria_label(format!("Edit event {}", event.title))
+            .aria_label(if event.is_read_only() {
+                format!("Open Google event {}, read only", event.title)
+            } else {
+                format!("Edit event {}", event.title)
+            })
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -1535,6 +1635,14 @@ impl Workspace {
         let move_drag = DesktopTimegridDrag::new(&event, DesktopTimegridDragKind::Move);
         let resize_drag = DesktopTimegridDrag::new(&event, DesktopTimegridDragKind::ResizeEnd);
         let debug_key = element_key(&event.id);
+        // Provider events are read only: a pointer opens their detail, and
+        // there is no grab cursor, drag preview or resize edge (CAL-06).
+        let read_only = event.is_read_only();
+        let block_label = if read_only {
+            format!("Open Google event {}, read only", event.title)
+        } else {
+            format!("Edit event {}", event.title)
+        };
 
         div()
             .id(("calendar-time-event", element_key(&event.id)))
@@ -1564,9 +1672,10 @@ impl Workspace {
                     .text_color(text_color)
                     .tab_index(0)
                     .role(Role::Button)
-                    .aria_label(format!("Edit event {}", event.title))
+                    .aria_label(block_label)
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                    .cursor_grab()
+                    .when(read_only, |el| el.cursor_pointer())
+                    .when(!read_only, |el| el.cursor_grab())
                     .hover(|el| {
                         el.bg(surface_color.opacity(CALENDAR_TIMEGRID_EVENT_HOVER_BG_OPACITY))
                     })
@@ -1578,16 +1687,19 @@ impl Workspace {
                             .text_ellipsis()
                             .child(event.title.clone()),
                     )
-                    .on_drag(move_drag, {
+                    .when(!read_only, |el| {
                         let workspace = workspace.clone();
-                        move |drag: &DesktopTimegridDrag, offset, _window, cx| {
-                            let grab_offset_y_px = f32::from(offset.y);
-                            let _ = workspace.update(cx, |this, cx| {
-                                this.begin_timegrid_drag(drag, grab_offset_y_px, cx);
-                            });
-                            cx.stop_propagation();
-                            cx.new(|_| drag.clone())
-                        }
+                        el.on_drag(
+                            move_drag,
+                            move |drag: &DesktopTimegridDrag, offset, _window, cx| {
+                                let grab_offset_y_px = f32::from(offset.y);
+                                let _ = workspace.update(cx, |this, cx| {
+                                    this.begin_timegrid_drag(drag, grab_offset_y_px, cx);
+                                });
+                                cx.stop_propagation();
+                                cx.new(|_| drag.clone())
+                            },
+                        )
                     })
                     .on_click(cx.listener(move |this, _ev, window, cx| {
                         this.open_event_edit(event_id.clone(), window, cx);
@@ -1599,7 +1711,7 @@ impl Workspace {
                             this.open_event_edit(event_id_for_key.clone(), window, cx);
                         }
                     }))
-                    .child(
+                    .when(!read_only, |el| el.child(
                         div()
                             .id(("calendar-time-event-resize", element_key(&event.id)))
                             .debug_selector(move || {
@@ -1626,7 +1738,7 @@ impl Workspace {
                             .on_click(|_, _, cx| {
                                 cx.stop_propagation();
                             }),
-                    )
+                    ))
                     .on_mouse_down(MouseButton::Left, |_, _, cx| {
                         cx.stop_propagation();
                     }),

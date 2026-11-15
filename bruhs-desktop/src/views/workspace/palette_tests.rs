@@ -141,6 +141,7 @@ fn native_palette_should_search_hydrated_domains(cx: &mut TestAppContext) {
             all_day: false,
             color: None,
             notes: None,
+            ..Default::default()
         }];
         workspace.scheduling_preferences.links = vec![SchedulingLink::new("quartz booking", 30)];
         workspace.knowledge_documents = vec![KnowledgeDocument::new("quartz document", "body", 1)];
