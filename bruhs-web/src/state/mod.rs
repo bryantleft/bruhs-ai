@@ -27,6 +27,10 @@ mod calendar;
 pub(crate) use api_client::{ApiClientDraft, ApiClientSession};
 mod chat;
 mod library;
+mod mail;
+mod mail_compose;
+pub(crate) use mail::MailState;
+pub(crate) use mail_compose::MailComposeState;
 mod meetings;
 mod prefs;
 mod settings;
@@ -58,6 +62,8 @@ pub fn provide_app_state() {
     terminal::provide();
     tasks::provide();
     library::provide();
+    mail::provide();
+    mail_compose::provide();
     calendar::provide();
     meetings::provide();
 }

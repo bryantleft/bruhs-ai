@@ -16,6 +16,11 @@ pub use database::*;
 mod api_client;
 pub use api_client::*;
 mod http;
+mod mail;
+pub(crate) mod mail_compose;
+pub use mail::{
+    mail_attachment, mail_browse, mail_connection, mail_snapshot, mail_sync, mail_thread,
+};
 mod people_sync;
 mod reactive;
 pub use reactive::{reactive_command, reactive_hook_token, reactive_snapshot, ReactiveHookToken};
