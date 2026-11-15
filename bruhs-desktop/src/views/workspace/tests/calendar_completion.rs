@@ -481,7 +481,10 @@ fn hidden_month_records_are_reachable_through_the_day_list(cx: &mut gpui::TestAp
     cx.run_until_parked();
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.overlay, Some(Overlay::CalendarDay { date }));
-        assert!(!workspace.event_create_visible(), "+N more must not create an event");
+        assert!(
+            !workspace.event_create_visible(),
+            "+N more must not create an event"
+        );
     });
     assert_rendered_bounds(cx, "desktop-calendar-day-list");
     for id in ["local-0", "local-1", "local-2", "google-hidden"] {
@@ -511,6 +514,9 @@ fn hidden_month_records_are_reachable_through_the_day_list(cx: &mut gpui::TestAp
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.overlay, None);
         assert_eq!(workspace.active_view, AppView::Tasks);
-        assert_eq!(workspace.selected_work_item_id.as_deref(), Some("task-hidden"));
+        assert_eq!(
+            workspace.selected_work_item_id.as_deref(),
+            Some("task-hidden")
+        );
     });
 }
