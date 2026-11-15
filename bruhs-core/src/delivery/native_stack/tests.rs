@@ -83,7 +83,9 @@ else: raise Exception(args)
         std::fs::write(&self.state, state.to_string()).unwrap();
     }
     async fn finished(&self, id: &str) -> ActionReceipt {
-        tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        // Wider than the action's own 10 second budget, which decides the
+        // outcome; this only catches a receipt that never settles.
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 let receipt = self
                     .service
@@ -96,7 +98,7 @@ else: raise Exception(args)
                 if receipt.status != ActionStatus::Running {
                     return receipt;
                 }
-                tokio::task::yield_now().await;
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         })
         .await

@@ -74,13 +74,15 @@ else: print(json.dumps(mr))
                 forge: Forge::Auto,
                 path: self.repository.path().to_string_lossy().into_owned(),
                 action,
-                timeout_seconds: 5,
+                // A stack merge runs dozens of git commands; under a loaded
+                // gate a five second budget timed out on a healthy run.
+                timeout_seconds: 60,
             })
             .await
             .unwrap()
     }
     async fn completed(&self, id: &str) -> ActionReceipt {
-        tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::time::timeout(std::time::Duration::from_secs(60), async {
             loop {
                 let receipt = self
                     .service
@@ -93,7 +95,8 @@ else: print(json.dumps(mr))
                 if receipt.status != ActionStatus::Running {
                     return receipt;
                 }
-                tokio::task::yield_now().await;
+                // Sleep rather than spin, so the git processes being awaited get the CPU.
+                tokio::time::sleep(std::time::Duration::from_millis(20)).await;
             }
         })
         .await
