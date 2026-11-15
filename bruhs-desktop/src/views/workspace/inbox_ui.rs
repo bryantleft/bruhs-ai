@@ -28,6 +28,7 @@ impl Workspace {
         }
         self.active_view = AppView::Inbox;
         self.inbox_import_visible = true;
+        self.inbox_mail_visible = false;
         self.inbox_import_source = InboxSource::Email;
         self.persistence_error = None;
         cx.notify();
@@ -101,6 +102,7 @@ impl Workspace {
         self.active_view = AppView::ConversationDetail {
             conversation_id: id.to_string(),
         };
+        self.inbox_mail_visible = false;
         self.workspace_focus_handle.focus(window, cx);
         self.persist_and_notify(cx);
     }
@@ -186,6 +188,13 @@ impl Workspace {
         if self.inbox_import_visible {
             return self.render_inbox_import(cx);
         }
+        if self.inbox_mail_visible {
+            return div()
+                .flex_1()
+                .h_full()
+                .min_w_0()
+                .child(self.connected_inbox.clone());
+        }
         let now = EpochMs::now().as_millis();
         let query = self.inbox_search_input.read(cx).value();
         let mut cache = self.inbox_directory.borrow_mut();
@@ -223,9 +232,19 @@ impl Workspace {
                 .child(div().min_w_0()
                     .child(div().font_family(theme::HEADING_FONT_FAMILY).text_size(px(18.0)).text_color(theme::rambutan_100()).child("Inbox"))
                     .child(div().mt_0p5().text_size(px(12.0)).text_color(theme::rambutan_500()).child("Imported conversations and local reply drafts.")))
+                .child(div().flex().flex_wrap().gap_2()
+                .child(web_button("desktop-inbox-email", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
+                    .debug_selector(|| "desktop-inbox-email".into()).aria_label("Email").child("Email")
+                    .on_click(cx.listener(|this, _, _, cx| this.open_connected_inbox(cx)))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                            window.prevent_default();
+                            this.open_connected_inbox(cx);
+                        }
+                    })))
                 .child(web_button("desktop-import-conversation", WebButtonVariant::Primary, WebButtonSize::Small, ButtonState::Enabled)
                     .aria_label("Import conversation").child("Import conversation")
-                    .on_click(cx.listener(|this, _, window, cx| this.start_inbox_import(window, cx)))))
+                    .on_click(cx.listener(|this, _, window, cx| this.start_inbox_import(window, cx))))))
             .child(div().flex_1().min_h_0().overflow_y_scrollbar().p_4().flex().justify_center()
                 .child(div().w_full().max_w(px(1024.0)).flex().flex_col().gap_4()
                     .child(Input::new(&self.inbox_search_input).aria_label("Search inbox"))
@@ -241,7 +260,7 @@ impl Workspace {
                         .child(format!("{} open", counts.open)).child(format!("{} unread", counts.unread))
                         .child(format!("{} need reply", counts.needs_reply)).child(format!("{} snoozed", counts.snoozed)))
                     .child(div().text_size(px(12.0)).text_color(theme::rambutan_400())
-                        .child("Imported messages and replies stay on this device. Email sync and delivery are not available yet."))))
+                        .child("Imported messages and replies stay on this device. Choose Email to read and sync connected Gmail."))))
             .when(total > INBOX_PAGE_SIZE, |element| element.child(
                 div().id("desktop-inbox-pages").aria_label("Inbox pages")
                     .flex().items_center().justify_between().px_3().py_2()
@@ -816,7 +835,7 @@ impl Workspace {
     }
 }
 
-fn inbox_date(timestamp_ms: i64) -> String {
+pub(super) fn inbox_date(timestamp_ms: i64) -> String {
     chrono::DateTime::from_timestamp_millis(timestamp_ms).map_or_else(
         || "Unknown date".into(),
         |date| {
