@@ -511,6 +511,10 @@ fn router_with_capture_daemon(
             "/api/agent/auth/{provider}",
             get(routes::agent_auth::get_auth_for_provider),
         )
+        .route(
+            "/api/agent/models/{provider}",
+            get(routes::agent_auth::get_models_for_provider),
+        )
         .route("/api/health", get(routes::health::get_health))
         .route("/api/updates", get(routes::updates::get_updates))
         .route(

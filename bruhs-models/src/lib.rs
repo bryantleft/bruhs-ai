@@ -6,7 +6,8 @@
 //!
 //! - [`api`]: request/response bodies and the agent stream protocol shared by
 //!   the server, web and desktop.
-//! - [`agent`]: permission modes, providers, roles and the model catalog.
+//! - [`agent`]: permission modes, providers, roles and the model catalog;
+//!   [`runtime_models`]: models a runtime lists for the account.
 //! - [`ids`]: validated id newtypes; [`time`]: [`EpochMs`] and date helpers.
 //! - [`num`]: named lossy numeric conversions (rounding, saturating).
 //! - [`updates`]: provider CLI and app update reports and their rules.
@@ -35,6 +36,7 @@ pub mod num;
 pub mod reactive;
 pub mod remote_hosts;
 pub mod roles;
+pub mod runtime_models;
 pub mod secrets;
 pub mod thread_link;
 pub mod time;

@@ -25,7 +25,18 @@ Type an explicit selection into the same picker to choose another model:
 | `opencode/local/my-model` | Your configured OpenCode provider and model |
 
 Model names in the examples must be available in the installed runtime and
-account. Use that runtime's model list for current names. Custom selections
+account. Use that runtime's model list for current names.
+
+The Cursor group in the picker lists your account's models beneath
+`Cursor default`. Bruhs reads them from `cursor-agent --list-models` each time
+the picker opens. The server and desktop cache the answer for ten minutes, or
+for 30 seconds after a failure, so a sign-in or update shows up quickly. A
+failed refresh keeps the models listed before. When Cursor cannot list them,
+the picker footer says why. Typical reasons are a CLI
+older than the flag (run `cursor-agent update`) or a signed-out CLI (run
+`cursor-agent login`). Typed `cursor/model` selections keep working either
+way. On the web the list comes from `GET /api/agent/models/cursor`. Other
+runtimes return an empty list. Custom selections
 persist in threads, the new-thread default, and roles. Existing unprefixed
 Claude and Codex selections keep their previous routing.
 To assign a custom model to a role, choose it in the composer first. It then

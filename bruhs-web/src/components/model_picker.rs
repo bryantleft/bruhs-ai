@@ -5,17 +5,19 @@
 use leptos::html::{Div, Input};
 use leptos::prelude::*;
 
-use bruhs_models::agent::{
-    custom_model_selection, provider_for_model_id, AgentProvider, ModelInfo, MODEL_CATALOG,
+use bruhs_models::agent::{custom_model_selection, provider_for_model_id, AgentProvider};
+use bruhs_models::runtime_models::{
+    highlighted_id, listed_models, listing_error_line, reanchor_highlight, replace_listing,
+    ModelChoice, RuntimeModels, DISCOVERABLE_PROVIDERS,
 };
 
 use crate::auth::AuthStatus;
 use crate::components::provider::{provider_label, provider_logo_src, PROVIDER_LOGO_CLASS};
-use crate::state::{CodexAuthSignal, ModelSelectOpen, SetModelSelectOpen};
+use crate::state::{CodexAuthSignal, ModelSelectOpen, RuntimeModelsSignal, SetModelSelectOpen};
 use crate::ui::{Icon, Kbd};
 
 /// Models whose label, id or provider contains every word of `query`.
-pub fn filter_models<'a>(models: &'a [ModelInfo], query: &str) -> Vec<&'a ModelInfo> {
+pub fn filter_models(models: &[ModelChoice], query: &str) -> Vec<ModelChoice> {
     let words: Vec<String> = query.split_whitespace().map(|w| w.to_lowercase()).collect();
     models
         .iter()
@@ -28,23 +30,25 @@ pub fn filter_models<'a>(models: &'a [ModelInfo], query: &str) -> Vec<&'a ModelI
             );
             words.iter().all(|w| hay.contains(w.as_str()))
         })
+        .cloned()
         .collect()
 }
 
 /// Group in first-seen provider order (Anthropic first in the default list).
-pub fn group_models<'a>(models: &[&'a ModelInfo]) -> Vec<(AgentProvider, Vec<&'a ModelInfo>)> {
-    let mut groups: Vec<(AgentProvider, Vec<&'a ModelInfo>)> = Vec::new();
-    for &m in models {
+pub fn group_models(models: &[ModelChoice]) -> Vec<(AgentProvider, Vec<ModelChoice>)> {
+    let mut groups: Vec<(AgentProvider, Vec<ModelChoice>)> = Vec::new();
+    for m in models {
         match groups.iter_mut().find(|(p, _)| *p == m.provider) {
-            Some((_, list)) => list.push(m),
-            None => groups.push((m.provider, vec![m])),
+            Some((_, list)) => list.push(m.clone()),
+            None => groups.push((m.provider, vec![m.clone()])),
         }
     }
     groups
 }
 
-/// A typed provider/model choice, or the current custom model while searching.
-pub fn custom_model_match(query: &str, current: &str) -> Option<String> {
+/// A typed provider/model choice, or the current custom model while searching,
+/// unless it is already one of the `listed` rows.
+pub fn custom_model_match(query: &str, current: &str, listed: &[ModelChoice]) -> Option<String> {
     let typed = custom_model_selection(query.trim());
     let candidate = typed.or_else(|| {
         let hay = current.to_lowercase();
@@ -54,10 +58,7 @@ pub fn custom_model_match(query: &str, current: &str) -> Option<String> {
             .then(|| custom_model_selection(current))
             .flatten()
     })?;
-    (!MODEL_CATALOG
-        .iter()
-        .any(|model| model.id == candidate.as_str()))
-    .then(|| candidate.into_inner())
+    (!listed.iter().any(|model| model.id == candidate.as_str())).then(|| candidate.into_inner())
 }
 
 /// Short auth line for a provider.
@@ -106,6 +107,7 @@ pub fn ModelPicker() -> impl IntoView {
     let crate::state::DefaultModel(default_model) = expect_context::<crate::state::DefaultModel>();
     let auth_status = expect_context::<crate::state::ClaudeAuthSignal>().0;
     let CodexAuthSignal(codex_auth) = expect_context::<CodexAuthSignal>();
+    let RuntimeModelsSignal(runtime_models) = expect_context::<RuntimeModelsSignal>();
 
     let (query, set_query) = signal(String::new());
     let (highlight, set_highlight) = signal(0usize);
@@ -114,9 +116,25 @@ pub fn ModelPicker() -> impl IntoView {
     let menu_ref = NodeRef::<Div>::new();
     let menu_position = RwSignal::new(String::new());
 
-    let flat = Memo::new(move |_| filter_models(MODEL_CATALOG, &query.get()));
-    let groups = Memo::new(move |_| group_models(&flat.get()));
-    let custom = Memo::new(move |_| custom_model_match(&query.get(), &current_model.get()));
+    let all = Memo::new(move |_| runtime_models.with(|listings| listed_models(listings)));
+    let flat = Memo::new(move |_| all.with(|all| filter_models(all, &query.get())));
+    let groups = Memo::new(move |_| flat.with(|flat| group_models(flat)));
+    let custom = Memo::new(move |_| {
+        all.with(|all| custom_model_match(&query.get(), &current_model.get(), all))
+    });
+    // The current model's row, or the custom row when it is not listed.
+    let current_index = move || {
+        let cur = current_model.get_untracked();
+        all.with_untracked(|all| {
+            all.iter().position(|m| m.id == cur).unwrap_or_else(|| {
+                if custom_model_match("", &cur, all).is_some() {
+                    all.len()
+                } else {
+                    0
+                }
+            })
+        })
+    };
 
     let position_menu = move || {
         let Some(Some(menu)) = menu_ref.try_get_untracked() else {
@@ -195,18 +213,51 @@ pub fn ModelPicker() -> impl IntoView {
             return;
         }
         set_query.set(String::new());
-        let cur = current_model.get_untracked();
-        let idx = MODEL_CATALOG
-            .iter()
-            .position(|m| m.id == cur)
-            .unwrap_or_else(|| {
-                if custom_model_match("", &cur).is_some() {
-                    MODEL_CATALOG.len()
-                } else {
-                    0
-                }
+        set_highlight.set(current_index());
+        // Refresh the account's models; the server caches the CLI's answer.
+        for provider in DISCOVERABLE_PROVIDERS {
+            leptos::task::spawn_local(async move {
+                let route = format!(
+                    "/api/agent/models/{}",
+                    crate::api::segment(provider.as_str())
+                );
+                let listing = match crate::api::get_json::<RuntimeModels>(&route).await {
+                    Ok(listing) => listing,
+                    Err(error) => {
+                        log::warn!("listing {provider} models: {error}");
+                        return;
+                    }
+                };
+                // The model under the highlight before the rows change. The
+                // reply can outlive this picker (the composer remounts), so
+                // its signals are read with the non-panicking forms.
+                let before = flat
+                    .try_with_untracked(|rows| {
+                        let custom = custom.try_get_untracked().flatten();
+                        let index = highlight.try_get_untracked()?;
+                        let id = highlighted_id(rows, custom.as_deref(), index);
+                        Some((index, id.map(str::to_owned)))
+                    })
+                    .flatten();
+                let mut changed = false;
+                runtime_models.maybe_update(|listings| {
+                    changed = replace_listing(listings, provider, listing);
+                    changed
+                });
+                let Some((index, previous)) = before.filter(|_| changed) else {
+                    return;
+                };
+                // Arriving rows never move the highlight to another model.
+                let (Some(rows), Some(custom)) =
+                    (flat.try_get_untracked(), custom.try_get_untracked())
+                else {
+                    return;
+                };
+                let index =
+                    reanchor_highlight(previous.as_deref(), &rows, custom.as_deref(), index);
+                set_highlight.try_set(index);
             });
-        set_highlight.set(idx);
+        }
         gloo_timers::callback::Timeout::new(0, move || {
             if let Some(Some(el)) = input_ref.try_get_untracked() {
                 let _ = el.focus();
@@ -231,8 +282,10 @@ pub fn ModelPicker() -> impl IntoView {
         set_open.set(false);
     };
     let choose_index = move |index: usize| {
-        if let Some(id) = flat.with_untracked(|models| models.get(index).map(|model| model.id)) {
-            choose(id.to_string());
+        if let Some(id) =
+            flat.with_untracked(|models| models.get(index).map(|model| model.id.clone()))
+        {
+            choose(id);
         } else if index == flat.with_untracked(|models| models.len()) {
             if let Some(id) = custom.get_untracked() {
                 choose(id);
@@ -265,7 +318,7 @@ pub fn ModelPicker() -> impl IntoView {
             }
             "Enter" => {
                 ev.prevent_default();
-                choose_index(highlight.get_untracked());
+                choose_index(highlight.get_untracked().min(n.saturating_sub(1)));
             }
             "Escape" => {
                 ev.prevent_default();
@@ -279,7 +332,11 @@ pub fn ModelPicker() -> impl IntoView {
             .with(|f| f.get(highlight.get()).map(|m| m.provider))
             .or_else(|| custom.get().map(|id| provider_for_model_id(&id)))
             .unwrap_or_else(|| provider_for_model_id(&current_model.get()));
-        auth_line(provider, &auth_status.get(), codex_auth.get().authenticated)
+        runtime_models
+            .with(|listings| listing_error_line(listings, provider))
+            .unwrap_or_else(|| {
+                auth_line(provider, &auth_status.get(), codex_auth.get().authenticated)
+            })
     };
 
     view! {
@@ -321,8 +378,8 @@ pub fn ModelPicker() -> impl IntoView {
                             let rows = models.into_iter().map(|m| {
                                 let i = index;
                                 index += 1;
-                                let id_choose = m.id;
-                                let id_selected = m.id;
+                                let id_choose = m.id.clone();
+                                let id_selected = m.id.clone();
                                 let is_selected = Signal::derive(move || current_model.get() == id_selected);
                                 let is_hot = Signal::derive(move || highlight.get() == i);
                                 let label = m.label;
@@ -338,7 +395,7 @@ pub fn ModelPicker() -> impl IntoView {
                                             if is_hot.get() { "bg-white/[0.06]" } else { "" }
                                         )
                                         on:mouseenter=move |_| set_highlight.set(i)
-                                        on:click=move |_| choose(id_choose.to_string())
+                                        on:click=move |_| choose(id_choose.clone())
                                     >
                                         <div class="min-w-0 flex-1">
                                             <div class="truncate text-label text-rambutan-100">{label}</div>
@@ -400,12 +457,16 @@ pub fn ModelPicker() -> impl IntoView {
 mod tests {
     use super::*;
 
-    fn m(id: &'static str, label: &'static str, provider: AgentProvider) -> ModelInfo {
-        ModelInfo {
-            id,
-            label,
+    fn m(id: &str, label: &str, provider: AgentProvider) -> ModelChoice {
+        ModelChoice {
+            id: id.into(),
+            label: label.into(),
             provider,
         }
+    }
+
+    fn catalog() -> Vec<ModelChoice> {
+        listed_models(&[])
     }
 
     #[test]
@@ -432,7 +493,7 @@ mod tests {
             m("b", "B", AgentProvider::Codex),
             m("c", "C", AgentProvider::Claude),
         ];
-        let g = group_models(&all.iter().collect::<Vec<_>>());
+        let g = group_models(&all);
         assert_eq!(g.len(), 2);
         assert_eq!(g[0].0, AgentProvider::Claude);
         assert_eq!(g[0].1.len(), 2);
@@ -451,20 +512,42 @@ mod tests {
 
     #[test]
     fn custom_model_search_accepts_explicit_providers_and_retains_the_current_choice() {
+        let all = catalog();
         assert_eq!(
-            custom_model_match("grok/my-model", "claude-sonnet-4-6"),
+            custom_model_match("grok/my-model", "claude-sonnet-4-6", &all),
             Some("grok/my-model".into())
         );
         assert_eq!(
-            custom_model_match("", "opencode/local/my-model"),
+            custom_model_match("", "opencode/local/my-model", &all),
             Some("opencode/local/my-model".into())
         );
         assert_eq!(
-            custom_model_match("local", "opencode/local/my-model"),
+            custom_model_match("local", "opencode/local/my-model", &all),
             Some("opencode/local/my-model".into())
         );
-        assert!(custom_model_match("unknown/my-model", "claude-sonnet-4-6").is_none());
-        assert!(custom_model_match("cursor/default", "claude-sonnet-4-6").is_none());
+        assert!(custom_model_match("unknown/my-model", "claude-sonnet-4-6", &all).is_none());
+        assert!(custom_model_match("cursor/default", "claude-sonnet-4-6", &all).is_none());
+    }
+
+    #[test]
+    fn listed_cursor_models_are_rows_not_custom_entries() {
+        let listings = vec![(
+            AgentProvider::Cursor,
+            RuntimeModels {
+                models: vec![m("cursor/gpt-5", "GPT-5", AgentProvider::Cursor)],
+                error: None,
+            },
+        )];
+        let all = listed_models(&listings);
+        assert!(custom_model_match("", "cursor/gpt-5", &all).is_none());
+        assert_eq!(
+            custom_model_match("", "cursor/gpt-5", &catalog()),
+            Some("cursor/gpt-5".into())
+        );
+        let cursor = filter_models(&all, "cursor");
+        let ids: Vec<&str> = cursor.iter().map(|model| model.id.as_str()).collect();
+        assert_eq!(ids, ["cursor/default", "cursor/gpt-5"]);
+        assert_eq!(listing_error_line(&listings, AgentProvider::Cursor), None);
     }
 
     #[test]
