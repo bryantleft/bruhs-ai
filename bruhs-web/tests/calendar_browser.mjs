@@ -33,6 +33,9 @@ const relevantSources = [
   'bruhs-models/src/calendar/zone.rs',
   'bruhs-models/src/models/calendar_event.rs',
   'bruhs-models/src/models/google_calendar.rs',
+  'bruhs-models/src/models/planning.rs',
+  'bruhs-web/src/ui/button.rs',
+  'bruhs-web/src/ui/input.rs',
 ];
 await mkdir(output, { recursive: true });
 const sourceTimes = await Promise.all(relevantSources.map(async file => ({ file, modifiedMs: (await stat(path.join(root, file))).mtimeMs, sha256: createHash('sha256').update(await readFile(path.join(root, file))).digest('hex') })));
@@ -59,6 +62,13 @@ const standup = { id: 'cal-provider-standup', google: 'g-standup', title: 'Provi
 const holiday = { id: 'cal-provider-holiday', google: 'g-holiday', title: 'Provider holiday', start: utc('2026-11-02T00:00:00Z'), end: utc('2026-11-03T00:00:00Z') }; // date 2026-11-02
 const legacy = { id: 'cal-legacy-offsite', google: 'g-legacy', title: 'Legacy offsite', start: utc('2026-11-04T00:00:00Z'), end: utc('2026-11-05T00:00:00Z') }; // stored before normalization
 const syncedAt = utc('2026-11-01T19:00:00Z');
+// A focus block placed from a task, and a task due on the fall-back day.
+const focusBlock = { id: 'cal-focus-block', title: 'Focus: synthetic audit', start: utc('2026-11-01T23:00:00Z'), end: utc('2026-11-02T00:00:00Z') }; // 15:00 PST
+function task(id, title, extra = {}) {
+  return { id, project_id: null, title, description: null, status: 'Todo', priority: 'Medium', due_date: null, planning: { cycle: null, dependency_ids: [], estimate_minutes: null, recurrence: null, time_block_event_ids: [], waiting_on: null }, created_at: syncedAt, updated_at: syncedAt, ...extra };
+}
+const dueTask = task('cal-task-due', 'Synthetic due task', { due_date: '2026-11-01' });
+const focusTask = task('cal-task-focus', 'Synthetic focus source', { planning: { cycle: null, dependency_ids: [], estimate_minutes: 60, recurrence: null, time_block_event_ids: [focusBlock.id], waiting_on: null } });
 
 function record({ id, title, start, end, google }, extra = {}) {
   return { id, title, start_at_ms: start, end_at_ms: end, all_day: false, color: google ? null : 'blueberry', notes: null, created_at: syncedAt, updated_at: syncedAt, source: google ? 'google' : 'local', google_event_id: google ?? null, calendar_id: google ? 'cal-synthetic' : null, attendees: [], organizer: null, location: null, conferencing: null, recurring_event_id: null, html_link: google ? `https://calendar.google.com/calendar/event?eid=${google}` : null, ...extra };
@@ -95,25 +105,26 @@ const results = { startedAt, origin, dist, timezone: 'America/Los_Angeles', asse
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
 const loopback = hostname => ['127.0.0.1', 'localhost', '[::1]'].includes(hostname);
 
-function idb(page, mode, body, arg) {
-  return page.evaluate(({ mode, body, arg }) => new Promise((resolve, reject) => {
+function idb(page, mode, storeName, arg) {
+  return page.evaluate(({ mode, storeName, arg }) => new Promise((resolve, reject) => {
     const open = indexedDB.open('bruhs');
     open.onerror = () => reject(new Error(String(open.error)));
     open.onsuccess = () => {
       const db = open.result;
-      if (!db.objectStoreNames.contains('events')) { db.close(); reject(new Error('events store is missing')); return; }
-      const transaction = db.transaction('events', mode);
-      const store = transaction.objectStore('events');
+      if (!db.objectStoreNames.contains(storeName)) { db.close(); reject(new Error(`${storeName} store is missing`)); return; }
+      const transaction = db.transaction(storeName, mode);
+      const store = transaction.objectStore(storeName);
       let result;
       if (mode === 'readonly') { const read = store.getAll(); read.onsuccess = () => { result = read.result; }; }
       else for (const value of arg) store.put(value);
       transaction.oncomplete = () => { db.close(); resolve(result ?? arg.length); };
       transaction.onabort = () => { db.close(); reject(new Error(String(transaction.error))); };
     };
-  }), { mode, body, arg });
+  }), { mode, storeName, arg });
 }
-const readEvents = page => idb(page, 'readonly', null, null);
-const seedEvents = (page, records) => idb(page, 'readwrite', null, records);
+const readEvents = page => idb(page, 'readonly', 'events', null);
+const seedEvents = (page, records) => idb(page, 'readwrite', 'events', records);
+const seedTasks = (page, records) => idb(page, 'readwrite', 'work_items', records);
 
 try {
   for (const cell of cells) {
@@ -229,7 +240,8 @@ try {
       await page.goto(`${origin}/#/calendar`);
       await ready();
       state.stage = 'seed';
-      await seedEvents(page, [record(fallLocal), record(springLocal), record(legacy, { all_day: true })]);
+      await seedEvents(page, [record(fallLocal), record(springLocal), record(legacy, { all_day: true }), record(focusBlock)]);
+      await seedTasks(page, [dueTask, focusTask]);
       await page.reload();
       await ready();
       check(await page.evaluate(() => Intl.DateTimeFormat().resolvedOptions().timeZone) === 'America/Los_Angeles', 'browser runs in the America/Los_Angeles zone');
@@ -294,6 +306,10 @@ try {
       check(await dialog().getByRole('button', { name: 'Save', exact: true }).isDisabled(), 'the read-only Google dialog cannot save');
       check(await dialog().getByRole('link', { name: 'Open in Google Calendar', exact: true }).count() === 1, 'the read-only Google dialog links to the provider instead');
       check(await dialog().getByRole('button', { name: 'Delete', exact: true }).count() === 0, 'a Google event offers no local delete');
+      const providerColor = (await dialog().getByRole('button', { name: 'Color', exact: true }).innerText()).trim();
+      check(providerColor === 'Calendar color', 'an uncolored Google event shows its calendar color, not Persimmon', providerColor);
+      const providerSave = await dialog().getByRole('button', { name: 'Save', exact: true }).getAttribute('class');
+      check(!providerSave.includes('persimmon'), 'the read-only Save uses the neutral disabled treatment, not the persimmon action', providerSave);
       await snapshot('provider-dialog');
       await target(dialog().getByRole('button', { name: 'Cancel', exact: true }), 'event dialog Cancel', 32);
       await target(dialog().getByRole('button', { name: 'Save', exact: true }), 'event dialog Save', 32);
@@ -310,6 +326,86 @@ try {
       await page.keyboard.press('Enter');
       await dialog().getByText('Edit event', { exact: true }).waitFor();
       check(true, 'Enter on a focused event block opens its editor');
+      await dialog().getByRole('button', { name: 'Cancel', exact: true }).click();
+      await dialog().waitFor({ state: 'hidden' });
+
+      state.stage = 'create and delete through the dialog';
+      async function openNew() {
+        await main.getByRole('button', { name: 'New event', exact: true }).click();
+        await dialog().getByText('New event', { exact: true }).waitFor();
+      }
+      await openNew();
+      await dialog().getByRole('textbox').first().fill('Harness timed event');
+      await dialog().getByRole('button', { name: 'Create', exact: true }).click();
+      await dialog().waitFor({ state: 'hidden' });
+      const createdTimed = (await persisted(records => records.some(r => r.title === 'Harness timed event'), 'Create in the dialog saves a timed local event')).find(r => r.title === 'Harness timed event');
+      check(createdTimed && !createdTimed.all_day && createdTimed.source === 'local' && createdTimed.end_at_ms - createdTimed.start_at_ms === 3_600_000 && createdTimed.start_at_ms === utc('2026-11-01T19:30:00Z'), 'the new timed event starts at the prefilled 11:30 PST and lasts an hour', createdTimed);
+      await openNew();
+      await dialog().getByRole('textbox').first().fill('Harness all-day event');
+      await dialog().getByRole('checkbox').first().click();
+      await dialog().getByRole('button', { name: 'Create', exact: true }).click();
+      await dialog().waitFor({ state: 'hidden' });
+      const createdAllDay = (await persisted(records => records.some(r => r.title === 'Harness all-day event'), 'Create in the dialog saves an all-day local event')).find(r => r.title === 'Harness all-day event');
+      check(createdAllDay && createdAllDay.all_day && createdAllDay.start_at_ms === utc('2026-11-01T07:00:00Z') && createdAllDay.end_at_ms === utc('2026-11-02T08:00:00Z'), 'the all-day event spans local midnight to local midnight of the 25-hour day', createdAllDay);
+      await page.reload();
+      await ready();
+      await modeButton('Day').click();
+      await block(createdTimed.id).waitFor();
+      check(true, 'the created timed event is restored after a reload');
+      await block(createdTimed.id).click();
+      await dialog().getByText('Edit event', { exact: true }).waitFor();
+      await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
+      await dialog().waitFor({ state: 'hidden' });
+      await persisted(records => !records.some(r => r.id === createdTimed.id), 'Delete in the dialog removes the timed event');
+      await modeButton('Month').click();
+      const allDayPill = page.locator(`button[data-event-id="${createdAllDay.id}"]`);
+      await allDayPill.waitFor();
+      check(await allDayPill.count() === 1, 'the created all-day event is restored after a reload on its own day', await allDayPill.count());
+      await allDayPill.click();
+      await dialog().getByText('Edit event', { exact: true }).waitFor();
+      await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
+      await dialog().waitFor({ state: 'hidden' });
+      await persisted(records => !records.some(r => r.id === createdAllDay.id), 'Delete in the dialog removes the all-day event');
+      await page.reload();
+      await ready();
+      const afterDeleteReload = await readEvents(page);
+      check(!afterDeleteReload.some(r => r.title.startsWith('Harness ')), 'deleted events stay deleted after a reload', afterDeleteReload.map(r => r.title));
+
+      state.stage = 'task links';
+      async function focusedTaskTitle() {
+        const deadline = Date.now() + 4000;
+        let value = null;
+        do {
+          value = await page.evaluate(() => document.activeElement?.id === 'task-detail-title' ? document.activeElement.value ?? document.activeElement.textContent : null);
+          if (value !== null) return value.trim();
+          await sleep(60);
+        } while (Date.now() < deadline);
+        return value;
+      }
+      async function backToCalendar() {
+        await page.evaluate(() => { location.hash = '#/calendar'; });
+        await ready();
+      }
+      await modeButton('Month').click();
+      const dueMarker = page.locator(`button[data-calendar-task="${dueTask.id}"]`);
+      await dueMarker.waitFor();
+      check(await dueMarker.getAttribute('aria-label') === `Open task ${dueTask.title}, due this day`, 'the due marker names its task', await dueMarker.getAttribute('aria-label'));
+      await dueMarker.click();
+      check(await focusedTaskTitle() === dueTask.title, 'a due marker opens its task in Tasks with the title focused', await page.evaluate(() => [location.hash, document.activeElement?.id]));
+      await backToCalendar();
+      await modeButton('Day').click();
+      await block(focusBlock.id).waitFor();
+      await block(focusBlock.id).click();
+      await dialog().getByText('Edit event', { exact: true }).waitFor();
+      const openTask = dialog().getByRole('button', { name: 'Open task', exact: true });
+      check(await openTask.count() === 1, 'a focus block offers Open task');
+      await openTask.click();
+      check(await focusedTaskTitle() === focusTask.title, 'Open task opens the focus block source task with the title focused', await page.evaluate(() => [location.hash, document.activeElement?.id]));
+      await backToCalendar();
+      await modeButton('Day').click();
+      await block(fallLocal.id).click();
+      await dialog().getByText('Edit event', { exact: true }).waitFor();
+      check(await dialog().getByRole('button', { name: 'Open task', exact: true }).count() === 0, 'an event without a source task offers no Open task');
       await dialog().getByRole('button', { name: 'Cancel', exact: true }).click();
       await dialog().waitFor({ state: 'hidden' });
 
@@ -335,7 +431,7 @@ try {
       await ready();
       const afterReload = await readEvents(page);
       check(afterReload.find(r => r.id === fallLocal.id)?.start_at_ms === utc('2026-11-01T22:00:00Z') && afterReload.find(r => r.id === legacy.id)?.start_at_ms === utc('2026-11-04T08:00:00Z'), 'moves and migrations survive a reload unchanged', afterReload.map(r => [r.id, r.start_at_ms]));
-      check(afterReload.length === 5, 'reload keeps exactly the five synthetic events', afterReload.length);
+      check(afterReload.length === 6, 'reload keeps exactly the six synthetic events', afterReload.length);
     } catch (error) {
       check(false, 'workflow completed without an unexpected browser interaction failure', { error: error.stack ?? String(error) });
       await snapshot('failure').catch(() => {});
