@@ -2,8 +2,8 @@
 
 Recorded 2026-11-14. Parent: [product completion goal](product-completion-goal-2026-11-13.md).
 **Status: in progress.** This inventory records the People capability baseline,
-fixed acceptance cases, and the first privacy and integrity fixes. It does not
-certify completion. The parent goal's shared gates still apply.
+fixed acceptance cases, the decided rules, and the fixes made against them. It
+does not certify completion. The parent goal's shared gates still apply.
 
 Statuses use the parent's vocabulary. **Verified** means the case passed the
 checks named in the evidence column on the platforms listed there, and nothing
@@ -36,6 +36,11 @@ audit onward, the opt-out means:
    transcripts or summaries entirely would be a new scope item; it is not
    claimed here.
 
+4. **Merge and undo.** A merge keeps the opt-out sticky: the survivor is
+   untracked if either side was. Undoing a merge gives each contact back its
+   own flag, unless the survivor's flag was changed after the merge, in which
+   case that later choice is kept.
+
 Agent context paths reviewed for opted-out data:
 
 | Path | Finding | Status |
@@ -48,6 +53,42 @@ Agent context paths reviewed for opted-out data:
 | Inbox “Ask agent” ([`inbox.rs`](../bruhs-models/src/models/inbox.rs) `inbox_agent_prompt`) | Conversation content only, no profile data. | Verified by source review |
 | Web agent tools | The web hosts no People read bridge. Agents started from the web cannot read People records. | Not applicable; recorded as a parity gap |
 | Summary route response ([`meetings_summary.rs`](../bruhs-server/src/routes/meetings_summary.rs)) | Returns the summary only, not raw model observations. | Verified by source review |
+
+## Decided rules
+
+These were product decisions for this pillar. Both surfaces and both stores
+apply them.
+
+- **Delete cascade (PEOPLE-10).** Deleting a profile asks for confirmation
+  first. The contact's observations, aliases and private relationship data
+  (details and reminders) are deleted. Meeting speakers, summary action
+  items, Inbox participants and knowledge links stay where they are and lose
+  only their link to the person. Merge redirects that ended at the contact
+  are retired with it. Capture receipts are left unchanged. The server keeps
+  a private record of what it removed so the delete can be undone.
+- **Undo (PEOPLE-09).** Rename, the opt-out toggle, merge and delete offer
+  undo right after the change, from an undo bar on the People page. Undo
+  follows the workflow reminder rule: it reverts a change only while the
+  records it touched are exactly as the change left them, and otherwise
+  refuses with "No records were changed." The receipt lives in memory for
+  the session: a reload or a newer People change replaces it. Undoing a delete
+  restores the contact, its relationship data, and the speaker, action item,
+  Inbox and knowledge links it removed that are still unlinked. Undoing a
+  merge restores both contacts from the merge originals, keeps later edits
+  to the survivor, and points back the links the merge moved. Merges made by
+  builds before this one restore the contacts but not their meeting links,
+  because those builds did not record them.
+- **Meeting delete (PEOPLE-14).** Deleting a meeting deletes the observations
+  derived from it, in the same store transaction, and announces
+  `PeopleUpdated` so both surfaces refetch. No surface offers a meeting delete
+  control yet; the rule applies to the server route and any future control.
+- **Alias uniqueness (PEOPLE-04).** A new alias is refused when another
+  profile already answers to that name (display name or alias, Unicode case
+  folded). The refusal says to merge the two profiles instead. The surface
+  reviews it before sending and the server reviews it again before saving.
+- **Inbox auto link.** An imported sender links to a person only when exactly
+  one profile answers to the sender's name or alias. Two matches link
+  nobody.
 
 ## Capability inventory
 
@@ -70,41 +111,45 @@ Agent context paths reviewed for opted-out data:
 
 | Case | Scenario and expected result | Status |
 | --- | --- | --- |
-| PEOPLE-01 | Create a profile from the People page on each surface, with Unicode and long names. Blank names are refused and input is kept. Reload restores it. | **Failing.** No People-page create on either surface; Capture-only path unverified here. |
-| PEOPLE-02 | Find a person on the People page by name and alias, case-insensitively, including beyond the first page. | **Failing.** No People-page search on either surface. |
+| PEOPLE-01 | Create a profile from the People page on each surface, with Unicode and long names. Blank names are refused and input is kept. Reload restores it. | **Implemented, unverified.** Web and desktop People pages create a profile; a blank name shows `CREATE_BLANK` and keeps the input. Not yet compiled or run: written under a machine-wide build hold. Browser harness `create` stage and a desktop GPUI test are queued. |
+| PEOPLE-02 | Find a person on the People page by name and alias, case-insensitively, including beyond the first page. | **Implemented, unverified.** Both surfaces search display names and aliases with `person_matches_query` (Unicode case folded) before paging, with the same 25-person pages. Not yet compiled or run: written under a machine-wide build hold. Harness `search` stage reaches page two. |
 | PEOPLE-03 | Rename with trimming. A blank name is refused with a visible message and sends nothing. A failed save is visible. Reload keeps the new name. | **Verified on web** (browser harness, three cells). Desktop trims and refuses blanks by source review; desktop failure copy changed, not exercised. |
-| PEOPLE-04 | Add, remove and inspect aliases. Aliases match speakers and senders case-insensitively, including non-ASCII names. | **Failing** for editing (no UI). Matching **verified** in core for summaries, appended observations and recognized speaker names. |
+| PEOPLE-04 | Add, remove and inspect aliases. Aliases match speakers and senders case-insensitively, including non-ASCII names. | **Implemented, unverified** for editing: alias list, add and remove on both surfaces, reviewed by `review_alias` on the surface and again by the server (409 on a name another profile uses). Matching **verified** in core for summaries, appended observations and recognized speaker names. Not yet compiled or run: written under a machine-wide build hold. |
 | PEOPLE-05 | Each observation shows its source meeting and opens it. An observation whose meeting is gone says so. No observation is dropped from the list. | **Verified** on web (browser harness) and desktop (GPUI test-frame check). |
-| PEOPLE-06 | Open a person's meetings and conversations from the profile and return. | **Failing.** Only unanswered-conversation suggestions exist; desktop suggestions are not clickable. |
-| PEOPLE-07 | Create, edit, complete and delete reminders with the same options on both surfaces. State survives reload. | **Failing.** No delete; desktop lacks the optional due date and kind choice. Persistence covered by existing store tests only. |
-| PEOPLE-08 | Merge after confirmation. Aliases, observations, reminders, voice and all links move to the target. An opt-out on either side survives. | **Failing.** No confirmation; web does not repoint Inbox or knowledge links (cross-pillar). Sticky opt-out **verified** by existing core tests (`merge_retry_tests`, `sqlite/tests.rs`). |
-| PEOPLE-09 | Undo a merge, rename, opt-out change and deletion; both records come back intact. | **Failing.** Only workflow reminder undo exists; merge originals are archived but never restored. |
-| PEOPLE-10 | Delete a profile with confirmation or undo; observations, aliases and links follow a documented cascade. | **Failing.** Not supported. |
+| PEOPLE-06 | Open a person's meetings and conversations from the profile and return. | **Implemented, unverified.** The profile lists the person's meetings (`person_meetings`) and Inbox conversations (`person_conversations`); opening one shows Back to People, which returns to the open profile. Desktop follow-up suggestions are clickable. Not yet compiled or run: written under a machine-wide build hold. |
+| PEOPLE-07 | Create, edit, complete and delete reminders with the same options on both surfaces. State survives reload. | **Implemented, unverified.** Both surfaces offer the four kinds, the optional Due tomorrow (commitments and reminders only), edit, complete and delete (`edit_item`, `remove_item`). Persistence uses the existing stores. Not yet compiled or run: written under a machine-wide build hold. |
+| PEOPLE-08 | Merge after confirmation. Aliases, observations, reminders, voice and all links move to the target. An opt-out on either side survives. | **Implemented, unverified.** Merge shows a confirmation in words before anything is sent. The web merge commit now repoints Inbox participants and knowledge links in its transaction, as the desktop does. Sticky opt-out **verified** by existing core tests. Not yet compiled or run: written under a machine-wide build hold. |
+| PEOPLE-09 | Undo a merge, rename, opt-out change and deletion; both records come back intact. | **Implemented, unverified.** Undo for rename, opt-out, merge and delete on both surfaces under the unchanged-records rule (`PeopleUndo::check`); server restore and unmerge on both stores. Not yet compiled or run: written under a machine-wide build hold. |
+| PEOPLE-10 | Delete a profile with confirmation or undo; observations, aliases and links follow a documented cascade. | **Implemented, unverified.** Delete with confirmation and the documented cascade on both surfaces and both stores. Not yet compiled or run: written under a machine-wide build hold. |
 | PEOPLE-11 | With a person opted out, generating or regenerating a summary, appending observations, or recognizing their name or alias on screen adds no observation for them under any casing. Reopening a database written by an older build keeps the protection. | **Verified** in core: 8 new tests in `meetings::opt_out_tests` on both stores, plus existing `summary_tests` tracking cases. |
 | PEOPLE-12 | With a person opted out, no agent read returns their observations; identity and the opt-out stay visible to the agent. | **Verified** on desktop (GPUI bridge test). Web has no agent People reads. |
 | PEOPLE-13 | Toggling the opt-out shows a visible failure when the save fails and does not look applied. A confirmed change survives reload. | **Verified on web** (browser harness). Desktop shows a notice by source review, not exercised. |
-| PEOPLE-14 | Deleting a meeting removes or explicitly retains its derived observations by a documented rule. | **Failing.** Observations remain with a dangling source (`delete_observations_for_meeting` is unused outside tests). The UI now says “Source meeting is not stored”. Needs a product decision. |
+| PEOPLE-14 | Deleting a meeting removes or explicitly retains its derived observations by a documented rule. | **Implemented, unverified.** Rule decided (see Decided rules): both stores delete a meeting's derived observations in the same transaction and the route announces `PeopleUpdated`. No surface offers a meeting delete control. Not yet compiled or run: written under a machine-wide build hold. |
 | PEOPLE-15 | Compare web and desktop People pages with the same records at the same viewport. | **Unverified.** No same-size desktop screenshot was taken. Known gaps listed in the inventory. |
 | PEOPLE-16 | Keyboard and screen reader: every card action has a unique accessible name, focus is visible, and touch targets are 44px. | **Partially verified on web** (names and touch targets for the checked controls, harness). The web rename input still sits inside the expand button. Desktop keyboard activation of text buttons is unverified. |
 | PEOPLE-17 | 640×480, 390×844 touch and 1280×800 without horizontal overflow or hidden actions. | **Verified on web** for the checked flows (harness). Desktop unverified. |
 | PEOPLE-18 | Honest states: loading, empty, cache failure, sync failure, merge recovery, failed save. | **Partial.** Web has them; desktop lacks loading and merge recovery UI. Not exercised beyond PEOPLE-03 and PEOPLE-13. |
-| PEOPLE-19 | Measure People list and profile performance with a large directory. | **Unverified.** Existing server read-performance tests only. |
+| PEOPLE-19 | Measure People list and profile performance with a large directory. | **Unverified.** `bruhs-web/tests/people_scale_browser.mjs` measures list, search and profile timings with 5,000 synthetic people; not run yet. |
 
 ## Cross-pillar items
 
-These need files owned by other pillars. They were not edited.
+These touch files owned by other pillars. The edits are kept small and are
+listed so a landing can merge them with care.
 
-- **Inbox (desktop auto-link).** [`inbox_ui.rs`](../bruhs-desktop/src/views/workspace/inbox_ui.rs)
-  links an imported sender with `display_name.eq_ignore_ascii_case`. That ignores
-  aliases and non-ASCII case, and takes the first duplicate. It should use
-  `bruhs_models::person_names_match` across display names and aliases, and refuse
-  ambiguous matches.
+- **Inbox (desktop auto link).** [`inbox_ui.rs`](../bruhs-desktop/src/views/workspace/inbox_ui.rs)
+  used `display_name.eq_ignore_ascii_case` and took the first duplicate. It
+  now uses `bruhs_models::unique_person_named`: display names and aliases,
+  Unicode case folded, and no link when two profiles match. Not yet compiled.
 - **Inbox (web merge links).** The web merge commit
-  ([`commit.rs`](../bruhs-web/src/storage/people/merge/commit.rs)) does not
-  repoint Inbox participants or knowledge links to the surviving contact. The
-  desktop does. The fix writes to the Inbox store, so it needs coordination with
-  the Inbox owner.
-- **Meetings.** Deleting a meeting leaves its observations behind (PEOPLE-14).
+  ([`commit.rs`](../bruhs-web/src/storage/people/merge/commit.rs)) now
+  repoints Inbox participants and knowledge links to the survivor in the
+  same IndexedDB transaction and records them for undo. Not yet compiled.
+- **Inbox and meetings (Back to People).** The conversation and meeting
+  detail headers show a Back to People button only when opened from a
+  profile ([`inbox_page.rs`](../bruhs-web/src/components/inbox_page.rs),
+  [`meeting_detail.rs`](../bruhs-web/src/components/meeting_detail.rs)).
+- **Meetings (PEOPLE-14).** `delete_meeting` on both stores deletes derived
+  observations; the route announces `PeopleUpdated`.
 
 ## Evidence log
 
