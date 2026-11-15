@@ -137,9 +137,7 @@ impl Workspace {
                     .iter_mut()
                     .find(|event| event.id == conflict.event_id)
                 {
-                    event.start_at_ms = conflict.remote_start_at_ms;
-                    event.end_at_ms = conflict.remote_end_at_ms;
-                    event.updated_at = EpochMs::now().as_millis();
+                    conflict.apply_remote(event, EpochMs::now().as_millis());
                 }
                 cx.notify();
             });

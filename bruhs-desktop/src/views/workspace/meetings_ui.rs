@@ -3681,17 +3681,11 @@ impl Workspace {
                             });
                     if !already_pending {
                         this.scheduling_preferences.conflicts.push(
-                            bruhs_models::SchedulingConflict {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                event_id: local.id.clone(),
-                                event_title: local.title.clone(),
-                                local_start_at_ms: local.start_at_ms,
-                                local_end_at_ms: local.end_at_ms,
-                                remote_start_at_ms: remote.start_at_ms,
-                                remote_end_at_ms: remote.end_at_ms,
-                                detected_at_ms: EpochMs::now().as_millis(),
-                                resolution: None,
-                            },
+                            bruhs_models::SchedulingConflict::detected(
+                                local,
+                                remote,
+                                EpochMs::now().as_millis(),
+                            ),
                         );
                         this.scheduling_preferences.updated_at_ms = EpochMs::now().as_millis();
                         this.persist_and_notify(cx);

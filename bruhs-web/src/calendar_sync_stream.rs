@@ -137,17 +137,11 @@ fn apply_event(event: CalendarSyncEvent, state: CalendarState) {
                     if !already_pending {
                         preferences
                             .conflicts
-                            .push(bruhs_models::SchedulingConflict {
-                                id: uuid::Uuid::new_v4().to_string(),
-                                event_id: existing.id.clone(),
-                                event_title: existing.title.clone(),
-                                local_start_at_ms: existing.start_at_ms,
-                                local_end_at_ms: existing.end_at_ms,
-                                remote_start_at_ms: event.start_at_ms,
-                                remote_end_at_ms: event.end_at_ms,
-                                detected_at_ms: crate::clock::now_ms(),
-                                resolution: None,
-                            });
+                            .push(bruhs_models::SchedulingConflict::detected(
+                                existing,
+                                &event,
+                                crate::clock::now_ms(),
+                            ));
                         preferences.updated_at_ms = crate::clock::now_ms();
                     }
                 });
