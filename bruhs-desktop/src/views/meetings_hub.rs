@@ -131,9 +131,13 @@ pub enum HubEvent {
         local_only: bool,
     },
     /// An undo of a delete put the contact back.
-    PersonRestored { person_id: String },
+    PersonRestored {
+        person_id: String,
+    },
     /// An undo of a merge put both contacts back.
-    PersonUnmerged { source_id: String },
+    PersonUnmerged {
+        source_id: String,
+    },
     /// A confirmed rename or opt-out change that can be undone.
     PeopleUndoReady(Box<bruhs_models::PeopleUndo>),
     /// An undo did not complete; nothing else changed.
@@ -1296,9 +1300,9 @@ impl MeetingsHub {
                             p.updated_at = updated.updated_at;
                         }
                         hub.people_changed(cx);
-                        if let Some(before) = before.filter(|before| {
-                            record_undo && *before != updated.display_name
-                        }) {
+                        if let Some(before) =
+                            before.filter(|before| record_undo && *before != updated.display_name)
+                        {
                             cx.emit(HubEvent::PeopleUndoReady(Box::new(
                                 bruhs_models::PeopleUndo::Rename {
                                     person_id: updated.id.clone(),

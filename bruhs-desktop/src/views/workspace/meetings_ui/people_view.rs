@@ -136,7 +136,11 @@ impl PeoplePageState {
 }
 
 /// A people page item kind button: pressed state is visible and announced.
-fn kind_button(id: impl Into<ElementId>, kind: RelationshipItemKind, pressed: bool) -> Stateful<Div> {
+fn kind_button(
+    id: impl Into<ElementId>,
+    kind: RelationshipItemKind,
+    pressed: bool,
+) -> Stateful<Div> {
     div()
         .id(id)
         .role(Role::Button)
@@ -525,7 +529,10 @@ impl Workspace {
     }
 
     /// PEOPLE-10: delete after the confirmation was accepted.
-    pub(in crate::views::workspace) fn confirm_person_delete(&mut self, cx: &mut Context<'_, Self>) {
+    pub(in crate::views::workspace) fn confirm_person_delete(
+        &mut self,
+        cx: &mut Context<'_, Self>,
+    ) {
         let Some(person_id) = self.people_page.confirm_delete.take() else {
             return;
         };
@@ -560,11 +567,9 @@ impl Workspace {
                 *slot = None;
             }
         }
-        if self
-            .merge
-            .as_ref()
-            .is_some_and(|merge| merge.person_id == id || merge.target_id.as_deref() == Some(id.as_str()))
-        {
+        if self.merge.as_ref().is_some_and(|merge| {
+            merge.person_id == id || merge.target_id.as_deref() == Some(id.as_str())
+        }) {
             self.merge = None;
         }
         if self
@@ -820,7 +825,10 @@ impl Workspace {
     }
 
     /// Web `PeoplePage`.
-    pub(in crate::views::workspace) fn render_people_page(&self, cx: &Context<'_, Self>) -> AnyElement {
+    pub(in crate::views::workspace) fn render_people_page(
+        &self,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let people = self.people_matching_search(cx);
         let page = self.people_page_index(&people);
         let page_count = people_page_count(people.len());
@@ -853,8 +861,18 @@ impl Workspace {
                 .flex_wrap()
                 .items_start()
                 .gap_3()
-                .child(div().flex_1().min_w(px(240.0)).child(self.render_people_create(cx)))
-                .child(div().flex_1().min_w(px(240.0)).child(self.render_people_search(cx))),
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(240.0))
+                        .child(self.render_people_create(cx)),
+                )
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w(px(240.0))
+                        .child(self.render_people_search(cx)),
+                ),
         );
         if let Some(notice) = &self.people_page.notice {
             page_el = page_el.child(
@@ -956,7 +974,11 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap_1()
-            .child(label(copy::CREATE_LABEL, LABEL_SM_PX, theme::rambutan_500()))
+            .child(label(
+                copy::CREATE_LABEL,
+                LABEL_SM_PX,
+                theme::rambutan_500(),
+            ))
             .child(
                 div()
                     .flex()
@@ -1005,7 +1027,11 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap_1()
-            .child(label(copy::SEARCH_LABEL, LABEL_SM_PX, theme::rambutan_500()))
+            .child(label(
+                copy::SEARCH_LABEL,
+                LABEL_SM_PX,
+                theme::rambutan_500(),
+            ))
             .child(
                 div()
                     .debug_selector(|| "desktop-people-search".into())
@@ -1172,11 +1198,16 @@ impl Workspace {
         if waiting > 0 {
             section = section
                 .child(
-                    div().id("desktop-people-merge-waiting").role(Role::Status).child(label(
-                        format!("Server confirmed; local merge still pending for {waiting} contact(s)."),
-                        LABEL_SM_PX,
-                        theme::rambutan_400(),
-                    )),
+                    div()
+                        .id("desktop-people-merge-waiting")
+                        .role(Role::Status)
+                        .child(label(
+                            format!(
+                            "Server confirmed; local merge still pending for {waiting} contact(s)."
+                        ),
+                            LABEL_SM_PX,
+                            theme::rambutan_400(),
+                        )),
                 )
                 .child(
                     web_button(
@@ -1318,7 +1349,8 @@ impl Workspace {
                                 if opening {
                                     this.load_relationship_inputs(&id_toggle, window, cx);
                                 }
-                                *this.people_page.seen_expanded.borrow_mut() = this.expanded_person_id.clone();
+                                *this.people_page.seen_expanded.borrow_mut() =
+                                    this.expanded_person_id.clone();
                                 cx.notify();
                             }))
                             .child(name_slot)
@@ -1515,7 +1547,11 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap_2()
-            .child(body(copy::delete_confirm(name), BODY_SM_PX, theme::rambutan_200()))
+            .child(body(
+                copy::delete_confirm(name),
+                BODY_SM_PX,
+                theme::rambutan_200(),
+            ))
             .child(
                 div()
                     .flex()
@@ -1545,9 +1581,9 @@ impl Workspace {
                         .debug_selector(|| "desktop-person-delete-commit".into())
                         .aria_label(format!("{} {name}", copy::DELETE_BUTTON))
                         .child(copy::DELETE_BUTTON)
-                        .on_click(cx.listener(|this, _ev, _window, cx| {
-                            this.confirm_person_delete(cx)
-                        })),
+                        .on_click(
+                            cx.listener(|this, _ev, _window, cx| this.confirm_person_delete(cx)),
+                        ),
                     ),
             )
             .into_any_element()
@@ -1581,9 +1617,11 @@ impl Workspace {
                                 theme::lychee_300(),
                             )
                             .aria_label(format!("Remove alias {alias}"))
-                            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                this.remove_person_alias(&remove_id, &remove_alias, cx)
-                            })),
+                            .on_click(cx.listener(
+                                move |this, _ev, _window, cx| {
+                                    this.remove_person_alias(&remove_id, &remove_alias, cx)
+                                },
+                            )),
                         )
                 }))
                 .into_any_element()
@@ -1601,7 +1639,11 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap_2()
-            .child(label(copy::ALIASES_HEADING, LABEL_SM_PX, theme::rambutan_500()))
+            .child(label(
+                copy::ALIASES_HEADING,
+                LABEL_SM_PX,
+                theme::rambutan_500(),
+            ))
             .child(aliases)
             .child(
                 div()
@@ -1624,9 +1666,9 @@ impl Workspace {
                         )
                         .aria_label(copy::ALIAS_BUTTON)
                         .child(copy::ALIAS_BUTTON)
-                        .on_click(cx.listener(move |this, _ev, window, cx| {
-                            this.add_person_alias(&add_id, window, cx)
-                        })),
+                        .on_click(cx.listener(
+                            move |this, _ev, window, cx| this.add_person_alias(&add_id, window, cx),
+                        )),
                     ),
             )
             .when_some(self.people_page.alias_error.clone(), |el, message| {
@@ -1665,9 +1707,11 @@ impl Workspace {
                         )
                         .debug_selector(move || format!("desktop-person-meeting-{index}"))
                         .aria_label(format!("Open meeting {title}"))
-                        .on_click(cx.listener(move |this, _ev, _window, cx| {
-                            this.open_person_meeting(&person_id, meeting_id.clone(), cx)
-                        })),
+                        .on_click(cx.listener(
+                            move |this, _ev, _window, cx| {
+                                this.open_person_meeting(&person_id, meeting_id.clone(), cx)
+                            },
+                        )),
                     )
                     .child(label(
                         format_started_at(meeting.started_at_ms),
@@ -1714,7 +1758,11 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap_3()
-            .child(section(copy::MEETINGS_HEADING, copy::MEETINGS_EMPTY, meetings))
+            .child(section(
+                copy::MEETINGS_HEADING,
+                copy::MEETINGS_EMPTY,
+                meetings,
+            ))
             .child(section(
                 copy::CONVERSATIONS_HEADING,
                 copy::CONVERSATIONS_EMPTY,
@@ -1820,8 +1868,9 @@ impl Workspace {
                     }))
                     .into_any_element()
                 }
-                None => label(suggestion.reason, LABEL_SM_PX, theme::blueberry_200())
-                    .into_any_element(),
+                None => {
+                    label(suggestion.reason, LABEL_SM_PX, theme::blueberry_200()).into_any_element()
+                }
             }
         })
         .collect::<Vec<_>>();
@@ -1959,7 +2008,11 @@ impl Workspace {
         let meta = format!(
             "{}{}",
             item.kind.label(),
-            if item.due_at_ms.is_some() { ", due" } else { "" }
+            if item.due_at_ms.is_some() {
+                ", due"
+            } else {
+                ""
+            }
         );
         div()
             .flex()
@@ -2077,12 +2130,9 @@ impl Workspace {
                     .flex_wrap()
                     .items_center()
                     .gap_2()
-                    .child(
-                        div()
-                            .flex_1()
-                            .min_w(px(160.0))
-                            .child(Input::new(&self.people_page.item_edit_input).aria_label("Item text")),
-                    )
+                    .child(div().flex_1().min_w(px(160.0)).child(
+                        Input::new(&self.people_page.item_edit_input).aria_label("Item text"),
+                    ))
                     .child(
                         Checkbox::new("desktop-relationship-edit-due")
                             .label(copy::DUE_TOMORROW)
@@ -2103,10 +2153,12 @@ impl Workspace {
                         )
                         .aria_label(copy::CANCEL)
                         .child(copy::CANCEL)
-                        .on_click(cx.listener(|this, _event, _window, cx| {
-                            this.people_page.editing_item = None;
-                            cx.notify();
-                        })),
+                        .on_click(cx.listener(
+                            |this, _event, _window, cx| {
+                                this.people_page.editing_item = None;
+                                cx.notify();
+                            },
+                        )),
                     )
                     .child(
                         web_button(
@@ -2118,9 +2170,7 @@ impl Workspace {
                         .debug_selector(|| "desktop-relationship-edit-save".into())
                         .aria_label(copy::ITEM_SAVE)
                         .child(copy::ITEM_SAVE)
-                        .on_click(cx.listener(|this, _event, _window, cx| {
-                            this.save_item_edit(cx)
-                        })),
+                        .on_click(cx.listener(|this, _event, _window, cx| this.save_item_edit(cx))),
                     ),
             )
             .when_some(self.people_page.item_error, |el, message| {
@@ -2242,12 +2292,14 @@ impl Workspace {
                                 theme::rambutan_500(),
                                 theme::rambutan_300(),
                             )
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                if let Some(merge) = &mut this.merge {
-                                    merge.confirming = false;
-                                }
-                                cx.notify();
-                            })),
+                            .on_click(cx.listener(
+                                |this, _ev, _window, cx| {
+                                    if let Some(merge) = &mut this.merge {
+                                        merge.confirming = false;
+                                    }
+                                    cx.notify();
+                                },
+                            )),
                         )
                         .child(
                             text_button(
@@ -2261,23 +2313,25 @@ impl Workspace {
                                 "{} {source_name} into {target_name}",
                                 copy::MERGE_CONFIRM_BUTTON
                             ))
-                            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                let Some(target) = this
-                                    .merge
-                                    .as_ref()
-                                    .filter(|merge| merge.confirming)
-                                    .and_then(|merge| merge.target_id.clone())
-                                else {
-                                    return;
-                                };
-                                this.merge = None;
-                                this.people_page.notice = None;
-                                this.people_page.pending_merge =
-                                    Some((source.clone(), target.clone()));
-                                let source = source.clone();
-                                this.meetings_hub
-                                    .update(cx, |hub, cx| hub.merge_people(source, target, cx));
-                            })),
+                            .on_click(cx.listener(
+                                move |this, _ev, _window, cx| {
+                                    let Some(target) = this
+                                        .merge
+                                        .as_ref()
+                                        .filter(|merge| merge.confirming)
+                                        .and_then(|merge| merge.target_id.clone())
+                                    else {
+                                        return;
+                                    };
+                                    this.merge = None;
+                                    this.people_page.notice = None;
+                                    this.people_page.pending_merge =
+                                        Some((source.clone(), target.clone()));
+                                    let source = source.clone();
+                                    this.meetings_hub
+                                        .update(cx, |hub, cx| hub.merge_people(source, target, cx));
+                                },
+                            )),
                         ),
                 );
         } else {

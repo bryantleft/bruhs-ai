@@ -353,7 +353,13 @@ pub(super) fn restore_merge_links(
 ) -> MeetingStoreResult<()> {
     for id in links.meeting_ids() {
         update_meeting_if(connection, id, |meeting| {
-            person_changes::restore_meeting_links(meeting, source_id, target_id, merged_label, links)
+            person_changes::restore_meeting_links(
+                meeting,
+                source_id,
+                target_id,
+                merged_label,
+                links,
+            )
         })?;
     }
     Ok(())

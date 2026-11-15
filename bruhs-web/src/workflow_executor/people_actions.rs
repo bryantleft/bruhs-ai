@@ -136,7 +136,10 @@ impl WorkflowExecutor {
         let Some(person) = self.person_untracked(&id) else {
             return;
         };
-        let guard = match self.relationships.begin_transaction(std::slice::from_ref(&id)) {
+        let guard = match self
+            .relationships
+            .begin_transaction(std::slice::from_ref(&id))
+        {
             Ok(guard) => guard,
             Err(error) => {
                 self.people_failed(error.to_string());
@@ -187,7 +190,9 @@ impl WorkflowExecutor {
     }
 
     fn forget_person_in_memory(self, id: &str) {
-        self.set_people.0.update(|people| people.retain(|person| person.id != id));
+        self.set_people
+            .0
+            .update(|people| people.retain(|person| person.id != id));
         self.inbox.0.update(|items| {
             unlink_person(id, items, &mut []);
         });
@@ -199,15 +204,23 @@ impl WorkflowExecutor {
     /// Another client deleted a contact: apply the same cascade here. This
     /// browser keeps no undo for a change it did not make.
     pub fn remote_person_deleted(self, id: String) {
-        if self.people_deleting.with_untracked(|deleting| deleting.as_deref() == Some(id.as_str())) {
+        if self
+            .people_deleting
+            .with_untracked(|deleting| deleting.as_deref() == Some(id.as_str()))
+        {
             return;
         }
         let Some(person) = self.person_untracked(&id) else {
             return;
         };
-        let Ok(guard) = self.relationships.begin_transaction(std::slice::from_ref(&id)) else {
+        let Ok(guard) = self
+            .relationships
+            .begin_transaction(std::slice::from_ref(&id))
+        else {
             // Edits are saving; drop the contact from view and let the next load settle it.
-            self.set_people.0.update(|people| people.retain(|person| person.id != id));
+            self.set_people
+                .0
+                .update(|people| people.retain(|person| person.id != id));
             return;
         };
         let relationship = guard.expected().get(&id).cloned().flatten();
@@ -306,9 +319,12 @@ impl WorkflowExecutor {
                 person_id, before, ..
             } => {
                 drop(guard);
-                let updated = crate::api::rename_person(person_id, before)
-                    .await
-                    .map_err(|error| format!("The rename was not undone. Try again. Details: {error}"))?;
+                let updated =
+                    crate::api::rename_person(person_id, before)
+                        .await
+                        .map_err(|error| {
+                            format!("The rename was not undone. Try again. Details: {error}")
+                        })?;
                 self.cache_people(vec![updated]).await;
                 Ok(())
             }
@@ -333,9 +349,11 @@ impl WorkflowExecutor {
                 let restored_person = if *local_only {
                     person.clone()
                 } else {
-                    crate::api::restore_person(&person.id).await.map_err(|error| {
-                        format!("The delete was not undone. Try again. Details: {error}")
-                    })?
+                    crate::api::restore_person(&person.id)
+                        .await
+                        .map_err(|error| {
+                            format!("The delete was not undone. Try again. Details: {error}")
+                        })?
                 };
                 let restored = changes::restore(
                     &restored_person,
@@ -349,7 +367,10 @@ impl WorkflowExecutor {
                 })?;
                 guard.replaced(vec![(person.id.clone(), relationship.clone())]);
                 self.set_people.0.update(|people| {
-                    if !people.iter().any(|current| current.id == restored_person.id) {
+                    if !people
+                        .iter()
+                        .any(|current| current.id == restored_person.id)
+                    {
                         people.push(restored_person.clone());
                     }
                 });
@@ -381,9 +402,11 @@ impl WorkflowExecutor {
                             && record.target.id == *target_id
                     })
                     .ok_or_else(|| PeopleUndoError::ProfileChanged.message().to_string())?;
-                let reply = crate::api::unmerge_person(source_id).await.map_err(|error| {
-                    format!("The merge was not undone. Try again. Details: {error}")
-                })?;
+                let reply = crate::api::unmerge_person(source_id)
+                    .await
+                    .map_err(|error| {
+                        format!("The merge was not undone. Try again. Details: {error}")
+                    })?;
                 let restored = merge::unmerge(&record, &reply).await.map_err(|error| {
                     format!("The server undid the merge, but this browser could not save it. Reload People. Details: {error}")
                 })?;
@@ -393,7 +416,10 @@ impl WorkflowExecutor {
                 ]);
                 self.set_people.0.update(|people| {
                     people.retain(|person| person.id != reply.source.id);
-                    if let Some(target) = people.iter_mut().find(|person| person.id == reply.target.id) {
+                    if let Some(target) = people
+                        .iter_mut()
+                        .find(|person| person.id == reply.target.id)
+                    {
                         *target = reply.target.clone();
                     } else {
                         people.push(reply.target.clone());

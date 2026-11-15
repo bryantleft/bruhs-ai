@@ -24,7 +24,10 @@ fn due_option(checked: bool) -> RelationshipDue {
 }
 
 /// The four kind buttons, as a pressed group.
-fn kind_buttons(selected: RwSignal<RelationshipItemKind>, on_pick: impl Fn() + Copy + 'static) -> impl IntoView {
+fn kind_buttons(
+    selected: RwSignal<RelationshipItemKind>,
+    on_pick: impl Fn() + Copy + 'static,
+) -> impl IntoView {
     view! {
         <div role="group" aria-label="Item kind" class="flex flex-wrap gap-1">
             {RELATIONSHIP_ITEM_KINDS.into_iter().map(|kind| view! {

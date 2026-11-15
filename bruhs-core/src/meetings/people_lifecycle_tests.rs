@@ -83,10 +83,20 @@ async fn sqlite_store() -> (tempfile::TempDir, SqliteMeetingStore) {
 /// (never deletes) its meeting links, and keeps retired merge ids
 /// resolvable. Restore puts every still unlinked link back.
 async fn delete_and_restore_contract(store: &dyn MeetingStore) {
-    let ada = contact(store, "ada", "Ada", &["Countess"], vec![observation("m1", "Engines")]).await;
+    let ada = contact(
+        store,
+        "ada",
+        "Ada",
+        &["Countess"],
+        vec![observation("m1", "Engines")],
+    )
+    .await;
     contact(store, "zoe", "Zoë", &[], Vec::new()).await;
     contact(store, "old", "Old Ada", &[], Vec::new()).await;
-    store.merge_person_into(&pid("old"), &pid("ada")).await.unwrap();
+    store
+        .merge_person_into(&pid("old"), &pid("ada"))
+        .await
+        .unwrap();
     let ada = store.get_person("ada").await.unwrap().unwrap_or(ada);
     linked_meeting(
         store,
@@ -145,7 +155,10 @@ async fn delete_and_restore_contract(store: &dyn MeetingStore) {
     assert_eq!(restored.aliases, ada.aliases);
     assert_eq!(restored.observations, ada.observations);
     assert!(restored.updated_at > ada.updated_at, "a new version");
-    assert_eq!(store.get_person("ada").await.unwrap(), Some(restored.clone()));
+    assert_eq!(
+        store.get_person("ada").await.unwrap(),
+        Some(restored.clone())
+    );
     let meeting = store.get_meeting("m1").await.unwrap().unwrap();
     assert_eq!(meeting.speakers[0].person_id.as_deref(), Some("ada"));
     let items = &meeting.summary.as_ref().unwrap().action_items;
@@ -187,7 +200,11 @@ async fn restore_refusal_contract(store: &dyn MeetingStore) {
     linked_meeting(store, "m1", ("ada", "Ada"), &[("Write notes", Some("ada"))]).await;
     store.delete_person(&pid("ada")).await.unwrap();
     store
-        .link_speaker_to_person(&"m1".parse().unwrap(), &"them_1".parse().unwrap(), &pid("zoe"))
+        .link_speaker_to_person(
+            &"m1".parse().unwrap(),
+            &"them_1".parse().unwrap(),
+            &pid("zoe"),
+        )
         .await
         .unwrap();
     store.restore_person(&pid("ada")).await.unwrap();
@@ -236,8 +253,21 @@ async fn unmerge_contract(store: &dyn MeetingStore) {
         .patch_person_tracked(&pid("source"), false)
         .await
         .unwrap();
-    let target = contact(store, "target", "Taylor", &[], vec![observation("m1", "Target note")]).await;
-    linked_meeting(store, "m1", ("source", "Sam"), &[("Write notes", Some("source"))]).await;
+    let target = contact(
+        store,
+        "target",
+        "Taylor",
+        &[],
+        vec![observation("m1", "Target note")],
+    )
+    .await;
+    linked_meeting(
+        store,
+        "m1",
+        ("source", "Sam"),
+        &[("Write notes", Some("source"))],
+    )
+    .await;
 
     let merged = store
         .merge_person_into(&pid("source"), &pid("target"))
@@ -380,7 +410,12 @@ async fn alias_contract(store: &dyn MeetingStore) {
     let saved = store
         .set_person_aliases(
             &pid("ada"),
-            vec![" Countess ".into(), "countess".into(), "ADA".into(), String::new()],
+            vec![
+                " Countess ".into(),
+                "countess".into(),
+                "ADA".into(),
+                String::new(),
+            ],
         )
         .await
         .unwrap();
@@ -409,7 +444,10 @@ async fn alias_contract(store: &dyn MeetingStore) {
     assert_eq!(appended.len(), 1);
     assert_eq!(appended[0].id, "ada");
 
-    let cleared = store.set_person_aliases(&pid("ada"), Vec::new()).await.unwrap();
+    let cleared = store
+        .set_person_aliases(&pid("ada"), Vec::new())
+        .await
+        .unwrap();
     assert!(cleared.aliases.is_empty());
     assert!(matches!(
         store.set_person_aliases(&pid("nobody"), Vec::new()).await,
