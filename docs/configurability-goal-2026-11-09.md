@@ -103,7 +103,18 @@ meeting type. Preserve existing skip rules and recording consent. Explain which
 rule matched, what will happen, and when; keep preview, cancellation, and failure
 feedback available. Test quiet-hour boundaries and overlapping rules.
 
+Status 2026-11-14 (partial): reactive agent updates have per-kind system
+notification choices (updates, questions) and quiet hours in an explicit IANA
+time zone, enforced by the local server with boundary tests
+(`bruhs-core/src/reactive/clock.rs`, `docs/reactive-agents.md`). Recording
+countdown preferences and calendar/meeting-type automation rules remain open.
+
 ### 7. Memory controls
+
+Status 2026-11-14 (partial): reactive agents' own memory can be inspected,
+edited, forgotten, tidied and copied with per-entry run provenance on both
+surfaces (`docs/reactive-agents.md#memory`). Scope, expiration and the other
+memory sources remain open.
 
 Let users choose what is remembered, its personal/project scope, and expiration.
 Distinguish factual notes from inferred tone or other observations. Provide ways

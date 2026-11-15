@@ -8,7 +8,7 @@ This is local working tree delivery for BNLE-36. It has not been published as a 
 
 1. Open Automations, then New report preset.
 2. Choose an existing project folder and model. Select local Git commits, GitHub PRs or GitHub deployments. GitHub feeds use the host's `gh` login and the selected project's GitHub origin.
-3. Save the preset. Enable Repeat every seven days for background generation while the local server runs. New schedules first run after seven days; a resumed schedule can catch up on a missed window.
+3. Save the preset. Enable Repeat every seven days for background generation while the local server runs. New schedules first run after seven days; a resumed schedule can catch up on a missed window. Choose **Fixed weekday and time** under Schedule to run at, for example, Monday 09:00 in your time zone instead; the reporting window then ends at that slot. A finished report appears under Automations → Updates.
 4. Generate a report now. Leave the UTC window end blank for the latest seven days, or enter a historical end such as `2026-11-06T15:00:00Z`. All windows include their start and exclude their end.
 5. Open the saved report to edit its title and Markdown, inspect sources, or reopen its project and agent conversation. The conversation receives the selected saved body as an unsent draft.
 
