@@ -174,11 +174,6 @@ impl DesktopCalendarEvent {
         )
     }
 
-    /// [`Self::instants_in`] the machine zone.
-    pub(super) fn instants(&self) -> (i64, i64) {
-        self.instants_in(local_offset_minutes_east)
-    }
-
     /// The event at UTC instants, shown in the zone `offset_at` describes.
     pub(super) fn with_instants_in(
         mut self,
