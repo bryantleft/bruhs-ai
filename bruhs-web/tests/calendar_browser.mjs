@@ -26,6 +26,7 @@ const relevantSources = [
   'bruhs-web/src/components/calendar_page.rs',
   'bruhs-web/src/components/timegrid_view.rs',
   'bruhs-web/src/components/month_view.rs',
+  'bruhs-web/src/ui/dialog.rs',
   'bruhs-web/src/components/event_create_dialog.rs',
   'bruhs-web/src/calendar_sync_stream.rs',
   'bruhs-web/src/workflow_executor.rs',
@@ -170,6 +171,13 @@ try {
     const block = id => page.locator(`[role="button"][data-event-id="${id}"]`);
     const column = () => page.locator('div.relative.border-l').first();
     const dialog = () => page.getByRole('dialog', { name: 'Calendar event', exact: true });
+    const dayList = () => page.getByRole('dialog', { name: 'Calendar day', exact: true });
+    // A month cell shows three records and clips on compact widths; its
+    // date opens every event and due task of that day.
+    async function openDay(iso) {
+      await page.locator(`button[data-calendar-day="${iso}"]`).click();
+      await dayList().waitFor();
+    }
     async function snapshot(name) {
       const file = `${cell.name}-${name}.png`;
       await page.screenshot({ path: path.join(output, file) });
@@ -309,7 +317,9 @@ try {
       const providerColor = (await dialog().getByRole('button', { name: 'Color', exact: true }).innerText()).trim();
       check(providerColor === 'Calendar color', 'an uncolored Google event shows its calendar color, not Persimmon', providerColor);
       const providerSave = await dialog().getByRole('button', { name: 'Save', exact: true }).getAttribute('class');
-      check(!providerSave.includes('persimmon'), 'the read-only Save uses the neutral disabled treatment, not the persimmon action', providerSave);
+      // The persimmon focus outline is the standard ring on every control;
+      // the action fill is what must not be persimmon.
+      check(providerSave.includes('bg-transparent') && !/(^|\s)([a-z-]+:)*bg-persimmon-/.test(providerSave), 'the read-only Save uses the neutral outline treatment, not the persimmon action fill', providerSave);
       await snapshot('provider-dialog');
       await target(dialog().getByRole('button', { name: 'Cancel', exact: true }), 'event dialog Cancel', 32);
       await target(dialog().getByRole('button', { name: 'Save', exact: true }), 'event dialog Save', 32);
@@ -358,10 +368,16 @@ try {
       await dialog().waitFor({ state: 'hidden' });
       await persisted(records => !records.some(r => r.id === createdTimed.id), 'Delete in the dialog removes the timed event');
       await modeButton('Month').click();
-      const allDayPill = page.locator(`button[data-event-id="${createdAllDay.id}"]`);
-      await allDayPill.waitFor();
-      check(await allDayPill.count() === 1, 'the created all-day event is restored after a reload on its own day', await allDayPill.count());
-      await allDayPill.click();
+      check(await page.locator('button[data-calendar-more="2026-11-01"]').count() === 1, 'a day with more than three records offers +N more');
+      await openDay('2026-11-02');
+      check(await dayList().locator(`button[data-day-list-event="${createdAllDay.id}"]`).count() === 0, 'the created all-day event does not spill into November 2');
+      await page.keyboard.press('Escape');
+      await dayList().waitFor({ state: 'hidden' });
+      await openDay('2026-11-01');
+      const allDayRow = dayList().locator(`button[data-day-list-event="${createdAllDay.id}"]`);
+      check(await allDayRow.count() === 1, 'the created all-day event is restored after a reload on its own day', await allDayRow.count());
+      await target(allDayRow, 'day list event row', 32);
+      await allDayRow.click();
       await dialog().getByText('Edit event', { exact: true }).waitFor();
       await dialog().getByRole('button', { name: 'Delete', exact: true }).click();
       await dialog().waitFor({ state: 'hidden' });
@@ -387,9 +403,10 @@ try {
         await ready();
       }
       await modeButton('Month').click();
-      const dueMarker = page.locator(`button[data-calendar-task="${dueTask.id}"]`);
-      await dueMarker.waitFor();
+      await openDay('2026-11-01');
+      const dueMarker = dayList().locator(`button[data-day-list-task="${dueTask.id}"]`);
       check(await dueMarker.getAttribute('aria-label') === `Open task ${dueTask.title}, due this day`, 'the due marker names its task', await dueMarker.getAttribute('aria-label'));
+      await target(dueMarker, 'day list task row', 32);
       await dueMarker.click();
       check(await focusedTaskTitle() === dueTask.title, 'a due marker opens its task in Tasks with the title focused', await page.evaluate(() => [location.hash, document.activeElement?.id]));
       await backToCalendar();
