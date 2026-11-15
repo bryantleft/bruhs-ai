@@ -35,6 +35,7 @@ fn reactive_draft_is_previewed_without_granting_write_or_starting_a_job(
             operations: vec![WorkflowOperation::CreateTask {
                 title: "Review the quote".into(),
             }],
+            run_id: "run-42".into(),
         });
     });
     cx.run_until_parked();
@@ -42,6 +43,14 @@ fn reactive_draft_is_previewed_without_granting_write_or_starting_a_job(
         let workflow = workspace.automation_state.workflows.last().unwrap();
         assert_eq!(workflow.title, "Follow up after the meeting");
         assert_eq!(workflow.status, WorkflowStatus::Previewed);
+        assert_eq!(
+            workflow
+                .origin
+                .as_ref()
+                .map(|origin| origin.reactive_run_id.as_str()),
+            Some("run-42"),
+            "the draft's run receives the owner's decision"
+        );
         assert_eq!(workspace.reviewed_workflow_id.as_ref(), Some(&workflow.id));
         assert!(!workspace
             .automation_state

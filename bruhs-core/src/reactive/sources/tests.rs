@@ -350,6 +350,7 @@ async fn restarted_weekly_source_wakes_for_its_persisted_deadline() {
                     auto_run: false,
                     debounce_ms: 0,
                     throttle_ms: 0,
+                    on_busy: Default::default(),
                 },
             },
         })

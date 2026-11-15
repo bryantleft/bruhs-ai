@@ -33,6 +33,7 @@ fn subscription(auto_run: bool) -> Subscription {
         auto_run,
         debounce_ms: 0,
         throttle_ms: 0,
+        on_busy: Default::default(),
     }
 }
 
@@ -91,7 +92,7 @@ async fn duplicate_events_have_one_receipt_and_conflicting_reuse_fails() {
 async fn second_runtime_cannot_recover_or_execute_a_live_database() {
     let (dir, runtime) = configured(true).await;
     runtime.publish("scans", "one", json!({})).await.unwrap();
-    let (_, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let store::Claim { run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
     assert!(matches!(
         ReactiveRuntime::open(dir.path().join("reactive.sqlite3")).await,
         Err(ReactiveError::Conflict(_))
@@ -331,7 +332,7 @@ async fn queue_budget_is_global_and_ingestion_capacity_accounts_for_subscription
 async fn oversized_results_are_marked_partial_and_cannot_claim_completion() {
     let (_dir, runtime) = configured(true).await;
     runtime.publish("scans", "one", json!({})).await.unwrap();
-    let (_, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let store::Claim { run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
     let id = run.id;
     runtime
         .call(move |connection| {
@@ -340,6 +341,7 @@ async fn oversized_results_are_marked_partial_and_cannot_claim_completion() {
                 &id,
                 RunStatus::Completed,
                 Some("言".repeat(MAX_TEXT_CHARS + 1)),
+                None,
                 None,
             )
         })
@@ -361,7 +363,7 @@ async fn oversized_results_are_marked_partial_and_cannot_claim_completion() {
 async fn cancellation_retains_partial_output_without_overriding_its_receipt() {
     let (_dir, runtime) = configured(true).await;
     runtime.publish("scans", "one", json!({})).await.unwrap();
-    let (_, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let store::Claim { run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
     runtime
         .command(ReactiveCommand::CancelRun { id: run.id.clone() })
         .await
@@ -425,8 +427,8 @@ async fn explicit_approval_and_opted_in_subscriptions_both_keep_plan_permissions
         .command(ReactiveCommand::ApproveRun { id: run.id.clone() })
         .await
         .unwrap();
-    let (agent, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
-    let turn = worker::turn(&agent, &run);
+    let store::Claim { agent, run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let turn = worker::turn(&agent, &run, "");
     assert_eq!(turn.permission_mode, PermissionMode::Plan);
     assert_eq!(
         turn.thread_access,
@@ -442,6 +444,7 @@ async fn explicit_approval_and_opted_in_subscriptions_both_keep_plan_permissions
                 RunStatus::Completed,
                 Some("Draft".into()),
                 None,
+                None,
             )
         })
         .await
@@ -455,9 +458,9 @@ async fn explicit_approval_and_opted_in_subscriptions_both_keep_plan_permissions
         .await
         .unwrap();
     runtime.publish("scans", "two", json!({})).await.unwrap();
-    let (_, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let store::Claim { run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
     assert_eq!(
-        worker::turn(&agent, &run).permission_mode,
+        worker::turn(&agent, &run, "").permission_mode,
         PermissionMode::Plan
     );
 }
@@ -466,8 +469,9 @@ async fn explicit_approval_and_opted_in_subscriptions_both_keep_plan_permissions
 async fn restart_preserves_queued_work_and_marks_active_work_interrupted() {
     let (dir, runtime) = configured(true).await;
     runtime.publish("scans", "one", json!({})).await.unwrap();
+    let store::Claim { run: running, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
+    // Arrives mid-run, so it stays queued rather than joining the running turn.
     runtime.publish("scans", "two", json!({})).await.unwrap();
-    let (_, running) = runtime.call(store::claim_next).await.unwrap().unwrap();
     let id = running.id.clone();
     runtime
         .call(move |connection| {
@@ -498,7 +502,7 @@ async fn restart_preserves_queued_work_and_marks_active_work_interrupted() {
             .count(),
         1
     );
-    let (_, next) = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let store::Claim { run: next, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
     assert_ne!(next.id, running.id);
     assert_eq!(next.session_id.as_deref(), Some("persistent-session"));
 }
@@ -665,7 +669,7 @@ async fn memory_changes_drop_the_provider_session_and_fence_older_approved_turns
         })
         .await
         .unwrap();
-    let (_, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let store::Claim { run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
     let id = run.id.clone();
     runtime
         .call(move |connection| {
@@ -689,8 +693,8 @@ async fn memory_changes_drop_the_provider_session_and_fence_older_approved_turns
         })
         .await
         .unwrap();
-    let (agent, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
-    let turn = worker::turn(&agent, &run);
+    let store::Claim { agent, run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let turn = worker::turn(&agent, &run, "");
     assert!(run.session_id.is_none() && turn.fresh_session);
     assert!(turn.instructions.unwrap().contains("Prefer a table."));
 }
@@ -763,7 +767,7 @@ async fn debounce_coalesces_pending_runs_and_new_content_requires_new_review() {
 async fn late_success_cannot_overwrite_cancellation() {
     let (_dir, runtime) = configured(true).await;
     runtime.publish("scans", "one", json!({})).await.unwrap();
-    let (_, run) = runtime.call(store::claim_next).await.unwrap().unwrap();
+    let store::Claim { run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
     runtime
         .command(ReactiveCommand::CancelRun { id: run.id.clone() })
         .await
@@ -776,6 +780,7 @@ async fn late_success_cannot_overwrite_cancellation() {
                 &id,
                 RunStatus::Completed,
                 Some("Late answer".into()),
+                None,
                 None,
             )
         })

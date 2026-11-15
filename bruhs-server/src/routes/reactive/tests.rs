@@ -236,6 +236,7 @@ async fn weekly_report_preset_and_run_retry_use_the_same_http_contract_for_nativ
         github_pull_requests: false,
         github_deployments: false,
         scheduled: false,
+        schedule: None,
     };
     assert!(matches!(
         native

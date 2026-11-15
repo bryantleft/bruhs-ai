@@ -2,6 +2,7 @@
 
 use super::*;
 mod chat;
+mod draft_outcomes;
 mod history_ui;
 mod people;
 #[cfg(test)]
@@ -55,6 +56,12 @@ fn focus_operations() -> Vec<WorkflowOperation> {
 
 impl Workspace {
     pub(super) fn drive_background_automations(&mut self, cx: &mut Context<'_, Self>) {
+        // Runs once after load and after every save: report draft decisions
+        // back to their agents and keep agent update notices subscribed.
+        self.start_reactive_awareness(cx);
+        if self.save_status.is_saved() {
+            self.reconcile_draft_outcomes(cx);
+        }
         if !self.save_status.is_saved()
             || self.automation_error.is_some()
             || self.automation_pending

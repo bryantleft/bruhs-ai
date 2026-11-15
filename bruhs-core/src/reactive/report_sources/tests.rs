@@ -11,6 +11,7 @@ fn fixture(path: &Path) -> ReportJob {
             github_pull_requests: false,
             github_deployments: false,
             scheduled: false,
+            schedule: None,
         },
         window_start: EpochMs::saturating_from_i64(1_000_000_000_000),
         window_end: EpochMs::saturating_from_i64(1_000_604_800_000),

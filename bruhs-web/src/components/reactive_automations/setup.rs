@@ -1,4 +1,5 @@
 //! A reviewed automation saves its agent, source, and subscription as one command.
+use super::calendar::{calendar_source, local_time_zone, WeekdayToggles};
 use super::{
     apply, command_button, id, milliseconds, seconds, source_kind, Check, Field, CARD, SELECT,
 };
@@ -12,7 +13,7 @@ fn new_setup() -> AutomationSetup {
     AutomationSetup {
         agent:ReactiveAgent{id:agent_id.clone(),name:String::new(),instructions:String::new(),memory:String::new(),model:bruhs_models::agent::DEFAULT_AGENT_MODEL.into(),project_path:String::new(),enabled:true},
         source:EventSource{id:source_id.clone(),name:String::new(),enabled:true,kind:SourceKind::Folder{path:String::new(),pattern:"*.pdf".into(),recursive:true,settle_ms:2_000,poll_ms:5_000}},
-        subscription:Subscription{id:id(),agent_id,source_id,instructions:"Follow the automation's purpose for this event. Prepare a draft and flag uncertainty. Never perform writes or payments.".into(),enabled:true,auto_run:true,debounce_ms:0,throttle_ms:0},
+        subscription:Subscription{id:id(),agent_id,source_id,instructions:"Follow the automation's purpose for this event. Prepare a draft and flag uncertainty. Never perform writes or payments.".into(),enabled:true,auto_run:true,debounce_ms:0,throttle_ms:0,on_busy:BusyPolicy::Queue},
     }
 }
 
@@ -44,7 +45,13 @@ pub(super) fn AutomationSetupPanel(
     let auto_run = RwSignal::new(true);
     let debounce = RwSignal::new("0".into());
     let throttle = RwSignal::new("0".into());
+    let cal_times = RwSignal::new("08:00".to_string());
+    let cal_days = RwSignal::new(Vec::<u8>::new());
+    let cal_zone = RwSignal::new(local_time_zone());
     let open = Callback::new(move |setup: AutomationSetup| {
+        cal_times.set("08:00".into());
+        cal_days.set(Vec::new());
+        cal_zone.set(local_time_zone());
         command_folder.set(String::new());
         timeout.set("30".into());
         source_value.set(String::new());
@@ -96,6 +103,16 @@ pub(super) fn AutomationSetupPanel(
             SourceKind::Schedule { every_ms } => {
                 kind.set("schedule".into());
                 interval.set(seconds(*every_ms));
+            }
+            SourceKind::Calendar {
+                times,
+                weekdays,
+                time_zone,
+            } => {
+                kind.set("calendar".into());
+                cal_times.set(times.join(", "));
+                cal_days.set(weekdays.clone());
+                cal_zone.set(time_zone.clone());
             }
             SourceKind::Webhook => kind.set("webhook".into()),
             SourceKind::AppEvent { topic } => {
@@ -159,16 +176,24 @@ pub(super) fn AutomationSetupPanel(
             } else {
                 command_folder.get_untracked()
             };
-            setup.source.kind = source_kind(
-                &kind.get_untracked(),
-                source_value.get_untracked(),
-                cwd,
-                pattern.get_untracked(),
-                recursive.get_untracked(),
-                &interval.get_untracked(),
-                &settle.get_untracked(),
-                &timeout.get_untracked(),
-            )?;
+            setup.source.kind = if kind.get_untracked() == "calendar" {
+                calendar_source(
+                    &cal_times.get_untracked(),
+                    &cal_days.get_untracked(),
+                    &cal_zone.get_untracked(),
+                )?
+            } else {
+                source_kind(
+                    &kind.get_untracked(),
+                    source_value.get_untracked(),
+                    cwd,
+                    pattern.get_untracked(),
+                    recursive.get_untracked(),
+                    &interval.get_untracked(),
+                    &settle.get_untracked(),
+                    &timeout.get_untracked(),
+                )?
+            };
             setup.source.enabled = true;
             setup.subscription.instructions = note.get_untracked();
             setup.subscription.enabled = true;
@@ -195,13 +220,14 @@ pub(super) fn AutomationSetupPanel(
                     <div class="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Automation name" value=name /><Field label="Model" value=model /><div class="sm:col-span-2"><Field label="What should this automation do?" value=purpose multiline=true /></div><div class="sm:col-span-2"><Field label="Automation working folder" value=folder /></div>
                         <label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Starts when"</span><select aria-label="Automation source type" class=SELECT prop:value=move ||kind.get() on:change=move |event| {let value=event_target_value(&event);if value=="app_event"{source_value.set("meeting.completed".into());}
                         if value=="schedule"{interval.set("3600".into());}kind.set(value);}>
-                            {[("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(value,label)|view!{<option value=value>{label}</option>}).collect_view()}
+                            {[("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("calendar","At set times of day"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(value,label)|view!{<option value=value>{label}</option>}).collect_view()}
                         </select></label>
                         {move ||match kind.get().as_str(){
                             "folder"=>view!{<div class="space-y-3 sm:col-span-2"><Field label="Folder to watch" value=source_value /><Field label="File pattern" value=pattern /></div>}.into_any(),
                             "http"=>view!{<div class="sm:col-span-2"><Field label="Website URL" value=source_value /></div>}.into_any(),
                             "command"=>view!{<div class="sm:col-span-2"><Field label="Command to run" value=source_value multiline=true /><p class="mt-1 text-label-sm text-rambutan-400">"This command runs on your machine once you enable the automation."</p></div>}.into_any(),
                             "schedule"=>view!{<Field label="Run every, in seconds" value=interval />}.into_any(),
+                            "calendar"=>view!{<div class="space-y-3 sm:col-span-2"><Field label="Times (HH:MM, comma-separated)" value=cal_times /><WeekdayToggles value=cal_days /><Field label="Time zone" value=cal_zone /></div>}.into_any(),
                             "app_event"=>view!{<label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Meeting event"</span><select aria-label="Meeting event" class=SELECT prop:value=move ||source_value.get() on:change=move |event|source_value.set(event_target_value(&event))><option value="meeting.completed">"Meeting completed"</option><option value="meeting.transcribed">"Final transcript updated"</option><option value="meeting.summary">"Summary ready"</option></select></label>}.into_any(),
                             "webhook"=>view!{<p class="text-body-sm text-rambutan-400 sm:col-span-2">"A private endpoint is created when you enable this automation. Reveal its token in Advanced settings."</p>}.into_any(),
                             _=>view!{<p class="text-body-sm text-rambutan-400 sm:col-span-2">"Device bridges can publish events through the local API. Use a watched folder for FTP uploads."</p>}.into_any(),
@@ -222,10 +248,10 @@ pub(super) fn AutomationSetupPanel(
             })}
             <Show when=move ||snapshot.with(|s|s.as_ref().is_some_and(|s|s.subscriptions.is_empty()))><p class="text-body-sm text-rambutan-400">"No automations yet. Start with a scan folder, a meeting event, or a repeating check."</p></Show>
             {move ||snapshot.with(|s|s.as_ref().map(|s|s.subscriptions.iter().filter_map(|sub|AutomationSetup::from_subscription(s,sub)).collect::<Vec<_>>()).unwrap_or_default()).into_iter().map(|setup|{
-                let edit=setup.clone();let agent_id=setup.agent.id.clone();let subscription_id=setup.subscription.id.clone();let active=setup.enabled();let status=automation_status(&setup);
+                let edit=setup.clone();let agent_id=setup.agent.id.clone();let memory_agent=setup.agent.id.clone();let subscription_id=setup.subscription.id.clone();let active=setup.enabled();let status=automation_status(&setup);
                 let latest=snapshot.with(|s|s.as_ref().and_then(|s|s.runs.iter().find(|run|run.subscription_id.as_deref()==Some(subscription_id.as_str()))).cloned());
                 let source_error=snapshot.with(|s|s.as_ref().and_then(|s|s.source_statuses.iter().find(|status|status.source_id==setup.source.id)).and_then(|status|status.error.clone()));
-                view!{<article class=CARD><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><h3 class="break-words text-label text-rambutan-100">{setup.agent.name}</h3><p class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{setup.agent.instructions}</p><p class="mt-2 break-all text-label-sm text-rambutan-400">{source_summary(&setup.source.kind)}</p><p class="mt-1 text-label-sm text-blueberry-200">{status}</p>{latest.map(|run|view!{<p class="mt-1 text-label-sm text-rambutan-400">{format!("Latest activity: {}",super::run_label(run.status))}</p>})}{source_error.map(|message|view!{<p role="status" class="mt-1 break-words text-body-sm text-lychee-200">{message}</p>})}</div><div class="flex flex-wrap gap-2">{command_button(if active{"Pause automation"}else{"Resume automation"},ReactiveCommand::SetAutomationEnabled{id:subscription_id,enabled:!active},send)}<Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|open.run(edit.clone()))>"Edit automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|on_chat.run(agent_id.clone()))>"Chat"</Button></div></div></article>}
+                view!{<article class=CARD><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><h3 class="break-words text-label text-rambutan-100">{setup.agent.name}</h3><p class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{setup.agent.instructions}</p><p class="mt-2 break-all text-label-sm text-rambutan-400">{source_summary(&setup.source.kind)}</p><p class="mt-1 text-label-sm text-blueberry-200">{status}</p>{latest.map(|run|view!{<p class="mt-1 text-label-sm text-rambutan-400">{format!("Latest activity: {}",super::run_label(run.status))}</p>})}{source_error.map(|message|view!{<p role="status" class="mt-1 break-words text-body-sm text-lychee-200">{message}</p>})}</div><div class="flex flex-wrap gap-2">{command_button(if active{"Pause automation"}else{"Resume automation"},ReactiveCommand::SetAutomationEnabled{id:subscription_id,enabled:!active},send)}<Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|open.run(edit.clone()))>"Edit automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|on_chat.run(agent_id.clone()))>"Chat"</Button></div></div><super::memory::AgentMemoryPanel agent_id=memory_agent snapshot=snapshot send=send /></article>}
             }).collect_view()}
         </div>
     }
@@ -237,6 +263,11 @@ pub(super) fn source_summary(kind: &SourceKind) -> String {
         SourceKind::Http { url, .. } => format!("Website: {url}"),
         SourceKind::Command { command, .. } => format!("Command: {command}"),
         SourceKind::Schedule { every_ms } => format!("Every {} seconds", seconds(*every_ms)),
+        SourceKind::Calendar {
+            times,
+            weekdays,
+            time_zone,
+        } => describe_calendar(times, weekdays, time_zone),
         SourceKind::Webhook => "Authenticated webhook".into(),
         SourceKind::AppEvent { topic } => format!("App event: {topic}"),
         SourceKind::Custom => "Custom events from your integrations".into(),
@@ -261,6 +292,7 @@ fn source_details(kind: &SourceKind) -> String {
         SourceKind::Http{url,poll_ms}=>format!("URL: {url}\nCheck interval: {} seconds",seconds(*poll_ms)),
         SourceKind::Command{command,cwd,poll_ms,timeout_ms}=>format!("Command: {command}\nWorking folder: {cwd}\nCheck interval: {} seconds\nTimeout: {} seconds\nSource command access: Runs with the local server account's permissions. The agent's read-only tool policy does not restrict this command.",seconds(*poll_ms),seconds(*timeout_ms)),
         SourceKind::Schedule{every_ms}=>format!("Repeat every {} seconds",seconds(*every_ms)),
+        SourceKind::Calendar{times,weekdays,time_zone}=>describe_calendar(times,weekdays,time_zone),
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
         SourceKind::AppEvent{topic}=>format!("App event: {topic}"),
         SourceKind::Custom=>"Events published by your integrations through the local API.".into(),

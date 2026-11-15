@@ -1,5 +1,6 @@
 //! Reactive automation shares the local server's durable state with the web app.
 use super::{ServerClient, ServerError};
+use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
 use bruhs_models::weekly_reports::{EngineeringReport, WeeklyReportCommand, WeeklyReportsSnapshot};
 use serde::Deserialize;
@@ -61,6 +62,25 @@ impl ServerClient {
             reqwest::Method::POST,
             "/api/reactive/commands",
             Some(command),
+        )
+        .await
+    }
+
+    /// Whether the local server keeps running automations after the app quits.
+    pub async fn background_service(&self) -> Result<BackgroundService, ServerError> {
+        self.get_json("/api/service").await
+    }
+
+    /// Install or remove the login service. The installer can take a while.
+    pub async fn set_background_service(
+        &self,
+        action: BackgroundServiceAction,
+    ) -> Result<BackgroundService, ServerError> {
+        self.send_json_with_timeout(
+            reqwest::Method::POST,
+            "/api/service",
+            Some(&action),
+            std::time::Duration::from_secs(60),
         )
         .await
     }

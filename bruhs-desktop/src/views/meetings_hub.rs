@@ -73,6 +73,23 @@ pub struct MeetingPrefs {
 pub struct HubNotice {
     pub message: String,
     pub warning: bool,
+    /// An optional button beside Dismiss (web banner action).
+    pub action: Option<NoticeAction>,
+}
+
+/// Where a notice's action button takes the owner.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum NoticeAction {
+    /// An agent update arrived; open the automations view.
+    OpenAutomations,
+}
+
+impl NoticeAction {
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::OpenAutomations => "Open",
+        }
+    }
 }
 
 /// What the hub tells the workspace.
@@ -475,16 +492,36 @@ impl MeetingsHub {
         self.notify_notice(message, warning, cx);
     }
 
+    /// Show an informational notice with one action button.
+    pub fn show_notice_with_action(
+        &mut self,
+        message: impl Into<String>,
+        action: NoticeAction,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.post_notice(message.into(), false, Some(action), cx);
+    }
+
     fn notify_notice(
         &mut self,
         message: impl Into<String>,
         warning: bool,
         cx: &mut Context<'_, Self>,
     ) {
-        let message = message.into();
+        self.post_notice(message.into(), warning, None, cx);
+    }
+
+    fn post_notice(
+        &mut self,
+        message: String,
+        warning: bool,
+        action: Option<NoticeAction>,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.notice = Some(HubNotice {
             message: message.clone(),
             warning,
+            action,
         });
         cx.notify();
         // Web banners expire (8s); clear ours unless a newer one replaced it.

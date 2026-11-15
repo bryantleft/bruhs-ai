@@ -6,18 +6,26 @@ use crate::{
     theme,
 };
 use bruhs_models::reactive::*;
+mod editor_fields;
+mod memory;
+mod notifications;
+mod runs;
 mod setup;
+mod updates;
 mod weekly_reports;
 use gpui::{prelude::*, *};
 use gpui_component::input::{Input, InputState};
 use std::{
-    collections::HashSet,
+    collections::{HashMap, HashSet},
     rc::Rc,
     time::{Duration, Instant},
 };
+pub(crate) use updates::{unread_badge, unread_label};
 
 // Match the web panel and existing connection status polling.
 const REFRESH: Duration = Duration::from_secs(2);
+// While the panel is off screen, keep the unread badge and arrival notices current.
+const BACKGROUND_REFRESH: Duration = Duration::from_secs(15);
 
 struct AgentEditor {
     agent: ReactiveAgent,
@@ -38,6 +46,9 @@ struct SourceEditor {
     settle: Entity<InputState>,
     timeout: Entity<InputState>,
     recursive: bool,
+    times: Entity<InputState>,
+    weekdays: Vec<u8>,
+    time_zone: Entity<InputState>,
 }
 struct SubscriptionEditor {
     subscription: bruhs_models::reactive::Subscription,
@@ -65,6 +76,23 @@ enum Editor {
 pub(crate) struct ReactivePreview {
     pub title: String,
     pub operations: Vec<bruhs_models::WorkflowOperation>,
+    /// The run whose draft this is, so the owner's decision can flow back to it.
+    pub run_id: String,
+}
+
+/// A new unread agent update arrived while the app was open.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReactiveArrival {
+    pub message: String,
+}
+
+/// Where a failed command's message is shown.
+#[derive(Clone, Debug, PartialEq, Eq)]
+enum Scope {
+    General,
+    Updates,
+    Agent(String),
+    Notifications,
 }
 
 #[derive(Clone)]
@@ -88,7 +116,20 @@ pub(crate) struct ReactiveAutomations {
     request: Option<Task<()>>,
     poll: Option<Task<()>>,
     last_render: Instant,
+    last_refresh: Option<Instant>,
     weekly: weekly_reports::WeeklyReportsState,
+    /// Agent names from the unfiltered snapshot, so managed agents still have names.
+    agent_names: HashMap<String, String>,
+    /// Unread outbox ids already seen; `None` until the first snapshot.
+    outbox_seen: Option<HashSet<String>>,
+    reply: Option<(String, Entity<InputState>)>,
+    memory_edit: Option<memory::MemoryEdit>,
+    notify_form: Option<notifications::NotificationForm>,
+    service: notifications::ServiceState,
+    scoped_error: Option<(Scope, String)>,
+    /// A draft-decision report is in flight (owned by the workspace reconciler).
+    draft_reporting: bool,
+    awareness: Option<gpui::Subscription>,
 }
 
 trait ReactiveButton {
@@ -143,12 +184,25 @@ fn apply(change: ReactiveChange) -> ReactiveCommand {
     ReactiveCommand::Apply { change }
 }
 fn control(id: impl Into<ElementId>, label: &str, disabled: bool) -> Stateful<Div> {
-    web_button(
+    control_as(
         id,
-        if matches!(
+        label,
+        disabled,
+        matches!(
             label,
             "New automation" | "Review automation" | "Enable automation"
-        ) {
+        ),
+    )
+}
+fn control_as(
+    id: impl Into<ElementId>,
+    label: &str,
+    disabled: bool,
+    primary: bool,
+) -> Stateful<Div> {
+    web_button(
+        id,
+        if primary {
             WebButtonVariant::Primary
         } else {
             WebButtonVariant::Outline
@@ -223,6 +277,33 @@ fn reactive_error(error: ServerError) -> String {
     detail.unwrap_or_else(|| error.to_string())
 }
 
+/// What a successful command closes or resets.
+#[derive(Debug, PartialEq, Eq)]
+enum Effect {
+    CloseAutomation,
+    CloseReply(String),
+    CloseMemory { agent_id: String, key: String },
+    ResetNotifications,
+    None,
+}
+impl Effect {
+    fn of(command: &ReactiveCommand) -> Self {
+        match command {
+            ReactiveCommand::Apply {
+                change: ReactiveChange::SaveAutomation { .. },
+            } => Self::CloseAutomation,
+            ReactiveCommand::AnswerOutbox { id, .. } => Self::CloseReply(id.clone()),
+            ReactiveCommand::EditMemory { agent_id, key, .. }
+            | ReactiveCommand::ForgetMemory { agent_id, key } => Self::CloseMemory {
+                agent_id: agent_id.clone(),
+                key: key.clone(),
+            },
+            ReactiveCommand::SetNotificationSettings { .. } => Self::ResetNotifications,
+            _ => Self::None,
+        }
+    }
+}
+
 fn run_label(status: RunStatus) -> &'static str {
     match status {
         RunStatus::AwaitingReview => "Awaiting review",
@@ -232,6 +313,7 @@ fn run_label(status: RunStatus) -> &'static str {
         RunStatus::Failed => "Failed",
         RunStatus::Interrupted => "Interrupted",
         RunStatus::Cancelled => "Cancelled",
+        RunStatus::Merged => "Handled with another run",
     }
 }
 fn source_label(kind: &SourceKind) -> &'static str {
@@ -240,6 +322,7 @@ fn source_label(kind: &SourceKind) -> &'static str {
         SourceKind::Http { .. } => "Website",
         SourceKind::Command { .. } => "Command",
         SourceKind::Schedule { .. } => "Schedule",
+        SourceKind::Calendar { .. } => "Calendar",
         SourceKind::Webhook => "Webhook",
         SourceKind::AppEvent { .. } => "App event",
         SourceKind::Custom => "Custom event",
@@ -298,7 +381,17 @@ impl ReactiveAutomations {
             request: None,
             poll: None,
             last_render: Instant::now(),
+            last_refresh: None,
             weekly: weekly_reports::WeeklyReportsState::default(),
+            agent_names: HashMap::new(),
+            outbox_seen: None,
+            reply: None,
+            memory_edit: None,
+            notify_form: None,
+            service: notifications::ServiceState::default(),
+            scoped_error: None,
+            draft_reporting: false,
+            awareness: None,
         };
         if cfg!(not(test)) {
             panel.poll = Some(cx.spawn(async move |this, cx| loop {
@@ -307,6 +400,11 @@ impl ReactiveAutomations {
                     .update(cx, |this, cx| {
                         if this.last_render.elapsed() < REFRESH.saturating_mul(2) {
                             this.refresh(cx);
+                        } else if this
+                            .last_refresh
+                            .is_none_or(|at| at.elapsed() >= BACKGROUND_REFRESH)
+                        {
+                            this.refresh_snapshot(cx);
                         }
                     })
                     .is_err()
@@ -317,12 +415,76 @@ impl ReactiveAutomations {
         }
         panel
     }
+    pub(crate) fn client(&self) -> ServerClient {
+        self.client.clone()
+    }
+    /// Unread agent updates, for the navigation badge.
+    pub(crate) fn unread_count(&self) -> usize {
+        self.snapshot
+            .as_ref()
+            .map_or(0, ReactiveSnapshot::unread_count)
+    }
+    /// The workspace listens for arrivals once; the subscription lives with the panel.
+    pub(crate) fn has_awareness(&self) -> bool {
+        self.awareness.is_some()
+    }
+    pub(crate) fn set_awareness(&mut self, subscription: gpui::Subscription) {
+        self.awareness = Some(subscription);
+    }
+    /// Claim the single in-flight draft-decision report; false when one is running.
+    pub(crate) fn begin_draft_reporting(&mut self) -> bool {
+        !std::mem::replace(&mut self.draft_reporting, true)
+    }
+    pub(crate) fn finish_draft_reporting(
+        &mut self,
+        snapshot: Option<ReactiveSnapshot>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.draft_reporting = false;
+        if let Some(snapshot) = snapshot {
+            if !self.busy {
+                self.set_snapshot(snapshot, cx);
+                cx.notify();
+            }
+        }
+    }
+    /// Every snapshot passes through here so arrivals are detected exactly once.
+    fn set_snapshot(&mut self, snapshot: ReactiveSnapshot, cx: &mut Context<'_, Self>) {
+        self.agent_names = snapshot
+            .agents
+            .iter()
+            .map(|agent| (agent.id.clone(), agent.name.clone()))
+            .collect();
+        if let Some(item) = updates::new_arrival(&mut self.outbox_seen, &snapshot.outbox) {
+            cx.emit(ReactiveArrival {
+                message: format!("{}: {}", self.agent_name(&item.agent_id), item.title),
+            });
+        }
+        self.snapshot = Some(bruhs_models::weekly_reports::editable_automation_snapshot(
+            snapshot,
+        ));
+        let settings = self.snapshot.as_ref().map(|s| &s.notification_settings);
+        if self
+            .notify_form
+            .as_ref()
+            .is_some_and(|form| !form.dirty && Some(&form.base) != settings)
+        {
+            self.notify_form = None;
+        }
+    }
+    fn agent_name(&self, id: &str) -> &str {
+        self.agent_names.get(id).map_or("Agent", String::as_str)
+    }
     fn refresh(&mut self, cx: &mut Context<'_, Self>) {
         self.refresh_weekly(cx);
+        self.refresh_snapshot(cx);
+    }
+    fn refresh_snapshot(&mut self, cx: &mut Context<'_, Self>) {
         if self.busy || self.reading {
             return;
         }
         self.loaded = true;
+        self.last_refresh = Some(Instant::now());
         self.reading = true;
         self.revision = self.revision.wrapping_add(1);
         let revision = self.revision;
@@ -337,9 +499,7 @@ impl ReactiveAutomations {
                 this.reading = false;
                 match result {
                     Ok(snapshot) => {
-                        this.snapshot = Some(
-                            bruhs_models::weekly_reports::editable_automation_snapshot(snapshot),
-                        );
+                        this.set_snapshot(snapshot, cx);
                         this.load_error = None;
                     }
                     Err(error) => this.load_error = Some(reactive_error(error)),
@@ -350,21 +510,20 @@ impl ReactiveAutomations {
         cx.notify();
     }
     fn send(&mut self, command: ReactiveCommand, cx: &mut Context<'_, Self>) {
+        self.send_in(command, Scope::General, cx);
+    }
+    fn send_in(&mut self, command: ReactiveCommand, scope: Scope, cx: &mut Context<'_, Self>) {
         if self.busy {
             return;
         }
         self.busy = true;
         self.reading = false;
         self.error = None;
+        self.scoped_error = None;
         self.hook = None;
         self.revision = self.revision.wrapping_add(1);
         let revision = self.revision;
-        let closes_automation = matches!(
-            &command,
-            ReactiveCommand::Apply {
-                change: ReactiveChange::SaveAutomation { .. }
-            }
-        );
+        let effect = Effect::of(&command);
         let client = self.client.clone();
         let operation = spawn_tokio(cx, async move { client.reactive_command(&command).await });
         self.request = Some(cx.spawn(async move |this, cx| {
@@ -376,19 +535,43 @@ impl ReactiveAutomations {
                 this.busy = false;
                 match result {
                     Ok(snapshot) => {
-                        this.snapshot = Some(
-                            bruhs_models::weekly_reports::editable_automation_snapshot(snapshot),
-                        );
-                        if closes_automation {
-                            this.editor = None;
+                        this.apply_effect(effect);
+                        this.set_snapshot(snapshot, cx);
+                    }
+                    Err(error) => {
+                        let message = reactive_error(error);
+                        if scope == Scope::General {
+                            this.error = Some(message);
+                        } else {
+                            this.scoped_error = Some((scope, message));
                         }
                     }
-                    Err(error) => this.error = Some(reactive_error(error)),
                 }
                 cx.notify();
             });
         }));
         cx.notify();
+    }
+    fn apply_effect(&mut self, effect: Effect) {
+        match effect {
+            Effect::CloseAutomation => self.editor = None,
+            Effect::CloseReply(id) => {
+                if self.reply.as_ref().is_some_and(|(open, _)| *open == id) {
+                    self.reply = None;
+                }
+            }
+            Effect::CloseMemory { agent_id, key } => {
+                if self
+                    .memory_edit
+                    .as_ref()
+                    .is_some_and(|edit| edit.agent_id == agent_id && edit.key == key)
+                {
+                    self.memory_edit = None;
+                }
+            }
+            Effect::ResetNotifications => self.notify_form = None,
+            Effect::None => {}
+        }
     }
     fn command(
         &self,
@@ -399,6 +582,31 @@ impl ReactiveAutomations {
     ) -> Stateful<Div> {
         control(SharedString::from(key), label, self.busy)
             .on_activate(cx, move |this, _, cx| this.send(command.clone(), cx))
+    }
+    fn command_in(
+        &self,
+        key: String,
+        label: &str,
+        command: ReactiveCommand,
+        scope: Scope,
+        cx: &Context<'_, Self>,
+    ) -> Stateful<Div> {
+        control(SharedString::from(key), label, self.busy).on_activate(cx, move |this, _, cx| {
+            this.send_in(command.clone(), scope.clone(), cx)
+        })
+    }
+    fn scoped_error(&self, scope: &Scope) -> Option<Stateful<Div>> {
+        let (_, message) = self.scoped_error.as_ref().filter(|(at, _)| at == scope)?;
+        Some(
+            div()
+                .id(SharedString::from(format!(
+                    "reactive-scoped-error-{scope:?}"
+                )))
+                .role(Role::Alert)
+                .text_size(px(13.0))
+                .text_color(theme::lychee_300())
+                .child(message.clone()),
+        )
     }
     fn open_agent(
         &mut self,
@@ -463,6 +671,9 @@ impl ReactiveAutomations {
             settle: edit_input("2", false, window, cx),
             timeout: edit_input("30", false, window, cx),
             recursive: true,
+            times: edit_input("08:00", false, window, cx),
+            weekdays: Vec::new(),
+            time_zone: edit_input(&editor_fields::local_zone(), false, window, cx),
         };
         let (kind, text) = match &source.kind {
             SourceKind::Folder {
@@ -513,6 +724,20 @@ impl ReactiveAutomations {
                 });
                 ("schedule", "")
             }
+            SourceKind::Calendar {
+                times,
+                weekdays,
+                time_zone,
+            } => {
+                editor.times.update(cx, |input, cx| {
+                    input.set_value(times.join(", "), window, cx)
+                });
+                editor
+                    .time_zone
+                    .update(cx, |input, cx| input.set_value(time_zone, window, cx));
+                editor.weekdays.clone_from(weekdays);
+                ("calendar", "")
+            }
             SourceKind::Webhook => ("webhook", ""),
             SourceKind::AppEvent { topic } => ("app_event", topic.as_str()),
             SourceKind::Custom => ("custom", ""),
@@ -532,7 +757,7 @@ impl ReactiveAutomations {
         cx: &mut Context<'_, Self>,
     ) {
         self.advanced_open = true;
-        let subscription=subscription.unwrap_or_else(||bruhs_models::reactive::Subscription{id:uuid::Uuid::new_v4().to_string(),agent_id:self.snapshot.as_ref().and_then(|s|s.agents.first()).map(|a|a.id.clone()).unwrap_or_default(),source_id:self.snapshot.as_ref().and_then(|s|s.sources.first()).map(|a|a.id.clone()).unwrap_or_default(),instructions:"Read each new scan and prepare a draft with the payee, amount, due date, and payment reference. Flag missing or uncertain details. Do not make payments.".into(),enabled:false,auto_run:false,debounce_ms:0,throttle_ms:0});
+        let subscription=subscription.unwrap_or_else(||bruhs_models::reactive::Subscription{id:uuid::Uuid::new_v4().to_string(),agent_id:self.snapshot.as_ref().and_then(|s|s.agents.first()).map(|a|a.id.clone()).unwrap_or_default(),source_id:self.snapshot.as_ref().and_then(|s|s.sources.first()).map(|a|a.id.clone()).unwrap_or_default(),instructions:"Read each new scan and prepare a draft with the payee, amount, due date, and payment reference. Flag missing or uncertain details. Do not make payments.".into(),enabled:false,auto_run:false,debounce_ms:0,throttle_ms:0,on_busy:BusyPolicy::Queue});
         self.editor = Some(Editor::Subscription(SubscriptionEditor {
             instructions: edit_input(&subscription.instructions, true, window, cx),
             debounce: edit_input(&seconds(subscription.debounce_ms), false, window, cx),
@@ -582,6 +807,11 @@ impl ReactiveAutomations {
                         "schedule" => SourceKind::Schedule {
                             every_ms: milliseconds(&value(&editor.interval, cx), false)?,
                         },
+                        "calendar" => editor_fields::calendar_kind(
+                            &value(&editor.times, cx),
+                            &editor.weekdays,
+                            &value(&editor.time_zone, cx),
+                        )?,
                         "webhook" => SourceKind::Webhook,
                         "app_event" => SourceKind::AppEvent { topic: text },
                         "custom" => SourceKind::Custom,
@@ -668,6 +898,7 @@ impl ReactiveAutomations {
                                 ("http", "Website"),
                                 ("command", "Command"),
                                 ("schedule", "Schedule"),
+                                ("calendar", "Calendar"),
                                 ("webhook", "Webhook"),
                                 ("app_event", "App event"),
                                 ("custom", "Custom event"),
@@ -699,6 +930,7 @@ impl ReactiveAutomations {
                     "http"=>body.child(field("Website URL", &editor.value, false, self.busy)),
                     "command"=>body.child(field("Command to run", &editor.value, true, self.busy)).child(field("Command working folder", &editor.cwd, false, self.busy)).child(field("Command timeout in seconds", &editor.timeout, false, self.busy)).child(muted("This command runs on your machine when the source is enabled. Use a command you trust.")),
                     "app_event"=>body.child(field("App event topic", &editor.value, false, self.busy)).child(muted("Choose meeting.completed, meeting.transcribed, or meeting.summary.")),
+                    "calendar"=>body.child(self.render_calendar_fields(editor, cx)),
                     "webhook"=>body.child(muted("Save the source, then reveal its private token from the source row.")),
                     "custom"=>body.child(muted("MQTT and Zigbee bridges can publish through the local API. Use a folder source for an FTP upload folder.")),
                     _=>body.child(muted("Run on a repeating interval while the local server is available.")),
@@ -784,6 +1016,7 @@ impl ReactiveAutomations {
                         ));
                 }
                 body=body.child(field("What to do when this source reports an event", &editor.instructions, true, self.busy)).child(field("Debounce in seconds", &editor.debounce, false, self.busy)).child(field("Minimum gap between runs in seconds", &editor.throttle, false, self.busy))
+                    .child(self.render_busy_choice(editor.subscription.on_busy, cx))
                     .child(control("reactive-sub-enabled",if editor.subscription.enabled{"Subscription enabled"}else{"Subscription paused"},self.busy).on_activate(cx, |this,_,cx|{if let Some(Editor::Subscription(editor))=&mut this.editor{editor.subscription.enabled= !editor.subscription.enabled;}cx.notify();}))
                     .child(control("reactive-sub-auto",if editor.subscription.auto_run{"Automatic read-only drafts: On"}else{"Review each event before running"},self.busy).on_activate(cx, |this,_,cx|{if let Some(Editor::Subscription(editor))=&mut this.editor{editor.subscription.auto_run= !editor.subscription.auto_run;}cx.notify();}))
                     .child(muted("Automatic drafts never grant write access. Leave them off to review each event first."));
@@ -849,6 +1082,7 @@ impl ReactiveAutomations {
 
 impl EventEmitter<ReactivePreview> for ReactiveAutomations {}
 impl EventEmitter<ReactiveProjectOpened> for ReactiveAutomations {}
+impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
 
 impl Render for ReactiveAutomations {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
@@ -856,9 +1090,14 @@ impl Render for ReactiveAutomations {
         if !self.loaded && cfg!(not(test)) {
             self.refresh(cx);
         }
+        if !self.service.loaded && cfg!(not(test)) {
+            self.load_service(cx);
+        }
         let disabled = self.busy || self.snapshot.is_none();
         self.ensure_weekly_inputs(_window, cx);
+        self.ensure_notification_form(_window, cx);
         let mut panel=div().id("reactive-automations").w_full().min_w_0().mb_4().p_4().rounded(px(8.0)).bg(theme::longan_900()).border_1().border_color(theme::longan_700().opacity(0.5)).flex().flex_col().gap_3()
+            .when(self.snapshot.is_some(), |panel| panel.child(self.render_updates(cx)))
             .child(div().flex().flex_wrap().items_center().justify_between().gap_2().child(heading("Automations")).child(muted("Drafts only")).child(control("reactive-refresh","Refresh",self.busy||self.reading).on_activate(cx, |this,_,cx|this.refresh(cx))))
             .child(muted("Describe a job and choose what starts it. Review once to enable a complete automation, then pause or resume it with one control."))
             .child(muted("Watches and schedules keep working while the local server runs, even with this page closed."))
@@ -876,6 +1115,13 @@ impl Render for ReactiveAutomations {
         }
         panel = panel.child(self.render_weekly_reports(cx));
         panel = panel.child(self.render_automation_cards(cx));
+        // Both wait for the server: no settings or service state exists before it answers.
+        if self.notify_form.is_some() {
+            panel = panel.child(self.render_notifications(cx));
+        }
+        if let Some(service) = self.render_background_service(cx) {
+            panel = panel.child(service);
+        }
         panel = panel.child(
             control(
                 "automation-advanced-settings",
@@ -903,6 +1149,7 @@ impl Render for ReactiveAutomations {
                 if snapshot.agents.is_empty() {
                     panel=panel.child(muted("Start with a bill assistant: create an agent, choose Watch scans, then connect the two. New agents and sources stay paused until you enable them."));
                 }
+                let on_cards = setup::automation_agent_ids(snapshot);
                 for agent in &snapshot.agents {
                     let edit = agent.clone();
                     let mut toggle = agent.clone();
@@ -966,7 +1213,10 @@ impl Render for ReactiveAutomations {
                                             }),
                                             cx,
                                         )),
-                                ),
+                                )
+                                .when(!on_cards.contains(&agent.id), |card| {
+                                    card.child(self.render_agent_records(&agent.id, cx))
+                                }),
                         );
                 }
                 panel = panel.child(heading("Event sources")).child(
@@ -1129,6 +1379,12 @@ impl Render for ReactiveAutomations {
                                         "Review each event before running"
                                     }
                                 )))
+                                .when(subscription.on_busy == BusyPolicy::Restart, |card| {
+                                    card.child(muted(format!(
+                                        "While the agent is busy: {}",
+                                        editor_fields::BUSY_RESTART_LABEL
+                                    )))
+                                })
                                 .child(muted(subscription.instructions.clone()))
                                 .child(
                                     div()
@@ -1277,11 +1533,22 @@ impl Render for ReactiveAutomations {
                         div()
                             .flex()
                             .flex_wrap()
+                            .items_center()
                             .justify_between()
                             .gap_2()
                             .child(heading(name.to_string()))
-                            .child(muted(run_label(run.status))),
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .gap_2()
+                                    .child(muted(runs::trigger_label(run)))
+                                    .children(runs::outcome_label(run).map(updates::badge_info))
+                                    .child(muted(run_label(run.status))),
+                            ),
                     )
+                    .children(runs::run_notes(run).into_iter().map(runs::note))
                     .child(
                         control(
                             SharedString::from(format!("reactive-context-{}", run.id)),
@@ -1335,6 +1602,7 @@ impl Render for ReactiveAutomations {
                     let event = ReactivePreview {
                         title: draft.summary,
                         operations: draft.operations,
+                        run_id: run.id.clone(),
                     };
                     row=row.child(control(SharedString::from(format!("reactive-preview-run-{}",run.id)),"Preview changes",self.busy).on_activate(cx,move |_,_,cx|cx.emit(event.clone()))).child(muted("Creates a separate reviewed workflow. This draft is not marked as applied."));
                 }

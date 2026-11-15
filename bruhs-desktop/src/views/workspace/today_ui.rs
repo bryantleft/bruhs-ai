@@ -345,6 +345,7 @@ impl Workspace {
     pub(super) fn render_today_page(&self, compact: bool, cx: &Context<'_, Self>) -> Div {
         let snapshot = self.today_snapshot(cx);
         let date = self.planning_now().format("%A, %B %-d").to_string();
+        let unread_updates = self.reactive_automations.read(cx).unread_count();
         let focus_rows = snapshot
             .focus_queue
             .iter()
@@ -670,8 +671,17 @@ impl Workspace {
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
-                            .aria_label("Agent workflows")
+                            .aria_label(crate::views::reactive_automations::unread_label(
+                                "Agent workflows",
+                                unread_updates,
+                            ))
+                            .gap_1()
                             .child("Agent workflows")
+                            .when(unread_updates > 0, |button| {
+                                button.child(crate::views::reactive_automations::unread_badge(
+                                    unread_updates,
+                                ))
+                            })
                             .on_click(cx.listener(
                                 |this, _event, window, cx| {
                                     this.activate_sidebar_view(AppView::Automations, window, cx)

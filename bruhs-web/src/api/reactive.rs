@@ -1,5 +1,6 @@
 //! Server-owned event agents; these records never enter browser metadata storage.
 use super::{get_json, segment, send_json, ApiError};
+use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
 use bruhs_models::weekly_reports::{EngineeringReport, WeeklyReportCommand, WeeklyReportsSnapshot};
 use gloo_net::http::Method;
@@ -43,4 +44,15 @@ pub async fn reactive_hook_token(source_id: &str) -> Result<ReactiveHookToken, A
         segment(source_id)
     ))
     .await
+}
+
+/// Whether bruhs-server runs as a login service, so agents keep running after quit.
+pub async fn background_service() -> Result<BackgroundService, ApiError> {
+    get_json("/api/service").await
+}
+
+pub async fn set_background_service(
+    action: BackgroundServiceAction,
+) -> Result<BackgroundService, ApiError> {
+    send_json(Method::POST, "/api/service", Some(&action)).await
 }

@@ -16,6 +16,7 @@ fn fixture() -> (
         github_pull_requests: false,
         github_deployments: false,
         scheduled: false,
+        schedule: None,
     };
     command(
         &mut connection,
@@ -37,7 +38,7 @@ fn queue(connection: &mut Connection, preset: &WeeklyReportPreset) -> ReactiveRu
         },
     )
     .unwrap();
-    super::super::claim_next(connection).unwrap().unwrap().1
+    super::super::claim_next(connection).unwrap().unwrap().run
 }
 fn evidence() -> Vec<ReportCoverage> {
     vec![ReportCoverage::Unavailable {
@@ -52,6 +53,7 @@ fn finish(connection: &mut Connection, run: &ReactiveRun) {
         &run.id,
         RunStatus::Completed,
         Some("# Report\nSources were reviewed. Incidents are unavailable.".into()),
+        None,
         None,
     )
     .unwrap();
@@ -77,7 +79,7 @@ fn retries_keep_one_window_and_one_saved_report_after_reopen() {
     let run = super::super::claim_next(&mut connection)
         .unwrap()
         .unwrap()
-        .1;
+        .run;
     let job = prepare(&mut connection, &run).unwrap().unwrap();
     assert_eq!(job.window_end.millis_since(job.window_start), WEEK_MS);
     finish(&mut connection, &run);
@@ -115,6 +117,7 @@ fn cancelled_or_failed_runs_do_not_save_reports() {
             },
             Some("Partial output".into()),
             None,
+            None,
         )
         .unwrap();
         assert!(snapshot(&mut connection, None).unwrap().reports.is_empty());
@@ -132,6 +135,7 @@ fn report_storage_failure_cannot_acknowledge_a_completed_run() {
         &run.id,
         RunStatus::Completed,
         Some("Full report".into()),
+        None,
         None
     )
     .is_err());
@@ -188,7 +192,7 @@ fn delayed_schedule_uses_the_due_window_not_execution_time() {
     let run = super::super::claim_next(&mut connection)
         .unwrap()
         .unwrap()
-        .1;
+        .run;
     assert_eq!(run.event_id, Some(event.id));
     let job = prepare(&mut connection, &run).unwrap().unwrap();
     assert_eq!(job.window_end, due);
@@ -247,6 +251,7 @@ async fn live_weekly_report_delivery() {
         github_pull_requests: false,
         github_deployments: false,
         scheduled: false,
+        schedule: None,
     };
     runtime
         .weekly_report_command(WeeklyReportCommand::SavePreset {
@@ -389,7 +394,7 @@ fn selected_utc_window_is_frozen_and_idempotency_cannot_change_it() {
     let run = super::super::claim_next(&mut connection)
         .unwrap()
         .unwrap()
-        .1;
+        .run;
     let job = prepare(&mut connection, &run).unwrap().unwrap();
     assert_eq!(
         job.window_end.as_millis(),
@@ -440,7 +445,7 @@ fn a_new_request_can_regenerate_the_same_window_with_changed_settings() {
     let old = super::super::claim_next(&mut connection)
         .unwrap()
         .unwrap()
-        .1;
+        .run;
     finish(&mut connection, &old);
     let saved = read(&mut connection, &old.id).unwrap();
     preset.model = if saved.model == "claude-haiku-4-5" {
@@ -466,7 +471,7 @@ fn a_new_request_can_regenerate_the_same_window_with_changed_settings() {
     let new = super::super::claim_next(&mut connection)
         .unwrap()
         .unwrap()
-        .1;
+        .run;
     assert_ne!(old.id, new.id);
     assert_eq!(
         prepare(&mut connection, &new)
@@ -509,6 +514,7 @@ fn retrying_a_frozen_model_cannot_replace_the_current_models_chat_session() {
         RunStatus::Failed,
         None,
         Some("Retry fixture".into()),
+        None,
     )
     .unwrap();
     preset.model = if old_model == "claude-haiku-4-5" {
@@ -530,7 +536,8 @@ fn retrying_a_frozen_model_cannot_replace_the_current_models_chat_session() {
         ReactiveCommand::RetryRun { id: run.id.clone() },
     )
     .unwrap();
-    let (_, retry) = super::super::claim_next(&mut connection).unwrap().unwrap();
+    let super::super::Claim { run: retry, .. } =
+        super::super::claim_next(&mut connection).unwrap().unwrap();
     assert_eq!(
         prepare(&mut connection, &retry)
             .unwrap()

@@ -9,6 +9,15 @@ pub(super) struct AutomationEditor {
     advanced: bool,
 }
 
+impl AutomationEditor {
+    pub(super) fn source_mut(&mut self) -> &mut SourceEditor {
+        &mut self.source
+    }
+    pub(super) fn subscription_mut(&mut self) -> &mut SubscriptionEditor {
+        &mut self.subscription
+    }
+}
+
 impl ReactiveAutomations {
     pub(super) fn open_automation(
         &mut self,
@@ -123,13 +132,14 @@ impl ReactiveAutomations {
         }
         let mut body=card().child(heading("Set up an automation")).child(muted("Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."))
             .child(field("Automation name",&editor.agent.name,false,self.busy)).child(field("What should this automation do?",&editor.agent.instructions,true,self.busy)).child(field("Automation working folder",&editor.agent.path,false,self.busy)).child(field("Model",&editor.agent.model,false,self.busy)).child(muted("Starts when"))
-            .child(div().flex().flex_wrap().gap_2().children([("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(kind,label)|control(SharedString::from(format!("automation-kind-{kind}")),label,self.busy).aria_selected(editor.source.kind==kind).when(editor.source.kind==kind,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.kind=kind;editor.source.value=edit_input(if kind=="app_event"{"meeting.completed"}else{""},kind=="command",window,cx);if kind=="schedule"{editor.source.interval.update(cx,|input,cx|input.set_value("3600",window,cx));}}cx.notify();}))));
+            .child(div().flex().flex_wrap().gap_2().children([("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("calendar","At set times of day"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(kind,label)|control(SharedString::from(format!("automation-kind-{kind}")),label,self.busy).aria_selected(editor.source.kind==kind).when(editor.source.kind==kind,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.kind=kind;editor.source.value=edit_input(if kind=="app_event"{"meeting.completed"}else{""},kind=="command",window,cx);if kind=="schedule"{editor.source.interval.update(cx,|input,cx|input.set_value("3600",window,cx));}}cx.notify();}))));
         body=match editor.source.kind {
             "folder"=>body.child(field("Folder to watch",&editor.source.value,false,self.busy)).child(field("File pattern",&editor.source.pattern,false,self.busy)),
             "http"=>body.child(field("Website URL",&editor.source.value,false,self.busy)),
             "command"=>body.child(field("Command to run",&editor.source.value,true,self.busy)).child(muted("This command runs on your machine once you enable the automation.")),
             "schedule"=>body.child(field("Run every, in seconds",&editor.source.interval,false,self.busy)),
             "app_event"=>body.child(div().flex().flex_wrap().gap_2().children([("meeting.completed","Meeting completed"),("meeting.transcribed","Final transcript updated"),("meeting.summary","Summary ready")].into_iter().map(|(topic,label)|{let selected=value(&editor.source.value,cx)==topic;control(SharedString::from(format!("automation-topic-{topic}")),label,self.busy).aria_selected(selected).when(selected,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.value.update(cx,|input,cx|input.set_value(topic,window,cx));}cx.notify();})}))),
+            "calendar"=>body.child(self.render_calendar_fields(&editor.source, cx)),
             "webhook"=>body.child(muted("A private endpoint is created when you enable this automation. Reveal its token in Advanced settings.")),
             _=>body.child(muted("Device bridges can publish through the local API. Use a watched folder for FTP uploads.")),
         };
@@ -236,7 +246,8 @@ impl ReactiveAutomations {
                     &editor.subscription.throttle,
                     false,
                     self.busy,
-                ));
+                ))
+                .child(self.render_busy_choice(editor.subscription.subscription.on_busy, cx));
             body = body.child(advanced);
         }
         body.child(
@@ -264,6 +275,7 @@ impl ReactiveAutomations {
         let Some(snapshot) = &self.snapshot else {
             return body;
         };
+        let mut shown_agents = HashSet::new();
         if snapshot.subscriptions.is_empty() {
             body=body.child(muted("No automations yet. Start with a scan folder, a meeting event, or a repeating check."));
         }
@@ -279,7 +291,13 @@ impl ReactiveAutomations {
                 .child(heading(setup.agent.name.clone()))
                 .child(muted(setup.agent.instructions.clone()))
                 .child(muted(source_summary(&setup.source.kind)))
-                .child(muted(automation_status(&setup)));
+                .child(muted(automation_status(&setup)))
+                .when(setup.subscription.on_busy == BusyPolicy::Restart, |row| {
+                    row.child(muted(format!(
+                        "While the agent is busy: {}",
+                        super::editor_fields::BUSY_RESTART_LABEL
+                    )))
+                });
             if let Some(run) = snapshot
                 .runs
                 .iter()
@@ -349,6 +367,9 @@ impl ReactiveAutomations {
                         }),
                     ),
             );
+            if shown_agents.insert(setup.agent.id.clone()) {
+                row = row.child(self.render_agent_records(&setup.agent.id, cx));
+            }
             body = body.child(row);
         }
         body
@@ -409,6 +430,11 @@ impl AutomationEditor {
             "schedule" => SourceKind::Schedule {
                 every_ms: interval?,
             },
+            "calendar" => super::editor_fields::calendar_kind(
+                &value(&self.source.times, cx),
+                &self.source.weekdays,
+                &value(&self.source.time_zone, cx),
+            )?,
             "webhook" => SourceKind::Webhook,
             "app_event" => SourceKind::AppEvent { topic: text },
             "custom" => SourceKind::Custom,
@@ -426,12 +452,26 @@ impl AutomationEditor {
         })
     }
 }
+/// Agents whose memory already shows on an automation card.
+pub(super) fn automation_agent_ids(snapshot: &ReactiveSnapshot) -> HashSet<String> {
+    snapshot
+        .subscriptions
+        .iter()
+        .filter_map(|subscription| AutomationSetup::from_subscription(snapshot, subscription))
+        .map(|setup| setup.agent.id)
+        .collect()
+}
 fn source_summary(kind: &SourceKind) -> String {
     match kind {
         SourceKind::Folder { path, pattern, .. } => format!("Folder: {path} ({pattern})"),
         SourceKind::Http { url, .. } => format!("Website: {url}"),
         SourceKind::Command { command, .. } => format!("Command: {command}"),
         SourceKind::Schedule { every_ms } => format!("Every {} seconds", seconds(*every_ms)),
+        SourceKind::Calendar {
+            times,
+            weekdays,
+            time_zone,
+        } => describe_calendar(times, weekdays, time_zone),
         SourceKind::Webhook => "Authenticated webhook".into(),
         SourceKind::AppEvent { topic } => format!("App event: {topic}"),
         SourceKind::Custom => "Custom events from your integrations".into(),
@@ -456,6 +496,7 @@ fn source_details(kind: &SourceKind) -> String {
         SourceKind::Http{url,poll_ms}=>format!("URL: {url}\nCheck interval: {} seconds",seconds(*poll_ms)),
         SourceKind::Command{command,cwd,poll_ms,timeout_ms}=>format!("Command: {command}\nWorking folder: {cwd}\nCheck interval: {} seconds\nTimeout: {} seconds\nSource command access: Runs with the local server account's permissions. The agent's read-only tool policy does not restrict this command.",seconds(*poll_ms),seconds(*timeout_ms)),
         SourceKind::Schedule{every_ms}=>format!("Repeat every {} seconds",seconds(*every_ms)),
+        SourceKind::Calendar{times,weekdays,time_zone}=>describe_calendar(times,weekdays,time_zone),
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
         SourceKind::AppEvent{topic}=>format!("App event: {topic}"),
         SourceKind::Custom=>"Events published by your integrations through the local API.".into(),

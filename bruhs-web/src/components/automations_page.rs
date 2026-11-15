@@ -89,17 +89,23 @@ pub fn AutomationsPage() -> impl IntoView {
     let preview = RwSignal::new(None::<WorkflowPreview>);
     let execution_error = RwSignal::new(None::<String>);
 
-    let make_preview = move |operations: Vec<WorkflowOperation>, title: &str| {
-        let now = crate::clock::now_ms();
-        let mut workflow_id = String::new();
-        let mut next_preview = None;
-        automation.update(|state| {
-            workflow_id = state.create_workflow(title, operations, now);
-            next_preview = state.preview(&workflow_id, now);
-        });
-        active_workflow.set(Some(workflow_id));
-        preview.set(next_preview);
-    };
+    // A workflow made from an agent's draft keeps the run it came from, so
+    // the decision on it flows back to that agent (`crate::agent_updates`).
+    let make_preview =
+        move |operations: Vec<WorkflowOperation>, title: &str, run_id: Option<String>| {
+            let now = crate::clock::now_ms();
+            let mut workflow_id = String::new();
+            let mut next_preview = None;
+            automation.update(|state| {
+                workflow_id = match run_id {
+                    Some(run_id) => state.create_reactive_workflow(title, operations, run_id, now),
+                    None => state.create_workflow(title, operations, now),
+                };
+                next_preview = state.preview(&workflow_id, now);
+            });
+            active_workflow.set(Some(workflow_id));
+            preview.set(next_preview);
+        };
 
     let recheck_preview = move |_| {
         let Some(id) = active_workflow.get_untracked() else {
@@ -146,7 +152,7 @@ pub fn AutomationsPage() -> impl IntoView {
                 })}
             </Show>
             <div class="flex-1 overflow-y-auto px-4 py-4 sm:px-6 sm:py-5">
-                <super::reactive_automations::ReactiveAutomations on_preview=Callback::new(move |(title, operations): (String, Vec<WorkflowOperation>)| make_preview(operations, &title)) />
+                <super::reactive_automations::ReactiveAutomations on_preview=Callback::new(move |(title, operations, run_id): super::reactive_automations::DraftPreview| make_preview(operations, &title, Some(run_id))) />
                 <fieldset disabled=move || !automation.editable() || matches!(automation.status.get(), crate::durable_metadata::SaveState::Saving) || !executor.ready.get() class="m-0 min-w-0 border-0 p-0">
                 {move || execution_error.get().map(|message| view! {
                     <p role="alert" class="mx-auto mb-3 max-w-6xl rounded-grape bg-longan-900 px-3 py-2 text-body-sm text-lychee-300">{message}</p>
@@ -159,7 +165,7 @@ pub fn AutomationsPage() -> impl IntoView {
                                     <h2 id="suggestions-title" class="text-h4 text-rambutan-100">"Local suggestions"</h2>
                                     <p class="text-body-sm text-rambutan-500">"Evidence is shown before any proposal. Suggestions appear at most three times, no more than daily."</p>
                                 </div>
-                                <Button class="whitespace-nowrap" variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| make_preview(focus_operations(crate::clock::now_ms()), "Protect focus"))>
+                                <Button class="whitespace-nowrap" variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| make_preview(focus_operations(crate::clock::now_ms()), "Protect focus", None))>
                                     "New dry run"
                                 </Button>
                             </div>
@@ -183,7 +189,7 @@ pub fn AutomationsPage() -> impl IntoView {
                                             </div>
                                             <button type="button" class="mt-3 rounded-grape bg-persimmon-500 px-3 py-1.5 text-label-sm text-longan-950 hover:bg-persimmon-400 cursor-pointer" on:click=move |_| {
                                                 automation.update(|state| { let _ = state.mark_suggestion_surfaced(&id_for_preview, crate::clock::now_ms()); });
-                                                make_preview(operations.clone(), &workflow_title);
+                                                make_preview(operations.clone(), &workflow_title, None);
                                             }>{preview_label}</button>
                                         </article>
                                     }

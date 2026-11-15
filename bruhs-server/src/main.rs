@@ -4,6 +4,7 @@ mod local_access;
 mod parent_watch;
 mod reactive_events;
 mod routes;
+mod service;
 mod static_assets;
 
 #[cfg(test)]
@@ -72,6 +73,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     if bruhs_core::thread_link::is_mcp_helper() {
         bruhs_core::thread_link::run_mcp_helper().await?;
         return Ok(());
+    }
+    if std::env::args().nth(1).as_deref() == Some("service") {
+        let config = Config::from_env()?;
+        std::process::exit(service::cli(&config.spa_dir).unwrap_or(2));
     }
     tracing_subscriber::registry()
         .with(log_filter())
@@ -406,6 +411,10 @@ fn router_with_capture_daemon(
         .route(
             "/api/local-tools/dictation",
             post(routes::local_tools::dictation).layer(DefaultBodyLimit::max(UPLOAD_BODY_BYTES)),
+        )
+        .route(
+            "/api/service",
+            get(routes::reactive::service_status).post(routes::reactive::service_apply),
         )
         .route("/api/reactive", get(routes::reactive::snapshot))
         .route("/api/reactive/commands", post(routes::reactive::command))

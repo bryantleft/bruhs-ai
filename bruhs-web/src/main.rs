@@ -1,4 +1,5 @@
 mod activity_monitor;
+mod agent_updates;
 mod api;
 mod app;
 mod auth;
