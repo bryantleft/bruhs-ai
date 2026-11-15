@@ -157,3 +157,13 @@ The [combined checkpoint](mail-finalization-2026-11-15.md) records the later
 14-step gate and focused copy acceptance. It supersedes pending final-gate/copy
 status for that source snapshot; earlier evidence retains its original scope.
 Recovery, Sent reconciliation and live-provider/product acceptance remain open.
+
+### Pre-queue recovery follow-up, 2026-11-15 UTC
+
+The [bounded backend checkpoint](mail-prequeue-recovery-2026-11-15.md) adds durable
+status recovery for definite authorization/profile failures before queueing,
+without hiding existing uncertain sends. Its 178 Core mail and 16 actual-router
+tests and strict lint pass; combined meeting/backend checks also pass. This is
+source/test/lint proof, with no new production asset or UI acceptance. Sent
+reconciliation, full recovery and live-provider/delivery acceptance remain open;
+Inbox remains partial.

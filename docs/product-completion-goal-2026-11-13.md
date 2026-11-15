@@ -212,3 +212,15 @@ accessibility/platform/reply coverage and live-provider/delivery acceptance
 remain open. Always-On on-screen/service-install acceptance and its outstanding
 Codex follow-up eval remain separate. This does not complete Inbox or the
 product goal.
+
+### Pre-queue recovery follow-up, 2026-11-15 UTC
+
+The [bounded mail recovery checkpoint](mail-prequeue-recovery-2026-11-15.md)
+closes the definite authorization/profile-denial case before send queueing.
+It preserves the original error, durable reviewed bindings, existing attempts
+and the visible uncertain status. Eight selected controls, 178 Core mail tests,
+16 actual-router tests and strict Core/Server lint pass. Combined with meeting
+integration, 198 focused Core and 17 Server tests plus strict lint pass. No new
+full gate or combined current-web bundle is claimed. Broader recovery, Sent
+reconciliation, accessibility/platform/reply coverage, live providers and delivery
+remain open. This does not complete Inbox or the product goal.

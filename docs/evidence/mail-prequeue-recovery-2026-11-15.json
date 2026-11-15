@@ -1,0 +1,78 @@
+{
+  "recordedAt": "2026-11-15T06:47:18.415848+00:00",
+  "status": "bounded_backend_source_test_lint_GREEN_product_PARTIAL",
+  "sourceCommit": "1be2e94038cef74bde7235cdef40cea18c519413",
+  "sourceCommitParent": "15e178eeaad1e0b078191d27b0b8c31cc73ed8ed",
+  "sourceFiles": {
+    "bruhs-core/src/mail/cache/send_journal.rs": "a0356bde8ad4ec9570dda8ab3d5c34fc60a0f55fc60d40f8d320511e25e244ec",
+    "bruhs-core/src/mail/compose/dispatch.rs": "387aef42ac5bf545815da7237e8cbf622c92a63355cb42d64a91866473d31fe0",
+    "bruhs-core/src/mail/compose/dispatch/tests.rs": "5bbd2bcd80a348a9cf64bd717331d80d157d6e10a6a4427628cd6ffd4c59c486",
+    "bruhs-server/src/routes/mail/compose.rs": "d1c19b22c66a4d9f6597d427d7006ddc0a60f8630acdcc3e9fcb005b5ad5c828",
+    "bruhs-server/src/routes/mail/compose/tests.rs": "a5a430c6eb417a2c9f8b8290336140db67f9f6093c59710e89110feb809f93e3",
+    "bruhs-core/src/mail/cache/send_journal/prequeue.rs": "843bdd33672eb2f2ca4ac6859ca72fce234a5f19bcfa3582dc80a6e7fea87c86",
+    "bruhs-core/src/mail/compose/dispatch/tests/prequeue.rs": "a49376986df1ef58fdb73b6f4440a06fdf165fdff4fb4c049e1ff8408cd7cb57",
+    "bruhs-server/src/routes/mail/compose/prequeue.rs": "b8172488b9017099915d43af4de0e3bfea488cfc4c615a9baf03c965c2bd4c28",
+    "bruhs-server/src/routes/mail/compose/tests/prequeue.rs": "3ef01559e08e1bde1077a63c4978cbc94f5ea867aa71c88a2fc22606f1da4b9e"
+  },
+  "receipt": {
+    "path": "target/mail-slot3-prequeue-recovery-20261115/receipt.json",
+    "sha256": "e4e20c86b18855cc1efdcbc6578ead9993828781159d6ed27fa756277475f05b"
+  },
+  "report": {
+    "path": "target/mail-slot3-prequeue-recovery-20261115/report.json",
+    "sha256": "3662f924ceee68d6701691414de812fe5393b6514d6fcc92ef13ef74c7f50f3f"
+  },
+  "patch": {
+    "path": "target/mail-slot3-prequeue-recovery-20261115/mail-prequeue.patch",
+    "sha256": "4b4fe05183c8a72cf964c31899c4f8d69cdc174e6478edb10c88e3deaa89a96f",
+    "reverseCheckExitCode": 0
+  },
+  "artifactManifest": {
+    "path": "target/mail-slot3-prequeue-recovery-20261115/artifacts.json",
+    "sha256": "1d94d1d75b6f57a6b2cad07fce884c8ae9094c39477c0c387e14cf7302158ecd",
+    "files": 110
+  },
+  "rootVerification": {
+    "path": "target/postcommit-slot3-root-verification-20261115T062429Z.json",
+    "sha256": "b9e414de160015bb876eba3f4c0c571b4e6ba215c30e52a857b89bda2525dc76"
+  },
+  "originalSelectedRed": {
+    "failed": 2,
+    "cause": "Missing durable status after definite prequeue denial; original HTTP error and no provider send POST retained."
+  },
+  "additionalSelectedRed": {
+    "failed": 1,
+    "cause": "Rejected operation B hid uncertain A through latest_send."
+  },
+  "green": {
+    "selectedCorePrequeue": 8,
+    "coreMail": 178,
+    "actualServerMailRouter": 16,
+    "strictCoreServerAllTargetsAllFeatures": "PASS",
+    "targetedFormatWhitespace": "PASS"
+  },
+  "combinedMeetingSource": {
+    "meetingTip": "15e178eeaad1e0b078191d27b0b8c31cc73ed8ed",
+    "sameFrozenMailPatch": true,
+    "coreFocusedPassed": 198,
+    "serverFocusedPassed": 17,
+    "strictCoreServer": "PASS",
+    "serverDebugBuild": "PASS",
+    "validation": {
+      "path": "target/meeting-suggestions-slot4-validation-20261115T064039Z/validation.json",
+      "sha256": "628a77b78ca09750966925a714746ae661a9761918a342c7f0560e05283c5587"
+    },
+    "liveFeatureChecks": 11,
+    "liveAssetLimit": "Older meeting bundle with identical feature changes; newer mail/agent web code absent. Not current-combined-web acceptance."
+  },
+  "notClaimed": [
+    "new default assets",
+    "new full14step gate",
+    "native UI/browser acceptance for this patch",
+    "live mail consent/provider acceptance/recipient delivery",
+    "Sent reconciliation/full recovery/full accessibility/platform/reply acceptance",
+    "whole Inbox/product completion"
+  ],
+  "rawArtifactsRemainLocalIgnored": true,
+  "standingProductGoalComplete": false
+}

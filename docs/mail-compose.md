@@ -177,9 +177,11 @@ must correlate the Message-ID and reviewed content; an absent result is not proo
 that a message was unsent. Reauthorization needs a dedicated reconciliation path,
 without weakening ordinary dispatch's connection-generation fence. Initial compose
 currently requires an account already bound to this cache by sync.
-An authorization failure before the server queues a send can leave the client
-conservatively pending when status is absent. A request-scoped no-dispatch proof
-is still needed to unlock that case safely; a missing status alone must never
+Definite authorization or sender-profile failures before queueing now have a
+durable Rejected status when the saved review and account bindings match. The
+[bounded recovery checkpoint](mail-prequeue-recovery-2026-11-15.md) retains the
+original error and keeps existing attempts authoritative. Missing status,
+storage failure and invalid/stale bindings remain conservative; they must never
 clear an uncertain attempt.
 
 Google's [sending guide](https://developers.google.com/workspace/gmail/api/guides/sending)
