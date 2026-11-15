@@ -111,6 +111,49 @@ pub(super) async fn mark_merged_in(tx: &idb::Transaction, source: &str) -> Resul
     Ok(())
 }
 
+/// Delete cascade: a deleted contact leaves the sync queue. Returns whether it
+/// was still waiting for its first sync, which makes the delete local only.
+pub(super) async fn forget_in(tx: &idb::Transaction, id: &str) -> Result<bool, SaveError> {
+    let mut outbox = read(tx).await?;
+    if outbox.merged.contains(id) {
+        return Err(SaveError::Rejected(
+            "This contact was merged. Reload People before deleting it. No records were changed.",
+        ));
+    }
+    let pending = outbox.ids.remove(id);
+    if pending {
+        tx.object_store(STORE_METADATA)?
+            .put(&to_js(&outbox)?, None)?
+            .await?;
+    }
+    Ok(pending)
+}
+
+/// Undo of a local-only delete: the contact waits for its first sync again.
+pub(super) async fn restage_in(tx: &idb::Transaction, id: &str) -> Result<(), SaveError> {
+    let mut outbox = read(tx).await?;
+    if outbox.merged.contains(id) {
+        return Err(SaveError::Conflict);
+    }
+    outbox.ids.insert(id.into());
+    tx.object_store(STORE_METADATA)?
+        .put(&to_js(&outbox)?, None)?
+        .await?;
+    Ok(())
+}
+
+/// Undo of a merge: the source identity is live again, so it may be cached
+/// and edited.
+pub(super) async fn unmark_merged_in(tx: &idb::Transaction, id: &str) -> Result<(), SaveError> {
+    let mut outbox = read(tx).await?;
+    if outbox.merged.remove(id) {
+        tx.object_store(STORE_METADATA)?
+            .put(&to_js(&outbox)?, None)?
+            .await?;
+    }
+    Ok(())
+}
+
 pub(super) async fn ensure_remote_merge_ready(
     tx: &idb::Transaction,
     source: &str,

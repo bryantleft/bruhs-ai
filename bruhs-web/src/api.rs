@@ -830,6 +830,40 @@ pub async fn set_person_tracked(person_id: &str, tracked: bool) -> Result<Person
     send_json(Method::PATCH, &route, Some(&body)).await
 }
 
+/// `DELETE /api/people/{id}`: delete a contact. The reply records what the
+/// server removed and unlinked so the delete can be undone.
+pub async fn delete_person(
+    person_id: &str,
+) -> Result<bruhs_models::PersonDeletion, ApiError> {
+    let route = format!("/api/people/{}", segment(person_id));
+    send_json(Method::DELETE, &route, NO_BODY).await
+}
+
+/// `POST /api/people/{id}/restore`: undo a delete from the server's record.
+pub async fn restore_person(person_id: &str) -> Result<PersonProfile, ApiError> {
+    let route = format!("/api/people/{}/restore", segment(person_id));
+    send_json(Method::POST, &route, NO_BODY).await
+}
+
+/// `POST /api/people/{source_id}/unmerge`: undo a merge; both contacts return.
+pub async fn unmerge_person(
+    source_id: &str,
+) -> Result<bruhs_models::PersonUnmerge, ApiError> {
+    let route = format!("/api/people/{}/unmerge", segment(source_id));
+    send_json(Method::POST, &route, NO_BODY).await
+}
+
+/// `PUT /api/people/{id}/aliases`: save the complete alias list. A conflict
+/// carries the alias problem as its message.
+pub async fn set_person_aliases(
+    person_id: &str,
+    aliases: Vec<String>,
+) -> Result<PersonProfile, ApiError> {
+    let route = format!("/api/people/{}/aliases", segment(person_id));
+    let body = bruhs_models::PersonAliasesBody { aliases };
+    send_json(Method::PUT, &route, Some(&body)).await
+}
+
 /// `PATCH /api/meetings/{id}/skip_observations` — toggle per-meeting opt-out.
 pub async fn set_meeting_skip_observations(
     meeting_id: &str,

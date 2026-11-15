@@ -103,6 +103,19 @@ impl RelationshipTransaction {
         self.store.set_records.update(|records| plan.apply(records));
     }
 
+    /// Publish profiles a People delete or undo already committed: `None`
+    /// removes the person's profile, `Some` replaces or adds it.
+    pub fn replaced(self, entries: Vec<(String, Option<RelationshipProfile>)>) {
+        self.store.set_records.update(|records| {
+            for (person_id, profile) in entries {
+                records.retain(|current| current.person_id != person_id);
+                if let Some(profile) = profile {
+                    records.push(profile);
+                }
+            }
+        });
+    }
+
     pub fn merged(self, source_id: &str, target: Option<RelationshipProfile>) {
         self.store.set_records.update(|records| {
             records.retain(|profile| profile.person_id != source_id);

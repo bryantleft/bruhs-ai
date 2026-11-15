@@ -19,6 +19,7 @@ mod contact_reconcile;
 mod contact_sync;
 pub mod note_editor;
 mod people;
+mod people_actions;
 mod people_cache;
 
 #[derive(Clone, Copy)]
@@ -57,6 +58,12 @@ pub struct WorkflowExecutor {
     pub merge_error: RwSignal<Option<String>>,
     merge_loaded: RwSignal<bool>,
     pub contact_sync_error: RwSignal<Option<String>>,
+    /// The latest People change this browser can undo.
+    pub people_undo: RwSignal<Option<bruhs_models::PeopleUndo>>,
+    /// A People action or undo failed; shown on the People page.
+    pub people_notice: RwSignal<Option<String>>,
+    people_action_busy: RwSignal<bool>,
+    people_deleting: RwSignal<Option<String>>,
     banners: crate::components::banner::BannerStackSignal,
     pub threads_hydrated: RwSignal<bool>,
     pub ready: RwSignal<bool>,
@@ -101,6 +108,10 @@ impl WorkflowExecutor {
             merge_error: RwSignal::new(None),
             merge_loaded: RwSignal::new(false),
             contact_sync_error: RwSignal::new(None),
+            people_undo: RwSignal::new(None),
+            people_notice: RwSignal::new(None),
+            people_action_busy: RwSignal::new(false),
+            people_deleting: RwSignal::new(None),
             banners: expect_context(),
             threads_hydrated: RwSignal::new(false),
             ready: RwSignal::new(false),

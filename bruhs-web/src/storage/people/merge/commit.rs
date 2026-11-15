@@ -1,18 +1,22 @@
 use super::*;
 
+/// Commit a confirmed merge locally, in one transaction: the surviving
+/// contact, the merged relationship, the journal, the retired identity, and
+/// every Inbox participant and knowledge link that pointed at the source,
+/// repointed to the survivor as the desktop does.
 pub async fn complete(expected: &Record) -> Result<Record, SaveError> {
     let Phase::Confirmed { reply } = &expected.phase else {
         return Err(SaveError::Unavailable);
     };
-    let mut completed = expected.clone();
-    completed.phase = Phase::Completed {
-        reply: reply.clone(),
-    };
-    let mut archive = completed.clone();
-    archive.key = format!("{KEY}.archive.{}", archive.id);
     let db = open_db().await?;
     let tx = LocalTransaction::new(db.transaction(
-        &[STORE_METADATA, STORE_PEOPLE, STORE_RELATIONSHIPS],
+        &[
+            STORE_METADATA,
+            STORE_PEOPLE,
+            STORE_RELATIONSHIPS,
+            crate::storage::STORE_INBOX_CONVERSATIONS,
+            crate::storage::STORE_KNOWLEDGE_DOCUMENTS,
+        ],
         TransactionMode::ReadWrite,
     )?);
     let result = async {
@@ -23,6 +27,21 @@ pub async fn complete(expected: &Record) -> Result<Record, SaveError> {
             return Err(SaveError::Conflict);
         }
         check_baselines(&tx, expected).await?;
+        let (mut conversations, mut documents) = super::super::links::load_in(&tx).await?;
+        let relinked = bruhs_models::retarget_person_links(
+            &expected.source.id,
+            &expected.target.id,
+            &mut conversations,
+            &mut documents,
+        );
+        super::super::links::save_in(&tx, &relinked, &conversations, &documents).await?;
+        let mut completed = expected.clone();
+        completed.phase = Phase::Completed {
+            reply: reply.clone(),
+        };
+        completed.relinked = relinked;
+        let mut archive = completed.clone();
+        archive.key = format!("{KEY}.archive.{}", archive.id);
         // Drain every request, then wait for terminal commit before publishing any UI state.
         let (contacts, context, journal, outbox) = futures_util::join!(
             async {

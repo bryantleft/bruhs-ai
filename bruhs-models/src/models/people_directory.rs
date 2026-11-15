@@ -45,6 +45,9 @@ pub mod people_copy {
     pub const CANCEL: &str = "Cancel";
     pub const DUE_TOMORROW: &str = "Due tomorrow";
     pub const ITEM_SAVE: &str = "Save";
+    pub const ITEM_BLANK: &str = "Text is required. The item was not changed.";
+    pub const ALIAS_INPUT_LABEL: &str = "New alias";
+    pub const UNDO_DISMISS: &str = "Dismiss";
     pub const LOADING: &str = "Loading contacts… Profiles will appear as they are saved locally.";
     pub const EMPTY: &str =
         "No people yet. Add one above, or profiles populate after your first meeting summary completes.";
@@ -84,8 +87,17 @@ pub fn person_answers_to(person: &PersonProfile, name: &str) -> bool {
 /// People page search: the query is a case-folded substring of the display
 /// name or of any alias. A blank query matches everyone.
 pub fn person_matches_query(person: &PersonProfile, query: &str) -> bool {
+    names_match_query(person_names(person), query)
+}
+
+/// [`person_matches_query`] over a list of names, for directories that keep
+/// only a profile's names.
+pub fn names_match_query<'a>(names: impl IntoIterator<Item = &'a str>, query: &str) -> bool {
     let query = person_name_key(query.trim());
-    query.is_empty() || person_names(person).any(|name| person_name_key(name).contains(&query))
+    query.is_empty()
+        || names
+            .into_iter()
+            .any(|name| person_name_key(name).contains(&query))
 }
 
 /// The number of directory pages for `len` people. Never zero, so an empty

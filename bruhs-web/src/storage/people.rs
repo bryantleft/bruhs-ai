@@ -6,6 +6,8 @@ use crate::storage::STORE_METADATA;
 use futures_util::future::join_all;
 use idb::TransactionMode;
 use wasm_bindgen::JsValue;
+pub mod changes;
+mod links;
 pub mod merge;
 pub mod outbox;
 
