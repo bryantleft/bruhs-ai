@@ -267,6 +267,9 @@ pub async fn delete_meeting(
     Path(id): Path<MeetingId>,
 ) -> Result<StatusCode, AppError> {
     if state.meetings().delete_meeting(&id).await? {
+        // The store deleted the observations derived from this meeting in the
+        // same commit (PEOPLE-14), so contact caches must refetch.
+        state.emit_meeting_event(bruhs_models::MeetingEvent::PeopleUpdated);
         Ok(StatusCode::NO_CONTENT)
     } else {
         Err(meeting_not_found(&id))
@@ -299,6 +302,48 @@ mod tests {
     use super::*;
     use bruhs_core::AppState;
     use std::sync::Arc;
+
+    /// PEOPLE-14: deleting a meeting deletes the observations derived from
+    /// it, and contact caches are told to refetch.
+    #[tokio::test]
+    async fn deleting_a_meeting_drops_its_observations_and_announces_it() {
+        let state = Arc::new(AppState::new());
+        let Json(meeting) = create_meeting(
+            State(state.clone()),
+            Json(CreateMeetingRequest {
+                title: "Sync".into(),
+                started_at_ms: 1.0,
+                calendar_event_id: None,
+            }),
+        )
+        .await
+        .unwrap();
+        let mut person = bruhs_models::PersonProfile::new("Ada");
+        person.observations.push(bruhs_models::PersonObservation {
+            at_meeting_id: meeting.id.clone(),
+            kind: bruhs_models::ObservationKind::Topic,
+            text: "Derived from the deleted meeting".into(),
+            created_at: 1,
+        });
+        let person = state.meetings().upsert_person(person).await.unwrap();
+        let mut events = state.subscribe_meeting_events();
+        let status = delete_meeting(State(state.clone()), Path(meeting.id.parse().unwrap()))
+            .await
+            .unwrap();
+        assert_eq!(status, StatusCode::NO_CONTENT);
+        assert_eq!(
+            events.try_recv().unwrap(),
+            bruhs_models::MeetingEvent::PeopleUpdated
+        );
+        assert!(state
+            .meetings()
+            .get_person(&person.id)
+            .await
+            .unwrap()
+            .unwrap()
+            .observations
+            .is_empty());
+    }
 
     #[tokio::test]
     async fn create_then_list_returns_one() {

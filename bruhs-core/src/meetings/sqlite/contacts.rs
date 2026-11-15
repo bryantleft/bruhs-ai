@@ -1,6 +1,10 @@
 use super::*;
-use crate::meetings::person_changes::{merged_profile, next_version, validate_person};
-use bruhs_models::{person_name_key, PersonObservation, PersonProfile};
+use crate::meetings::person_changes::{
+    aliases_to_save, merged_profile, next_version, now_ms, restored_source, unmerged_target,
+    validate_person, ArchivedMerge, DeletionArchive, RESTORE_LIVE, UNMERGE_SOURCE_LIVE,
+    UNMERGE_SOURCE_TARGETED, UNMERGE_TARGET_GONE,
+};
+use bruhs_models::{person_name_key, PersonDeletion, PersonObservation, PersonProfile};
 use std::collections::HashMap;
 
 pub(super) fn resolve_merges(
@@ -192,10 +196,198 @@ pub(super) fn merge(
     let target = required(connection, target_id)?;
     let merged = merged_profile(&source, &target)?;
     save(connection, &merged)?;
-    records::retarget_meetings(connection, &source, &merged)?;
-    connection.execute("INSERT INTO merged_people(source_id,target_id,source_original,target_original) VALUES(?1,?2,?3,?4)", rusqlite::params![source_id,target_id,encode(&source)?,encode(&target)?])?;
-    connection.execute("DELETE FROM people WHERE id=?1", [source_id])?;
+    let links = records::retarget_meetings(connection, &source, &merged)?;
+    connection.execute("INSERT INTO merged_people(source_id,target_id,source_original,target_original,links) VALUES(?1,?2,?3,?4,?5)", rusqlite::params![source_id,target_id,encode(&source)?,encode(&target)?,encode(&links)?])?;
+    remove(connection, source_id)?;
     Ok(merged)
+}
+
+fn remove(connection: &Connection, id: &str) -> MeetingStoreResult<()> {
+    connection.execute("DELETE FROM person_names WHERE person_id=?1", [id])?;
+    connection.execute("DELETE FROM people WHERE id=?1", [id])?;
+    Ok(())
+}
+
+fn is_merged(connection: &Connection, id: &str) -> MeetingStoreResult<bool> {
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM merged_people WHERE source_id=?1)",
+        [id],
+        |row| row.get(0),
+    )?)
+}
+
+/// A `merged_people` row: source, target, both originals and the link record.
+type MergeRow = (String, String, String, String, Option<String>);
+
+fn archived_merge(
+    (source_id, target_id, source, target, links): MergeRow,
+) -> MeetingStoreResult<ArchivedMerge> {
+    Ok(ArchivedMerge {
+        source_id,
+        target_id,
+        source_original: decode(source)?,
+        target_original: decode(target)?,
+        links: links.map(decode).transpose()?,
+    })
+}
+
+fn merge_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MergeRow> {
+    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+}
+
+fn insert_merge(connection: &Connection, merge: &ArchivedMerge) -> MeetingStoreResult<()> {
+    let links = merge.links.as_ref().map(encode).transpose()?;
+    connection.execute("INSERT INTO merged_people(source_id,target_id,source_original,target_original,links) VALUES(?1,?2,?3,?4,?5)", rusqlite::params![merge.source_id, merge.target_id, encode(&merge.source_original)?, encode(&merge.target_original)?, links])?;
+    Ok(())
+}
+
+/// PEOPLE-10: see [`crate::meetings::PeopleStore::delete_person`].
+pub(super) fn delete(connection: &Connection, id: &str) -> MeetingStoreResult<PersonDeletion> {
+    let person = required(connection, id)?;
+    let (speakers, action_items) = records::unlink_person(connection, id)?;
+    // Every merge whose redirect chain ends here, or `resolve_merges` would
+    // fail for those retired ids once the terminal contact is gone.
+    let merges = connection
+        .prepare(
+            "WITH RECURSIVE chain(source_id) AS (
+                SELECT source_id FROM merged_people WHERE target_id=?1
+                UNION SELECT merged_people.source_id FROM merged_people JOIN chain ON merged_people.target_id=chain.source_id)
+            SELECT merged_people.source_id,target_id,source_original,target_original,links
+            FROM merged_people JOIN chain USING(source_id) ORDER BY merged_people.source_id",
+        )?
+        .query_map([id], merge_row)?
+        .collect::<Result<Vec<_>, _>>()?
+        .into_iter()
+        .map(archived_merge)
+        .collect::<MeetingStoreResult<Vec<_>>>()?;
+    for merge in &merges {
+        connection.execute(
+            "DELETE FROM merged_people WHERE source_id=?1",
+            [&merge.source_id],
+        )?;
+    }
+    remove(connection, id)?;
+    let deletion = PersonDeletion {
+        person,
+        speakers,
+        action_items,
+        deleted_at: now_ms(),
+    };
+    let archive = DeletionArchive {
+        deletion: deletion.clone(),
+        merges,
+    };
+    connection.execute("INSERT INTO deleted_people(id,deleted,payload) VALUES(?1,?2,?3) ON CONFLICT(id) DO UPDATE SET deleted=excluded.deleted,payload=excluded.payload", rusqlite::params![id, deletion.deleted_at, encode(&archive)?])?;
+    Ok(deletion)
+}
+
+/// PEOPLE-09: see [`crate::meetings::PeopleStore::restore_person`].
+pub(super) fn restore(connection: &Connection, id: &str) -> MeetingStoreResult<PersonProfile> {
+    let archive: DeletionArchive = get(connection, "deleted_people", id)?
+        .ok_or_else(|| MeetingStoreError::PersonNotFound { id: id.into() })?;
+    if archive.deletion.person.id != id {
+        return Err(MeetingStoreError::PersistenceFailed(
+            "Saved contact deletion is malformed. Original data was preserved.".into(),
+        ));
+    }
+    if person(connection, id)?.is_some() || is_merged(connection, id)? {
+        return Err(MeetingStoreError::Conflict(RESTORE_LIVE.into()));
+    }
+    let mut value = archive.deletion.person.clone();
+    value.updated_at = next_version(value.updated_at)?;
+    save(connection, &value)?;
+    records::relink_person(
+        connection,
+        id,
+        &archive.deletion.speakers,
+        &archive.deletion.action_items,
+    )?;
+    for merge in &archive.merges {
+        // A retired id that is live again keeps its new identity.
+        if person(connection, &merge.source_id)?.is_none() && !is_merged(connection, &merge.source_id)? {
+            insert_merge(connection, merge)?;
+        }
+    }
+    connection.execute("DELETE FROM deleted_people WHERE id=?1", [id])?;
+    Ok(value)
+}
+
+/// PEOPLE-09: see [`crate::meetings::PeopleStore::unmerge_person`].
+pub(super) fn unmerge(
+    connection: &Connection,
+    source_id: &str,
+) -> MeetingStoreResult<bruhs_models::PersonUnmerge> {
+    let merge = connection
+        .query_row(
+            "SELECT source_id,target_id,source_original,target_original,links FROM merged_people WHERE source_id=?1",
+            [source_id],
+            merge_row,
+        )
+        .optional()?
+        .map(archived_merge)
+        .transpose()?
+        .ok_or_else(|| MeetingStoreError::PersonNotFound {
+            id: source_id.into(),
+        })?;
+    if person(connection, source_id)?.is_some() {
+        return Err(MeetingStoreError::Conflict(UNMERGE_SOURCE_LIVE.into()));
+    }
+    let targeted: bool = connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM merged_people WHERE target_id=?1)",
+        [source_id],
+        |row| row.get(0),
+    )?;
+    if targeted {
+        return Err(MeetingStoreError::Conflict(UNMERGE_SOURCE_TARGETED.into()));
+    }
+    let current = person(connection, &merge.target_id)?
+        .ok_or_else(|| MeetingStoreError::Conflict(UNMERGE_TARGET_GONE.into()))?;
+    let target = unmerged_target(&current, &merge.source_original, &merge.target_original)?;
+    let source = restored_source(&merge.source_original)?;
+    connection.execute("DELETE FROM merged_people WHERE source_id=?1", [source_id])?;
+    save(connection, &target)?;
+    save(connection, &source)?;
+    if let Some(links) = &merge.links {
+        records::restore_merge_links(
+            connection,
+            source_id,
+            &merge.target_id,
+            &merge.target_original.display_name,
+            links,
+        )?;
+    }
+    Ok(bruhs_models::PersonUnmerge { source, target })
+}
+
+/// PEOPLE-04: see [`crate::meetings::PeopleStore::set_person_aliases`].
+pub(super) fn set_aliases(
+    connection: &Connection,
+    id: &str,
+    aliases: &[String],
+) -> MeetingStoreResult<PersonProfile> {
+    let people = list(connection)?;
+    edit(connection, id, |person| {
+        person.aliases = aliases_to_save(person, aliases, people.iter())?;
+        Ok(())
+    })
+}
+
+/// PEOPLE-14: drop every observation sourced from `meeting_id`, bumping each
+/// changed contact's version. Returns how many were deleted.
+pub(super) fn drop_meeting_observations(
+    connection: &Connection,
+    meeting_id: &str,
+) -> MeetingStoreResult<usize> {
+    let mut deleted = 0;
+    for mut person in list(connection)? {
+        let removed = bruhs_models::drop_meeting_observations(&mut person, meeting_id);
+        if removed > 0 {
+            deleted += removed;
+            person.updated_at = next_version(person.updated_at)?;
+            save(connection, &person)?;
+        }
+    }
+    Ok(deleted)
 }
 
 pub(super) fn observations(

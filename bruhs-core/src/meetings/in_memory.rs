@@ -8,7 +8,9 @@ use tokio::sync::RwLock;
 use bruhs_models::{person_names_match, Meeting, PersonProfile, TranscriptSegment};
 
 use super::error::{MeetingStoreError, MeetingStoreResult};
-use super::person_changes::{merged_profile, next_version, validate_person};
+use super::person_changes::{
+    self, merged_profile, next_version, validate_person, ArchivedMerge, DeletionArchive, MergeLinks,
+};
 use super::{MeetingRecords, PeopleStore, SpeakerLinkJobs, SummaryGenerationStore};
 
 mod generation;
@@ -18,7 +20,10 @@ pub struct InMemoryMeetingStore {
     pub(super) segments: RwLock<HashMap<String, Vec<TranscriptSegment>>>,
     removals: RwLock<HashMap<String, HashSet<String>>>,
     pub(super) people: RwLock<BTreeMap<String, PersonProfile>>,
-    merged_people: RwLock<HashMap<String, String>>,
+    /// Merge redirects by source id, with the originals undo restores.
+    merged_people: RwLock<HashMap<String, ArchivedMerge>>,
+    /// Deleted contacts by id, so a delete can be undone.
+    deleted_people: RwLock<HashMap<String, DeletionArchive>>,
     generations: RwLock<HashMap<String, bruhs_models::SummaryGenerationReceipt>>,
     link_jobs: RwLock<HashMap<String, super::SpeakerLinkJob>>,
     local_focus: RwLock<HashMap<String, Vec<bruhs_models::LocalFocusObservation>>>,
@@ -32,6 +37,7 @@ impl InMemoryMeetingStore {
             removals: RwLock::new(HashMap::new()),
             people: RwLock::new(BTreeMap::new()),
             merged_people: RwLock::new(HashMap::new()),
+            deleted_people: RwLock::new(HashMap::new()),
             generations: RwLock::new(HashMap::new()),
             link_jobs: RwLock::new(HashMap::new()),
             local_focus: RwLock::new(HashMap::new()),
@@ -302,7 +308,32 @@ impl MeetingRecords for InMemoryMeetingStore {
         let id = id.as_str();
         let mut generations = self.generations.write().await;
         let mut meetings = self.meetings.write().await;
+        // PEOPLE-14: observations derived from the meeting go with it.
+        // Validate every version before anything is removed.
+        let mut people = self.people.write().await;
+        let versions = if meetings.contains_key(id) {
+            people
+                .values()
+                .filter(|person| {
+                    person
+                        .observations
+                        .iter()
+                        .any(|observation| observation.at_meeting_id == id)
+                })
+                .map(|person| Ok((person.id.clone(), next_version(person.updated_at)?)))
+                .collect::<MeetingStoreResult<Vec<_>>>()?
+        } else {
+            Vec::new()
+        };
+        for (person_id, version) in versions {
+            if let Some(person) = people.get_mut(&person_id) {
+                bruhs_models::drop_meeting_observations(person, id);
+                person.updated_at = version;
+            }
+        }
         let removed = meetings.remove(id).is_some();
+        // The meeting and its observations leave under the same locks.
+        drop(people);
         self.link_jobs.write().await.remove(id);
         self.segments.write().await.remove(id);
         self.removals.write().await.remove(id);
@@ -550,11 +581,11 @@ impl PeopleStore for InMemoryMeetingStore {
         let people = self.people.read().await;
         let mut result = Vec::new();
         for id in ids {
-            let Some(mut target_id) = merged.get(id) else {
+            let Some(mut target_id) = merged.get(id).map(|merge| &merge.target_id) else {
                 continue;
             };
             let mut seen = std::collections::HashSet::from([id]);
-            while let Some(next) = merged.get(target_id) {
+            while let Some(next) = merged.get(target_id).map(|merge| &merge.target_id) {
                 if !seen.insert(target_id) {
                     return Err(MeetingStoreError::PersistenceFailed(
                         "Saved contact merge contains a cycle.".into(),
@@ -798,9 +829,10 @@ impl PeopleStore for InMemoryMeetingStore {
             ));
         }
         let mut merged = self.merged_people.write().await;
+        let mut meetings = self.meetings.write().await;
         let mut people = self.people.write().await;
-        if let Some(committed_target) = merged.get(source_id) {
-            if committed_target != target_id {
+        if let Some(committed) = merged.get(source_id) {
+            if committed.target_id != target_id {
                 return Err(MeetingStoreError::InvalidInput(
                     "This source was already merged into another contact.".into(),
                 ));
@@ -827,12 +859,242 @@ impl PeopleStore for InMemoryMeetingStore {
                 "target_id existence was verified with contains_key while holding the write lock"
             );
         };
+        let target_original = target.clone();
         let updated = merged_profile(&source, target)?;
+        // Same cascade as the sqlite store: the source's speakers and action
+        // items move to the target, recorded so the merge can be undone.
+        let mut links = MergeLinks::default();
+        let mut retargeted = Vec::new();
+        for meeting in meetings.values() {
+            let mut next = meeting.clone();
+            let moved = person_changes::retarget_meeting(&mut next, &source, &updated);
+            if !moved.speakers.is_empty() || !moved.action_items.is_empty() {
+                next.updated_at = next_version(next.updated_at)?;
+                links.extend(moved);
+                retargeted.push(next);
+            }
+        }
+        for meeting in retargeted {
+            meetings.insert(meeting.id.clone(), meeting);
+        }
         people.insert(target_id.into(), updated.clone());
-        merged.insert(source_id.into(), target_id.into());
+        merged.insert(
+            source_id.into(),
+            ArchivedMerge {
+                source_id: source_id.into(),
+                target_id: target_id.into(),
+                source_original: source,
+                target_original,
+                links: Some(links),
+            },
+        );
         people.remove(source_id);
         drop(people);
+        drop(meetings);
         drop(merged);
+        Ok(updated)
+    }
+
+    async fn delete_person(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<bruhs_models::PersonDeletion> {
+        let person_id = person_id.as_str();
+        // Lock order: merged, meetings, people, then the archive.
+        let mut merged = self.merged_people.write().await;
+        let mut meetings = self.meetings.write().await;
+        let mut people = self.people.write().await;
+        let person = people
+            .get(person_id)
+            .cloned()
+            .ok_or_else(|| MeetingStoreError::PersonNotFound {
+                id: person_id.into(),
+            })?;
+        let mut speakers = Vec::new();
+        let mut action_items = Vec::new();
+        let mut unlinked = Vec::new();
+        for meeting in meetings.values() {
+            let mut next = meeting.clone();
+            let (lost_speakers, lost_items) = person_changes::unlink_meeting(&mut next, person_id);
+            if !lost_speakers.is_empty() || !lost_items.is_empty() {
+                next.updated_at = next_version(next.updated_at)?;
+                speakers.extend(lost_speakers);
+                action_items.extend(lost_items);
+                unlinked.push(next);
+            }
+        }
+        let retired = person_changes::merges_ending_at(
+            merged
+                .values()
+                .map(|merge| (merge.source_id.as_str(), merge.target_id.as_str())),
+            person_id,
+        );
+        let merges = retired
+            .iter()
+            .filter_map(|source| merged.get(source).cloned())
+            .collect::<Vec<_>>();
+        let deletion = bruhs_models::PersonDeletion {
+            person,
+            speakers,
+            action_items,
+            deleted_at: person_changes::now_ms(),
+        };
+        // Everything above was fallible; nothing is published until here.
+        for meeting in unlinked {
+            meetings.insert(meeting.id.clone(), meeting);
+        }
+        for source in &retired {
+            merged.remove(source);
+        }
+        people.remove(person_id);
+        self.deleted_people.write().await.insert(
+            person_id.into(),
+            DeletionArchive {
+                deletion: deletion.clone(),
+                merges,
+            },
+        );
+        drop(people);
+        drop(meetings);
+        drop(merged);
+        Ok(deletion)
+    }
+
+    async fn restore_person(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<PersonProfile> {
+        let person_id = person_id.as_str();
+        let mut merged = self.merged_people.write().await;
+        let mut meetings = self.meetings.write().await;
+        let mut people = self.people.write().await;
+        let mut deleted = self.deleted_people.write().await;
+        let Some(archive) = deleted.get(person_id).cloned() else {
+            return Err(MeetingStoreError::PersonNotFound {
+                id: person_id.into(),
+            });
+        };
+        if people.contains_key(person_id) || merged.contains_key(person_id) {
+            return Err(MeetingStoreError::Conflict(
+                person_changes::RESTORE_LIVE.into(),
+            ));
+        }
+        let mut person = archive.deletion.person.clone();
+        person.updated_at = next_version(person.updated_at)?;
+        let mut relinked = Vec::new();
+        for meeting in meetings.values() {
+            let mut next = meeting.clone();
+            if person_changes::relink_meeting(
+                &mut next,
+                person_id,
+                &archive.deletion.speakers,
+                &archive.deletion.action_items,
+            ) {
+                next.updated_at = next_version(next.updated_at)?;
+                relinked.push(next);
+            }
+        }
+        for meeting in relinked {
+            meetings.insert(meeting.id.clone(), meeting);
+        }
+        for merge in archive.merges {
+            // A retired id that is live again keeps its new identity.
+            if !people.contains_key(&merge.source_id) && !merged.contains_key(&merge.source_id) {
+                merged.insert(merge.source_id.clone(), merge);
+            }
+        }
+        people.insert(person.id.clone(), person.clone());
+        deleted.remove(person_id);
+        drop(deleted);
+        drop(people);
+        drop(meetings);
+        drop(merged);
+        Ok(person)
+    }
+
+    async fn unmerge_person(
+        &self,
+        source_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<bruhs_models::PersonUnmerge> {
+        let source_id = source_id.as_str();
+        let mut merged = self.merged_people.write().await;
+        let mut meetings = self.meetings.write().await;
+        let mut people = self.people.write().await;
+        let Some(merge) = merged.get(source_id).cloned() else {
+            return Err(MeetingStoreError::PersonNotFound {
+                id: source_id.into(),
+            });
+        };
+        if people.contains_key(source_id) {
+            return Err(MeetingStoreError::Conflict(
+                person_changes::UNMERGE_SOURCE_LIVE.into(),
+            ));
+        }
+        if merged.values().any(|other| other.target_id == source_id) {
+            return Err(MeetingStoreError::Conflict(
+                person_changes::UNMERGE_SOURCE_TARGETED.into(),
+            ));
+        }
+        let Some(current) = people.get(&merge.target_id) else {
+            return Err(MeetingStoreError::Conflict(
+                person_changes::UNMERGE_TARGET_GONE.into(),
+            ));
+        };
+        let target =
+            person_changes::unmerged_target(current, &merge.source_original, &merge.target_original)?;
+        let source = person_changes::restored_source(&merge.source_original)?;
+        let mut restored = Vec::new();
+        if let Some(links) = &merge.links {
+            for meeting_id in links.meeting_ids() {
+                let Some(meeting) = meetings.get(meeting_id) else {
+                    continue;
+                };
+                let mut next = meeting.clone();
+                if person_changes::restore_meeting_links(
+                    &mut next,
+                    source_id,
+                    &merge.target_id,
+                    &merge.target_original.display_name,
+                    links,
+                ) {
+                    next.updated_at = next_version(next.updated_at)?;
+                    restored.push(next);
+                }
+            }
+        }
+        for meeting in restored {
+            meetings.insert(meeting.id.clone(), meeting);
+        }
+        people.insert(target.id.clone(), target.clone());
+        people.insert(source.id.clone(), source.clone());
+        merged.remove(source_id);
+        drop(people);
+        drop(meetings);
+        drop(merged);
+        Ok(bruhs_models::PersonUnmerge { source, target })
+    }
+
+    async fn set_person_aliases(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+        aliases: Vec<String>,
+    ) -> MeetingStoreResult<PersonProfile> {
+        let person_id = person_id.as_str();
+        let mut people = self.people.write().await;
+        let Some(current) = people.get(person_id) else {
+            return Err(MeetingStoreError::PersonNotFound {
+                id: person_id.into(),
+            });
+        };
+        let next = person_changes::aliases_to_save(current, &aliases, people.values())?;
+        let version = next_version(current.updated_at)?;
+        let Some(person) = people.get_mut(person_id) else {
+            unreachable!("the write lock keeps the checked contact present");
+        };
+        person.aliases = next;
+        person.updated_at = version;
+        let updated = person.clone();
+        drop(people);
         Ok(updated)
     }
 

@@ -20,6 +20,8 @@ mod merge_resolution_tests;
 mod merge_retry_tests;
 #[cfg(test)]
 mod opt_out_tests;
+#[cfg(test)]
+mod people_lifecycle_tests;
 mod person_changes;
 mod speaker_linking;
 #[cfg(test)]
@@ -176,6 +178,9 @@ pub trait MeetingRecords: Send + Sync {
         skip: bool,
     ) -> MeetingStoreResult<Meeting>;
 
+    /// Delete a meeting and, in the same commit, every person observation
+    /// derived from it (PEOPLE-14). `false` when there was no such meeting,
+    /// and then nothing changes.
     async fn delete_meeting(&self, id: &bruhs_models::ids::MeetingId) -> MeetingStoreResult<bool>;
 
     async fn append_segment(&self, segment: TranscriptSegment) -> MeetingStoreResult<()>;
@@ -307,6 +312,45 @@ pub trait PeopleStore: Send + Sync {
         &self,
         source_id: &bruhs_models::ids::PersonId,
         target_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<PersonProfile>;
+
+    /// Delete a contact (PEOPLE-10). Its observations and aliases go with it.
+    /// Meeting speakers and summary action items linked to it stay, unlinked.
+    /// Merge redirects that ended at it are removed so retired ids resolve as
+    /// unknown. The store keeps an archive so [`Self::restore_person`] needs
+    /// only the id. Errors with `PersonNotFound` for an unknown id.
+    async fn delete_person(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<bruhs_models::PersonDeletion>;
+
+    /// Undo [`Self::delete_person`]: put the contact back with a new version,
+    /// relink the speakers and action items it lost that are still unlinked,
+    /// and reinstate its merge redirects. `PersonNotFound` when nothing was
+    /// archived; `Conflict` when the id is live or merged again.
+    async fn restore_person(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<PersonProfile>;
+
+    /// Undo a merge (PEOPLE-09). The source returns from its original; the
+    /// target loses only what the merge brought, so later edits survive.
+    /// Meeting links the merge moved go back when the merge recorded them.
+    /// `PersonNotFound` when `source_id` was never merged; `Conflict` when
+    /// the source is live, the target is no longer live, or another contact
+    /// was merged into the source.
+    async fn unmerge_person(
+        &self,
+        source_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<bruhs_models::PersonUnmerge>;
+
+    /// Replace a contact's aliases (PEOPLE-04). The list is normalized with
+    /// [`bruhs_models::normalize_aliases`]. A newly added alias that another
+    /// contact answers to is refused as `Conflict` and nothing changes.
+    async fn set_person_aliases(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+        aliases: Vec<String>,
     ) -> MeetingStoreResult<PersonProfile>;
 
     /// Phase 3d: manually link a speaker entry in a meeting to an existing

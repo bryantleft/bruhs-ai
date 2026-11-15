@@ -717,7 +717,21 @@ fn router_with_capture_daemon(
         )
         .route(
             "/api/people/{id}",
-            get(routes::people::get_person).patch(routes::people::patch_person),
+            get(routes::people::get_person)
+                .patch(routes::people::patch_person)
+                .delete(routes::people::delete_person),
+        )
+        .route(
+            "/api/people/{id}/restore",
+            post(routes::people::restore_person),
+        )
+        .route(
+            "/api/people/{id}/unmerge",
+            post(routes::people::unmerge_person),
+        )
+        .route(
+            "/api/people/{id}/aliases",
+            axum::routing::put(routes::people::set_person_aliases),
         )
         .route(
             "/api/people/resolve-merges",

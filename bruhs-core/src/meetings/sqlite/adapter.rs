@@ -1,8 +1,5 @@
 use super::*;
-use crate::meetings::{
-    person_changes::next_version, MeetingRecords, PeopleStore, SpeakerLinkJobs,
-    SummaryGenerationStore,
-};
+use crate::meetings::{MeetingRecords, PeopleStore, SpeakerLinkJobs, SummaryGenerationStore};
 use bruhs_models::{
     Meeting, MeetingSummary, PersonObservation, PersonProfile, Speaker, TranscriptSegment,
 };
@@ -241,6 +238,12 @@ impl MeetingRecords for SqliteMeetingStore {
         let id = id.to_owned();
         self.call(move |connection| {
             write(connection, |tx| {
+                // PEOPLE-14: the observations derived from a meeting leave
+                // with it, in the same commit. An unknown id changes nothing.
+                if records::meeting(tx, &id)?.is_none() {
+                    return Ok(false);
+                }
+                contacts::drop_meeting_observations(tx, &id)?;
                 Ok(tx.execute("DELETE FROM meetings WHERE id=?1", [&id])? != 0)
             })
         })
@@ -438,22 +441,7 @@ impl PeopleStore for SqliteMeetingStore {
         let meeting_id = meeting_id.as_str();
         let id = meeting_id.to_owned();
         self.call(move |connection| {
-            write(connection, |tx| {
-                let people = contacts::list(tx)?;
-                let mut deleted = 0;
-                for mut person in people {
-                    let prior = person.observations.len();
-                    person
-                        .observations
-                        .retain(|observation| observation.at_meeting_id != id);
-                    if person.observations.len() != prior {
-                        deleted += prior - person.observations.len();
-                        person.updated_at = next_version(person.updated_at)?;
-                        contacts::save(tx, &person)?;
-                    }
-                }
-                Ok(deleted)
-            })
+            write(connection, |tx| contacts::drop_meeting_observations(tx, &id))
         })
         .await
     }
@@ -487,6 +475,45 @@ impl PeopleStore for SqliteMeetingStore {
         let (source, target) = (source_id.to_owned(), target_id.to_owned());
         self.call(move |connection| write(connection, |tx| contacts::merge(tx, &source, &target)))
             .await
+    }
+
+    async fn delete_person(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<bruhs_models::PersonDeletion> {
+        let id = person_id.as_str().to_owned();
+        self.call(move |connection| write(connection, |tx| contacts::delete(tx, &id)))
+            .await
+    }
+
+    async fn restore_person(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<PersonProfile> {
+        let id = person_id.as_str().to_owned();
+        self.call(move |connection| write(connection, |tx| contacts::restore(tx, &id)))
+            .await
+    }
+
+    async fn unmerge_person(
+        &self,
+        source_id: &bruhs_models::ids::PersonId,
+    ) -> MeetingStoreResult<bruhs_models::PersonUnmerge> {
+        let id = source_id.as_str().to_owned();
+        self.call(move |connection| write(connection, |tx| contacts::unmerge(tx, &id)))
+            .await
+    }
+
+    async fn set_person_aliases(
+        &self,
+        person_id: &bruhs_models::ids::PersonId,
+        aliases: Vec<String>,
+    ) -> MeetingStoreResult<PersonProfile> {
+        let id = person_id.as_str().to_owned();
+        self.call(move |connection| {
+            write(connection, |tx| contacts::set_aliases(tx, &id, &aliases))
+        })
+        .await
     }
 
     async fn link_speaker_to_person(
