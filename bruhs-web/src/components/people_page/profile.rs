@@ -29,8 +29,9 @@ pub fn AliasesPanel(person_id: String) -> impl IntoView {
         })
     });
     let add = move || {
-        let reviewed = people
-            .with_untracked(|people| review_alias(people.iter(), &id.get_value(), &draft.get_untracked()));
+        let reviewed = people.with_untracked(|people| {
+            review_alias(people.iter(), &id.get_value(), &draft.get_untracked())
+        });
         match reviewed {
             Err(refused) => problem.set(Some(refused.message())),
             Ok(alias) => {
@@ -149,10 +150,11 @@ pub fn LinkedRecords(person_id: String) -> impl IntoView {
                         <ul role="list" class="space-y-0.5">
                             {rows.into_iter().map(|(meeting_id, title)| {
                                 let title = if title.trim().is_empty() { "Untitled meeting".to_string() } else { title };
+                                let label = format!("Open meeting {title}");
                                 view! {
                                     <li>
                                         <button type="button" class=LINK
-                                            aria-label=format!("Open meeting {title}")
+                                            aria-label=label
                                             on:click=move |_| opener.open(&id.get_value(), AppView::MeetingDetail { meeting_id: meeting_id.clone() })>
                                             <span class="min-w-0 truncate">{title}</span>
                                         </button>
@@ -172,15 +174,18 @@ pub fn LinkedRecords(person_id: String) -> impl IntoView {
                     }
                     view! {
                         <ul role="list" class="space-y-0.5">
-                            {rows.into_iter().map(|(conversation_id, subject, source)| view! {
-                                <li>
-                                    <button type="button" class=LINK
-                                        aria-label=format!("Open conversation {subject}")
-                                        on:click=move |_| opener.open(&id.get_value(), AppView::ConversationDetail { conversation_id: conversation_id.clone() })>
-                                        <span class="min-w-0 truncate">{subject.clone()}</span>
-                                        <span class="shrink-0 text-label-sm text-rambutan-500">{source}</span>
-                                    </button>
-                                </li>
+                            {rows.into_iter().map(|(conversation_id, subject, source)| {
+                                let label = format!("Open conversation {subject}");
+                                view! {
+                                    <li>
+                                        <button type="button" class=LINK
+                                            aria-label=label
+                                            on:click=move |_| opener.open(&id.get_value(), AppView::ConversationDetail { conversation_id: conversation_id.clone() })>
+                                            <span class="min-w-0 truncate">{subject}</span>
+                                            <span class="shrink-0 text-label-sm text-rambutan-500">{source}</span>
+                                        </button>
+                                    </li>
+                                }
                             }).collect_view()}
                         </ul>
                     }.into_any()
