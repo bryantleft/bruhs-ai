@@ -18,6 +18,57 @@ pub const PEOPLE_PAGE_SIZE: usize = 25;
 /// How far "Due tomorrow" sets a reminder's due time.
 pub const RELATIONSHIP_DUE_TOMORROW_MS: i64 = 86_400_000;
 
+/// App-owned People copy both surfaces render, so web and desktop match word
+/// for word. Follows `docs/ui-standards.md`: short sentences, no dashes.
+pub mod people_copy {
+    pub const CREATE_LABEL: &str = "New person";
+    pub const CREATE_PLACEHOLDER: &str = "Name";
+    pub const CREATE_BUTTON: &str = "Add person";
+    pub const CREATE_BLANK: &str = "A name is required. No profile was created.";
+    pub const SEARCH_LABEL: &str = "Search people";
+    pub const SEARCH_PLACEHOLDER: &str = "Search by name or alias";
+    pub const SEARCH_EMPTY: &str = "No people match this search.";
+    pub const PREVIOUS_PAGE: &str = "Previous people";
+    pub const NEXT_PAGE: &str = "Next people";
+    pub const RENAME_BLANK: &str = "A name is required. The profile kept its previous name.";
+    pub const ALIASES_HEADING: &str = "Aliases";
+    pub const ALIASES_EMPTY: &str = "No aliases yet.";
+    pub const ALIAS_PLACEHOLDER: &str = "Add an alias";
+    pub const ALIAS_BUTTON: &str = "Add alias";
+    pub const MEETINGS_HEADING: &str = "Meetings";
+    pub const MEETINGS_EMPTY: &str = "No meetings with this person yet.";
+    pub const CONVERSATIONS_HEADING: &str = "Conversations";
+    pub const CONVERSATIONS_EMPTY: &str = "No Inbox conversations with this person yet.";
+    pub const BACK_TO_PEOPLE: &str = "Back to People";
+    pub const MERGE_CONFIRM_BUTTON: &str = "Confirm merge";
+    pub const DELETE_BUTTON: &str = "Delete profile";
+    pub const CANCEL: &str = "Cancel";
+    pub const DUE_TOMORROW: &str = "Due tomorrow";
+    pub const ITEM_SAVE: &str = "Save";
+    pub const LOADING: &str = "Loading contacts… Profiles will appear as they are saved locally.";
+    pub const EMPTY: &str =
+        "No people yet. Add one above, or profiles populate after your first meeting summary completes.";
+
+    /// The merge confirmation sentence.
+    pub fn merge_confirm(source: &str, target: &str) -> String {
+        format!(
+            "Merge {source} into {target}? Aliases, observations, reminders, voice and links move to {target}. You can undo right after."
+        )
+    }
+
+    /// The delete confirmation sentence.
+    pub fn delete_confirm(name: &str) -> String {
+        format!(
+            "Delete {name}? Their observations, aliases and reminders are deleted. Meetings and Inbox conversations stay, unlinked. You can undo right after."
+        )
+    }
+
+    /// "Page 2 of 5".
+    pub fn page_status(page: usize, count: usize) -> String {
+        format!("Page {} of {}", page.saturating_add(1), count)
+    }
+}
+
 /// Every name a profile answers to: the display name, then its aliases.
 pub fn person_names(person: &PersonProfile) -> impl Iterator<Item = &str> {
     std::iter::once(person.display_name.as_str()).chain(person.aliases.iter().map(String::as_str))
