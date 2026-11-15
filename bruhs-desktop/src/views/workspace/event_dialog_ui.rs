@@ -760,8 +760,8 @@ impl Workspace {
                                         el.child(self.render_event_open_task(task_id, cx))
                                     })
                                     .when_some(delete_id, |el, delete_id| {
-                                let delete_id_for_key = delete_id.clone();
-                                el.child(
+                                        let delete_id_for_key = delete_id.clone();
+                                        el.child(
                                     div()
                                         .id("event-create-delete")
                                         .debug_selector(|| {
@@ -807,7 +807,8 @@ impl Workspace {
                                         ))
                                         .child(EVENT_DELETE_LABEL),
                                 )
-                            }))
+                                    }),
+                            )
                             .child(
                                 div()
                                     .flex()

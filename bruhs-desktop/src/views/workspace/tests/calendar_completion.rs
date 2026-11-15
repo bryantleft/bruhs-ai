@@ -3,17 +3,19 @@
 //! disk (CAL-13) and fall-back planning, through GPUI test frames.
 
 use super::*;
-use chrono::{Local, TimeZone};
 use crate::views::workspace::{
     persisted_calendar_event, planning_calendar_events_in, restore_calendar_event,
     DesktopProviderEvent, PersistedCalendarEvent,
 };
+use chrono::{Local, TimeZone};
 
 const HOUR_MS: i64 = 3_600_000;
 
 /// UTC milliseconds of a civil time.
 fn utc(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> i64 {
-    dt(year, month, day, hour, minute).and_utc().timestamp_millis()
+    dt(year, month, day, hour, minute)
+        .and_utc()
+        .timestamp_millis()
 }
 
 /// US Pacific in 2026: PDT from 2026-03-08 10:00 UTC to 2026-11-01 09:00
@@ -134,11 +136,7 @@ fn planning_keeps_events_in_the_repeated_fall_back_hour() {
         title: "Second 01:30".into(),
         ..Default::default()
     }
-    .with_instants_in(
-        utc(2026, 11, 1, 9, 30),
-        utc(2026, 11, 1, 9, 45),
-        pacific,
-    )
+    .with_instants_in(utc(2026, 11, 1, 9, 30), utc(2026, 11, 1, 9, 45), pacific)
     .expect("a valid instant");
     let planned = planning_calendar_events_in(vec![first, second], pacific);
     assert_eq!(planned.len(), 2, "{planned:?}");
@@ -154,7 +152,9 @@ fn planning_keeps_events_in_the_repeated_fall_back_hour() {
 }
 
 /// A workspace window on the calendar at the 1280×800 parity cell.
-fn calendar_workspace(cx: &mut gpui::TestAppContext) -> (Entity<Workspace>, &mut gpui::VisualTestContext) {
+fn calendar_workspace(
+    cx: &mut gpui::TestAppContext,
+) -> (Entity<Workspace>, &mut gpui::VisualTestContext) {
     cx.update(|cx| {
         gpui_component::init(cx);
         gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
@@ -221,7 +221,12 @@ fn a_google_block_is_read_only_and_opens_its_provider_detail(cx: &mut gpui::Test
             dt(2026, 5, 12, 10, 0),
         )];
         workspace.meetings_hub.update(cx, |hub, _cx| {
-            hub.google_events = vec![google_event("google-1", "Provider sync", start, start + HOUR_MS)];
+            hub.google_events = vec![google_event(
+                "google-1",
+                "Provider sync",
+                start,
+                start + HOUR_MS,
+            )];
         });
         cx.notify();
     });
@@ -232,7 +237,10 @@ fn a_google_block_is_read_only_and_opens_its_provider_detail(cx: &mut gpui::Test
     assert_rendered_bounds(cx, google_block);
     assert_rendered_bounds(cx, local_block);
     assert_rendered_bounds(cx, calendar_timegrid_event_resize_debug_selector("local-1"));
-    assert_no_rendered_bounds(cx, calendar_timegrid_event_resize_debug_selector("google-1"));
+    assert_no_rendered_bounds(
+        cx,
+        calendar_timegrid_event_resize_debug_selector("google-1"),
+    );
 
     // Pressing and moving over a Google block starts no drag.
     let bounds = rendered_bounds(cx, google_block);
@@ -243,7 +251,10 @@ fn a_google_block_is_read_only_and_opens_its_provider_detail(cx: &mut gpui::Test
         Some(gpui::MouseButton::Left),
         gpui::Modifiers::default(),
     );
-    assert!(!cx.update(|_, cx| cx.has_active_drag()), "a Google block must not drag");
+    assert!(
+        !cx.update(|_, cx| cx.has_active_drag()),
+        "a Google block must not drag"
+    );
     cx.simulate_mouse_up(from, gpui::MouseButton::Left, gpui::Modifiers::default());
     cx.run_until_parked();
     workspace.update_in(cx, |workspace, _window, _cx| {
@@ -261,9 +272,7 @@ fn a_google_block_is_read_only_and_opens_its_provider_detail(cx: &mut gpui::Test
         assert_eq!(
             workspace.event_dialog_provider,
             Some(DesktopProviderEvent {
-                html_link: Some(
-                    "https://calendar.google.com/calendar/event?eid=synthetic".into()
-                ),
+                html_link: Some("https://calendar.google.com/calendar/event?eid=synthetic".into()),
             })
         );
         assert_eq!(
@@ -301,7 +310,10 @@ fn a_google_block_is_read_only_and_opens_its_provider_detail(cx: &mut gpui::Test
     cx.run_until_parked();
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert!(!workspace.event_dialog_read_only());
-        assert_eq!(workspace.selected_calendar_event_id.as_deref(), Some("local-1"));
+        assert_eq!(
+            workspace.selected_calendar_event_id.as_deref(),
+            Some("local-1")
+        );
     });
     assert_rendered_bounds(cx, "desktop-event-create-delete");
     assert_no_rendered_bounds(cx, "desktop-event-provider-link");
@@ -366,7 +378,10 @@ fn a_focus_block_opens_its_source_task(cx: &mut gpui::TestAppContext) {
 fn calendar_views_draw_their_controls_at_the_parity_cell(cx: &mut gpui::TestAppContext) {
     let (workspace, cx) = calendar_workspace(cx);
     for (mode, grid) in [
-        (DesktopCalendarMode::Month, "desktop-calendar-day-2026-05-12"),
+        (
+            DesktopCalendarMode::Month,
+            "desktop-calendar-day-2026-05-12",
+        ),
         (DesktopCalendarMode::Week, "desktop-calendar-timegrid-7"),
         (DesktopCalendarMode::Day, "desktop-calendar-timegrid-1"),
     ] {
