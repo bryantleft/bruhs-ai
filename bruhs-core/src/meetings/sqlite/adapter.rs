@@ -441,7 +441,9 @@ impl PeopleStore for SqliteMeetingStore {
         let meeting_id = meeting_id.as_str();
         let id = meeting_id.to_owned();
         self.call(move |connection| {
-            write(connection, |tx| contacts::drop_meeting_observations(tx, &id))
+            write(connection, |tx| {
+                contacts::drop_meeting_observations(tx, &id)
+            })
         })
         .await
     }

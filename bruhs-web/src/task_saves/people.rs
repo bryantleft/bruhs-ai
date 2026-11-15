@@ -9,8 +9,9 @@ impl TaskSaves {
     /// Inbox or knowledge edits are still being written. People deletes and
     /// undo rewrite those records, so they wait.
     pub fn saving_links(self) -> bool {
-        self.queue
-            .with_untracked(|queue| queue.saving_kind(Kind::Inbox) || queue.saving_kind(Kind::Document))
+        self.queue.with_untracked(|queue| {
+            queue.saving_kind(Kind::Inbox) || queue.saving_kind(Kind::Document)
+        })
     }
 
     /// A contact created on the People page. The contact and its pending-sync

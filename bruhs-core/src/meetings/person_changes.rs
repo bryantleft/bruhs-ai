@@ -104,7 +104,11 @@ impl MergeLinks {
         self.speakers
             .iter()
             .map(|speaker| speaker.meeting_id.as_str())
-            .chain(self.action_items.iter().map(|item| item.meeting_id.as_str()))
+            .chain(
+                self.action_items
+                    .iter()
+                    .map(|item| item.meeting_id.as_str()),
+            )
             .collect()
     }
 }
@@ -186,9 +190,11 @@ pub(super) fn relink_meeting(
     }
     if let Some(summary) = &mut meeting.summary {
         for reference in items.iter().filter(|r| r.meeting_id == meeting.id) {
-            if let Some(item) = summary.action_items.get_mut(reference.index).filter(|item| {
-                item.text == reference.text && item.assignee_person_id.is_none()
-            }) {
+            if let Some(item) = summary
+                .action_items
+                .get_mut(reference.index)
+                .filter(|item| item.text == reference.text && item.assignee_person_id.is_none())
+            {
                 item.assignee_person_id = Some(person_id.to_string());
                 changed = true;
             }
@@ -208,9 +214,8 @@ pub(super) fn retarget_meeting(
     for speaker in &mut meeting.speakers {
         if speaker.person_id.as_deref() == Some(source.id.as_str()) {
             speaker.person_id = Some(target.id.clone());
-            let label = (speaker.label == source.display_name).then(|| {
-                std::mem::replace(&mut speaker.label, target.display_name.clone())
-            });
+            let label = (speaker.label == source.display_name)
+                .then(|| std::mem::replace(&mut speaker.label, target.display_name.clone()));
             links.speakers.push(MovedSpeaker {
                 meeting_id: meeting.id.clone(),
                 speaker_id: speaker.id.clone(),
@@ -264,9 +269,14 @@ pub(super) fn restore_meeting_links(
             .iter()
             .filter(|r| r.meeting_id == meeting.id)
         {
-            if let Some(item) = summary.action_items.get_mut(reference.index).filter(|item| {
-                item.text == reference.text && item.assignee_person_id.as_deref() == Some(target_id)
-            }) {
+            if let Some(item) = summary
+                .action_items
+                .get_mut(reference.index)
+                .filter(|item| {
+                    item.text == reference.text
+                        && item.assignee_person_id.as_deref() == Some(target_id)
+                })
+            {
                 item.assignee_person_id = Some(source_id.to_string());
                 changed = true;
             }

@@ -6,7 +6,8 @@ use leptos::prelude::*;
 use crate::state::PeopleSignal;
 use crate::ui::{Dropdown, DropdownOption};
 
-const PANEL: &str = "mt-1 space-y-2 rounded-seed bg-longan-800/80 p-2 inset-ring inset-ring-longan-700";
+const PANEL: &str =
+    "mt-1 space-y-2 rounded-seed bg-longan-800/80 p-2 inset-ring inset-ring-longan-700";
 const QUIET: &str = "bruhs-control inline-flex items-center justify-center rounded-grape px-3 text-label-sm text-rambutan-400 hover:bg-longan-800 hover:text-rambutan-200 cursor-pointer";
 
 /// Pick the surviving profile, then confirm the merge in words.

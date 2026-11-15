@@ -480,9 +480,12 @@ mod tests {
             "{refused:?}"
         );
 
-        merge_person_into(State(state.clone()), Path(("zoe".parse().unwrap(), "ada".parse().unwrap())))
-            .await
-            .unwrap();
+        merge_person_into(
+            State(state.clone()),
+            Path(("zoe".parse().unwrap(), "ada".parse().unwrap())),
+        )
+        .await
+        .unwrap();
         assert!(events.try_recv().is_ok(), "the merge event");
         let Json(unmerge) = unmerge_person(State(state.clone()), id("zoe"))
             .await

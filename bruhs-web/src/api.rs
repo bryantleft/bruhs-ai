@@ -832,9 +832,7 @@ pub async fn set_person_tracked(person_id: &str, tracked: bool) -> Result<Person
 
 /// `DELETE /api/people/{id}`: delete a contact. The reply records what the
 /// server removed and unlinked so the delete can be undone.
-pub async fn delete_person(
-    person_id: &str,
-) -> Result<bruhs_models::PersonDeletion, ApiError> {
+pub async fn delete_person(person_id: &str) -> Result<bruhs_models::PersonDeletion, ApiError> {
     let route = format!("/api/people/{}", segment(person_id));
     send_json(Method::DELETE, &route, NO_BODY).await
 }
@@ -846,9 +844,7 @@ pub async fn restore_person(person_id: &str) -> Result<PersonProfile, ApiError> 
 }
 
 /// `POST /api/people/{source_id}/unmerge`: undo a merge; both contacts return.
-pub async fn unmerge_person(
-    source_id: &str,
-) -> Result<bruhs_models::PersonUnmerge, ApiError> {
+pub async fn unmerge_person(source_id: &str) -> Result<bruhs_models::PersonUnmerge, ApiError> {
     let route = format!("/api/people/{}/unmerge", segment(source_id));
     send_json(Method::POST, &route, NO_BODY).await
 }

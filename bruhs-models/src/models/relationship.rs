@@ -111,12 +111,7 @@ impl RelationshipProfile {
 
     /// Replace an item's kind, text and due time. A blank text is refused
     /// and changes nothing. Completion, source and identity are kept.
-    pub fn edit_item(
-        &mut self,
-        item_id: &str,
-        edit: RelationshipItemEdit,
-        now_ms: i64,
-    ) -> bool {
+    pub fn edit_item(&mut self, item_id: &str, edit: RelationshipItemEdit, now_ms: i64) -> bool {
         let text = edit.text.trim();
         if text.is_empty() {
             return false;
@@ -173,9 +168,10 @@ impl RelationshipDue {
         now_ms: i64,
     ) -> Option<i64> {
         match self {
-            Self::Tomorrow if Self::applies_to(kind) => Some(current.unwrap_or_else(|| {
-                now_ms.saturating_add(super::RELATIONSHIP_DUE_TOMORROW_MS)
-            })),
+            Self::Tomorrow if Self::applies_to(kind) => Some(
+                current
+                    .unwrap_or_else(|| now_ms.saturating_add(super::RELATIONSHIP_DUE_TOMORROW_MS)),
+            ),
             _ => None,
         }
     }
@@ -306,7 +302,10 @@ mod tests {
             100,
         );
         assert_eq!(item.text, "Call back");
-        assert_eq!(item.due_at_ms, Some(100 + crate::RELATIONSHIP_DUE_TOMORROW_MS));
+        assert_eq!(
+            item.due_at_ms,
+            Some(100 + crate::RELATIONSHIP_DUE_TOMORROW_MS)
+        );
         let note = RelationshipItem::with_due(
             RelationshipItemKind::Note,
             "Likes tea",
@@ -359,7 +358,12 @@ mod tests {
             105,
         ));
         assert_eq!(
-            profile.items.iter().find(|item| item.id == id).unwrap().due_at_ms,
+            profile
+                .items
+                .iter()
+                .find(|item| item.id == id)
+                .unwrap()
+                .due_at_ms,
             None,
             "interactions are never due"
         );

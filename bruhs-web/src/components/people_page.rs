@@ -261,11 +261,7 @@ pub fn PeoplePage() -> impl IntoView {
 }
 
 #[component]
-fn PersonCard(
-    person_id: String,
-    directory: Memo<Directory>,
-    cards: CardState,
-) -> impl IntoView {
+fn PersonCard(person_id: String, directory: Memo<Directory>, cards: CardState) -> impl IntoView {
     let workflow_executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
     let saves = expect_context::<crate::task_saves::TaskSaves>();
     let PeopleSignal(people) = expect_context::<PeopleSignal>();
@@ -286,7 +282,8 @@ fn PersonCard(
     let is_expanded = move || expanded.get().as_deref() == Some(id.get_value().as_str());
     let is_renaming = move || cards.renaming.get().as_deref() == Some(id.get_value().as_str());
     let is_merge_open = move || cards.merge_open.get().as_deref() == Some(id.get_value().as_str());
-    let is_delete_open = move || cards.delete_open.get().as_deref() == Some(id.get_value().as_str());
+    let is_delete_open =
+        move || cards.delete_open.get().as_deref() == Some(id.get_value().as_str());
     let observations = Memo::new(move |_| {
         if !is_expanded() {
             return Vec::new();

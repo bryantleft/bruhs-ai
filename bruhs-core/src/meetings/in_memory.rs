@@ -904,12 +904,13 @@ impl PeopleStore for InMemoryMeetingStore {
         let mut merged = self.merged_people.write().await;
         let mut meetings = self.meetings.write().await;
         let mut people = self.people.write().await;
-        let person = people
-            .get(person_id)
-            .cloned()
-            .ok_or_else(|| MeetingStoreError::PersonNotFound {
-                id: person_id.into(),
-            })?;
+        let person =
+            people
+                .get(person_id)
+                .cloned()
+                .ok_or_else(|| MeetingStoreError::PersonNotFound {
+                    id: person_id.into(),
+                })?;
         let mut speakers = Vec::new();
         let mut action_items = Vec::new();
         let mut unlinked = Vec::new();
@@ -1040,8 +1041,11 @@ impl PeopleStore for InMemoryMeetingStore {
                 person_changes::UNMERGE_TARGET_GONE.into(),
             ));
         };
-        let target =
-            person_changes::unmerged_target(current, &merge.source_original, &merge.target_original)?;
+        let target = person_changes::unmerged_target(
+            current,
+            &merge.source_original,
+            &merge.target_original,
+        )?;
         let source = person_changes::restored_source(&merge.source_original)?;
         let mut restored = Vec::new();
         if let Some(links) = &merge.links {

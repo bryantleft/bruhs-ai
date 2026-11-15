@@ -232,7 +232,13 @@ fn archived_merge(
 }
 
 fn merge_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<MergeRow> {
-    Ok((row.get(0)?, row.get(1)?, row.get(2)?, row.get(3)?, row.get(4)?))
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+    ))
 }
 
 fn insert_merge(connection: &Connection, merge: &ArchivedMerge) -> MeetingStoreResult<()> {
@@ -304,7 +310,9 @@ pub(super) fn restore(connection: &Connection, id: &str) -> MeetingStoreResult<P
     )?;
     for merge in &archive.merges {
         // A retired id that is live again keeps its new identity.
-        if person(connection, &merge.source_id)?.is_none() && !is_merged(connection, &merge.source_id)? {
+        if person(connection, &merge.source_id)?.is_none()
+            && !is_merged(connection, &merge.source_id)?
+        {
             insert_merge(connection, merge)?;
         }
     }

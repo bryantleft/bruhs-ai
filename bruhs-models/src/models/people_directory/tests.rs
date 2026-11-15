@@ -85,7 +85,10 @@ fn alias_review_refuses_blank_existing_and_other_people_names() {
         review_alias(&people, "ada", "  Lady L  ").as_deref(),
         Ok("Lady L")
     );
-    assert_eq!(review_alias(&people, "ada", "   "), Err(AliasProblem::Blank));
+    assert_eq!(
+        review_alias(&people, "ada", "   "),
+        Err(AliasProblem::Blank)
+    );
     assert_eq!(
         review_alias(&people, "ada", "countess"),
         Err(AliasProblem::AlreadyOnProfile)
@@ -292,7 +295,13 @@ fn merge_cascade_retargets_and_undo_restores_only_moved_links() {
         .iter()
         .all(|link| link.target_id == "target"));
 
-    let restored = restore_person_links("source", "target", &moved, &mut conversations, &mut documents);
+    let restored = restore_person_links(
+        "source",
+        "target",
+        &moved,
+        &mut conversations,
+        &mut documents,
+    );
     assert_eq!(restored, moved);
     assert_eq!(conversations, original_conversations);
     assert_eq!(documents, original_documents);
