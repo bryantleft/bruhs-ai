@@ -1,0 +1,66 @@
+{
+  "createdAt": "2026-11-15T01:15:48.257813+00:00",
+  "status": "Scoped UI implementation checkpoint; product goal remains open",
+  "productionBuild": {
+    "receipt": "target/inbox-ui-qa/mail-compose-integration/default-build-20261115T000417Z/build.json",
+    "receiptSha256": "74913fbaeec28e7929b3de94eec3b070102517e59a0410dbba287c90517a8144",
+    "dist": "target/mail-compose-default-dist-capture-20261115T000417Z",
+    "assetCount": 298,
+    "sourceInputs": 579,
+    "indexSha256": "47a71cfe3f05b096e1e1295d42c1313c8120d8db8a1d6e960d648e97a5ccc058",
+    "defaultFeatures": true,
+    "api": "http://127.0.0.1:3001"
+  },
+  "browser": {
+    "compose": {
+      "report": "target/inbox-ui-qa/compose-browser/2026-11-15T00-20-50-553Z/report.json",
+      "sha256": "ee14714305623c802507289bf40abdd361b110b1be3c4d721e054042a623c441",
+      "passed": 1066,
+      "failed": 0
+    },
+    "slow3g": {
+      "report": "target/inbox-ui-qa/compose-browser/2026-11-15T00-22-57-755Z/report.json",
+      "sha256": "f790817166d2205645664ed62beeacfb12292c785b063f8ff747863a03106db4",
+      "passed": 358,
+      "failed": 0
+    },
+    "gmail": {
+      "report": "target/inbox-ui-qa/connected-mail-browser/2026-11-15T00-21-30-905Z/report.json",
+      "sha256": "38b80ad2e4a82860db246d605edb00b79b680409e178f866ddf45970b9279dd1",
+      "passed": 1595,
+      "failed": 0
+    },
+    "outlook": {
+      "report": "target/inbox-ui-qa/connected-mail-browser/2026-11-15T00-22-56-595Z/report.json",
+      "sha256": "214ac2220c593fa3600b69046346ad9dc8b3d65f495e45603dfa81a9f882dc8f",
+      "passed": 1771,
+      "failed": 0
+    }
+  },
+  "native": {
+    "verification": "target/inbox-ui-qa/mail-compose-integration/current-check-20261115T004859Z/verification.json",
+    "verificationSha256": "700af5e5e0bb8be7664582d665354d4c9f8bca274f0291ed88f9f9f5889bc768",
+    "sourceManifestSha256": "5dc40345c7324e66811fe996661b0a6a80dc9977ee5af457b8062d5366d6f40d",
+    "sourceCount": 1473,
+    "composerTests": 9,
+    "accessibilityTests": 2,
+    "strictCoreServerDesktopAllTargetsAllFeatures": true,
+    "normalAppBuild": true,
+    "physicalReceipt": "target/inbox-ui-qa/native-compose-20261115T002327Z/physical-checkpoint.json",
+    "physicalReceiptSha256": "f2458d7605a1b2e9ea668db48689a0c9408c9c8e3b098dc126e5464f7a05ad43",
+    "binarySha256": "188b15e168abb27af4e7901eb52d9e2e9c53a1c4c38cf3efd17020b1e26236fd"
+  },
+  "postAcceptanceCopyChanges": {
+    "bruhs-models/src/reactive/report.rs": "106e677361d6d977ff6b3c4cfc68e343401cdad006aed4de87bce2e9131a9437",
+    "bruhs-web/src/components/mail_compose.rs": "4b8c7c2d55e904c6230014874c1754a88ba2ba868b4abb27bdf6fb1f733ef588"
+  },
+  "strictReadDriverSha256": "d3afbcd0d246a7864882e13ce5d5c1961ded67c6ba15d8548bafb5992301b6b7",
+  "sidebarWipSha256": "eb629efffec2485c442895c92307c7df32faa8974540aca7231273ae40d103b0",
+  "limits": [
+    "The two post-acceptance copy changes await compilation in the final combined gate/default capture.",
+    "No live provider consent, acceptance or recipient delivery.",
+    "Known pre-queue authorization failure can leave conservative pending state; request-scoped no-dispatch recovery and Sent reconciliation remain open.",
+    "Warm-app3G tests exclude initial WASM loading. Physical native fixture is macOS/Gmail, not complete VoiceOver or other-platform acceptance.",
+    "Failed private Whiteboard hover candidate is unadopted and excluded."
+  ]
+}

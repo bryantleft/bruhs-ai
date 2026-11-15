@@ -152,8 +152,63 @@ transport fakes cannot satisfy live provider or physical-device acceptance.
 | 2026-11-14 | Default release web verification | Immutable default capture `gate-dist-capture-20261114T104636Z` passes Inbox 399/399 and synthetic mail setup 642/642. All eight prior touch failures are resolved; asset/source/artifact hashes and visual samples were independently checked. The shared workspace gate passes 3,010 tests, strict native/WASM lint, release checks, rustdoc and dependency policy. | No live provider login, sync, send or full Inbox completion. |
 | 2026-11-14 | Today release audit | The unchanged harness reports 404 passing checks and 63 failing assertions: stale Apply 45, Undo/newer-edit loss 12, DST workday arithmetic 6. Assertion sets match the prior debug run with no regressions; these are three failure families, not 63 distinct bugs or muted expected failures. Evidence is retained under `target/inbox-ui-qa/release-checkpoint-20261114T104636Z/`. | Behavior fixes remain off-tree. Rollover/resume, delayed/failed persistence, native parity/performance and live providers remain unverified. |
 | 2026-11-14 | Integrated Today fixes | Shared Apply/Undo ownership validation, explicit local workday bounds, transactional web receipts, queued-edit preservation and mounted-clock refresh are integrated. The new pinned production bundle passes 935 Today assertions plus the unchanged Inbox 399 and synthetic mail 642 checks. All original 63 failures are resolved without removing assertions. Native focused controls/timezone checks and strict native/WASM lint pass. See the [case-by-case Today record](today-completion-2026-11-14.md). | Full Today states, keyboard/scaling/motion, native physical/restart/failure parity and performance remain open. Live mail and the wider product goal remain open. The finalization source hold is released; the separate no-index/history-write agreement remains in force. |
+| 2026-11-14 | Canonical mail runtime and Gmail reads | Server-owned private cache, revision-aware drafts and reviewed-send journal are integrated. Gmail full-thread/MIME reads, resumable full/history sync and atomic full-scan reconciliation pass 71 controlled-transport/storage checks. Strict Core/Server/WASM lint, dependency policy and formatting pass for that source checkpoint. See [runtime](mail-runtime.md) and [Gmail read/sync](gmail-sync.md). | Inbox UI/native transport, People/triage overlays, attachment download/compose/send, Outlook, live provider and recipient delivery remain open. This is a source checkpoint, not whole-product or whole-workspace release acceptance. |
+
+| 2026-11-14 | Connected Email UI and bounded cache browsing | Real web/native Email entries, account selection, full-text search, shared filters, complete saved-message reading, and app-owned Gmail sync/Stop are wired to the canonical HTTP API. The controlled checkpoint passes 78 core mail, three actual-router HTTP, five native Inbox, and 1,008 model/web tests plus strict native/WASM lint, dependency policy and formatting. See [integration and source receipts](connected-mail-ui-2026-11-14.md). | Fresh production browser acceptance is in progress. Native physical/device parity, attachment download, compose/reply, Outlook, live accounts and recipient delivery remain open. This is not a full-workspace gate or completed pillar claim. |
+| 2026-11-14 | Connected Email browser and attachment checkpoint | The corrective default production capture passes 1,525 browser checks, retaining all 1,327 attachment assertions and adding 198 visible/keyboard-scrollable feedback checks. All 36 downloaded files match bytes, hashes and filenames. Controlled checkpoints pass 84 core mail, four actual-router/native HTTP and five native Inbox tests; the attachment batch also passes 1,009 model/web tests with six ignored. Exact sources and earlier version scopes are recorded in [Email integration](connected-mail-ui-2026-11-14.md) and the [download contract](mail-attachments.md). | Native physical/device parity, offline client replicas, restart restoration, compose/reply, Outlook, live accounts and recipient delivery remain open. No current full-workspace gate or completed pillar claim. |
+| 2026-11-14 | Actual native Email window and save dialog | The GPUI/macOS app reads synthetic saved history, searches by Enter and saves exact private attachment bytes through the real OS chooser. A native correction exposes reader/metadata/status text to AX and gives short feedback natural height; long feedback remains bounded and keyboard-scrollable. Five Inbox tests, two accessibility audits and strict native/WASM checks pass; actual windows were reviewed at 1,280×800 and 640×480. See [native scope and receipts](connected-mail-ui-2026-11-14.md). | Full keyboard/VoiceOver, scaling/motion, other devices, offline replicas, restart restoration, compose/send, Outlook and live-provider/recipient acceptance remain open. The native graph capture is focused; this does not replace a combined gate. |
+| 2026-11-14 | Local compose storage | Schema 4 adds immutable, draft-owned file uploads with retry, size/count, ownership, corruption and pending-send guards. Host-fenced local draft edits remain usable after provider disconnect and preserve newer revisions. The focused checkpoint passes 94 Core mail tests and strict Core/Server lint; exact sources exclude the separately owned Outlook adapter. See [compose contract](mail-compose.md). | Typed HTTP APIs, persistent composer UI, MIME preparation, reviewed dispatch/reconciliation and live delivery are still being implemented. The later Outlook module/cursor seams have a separate owner validation window; this checkpoint does not claim their acceptance. |
 | 2026-11-14 | Calendar audit | Inventory and 18 numbered cases recorded. Fixed false sync conflicts, hidden sync failures, DST time-grid and slot-search errors, Google all-day date shifts, editable Google events on web, read-only conflict copies, and header/dialog accessibility. Model/core tests failed first and now pass; a new Los Angeles DST browser harness passes on three cells. See the [Calendar record](calendar-completion-2026-11-14.md). | Desktop read-only affordance and inspection, time-semantics parity, recurring-series sync window, focus-block back-links, live Google sync and same-size parity screenshots remain open. |
 
 Goal registration creates no scheduled job, connects no account, changes no
 privacy grant, and sends no email. Use synthetic data for automated checks;
 live external actions retain their normal explicit product authorization.
+
+### Compose backend checkpoint, 2026-11-14 19:58 UTC
+
+Typed local drafts, selected immutable files, bounded MIME and atomic prepared
+storage pass 135 Core mail tests and nine production mail-router tests, plus
+strict Core/Server Clippy. All 464 recorded source inputs stayed fixed; protected
+index/sidebar WIP hashes are unchanged. Details and exact receipt paths are in
+[mail-compose.md](mail-compose.md). No compose HTTP/UI, provider-send, delivery,
+whole-Inbox or whole-product completion is claimed. Existing read-bundle and
+Today acceptance remain scoped to their recorded versions.
+
+
+Current compose backend checkpoint on the integrated base: 14 mail model,
+20 connection, 170 Core mail and 14 actual-router/native HTTP tests pass with
+strict Core/Server lint and 900 unchanged scoped inputs. The device-store
+regressions include retained bytes after online refresh and an atomic final
+write against a queued older writer. Exact scope:
+`target/inbox-ui-qa/mail-compose-integration/review-backend-checkpoint.json`.
+Seven native composer tests now pass; the subsequent focus-style correction
+passes both accessibility audits and strict desktop lint. The current web suite
+passes 465 tests with five ignored and strict host/actual-WASM lint against
+1,473 unchanged captured source hashes. Production browser and physical native
+acceptance remain pending; see
+`target/inbox-ui-qa/mail-compose-integration/current-ui-compile-checkpoint.json`.
+This does not complete Inbox, establish live consent,
+provider sending or recipient delivery, or replace a combined product gate.
+
+The next scoped UI checkpoint passes 1,066 compose, 358 warm-app Slow 3G,
+1,595 Gmail read and 1,771 Outlook read browser checks. Physical macOS review
+found three composer issues; their repairs pass nine native composer tests,
+both accessibility audits and strict Core/Server/Desktop lint. The corrected
+native app verifies Unicode, real file selection, accessible review/status text,
+keyboard actions and one-attempt restart recovery. See the
+[versioned evidence](evidence/mail-compose-ui-2026-11-14.json). Two subsequent copy
+changes await compilation in the combined gate. Pre-queue authorization recovery,
+Sent reconciliation, complete accessibility/parity and live-provider/delivery
+acceptance remain open; this is a checkpoint, not a completed Inbox pillar.
+
+### Combined integration gate, 2026-11-15 UTC
+
+The frozen Mail/Always-On graph passes all 14 repository gate steps and 3,449
+tests with no failures (54 Rust tests ignored). The final default capture and
+focused copy check are accepted within their recorded scope. See
+[the combined checkpoint](mail-finalization-2026-11-15.md). Earlier receipts
+remain versioned; pre-queue recovery, Sent reconciliation, complete
+accessibility/platform/reply coverage and live-provider/delivery acceptance
+remain open. Always-On on-screen/service-install acceptance and its outstanding
+Codex follow-up eval remain separate. This does not complete Inbox or the
+product goal.

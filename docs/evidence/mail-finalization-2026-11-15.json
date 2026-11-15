@@ -1,0 +1,148 @@
+{
+  "createdAt": "2026-11-15T03:32:38.098036+00:00",
+  "scope": "Combined source validation and scoped copy acceptance; product goals remain partial.",
+  "gate": {
+    "directory": "target/final-mail-gate-20261115T025256Z",
+    "completionSha256": "05c2b235c4e47896dc54a0420891da5841de1603d6c014f8362070e3515a3ac5",
+    "validationSha256": "d08b490a613236f360190e81b635883d8529c0f212b811c847a66d94d53c6667",
+    "startedAt": "2026-11-15T02:52:57.613273+00:00",
+    "finishedAt": "2026-11-15T03:11:00.089356+00:00",
+    "stepsPassed": 14,
+    "tests": {
+      "rust": {
+        "suites": 32,
+        "passed": 3339,
+        "failed": 0,
+        "ignored": 54
+      },
+      "python": {
+        "passed": 5
+      },
+      "site_node": {
+        "passed": 72
+      },
+      "mobile_node": {
+        "passed": 33
+      },
+      "combined_passed": 3449,
+      "limits": [
+        "Bench fixture self-check and type/lint/build/policy steps are additional gates, not added to the test count.",
+        "Ignored live/device tests remain unverified."
+      ]
+    },
+    "validatedInputsUnchanged": true
+  },
+  "sources": {
+    "frozenNativeInputs": 1473,
+    "manifest": "target/final-mail-gate-frozen-sources-20261115T0136Z.json",
+    "manifestSha256": "685d9b26db25a5917d05fbb2c2dbebf234fb82896f9ac4b18a3993ce0b177a05",
+    "formatOnlyDelta": "bruhs-web/src/api.rs public re-export ordering",
+    "bothPostAcceptanceCopyChangesCompiled": true
+  },
+  "defaultCapture": {
+    "dist": "target/final-mail-default-dist-capture-20261115T031111Z",
+    "assets": 298,
+    "frontendInputs": 579,
+    "api": "http://127.0.0.1:3001",
+    "defaultFeatures": true,
+    "receipt": "target/final-mail-gate-20261115T025256Z/build.json",
+    "receiptSha256": "505ef09d0b22e0fd3cc98bad55585a166530a4bfb1e66baefbd18c139261a902",
+    "indexSha256": "2552d2c3ea73ce0118c67087de3fe2c6298c003e348134d09ef74af3bbff3044",
+    "copyVerified": true,
+    "priorAcceptedCaptureUnchanged": true
+  },
+  "focusedCopyAcceptance": {
+    "accepted": true,
+    "verifiedAt": "2026-11-15T03:32:37.960875+00:00",
+    "gateCompletionSha256": "05c2b235c4e47896dc54a0420891da5841de1603d6c014f8362070e3515a3ac5",
+    "ownerReceipt": {
+      "path": "target/final-mail-copy-acceptance-20261115T032222Z/receipt.json",
+      "sha256": "48fc33f6aad36f13e7c09bb7da03e07392fc3bc35939146053ffde67db21b605"
+    },
+    "ownerReport": {
+      "path": "target/final-mail-copy-acceptance-20261115T032222Z/report.json",
+      "sha256": "b250f594f2c4ced79692f20c2e329493313a363000eb36d59a0832cd34059e17"
+    },
+    "browser": {
+      "passed": 7,
+      "failed": 0,
+      "countDefinition": "Three editor and four review DOM copy/sender assertions; layout and cleanup guards are separate.",
+      "viewport": {
+        "height": 844,
+        "width": 390
+      },
+      "coarsePointer": false,
+      "scope": "Actual compiled bundle, saved synthetic one-byte attachment in editor and review. Narrow desktop pointer profile; no new touch/platform/provider matrix.",
+      "screenshotsReviewedByRoot": true,
+      "horizontalOverflow": false,
+      "controlsUncovered": true,
+      "providerSendPosts": 0,
+      "minimalFixtureStartupDtoWarningsRetained": 3,
+      "warningScope": "Three unrelated minimal-fixture startup DTO warnings (terminal sessions, capture status, update check); retained rather than claimed clean."
+    },
+    "model": {
+      "source": "bruhs-models/src/reactive/report.rs",
+      "sourceSha256": "106e677361d6d977ff6b3c4cfc68e343401cdad006aed4de87bce2e9131a9437",
+      "binary": "target/debug/deps/bruhs_models-5302335307a96278",
+      "binarySha256": "3504b04c06baed078f66b52e1929d58458710d009284d2edf44ba97b49e5767f",
+      "targetedExistingUnitTestPassed": true,
+      "scope": "Frozen source, gate-built binary warning text and existing unit branch. No browser-rendered reactive-warning claim."
+    },
+    "artifacts": {
+      "editor-dom.json": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/editor-dom.json",
+        "sha256": "8e62ec21548d8c1eb62315f35eaf900fa94be2c7e5b7e5ff26b4405e0191c773"
+      },
+      "review-dom.json": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/review-dom.json",
+        "sha256": "0c28b0f97ec0f101d902a223e896e78d300418bfd7a15382b83b2fd10914d82c"
+      },
+      "editor.png": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/editor.png",
+        "sha256": "4b5d2133d62077324180c66784bd5653a6754d6045a3f625908674ec61537c28"
+      },
+      "review.png": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/review.png",
+        "sha256": "8ae7f58ff1da71f77cccfb1365974f73de0e3928f842eb0dc875add53fa9acb9"
+      },
+      "fixture-proof.json": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/fixture-proof.json",
+        "sha256": "765b3c3c6d1a82b4a51136da26a5b14cf3786e1a289f71098db2e2a48e89945f"
+      },
+      "fixture-terminal.json": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/fixture-terminal.json",
+        "sha256": "a31eba8b0de9e3207cd173e07dab82117efc372174fe60075f71f380e0d75561"
+      },
+      "tabs-after.json": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/tabs-after.json",
+        "sha256": "a1b73c3ccc1895cf79296f1131f5cfebc33935ebf3e4eb45afdd431f13a7391c"
+      },
+      "model-copy.json": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/model-copy.json",
+        "sha256": "49546341875a1e1d5b118d46c4e765d2dcb3a200354deddee209520ae9081706"
+      },
+      "model-copy-test.log": {
+        "path": "target/final-mail-copy-acceptance-20261115T032222Z/model-copy-test.log",
+        "sha256": "4440e8cd62a1808bd59c03a8ac0578469e3a224d244c99f5628e7a3554972b1b"
+      }
+    },
+    "assetsAndSourcesExact": true,
+    "all298AssetHashesMtimesAndFileSetVerified": true,
+    "cleanupVerified": true,
+    "noAdditionalCompilerOrBrowserRunByRoot": true,
+    "limits": [
+      "Synthetic fixture only; no provider send, live consent or delivery.",
+      "No broader native/accessibility/reply/platform acceptance."
+    ]
+  },
+  "earlierBrowserAndPhysicalNativeScope": "docs/evidence/mail-compose-ui-2026-11-14.json",
+  "limits": [
+    "The final focused browser check covers the recorded copy case, not a new full provider/platform matrix.",
+    "Pre-queue authorization recovery and request-scoped no-dispatch recovery remain open.",
+    "Sent correlation/reconciliation, complete reply/accessibility/platform coverage remain open.",
+    "No live consent, provider acceptance or recipient-delivery acceptance.",
+    "Always-On UI/service-install acceptance and the outstanding Codex follow-up evaluation remain unverified.",
+    "Private whiteboard correction is unadopted. No complete-action/T3 or full-product acceptance."
+  ],
+  "pushOrDeploymentClaim": false
+}

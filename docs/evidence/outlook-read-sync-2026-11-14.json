@@ -1,0 +1,154 @@
+{
+  "schema": 1,
+  "recordedAt": "2026-11-14T20:09:51.820866+00:00",
+  "scope": "Read/sync/download only: actual default production WASM and synthetic loopback transport; no provider login, send or live-mail acceptance",
+  "capture": "target/outlook-default-dist-capture-20261114T193910Z",
+  "buildReceipt": "target/outlook-qa/default-build-20261114T193910Z/build.json",
+  "buildReceiptSha256": "8e480529dedd7c84e390098345105256a750604f5ad886c0fd5511f39db604f8",
+  "buildInputsSha256": "075e24733d44b40d101a8932e13de909fa44134861ba06b0f5d92b9ffafd2333",
+  "defaultFeatures": true,
+  "api": "http://127.0.0.1:3001",
+  "NO_COLOR": "true",
+  "assetCount": 298,
+  "sourceAndArtifactIntegrityVerified": true,
+  "postBuildTestOnlyChange": "Exact-request classifier for deliberately invalid export-size response-body cancellations; no production source change or rebuild",
+  "runs": {
+    "gmail": {
+      "report": "target/outlook-qa/browser-gmail-20261114T195458Z/report.json",
+      "reportSha256": "9932fd3e9677a6ba2aa665068700dc116d495dd93b0951356a575b89b1558036",
+      "summary": {
+        "passed": 1532,
+        "failed": 0,
+        "cases": 21,
+        "screenshots": 96
+      },
+      "sourceFiles": 26,
+      "assets": 298,
+      "harnessSha256": "aab576ef52596d859cbefe5cbf4db32daff905f5cb9608e4c869196af02ab878",
+      "allHarnessArtifactHashesVerified": 134,
+      "finalArtifacts": "target/outlook-qa/browser-gmail-20261114T195458Z-final-artifacts.json",
+      "finalArtifactsSha256": "64d8c2be082888f61ca318f1e40bc65c8564279ddb710bf3afba117a2500248f",
+      "fixturePortClosed": true,
+      "runtimeErrors": 0,
+      "unexpectedRequests": 0
+    },
+    "outlook": {
+      "report": "target/outlook-qa/browser-outlook-20261114T195229Z/report.json",
+      "reportSha256": "e9e7224d573a70b253c41572196bbeaf71ebe6180397ab483970a5e366cb02fd",
+      "summary": {
+        "passed": 1708,
+        "failed": 0,
+        "cases": 24,
+        "screenshots": 102
+      },
+      "sourceFiles": 26,
+      "assets": 298,
+      "harnessSha256": "aab576ef52596d859cbefe5cbf4db32daff905f5cb9608e4c869196af02ab878",
+      "allHarnessArtifactHashesVerified": 146,
+      "finalArtifacts": "target/outlook-qa/browser-outlook-20261114T195229Z-final-artifacts.json",
+      "finalArtifactsSha256": "00318948415fa66459a454268d17e3158914f996420f3c139d68e57d06f2299e",
+      "fixturePortClosed": true,
+      "runtimeErrors": 0,
+      "unexpectedRequests": 0
+    },
+    "slow_gmail": {
+      "report": "target/outlook-qa/browser-gmail-20261114T195817Z/report.json",
+      "reportSha256": "7733038a0b58e9a1da860110759e10b31634331535acaa7f62a56d6efee5908e",
+      "summary": {
+        "passed": 231,
+        "failed": 0,
+        "cases": 9,
+        "screenshots": 33
+      },
+      "sourceFiles": 26,
+      "assets": 298,
+      "harnessSha256": "a10018c3c6e5c2f3ce3d2b1122299d06d813b8c507319b3eaa417cdaf8b7347a",
+      "allHarnessArtifactHashesVerified": 35,
+      "finalArtifacts": "target/outlook-qa/browser-gmail-20261114T195817Z-final-artifacts.json",
+      "finalArtifactsSha256": "d778ca787a762382c7b81ea8fa99291a2bdb8ff1ff50a16694b5bb25e7f97c37",
+      "fixturePortClosed": true,
+      "runtimeErrors": 0,
+      "unexpectedRequests": 0,
+      "profile": {
+        "latencyMs": 400,
+        "downloadBytesPerSecond": 51200,
+        "uploadBytesPerSecond": 20480,
+        "scope": "Warm loaded app: actual CDP network emulation plus explicit synthetic API response latency/bandwidth. Initial WASM/static load is outside the throttled pass. No performance, physical network or provider acceptance claim."
+      }
+    },
+    "slow_outlook": {
+      "report": "target/outlook-qa/browser-outlook-20261114T200431Z/report.json",
+      "reportSha256": "15ef1c549e0091a604c1904ae232ee3c8fddfab5e73d77050446a827903e6ecd",
+      "summary": {
+        "passed": 407,
+        "failed": 0,
+        "cases": 12,
+        "screenshots": 39
+      },
+      "sourceFiles": 26,
+      "assets": 298,
+      "harnessSha256": "80470363f5ed984569cabffb85c2f65586de06ea4102a60bcee0a6ed15a6b9a1",
+      "allHarnessArtifactHashesVerified": 50,
+      "finalArtifacts": "target/outlook-qa/browser-outlook-20261114T200431Z-final-artifacts.json",
+      "finalArtifactsSha256": "0d022aeed349a5b704527079bb62da1cf45857f92a8af269f0c7572a0ede96c5",
+      "fixturePortClosed": true,
+      "runtimeErrors": 0,
+      "unexpectedRequests": 0,
+      "profile": {
+        "latencyMs": 400,
+        "downloadBytesPerSecond": 51200,
+        "uploadBytesPerSecond": 20480,
+        "scope": "Warm loaded app: actual CDP network emulation plus explicit synthetic API response latency/bandwidth. Initial WASM/static load is outside the throttled pass. No performance, physical network or provider acceptance claim."
+      }
+    }
+  },
+  "otherValidation": {
+    "webUnitTests": {
+      "passed": 440,
+      "ignored": 5,
+      "receipt": "target/outlook-qa/web-tests-20261114T193547Z/result.json"
+    },
+    "strictActualWasm": "target/outlook-qa/clippy-wasm-20261114T193702Z/result.json",
+    "nativeInboxTests": {
+      "passed": 6,
+      "receipt": "target/outlook-qa/native-20261114T193753Z/result.json"
+    },
+    "commonMimeStorageBackend": {
+      "coreMailTests": 135,
+      "productionMailRouterTests": 9,
+      "strictCoreServerClippy": "passed",
+      "receipt": "target/inbox-ui-qa/mail-compose-integration/backend-checkpoint.json",
+      "scope": "Versioned checkpoint before the later four Outlook SMTP-profile helper tests"
+    }
+  },
+  "outlookSenderFoundation": "Four leased SMTP-profile regressions passed in the24/0Outlook read-review suite. Later reviewed-send backend and profile-consent repair evidence is recorded separately in docs/evidence/outlook-reviewed-send-2026-11-14.json.",
+  "rawCheckpoint": "target/outlook-qa/read-controls-checkpoint.json",
+  "rawCheckpointSha256": "c77ab68b00543fc6be18ff529f55c1a7eb2d29fa7d9462a221b4eb39a6b159f5",
+  "recordingsRetained": 3,
+  "independentlyReviewedFrames": 8,
+  "allOwnJobsTerminal": true,
+  "allFixturePortsClosed": true,
+  "limits": [
+    "Synthetic provider responses and current-authorization fixtures; no real Outlook/Gmail login or mailbox sync acceptance",
+    "Slow-connection pass covers a warm app; initial static/WASM loading is outside it",
+    "No outgoing send, recipient delivery, physical network, performance or device acceptance",
+    "This historical capture covers read/sync/download only; later backend dispatch checks are separate, and compose HTTP/UI acceptance and the broader current-source gate/commits remain separate"
+  ],
+  "reviewFollowup": {
+    "receipt": "target/outlook-qa/read-review-fixes-checkpoint.json",
+    "sha256": "c687bae20be81ecb41291ae550a199b471cf6c0e186a29f93fb326fe764bfdc1",
+    "testsBefore": {
+      "passed": 22,
+      "failed": 2
+    },
+    "testsAfter": {
+      "passed": 24,
+      "failed": 0
+    },
+    "strictCoreAllTargetsAllFeatures": "passed",
+    "findingsResolved": [
+      "Only a successful empty conversation query returns None; subordinate404 errors cannot authorize final reconciliation",
+      "Recognize documented syncStateNotFound on non410responses alongside legacy spelling"
+    ]
+  }
+}

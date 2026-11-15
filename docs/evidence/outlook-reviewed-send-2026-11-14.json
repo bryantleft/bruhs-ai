@@ -1,0 +1,112 @@
+{
+  "schema": 1,
+  "recordedAt": "2026-11-14T21:48:24.937657+00:00",
+  "scope": "Controlled Outlook reviewed-send backend and delegated-profile authorization repair; synthetic OAuth and actual loopback HTTP, not live-provider or compose UI acceptance",
+  "sources": {
+    "bruhs-core/src/connections/oauth.rs": "fc24b1e0eeab3e3501aa31d8da9239aca0af77529ad4f2f77913506c942473f7",
+    "bruhs-core/src/connections/tests.rs": "647359f27380cad2f80d754be1404dc08866d4b048f0ac1c382b929a75660e7a",
+    "bruhs-core/src/mail/outlook/mod.rs": "d7195cd3f42d3331ae4eb7547d9607071cca768816fdbee9fae3c24159ec2065",
+    "bruhs-core/src/mail/outlook/sync.rs": "827f0b5143dc812dbf9f9f45b1cbb59965eb1b24c2be3cc37064c1d322eb3b2d",
+    "bruhs-core/src/mail/outlook/tests.rs": "b3f1d3dc3994612eb66442b258ac81189261ea7fe69650f3f4c80edcb95a4311",
+    "bruhs-core/src/mail/outlook/send.rs": "6949d2ca63151a91898dc8ac65fbb8628225166d1effd7d08deae34d5f5c54af",
+    "bruhs-core/src/mail/outlook/send/tests.rs": "2507b156143b9819acd9ae5d0d46a2ed982844c6bd8959a17859193e9ebe621d"
+  },
+  "contract": {
+    "sender": "Current leased Graph /me SMTP mail field only; never sign-in-name fallback",
+    "requiredOutlookMailScopes": [
+      "User.Read",
+      "Mail.ReadWrite",
+      "Mail.Send"
+    ],
+    "dispatch": "Non-Clone common dispatch capability consumed only after durable claim and validated before provider I/O",
+    "wire": "One fixed-origin POST /me/sendMail, text/plain standard base64 of exact frozen MIME bytes",
+    "rawMimeLimitBytes": 3000000,
+    "encodedMimeLimitBytes": 4000000,
+    "automaticRetries": false,
+    "redirects": false,
+    "acceptance": "HTTP202 only; optional provider resource IDs remain absent when not supplied; acceptance is not recipient delivery",
+    "uncertain": "Lost response, timeout, server error, redirect or unexpected success remains uncertain and is never blindly replayed",
+    "callerDrop": "App-owned worker retains provider attempt and durable receipt after waiter drop",
+    "errors": "Known rejection and uncertain outcomes are separate; provider response bodies never appear in errors"
+  },
+  "combinedBackendBeforeConsentRepair": {
+    "receipt": "target/inbox-ui-qa/mail-compose-integration/provider-send-checkpoint.json",
+    "sha256": "af73b826c4c03d97f13aec94742696366e8025dac1583b837feb0de4953d3fef",
+    "tests": {
+      "coreMail": 165,
+      "modelsMail": 10,
+      "existingMailRouter": 9
+    },
+    "strict": "Core/Server all-targets/all-features Clippy -D warnings + targeted format + whitespace",
+    "scope": "Both provider send adapters, existing mail-router suite and new compose module compile. New compose-route tests and UI were pending. This immutable version still identified the subsequently repaired User.Read gap."
+  },
+  "consentRepair": {
+    "receipt": "target/outlook-qa/outlook-consent-checkpoint.json",
+    "sha256": "63a81eb440ed52d3f968d2139f454000344291e881529d2316e46e48065c88a5",
+    "redConnections": {
+      "passed": 16,
+      "failed": 4,
+      "ignored": 0
+    },
+    "greenConnections": {
+      "passed": 20,
+      "failed": 0,
+      "ignored": 0
+    },
+    "greenMail": {
+      "passed": 165,
+      "failed": 0,
+      "ignored": 0
+    },
+    "strictCoreAllTargetsAllFeatures": "passed with -D warnings",
+    "targetedFormatAndWhitespace": "passed",
+    "currentInputCount": 388,
+    "currentInputsRehashedUnchanged": true,
+    "scopeOnlyRenewalKeepsRegistrationMailboxAndActualSQLiteDraft": true,
+    "calendarAndGmailGrantsUnchanged": true,
+    "narrowedRefreshSavesRotationAndRefusesAccess": true,
+    "runs": {
+      "red": {
+        "path": "target/outlook-qa/core-connections-consent-review-red-20261114T213524Z",
+        "resultSha256": "e6b98fb6a93a318e832da4955c590410a22d8095b2b64d0808a7c3d9f9da3096",
+        "manifestSha256": "341266244020e1a7c020668b49e4561ea81935b77a637b1c7b2791da1804c9e7",
+        "outputSha256": "c90a9c77ed59be849f752346bec41355b4217a8bbc0d5a6c28a1e45c793d4eef"
+      },
+      "connections": {
+        "path": "target/outlook-qa/core-connections-consent-review-green-20261114T213808Z",
+        "resultSha256": "c7f311860ee33640c7a226d1cad445b71f1169570bf2175abd4c68de85432d98",
+        "manifestSha256": "34fec527e10d0a98c3227f0f7a0730c1d0bdae8fa5fbc3ed01b9064be977c73c",
+        "outputSha256": "283ebebb43203222de329945e1a660c5c40616eab90c3a088c31195db169e60d"
+      },
+      "mail": {
+        "path": "target/outlook-qa/core-mail-consent-review-green-20261114T214408Z",
+        "resultSha256": "9a60efac7db04a91f27fda1854a8117a17f30051a24fb628a714d171b79b7112",
+        "manifestSha256": "34fec527e10d0a98c3227f0f7a0730c1d0bdae8fa5fbc3ed01b9064be977c73c",
+        "outputSha256": "a524143523dae40b4d5cdbec53eefcf35d73a7ff1b4024b882a8596da5d5c223"
+      },
+      "strict": {
+        "path": "target/outlook-qa/core-clippy-consent-review-green-20261114T214441Z",
+        "resultSha256": "703bfb3e8d226274486c103b832d08acb47224c8cf56d9e55c180f760fc6fd67",
+        "manifestSha256": "34fec527e10d0a98c3227f0f7a0730c1d0bdae8fa5fbc3ed01b9064be977c73c",
+        "outputSha256": "289e18a86756828816c9f6c2a892638d786a77660b70af61b2dc26f03fd2b20c"
+      }
+    }
+  },
+  "reviewFindings": {
+    "read": "Both subordinate-attachment404 and documented non410 syncStateNotFound repairs are pinned by docs/evidence/outlook-read-sync-2026-11-14.json",
+    "send": "Only concrete outgoing-boundary finding was missing User.Read; repair and regressions recorded above. No additional concrete authority, duplicate, persistence, cleanup, Gmail or route-binding findings."
+  },
+  "officialSources": [
+    "https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0",
+    "https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0",
+    "https://learn.microsoft.com/en-us/graph/use-the-api"
+  ],
+  "limits": [
+    "No real Outlook/Gmail consent, mailbox sync, outgoing provider acceptance or recipient receipt was performed",
+    "Compose-specific HTTP cases, browser/native composer and final current-source combined gate remain separate",
+    "Historical193910 browser capture predates these backend and later GET-cancellation changes; its claims are preserved separately",
+    "No whole-Inbox, full-product, physical-network, latency or T3-win acceptance claim"
+  ],
+  "allOwnJobsTerminal": true,
+  "indexHistoryWritten": false
+}

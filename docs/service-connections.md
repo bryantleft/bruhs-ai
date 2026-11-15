@@ -80,9 +80,10 @@ Initial permissions are deliberately limited:
 - Gmail: `openid`, `email`, and `gmail.modify` for the separate mail entry.
   This permits reading, organizing, composing, and sending mail, while excluding
   immediate permanent deletion. See [Google's scope definitions](https://developers.google.com/workspace/gmail/api/auth/scopes).
-- Outlook Mail: `openid`, `profile`, `email`, `offline_access`, `Mail.ReadWrite`,
-  and `Mail.Send` for its separate mail entry. Read/write access and send access
-  are separate permissions. See [message updates](https://learn.microsoft.com/en-us/graph/api/message-update?view=graph-rest-1.0)
+- Outlook Mail: `openid`, `profile`, `email`, `offline_access`, `User.Read`,
+  `Mail.ReadWrite`, and `Mail.Send` for its separate mail entry. `User.Read`
+  supplies the verified SMTP sender from [the current profile](https://learn.microsoft.com/en-us/graph/api/user-get?view=graph-rest-1.0).
+  Read/write access and send access are separate permissions. See [message updates](https://learn.microsoft.com/en-us/graph/api/message-update?view=graph-rest-1.0)
   and [sending mail](https://learn.microsoft.com/en-us/graph/api/user-sendmail?view=graph-rest-1.0).
 
 Existing Google/Microsoft Calendar scopes are unchanged. Partial mail grants
@@ -91,6 +92,10 @@ returns narrower mail access, the broker saves any rotated credentials, marks
 the connection for sign-in, and refuses access. Disconnecting the mail entry
 leaves the separate Calendar entry intact. Mail client secrets are removed from
 agent commands along with the existing service client secrets.
+
+Older Outlook Mail grants without `User.Read` require renewed sign-in. Adding this
+scope does not change the registration fingerprint or mailbox namespace, so saved
+mail and drafts remain attached to the same account after renewed consent.
 
 These are service access tokens, not universal credentials for other resources.
 Adding write permissions or another API requires a separate scope decision and

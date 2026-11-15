@@ -68,7 +68,20 @@ tested; preserve unverified visual, device, and live-provider checks separately.
 The native service broker now has separate Gmail and Outlook Mail authorization
 entries alongside the existing Google/Microsoft Calendar entries. The latter's
 read-only scopes are unchanged. Registration, token storage/refresh, and explicit
-mail-scope validation are implemented; mailbox sync and delivery are not.
+mail-scope validation are implemented. Gmail read/sync is integrated; delivery
+and live-provider acceptance remain open.
+The server now explicitly opens and owns the connected-mail SQLite cache and
+reviewed-send journal. Its async API retains current broker leases, serializes
+blocking writes, preserves newer draft revisions and marks interrupted sends
+uncertain on exclusive restart. Local imported records remain independent.
+This storage/runtime foundation alone does not establish real account, send,
+attachment or delivery acceptance.
+The [runtime contract and evidence](mail-runtime.md) describes its ownership,
+revision and interrupted-send guarantees.
+The [Gmail adapter](gmail-sync.md) now has controlled-transport read/full/history
+sync tests. The [connected Email UI](connected-mail-ui-2026-11-14.md) now uses real
+server transport on web/native; its fresh production browser acceptance and live
+account acceptance remain open.
 The implementation is in
 [`connections/oauth.rs`](../bruhs-core/src/connections/oauth.rs) and the
 [service connection guide](service-connections.md). Live registrations, OS keychain
@@ -88,11 +101,14 @@ and the parent gates pass.
 | 2026-11-13 | INBOX-02, INBOX-03, INBOX-05, INBOX-12 | All 4 native Inbox checks and 8 shared Inbox checks pass at the coordinated compile checkpoint. First production browser run passed 384 automated checks with no runtime errors or external writes. Visual review found a 20px-wide compact search field and roughly 30px of message history; fixes and stronger geometry assertions are written. | Fresh browser execution and visual review of the compact fixes remain pending. Prior screenshots/results are preserved under `target/inbox-ui-qa/before-compact-fix`. |
 | 2026-11-13 | INBOX-14, INBOX-15, INBOX-17 | Separate Gmail/Outlook authorization entries and mail-scope enforcement added. All 18 connection tests pass, including partial-grant rejection, rotated-token preservation after narrowed permissions, Calendar isolation, and mail-secret removal from agent commands. | No live provider login or mailbox sync/send acceptance. Core evidence is `target/inbox-ui-qa/mail-connections.log`; this is authorization groundwork, not a completed email client. |
 | 2026-11-14 | Local web Inbox and synthetic connection UI | The captured default production bundle passes all 399 Inbox and 642 synthetic mail-setup checks. All 30 Inbox screenshots were reviewed; compact search/history fixes pass. Five Permissions and three Today Undo touch failures are resolved with 44px targets. Asset, source and artifact hashes were independently checked. The shared workspace gate passes 3,010 tests plus strict lint/build/docs/dependency checks. | Full Inbox/native/device/provider acceptance remains open. No live login, sync, send or delivery was exercised. |
+| 2026-11-14 | Connected Email reading, sync and attachment UI | The later corrective default capture passes 1,525 browser checks across desktop, compact and touch, with all 36 synthetic downloads verified by bytes, hashes and names. Feedback remains visible during reader scroll. Controlled runtime/native checkpoints pass 84 core mail, four production-router HTTP and five native Inbox tests. See [versioned evidence and limits](connected-mail-ui-2026-11-14.md). | This is not live-provider, physical-native/device, compose/send or recipient-delivery acceptance. Earlier Inbox/Today/setup results retain their own bundle scope; the current full-workspace gate and pillar remain open. |
 
 The shared model check is reproducible with
 `cargo test -p bruhs-models --lib models::inbox --locked`. At the recorded implementation
 checkpoints, changed Rust files passed targeted `rustfmt --check` and the browser
-harness passed `node --check`. The final current-tree gate passes.
+harness passed `node --check`. The finalization gate passed at
+`cdf35b428d39a2ff0c369c246574820b8e29867f`; the later Today/mail working changes
+have separately scoped checks and do not inherit a new whole-workspace gate.
 Generated evidence is in `target/inbox-ui-qa/models.log` and
 `target/inbox-ui-qa/implementation.json`, including source hashes.
 
@@ -110,7 +126,8 @@ The final default production bundle was captured from `target/gate/dist` into
 timestamps. The 27 relevant source files and three unchanged harnesses match the
 pinned manifest. Use `BRUHS_INBOX_UI_DIST` to reuse that capture rather than
 starting a duplicate build during finalization. The current web subset passes;
-the native/policy gate also passes; broader product cases remain separate.
+the native/policy gate also passed for that committed base; broader product
+cases and the newer implementation remain separate.
 For an independent reproduction after the source/build window is released:
 
 ```sh
@@ -133,3 +150,10 @@ computed reading space, and visible initial message text. The release run passes
 under `target/inbox-ui-qa/release-checkpoint-20261114T104636Z/`; its verification
 report also records the unchanged open Today failures. No full Inbox acceptance
 or live email delivery is claimed.
+
+### Combined validation follow-up, 2026-11-15 UTC
+
+The [combined checkpoint](mail-finalization-2026-11-15.md) records the later
+14-step gate and focused copy acceptance. It supersedes pending final-gate/copy
+status for that source snapshot; earlier evidence retains its original scope.
+Recovery, Sent reconciliation and live-provider/product acceptance remain open.
