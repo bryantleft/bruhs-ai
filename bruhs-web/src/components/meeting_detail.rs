@@ -117,7 +117,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                     {move || transcript_status.get().warning.map(|warning| view! {
                         <section aria-label="Transcript recovery" class="rounded-grape bg-longan-900 p-3 mb-2 inset-ring inset-ring-longan-800 space-y-2">
                             <p role="status" class="text-body-sm text-rambutan-300">{warning}</p>
-                            <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-6 text-label-sm cursor-pointer disabled:opacity-40" disabled=move || transcript_status.get().loading on:click=move |_| transcript_sync.refresh(mid.get_value())>"Retry loading transcript"</button>
+                            <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-[24px] text-label-sm cursor-pointer disabled:opacity-40" disabled=move || transcript_status.get().loading on:click=move |_| transcript_sync.refresh(mid.get_value())>"Retry loading transcript"</button>
                         </section>
                     })}
                     <Show when=move || transcript_identity.with(Option::is_some)>
@@ -146,15 +146,15 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                         // Native announces recovery as an alert; keep the same semantics here.
                         <p role=move || if action_status.get().recovery { "alert" } else { "status" } class="text-body-sm text-rambutan-300">{message}</p>
                         <Show when=move || action_status.get().recovery>
-                            <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-6 text-label-sm cursor-pointer disabled:opacity-40"
+                            <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-[24px] text-label-sm cursor-pointer disabled:opacity-40"
                                 disabled=move || action_status.get().busy on:click=move |_| meeting_actions.retry(mid.get_value())>"Load latest meeting"</button>
                         </Show>
                         <Show when=move || action_status.get().cancellable>
-                            <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-6 text-label-sm cursor-pointer disabled:opacity-40"
+                            <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-[24px] text-label-sm cursor-pointer disabled:opacity-40"
                                 disabled=move || action_status.get().busy on:click=move |_| meeting_actions.cancel_generation(mid.get_value())>"Cancel saved generation"</button>
                         </Show>
                         <Show when=move || action_status.get().foreign_pending>
-                            <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-6 text-label-sm cursor-pointer disabled:opacity-40"
+                            <button type="button" class="rounded-grape bg-longan-800 px-3 py-2 min-h-11 sm:min-h-[24px] text-label-sm cursor-pointer disabled:opacity-40"
                                 disabled=move || action_status.get().busy on:click=move |_| meeting_actions.cancel_foreign(mid.get_value())>"Cancel unresolved server request"</button>
                         </Show>
                     </section>
@@ -167,7 +167,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                                     <div class="flex items-center gap-1">
                                         <button
                                             type="button"
-                                            class="min-h-11 sm:min-h-6 px-2 text-label-sm text-rambutan-400 hover:text-rambutan-200 cursor-pointer disabled:opacity-40"
+                                            class="min-h-11 sm:min-h-[24px] px-2 text-label-sm text-rambutan-400 hover:text-rambutan-200 cursor-pointer disabled:opacity-40"
                                             disabled=move || action_status.get().busy
                                             on:click=move |_| meeting_actions.discover_pending(mid.get_value())
                                         >
@@ -176,7 +176,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                                         <button
                                             type="button"
                                             on:click=on_resummarize
-                                            class="min-h-11 sm:min-h-6 px-2 text-label-sm text-rambutan-400 hover:text-rambutan-200 cursor-pointer disabled:opacity-40"
+                                            class="min-h-11 sm:min-h-[24px] px-2 text-label-sm text-rambutan-400 hover:text-rambutan-200 cursor-pointer disabled:opacity-40"
                                             disabled=move || actions_disabled.get()
                                         >
                                             {if m.summary.is_some() { "Re-summarize" } else { "Generate summary" }}
@@ -268,7 +268,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                                         id="skip-obs-checkbox".to_string()
                                         checked=skip
                                         disabled=Signal::derive(move || actions_disabled.get())
-                                        class="min-h-11 min-w-11 sm:min-h-6 sm:min-w-6"
+                                        class="min-h-11 min-w-11 sm:min-h-[24px] sm:min-w-[24px]"
                                         on_change=Callback::new(on_toggle_skip)
                                     />
                                     <label
@@ -280,7 +280,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                                 </div>
                                 <button
                                     type="button"
-                                    class="min-h-11 sm:min-h-6 text-label-sm text-rambutan-400 hover:text-rambutan-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed inset-ring inset-ring-longan-700 rounded-seed px-2 py-0.5"
+                                    class="min-h-11 sm:min-h-[24px] text-label-sm text-rambutan-400 hover:text-rambutan-200 cursor-pointer disabled:opacity-40 disabled:cursor-not-allowed inset-ring inset-ring-longan-700 rounded-seed px-2 py-0.5"
                                     disabled=reextract_disabled
                                     on:click=on_reextract
                                 >
@@ -585,7 +585,7 @@ pub fn SpeakerChip(
                                 class=format!(
                                     "text-label {text_class} \
                                      inset-ring {ring_class} rounded-seed \
-                                     px-2 py-0.5 min-h-11 min-w-11 sm:min-h-6 sm:min-w-6 cursor-pointer \
+                                     px-2 py-0.5 min-h-11 min-w-11 sm:min-h-[24px] sm:min-w-[24px] cursor-pointer \
                                      hover:opacity-80 transition-opacity"
                                 )
                                 on:click=move |_| {
@@ -603,7 +603,7 @@ pub fn SpeakerChip(
                                     type="button"
                                     class=format!(
                                         "text-label-sm {text_class} opacity-60 \
-                                         hover:opacity-100 transition-opacity px-0.5 min-h-11 min-w-11 sm:min-h-6 sm:min-w-6 cursor-pointer"
+                                         hover:opacity-100 transition-opacity px-0.5 min-h-11 min-w-11 sm:min-h-[24px] sm:min-w-[24px] cursor-pointer"
                                     )
                                     on:click=move |ev| {
                                         ev.stop_propagation();
@@ -642,7 +642,7 @@ pub fn SpeakerChip(
                                                     view! {
                                                         <button
                                                             type="button"
-                                                            class="w-full text-left px-2 py-1 min-h-11 sm:min-h-6 \
+                                                            class="w-full text-left px-2 py-1 min-h-11 sm:min-h-[24px] \
                                                                    text-label text-rambutan-200 \
                                                                    hover:bg-longan-800 transition-colors"
                                                             on:click=move |_| {
@@ -657,7 +657,7 @@ pub fn SpeakerChip(
                                         }}
                                         <button
                                             type="button"
-                                            class="w-full text-left px-2 py-1 min-h-11 sm:min-h-6 \
+                                            class="w-full text-left px-2 py-1 min-h-11 sm:min-h-[24px] \
                                                    text-label text-rambutan-500 \
                                                    hover:bg-longan-800 transition-colors \
                                                    mt-1"
@@ -692,7 +692,7 @@ pub fn SpeakerChip(
                 class=format!(
                     "text-label {text_class} \
                      bg-transparent inset-ring {ring_class} rounded-seed \
-                     px-2 py-0.5 min-h-11 sm:min-h-6 outline-none min-w-0 w-[120px]"
+                     px-2 py-0.5 min-h-11 sm:min-h-[24px] outline-none min-w-0 w-[120px]"
                 )
                 prop:value=move || draft.get()
                 on:input=on_input

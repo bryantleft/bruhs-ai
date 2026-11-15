@@ -206,7 +206,7 @@ pub(super) fn InteractiveResponse(
     let draft = use_context::<ComposerDraft>().map(|draft| draft.0);
     view! {
         <section node_ref=section on:pointerdown=move |_| { if let Some(interaction)=interaction {interaction.0.run(());} } class="my-2 min-w-0 overflow-hidden rounded-grape bg-longan-900/40 inset-ring inset-ring-longan-800 [&:fullscreen]:overflow-auto [&:fullscreen]:bg-longan-950 [&:fullscreen]:p-3" data-response-interactive="" data-widget-state-key=key.get_value()>
-            <div class="flex min-h-8 flex-wrap items-center gap-1 px-2">
+            <div class="flex min-h-[32px] flex-wrap items-center gap-1 px-2">
                 <span class="min-w-0 flex-1 truncate text-label-sm text-rambutan-300" title=title>{title.clone()}</span>
                 <button type="button" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") aria-pressed=move || show_source.get().to_string() on:click=move |_| show_source.update(|value| *value = !*value)>{move || if show_source.get() { "Preview" } else { "Source" }}</button>
                 <button type="button" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") aria-label="Fullscreen interactive response" on:click=move |_| { if let Some(node) = section.get_untracked() { bridge::fullscreen((*node).clone(), error); } }>"Fullscreen"</button>
@@ -225,7 +225,7 @@ pub(super) fn InteractiveResponse(
                     <button type="button" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") on:click=move |_| { error.set(None); load_state(key.get_value(), state, error, writer.get_value()); }>"Retry saved state"</button>
                 </div>
             </Show>
-            <div class="flex min-h-7 items-center gap-1 px-3 text-label-sm text-rambutan-400"><span role="status">{move || status.get()}</span><Show when=move || status.with(|status|status.as_deref().is_some_and(|status|status!="Saving widget state…"))><button type="button" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") on:click=move |_| writer.get_value().drain()>"Retry save"</button></Show></div>
+            <div class="flex min-h-[28px] items-center gap-1 px-3 text-label-sm text-rambutan-400"><span role="status">{move || status.get()}</span><Show when=move || status.with(|status|status.as_deref().is_some_and(|status|status!="Saving widget state…"))><button type="button" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") on:click=move |_| writer.get_value().drain()>"Retry save"</button></Show></div>
             <Show when=move || diagnostic_status.get().is_some()><div class="flex items-center gap-1 px-3 py-1 text-label-sm text-rambutan-400" role="status"><span>{move || diagnostic_status.get()}</span><button type="button" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") on:click=move |_| { if let Some(reporter)=reporter.get_value() { reporter.drain(); } }>"Retry preview feedback"</button></div></Show>
             <div class:hidden=move || show_source.get() style=move || format!("height:{}px;min-height:80px;resize:vertical;overflow:hidden", height.get())>
                 <Show when=move || state.get().is_some()>

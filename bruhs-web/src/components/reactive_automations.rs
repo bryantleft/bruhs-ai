@@ -12,7 +12,7 @@ mod updates;
 mod weekly_reports;
 use runs::run_label;
 
-const SELECT: &str = "bruhs-control min-h-8 w-full rounded-grape bg-longan-950 px-3 py-1.5 text-body text-rambutan-100 inset-ring inset-ring-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400";
+const SELECT: &str = "bruhs-control min-h-[32px] w-full rounded-grape bg-longan-950 px-3 py-1.5 text-body text-rambutan-100 inset-ring inset-ring-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400";
 const CARD: &str = "min-w-0 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50";
 // Status refresh follows the existing account connection status cadence.
 #[cfg(target_arch = "wasm32")]
@@ -56,7 +56,7 @@ fn Field(
 
 #[component]
 fn Check(label: &'static str, value: RwSignal<bool>) -> impl IntoView {
-    view! { <label class="flex min-h-11 cursor-pointer items-center gap-2 text-label-sm text-rambutan-300 sm:min-h-8">
+    view! { <label class="flex min-h-11 cursor-pointer items-center gap-2 text-label-sm text-rambutan-300 sm:min-h-[32px]">
         <input type="checkbox" class="size-4 accent-persimmon-500" prop:checked=move || value.get() on:change=move |event| value.set(event_target_checked(&event)) />
         <span>{label}</span>
     </label> }

@@ -41,13 +41,13 @@ fn provider_label(status: ProviderStatus) -> &'static str {
     }
 }
 
-const INPUT_CLASS: &str = "mt-1 h-9 min-h-[44px] min-w-0 w-full sm:min-h-9 rounded-grape bg-longan-950/70 px-2.5 text-body-sm text-rambutan-200 outline-none inset-ring inset-ring-longan-700 placeholder:text-rambutan-500 focus:inset-ring-persimmon-400";
+const INPUT_CLASS: &str = "mt-1 h-9 min-h-[44px] min-w-0 w-full sm:min-h-[36px] rounded-grape bg-longan-950/70 px-2.5 text-body-sm text-rambutan-200 outline-none inset-ring inset-ring-longan-700 placeholder:text-rambutan-500 focus:inset-ring-persimmon-400";
 const CARD_CLASS: &str =
     "min-w-0 rounded-grape bg-longan-900/65 p-3 inset-ring inset-ring-longan-800";
-const TAB_ON: &str = "min-h-[44px] sm:min-h-6 rounded-seed bg-longan-700 px-3 py-1.5 text-label-sm text-rambutan-100 cursor-pointer";
-const TAB_OFF: &str = "min-h-[44px] sm:min-h-6 rounded-seed px-3 py-1.5 text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer";
-const SMALL_ACTION: &str = "mt-1 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-9";
-const ADD_BUTTON: &str = "mt-2 inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-9";
+const TAB_ON: &str = "min-h-[44px] sm:min-h-[24px] rounded-seed bg-longan-700 px-3 py-1.5 text-label-sm text-rambutan-100 cursor-pointer";
+const TAB_OFF: &str = "min-h-[44px] sm:min-h-[24px] rounded-seed px-3 py-1.5 text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer";
+const SMALL_ACTION: &str = "mt-1 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-[36px]";
+const ADD_BUTTON: &str = "mt-2 inline-flex min-h-[44px] min-w-[44px] items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-[36px]";
 const ROW: &str =
     "flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-seed bg-longan-950/45 px-2.5 py-2";
 const ROW_AMOUNT: &str =
@@ -450,7 +450,7 @@ pub fn LifePage() -> impl IntoView {
                                 <span>{move || notice.get().unwrap_or_default()}</span>
                                 <button
                                     type="button"
-                                    class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 text-label-sm cursor-pointer"
+                                    class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] text-label-sm cursor-pointer"
                                     on:click=move |_| notice.set(None)
                                 >
                                     "Dismiss"
@@ -524,7 +524,7 @@ fn finance_privacy(page: Page) -> impl IntoView {
                     <button
                         type="button"
                         aria-pressed=move || agent_access().to_string()
-                        class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 rounded-seed px-2.5 py-1.5 text-label-sm text-blueberry-300 inset-ring inset-ring-blueberry-500/25 cursor-pointer"
+                        class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] rounded-seed px-2.5 py-1.5 text-label-sm text-blueberry-300 inset-ring inset-ring-blueberry-500/25 cursor-pointer"
                         on:click=move |_| page.toggle_finance_agent_access()
                     >
                         {move || if agent_access() { "Agent access on" } else { "Agent access off" }}
@@ -533,7 +533,7 @@ fn finance_privacy(page: Page) -> impl IntoView {
                         type="button"
                         disabled=move || !agent_access()
                         aria-pressed=move || exact().to_string()
-                        class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 rounded-seed px-2.5 py-1.5 text-label-sm text-rambutan-400 inset-ring inset-ring-longan-700 disabled:opacity-40 cursor-pointer"
+                        class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] rounded-seed px-2.5 py-1.5 text-label-sm text-rambutan-400 inset-ring inset-ring-longan-700 disabled:opacity-40 cursor-pointer"
                         on:click=move |_| page.toggle_exact_amounts()
                     >
                         {move || if exact() { "Exact amounts shared" } else { "Amounts redacted" }}
@@ -568,7 +568,7 @@ fn accounts(page: Page) -> impl IntoView {
                             <button
                                 type="button"
                                 aria-label="Delete account"
-                                class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 text-label-sm text-rambutan-400 hover:text-lychee-300 cursor-pointer"
+                                class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] text-label-sm text-rambutan-400 hover:text-lychee-300 cursor-pointer"
                                 on:click=delete
                             >
                                 "×"
@@ -588,7 +588,7 @@ fn accounts(page: Page) -> impl IntoView {
                 {labelled_field("Balance", "Account balance", "2500.00", i.account_balance, Some("decimal"), caption)}
                 <button
                     type="button"
-                    class="mt-5 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-9"
+                    class="mt-5 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-[36px]"
                     on:click=move |_| page.add_account()
                 >
                     "Add"
@@ -623,7 +623,7 @@ fn transactions(page: Page) -> impl IntoView {
                             <button
                                 type="button"
                                 aria-label="Delete transaction"
-                                class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 text-rambutan-400 hover:text-lychee-300 cursor-pointer"
+                                class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] text-rambutan-400 hover:text-lychee-300 cursor-pointer"
                                 on:click=delete
                             >
                                 "×"
@@ -713,7 +713,7 @@ fn csv_import(page: Page) -> impl IntoView {
             </p>
             <textarea
                 aria-label="Finance CSV rows"
-                class="mt-2 min-h-24 w-full resize-y rounded-grape bg-longan-950/70 p-2.5 font-mono text-body-sm text-rambutan-300 outline-none inset-ring inset-ring-longan-700 focus:inset-ring-persimmon-400"
+                class="mt-2 min-h-[96px] w-full resize-y rounded-grape bg-longan-950/70 p-2.5 font-mono text-body-sm text-rambutan-300 outline-none inset-ring inset-ring-longan-700 focus:inset-ring-persimmon-400"
                 placeholder="Coffee, Food, -5.25, client meeting"
                 prop:value=move || csv.get()
                 on:input=move |event| csv.set(event_target_value(&event))
@@ -763,7 +763,7 @@ fn health_tab(page: Page) -> impl IntoView {
                 <button
                     type="button"
                     aria-pressed=move || agent_access().to_string()
-                    class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 rounded-seed px-2.5 py-1.5 text-label-sm text-blueberry-300 inset-ring inset-ring-blueberry-500/25 cursor-pointer"
+                    class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] rounded-seed px-2.5 py-1.5 text-label-sm text-blueberry-300 inset-ring inset-ring-blueberry-500/25 cursor-pointer"
                     on:click=move |_| page.toggle_health_agent_access()
                 >
                     {move || if agent_access() { "Agent access on" } else { "Agent access off" }}
@@ -809,7 +809,7 @@ fn workouts(page: Page) -> impl IntoView {
                 {field("Workout duration minutes", "Minutes", i.workout_minutes, Some("numeric"))}
                 <button
                     type="button"
-                    class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 mt-1 rounded-seed bg-pandan-500/10 px-2 text-label-sm text-pandan-300 cursor-pointer"
+                    class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] mt-1 rounded-seed bg-pandan-500/10 px-2 text-label-sm text-pandan-300 cursor-pointer"
                     on:click=move |_| page.log_workout()
                 >
                     "Log"
@@ -937,7 +937,7 @@ fn insights(
                             <button
                                 type="button"
                                 aria-label="Dismiss observation"
-                                class="min-h-[44px] min-w-[44px] sm:min-h-6 sm:min-w-6 text-rambutan-400 hover:text-rambutan-300 cursor-pointer"
+                                class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] text-rambutan-400 hover:text-rambutan-300 cursor-pointer"
                                 on:click=move |_| life.update(|context| context.dismiss_insight(id.clone()))
                             >
                                 "×"

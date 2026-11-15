@@ -98,7 +98,7 @@ fn render_block(
             <div class="my-2 min-w-0 text-body-sm text-rambutan-400" data-rich-response-error="">
                 <p role="status" class="text-lychee-300">{message}</p>
                 <details class="mt-1">
-                    <summary class="bruhs-control min-h-7 cursor-pointer py-1 text-label-sm">"Show source"</summary>
+                    <summary class="bruhs-control min-h-[28px] cursor-pointer py-1 text-label-sm">"Show source"</summary>
                     <pre class="max-h-80 overflow-auto whitespace-pre-wrap break-words rounded-grape bg-longan-900 p-3 text-code-sm"><code>{source}</code></pre>
                 </details>
             </div>

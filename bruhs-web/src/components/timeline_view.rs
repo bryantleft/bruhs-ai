@@ -571,7 +571,7 @@ fn fold_row(key: String, label: String, rows: Arc<Vec<TimelineRow>>, ctx: RowCtx
         <div class="pb-2">
             <button
                 type="button"
-                class="flex min-h-6 items-center gap-1 rounded-grape px-1 py-0.5 text-body-sm text-rambutan-400 transition-colors hover:text-rambutan-200"
+                class="flex min-h-[24px] items-center gap-1 rounded-grape px-1 py-0.5 text-body-sm text-rambutan-400 transition-colors hover:text-rambutan-200"
                 aria-expanded=move || is_open().to_string()
                 on:click=move |_| ctx.expanded.toggle(&k.get_value(), false)
             >
@@ -787,7 +787,7 @@ fn AssistantMetaRow(
     });
     let has_text = !text.trim().is_empty();
     view! {
-        <div class="flex min-h-6 items-center gap-2 px-1 pb-4 text-label-sm tabular-nums text-rambutan-500 opacity-0 transition-opacity focus-within:opacity-100 group-hover/turn:opacity-100">
+        <div class="flex min-h-[24px] items-center gap-2 px-1 pb-4 text-label-sm tabular-nums text-rambutan-500 opacity-0 transition-opacity focus-within:opacity-100 group-hover/turn:opacity-100">
             {has_text.then(|| view! { <CopyButton text=text.clone() label="Copy response" /> })}
             {model.map(|m| view! { <span class="truncate">{m}</span> })}
             {duration_ms.map(|d| view! { <span>{format_duration_ms(d)}</span> })}
@@ -816,7 +816,7 @@ fn ThinkingRow(key: String, text: String, live: bool, expanded: Expanded) -> imp
         <div class="pb-1">
             <button
                 type="button"
-                class="flex min-h-6 w-full items-center gap-1.5 rounded-grape px-0.5 py-0.5 text-left transition-colors hover:bg-longan-800/30"
+                class="flex min-h-[24px] w-full items-center gap-1.5 rounded-grape px-0.5 py-0.5 text-left transition-colors hover:bg-longan-800/30"
                 aria-expanded=move || is_open().to_string()
                 on:click=move |_| expanded.toggle(&k.get_value(), false)
             >
@@ -889,7 +889,7 @@ fn WorkGroup(
         <div class="pb-2">
             <button
                 type="button"
-                class="group/tool-group flex min-h-6 w-full items-center gap-1.5 rounded-grape px-0.5 py-0.5 text-left transition-colors hover:bg-longan-800/30"
+                class="group/tool-group flex min-h-[24px] w-full items-center gap-1.5 rounded-grape px-0.5 py-0.5 text-left transition-colors hover:bg-longan-800/30"
                 aria-expanded=move || is_open().to_string()
                 on:click=move |_| expanded.toggle(&k.get_value(), default_open)
             >
@@ -969,7 +969,7 @@ fn ToolRow(tool: ToolView, key_prefix: String, expanded: Expanded) -> impl IntoV
                 }
             }
         >
-            <div class="flex min-h-6 items-center gap-1.5">
+            <div class="flex min-h-[24px] items-center gap-1.5">
                 <span class=format!("flex size-6 shrink-0 items-center justify-center {icon_cls}")>
                     <Icon name=icon size=14 />
                 </span>
@@ -1124,7 +1124,7 @@ fn WorkingRow(
     view! {
         <div class="pb-2 pt-0.5">
             {thinking_only.then(|| view! {
-                <div class="flex min-h-6 items-center gap-1.5 px-0.5">
+                <div class="flex min-h-[24px] items-center gap-1.5 px-0.5">
                     <span class="flex size-6 shrink-0 items-center justify-center text-rambutan-500">
                         <Icon name="brain" size=14 />
                     </span>
@@ -1259,7 +1259,7 @@ fn ErrorRow(
             {can_retry.then(|| view! {
                 <button
                     type="button"
-                    class="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-seed px-2 text-lychee-100 transition-colors hover:bg-lychee-500/20 sm:min-h-6"
+                    class="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-seed px-2 text-lychee-100 transition-colors hover:bg-lychee-500/20 sm:min-h-[24px]"
                     on:click=move |_| {
                         if let Some(p) = prompt.get_value() {
                             on_retry.run((mid.get_value(), p));

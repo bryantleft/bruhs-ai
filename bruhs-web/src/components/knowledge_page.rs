@@ -606,11 +606,11 @@ fn DocumentEditor(document_id: String) -> impl IntoView {
                         <div class="grid min-w-0 gap-5 lg:grid-cols-[minmax(0,1fr)_18rem]">
                             <div class="min-w-0 space-y-3">
                                 <Input aria_label="Document title" value=Signal::derive(move || title.get()) on_input=Callback::new(move |value| { title.set(value); dirty.set(true); }) autofocus=true class="text-title".to_string() />
-                                <Show when=move || !preview.get() fallback=move || view! { <article class="prose-msg min-h-80 rounded-grape bg-longan-900/30 p-4 text-body text-rambutan-200 inset-ring inset-ring-longan-800" inner_html=move || crate::markdown::render_untrusted(&body.get())></article> }>
-                                    <Textarea aria_label="Document body" rows=22 value=Signal::derive(move || body.get()) on_input=Callback::new(move |value| { body.set(value); dirty.set(true); }) placeholder="Write Markdown…".to_string() class="min-h-96 font-mono".to_string() />
+                                <Show when=move || !preview.get() fallback=move || view! { <article class="prose-msg min-h-[320px] rounded-grape bg-longan-900/30 p-4 text-body text-rambutan-200 inset-ring inset-ring-longan-800" inner_html=move || crate::markdown::render_untrusted(&body.get())></article> }>
+                                    <Textarea aria_label="Document body" rows=22 value=Signal::derive(move || body.get()) on_input=Callback::new(move |value| { body.set(value); dirty.set(true); }) placeholder="Write Markdown…".to_string() class="min-h-[384px] font-mono".to_string() />
                                 </Show>
                                 <div class="space-y-1"><label class="text-label-sm text-rambutan-500">"Tags, comma separated"</label><Input aria_label="Document tags" value=Signal::derive(move || tags.get()) on_input=Callback::new(move |value| { tags.set(value); dirty.set(true); }) placeholder="research, product, decision".to_string() /></div>
-                                <p class="min-h-5 text-label-sm text-rambutan-500" aria-live="polite">{move || {
+                                <p class="min-h-[20px] text-label-sm text-rambutan-500" aria-live="polite">{move || {
                                     use crate::durable_metadata::SaveState;
                                     match saves.record_status(crate::task_saves::Kind::Document, &stable_document_id.get_value()) {
                                         SaveState::Error { .. } => "Document or attachment not saved. Your changes are kept; use the save recovery notice to retry.".to_string(),

@@ -18,9 +18,9 @@ pub(super) fn ExportResponse(
             <button type="button" disabled=move || streaming.get() class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") aria-expanded=move || open.get().to_string() on:click=move |_| open.update(|open| *open = !*open)>"Export reply"</button>
             <Show when=move || open.get()>
                 <div class="mt-1 flex flex-col gap-2 rounded-grape bg-longan-900/60 p-3 text-rambutan-300 inset-ring inset-ring-longan-800">
-                    <label class="flex min-h-7 items-center gap-2"><input type="checkbox" prop:checked=move || include_remote.get() on:change=move |event| include_remote.set(event_target_checked(&event)) />"Include external media"</label>
+                    <label class="flex min-h-[28px] items-center gap-2"><input type="checkbox" prop:checked=move || include_remote.get() on:change=move |event| include_remote.set(event_target_checked(&event)) />"Include external media"</label>
                     <p class="text-rambutan-500">{move || if include_remote.get() { "Downloads linked media for this bundle." } else { "External media stays as links. Local media and interactive content are included." }}</p>
-                    <label class="flex min-h-7 items-center gap-2"><input type="checkbox" prop:checked=move || include_state.get() on:change=move |event| include_state.set(event_target_checked(&event)) />"Include saved widget values"</label>
+                    <label class="flex min-h-[28px] items-center gap-2"><input type="checkbox" prop:checked=move || include_state.get() on:change=move |event| include_state.set(event_target_checked(&event)) />"Include saved widget values"</label>
                     <p class="text-rambutan-500">"Saved values can include text entered in widget forms."</p>
                     <button type="button" disabled=move || busy.get() class=button_class(ButtonVariant::Outline, ButtonSize::Small, "self-start") on:click=move |_| {
                         busy.set(true); error.set(None);

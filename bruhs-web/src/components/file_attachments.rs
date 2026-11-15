@@ -416,7 +416,7 @@ fn media_pdf(url: Option<String>, name: String) -> AnyView {
     let Some(url) = url else {
         return missing();
     };
-    view! { <iframe src=url title=name class="h-full min-h-80 w-full bg-white"></iframe> }
+    view! { <iframe src=url title=name class="h-full min-h-[320px] w-full bg-white"></iframe> }
         .into_any()
 }
 
@@ -428,7 +428,7 @@ fn html_frame(html: String, name: String, policy: &'static str) -> AnyView {
     );
     view! {
         <iframe
-            class="h-full min-h-80 w-full bg-white"
+            class="h-full min-h-[320px] w-full bg-white"
             sandbox=""
             title=name
             prop:srcdoc=document

@@ -377,7 +377,7 @@ fn TextGeneration() -> impl IntoView {
         >
             <textarea
                 aria-label="Thread title instructions"
-                class="min-h-24 w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 sm:w-72"
+                class="min-h-[96px] w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10 placeholder:text-rambutan-500 sm:w-72"
                 placeholder="prefix: Bug\nmax 48"
                 prop:value=move || instructions.with(|store| store.global.clone())
                 on:input=move |ev| {
@@ -412,7 +412,7 @@ fn TextGeneration() -> impl IntoView {
             <SettingsRowBody>
                 <textarea
                     aria-label="Project thread title instructions"
-                    class="min-h-20 w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
+                    class="min-h-[80px] w-full rounded-grape bg-white/5 px-3 py-1.5 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
                     prop:value=move || {
                         let name = project.get();
                         instructions.with(|store| store.by_project.get(&name).cloned().unwrap_or_default())

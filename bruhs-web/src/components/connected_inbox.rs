@@ -50,7 +50,7 @@ fn ConnectedInboxRead() -> impl IntoView {
                             let selected_id = mailbox.mailbox_id.clone();
                             let id = mailbox.mailbox_id;
                             let label = if mailbox.account_label.is_empty() { mailbox.provider.name().to_string() } else { mailbox.account_label };
-                            view! { <button type="button" aria-pressed=move || (state.mailbox.get().as_ref() == Some(&selected_id)).to_string() class="bruhs-control inline-flex min-h-8 min-w-0 max-w-full items-start gap-2 whitespace-normal rounded-grape px-2.5 py-1.5 text-left text-label-sm text-rambutan-300 hover:bg-longan-800 aria-pressed:bg-blueberry-500/15 aria-pressed:text-blueberry-400 focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-60 cursor-pointer" disabled=move || state.syncing.get() on:click=move |_| state.select_mailbox(id.clone())><span class="min-w-0 break-all">{label}</span><span class="shrink-0 whitespace-nowrap">{format!("{} threads", mailbox.threads)}</span></button> }
+                            view! { <button type="button" aria-pressed=move || (state.mailbox.get().as_ref() == Some(&selected_id)).to_string() class="bruhs-control inline-flex min-h-[32px] min-w-0 max-w-full items-start gap-2 whitespace-normal rounded-grape px-2.5 py-1.5 text-left text-label-sm text-rambutan-300 hover:bg-longan-800 aria-pressed:bg-blueberry-500/15 aria-pressed:text-blueberry-400 focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-60 cursor-pointer" disabled=move || state.syncing.get() on:click=move |_| state.select_mailbox(id.clone())><span class="min-w-0 break-all">{label}</span><span class="shrink-0 whitespace-nowrap">{format!("{} threads", mailbox.threads)}</span></button> }
                         }).collect_view())}
                     </div>
                     <Show when=move || state.selected_thread.with(Option::is_some) fallback=move || view! { <MailRows /> }>
@@ -78,7 +78,7 @@ fn MailRows() -> impl IntoView {
             </form>
             <div class="flex flex-wrap gap-1" role="group" aria-label="Email filter">
                 {InboxFilter::ALL.into_iter().map(|filter| view! {
-                    <button type="button" aria-pressed=move || (state.filter.get() == filter).to_string() class="bruhs-control min-h-8 rounded-grape px-2.5 py-1.5 text-label-sm text-rambutan-400 hover:bg-longan-800 aria-pressed:bg-blueberry-500/15 aria-pressed:text-blueberry-400 focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-60 cursor-pointer" disabled=move || state.mailbox.with(Option::is_none) on:click=move |_| state.select_filter(filter)>{filter.label()}</button>
+                    <button type="button" aria-pressed=move || (state.filter.get() == filter).to_string() class="bruhs-control min-h-[32px] rounded-grape px-2.5 py-1.5 text-label-sm text-rambutan-400 hover:bg-longan-800 aria-pressed:bg-blueberry-500/15 aria-pressed:text-blueberry-400 focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-60 cursor-pointer" disabled=move || state.mailbox.with(Option::is_none) on:click=move |_| state.select_filter(filter)>{filter.label()}</button>
                 }).collect_view()}
             </div>
             <Show when=move || state.rows_loading.get()><p role="status" class="text-label-sm text-rambutan-400">"Loading cached email…"</p></Show>

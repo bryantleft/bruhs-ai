@@ -18,8 +18,8 @@ use crate::state::{
 use crate::ui::dialog::focusable_descendants;
 use crate::ui::Icon;
 
-const ACTION: &str = "bruhs-control inline-flex min-h-8 items-center justify-center gap-2 rounded-seed px-2 text-label-sm text-rambutan-300 hover:bg-longan-800/60 hover:text-rambutan-100 disabled:opacity-50 disabled:cursor-not-allowed";
-const ROW: &str = "bruhs-control flex min-h-8 w-full items-center justify-between gap-2 rounded-seed px-2 text-left text-label-sm text-rambutan-300 hover:bg-longan-800/60 hover:text-rambutan-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-rambutan-300";
+const ACTION: &str = "bruhs-control inline-flex min-h-[32px] items-center justify-center gap-2 rounded-seed px-2 text-label-sm text-rambutan-300 hover:bg-longan-800/60 hover:text-rambutan-100 disabled:opacity-50 disabled:cursor-not-allowed";
+const ROW: &str = "bruhs-control flex min-h-[32px] w-full items-center justify-between gap-2 rounded-seed px-2 text-left text-label-sm text-rambutan-300 hover:bg-longan-800/60 hover:text-rambutan-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-rambutan-300";
 
 #[component]
 pub(super) fn ComposerOptions(
@@ -219,7 +219,7 @@ pub(super) fn ComposerOptions(
                                 let age = crate::format::relative_time(entry.at_ms, now);
                                 view! {
                                     <div role="listitem" class="flex items-center gap-1">
-                                        <button type="button" data-stash-entry="" class="bruhs-control min-h-8 min-w-0 flex-1 rounded-seed px-2 py-1 text-left text-label-sm text-rambutan-300 hover:bg-longan-800/60" title=entry.text on:click=move |_| restore(restore_id.clone())>
+                                        <button type="button" data-stash-entry="" class="bruhs-control min-h-[32px] min-w-0 flex-1 rounded-seed px-2 py-1 text-left text-label-sm text-rambutan-300 hover:bg-longan-800/60" title=entry.text on:click=move |_| restore(restore_id.clone())>
                                             <span class="block truncate">{preview}</span><span class="block text-rambutan-500">{age}</span>
                                         </button>
                                         <button type="button" aria-label="Delete saved prompt" class="bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-seed text-rambutan-500 hover:bg-lychee-500/10 hover:text-lychee-300" on:click=move |_| { stash.update(|items| { items.remove(&delete_id); }); }><Icon name="x" size=14 /></button>
