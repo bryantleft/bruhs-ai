@@ -314,7 +314,15 @@ fn card(
         .filter(|child| child.relationship == Relationship::Verify)
         .copied()
         .collect::<Vec<_>>();
-    let pulls = link.map(|link| link.pulls.clone()).unwrap_or_default();
+    let pulls: Vec<TaskPull> = link
+        .map(|link| {
+            link.pulls
+                .iter()
+                .filter(|pull| belongs_to(task, pull))
+                .cloned()
+                .collect()
+        })
+        .unwrap_or_default();
     let (lane, pull_status) = lane(task, &pulls, &verifications);
     let status = status(task, lane, pull_status, &verifications);
     let updated_at = children
@@ -351,6 +359,13 @@ fn card(
             && task.state != TaskState::Ready,
         updated_at,
     }
+}
+
+/// Branch names get reused. A request that merged or closed before the task
+/// existed is earlier work on the same name, not this task's; an open one
+/// always counts, since a task may pick up an existing request.
+fn belongs_to(task: &CoordinatedTask, pull: &TaskPull) -> bool {
+    pull.open() || pull.updated_at.is_none_or(|at| at >= task.created_at)
 }
 
 fn count(n: usize) -> u32 {
@@ -884,5 +899,32 @@ mod tests {
         assert_eq!(parse_utc("2026-11-13T00:00:00+02:00"), None);
         assert_eq!(parse_utc("yesterday"), None);
         assert_eq!(parse_utc(""), None);
+    }
+
+    #[test]
+    fn requests_settled_before_the_task_existed_are_earlier_work_on_the_branch() {
+        let at = |ms| Some(EpochMs::saturating_from_i64(ms));
+        let mut old_merge = pull(PullState::Merged, ChecksState::Passing, None, "UNKNOWN");
+        old_merge.updated_at = at(5);
+        let mut current = pull(PullState::Draft, ChecksState::None, None, "MERGEABLE");
+        current.number = 8;
+        current.updated_at = at(3);
+        let task = task(Relationship::Root, TaskState::Completed, 10);
+
+        let cards = board(vec![task.clone()], &[(0, vec![old_merge.clone()])]);
+        assert_eq!(
+            only(&cards),
+            (Lane::Building, "Idle"),
+            "an old merge is not Done"
+        );
+        assert!(cards[0].pulls.is_empty());
+
+        let cards = board(vec![task], &[(0, vec![current, old_merge])]);
+        assert_eq!(
+            cards[0].pulls.len(),
+            1,
+            "the open request counts even if older"
+        );
+        assert_eq!(only(&cards), (Lane::Building, "Draft PR"));
     }
 }
