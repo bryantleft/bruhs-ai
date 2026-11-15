@@ -5,6 +5,9 @@
 // request fails the run.
 // Run after: (cd bruhs-web && trunk build --dist ../target/people-ui-dist)
 //   node bruhs-web/tests/people_browser.mjs
+// BRUHS_PEOPLE_UI_DIST picks the bundle and BRUHS_PEOPLE_QA_DIR the output
+// directory, so a later run never overwrites an earlier run's screenshots
+// and results.
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, readdir, stat, writeFile } from 'node:fs/promises';
@@ -15,7 +18,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const dist = path.resolve(process.env.BRUHS_PEOPLE_UI_DIST ?? path.join(root, 'target/people-ui-dist'));
-const output = path.join(root, 'target/people-ui-qa');
+const output = path.resolve(process.env.BRUHS_PEOPLE_QA_DIR ?? path.join(root, 'target/people-ui-qa'));
 const startedAt = new Date().toISOString();
 const cells = [
   { name: 'desktop', width: 1280, height: 800, hasTouch: false },
@@ -490,7 +493,11 @@ try {
       await eventually(async () => data.mergeRequests.length === 1 && await page.locator('#person-record-dir-00').count() === 0, 'a confirmed merge retires the source profile');
       await eventually(async () => await button('Undo merge').count() === 1, 'a merge offers undo');
       await button('Undo merge').click();
+      // A restored profile is new to this session's directory order, so it
+      // joins the last page; find it by name.
+      await search.fill('Directory Person 00');
       await eventually(async () => data.unmergeRequests.length === 1 && await page.locator('#person-record-dir-00').count() === 1, 'undo brings the merged profile back');
+      await search.fill('');
       check(await button('Undo merge').count() === 0, 'a finished undo clears its offer');
 
       state.stage = 'delete';
@@ -504,7 +511,9 @@ try {
       await eventually(async () => await button('Undo delete').count() === 1, 'a delete offers undo');
       await reachable(button('Undo delete'), 'Undo delete action');
       await button('Undo delete').click();
+      await search.fill('Directory Person 01');
       await eventually(async () => data.restoreRequests.length === 1 && await page.locator('#person-record-dir-01').count() === 1, 'undo restores the deleted profile');
+      await search.fill('');
       await page.reload();
       await ready();
       check(await page.locator('#person-record-dir-01').count() === 1 && await page.locator('#person-record-dir-00').count() === 1, 'restored profiles survive reload');
