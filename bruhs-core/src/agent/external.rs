@@ -11,6 +11,7 @@ use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
 
 pub(super) mod acp;
+pub(super) mod models;
 #[path = "../../../claude-sdk-rs/src/process.rs"]
 mod process;
 

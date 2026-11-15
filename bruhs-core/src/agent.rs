@@ -18,6 +18,15 @@ use tokio::sync::{mpsc, RwLock};
 
 mod external;
 
+/// The models `provider`'s CLI lists for the signed-in account (Cursor's
+/// `--list-models`), cached for a few minutes. Other runtimes, and a CLI that
+/// cannot list, return no models; the error says why when there is one.
+pub async fn list_runtime_models(
+    provider: AgentProvider,
+) -> bruhs_models::runtime_models::RuntimeModels {
+    external::models::list(provider).await
+}
+
 // ---------------------------------------------------------------------------
 // ThreadStatus
 // ---------------------------------------------------------------------------
