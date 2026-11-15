@@ -39,7 +39,13 @@ most every 20 seconds, open pull requests every minute and settled ones every
 15 minutes, and only while the board is open. The board answers from that
 cache and never waits on a forge. A failed lookup shows its error above the
 board and keeps what was read last. Guests see their one task without paths,
-branches or pull requests.
+branches or pull requests. Branch names get reused, so a pull request that
+merged or closed before the task existed is treated as earlier work and left
+off its card; an open one always counts.
+
+Agents see the board too: `workspace_status` gives each task summary its
+lane, status, branch and pull requests (number, state, checks, review and
+mergeability), without adding a tool to every turn.
 
 Archive files a finished task away from the lanes; it keeps its record,
 transcript, worktree and branch, and Restore or a new message brings it back.

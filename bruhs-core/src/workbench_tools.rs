@@ -164,7 +164,7 @@ fn catalogue(read_only: bool) -> Value {
     let definitions = [
         (
             "workspace_status",
-            "Read this project's host-owned task summaries and this thread's local-tool grants. To use a browser/device, ask the user to grant access in Workbench → Verification using this thread ID as principal.",
+            "Read this project's host-owned task summaries, each with its board lane (building, validating, in_review, ready, done), status, branch and pull requests, and this thread's local-tool grants. To use a browser/device, ask the user to grant access in Workbench → Verification using this thread ID as principal.",
         ),
         (
             "task_read",
@@ -222,6 +222,40 @@ fn descendant(tasks: &[Value], root: &str, id: &str) -> bool {
         };
         current = parent;
     }
+}
+/// Adds a task's board placement to its summary: lane, status label, branch
+/// and compact pull requests. Verification runs and side chats have no card
+/// of their own and stay plain.
+fn with_board(mut summary: Value, board: &Value) -> Value {
+    let Some(card) = board["cards"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .find(|card| card["id"] == summary["id"])
+    else {
+        return summary;
+    };
+    summary["lane"] = card["lane"].clone();
+    summary["status"] = card["status"]["label"].clone();
+    if !card["branch"].is_null() {
+        summary["branch"] = card["branch"].clone();
+    }
+    let pulls: Vec<_> = card["pulls"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .map(|pull| {
+            json!({"number":pull["number"],"state":pull["state"],"checks":pull["checks"],
+                "review":pull["review_decision"],"mergeable":pull["mergeable"],"url":pull["url"]})
+        })
+        .collect();
+    if !pulls.is_empty() {
+        summary["pulls"] = Value::Array(pulls);
+    }
+    if card["archived"] == true {
+        summary["archived"] = Value::Bool(true);
+    }
+    summary
 }
 fn task_running(task: &Value) -> bool {
     matches!(
@@ -332,7 +366,9 @@ impl Scope {
         match name {
             "workspace_status"=>{
                 let tasks=self.request("/api/coordination",None).await?;
-                let visible:Vec<_>=tasks["tasks"].as_array().into_iter().flatten().filter(|t|t["id"].as_str().is_some_and(|id|self.scoped_task(&tasks,id).is_ok())).map(|t|json!({"id":t["id"],"title":t["title"],"state":t["state"],"parent_id":t["parent_id"],"model":t["model"],"error":t["error"]})).collect();
+                // An older or busy host without a board still answers with plain summaries.
+                let board=self.request("/api/coordination/board",None).await.unwrap_or(Value::Null);
+                let visible:Vec<_>=tasks["tasks"].as_array().into_iter().flatten().filter(|t|t["id"].as_str().is_some_and(|id|self.scoped_task(&tasks,id).is_ok())).map(|t|with_board(json!({"id":t["id"],"title":t["title"],"state":t["state"],"parent_id":t["parent_id"],"model":t["model"],"error":t["error"]}),&board)).collect();
                 let tools=self.request("/api/local-tools",None).await?;
                 let grants:Vec<_>=tools["grants"].as_array().into_iter().flatten().filter(|g|g["principal"]==self.thread).cloned().collect();
                 Ok(json!({"thread_id":self.thread,"project":self.project,"tasks":visible,"grants":grants}))
@@ -499,6 +535,23 @@ mod tests {
                 "Agent catalogue exposed {forbidden}"
             );
         }
+    }
+    #[test]
+    fn task_summaries_carry_their_board_lane_and_pull_requests() {
+        let board = json!({"cards":[{"id":"a","lane":"in_review","status":{"label":"Awaiting review","tone":"warning","busy":false},
+            "branch":"bruhs/task-a","archived":false,"pulls":[{"number":7,"title":"Fix","url":"https://github.com/o/r/pull/7",
+            "state":"open","checks":"passing","review_decision":"REVIEW_REQUIRED","mergeable":"MERGEABLE","comments":2}]}]});
+        let summary = with_board(json!({"id":"a","title":"Fix","state":"completed"}), &board);
+        assert_eq!(summary["lane"], "in_review");
+        assert_eq!(summary["status"], "Awaiting review");
+        assert_eq!(summary["branch"], "bruhs/task-a");
+        assert_eq!(summary["pulls"][0]["number"], 7);
+        assert_eq!(summary["pulls"][0]["review"], "REVIEW_REQUIRED");
+        assert!(summary.get("archived").is_none());
+        // A folded verification run, or a host without a board, stays plain.
+        let plain = json!({"id":"v","title":"Verify","state":"completed"});
+        assert_eq!(with_board(plain.clone(), &board), plain);
+        assert_eq!(with_board(plain.clone(), &Value::Null), plain);
     }
     #[test]
     fn helper_endpoint_cannot_be_redirected_to_external_hosts() {
