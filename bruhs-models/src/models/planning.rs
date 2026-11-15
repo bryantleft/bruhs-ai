@@ -154,6 +154,14 @@ pub struct WorkItemPlanning {
     pub waiting_on: Option<String>,
 }
 
+impl WorkItemPlanning {
+    /// Whether `event_id` is a focus block placed from this task: the
+    /// event's way back to its source task (CAL-14).
+    pub fn has_time_block(&self, event_id: &str) -> bool {
+        self.time_block_event_ids.iter().any(|id| id == event_id)
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct AgendaEntry {
     pub event_id: String,
@@ -572,6 +580,17 @@ fn round_up(value: f64, quantum: f64) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_focus_block_finds_its_source_task() {
+        let planning = WorkItemPlanning {
+            time_block_event_ids: vec!["block-1".into(), "block-2".into()],
+            ..WorkItemPlanning::default()
+        };
+        assert!(planning.has_time_block("block-2"));
+        assert!(!planning.has_time_block("block"));
+        assert!(!WorkItemPlanning::default().has_time_block("block-1"));
+    }
 
     fn task(id: &str, title: &str, priority: Priority) -> WorkItem {
         let mut item = WorkItem::new(title);
