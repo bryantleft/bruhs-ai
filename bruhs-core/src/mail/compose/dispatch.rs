@@ -67,7 +67,7 @@ pub(crate) fn status(
     })
 }
 
-fn check_request(request: &MailSendRequest) -> Result<(), ComposeError> {
+pub(crate) fn check_request(request: &MailSendRequest) -> Result<(), ComposeError> {
     if request.operation_id.is_empty()
         || request.operation_id.len() > 128
         || !request
@@ -242,6 +242,29 @@ impl MailSession {
 }
 
 impl MailRuntime {
+    /// Records only a definite failure before queueing. This grants no broker
+    /// access or dispatch capability and never changes an existing operation.
+    pub async fn reject_unqueued_compose(
+        &self,
+        mailbox_id: String,
+        client_id: String,
+        request: MailSendRequest,
+        problem: MailSendProblem,
+    ) -> Result<MailSendStatus, ComposeError> {
+        self.compose_host(&request.host_id)?;
+        self.compose_call(true, move |cache| {
+            let operation = cache.reject_unqueued_compose(
+                &mailbox_id,
+                &client_id,
+                &request,
+                &problem,
+                EpochMs::now(),
+            )?;
+            status(cache.host().as_str(), &mailbox_id, &operation)
+        })
+        .await
+    }
+
     pub async fn cancel_reviewed_compose(
         &self,
         expected_host: String,
@@ -285,7 +308,18 @@ impl MailRuntime {
                 {
                     return Err(MailSendProblem::new(MailSendProblemKind::AccountChanged).into());
                 }
-                let verified = transport.verified_sender(&session).await?;
+                let verified = match transport.verified_sender(&session).await {
+                    Ok(sender) => sender,
+                    Err(problem) => {
+                        if let Err(error) = session.runtime.reject_unqueued_compose(
+                            session.authorization().mailbox().as_str().into(),
+                            client_id.clone(), request.clone(), problem.clone(),
+                        ).await {
+                            tracing::warn!(%error, "Could not persist the pre-queue mail rejection");
+                        }
+                        return Err(problem.into());
+                    }
+                };
                 let limit = transport.mime_limit_bytes();
                 let status = session
                     .queue_reviewed_compose(&verified, client_id.clone(), request.clone(), limit)

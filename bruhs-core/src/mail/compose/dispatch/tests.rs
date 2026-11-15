@@ -10,6 +10,8 @@ use std::sync::{
 };
 use tokio::sync::Notify;
 
+mod prequeue;
+
 struct Fixture {
     runtime: MailRuntime,
     connections: Connections,

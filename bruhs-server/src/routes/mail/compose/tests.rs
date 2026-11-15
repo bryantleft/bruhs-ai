@@ -11,6 +11,8 @@ use wiremock::{
     Mock, MockServer, ResponseTemplate,
 };
 
+mod prequeue;
+
 const TOKEN: &str = "synthetic-compose-http-token";
 struct Fixture {
     _directory: tempfile::TempDir,
