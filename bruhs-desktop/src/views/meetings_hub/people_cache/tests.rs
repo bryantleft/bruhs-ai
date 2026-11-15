@@ -34,6 +34,7 @@ fn retired_contact_cannot_return_from_old_refresh_or_create_ack_after_restore(
                 source_relationship: None,
                 target_relationship: None,
                 target_id: target.id.clone(),
+                links: Default::default(),
             },
             target.clone(),
             cx,

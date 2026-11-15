@@ -123,6 +123,21 @@ pub enum HubEvent {
         local: Box<CalendarEvent>,
         remote: Box<CalendarEvent>,
     },
+    /// This client deleted a contact and dropped it from the cache. The
+    /// workspace removes its relationship, unlinks private links and keeps
+    /// the undo receipt.
+    PersonDeleted {
+        person: Box<PersonProfile>,
+        local_only: bool,
+    },
+    /// An undo of a delete put the contact back.
+    PersonRestored { person_id: String },
+    /// An undo of a merge put both contacts back.
+    PersonUnmerged { source_id: String },
+    /// A confirmed rename or opt-out change that can be undone.
+    PeopleUndoReady(Box<bruhs_models::PeopleUndo>),
+    /// An undo did not complete; nothing else changed.
+    PeopleUndoFailed(String),
 }
 
 use bruhs_models::auto_record::auto_record_event_key as event_key;
@@ -312,6 +327,13 @@ pub struct MeetingsHub {
     person_merge_archives: BTreeMap<String, Arc<PeopleMergeArchive>>,
     person_merge_recoveries: BTreeMap<String, Vec<Arc<PeopleMergeArchive>>>,
     person_merges_waiting: HashSet<String>,
+    /// Contacts this client deleted. A refresh that started earlier must not
+    /// bring them back.
+    deleted_person_ids: HashSet<String>,
+    /// A merge request is on its way to the server.
+    pub person_merge_in_flight: bool,
+    /// The first directory restore or refresh has settled.
+    pub people_settled: bool,
     people_refreshing: bool,
     people_refresh_again: bool,
     people_refresh_failed: bool,
@@ -415,6 +437,9 @@ impl MeetingsHub {
             person_merge_archives: BTreeMap::new(),
             person_merge_recoveries: BTreeMap::new(),
             person_merges_waiting: HashSet::new(),
+            deleted_person_ids: HashSet::new(),
+            person_merge_in_flight: false,
+            people_settled: false,
             people_refreshing: false,
             people_refresh_again: false,
             people_refresh_failed: false,
@@ -550,10 +575,14 @@ impl MeetingsHub {
             cx,
             crate::native_performance::Service::Meetings,
         ) {
+            self.people_settled = true;
             return;
         }
         // gpui's test scheduler rejects wake-ups from the tokio threads, and
         // tests must not touch the network; the pages render offline states.
+        if cfg!(test) {
+            self.people_settled = true;
+        }
         if self.started || cfg!(test) {
             return;
         }
@@ -807,6 +836,9 @@ impl MeetingsHub {
             MeetingEvent::StreamOpened => {
                 self.refresh_people(cx);
                 self.recover_meeting_stream(cx);
+            }
+            MeetingEvent::PersonDeleted { person_id } => {
+                self.forget_person(&person_id, cx);
             }
             MeetingEvent::PersonChanged { .. }
             | MeetingEvent::PersonMerged { .. }
@@ -1234,25 +1266,56 @@ impl MeetingsHub {
 
     // ── People actions ──────────────────────────────────────────────────
 
-    pub fn rename_person(&mut self, person_id: String, name: String, _cx: &mut Context<'_, Self>) {
+    pub fn rename_person(&mut self, person_id: String, name: String, cx: &mut Context<'_, Self>) {
+        self.rename_person_with(person_id, name, true, cx);
+    }
+
+    /// Rename on the server. `record_undo` offers an undo once the server
+    /// confirms; an undo itself does not.
+    pub fn rename_person_with(
+        &mut self,
+        person_id: String,
+        name: String,
+        record_undo: bool,
+        _cx: &mut Context<'_, Self>,
+    ) {
+        let before = self
+            .people
+            .iter()
+            .find(|p| p.id == person_id)
+            .map(|p| p.display_name.clone());
         let client = self.client.clone();
         self.run(
             async move { client.rename_person(&person_id, &name).await },
-            |hub, result, cx| {
+            move |hub, result, cx| {
                 match result {
                     Ok(updated) => {
                         if let Some(p) = hub.people.iter_mut().find(|p| p.id == updated.id) {
                             let p = Arc::make_mut(p);
-                            p.display_name = updated.display_name;
+                            p.display_name.clone_from(&updated.display_name);
                             p.updated_at = updated.updated_at;
                         }
                         hub.people_changed(cx);
+                        if let Some(before) = before.filter(|before| {
+                            record_undo && *before != updated.display_name
+                        }) {
+                            cx.emit(HubEvent::PeopleUndoReady(Box::new(
+                                bruhs_models::PeopleUndo::Rename {
+                                    person_id: updated.id.clone(),
+                                    before,
+                                    after: updated.display_name,
+                                },
+                            )));
+                        }
                     }
-                    Err(e) => hub.notify_notice(
+                    Err(e) if record_undo => hub.notify_notice(
                         format!("The profile was not renamed. Try again. Details: {e}"),
                         true,
                         cx,
                     ),
+                    Err(e) => cx.emit(HubEvent::PeopleUndoFailed(format!(
+                        "Undo did not complete. The profile kept its current name. Details: {e}"
+                    ))),
                 }
                 cx.notify();
             },
@@ -1263,12 +1326,29 @@ impl MeetingsHub {
         &mut self,
         person_id: String,
         tracked: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.set_person_tracked_with(person_id, tracked, true, cx);
+    }
+
+    /// Change the opt-out on the server. `record_undo` offers an undo once
+    /// the server confirms; an undo itself does not.
+    pub fn set_person_tracked_with(
+        &mut self,
+        person_id: String,
+        tracked: bool,
+        record_undo: bool,
         _cx: &mut Context<'_, Self>,
     ) {
+        let before = self
+            .people
+            .iter()
+            .find(|p| p.id == person_id)
+            .map(|p| p.tracked);
         let client = self.client.clone();
         self.run(
             async move { client.set_person_tracked(&person_id, tracked).await },
-            |hub, result, cx| {
+            move |hub, result, cx| {
                 match result {
                     Ok(updated) => {
                         if let Some(p) = hub.people.iter_mut().find(|p| p.id == updated.id) {
@@ -1279,12 +1359,27 @@ impl MeetingsHub {
                             p.updated_at = updated.updated_at;
                         }
                         hub.people_changed(cx);
+                        if let Some(before) =
+                            before.filter(|before| record_undo && *before != updated.tracked)
+                        {
+                            cx.emit(HubEvent::PeopleUndoReady(Box::new(
+                                bruhs_models::PeopleUndo::Tracked {
+                                    person_id: updated.id.clone(),
+                                    name: updated.display_name.clone(),
+                                    before,
+                                    after: updated.tracked,
+                                },
+                            )));
+                        }
                     }
-                    Err(e) => hub.notify_notice(
+                    Err(e) if record_undo => hub.notify_notice(
                         format!("Observation tracking was not changed. Try again. Details: {e}"),
                         true,
                         cx,
                     ),
+                    Err(e) => cx.emit(HubEvent::PeopleUndoFailed(format!(
+                        "Undo did not complete. Observation tracking is unchanged. Details: {e}"
+                    ))),
                 }
                 cx.notify();
             },
@@ -1300,9 +1395,11 @@ impl MeetingsHub {
         let client = self.client.clone();
         let source = source_id.clone();
         let expected_target = target_id.clone();
+        self.person_merge_in_flight = true;
         self.run(
             async move { client.merge_people(&source, &target_id).await },
             move |hub, result, cx| {
+                hub.person_merge_in_flight = false;
                 match result {
                     Ok(target) if target.id == expected_target => {
                         hub.publish_person_merge(
@@ -1314,7 +1411,11 @@ impl MeetingsHub {
                         hub.notify_notice("Contact merge returned an unexpected target. Local records were retained; retry contact sync to confirm the surviving identity.", true, cx);
                         hub.refresh_people(cx);
                     }
-                    Err(e) => hub.notify_notice(format!("merge_people failed: {e}"), true, cx),
+                    Err(e) => hub.notify_notice(
+                        format!("The profiles were not merged. Both are unchanged. Try again. Details: {e}"),
+                        true,
+                        cx,
+                    ),
                 }
                 cx.notify();
             },

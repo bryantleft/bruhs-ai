@@ -46,6 +46,7 @@ pub(super) fn prepare_context(
             source_relationship: source_relationship.cloned(),
             target_relationship: target_relationship.cloned(),
             target_id: target_id.clone(),
+            links: bruhs_models::PersonLinkSet::default(),
         },
         canonical: target
             .filter(|p| p.updated_at > redirect.target.updated_at)

@@ -1382,6 +1382,8 @@ pub struct Workspace {
     renaming_person_id: Option<String>,
     expanded_person_id: Option<String>,
     merge: Option<meetings_ui::PersonMergePanel>,
+    /// People page search, paging, confirmations, undo and return state.
+    people_page: meetings_ui::people_view::PeoplePageState,
     editing_speaker: Option<meetings_ui::SpeakerRef>,
     /// Selected chunk in the live transcript. One at a time.
     live_chunk: Option<String>,
@@ -1564,6 +1566,7 @@ impl Workspace {
             search_query_input,
             person_rename_input,
             speaker_rename_input,
+            people_page,
         } = Self::new_people_inputs(window, cx, &mut subscriptions);
         let stepper_prefs = meetings_hub.read(cx).prefs.clone();
         let settings_stepper_inputs =
@@ -2031,6 +2034,7 @@ impl Workspace {
             renaming_person_id: None,
             expanded_person_id: None,
             merge: None,
+            people_page,
             editing_speaker: None,
             live_chunk: None,
             speaker_menu: None,
@@ -2550,13 +2554,14 @@ impl Workspace {
                 .child(self.render_search_page(window, cx)),
             AppView::MeetingDetail { meeting_id } => {
                 let id = meeting_id.clone();
-                div()
+                let detail = div()
                     .flex_1()
                     .h_full()
                     .min_w_0()
                     .min_h_0()
                     .flex()
-                    .child(self.render_meeting_detail(&id, cx))
+                    .child(self.render_meeting_detail(&id, cx));
+                self.with_back_to_people(detail, cx)
             }
             AppView::MeetingNoteDetail { note_id } => self.render_local_meeting_note(note_id, cx),
             AppView::DocumentDetail { document_id } => {
@@ -2564,7 +2569,8 @@ impl Workspace {
             }
             AppView::ClipDetail { .. } => self.render_source_clip_editor(false, cx),
             AppView::ConversationDetail { conversation_id } => {
-                self.render_conversation_detail(conversation_id, compact, cx)
+                let detail = self.render_conversation_detail(conversation_id, compact, cx);
+                self.with_back_to_people(detail, cx)
             }
             AppView::Booking { .. } => self.render_calendar_page(cx),
             AppView::Settings => self.render_web_only_view(cx),

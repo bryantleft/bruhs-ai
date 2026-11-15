@@ -29,6 +29,8 @@ mod meeting_note_tests;
 mod meeting_read_tests;
 #[cfg(test)]
 mod meeting_stream_tests;
+#[cfg(test)]
+mod people_page_tests;
 #[cfg(all(test, unix))]
 mod people_read_tests;
 #[cfg(all(test, unix))]
