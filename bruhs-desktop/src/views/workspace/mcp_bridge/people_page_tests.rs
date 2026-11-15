@@ -13,7 +13,10 @@ use bruhs_models::{
     KnowledgeLink, KnowledgeLinkKind, PeopleUndo, PersonProfile, RelationshipItem,
     RelationshipItemKind, RelationshipProfile,
 };
-use gpui::{Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui::{
+    point, px, Bounds, Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext,
+    VisualTestContext,
+};
 use std::sync::Arc;
 
 fn offline(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) {
@@ -44,6 +47,40 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
         .unwrap_or_else(|| panic!("Missing {selector}"));
     cx.simulate_click(bounds.center(), Modifiers::default());
     cx.run_until_parked();
+}
+
+/// The pager sits below a full page of cards, past the bottom of the
+/// window's viewport. Scroll the People page to its end the way a user would,
+/// then re-read the page and the control from the frame the click will hit
+/// and require the control's centre to be inside both the visible People page
+/// and the measured window viewport.
+fn scroll_people_page_to(cx: &mut VisualTestContext, selector: &'static str) {
+    cx.run_until_parked();
+    let page = cx
+        .debug_bounds("desktop-people-page")
+        .expect("Missing desktop-people-page");
+    cx.simulate_event(ScrollWheelEvent {
+        position: page.center(),
+        delta: ScrollDelta::Pixels(point(px(0.0), px(-100_000.0))),
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    let page = cx
+        .debug_bounds("desktop-people-page")
+        .expect("Missing desktop-people-page after scrolling");
+    let target = cx
+        .debug_bounds(selector)
+        .unwrap_or_else(|| panic!("Missing {selector}"));
+    let viewport =
+        cx.update(|window, _| Bounds::new(point(px(0.0), px(0.0)), window.viewport_size()));
+    assert!(
+        page.contains(&target.center()),
+        "{selector} is inside the visible People page after scrolling"
+    );
+    assert!(
+        viewport.contains(&target.center()),
+        "{selector} is inside the measured window viewport after scrolling"
+    );
 }
 
 #[gpui::test]
@@ -146,8 +183,13 @@ async fn people_search_finds_an_alias_beyond_the_first_page(cx: &mut TestAppCont
         w.people_page.page.set(0);
         cx.notify();
     });
+    workspace.update_in(cx, |w, _, _| assert_eq!(w.people_page.page.get(), 0));
+    scroll_people_page_to(cx, "desktop-people-next");
     click(cx, "desktop-people-next");
+    workspace.update_in(cx, |w, _, _| assert_eq!(w.people_page.page.get(), 1));
+    scroll_people_page_to(cx, "desktop-people-next");
     click(cx, "desktop-people-next");
+    workspace.update_in(cx, |w, _, _| assert_eq!(w.people_page.page.get(), 2));
     assert!(cx.debug_bounds("desktop-person-name-late").is_some());
     workspace.update_in(cx, |w, _, _| assert_eq!(w.people_page.page.get(), 2));
 }
