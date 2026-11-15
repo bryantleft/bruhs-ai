@@ -27,6 +27,15 @@ pub struct Banner {
     pub message: String,
     /// Auto-dismiss after this many ms. `None` = sticky until manually closed.
     pub ttl_ms: Option<u32>,
+    /// One optional action button; choosing it also dismisses the banner.
+    pub action: Option<BannerAction>,
+}
+
+/// A banner's action button, such as "Open".
+#[derive(Debug, Clone, Copy)]
+pub struct BannerAction {
+    pub label: &'static str,
+    pub run: Callback<()>,
 }
 
 /// Context newtype wrapping the banner queue signal.
@@ -39,11 +48,33 @@ const MAX_VISIBLE: usize = 5;
 
 impl BannerStackSignal {
     pub fn push(self, kind: BannerKind, message: impl Into<String>, ttl_ms: Option<u32>) {
+        self.push_banner(kind, message.into(), ttl_ms, None);
+    }
+
+    /// Like [`Self::push`], with an action button next to the message.
+    pub fn push_with_action(
+        self,
+        kind: BannerKind,
+        message: impl Into<String>,
+        ttl_ms: Option<u32>,
+        action: BannerAction,
+    ) {
+        self.push_banner(kind, message.into(), ttl_ms, Some(action));
+    }
+
+    fn push_banner(
+        self,
+        kind: BannerKind,
+        message: String,
+        ttl_ms: Option<u32>,
+        action: Option<BannerAction>,
+    ) {
         let banner = Banner {
             id: uuid::Uuid::new_v4().to_string(),
             kind,
-            message: message.into(),
+            message,
             ttl_ms,
+            action,
         };
         self.0.update(|q| {
             q.push_back(banner);
@@ -99,6 +130,9 @@ pub fn BannerStack() -> impl IntoView {
 fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> impl IntoView {
     let id_for_dismiss = banner.id;
     let on_dismiss_btn = on_dismiss.clone();
+    let on_dismiss_action = on_dismiss.clone();
+    let id_for_action = id_for_dismiss.clone();
+    let action = banner.action;
 
     // Auto-dismiss if ttl is set.
     if let Some(ttl) = banner.ttl_ms {
@@ -136,6 +170,18 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
         )>
             <span class="shrink-0 text-label" aria-hidden="true">{icon}</span>
             <span class="min-w-0 flex-1 [overflow-wrap:anywhere]">{message}</span>
+            {action.map(|action| view! {
+                <button
+                    type="button"
+                    class="-my-2 min-h-11 shrink-0 rounded-seed px-2 text-label-sm underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-persimmon-500 cursor-pointer"
+                    on:click=move |_| {
+                        action.run.run(());
+                        on_dismiss_action(id_for_action.clone());
+                    }
+                >
+                    {action.label}
+                </button>
+            })}
             <button
                 type="button"
                 aria-label="Dismiss notification"

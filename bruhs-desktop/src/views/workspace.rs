@@ -1723,9 +1723,10 @@ impl Workspace {
                     &panel,
                     |this, _, event: &crate::views::reactive_automations::ReactivePreview, cx| {
                         let now = EpochMs::now().as_millis();
-                        let id = this.automation_state.create_workflow(
+                        let id = this.automation_state.create_reactive_workflow(
                             &event.title,
                             event.operations.clone(),
+                            &event.run_id,
                             now,
                         );
                         if this.automation_state.preview(&id, now).is_none() {

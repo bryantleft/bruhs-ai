@@ -45,6 +45,30 @@ pub struct WeeklyReportPreset {
     #[serde(default)]
     pub github_deployments: bool,
     pub scheduled: bool,
+    /// Run at a fixed weekday and local time instead of seven days after enabling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub schedule: Option<WeeklySchedule>,
+}
+
+/// A fixed weekly slot in a named time zone.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WeeklySchedule {
+    /// ISO weekday, 1 = Monday … 7 = Sunday.
+    pub weekday: u8,
+    /// `HH:MM`, 24-hour.
+    pub time: String,
+    pub time_zone: String,
+}
+
+impl WeeklySchedule {
+    pub fn describe(&self) -> String {
+        crate::reactive::describe_calendar(
+            std::slice::from_ref(&self.time),
+            &[self.weekday],
+            &self.time_zone,
+        )
+    }
 }
 
 impl WeeklyReportPreset {

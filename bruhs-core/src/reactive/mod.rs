@@ -13,7 +13,11 @@ use std::{
 use tokio::sync::{watch, Mutex};
 
 #[cfg(test)]
+mod always_on_tests;
+#[cfg(test)]
 mod automation_tests;
+pub mod clock;
+mod notify;
 mod report_sources;
 pub mod sources;
 mod store;
@@ -51,12 +55,15 @@ pub struct SourceEmission {
     pub payload: Value,
 }
 
+pub use notify::{system_notifier, Notifier};
+
 #[derive(Clone)]
 pub struct ReactiveRuntime {
     connection: Arc<Mutex<Connection>>,
     _lock: Arc<store::RuntimeLock>,
     started: Arc<AtomicBool>,
     changes: watch::Sender<u64>,
+    notifier: Arc<std::sync::RwLock<Notifier>>,
 }
 
 /// Field order closes the SQLite connection before releasing its ownership lock.
@@ -108,7 +115,42 @@ impl ReactiveRuntime {
             _lock: Arc::new(lock),
             started: Arc::new(AtomicBool::new(false)),
             changes,
+            notifier: Arc::new(std::sync::RwLock::new(system_notifier())),
         })
+    }
+
+    /// Replace how system notifications are shown (tests, or a host with its own).
+    pub fn set_notifier(&self, notifier: Notifier) {
+        if let Ok(mut current) = self.notifier.write() {
+            *current = notifier;
+        }
+    }
+
+    fn notifier(&self) -> Notifier {
+        self.notifier
+            .read()
+            .map_or_else(|_| system_notifier(), |notifier| notifier.clone())
+    }
+
+    /// Unread and open-question counts plus the newest unread update.
+    pub async fn outbox_signal(
+        &self,
+    ) -> Result<bruhs_models::reactive::OutboxSignal, ReactiveError> {
+        self.call(|connection| store::signal(connection)).await
+    }
+
+    /// Deliver pending system notifications now; returns how many items were sent.
+    pub async fn deliver_notifications(&self) -> Result<usize, ReactiveError> {
+        notify::deliver_pending(self).await
+    }
+
+    /// Queue runs for due follow-ups now, as the worker does every second.
+    pub async fn fire_follow_ups(&self) -> Result<usize, ReactiveError> {
+        let fired = self.call(store::fire_follow_ups).await?;
+        if fired > 0 {
+            self.changed();
+        }
+        Ok(fired)
     }
 
     pub fn default_path() -> Result<std::path::PathBuf, ReactiveError> {

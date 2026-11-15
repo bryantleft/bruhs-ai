@@ -18,7 +18,7 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use bruhs_core::AppState;
-use bruhs_models::api::live_events::{CALENDAR, MEETINGS, TASKS};
+use bruhs_models::api::live_events::{CALENDAR, MEETINGS, REACTIVE, TASKS};
 use futures_core::Stream;
 use std::{convert::Infallible, sync::Arc};
 use tokio_stream::StreamExt as _;
@@ -51,10 +51,40 @@ fn events(state: Arc<AppState>, resume: bool) -> impl Stream<Item = Result<Event
         calendar_events_stream::event_stream(state.clone()),
         CALENDAR,
     );
+    let reactive = named(reactive_signals(state.reactive().cloned()), REACTIVE);
     if resume {
         state.google_calendar().force_full_sync();
     }
-    tasks.merge(calendar).merge(meetings)
+    tasks.merge(calendar).merge(meetings).merge(reactive)
+}
+
+/// Agent update counts: one frame on open, then one per change (coalesced).
+fn reactive_signals(
+    runtime: Option<bruhs_core::reactive::ReactiveRuntime>,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    async_stream::stream! {
+        let Some(runtime) = runtime else { return; };
+        let mut changes = runtime.watch_changes();
+        let mut previous = None;
+        loop {
+            match runtime.outbox_signal().await {
+                Ok(signal) if previous.as_ref() != Some(&signal) => {
+                    if let Ok(event) = Event::default().json_data(&signal) {
+                        yield Ok(event);
+                    }
+                    previous = Some(signal);
+                }
+                Ok(_) => {}
+                Err(error) => tracing::warn!("Agent update counts are unavailable: {error}"),
+            }
+            if changes.changed().await.is_err() {
+                return;
+            }
+            // Many changes land together when a run finishes.
+            tokio::time::sleep(std::time::Duration::from_millis(250)).await;
+            changes.borrow_and_update();
+        }
+    }
 }
 
 fn named(

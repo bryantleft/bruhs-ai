@@ -3445,6 +3445,21 @@ impl Workspace {
 
     // ── Notice toast ─────────────────────────────────────────────────────
 
+    fn run_notice_action(
+        &mut self,
+        action: crate::views::meetings_hub::NoticeAction,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.meetings_hub
+            .update(cx, |hub, cx| hub.dismiss_notice(cx));
+        match action {
+            crate::views::meetings_hub::NoticeAction::OpenAutomations => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+            }
+        }
+    }
+
     /// Web `BannerStack`: a bounded notice rail below page content.
     pub(super) fn render_hub_notice(
         &self,
@@ -3501,6 +3516,33 @@ impl Workspace {
                         .text_size(px(LABEL_PX))
                         .text_color(fg)
                         .child(div().min_w_0().flex_1().child(notice.message))
+                        .children(notice.action.map(|action| {
+                            text_button(
+                                "desktop-hub-notice-action",
+                                action.label(),
+                                fg,
+                                theme::rambutan_100(),
+                            )
+                            .debug_selector(|| "desktop-hub-notice-action".into())
+                            .min_h(px(44.0))
+                            .min_w(px(44.0))
+                            .flex_shrink_0()
+                            .flex()
+                            .items_center()
+                            .justify_center()
+                            .on_click(cx.listener(move |this, _ev, window, cx| {
+                                this.run_notice_action(action, window, cx);
+                            }))
+                            .on_key_down(cx.listener(
+                                move |this, event: &KeyDownEvent, window, cx| {
+                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                                        window.prevent_default();
+                                        cx.stop_propagation();
+                                        this.run_notice_action(action, window, cx);
+                                    }
+                                },
+                            ))
+                        }))
                         .child(
                             text_button(
                                 "desktop-hub-notice-dismiss",

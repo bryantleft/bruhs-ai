@@ -5,9 +5,13 @@ use serde::{de::DeserializeOwned, Serialize};
 use serde_json::Value;
 use std::path::Path;
 
+mod always_on;
 #[cfg(all(test, unix))]
 mod ownership_tests;
 pub(super) mod reports;
+pub(in crate::reactive) use always_on::{
+    notification_settings as snapshot_settings, pending_deliveries, record_delivery, signal,
+};
 
 /// A full review page across the runtime; overflow never hides unresolved work.
 const MAX_PENDING_RUNS: usize = HISTORY_LIMIT;
@@ -93,6 +97,7 @@ pub(super) fn open(path: &Path) -> Result<(Connection, RuntimeLock), ReactiveErr
         CREATE TABLE IF NOT EXISTS reactive_app_completions(topic TEXT NOT NULL,record_id TEXT NOT NULL,completed INTEGER NOT NULL,PRIMARY KEY(topic,record_id));
         CREATE TABLE IF NOT EXISTS reactive_source_status(id TEXT PRIMARY KEY,payload TEXT NOT NULL);")?;
     reports::initialize(&mut connection)?;
+    always_on::initialize(&connection)?;
     transaction(&mut connection, |connection| {
         for mut run in runs_where(connection, "status='running'", None)? {
             run.status = RunStatus::Interrupted;
@@ -215,6 +220,10 @@ pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, 
         runs,
         proposals,
         source_statuses: records(connection, "reactive_source_status")?,
+        outbox: always_on::outbox(connection)?,
+        memories: always_on::memories(connection)?,
+        follow_ups: always_on::follow_ups(connection)?,
+        notification_settings: always_on::notification_settings(connection)?,
     })
 }
 
@@ -355,6 +364,21 @@ fn validate_change(connection: &Connection, change: &ReactiveChange) -> Result<(
                     interval(*timeout_ms)?;
                 }
                 SourceKind::Schedule { every_ms } => interval(*every_ms)?,
+                SourceKind::Calendar {
+                    times,
+                    weekdays,
+                    time_zone,
+                } => {
+                    if let Some(error) = calendar_shape_error(times, weekdays, time_zone) {
+                        return Err(ReactiveError::Invalid(error));
+                    }
+                    super::clock::next_calendar_due(
+                        times,
+                        weekdays,
+                        time_zone,
+                        EpochMs::now().as_millis(),
+                    )?;
+                }
                 SourceKind::AppEvent { topic } => text(topic, "App event topic", true)?,
                 SourceKind::Webhook | SourceKind::Custom => {}
             }
@@ -536,6 +560,7 @@ fn run_status(status: RunStatus) -> &'static str {
         RunStatus::Failed => "failed",
         RunStatus::Interrupted => "interrupted",
         RunStatus::Cancelled => "cancelled",
+        RunStatus::Merged => "merged",
     }
 }
 
@@ -650,6 +675,7 @@ fn apply(connection: &Connection, change: &ReactiveChange) -> Result<(), Reactiv
                 )?;
             }
             connection.execute("DELETE FROM reactive_agents WHERE id=?1", [id])?;
+            always_on::delete_agent(connection, id)?;
         }
         ReactiveChange::DeleteSource { id } => {
             for subscription in records::<Subscription>(connection, "reactive_subscriptions")?
@@ -749,7 +775,7 @@ pub(super) fn command(
                 text(&message, "Agent message", true)?;
                 let agent = enabled_agent(connection, &agent_id)?;
                 queue_capacity(connection)?;
-                let run = new_run(
+                let mut run = new_run(
                     connection,
                     &agent,
                     message,
@@ -758,8 +784,48 @@ pub(super) fn command(
                     RunStatus::Queued,
                     0,
                 )?;
+                run.trigger = Some(RunTrigger::Chat);
                 save_run(connection, &run)?;
             }
+            ReactiveCommand::MarkOutboxRead { ids } => always_on::mark_read(connection, &ids)?,
+            ReactiveCommand::AnswerOutbox { id, message } => {
+                always_on::answer(connection, &id, message)?;
+            }
+            ReactiveCommand::DismissOutbox { id } => always_on::dismiss(connection, &id)?,
+            ReactiveCommand::EditMemory {
+                agent_id,
+                key,
+                kind,
+                text,
+            } => always_on::edit_memory(connection, &agent_id, &key, kind, text)?,
+            ReactiveCommand::ForgetMemory { agent_id, key } => {
+                always_on::forget_memory(connection, &agent_id, &key)?;
+            }
+            ReactiveCommand::ConsolidateMemory { agent_id } => {
+                if !always_on::consolidate(connection, &agent_id, false)? {
+                    return Err(ReactiveError::Conflict(
+                        "A memory tidy-up for this agent is already waiting.".into(),
+                    ));
+                }
+            }
+            ReactiveCommand::CancelFollowUp { id } => always_on::cancel_follow_up(connection, &id)?,
+            ReactiveCommand::SetNotificationSettings { settings } => {
+                always_on::set_notification_settings(connection, &settings)?;
+            }
+            ReactiveCommand::DraftOutcome {
+                run_id,
+                workflow_id,
+                outcome,
+                applied_steps,
+                total_steps,
+            } => always_on::draft_outcome(
+                connection,
+                &run_id,
+                &workflow_id,
+                outcome,
+                applied_steps,
+                total_steps,
+            )?,
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
                 if run.status == RunStatus::Queued {
@@ -885,6 +951,13 @@ fn new_run(
         not_before,
         result: None,
         error: None,
+        trigger: None,
+        merged_runs: Vec::new(),
+        merged_into: None,
+        report: None,
+        report_warning: None,
+        fresh_session: false,
+        context_tokens: None,
     })
 }
 
@@ -1002,6 +1075,7 @@ pub(super) fn publish(
             status,
             subscription.debounce_ms,
         )?;
+        run.trigger = Some(RunTrigger::Event);
         if subscription.debounce_ms != 0 {
             if let Some(previous) = last.filter(|run| run.status.is_pending()) {
                 run.id = previous.id;
@@ -1011,6 +1085,9 @@ pub(super) fn publish(
             }
         }
         queue_capacity(connection)?;
+        if subscription.on_busy == BusyPolicy::Restart && run.status == RunStatus::Queued {
+            restart_running(connection, &mut run)?;
+        }
         save_run(connection, &run)?;
     }
     let mut status: SourceStatus = get(connection, "reactive_source_status", source_id)?
@@ -1143,20 +1220,89 @@ pub(super) fn webhook_token(
         .map_err(Into::into)
 }
 
-pub(super) fn claim_next(
-    connection: &mut Connection,
-) -> Result<Option<(ReactiveAgent, ReactiveRun)>, ReactiveError> {
+/// Combined prompts stay well inside one provider turn.
+const MAX_BATCH_PROMPT_BYTES: usize = 256 * 1024;
+
+/// One claimed run, plus the memory and history the agent sees before its request.
+pub(super) struct Claim {
+    pub agent: ReactiveAgent,
+    pub run: ReactiveRun,
+    pub context: String,
+}
+
+fn item_label(run: &ReactiveRun) -> &'static str {
+    run.trigger.as_ref().map_or("Event", RunTrigger::label)
+}
+
+/// One prompt for several queued items, oldest first, so the agent replies once.
+fn combine(runs: &[&ReactiveRun]) -> String {
+    if let [only] = runs {
+        return only.prompt.clone();
+    }
+    let mut prompt = format!(
+        "{} items arrived for you. Handle them together in this run and write one report.",
+        runs.len()
+    );
+    for (index, run) in runs.iter().enumerate() {
+        prompt.push_str(&format!(
+            "\n\n### Item {} of {} ({})\n{}",
+            index + 1,
+            runs.len(),
+            item_label(run),
+            run.prompt
+        ));
+    }
+    prompt
+}
+
+fn absorb(primary: &mut ReactiveRun, merged: &mut ReactiveRun, reason: &str) {
+    primary.merged_runs.push(merged.id.clone());
+    primary.merged_runs.append(&mut merged.merged_runs.clone());
+    merged.status = RunStatus::Merged;
+    merged.merged_into = Some(primary.id.clone());
+    merged.error = Some(reason.into());
+    merged.updated_at = EpochMs::now();
+}
+
+/// `on_busy: restart`: stop the agent's current run and redo its work with the new event.
+fn restart_running(connection: &Connection, run: &mut ReactiveRun) -> Result<(), ReactiveError> {
+    let Some(mut running) = runs_where(
+        connection,
+        "agent_id=?1 AND status='running'",
+        Some(&run.agent_id),
+    )?
+    .pop() else {
+        return Ok(());
+    };
+    if reports::ungrouped(&running) || reports::ungrouped(run) {
+        return Ok(());
+    }
+    let combined = combine(&[&running, run]);
+    if combined.len() > MAX_BATCH_PROMPT_BYTES {
+        return Ok(());
+    }
+    run.prompt = combined;
+    absorb(
+        run,
+        &mut running,
+        "Restarted so a newer event could be handled with this one. Partial output is kept.",
+    );
+    save_run(connection, &running)
+}
+
+pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, ReactiveError> {
     transaction(connection, |connection| {
-        // The local runtime has one execution lane. A second caller cannot overlap provider turns.
-        let active: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM reactive_runs WHERE status='running')",
+        // One run per agent, and a few agents at once.
+        let running: i64 = connection.query_row(
+            "SELECT COUNT(*) FROM reactive_runs WHERE status='running'",
             [],
             |row| row.get(0),
         )?;
-        if active {
+        if usize::try_from(running).unwrap_or(usize::MAX) >= MAX_LANES {
             return Ok(None);
         }
-        let payload: Option<String> = connection.query_row("SELECT payload FROM reactive_runs WHERE status='queued' AND not_before<=?1 ORDER BY created,rowid LIMIT 1", [EpochMs::now().as_millis()], |row| row.get(0)).optional()?;
+        let now = EpochMs::now().as_millis();
+        let payload: Option<String> = connection.query_row("SELECT payload FROM reactive_runs r WHERE status='queued' AND not_before<=?1 AND NOT EXISTS(SELECT 1 FROM reactive_runs o WHERE o.agent_id=r.agent_id AND o.status='running') ORDER BY created,rowid LIMIT 1", [now], |row| row.get(0)).optional()?;
         let Some(payload) = payload else {
             return Ok(None);
         };
@@ -1169,16 +1315,83 @@ pub(super) fn claim_next(
             return Ok(None);
         }
         let agent: ReactiveAgent = required(connection, "reactive_agents", &run.agent_id, "agent")?;
+        if !reports::ungrouped(&run) {
+            let limit = i64::try_from(MAX_BATCH_RUNS.saturating_sub(1)).unwrap_or(0);
+            let mut statement = connection.prepare("SELECT payload FROM reactive_runs WHERE agent_id=?1 AND status='queued' AND not_before<=?2 AND id<>?3 ORDER BY created,rowid LIMIT ?4")?;
+            let rows = statement.query_map(params![run.agent_id, now, run.id, limit], |row| {
+                row.get::<_, String>(0)
+            })?;
+            let candidates = rows
+                .map(|row| decode::<ReactiveRun>(row?))
+                .collect::<Result<Vec<_>, _>>()?;
+            drop(statement);
+            let mut batch = vec![run.clone()];
+            for mut candidate in candidates {
+                if let Err(error) = check_run_enabled(connection, &candidate) {
+                    candidate.status = RunStatus::Cancelled;
+                    candidate.error = Some(error.to_string());
+                    candidate.updated_at = EpochMs::now();
+                    save_run(connection, &candidate)?;
+                    continue;
+                }
+                batch.push(candidate);
+                if combine(&batch.iter().collect::<Vec<_>>()).len() > MAX_BATCH_PROMPT_BYTES {
+                    batch.pop();
+                    break;
+                }
+            }
+            if batch.len() > 1 {
+                run.prompt = combine(&batch.iter().collect::<Vec<_>>());
+                for mut merged in batch.into_iter().skip(1) {
+                    absorb(
+                        &mut run,
+                        &mut merged,
+                        "Handled together with an earlier queued item.",
+                    );
+                    save_run(connection, &merged)?;
+                }
+            }
+        }
         // A queued turn may have been created before the previous turn obtained its session ID.
         run.session_id = connection.query_row(
             "SELECT session_id FROM reactive_agents WHERE id=?1",
             [&agent.id],
             |row| row.get(0),
         )?;
+        if run.session_id.is_some() {
+            // A session keeps the instructions it started with; changed ones start fresh.
+            let saved: Option<String> = connection
+                .query_row(
+                    "SELECT stamp FROM reactive_session_stamps WHERE agent_id=?1",
+                    [&agent.id],
+                    |row| row.get(0),
+                )
+                .optional()?;
+            if saved.as_deref() != Some(super::worker::instructions_stamp(&agent).as_str()) {
+                connection.execute(
+                    "UPDATE reactive_agents SET session_id=NULL WHERE id=?1",
+                    [&agent.id],
+                )?;
+                run.session_id = None;
+            }
+        }
+        run.fresh_session = run.session_id.is_none();
+        let context = always_on::run_context(connection, &run)?;
         run.status = RunStatus::Running;
         run.updated_at = EpochMs::now();
         save_run(connection, &run)?;
-        Ok(Some((agent, run)))
+        Ok(Some(Claim {
+            agent,
+            run,
+            context,
+        }))
+    })
+}
+
+/// Queue runs for follow-ups that came due.
+pub(super) fn fire_follow_ups(connection: &mut Connection) -> Result<usize, ReactiveError> {
+    transaction(connection, |connection| {
+        always_on::fire_due(connection, EpochMs::now())
     })
 }
 
@@ -1201,10 +1414,18 @@ pub(super) fn record_session(
         if run.status != RunStatus::Running {
             return Ok(());
         }
-        connection.execute(
+        let saved = connection.execute(
             "UPDATE reactive_agents SET session_id=?2 WHERE id=?1 AND thread_id=?3 AND json_extract(payload,'$.model')=?4",
             params![run.agent_id, session_id, run.thread_id.as_str(), model],
         )?;
+        if saved > 0 {
+            let agent: ReactiveAgent =
+                required(connection, "reactive_agents", &run.agent_id, "agent")?;
+            connection.execute(
+                "INSERT INTO reactive_session_stamps(agent_id,stamp) VALUES(?1,?2) ON CONFLICT(agent_id) DO UPDATE SET stamp=excluded.stamp",
+                params![agent.id, super::worker::instructions_stamp(&agent)],
+            )?;
+        }
         run.session_id = Some(session_id.into());
         save_run(connection, &run)
     })
@@ -1216,6 +1437,7 @@ pub(super) fn finish_run(
     status: RunStatus,
     result: Option<String>,
     error: Option<String>,
+    context_tokens: Option<u64>,
 ) -> Result<(), ReactiveError> {
     transaction(connection, |connection| {
         let mut run = run_record(connection, id)?;
@@ -1233,8 +1455,38 @@ pub(super) fn finish_run(
             run.error = Some("The output exceeded the saved result budget. The retained answer is partial; inspect it before retrying.".into());
         }
         run.updated_at = EpochMs::now();
+        run.context_tokens = context_tokens;
+        let mut parsed = None;
         if run.status == RunStatus::Completed {
+            if let Some(answer) = run.result.take() {
+                let answer = parse_answer(&answer);
+                run.result = Some(answer.body.clone());
+                run.report = answer.report.clone();
+                parsed = Some(answer);
+            }
             reports::save_completed(connection, &mut run)?;
+        }
+        if run.status == RunStatus::Completed {
+            let (body, report, mut warnings) = parsed.map_or_else(
+                || (String::new(), None, Vec::new()),
+                |answer| (answer.body, answer.report, answer.warnings),
+            );
+            let weekly = reports::is_report_run(connection, &run.id)?;
+            warnings.extend(always_on::apply_report(
+                connection,
+                &run,
+                &body,
+                report.as_ref(),
+                weekly,
+            )?);
+            run.report_warning = (!warnings.is_empty()).then(|| warnings.join(" "));
+        }
+        // A long conversation restarts next run; memory carries what matters.
+        if context_tokens.is_some_and(|tokens| tokens >= ROLLOVER_CONTEXT_TOKENS) {
+            connection.execute(
+                "UPDATE reactive_agents SET session_id=NULL WHERE id=?1 AND session_id IS ?2",
+                params![run.agent_id, run.session_id],
+            )?;
         }
         save_run(connection, &run)
     })
@@ -1260,10 +1512,10 @@ pub(super) fn cancelled_output(
 ) -> Result<(), ReactiveError> {
     transaction(connection, |connection| {
         let mut run = run_record(connection, id)?;
-        if run.status == RunStatus::Cancelled && !output.is_empty() {
+        if matches!(run.status, RunStatus::Cancelled | RunStatus::Merged) && !output.is_empty() {
             run.result = Some(bounded_output(&output));
             if run.error.is_none() {
-                run.error = Some("This run was cancelled. The retained output is partial.".into());
+                run.error = Some("This run was stopped. The retained output is partial.".into());
             }
             run.updated_at = EpochMs::now();
             save_run(connection, &run)?;

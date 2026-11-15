@@ -32,6 +32,7 @@ fn show_notice(workspace: &Entity<Workspace>, cx: &mut VisualTestContext, messag
             hub.notice = Some(HubNotice {
                 message,
                 warning: true,
+                action: None,
             });
             cx.notify();
         });

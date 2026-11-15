@@ -129,5 +129,32 @@ pub async fn hook(
     Ok((StatusCode::ACCEPTED, Json(event)))
 }
 
+/// `GET /api/service`: whether automations outlive the app.
+pub async fn service_status() -> impl axum::response::IntoResponse {
+    let status = tokio::task::spawn_blocking(crate::service::status)
+        .await
+        .unwrap_or_default();
+    (
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(status),
+    )
+}
+
+/// `POST /api/service`: install or remove the login service.
+pub async fn service_apply(
+    axum::extract::State(config): axum::extract::State<std::sync::Arc<crate::config::Config>>,
+    Json(action): Json<bruhs_models::api::BackgroundServiceAction>,
+) -> Result<Json<bruhs_models::api::BackgroundService>, AppError> {
+    let dist = config.spa_dir.clone();
+    tokio::task::spawn_blocking(move || crate::service::apply(action, &dist))
+        .await
+        .map_err(|_| AppError::Unavailable("The service installer stopped.".into()))?
+        .map(Json)
+        .map_err(|error| match error {
+            crate::service::ServiceError::Unsupported(message) => AppError::BadRequest(message),
+            crate::service::ServiceError::Failed(message) => AppError::Conflict(message),
+        })
+}
+
 #[cfg(test)]
 mod tests;

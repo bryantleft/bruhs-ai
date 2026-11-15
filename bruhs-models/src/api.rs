@@ -35,6 +35,34 @@ pub mod live_events {
     pub const CALENDAR: &str = "calendar";
     /// `MeetingEvent`, as `/api/meetings/stream`.
     pub const MEETINGS: &str = "meetings";
+    /// `reactive::OutboxSignal` whenever agent updates change.
+    pub const REACTIVE: &str = "reactive";
+}
+
+// ── Background service ─────────────────────────────────────────────────────
+
+/// `GET /api/service`: whether bruhs-server runs as a login service, so
+/// automations keep running after the app quits.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct BackgroundService {
+    /// This platform has a supported service manager (launchd or systemd).
+    pub supported: bool,
+    pub installed: bool,
+    /// The service manager reports it loaded or active.
+    pub loaded: bool,
+    /// The binary the service starts.
+    #[serde(default)]
+    pub binary: Option<String>,
+    /// Plain-language state or the reason it is unavailable.
+    pub detail: String,
+}
+
+/// `POST /api/service`.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case", tag = "action")]
+pub enum BackgroundServiceAction {
+    Install,
+    Uninstall,
 }
 
 // ── Meetings ───────────────────────────────────────────────────────────────

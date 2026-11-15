@@ -503,6 +503,7 @@ mod tests {
             hub.notice = Some(crate::views::meetings_hub::HubNotice {
                 message: "Synthetic warning".into(),
                 warning: true,
+                action: None,
             });
             cx.notify();
         });

@@ -285,6 +285,7 @@ mod tests {
                     auto_run: false,
                     debounce_ms: 0,
                     throttle_ms: 0,
+                    on_busy: Default::default(),
                 },
             },
         ] {
@@ -440,6 +441,7 @@ mod tests {
                         auto_run: false,
                         debounce_ms: 0,
                         throttle_ms: 0,
+                        on_busy: Default::default(),
                     },
                 },
             })

@@ -103,6 +103,7 @@ pub fn App() -> impl IntoView {
     crate::whiteboard::host::WhiteboardHost::install();
     crate::thread_link::ThreadLink::install();
     crate::meeting_actions::MeetingActions::install();
+    crate::agent_updates::AgentUpdates::install();
 
     // ── URL hash routing ─────────────────────────────────────────────────────
     // On mount: read window.location.hash and set the initial AppView.
@@ -228,6 +229,8 @@ pub fn App() -> impl IntoView {
         expect_context::<crate::workflow_executor::WorkflowExecutor>(),
         personality_for_stream,
     );
+    // Agent updates, for the unread badge and new-update banners.
+    crate::agent_updates::subscribe(&mut live_events);
     live_events.connect(use_context::<crate::components::banner::BannerStackSignal>());
 
     // Wire the calendar-driven auto-record watcher. Reads settings +

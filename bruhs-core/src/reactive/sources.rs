@@ -99,7 +99,10 @@ async fn drive(runtime: ReactiveRuntime, source: EventSource, client: reqwest::C
         let (delay, error) = match outcome {
             Ok(delay) => (delay, None),
             Err(error) => (
-                if matches!(source.kind, SourceKind::Schedule { .. }) {
+                if matches!(
+                    source.kind,
+                    SourceKind::Schedule { .. } | SourceKind::Calendar { .. }
+                ) {
                     // Match the queue worker's one-second retry resolution when
                     // capacity/storage failures leave an overdue schedule pending.
                     Duration::from_secs(1)
@@ -125,6 +128,8 @@ fn polling_interval(kind: &SourceKind) -> Option<Duration> {
         | SourceKind::Http { poll_ms, .. }
         | SourceKind::Command { poll_ms, .. } => *poll_ms,
         SourceKind::Schedule { every_ms } => *every_ms,
+        // Calendar wake-ups follow their saved deadline; this is only the retry pace.
+        SourceKind::Calendar { .. } => 60_000,
         SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return None,
     };
     Some(Duration::from_millis(millis.max(1)))
@@ -151,6 +156,7 @@ async fn poll_once_next_deadline(
         SourceKind::Http { .. } => "http",
         SourceKind::Command { .. } => "command",
         SourceKind::Schedule { .. } => "schedule",
+        SourceKind::Calendar { .. } => "calendar",
         SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(None),
     };
     let cursor = runtime.cursor(&source.id, cursor_key).await?;
@@ -195,6 +201,11 @@ async fn poll_once_next_deadline(
             )?
         }
         SourceKind::Schedule { every_ms } => schedule_batch(cursor, now_ms()?, *every_ms)?,
+        SourceKind::Calendar {
+            times,
+            weekdays,
+            time_zone,
+        } => calendar_batch(cursor, now_ms()?, times, weekdays, time_zone)?,
         SourceKind::Webhook | SourceKind::AppEvent { .. } | SourceKind::Custom => return Ok(None),
     };
     for event in &batch.events {
@@ -207,11 +218,16 @@ async fn poll_once_next_deadline(
         }
     }
     let waiting_for_capacity = batch.backpressured && batch.events.is_empty();
-    let next_deadline = if matches!(source.kind, SourceKind::Schedule { .. }) {
-        let cursor: ScheduleCursor = decode_cursor(Some(batch.cursor.clone()))?;
-        Some(cursor.next_due_ms)
-    } else {
-        None
+    let next_deadline = match source.kind {
+        SourceKind::Schedule { .. } => {
+            let cursor: ScheduleCursor = decode_cursor(Some(batch.cursor.clone()))?;
+            Some(cursor.next_due_ms)
+        }
+        SourceKind::Calendar { .. } => {
+            let cursor: CalendarCursor = decode_cursor(Some(batch.cursor.clone()))?;
+            u64::try_from(cursor.next_due_ms).ok()
+        }
+        _ => None,
     };
     runtime
         .ingest(source, batch.events, cursor_key, batch.cursor)
@@ -764,6 +780,83 @@ fn schedule_batch(
         cursor: serde_json::to_value(cursor).map_err(encoding_error)?,
         backpressured: false,
     })
+}
+
+#[derive(Default, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CalendarCursor {
+    /// The definition the deadline was computed for.
+    definition: String,
+    next_due_ms: i64,
+    sequence: u64,
+}
+
+fn calendar_batch(
+    cursor: Option<Value>,
+    now: u64,
+    times: &[String],
+    weekdays: &[u8],
+    time_zone: &str,
+) -> Result<PollBatch, ReactiveError> {
+    let now = i64::try_from(now)
+        .map_err(|_| ReactiveError::Invalid("The clock is outside the supported range.".into()))?;
+    let definition = format!("{times:?}|{weekdays:?}|{time_zone}");
+    let mut cursor: CalendarCursor = decode_cursor(cursor)?;
+    if cursor.definition != definition || cursor.next_due_ms == 0 {
+        // A new or changed calendar starts at its next slot; nothing is backfilled.
+        cursor.definition = definition;
+        cursor.next_due_ms = super::clock::next_calendar_due(times, weekdays, time_zone, now)?;
+    }
+    let mut events = Vec::new();
+    if now >= cursor.next_due_ms {
+        let scheduled_at_ms = cursor.next_due_ms;
+        cursor.sequence = cursor.sequence.checked_add(1).ok_or_else(|| {
+            ReactiveError::Invalid(
+                "The schedule event sequence is exhausted. Create a new source.".into(),
+            )
+        })?;
+        let missed =
+            super::clock::missed_between(times, weekdays, time_zone, scheduled_at_ms, now)?;
+        cursor.next_due_ms = super::clock::next_calendar_due(times, weekdays, time_zone, now)?;
+        // One event after downtime, with the skipped slots counted.
+        events.push(SourceEmission {
+            key: format!("calendar:{}:{scheduled_at_ms}", cursor.sequence),
+            payload: json!({
+                "event": "schedule_due",
+                "scheduled_at_ms": scheduled_at_ms,
+                "scheduled_local": super::clock::describe(scheduled_at_ms, time_zone),
+                "observed_at_ms": now,
+                "missed_slots": missed,
+            }),
+        });
+    }
+    Ok(PollBatch {
+        events,
+        cursor: serde_json::to_value(cursor).map_err(encoding_error)?,
+        backpressured: false,
+    })
+}
+
+#[cfg(test)]
+mod calendar_tests {
+    use super::*;
+
+    #[test]
+    fn calendar_waits_for_its_slot_then_emits_once_with_missed_slots() {
+        let times = vec!["09:00".to_owned()];
+        let start = 1_763_100_000_000_u64; // 2025-11-14T06:00:00Z
+        let first = calendar_batch(None, start, &times, &[], "UTC").unwrap();
+        assert!(first.events.is_empty());
+        let cursor: CalendarCursor = decode_cursor(Some(first.cursor.clone())).unwrap();
+        assert_eq!(cursor.next_due_ms, 1_763_110_800_000); // 09:00 UTC same day
+                                                           // Three days later: one event, two further missed slots.
+        let later = start + 3 * 86_400_000;
+        let batch = calendar_batch(Some(first.cursor), later, &times, &[], "UTC").unwrap();
+        assert_eq!(batch.events.len(), 1);
+        assert_eq!(batch.events[0].payload["missed_slots"], 2);
+        let cursor: CalendarCursor = decode_cursor(Some(batch.cursor)).unwrap();
+        assert!(cursor.next_due_ms > i64::try_from(later).unwrap());
+    }
 }
 
 #[cfg(test)]

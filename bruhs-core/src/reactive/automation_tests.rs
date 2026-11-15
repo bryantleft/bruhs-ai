@@ -28,6 +28,7 @@ fn setup() -> AutomationSetup {
             auto_run: true,
             debounce_ms: 0,
             throttle_ms: 0,
+            on_busy: Default::default(),
         },
     }
 }

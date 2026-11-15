@@ -3,8 +3,14 @@ use bruhs_models::reactive::*;
 use leptos::prelude::*;
 
 use crate::ui::{Button, ButtonSize, ButtonVariant, Input, Textarea};
+mod calendar;
+mod memory;
+mod notifications;
+mod runs;
 mod setup;
+mod updates;
 mod weekly_reports;
+use runs::run_label;
 
 const SELECT: &str = "bruhs-control min-h-8 w-full rounded-grape bg-longan-950 px-3 py-1.5 text-body text-rambutan-100 inset-ring inset-ring-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400";
 const CARD: &str = "min-w-0 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50";
@@ -19,24 +25,13 @@ fn apply(change: ReactiveChange) -> ReactiveCommand {
     ReactiveCommand::Apply { change }
 }
 
-fn run_label(status: RunStatus) -> &'static str {
-    match status {
-        RunStatus::AwaitingReview => "Awaiting review",
-        RunStatus::Queued => "Queued",
-        RunStatus::Running => "Running",
-        RunStatus::Completed => "Draft ready",
-        RunStatus::Failed => "Failed",
-        RunStatus::Interrupted => "Interrupted",
-        RunStatus::Cancelled => "Cancelled",
-    }
-}
-
 fn source_label(kind: &SourceKind) -> &'static str {
     match kind {
         SourceKind::Folder { .. } => "Folder",
         SourceKind::Http { .. } => "Website",
         SourceKind::Command { .. } => "Command",
         SourceKind::Schedule { .. } => "Schedule",
+        SourceKind::Calendar { .. } => "Calendar",
         SourceKind::Webhook => "Webhook",
         SourceKind::AppEvent { .. } => "App event",
         SourceKind::Custom => "Custom event",
@@ -75,11 +70,36 @@ fn command_button(
     view! { <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| send.run(command.clone()))>{label}</Button> }
 }
 
+/// A run's draft to preview as a reviewed workflow: title, operations, run id.
+pub type DraftPreview = (String, Vec<bruhs_models::WorkflowOperation>, String);
+
+/// The options of the subscription editor's busy policy.
+const BUSY_CHOICES: [(&str, &str); 2] = [
+    ("queue", "Wait, then handle new events together"),
+    ("restart", "Restart with the new event"),
+];
+
+fn busy_policy(value: &str) -> BusyPolicy {
+    if value == "restart" {
+        BusyPolicy::Restart
+    } else {
+        BusyPolicy::Queue
+    }
+}
+
 #[component]
-pub fn ReactiveAutomations(
-    on_preview: Callback<(String, Vec<bruhs_models::WorkflowOperation>)>,
-) -> impl IntoView {
+pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView {
     let snapshot = RwSignal::new(None::<ReactiveSnapshot>);
+    provide_context(memory::MemoryEditor::new());
+    // The unread badge follows every snapshot this view loads, not only the stream.
+    if let Some(updates) = use_context::<crate::agent_updates::AgentUpdates>() {
+        Effect::new(move |_| {
+            if let Some(unread) = snapshot.with(|s| s.as_ref().map(ReactiveSnapshot::unread_count))
+            {
+                updates.unread.set(unread);
+            }
+        });
+    }
     let error = RwSignal::new(None::<String>);
     let load_error = RwSignal::new(None::<String>);
     let loading = RwSignal::new(false);
@@ -104,9 +124,11 @@ pub fn ReactiveAutomations(
             loading.set(false);
             match result {
                 Ok(next) => {
-                    snapshot.set(Some(
-                        bruhs_models::weekly_reports::editable_automation_snapshot(next),
-                    ));
+                    let next = bruhs_models::weekly_reports::editable_automation_snapshot(next);
+                    // An unchanged poll leaves the cards, and any edit in them, alone.
+                    if snapshot.with_untracked(|current| current.as_ref() != Some(&next)) {
+                        snapshot.set(Some(next));
+                    }
                     load_error.set(None);
                 }
                 Err(err) => load_error.set(Some(err.to_string())),
@@ -186,6 +208,9 @@ pub fn ReactiveAutomations(
     let settle = RwSignal::new("2".to_string());
     let timeout = RwSignal::new("30".to_string());
     let source_enabled = RwSignal::new(false);
+    let cal_times = RwSignal::new("08:00".to_string());
+    let cal_days = RwSignal::new(Vec::<u8>::new());
+    let cal_zone = RwSignal::new(calendar::local_time_zone());
     let edit_source = Callback::new(move |source: EventSource| {
         source_id.set(Some(source.id));
         source_name.set(source.name);
@@ -226,6 +251,16 @@ pub fn ReactiveAutomations(
                 source_type.set("schedule".into());
                 interval.set(seconds(every_ms));
             }
+            SourceKind::Calendar {
+                times,
+                weekdays,
+                time_zone,
+            } => {
+                source_type.set("calendar".into());
+                cal_times.set(times.join(", "));
+                cal_days.set(weekdays);
+                cal_zone.set(time_zone);
+            }
             SourceKind::Webhook => source_type.set("webhook".into()),
             SourceKind::AppEvent { topic } => {
                 source_type.set("app_event".into());
@@ -244,6 +279,7 @@ pub fn ReactiveAutomations(
     let sub_auto = RwSignal::new(false);
     let debounce = RwSignal::new("0".into());
     let throttle = RwSignal::new("0".into());
+    let sub_busy = RwSignal::new("queue".to_string());
     let edit_subscription = Callback::new(move |subscription: Subscription| {
         subscription_id.set(Some(subscription.id));
         sub_agent.set(subscription.agent_id);
@@ -253,6 +289,13 @@ pub fn ReactiveAutomations(
         sub_auto.set(subscription.auto_run);
         debounce.set(seconds(subscription.debounce_ms));
         throttle.set(seconds(subscription.throttle_ms));
+        sub_busy.set(
+            match subscription.on_busy {
+                BusyPolicy::Queue => "queue",
+                BusyPolicy::Restart => "restart",
+            }
+            .into(),
+        );
         subscription_open.set(true);
     });
     let publish_source = RwSignal::new(String::new());
@@ -273,8 +316,13 @@ pub fn ReactiveAutomations(
             {move || load_error.get().map(|message| view! { <p role="alert" class="mt-3 rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200">{message}</p> })}
             {move || error.get().map(|message| view! { <p role="alert" class="mt-3 rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200">{message}</p> })}
             <fieldset disabled=move || busy.get() || snapshot.get().is_none() class="m-0 mt-4 min-w-0 space-y-4 border-0 p-0">
+                <updates::UpdatesPanel snapshot=snapshot send=send />
                 <weekly_reports::WeeklyReportsPanel on_chat=Callback::new(move |(id,body)|{chat_agent.set(id);chat.set(body);}) />
                 <setup::AutomationSetupPanel snapshot=snapshot busy=busy error=error send=send on_chat=Callback::new(move |id|chat_agent.set(id)) />
+                <div class="grid min-w-0 gap-4 lg:grid-cols-2">
+                    <notifications::NotificationsPanel snapshot=snapshot busy=busy error=error send=send />
+                    <notifications::BackgroundServicePanel />
+                </div>
                 <Show when=move || !chat_agent.get().is_empty()>
                     <div class=CARD><h3 class="mb-2 text-label text-rambutan-100">{move || snapshot.with(|s| s.as_ref().and_then(|s| s.agents.iter().find(|a| a.id == chat_agent.get())).map_or_else(|| "Agent chat".into(), |a| format!("Chat with {}", a.name)))}</h3><Field label="Message to agent" value=chat multiline=true /><div class="mt-2 flex gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_| { send.run(ReactiveCommand::Chat { agent_id: chat_agent.get_untracked(), message: chat.get_untracked() }); })>"Send message"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| chat_agent.set(String::new()))>"Close"</Button></div><p class="mt-2 text-label-sm text-rambutan-500">"Replies appear in activity below. The agent keeps its conversation across events and restarts."</p></div>
                 </Show>
@@ -289,7 +337,7 @@ pub fn ReactiveAutomations(
                     <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| {
                         subscription_id.set(None); sub_agent.set(snapshot.with(|s| s.as_ref().and_then(|s| s.agents.first()).map(|a| a.id.clone()).unwrap_or_default()));
                         sub_source.set(snapshot.with(|s| s.as_ref().and_then(|s| s.sources.first()).map(|a| a.id.clone()).unwrap_or_default()));
-                        sub_note.set("Read each new scan and prepare a draft with the payee, amount, due date, and payment reference. Flag missing or uncertain details. Do not make payments.".into()); sub_enabled.set(false); sub_auto.set(false); subscription_open.set(true);
+                        sub_note.set("Read each new scan and prepare a draft with the payee, amount, due date, and payment reference. Flag missing or uncertain details. Do not make payments.".into()); sub_enabled.set(false); sub_auto.set(false); sub_busy.set("queue".into()); subscription_open.set(true);
                     })>"Connect source to agent"</Button>
                 </div>
                 <Show when=move || snapshot.with(|s| s.as_ref().is_some_and(|s| s.agents.is_empty()))><p class="text-body-sm text-rambutan-400">"Start with a bill assistant: create an agent, choose Watch scans, then connect the two. New agents and sources stay paused until you enable them."</p></Show>
@@ -307,13 +355,16 @@ pub fn ReactiveAutomations(
                 {move || snapshot.with(|s| s.as_ref().map(|s| s.agents.clone()).unwrap_or_default()).into_iter().map(|agent| {
                     let edit = agent.clone(); let mut toggle = agent.clone(); toggle.enabled = !toggle.enabled;
                     let chat_id = agent.id.clone();
+                    // Automation cards already show the memory of their agents.
+                    let in_automation = snapshot.with(|s| s.as_ref().is_some_and(|s| s.subscriptions.iter().any(|sub| sub.agent_id == agent.id && AutomationSetup::from_subscription(s, sub).is_some())));
                     view! { <article class=CARD>
                         <div class="flex flex-wrap items-center justify-between gap-2"><div class="min-w-0"><h3 class="break-words text-label text-rambutan-100">{agent.name.clone()}</h3><p class="break-all text-label-sm text-rambutan-400">{format!("{}: {}", if agent.enabled { "Enabled" } else { "Paused" }, agent.model)}</p></div><div class="flex flex-wrap gap-2">
                             <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| edit_agent.run(edit.clone()))>"Edit and memory"</Button>
                             <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| chat_agent.set(chat_id.clone()))>"Chat"</Button>
                             {command_button(if agent.enabled { "Pause" } else { "Enable" }, apply(ReactiveChange::SaveAgent { agent: toggle }), send)}
-                            {command_button("Delete agent", apply(ReactiveChange::DeleteAgent { id: agent.id }), send)}
+                            {command_button("Delete agent", apply(ReactiveChange::DeleteAgent { id: agent.id.clone() }), send)}
                         </div></div>
+                        {(!in_automation).then(|| view! { <memory::AgentMemoryPanel agent_id=agent.id snapshot=snapshot send=send /> })}
                     </article> }
                 }).collect_view()}
 
@@ -326,21 +377,22 @@ pub fn ReactiveAutomations(
                     </div></div>{status.and_then(|s| s.error).map(|error| view! { <p role="status" class="mt-2 break-words text-body-sm text-lychee-200">{error}</p> })}</article> }
                 }).collect_view()}
                 {move || hook.get().map(|credentials| view! { <div class=CARD><p class="text-label-sm text-rambutan-300">"Private webhook credentials"</p><p class="mt-1 break-all select-all text-body-sm text-rambutan-200">{credentials.path}</p><p class="mt-1 break-all select-all text-body-sm text-rambutan-200">{format!("Authorization: Bearer {}", credentials.token)}</p><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| hook.set(None))>"Hide token"</Button></div> })}
-                <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| { source_id.set(None); source_name.set(String::new()); source_type.set("folder".into()); source_value.set(String::new()); source_cwd.set(String::new()); source_enabled.set(false); source_open.set(true); })>"New event source"</Button>
+                <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| { source_id.set(None); source_name.set(String::new()); source_type.set("folder".into()); source_value.set(String::new()); source_cwd.set(String::new()); cal_times.set("08:00".into()); cal_days.set(Vec::new()); cal_zone.set(calendar::local_time_zone()); source_enabled.set(false); source_open.set(true); })>"New event source"</Button>
                 <Show when=move || source_open.get()>
-                    <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><Field label="Source name" value=source_name /><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source type"</span><select aria-label="Source type" class=SELECT prop:value=move || source_type.get() on:change=move |event| source_type.set(event_target_value(&event))>{[("folder","Folder"),("http","Website"),("command","Command"),("schedule","Schedule"),("webhook","Webhook"),("app_event","App event"),("custom","Custom event")].into_iter().map(|(value,label)| view! { <option value=value>{label}</option> }).collect_view()}</select></label>
+                    <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><Field label="Source name" value=source_name /><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source type"</span><select aria-label="Source type" class=SELECT prop:value=move || source_type.get() on:change=move |event| source_type.set(event_target_value(&event))>{[("folder","Folder"),("http","Website"),("command","Command"),("schedule","Schedule"),("calendar","Calendar"),("webhook","Webhook"),("app_event","App event"),("custom","Custom event")].into_iter().map(|(value,label)| view! { <option value=value>{label}</option> }).collect_view()}</select></label>
                         {move || match source_type.get().as_str() {
                             "folder" => view! { <div class="space-y-3 sm:col-span-2"><Field label="Folder to watch" value=source_value /><Field label="File pattern" value=pattern /><Check label="Include subfolders" value=recursive /><Field label="File settle time in seconds" value=settle /></div> }.into_any(),
                             "http" => view! { <div class="sm:col-span-2"><Field label="Website URL" value=source_value /></div> }.into_any(),
                             "command" => view! { <div class="space-y-3 sm:col-span-2"><Field label="Command to run" value=source_value multiline=true /><Field label="Command working folder" value=source_cwd /><Field label="Command timeout in seconds" value=timeout /><p class="text-label-sm text-rambutan-400">"This command runs on your machine when the source is enabled. Use a command you trust."</p></div> }.into_any(),
                             "app_event" => view! { <div class="sm:col-span-2"><Field label="App event topic" value=source_value /><p class="mt-1 text-label-sm text-rambutan-500">"Choose meeting.completed, meeting.transcribed, or meeting.summary."</p></div> }.into_any(),
                             "webhook" => view! { <p class="text-body-sm text-rambutan-400 sm:col-span-2">"Save the source, then reveal its private token from the source row."</p> }.into_any(),
+                            "calendar" => view! { <div class="space-y-3 sm:col-span-2"><Field label="Times (HH:MM, comma-separated)" value=cal_times /><calendar::WeekdayToggles value=cal_days /><Field label="Time zone" value=cal_zone /></div> }.into_any(),
                             "custom" => view! { <p class="text-body-sm text-rambutan-400 sm:col-span-2">"Publish events through the local API or the event form below. MQTT and Zigbee bridges can publish here. An FTP upload folder can use a folder source."</p> }.into_any(),
                             _ => view! { <p class="text-body-sm text-rambutan-400 sm:col-span-2">"Run on a repeating interval while the local server is available."</p> }.into_any(),
                         }}
                         <Show when=move || matches!(source_type.get().as_str(), "folder" | "http" | "command" | "schedule")><Field label="Interval in seconds" value=interval /></Show>
                     </div><Check label="Source enabled" value=source_enabled /><div class="mt-2 flex gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_| {
-                        let kind = source_kind(&source_type.get_untracked(), source_value.get_untracked(), source_cwd.get_untracked(), pattern.get_untracked(), recursive.get_untracked(), &interval.get_untracked(), &settle.get_untracked(), &timeout.get_untracked());
+                        let kind = if source_type.get_untracked() == "calendar" { calendar::calendar_source(&cal_times.get_untracked(), &cal_days.get_untracked(), &cal_zone.get_untracked()) } else { source_kind(&source_type.get_untracked(), source_value.get_untracked(), source_cwd.get_untracked(), pattern.get_untracked(), recursive.get_untracked(), &interval.get_untracked(), &settle.get_untracked(), &timeout.get_untracked()) };
                         match kind { Ok(kind) => { let next_id=source_id.get_untracked().unwrap_or_else(id); source_id.set(Some(next_id.clone())); send.run(apply(ReactiveChange::SaveSource { source: EventSource { id: next_id, name: source_name.get_untracked(), enabled: source_enabled.get_untracked(), kind } })); }, Err(err) => error.set(Some(err)), }
                     })>"Save source"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| source_open.set(false))>"Close"</Button></div></div>
                 </Show>
@@ -348,11 +400,11 @@ pub fn ReactiveAutomations(
                 {move || snapshot.with(|s| s.as_ref().map(|s| s.subscriptions.clone()).unwrap_or_default()).into_iter().map(|subscription| {
                     let edit = subscription.clone(); let mut toggle = subscription.clone(); toggle.enabled = !toggle.enabled;
                     let label = snapshot.with(|s| { let s=s.as_ref(); format!("{} receives {}", s.and_then(|s| s.agents.iter().find(|a| a.id==subscription.agent_id)).map_or("Agent", |a| a.name.as_str()), s.and_then(|s| s.sources.iter().find(|a| a.id==subscription.source_id)).map_or("source", |a| a.name.as_str())) });
-                    view! { <article class=CARD><h4 class="break-words text-label text-rambutan-100">{label}</h4><p class="mt-1 text-label-sm text-rambutan-400">{format!("{}: {}", if subscription.enabled { "Enabled" } else { "Paused" }, if subscription.auto_run { "Automatic read-only drafts" } else { "Review each event before running" })}</p><p class="mt-2 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{subscription.instructions.clone()}</p><div class="mt-2 flex flex-wrap gap-2"><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| edit_subscription.run(edit.clone()))>"Edit subscription"</Button>{command_button(if subscription.enabled { "Pause" } else { "Enable" }, apply(ReactiveChange::SaveSubscription { subscription: toggle }), send)}{command_button("Delete subscription", apply(ReactiveChange::DeleteSubscription { id: subscription.id }), send)}</div></article> }
+                    view! { <article class=CARD><h4 class="break-words text-label text-rambutan-100">{label}</h4><p class="mt-1 text-label-sm text-rambutan-400">{format!("{}: {}", if subscription.enabled { "Enabled" } else { "Paused" }, if subscription.auto_run { "Automatic read-only drafts" } else { "Review each event before running" })}</p>{(subscription.on_busy == BusyPolicy::Restart).then(|| view! { <p class="mt-1 text-label-sm text-rambutan-400">{format!("While the agent is busy: {}", BUSY_CHOICES[1].1)}</p> })}<p class="mt-2 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{subscription.instructions.clone()}</p><div class="mt-2 flex flex-wrap gap-2"><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| edit_subscription.run(edit.clone()))>"Edit subscription"</Button>{command_button(if subscription.enabled { "Pause" } else { "Enable" }, apply(ReactiveChange::SaveSubscription { subscription: toggle }), send)}{command_button("Delete subscription", apply(ReactiveChange::DeleteSubscription { id: subscription.id }), send)}</div></article> }
                 }).collect_view()}
                 <Show when=move || subscription_open.get()>
-                    <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Agent"</span><select aria-label="Subscription agent" class=SELECT prop:value=move || sub_agent.get() on:change=move |event| sub_agent.set(event_target_value(&event))><option value="">"Choose agent"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.agents.clone()).unwrap_or_default()).into_iter().map(|agent| view! { <option value=agent.id>{agent.name}</option> }).collect_view()}</select></label><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source"</span><select aria-label="Subscription source" class=SELECT prop:value=move || sub_source.get() on:change=move |event| sub_source.set(event_target_value(&event))><option value="">"Choose source"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.sources.clone()).unwrap_or_default()).into_iter().map(|source| view! { <option value=source.id>{source.name}</option> }).collect_view()}</select></label><div class="sm:col-span-2"><Field label="What to do when this source reports an event" value=sub_note multiline=true /></div><Field label="Debounce in seconds" value=debounce /><Field label="Minimum gap between runs in seconds" value=throttle /></div><Check label="Subscription enabled" value=sub_enabled /><Check label="Run read-only drafts automatically" value=sub_auto /><p class="text-label-sm text-rambutan-500">"Leave automatic drafts off to review each event first. This never grants write access."</p><div class="mt-2 flex gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_| {
-                        match (milliseconds(&debounce.get_untracked(), true), milliseconds(&throttle.get_untracked(), true)) { (Ok(debounce_ms),Ok(throttle_ms)) => { let next_id=subscription_id.get_untracked().unwrap_or_else(id); subscription_id.set(Some(next_id.clone())); send.run(apply(ReactiveChange::SaveSubscription { subscription: Subscription { id: next_id, source_id: sub_source.get_untracked(), agent_id: sub_agent.get_untracked(), instructions: sub_note.get_untracked(), enabled: sub_enabled.get_untracked(), auto_run: sub_auto.get_untracked(), debounce_ms, throttle_ms } })); }, _ => error.set(Some("Enter a nonnegative number of seconds for debounce and minimum gap.".into())) }
+                    <div class=CARD><div class="grid gap-3 sm:grid-cols-2"><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Agent"</span><select aria-label="Subscription agent" class=SELECT prop:value=move || sub_agent.get() on:change=move |event| sub_agent.set(event_target_value(&event))><option value="">"Choose agent"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.agents.clone()).unwrap_or_default()).into_iter().map(|agent| view! { <option value=agent.id>{agent.name}</option> }).collect_view()}</select></label><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Source"</span><select aria-label="Subscription source" class=SELECT prop:value=move || sub_source.get() on:change=move |event| sub_source.set(event_target_value(&event))><option value="">"Choose source"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.sources.clone()).unwrap_or_default()).into_iter().map(|source| view! { <option value=source.id>{source.name}</option> }).collect_view()}</select></label><div class="sm:col-span-2"><Field label="What to do when this source reports an event" value=sub_note multiline=true /></div><Field label="Debounce in seconds" value=debounce /><Field label="Minimum gap between runs in seconds" value=throttle /><label class="block space-y-1 text-label-sm text-rambutan-300 sm:col-span-2"><span>"While the agent is busy"</span><select aria-label="While the agent is busy" class=SELECT prop:value=move || sub_busy.get() on:change=move |event| sub_busy.set(event_target_value(&event))>{BUSY_CHOICES.into_iter().map(|(value,label)| view! { <option value=value>{label}</option> }).collect_view()}</select></label></div><Check label="Subscription enabled" value=sub_enabled /><Check label="Run read-only drafts automatically" value=sub_auto /><p class="text-label-sm text-rambutan-500">"Leave automatic drafts off to review each event first. This never grants write access."</p><div class="mt-2 flex gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_| {
+                        match (milliseconds(&debounce.get_untracked(), true), milliseconds(&throttle.get_untracked(), true)) { (Ok(debounce_ms),Ok(throttle_ms)) => { let next_id=subscription_id.get_untracked().unwrap_or_else(id); subscription_id.set(Some(next_id.clone())); send.run(apply(ReactiveChange::SaveSubscription { subscription: Subscription { id: next_id, source_id: sub_source.get_untracked(), agent_id: sub_agent.get_untracked(), instructions: sub_note.get_untracked(), enabled: sub_enabled.get_untracked(), auto_run: sub_auto.get_untracked(), debounce_ms, throttle_ms, on_busy: busy_policy(&sub_busy.get_untracked()) } })); }, _ => error.set(Some("Enter a nonnegative number of seconds for debounce and minimum gap.".into())) }
                     })>"Save subscription"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| subscription_open.set(false))>"Close"</Button></div></div>
                 </Show>
                 <details class=CARD><summary class="cursor-pointer text-label text-rambutan-300">"Publish a custom event"</summary><div class="mt-3 space-y-3"><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Custom event source"</span><select aria-label="Custom event source" class=SELECT prop:value=move || publish_source.get() on:change=move |event| publish_source.set(event_target_value(&event))><option value="">"Choose source"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.sources.clone()).unwrap_or_default()).into_iter().filter(|s| matches!(s.kind, SourceKind::Custom)).map(|s| view! { <option value=s.id>{s.name}</option> }).collect_view()}</select></label><Field label="Unique event key" value=publish_key /><Field label="Event payload as JSON" value=publish_payload multiline=true /><p class="text-label-sm text-rambutan-500">"Reusing a key keeps the same event from running twice."</p><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| match serde_json::from_str(&publish_payload.get_untracked()) { Ok(payload) => send.run(ReactiveCommand::Publish { source_id: publish_source.get_untracked(), key: publish_key.get_untracked(), payload }), Err(err) => error.set(Some(format!("Check the event JSON: {err}"))) })>"Publish event"</Button></div></details>
@@ -366,8 +418,10 @@ pub fn ReactiveAutomations(
                 {move || snapshot.with(|s| s.as_ref().map(|s| s.runs.clone()).unwrap_or_default()).into_iter().map(|run| {
                     let agent = snapshot.with(|s| s.as_ref().and_then(|s| s.agents.iter().find(|a| a.id==run.agent_id)).map_or_else(|| "Agent".into(), |a| a.name.clone()));
                     let draft=run.result.as_deref().filter(|_|run.status==RunStatus::Completed).and_then(workflow_draft);
-                    view! { <article class=CARD><div class="flex flex-wrap justify-between gap-2"><h4 class="text-label text-rambutan-100">{agent}</h4><span class="text-label-sm text-blueberry-200">{run_label(run.status)}</span></div><details class="mt-2"><summary class="cursor-pointer text-label-sm text-rambutan-400">"Request and event context"</summary><pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{run.prompt}</pre></details>{run.result.map(|result| view! { <div class="mt-3 whitespace-pre-wrap break-words select-text text-body-sm text-rambutan-200">{workflow_draft(&result).map_or_else(|| result.clone(), |draft| draft.summary)}</div><crate::ui::CopyButton text=result label="Copy draft" /> })}{run.error.map(|error| view! { <p class="mt-2 whitespace-pre-wrap break-words text-body-sm text-lychee-200">{error}</p> })}<div class="mt-2 flex flex-wrap gap-2">
-                        {draft.map(|draft| view! { <Button size=ButtonSize::Small on_click=Callback::new(move |_| on_preview.run((draft.summary.clone(),draft.operations.clone())))>"Preview changes"</Button><p class="text-label-sm text-rambutan-500">"Creates a separate reviewed workflow. This draft is not marked as applied."</p> })}
+                    let draft_run=run.id.clone();
+                    let notes=runs::run_notes(&run); let warning=runs::report_warning(&run); let outcome=runs::outcome_badge(&run); let trigger=runs::trigger_label(&run);
+                    view! { <article class=CARD><div class="flex flex-wrap justify-between gap-2"><div class="flex min-w-0 flex-wrap items-center gap-2"><h4 class="break-words text-label text-rambutan-100">{agent}</h4><span class="rounded-seed bg-longan-800 px-2 py-0.5 text-label-sm text-rambutan-300">{trigger}</span>{outcome.map(|label| view! { <span class="rounded-seed bg-blueberry-500/15 px-2 py-0.5 text-label-sm text-blueberry-200">{label}</span> })}</div><span class="text-label-sm text-blueberry-200">{run_label(run.status)}</span></div>{notes.into_iter().map(|note| view! { <p class="mt-1 text-label-sm text-rambutan-400">{note}</p> }).collect_view()}{warning.map(|warning| view! { <p class="mt-1 break-words text-label-sm text-durian-300">{warning}</p> })}<details class="mt-2"><summary class="cursor-pointer text-label-sm text-rambutan-400">"Request and event context"</summary><pre class="mt-2 max-h-64 overflow-auto whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{run.prompt}</pre></details>{run.result.map(|result| view! { <div class="mt-3 whitespace-pre-wrap break-words select-text text-body-sm text-rambutan-200">{workflow_draft(&result).map_or_else(|| result.clone(), |draft| draft.summary)}</div><crate::ui::CopyButton text=result label="Copy draft" /> })}{run.error.map(|error| view! { <p class="mt-2 whitespace-pre-wrap break-words text-body-sm text-lychee-200">{error}</p> })}<div class="mt-2 flex flex-wrap gap-2">
+                        {draft.map(|draft| view! { <Button size=ButtonSize::Small on_click=Callback::new(move |_| on_preview.run((draft.summary.clone(),draft.operations.clone(),draft_run.clone())))>"Preview changes"</Button><p class="text-label-sm text-rambutan-500">"Creates a separate reviewed workflow. This draft is not marked as applied."</p> })}
                         {(run.status==RunStatus::AwaitingReview).then(|| command_button("Run read-only draft", ReactiveCommand::ApproveRun { id: run.id.clone() }, send))}
                         {matches!(run.status,RunStatus::AwaitingReview|RunStatus::Queued|RunStatus::Running).then(|| command_button("Cancel run", ReactiveCommand::CancelRun { id: run.id.clone() }, send))}
                         {matches!(run.status,RunStatus::Failed|RunStatus::Interrupted|RunStatus::Cancelled).then(|| command_button("Retry with review", ReactiveCommand::RetryRun { id: run.id }, send))}

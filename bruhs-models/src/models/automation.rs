@@ -446,6 +446,39 @@ pub struct Workflow {
     /// Missing legacy approvals fail closed and require a new preview.
     #[serde(default)]
     previewed_operations: Option<Vec<WorkflowOperation>>,
+    /// The reactive run whose draft became this workflow, so its agent can
+    /// learn the owner's decision. Absent for workflows started in the app.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub origin: Option<WorkflowOrigin>,
+}
+
+/// Links a workflow to the reactive draft it came from.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorkflowOrigin {
+    pub reactive_run_id: String,
+    /// The last terminal status the local server acknowledged for this draft.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reported: Option<WorkflowStatus>,
+}
+
+/// One draft decision a client still has to report to the local server.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct DraftOutcomeReport {
+    pub workflow_id: String,
+    pub run_id: String,
+    pub status: WorkflowStatus,
+    pub applied_steps: u32,
+    pub total_steps: u32,
+}
+
+impl WorkflowStatus {
+    /// A decision the owner or the executor reached; later changes are new reports.
+    pub fn is_settled(self) -> bool {
+        matches!(
+            self,
+            Self::Declined | Self::Completed | Self::Failed | Self::RolledBack
+        )
+    }
 }
 
 impl Workflow {
@@ -485,6 +518,7 @@ impl Workflow {
             created_at_ms: now_ms,
             updated_at_ms: now_ms,
             previewed_operations: None,
+            origin: None,
         }
     }
 
@@ -587,6 +621,71 @@ pub struct AutomationState {
 }
 
 impl AutomationState {
+    /// Settled reactive drafts whose decision the server has not acknowledged.
+    pub fn draft_outcome_reports(&self) -> Vec<DraftOutcomeReport> {
+        self.workflows
+            .iter()
+            .filter_map(|workflow| {
+                let origin = workflow.origin.as_ref()?;
+                (workflow.status.is_settled() && origin.reported != Some(workflow.status)).then(
+                    || DraftOutcomeReport {
+                        workflow_id: workflow.id.clone(),
+                        run_id: origin.reactive_run_id.clone(),
+                        status: workflow.status,
+                        applied_steps: u32::try_from(
+                            workflow
+                                .steps
+                                .iter()
+                                .filter(|step| step.status == WorkflowStepStatus::Completed)
+                                .count(),
+                        )
+                        .unwrap_or(u32::MAX),
+                        total_steps: u32::try_from(workflow.steps.len()).unwrap_or(u32::MAX),
+                    },
+                )
+            })
+            .collect()
+    }
+
+    /// Record the server's acknowledgement; a newer status reports again.
+    pub fn mark_draft_outcome_reported(
+        &mut self,
+        workflow_id: &str,
+        status: WorkflowStatus,
+    ) -> bool {
+        let Some(origin) = self
+            .workflows
+            .iter_mut()
+            .find(|workflow| workflow.id == workflow_id)
+            .and_then(|workflow| workflow.origin.as_mut())
+        else {
+            return false;
+        };
+        if origin.reported == Some(status) {
+            return false;
+        }
+        origin.reported = Some(status);
+        true
+    }
+
+    /// Create a workflow from a reactive run's draft, keeping the link back to it.
+    pub fn create_reactive_workflow(
+        &mut self,
+        title: impl Into<String>,
+        operations: Vec<WorkflowOperation>,
+        reactive_run_id: impl Into<String>,
+        now_ms: i64,
+    ) -> String {
+        let mut workflow = Workflow::draft(title, operations, now_ms);
+        workflow.origin = Some(WorkflowOrigin {
+            reactive_run_id: reactive_run_id.into(),
+            reported: None,
+        });
+        let id = workflow.id.clone();
+        self.workflows.push(workflow);
+        id
+    }
+
     pub fn create_workflow(
         &mut self,
         title: impl Into<String>,

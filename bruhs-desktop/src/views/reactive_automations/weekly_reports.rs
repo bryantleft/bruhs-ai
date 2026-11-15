@@ -22,12 +22,54 @@ enum WeeklyEditor {
         preset: WeeklyReportPreset,
         path: Entity<InputState>,
         model: Entity<InputState>,
+        schedule: Box<ScheduleEditor>,
     },
     Report {
         report: Box<EngineeringReport>,
         title: Entity<InputState>,
         body: Entity<InputState>,
     },
+}
+
+/// "Seven days after enabling" or a fixed weekly slot.
+struct ScheduleEditor {
+    fixed: bool,
+    weekday: u8,
+    time: Entity<InputState>,
+    time_zone: Entity<InputState>,
+}
+
+/// The preset's schedule, or the message to show instead of saving.
+fn weekly_schedule(
+    fixed: bool,
+    weekday: u8,
+    time: &str,
+    time_zone: &str,
+) -> Result<Option<WeeklySchedule>, String> {
+    if !fixed {
+        return Ok(None);
+    }
+    if !(1..=7).contains(&weekday) {
+        return Err("Choose a weekday.".into());
+    }
+    let time = time.trim();
+    let time_zone = time_zone.trim();
+    if let Some(error) = calendar_shape_error(&[time.to_string()], &[weekday], time_zone) {
+        return Err(error);
+    }
+    Ok(Some(WeeklySchedule {
+        weekday,
+        time: time.to_string(),
+        time_zone: time_zone.to_string(),
+    }))
+}
+
+fn preset_cadence(preset: &WeeklyReportPreset) -> String {
+    match (&preset.schedule, preset.scheduled) {
+        (_, false) => "On demand".into(),
+        (Some(schedule), true) => schedule.describe(),
+        (None, true) => "Repeats every seven days".into(),
+    }
 }
 
 fn time(time: EpochMs) -> String {
@@ -159,13 +201,37 @@ impl ReactiveAutomations {
             github_pull_requests: false,
             github_deployments: false,
             scheduled: false,
+            schedule: None,
         });
         let path = edit_input(&preset.project_path, false, window, cx);
         let model = edit_input(&preset.model, false, window, cx);
+        let schedule = Box::new(ScheduleEditor {
+            fixed: preset.schedule.is_some(),
+            weekday: preset.schedule.as_ref().map_or(1, |s| s.weekday),
+            time: edit_input(
+                preset
+                    .schedule
+                    .as_ref()
+                    .map_or("09:00", |s| s.time.as_str()),
+                false,
+                window,
+                cx,
+            ),
+            time_zone: edit_input(
+                &preset
+                    .schedule
+                    .as_ref()
+                    .map_or_else(super::editor_fields::local_zone, |s| s.time_zone.clone()),
+                false,
+                window,
+                cx,
+            ),
+        });
         self.weekly.editor = Some(Box::new(WeeklyEditor::Preset {
             preset,
             path,
             model,
+            schedule,
         }));
         self.weekly.error = None;
         cx.notify();
@@ -248,11 +314,7 @@ impl ReactiveAutomations {
                     .child(muted(format!(
                         "{}  {}",
                         preset.model,
-                        if preset.scheduled {
-                            "Repeats every seven days"
-                        } else {
-                            "On demand"
-                        }
+                        preset_cadence(preset)
                     )))
                     .child(
                         div()
@@ -346,6 +408,7 @@ impl ReactiveAutomations {
                 preset,
                 path,
                 model,
+                schedule,
             } => {
                 panel = panel
                     .child(heading("Report preset"))
@@ -399,7 +462,8 @@ impl ReactiveAutomations {
                         }),
                     );
                 }
-                panel=panel.child(muted("GitHub uses the host's gh login. Repeating reports run while the local server is available. New schedules first run after seven days. Paused schedules may catch up on resume.")).child(control("weekly-save-preset","Save report preset",disabled).on_activate(cx,|this,_,cx|{if let Some(WeeklyEditor::Preset {preset,path,model})=this.weekly.editor.as_deref(){let mut preset=preset.clone();preset.project_path=value(path,cx);preset.model=value(model,cx);this.weekly_command(WeeklyReportCommand::SavePreset {preset},cx);}}));
+                panel = panel.child(self.render_weekly_schedule(schedule, cx));
+                panel=panel.child(muted("GitHub uses the host's gh login. Repeating reports run while the local server is available. New schedules first run after seven days. Paused schedules may catch up on resume.")).child(control("weekly-save-preset","Save report preset",disabled).on_activate(cx,|this,_,cx|{if let Some(WeeklyEditor::Preset {preset,path,model,schedule})=this.weekly.editor.as_deref(){let mut preset=preset.clone();preset.project_path=value(path,cx);preset.model=value(model,cx);match weekly_schedule(schedule.fixed,schedule.weekday,&value(&schedule.time,cx),&value(&schedule.time_zone,cx)){Ok(slot)=>{preset.schedule=slot;this.weekly_command(WeeklyReportCommand::SavePreset {preset},cx);}Err(error)=>{this.weekly.error=Some(error);cx.notify();}}}}));
             }
             WeeklyEditor::Report {
                 report,
@@ -522,6 +586,81 @@ impl ReactiveAutomations {
     }
 }
 
+impl ReactiveAutomations {
+    fn render_weekly_schedule(&self, schedule: &ScheduleEditor, cx: &Context<'_, Self>) -> Div {
+        let disabled = self.weekly.busy;
+        let mut panel = div()
+            .min_w_0()
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(muted("Schedule"))
+            .child(
+                div().flex().flex_wrap().gap_2().children(
+                    [
+                        (false, "Seven days after enabling"),
+                        (true, "Fixed weekday and time"),
+                    ]
+                    .map(|(fixed, label)| {
+                        let selected = schedule.fixed == fixed;
+                        control(
+                            SharedString::from(format!("weekly-schedule-{fixed}")),
+                            label,
+                            disabled,
+                        )
+                        .aria_selected(selected)
+                        .when(selected, |button| {
+                            button.bg(theme::blueberry_500().opacity(0.15))
+                        })
+                        .on_activate(cx, move |this, _, cx| {
+                            if let Some(WeeklyEditor::Preset { schedule, .. }) =
+                                this.weekly.editor.as_deref_mut()
+                            {
+                                schedule.fixed = fixed;
+                            }
+                            cx.notify();
+                        })
+                    }),
+                ),
+            );
+        if schedule.fixed {
+            panel =
+                panel
+                    .child(muted("Weekday"))
+                    .child(div().flex().flex_wrap().gap_2().children(
+                        bruhs_models::reactive::WEEKDAY_NAMES.iter().zip(1u8..).map(
+                            |(name, day)| {
+                                let selected = schedule.weekday == day;
+                                control(
+                                    SharedString::from(format!("weekly-weekday-{day}")),
+                                    name,
+                                    disabled,
+                                )
+                                .aria_selected(selected)
+                                .when(selected, |button| {
+                                    button.bg(theme::blueberry_500().opacity(0.15))
+                                })
+                                .on_activate(
+                                    cx,
+                                    move |this, _, cx| {
+                                        if let Some(WeeklyEditor::Preset { schedule, .. }) =
+                                            this.weekly.editor.as_deref_mut()
+                                        {
+                                            schedule.weekday = day;
+                                        }
+                                        cx.notify();
+                                    },
+                                )
+                            },
+                        ),
+                    ))
+                    .child(field("Time", &schedule.time, false, disabled))
+                    .child(field("Time zone", &schedule.time_zone, false, disabled));
+        }
+        panel
+    }
+}
+
 fn set_report_editor(
     state: &mut WeeklyReportsState,
     report: EngineeringReport,
@@ -535,6 +674,46 @@ fn set_report_editor(
     }));
     state.error = None;
     state.notice = None;
+}
+
+#[cfg(test)]
+mod schedule_tests {
+    use super::{preset_cadence, weekly_schedule, WeeklyReportPreset, WeeklySchedule};
+
+    #[test]
+    fn fixed_weekly_schedule_validates_and_describes_the_slot() {
+        assert_eq!(weekly_schedule(false, 1, "nope", ""), Ok(None));
+        let slot = WeeklySchedule {
+            weekday: 5,
+            time: "16:30".into(),
+            time_zone: "Europe/Paris".into(),
+        };
+        assert_eq!(
+            weekly_schedule(true, 5, " 16:30 ", "Europe/Paris"),
+            Ok(Some(slot.clone()))
+        );
+        assert!(weekly_schedule(true, 5, "4:30pm", "UTC").is_err());
+        assert!(weekly_schedule(true, 5, "16:30", " ").is_err());
+        assert_eq!(
+            weekly_schedule(true, 0, "16:30", "UTC"),
+            Err("Choose a weekday.".into())
+        );
+        let mut preset = WeeklyReportPreset {
+            id: "p".into(),
+            project_path: "/repo".into(),
+            model: "m".into(),
+            local_git: true,
+            github_pull_requests: false,
+            github_deployments: false,
+            scheduled: true,
+            schedule: None,
+        };
+        assert_eq!(preset_cadence(&preset), "Repeats every seven days");
+        preset.schedule = Some(slot);
+        assert_eq!(preset_cadence(&preset), "Fri at 16:30 (Europe/Paris)");
+        preset.scheduled = false;
+        assert_eq!(preset_cadence(&preset), "On demand");
+    }
 }
 
 #[cfg(test)]
@@ -569,6 +748,7 @@ mod tests {
                 preset,
                 path,
                 model,
+                ..
             }) = panel.weekly.editor.as_deref_mut()
             else {
                 panic!("report preset editor");
@@ -596,6 +776,7 @@ mod tests {
                 preset,
                 path,
                 model,
+                ..
             }) = panel.weekly.editor.as_deref()
             else {
                 panic!("report preset editor");

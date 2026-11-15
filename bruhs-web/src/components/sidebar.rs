@@ -311,6 +311,46 @@ pub fn Sidebar() -> impl IntoView {
         }
     };
 
+    // Agent workflows carries the unread count of agent updates.
+    let agent_updates = use_context::<crate::agent_updates::AgentUpdates>();
+    let agent_workflows_nav = move || {
+        let unread =
+            Signal::derive(move || agent_updates.map_or(0, |updates| updates.unread.get()));
+        let is_on = Signal::derive(move || active_view.get() == AppView::Automations);
+        let label =
+            Signal::derive(move || crate::agent_updates::AgentUpdates::nav_label(unread.get()));
+        view! {
+            <button
+                type="button"
+                aria-label=move || label.get()
+                title=move || label.get()
+                aria-pressed=move || is_on.get().to_string()
+                class=move || format!(
+                    "relative inline-flex size-8 items-center justify-center rounded-grape transition-colors {}",
+                    if is_on.get() {
+                        "bg-longan-800/60 text-rambutan-100"
+                    } else {
+                        "text-rambutan-500 hover:bg-longan-800/40 hover:text-rambutan-100"
+                    }
+                )
+                on:click=move |_| {
+                    set_active_view.set(AppView::Automations);
+                    dismiss_mobile_navigation();
+                }
+            >
+                <Icon name="bot" size=16 />
+                <Show when=move || { unread.get() > 0 }>
+                    <span
+                        aria-hidden="true"
+                        class="pointer-events-none absolute -right-0.5 -top-0.5 h-[16px] min-w-[16px] rounded-orb bg-blueberry-400 px-1 text-center text-label-xs leading-[16px] text-longan-950"
+                    >
+                        {move || if unread.get() > 99 { "99+".to_string() } else { unread.get().to_string() }}
+                    </span>
+                </Show>
+            </button>
+        }
+    };
+
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
     let delete_thread = move |id: String| {
         let Some(original) =
@@ -1303,6 +1343,7 @@ pub fn Sidebar() -> impl IntoView {
                 {nav_icon(AppView::Calendar, "calendar", "Calendar")}
                 {nav_icon(AppView::Meetings, "mic", "Meetings")}
                 {nav_icon(AppView::People, "users", "People")}
+                {agent_workflows_nav()}
                 <span class="flex-1"></span>
                 {nav_icon(AppView::Settings, "settings", "Settings")}
             </div>
