@@ -66,12 +66,14 @@ mod calendar_ui;
 mod capture_ui;
 #[cfg(test)]
 mod chat_events_tests;
+mod connected_inbox;
 mod credential_settings;
 mod date_picker_ui;
 mod event_dialog_ui;
 #[cfg(test)]
 mod import_tests;
 mod import_ui;
+mod mail_compose;
 pub(crate) use import_ui::portable_messages;
 mod inbox_ui;
 mod keybindings_ui;
@@ -1283,6 +1285,8 @@ pub struct Workspace {
     clip_excerpt_input: Entity<InputState>,
     clip_create_visible: bool,
     inbox_import_visible: bool,
+    inbox_mail_visible: bool,
+    connected_inbox: Entity<connected_inbox::ConnectedInbox>,
     inbox_page: usize,
     inbox_filter: bruhs_models::InboxFilter,
     inbox_search_input: Entity<InputState>,
@@ -1432,6 +1436,22 @@ impl Workspace {
             inbox_body_input,
             inbox_reply_input,
         } = Self::new_inbox_inputs(window, cx, &mut subscriptions);
+        let connected_inbox =
+            cx.new(|cx| connected_inbox::ConnectedInbox::new(meetings_client(), window, cx));
+        subscriptions.push(cx.subscribe_in(
+            &connected_inbox,
+            window,
+            |this: &mut Self, _, event, window, cx| {
+                match event {
+                    connected_inbox::InboxEvent::ShowImports => this.inbox_mail_visible = false,
+                    connected_inbox::InboxEvent::OpenConnections => {
+                        this.open_settings(&OpenSettings, window, cx);
+                        this.set_settings_section(SettingsSection::Credentials, cx);
+                    }
+                }
+                cx.notify();
+            },
+        ));
         let scheduling_ui::SchedulingInputs {
             scheduling_link_title_input,
             scheduling_link_duration_input,
@@ -1908,6 +1928,8 @@ impl Workspace {
             clip_excerpt_input,
             clip_create_visible: false,
             inbox_import_visible: false,
+            inbox_mail_visible: false,
+            connected_inbox,
             inbox_page: 0,
             inbox_filter: bruhs_models::InboxFilter::Inbox,
             inbox_search_input,
