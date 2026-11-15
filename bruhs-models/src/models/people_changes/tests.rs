@@ -106,6 +106,13 @@ fn delete_undo_refuses_when_the_contact_is_back() {
         local_only: false,
     };
     assert_eq!(undo.summary(), "Deleted Ada.");
+    let initialed = PeopleUndo::Delete {
+        person: person("ada", "Ada L."),
+        relationship: None,
+        links: PersonLinkSet::default(),
+        local_only: false,
+    };
+    assert_eq!(initialed.summary(), "Deleted Ada L.");
     assert_eq!(undo.person_ids(), ["ada"]);
     assert!(undo.check(|_| None, none_relationship).is_ok());
     assert_eq!(
@@ -160,4 +167,23 @@ fn wire_records_round_trip_and_reject_unknown_fields() {
     let json = serde_json::to_value(&undo).unwrap();
     assert_eq!(json["kind"], "rename");
     assert_eq!(serde_json::from_value::<PeopleUndo>(json).unwrap(), undo);
+}
+
+#[test]
+fn undo_summary_preserves_terminal_punctuation_and_unicode() {
+    for (name, expected) in [
+        ("Zoë", "Deleted Zoë."),
+        ("Ada L.", "Deleted Ada L."),
+        ("Zoë!", "Deleted Zoë!"),
+        ("Zoë?", "Deleted Zoë?"),
+        ("Zoë...", "Deleted Zoë..."),
+    ] {
+        let undo = PeopleUndo::Delete {
+            person: person("copy", name),
+            relationship: None,
+            links: PersonLinkSet::default(),
+            local_only: false,
+        };
+        assert_eq!(undo.summary(), expected);
+    }
 }

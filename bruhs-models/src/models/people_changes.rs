@@ -94,6 +94,16 @@ impl PeopleUndoError {
     }
 }
 
+/// End `text` with a period unless it already ends a sentence, so a name such
+/// as "Ada L." does not produce "Ada L..".
+fn sentence(text: String) -> String {
+    if text.trim_end().ends_with(['.', '!', '?']) {
+        text
+    } else {
+        text + "."
+    }
+}
+
 /// The latest People change a surface can still undo.
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
@@ -138,17 +148,17 @@ impl PeopleUndo {
     /// What happened, in one sentence.
     pub fn summary(&self) -> String {
         match self {
-            Self::Rename { before, after, .. } => format!("Renamed {before} to {after}."),
+            Self::Rename { before, after, .. } => sentence(format!("Renamed {before} to {after}")),
             Self::Tracked {
                 name, after: false, ..
-            } => format!("Stopped tracking {name}."),
-            Self::Tracked { name, .. } => format!("Started tracking {name}."),
+            } => sentence(format!("Stopped tracking {name}")),
+            Self::Tracked { name, .. } => sentence(format!("Started tracking {name}")),
             Self::Merge {
                 source_name,
                 target_name,
                 ..
-            } => format!("Merged {source_name} into {target_name}."),
-            Self::Delete { person, .. } => format!("Deleted {}.", person.display_name),
+            } => sentence(format!("Merged {source_name} into {target_name}")),
+            Self::Delete { person, .. } => sentence(format!("Deleted {}", person.display_name)),
         }
     }
 
