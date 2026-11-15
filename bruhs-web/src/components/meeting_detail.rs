@@ -96,6 +96,7 @@ pub fn MeetingDetailPage(meeting_id: String) -> impl IntoView {
                     >
                         "← Back"
                     </button>
+                    <crate::components::people_page::BackToPeople />
                     <h1 class="text-body-lg text-rambutan-100">
                         {move || current.get().map_or_else(|| "Meeting".into(), |m| m.title)}
                     </h1>

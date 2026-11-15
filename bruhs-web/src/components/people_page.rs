@@ -1,28 +1,44 @@
-//! People page: list of PersonProfiles. Click a card to expand and
-//! view observations grouped by kind.
-//!
-//! Phase 6d additions:
-//! - Click display_name → inline edit input (Enter saves, Escape cancels).
-//! - Click ⋯ → inline merge dialog (select other profile + Confirm button).
+//! People page: create, search and page through profiles. Expand a card for
+//! its aliases, linked meetings and conversations, relationship context and
+//! observations grouped by kind. Rename, tracking, merge and delete each
+//! offer undo right after, while the touched records are unchanged.
 
 use leptos::prelude::*;
 use std::cmp::Reverse;
 use std::collections::BTreeMap;
 
+use bruhs_models::{people_copy, people_page_count, people_page_of, PersonProfile};
+
 use crate::api;
 use crate::components::metadata_status::MetadataStatus;
 use crate::components::voice_enroll::VoiceEnrollModal;
-use crate::relationship_store::{profile_fields, EditorDraft, RelationshipStore};
+use crate::relationship_store::RelationshipStore;
 use crate::state::{
-    AppView, InboxConversationsSignal, MeetingsSignal, ObservationKind, PeopleSignal,
-    PersonObservation, PersonProfile, RelationshipsSignal, SelectedPersonSignal, SetActiveView,
-    SetMeetingsSignal,
+    AppView, MeetingsSignal, ObservationKind, PeopleSignal, PersonObservation,
+    SelectedPersonSignal, SetActiveView, SetMeetingsSignal, SetPeopleSignal,
 };
-use crate::ui::{Dropdown, DropdownOption, Textarea};
+mod back;
+mod confirm;
 mod directory;
 mod draft_status;
 mod merge_status;
-use directory::{Directory, PAGE_SIZE};
+mod profile;
+mod relationship;
+pub use back::BackToPeople;
+use directory::Directory;
+
+/// Which card has which inline editor or confirmation open. One of each at a
+/// time across the page.
+#[derive(Clone, Copy)]
+struct CardState {
+    renaming: RwSignal<Option<String>>,
+    rename_value: RwSignal<String>,
+    merge_open: RwSignal<Option<String>>,
+    merge_target: RwSignal<String>,
+    merge_confirming: RwSignal<bool>,
+    delete_open: RwSignal<Option<String>>,
+    enroll_open: RwSignal<Option<String>>,
+}
 
 #[component]
 pub fn PeoplePage() -> impl IntoView {
@@ -30,14 +46,14 @@ pub fn PeoplePage() -> impl IntoView {
     let relationship_store = expect_context::<RelationshipStore>();
     let workflow_executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
     let PeopleSignal(people) = expect_context::<PeopleSignal>();
+    let SetPeopleSignal(set_people) = expect_context::<SetPeopleSignal>();
     let SelectedPersonSignal(expanded) = expect_context::<SelectedPersonSignal>();
-    let set_expanded = expanded;
     let directory =
         Memo::new(move |previous| people.with(|people| Directory::new(people, previous)));
+    let query = RwSignal::new(String::new());
+    let matching = Memo::new(move |_| directory.with(|directory| directory.matching(&query.get())));
     let page = RwSignal::new(0usize);
-    let page_count = Memo::new(move |_| {
-        directory.with(|directory| directory.order.len().div_ceil(PAGE_SIZE).max(1))
-    });
+    let page_count = Memo::new(move |_| matching.with(|ids| people_page_count(ids.len())));
     Effect::new(move |_| {
         if page.get() >= page_count.get() {
             page.set(page_count.get() - 1);
@@ -54,31 +70,31 @@ pub fn PeoplePage() -> impl IntoView {
             return;
         };
         if people.with(|profiles| profiles.iter().any(|profile| profile.id == id)) {
+            // A profile opened from elsewhere is shown even when a search hides it.
+            if !matching.with_untracked(|ids| ids.contains(&id)) {
+                query.set(String::new());
+            }
             if let Some(index) = directory.with(|directory| {
                 directory
                     .order
                     .iter()
                     .position(|candidate| candidate == &id)
             }) {
-                page.set(index / PAGE_SIZE);
+                page.set(people_page_of(index));
             }
             last_focused.set_value(Some(id.clone()));
             super::record_focus::focus_record(format!("person-record-{id}"));
         }
     });
-    // Which profile is being renamed (Some(id)) or None.
-    let (renaming_id, set_renaming_id) = signal::<Option<String>>(None);
-    // Rename input value.
-    let (rename_value, set_rename_value) = signal::<String>(String::new());
-    // Which profile has the merge panel open.
-    let (merge_open_id, set_merge_open_id) = signal::<Option<String>>(None);
-    // Selected target for merge.
-    let (merge_target_id, set_merge_target_id) = signal::<String>(String::new());
-    // Which profile has the voice-enroll modal open (Some(id)) or None.
-    let (enroll_open_id, set_enroll_open_id) = signal::<Option<String>>(None);
-    // A failed profile change stays visible: a silently failed opt-out would
-    // look applied while observations keep being collected.
-    let notice = RwSignal::new(Option::<String>::None);
+    let cards = CardState {
+        renaming: RwSignal::new(None),
+        rename_value: RwSignal::new(String::new()),
+        merge_open: RwSignal::new(None),
+        merge_target: RwSignal::new(String::new()),
+        merge_confirming: RwSignal::new(false),
+        delete_open: RwSignal::new(None),
+        enroll_open: RwSignal::new(None),
+    };
     // Observation provenance needs the meeting list, which is otherwise only
     // hydrated by the Meetings page. Load it the same way (server, then the
     // local cache) so a cold People visit never claims a stored meeting is gone.
@@ -102,26 +118,26 @@ pub fn PeoplePage() -> impl IntoView {
         });
     }
     provide_context(MeetingSourcesReady(meeting_sources_ready.read_only()));
-    let commit_rename = move |pid: String, name: String, current: String| {
-        let name = name.trim().to_string();
+
+    // Create keeps the typed name until a profile is actually created.
+    let new_name = RwSignal::new(String::new());
+    let create_error = RwSignal::new(Option::<&'static str>::None);
+    let create = move || {
+        let name = new_name.get_untracked().trim().to_string();
         if name.is_empty() {
-            notice.set(Some(
-                "A name is required. The profile kept its previous name.".into(),
-            ));
+            create_error.set(Some(people_copy::CREATE_BLANK));
             return;
         }
-        if name == current {
-            return;
-        }
-        notice.set(None);
-        wasm_bindgen_futures::spawn_local(async move {
-            match api::rename_person(&pid, &name).await {
-                Ok(updated) => workflow_executor.cache_people(vec![updated]).await,
-                Err(error) => notice.set(Some(format!(
-                    "The profile was not renamed. Try again. Details: {error}"
-                ))),
-            }
-        });
+        create_error.set(None);
+        let now = crate::clock::now_ms();
+        let mut person = PersonProfile::new(name);
+        person.created_at = now;
+        person.updated_at = now;
+        let id = person.id.clone();
+        set_people.update(|people| people.push(person.clone()));
+        saves.create_person(person);
+        new_name.set(String::new());
+        expanded.set(Some(id));
     };
 
     view! {
@@ -134,8 +150,25 @@ pub fn PeoplePage() -> impl IntoView {
             </div>
             <div class="min-h-0 flex-1 space-y-3 overflow-y-auto px-4 py-4 sm:px-6">
             <merge_status::ContactMergeStatus />
-            {move || notice.get().map(|message| view! {
+            {move || workflow_executor.people_notice.get().map(|message| view! {
                 <p role="alert" aria-label="Profile change failed" class="text-body-sm text-lychee-300">{message}</p>
+            })}
+            {move || workflow_executor.people_undo.get().map(|undo| {
+                let label = undo.action_label();
+                view! {
+                    <div aria-label="Undo People change" data-people-undo="" class="flex flex-wrap items-center justify-between gap-2 rounded-grape bg-longan-900 px-3 py-2 inset-ring inset-ring-longan-800">
+                        <p role="status" class="min-w-0 flex-1 break-words text-body-sm text-rambutan-300">{undo.summary()}</p>
+                        <div class="flex shrink-0 gap-2">
+                            <button type="button"
+                                class="bruhs-control inline-flex items-center justify-center rounded-grape px-3 text-label-sm text-persimmon-300 hover:bg-longan-800 disabled:opacity-40 cursor-pointer"
+                                disabled=move || workflow_executor.people_busy()
+                                on:click=move |_| workflow_executor.undo_people()>{label}</button>
+                            <button type="button" aria-label="Dismiss undo"
+                                class="bruhs-control inline-flex items-center justify-center rounded-grape px-3 text-label-sm text-rambutan-500 hover:bg-longan-800 hover:text-rambutan-300 cursor-pointer"
+                                on:click=move |_| workflow_executor.people_undo.set(None)>"Dismiss"</button>
+                        </div>
+                    </div>
+                }
             })}
             <Show when=move || workflow_executor.loading_people()>
                 <p role="status" aria-label="Local contact loading" class="text-label-sm text-rambutan-400">"Loading cached contacts…"</p>
@@ -158,302 +191,67 @@ pub fn PeoplePage() -> impl IntoView {
                 </div>
             })}
             <draft_status::RelationshipDraftStatus />
+            <div class="grid gap-3 sm:grid-cols-2">
+                <form aria-label="Create person" class="min-w-0 space-y-1" on:submit=move |event| { event.prevent_default(); create(); }>
+                    <label for="people-create" class="block text-label-sm text-rambutan-500">{people_copy::CREATE_LABEL}</label>
+                    <div class="flex gap-2">
+                        <input id="people-create" type="text" autocomplete="off"
+                            class="bruhs-control min-w-0 flex-1 rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                            placeholder=people_copy::CREATE_PLACEHOLDER
+                            aria-invalid=move || create_error.get().is_some().to_string()
+                            aria-describedby="people-create-error"
+                            prop:value=move || new_name.get()
+                            on:input=move |event| {
+                                new_name.set(event_target_value(&event));
+                                create_error.set(None);
+                            } />
+                        <button type="submit" class="bruhs-control inline-flex shrink-0 items-center justify-center rounded-grape bg-persimmon-500 px-3 text-label-sm text-longan-950 hover:bg-persimmon-400 cursor-pointer">
+                            {people_copy::CREATE_BUTTON}
+                        </button>
+                    </div>
+                    <p id="people-create-error" role="alert" class="text-body-sm text-lychee-300 empty:hidden">{move || create_error.get().unwrap_or_default()}</p>
+                </form>
+                <div role="search" class="min-w-0 space-y-1">
+                    <label for="people-search" class="block text-label-sm text-rambutan-500">{people_copy::SEARCH_LABEL}</label>
+                    <input id="people-search" type="search" autocomplete="off"
+                        class="bruhs-control w-full rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                        placeholder=people_copy::SEARCH_PLACEHOLDER
+                        prop:value=move || query.get()
+                        on:input=move |event| {
+                            query.set(event_target_value(&event));
+                            page.set(0);
+                        } />
+                </div>
+            </div>
             <Show
                 when=move || people.with(|people| !people.is_empty())
                 fallback=move || view! {
-                    <div class="text-label text-rambutan-500">
+                    <div class="text-label text-rambutan-500" role="status">
                         {move || if workflow_executor.refreshing_people() || !workflow_executor.people_hydrated.get() {
-                            "Loading contacts… Profiles will appear as they are saved locally."
+                            people_copy::LOADING
                         } else {
-                            "No people yet. Profiles populate after your first meeting summary completes."
+                            people_copy::EMPTY
                         }}
                     </div>
                 }
             >
+                <Show when=move || matching.with(|ids| ids.is_empty())>
+                    <p role="status" class="text-label text-rambutan-500">{people_copy::SEARCH_EMPTY}</p>
+                </Show>
                 <ul role="list" class="space-y-2">
                     <For
-                        each=move || directory.with(|directory| directory.page(page.get()))
+                        each=move || matching.with(|ids| bruhs_models::people_page(ids, page.get()).to_vec())
                         key=|id| id.clone()
                         let:person_id
                     >
-                        {
-                            let row_id = StoredValue::new(person_id.clone());
-                            let summary = Memo::new(move |_| directory.with(|directory| directory.summaries.get(&row_id.get_value()).cloned().unwrap_or_default()));
-                            let id = person_id.clone();
-                            let id_for_expanded = id.clone();
-                            let id_for_button = id.clone();
-                            let id_for_toggle = id.clone();
-                            let id_for_rename_commit = id.clone();
-                            let id_for_rename_cancel = id.clone();
-                            let id_for_rename_btn = id.clone();
-                            let id_for_renaming_check = id.clone();
-                            let id_for_merge_toggle = id.clone();
-                            let id_for_merge_confirm = id.clone();
-                            let id_for_merge_open_check = id.clone();
-                            let id_for_enroll = id;
-                            let id_for_relationship = id_for_enroll.clone();
-                            let is_expanded = move || expanded.get().as_deref() == Some(id_for_expanded.as_str());
-                            let is_renaming = move || renaming_id.get().as_deref() == Some(id_for_renaming_check.as_str());
-                            let is_merge_open = move || merge_open_id.get().as_deref() == Some(id_for_merge_open_check.as_str());
-                            let observations = Memo::new(move |_| {
-                                if expanded.get().as_deref() != Some(row_id.get_value().as_str()) { return Vec::new(); }
-                                people.with(|people| people.iter().find(|person| person.id == row_id.get_value()).map(|person| person.observations.clone()).unwrap_or_default())
-                            });
-                            let display_name = Signal::derive(move || summary.with(|summary| summary.name.clone()));
-                            let display_name_for_rename = display_name;
-                            let obs_count = Signal::derive(move || summary.with(|summary| summary.observations));
-                            let tracked = Signal::derive(move || summary.with(|summary| summary.tracked));
-
-                            let card_class = move || if tracked.get() {
-                                "bg-longan-900/50 inset-ring inset-ring-longan-700 rounded-seed p-3 space-y-2"
-                            } else {
-                                "bg-longan-900/50 inset-ring inset-ring-longan-700 rounded-seed p-3 space-y-2 opacity-60"
-                            };
-
-                            view! {
-                                <li class=card_class>
-                                    // Narrow cards wrap the actions under the name instead of overflowing.
-                                    <div class="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                                        // Left side: expand toggle OR inline rename input
-                                        <button
-                                            id=format!("person-record-{person_id}")
-                                            aria-expanded={let is_expanded = is_expanded.clone(); move || is_expanded().to_string()}
-                                            class="flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 text-left cursor-pointer"
-                                            on:click=move |_| {
-                                                let id = id_for_button.clone();
-                                                // Don't toggle expand if rename is active.
-                                                if renaming_id.get_untracked().is_some() { return; }
-                                                set_expanded.update(|e| {
-                                                    *e = if e.as_deref() == Some(id.as_str()) {
-                                                        None
-                                                    } else {
-                                                        Some(id)
-                                                    };
-                                                });
-                                            }
-                                        >
-                                            <Show
-                                                when=is_renaming
-                                                fallback={
-                                                    let dn = display_name;
-                                                    move || view! {
-                                                        <span class="text-body-sm text-rambutan-200">
-                                                            {move || dn.get()}
-                                                        </span>
-                                                    }
-                                                }
-                                            >
-                                                // Inline rename input — rendered inside the button area but
-                                                // stops click propagation so the expand-toggle doesn't fire.
-                                                <input
-                                                    type="text"
-                                                    aria-label="Profile name"
-                                                    class="bg-longan-800 inset-ring inset-ring-longan-600 rounded-seed px-1 py-0.5 text-body-sm text-rambutan-100 focus:outline-none w-full"
-                                                    prop:value=rename_value
-                                                    on:input=move |e| {
-                                                        set_rename_value.set(leptos::prelude::event_target_value(&e));
-                                                    }
-                                                    on:keydown={
-                                                        let id_commit = id_for_rename_commit.clone();
-                                                        move |e: web_sys::KeyboardEvent| {
-                                                            match e.key().as_str() {
-                                                                "Enter" => {
-                                                                    let name = rename_value.get_untracked();
-                                                                    set_renaming_id.set(None);
-                                                                    commit_rename(id_commit.clone(), name, display_name.get_untracked());
-                                                                }
-                                                                "Escape" => {
-                                                                    set_renaming_id.set(None);
-                                                                }
-                                                                _ => {}
-                                                            }
-                                                        }
-                                                    }
-                                                    on:blur={
-                                                        let id_blur = id_for_rename_cancel.clone();
-                                                        move |_| {
-                                                            // Blur commits (same as Enter). Only commit if
-                                                            // still renaming this card (re-entry guard).
-                                                            if renaming_id.get_untracked().as_deref() == Some(id_blur.as_str()) {
-                                                                let name = rename_value.get_untracked();
-                                                                set_renaming_id.set(None);
-                                                                commit_rename(id_blur.clone(), name, display_name.get_untracked());
-                                                            }
-                                                        }
-                                                    }
-                                                    on:click=|e: web_sys::MouseEvent| e.stop_propagation()
-                                                    autofocus=true
-                                                />
-                                            </Show>
-                                            {move || if !tracked.get() {
-                                                view! {
-                                                    <span class="shrink-0 whitespace-nowrap text-label-sm uppercase tracking-wide text-rambutan-300 bg-longan-800 inset-ring inset-ring-longan-600 rounded-seed px-1 py-0.5">
-                                                        "Not tracked"
-                                                    </span>
-                                                }.into_any()
-                                            } else {
-                                                ().into_any()
-                                            }}
-                                        </button>
-                                        <div class="flex flex-wrap items-center justify-end gap-x-2">
-                                            <span class="whitespace-nowrap text-label-sm text-rambutan-500">
-                                                {move || obs_count.get().to_string()}" obs"
-                                            </span>
-                                            // Rename trigger button (pencil / edit name)
-                                            <button
-                                                type="button"
-                                                title="Rename profile"
-                                                aria-label=move || format!("Rename {}", display_name.get())
-                                                class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
-                                                on:click={
-                                                    let dn = display_name_for_rename;
-                                                    let pid = id_for_rename_btn;
-                                                    move |_| {
-                                                        set_rename_value.set(dn.get_untracked());
-                                                        set_renaming_id.set(Some(pid.clone()));
-                                                        // Close merge panel if open for this profile.
-                                                        if merge_open_id.get_untracked().as_deref() == Some(pid.as_str()) {
-                                                            set_merge_open_id.set(None);
-                                                        }
-                                                    }
-                                                }
-                                            >
-                                                "rename"
-                                            </button>
-                                            // Tracked toggle button
-                                            <button
-                                                type="button"
-                                                title=move || if tracked.get() { "Stop collecting observations about this person and hide saved ones from agents" } else { "Collect observations about this person again" }
-                                                aria-label=move || format!("{} {}", if tracked.get() { "Untrack" } else { "Track" }, display_name.get())
-                                                class=move || if tracked.get() {
-                                                    "bruhs-control inline-flex items-center justify-center text-label-sm text-pandan-400 hover:text-pandan-200 cursor-pointer"
-                                                } else {
-                                                    "bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-400 cursor-pointer"
-                                                }
-                                                on:click=move |_| {
-                                                    let pid = id_for_toggle.clone();
-                                                    let new_tracked = !tracked.get_untracked();
-                                                    notice.set(None);
-                                                    wasm_bindgen_futures::spawn_local(async move {
-                                                        match api::set_person_tracked(&pid, new_tracked).await {
-                                                            Ok(updated) => {
-                                                                workflow_executor.cache_people(vec![updated]).await;
-                                                            }
-                                                            Err(error) => notice.set(Some(format!(
-                                                                "Observation tracking was not changed. Try again. Details: {error}"
-                                                            ))),
-                                                        }
-                                                    });
-                                                }
-                                            >
-                                                {move || if tracked.get() { "untrack" } else { "track" }}
-                                            </button>
-                                            // ⋯ merge menu button
-                                            <button
-                                                type="button"
-                                                title="Merge this profile into another"
-                                                aria-label=move || format!("Merge {} into another profile", display_name.get())
-                                                aria-expanded={let is_merge_open = is_merge_open.clone(); move || is_merge_open().to_string()}
-                                                class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
-                                                on:click={
-                                                    let pid = id_for_merge_toggle;
-                                                    move |_| {
-                                                        set_merge_open_id.update(|cur| {
-                                                            *cur = if cur.as_deref() == Some(pid.as_str()) {
-                                                                None
-                                                            } else {
-                                                                set_merge_target_id.set(String::new());
-                                                                Some(pid.clone())
-                                                            };
-                                                        });
-                                                    }
-                                                }
-                                            >
-                                                "⋯"
-                                            </button>
-                                            // Voice enroll button
-                                            {
-                                                let enroll_btn_pid = id_for_enroll.clone();
-                                                view! {
-                                                    <button
-                                                        type="button"
-                                                        title="Record voice sample for this person"
-                                                        aria-label=move || format!("Enroll voice for {}", display_name.get())
-                                                        class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-pandan-300 cursor-pointer"
-                                                        on:click=move |_| {
-                                                            set_enroll_open_id.set(Some(enroll_btn_pid.clone()));
-                                                        }
-                                                    >
-                                                        "enroll"
-                                                    </button>
-                                                }
-                                            }
-                                        </div>
-                                    </div>
-                                    // Inline merge panel
-                                    <Show when=is_merge_open fallback=|| view! { <></> }>
-                                        <MergePanel
-                                            source_id=id_for_merge_confirm.clone()
-                                            people=people
-                                            merge_target_id=merge_target_id
-                                            set_merge_target_id=set_merge_target_id
-                                            on_confirm={
-                                                let src = id_for_merge_confirm.clone();
-                                                move || {
-                                                    let src2 = src.clone();
-                                                    let tgt = merge_target_id.get_untracked();
-                                                    if tgt.is_empty() { return; }
-                                                    set_merge_open_id.set(None);
-                                                    workflow_executor.merge_people(src2, tgt);
-                                                }
-                                            }
-                                            on_cancel=move || set_merge_open_id.set(None)
-                                        />
-                                    </Show>
-                                    // Closed cards do not allocate recording state or effects.
-                                    {
-                                        let enroll_pid = id_for_enroll.clone();
-                                        let enroll_pname = display_name;
-                                        let show_enroll = Signal::derive(move || {
-                                            enroll_open_id.get().as_deref() == Some(enroll_pid.as_str())
-                                        });
-                                        view! {
-                                            <Show when=move || show_enroll.get()>
-                                                <VoiceEnrollModal
-                                                    person_id=id_for_enroll.clone()
-                                                    person_name=enroll_pname
-                                                    show=show_enroll
-                                                    on_close=move || set_enroll_open_id.set(None)
-                                                />
-                                            </Show>
-                                        }
-                                    }
-                                    <Show when=is_expanded fallback=|| view! { <></> }>
-                                        {
-                                            let relationship_id = id_for_relationship.clone();
-                                            move || view! {
-                                                <div class="space-y-4 border-t border-longan-700/70 pt-3">
-                                                    <Show when=move || !tracked.get()>
-                                                        <p class="text-label-sm text-rambutan-400" data-people-opt-out>
-                                                            "Observation tracking is off. Summaries add no observations about this person, and agents cannot read the saved ones."
-                                                        </p>
-                                                    </Show>
-                                                    <RelationshipPanel person_id=relationship_id.clone() />
-                                                    {move || view! { <ObservationsByKind observations=observations.get() /> }}
-                                                </div>
-                                            }
-                                        }
-                                    </Show>
-                                </li>
-                            }
-                        }
+                        <PersonCard person_id=person_id directory=directory cards=cards />
                     </For>
                 </ul>
                 <Show when=move || { page_count.get() > 1 }>
                     <nav aria-label="People pages" class="flex items-center justify-between gap-2 py-2 text-label-sm">
-                        <button type="button" disabled=move || page.get() == 0 class="rounded-grape bg-longan-800 px-3 py-2 disabled:opacity-40 cursor-pointer" on:click=move |_| page.update(|page| *page = page.saturating_sub(1))>"Previous people"</button>
-                        <span role="status">{move || format!("Page {} of {}", page.get() + 1, page_count.get())}</span>
-                        <button type="button" disabled=move || { page.get() + 1 >= page_count.get() } class="rounded-grape bg-longan-800 px-3 py-2 disabled:opacity-40 cursor-pointer" on:click=move |_| page.update(|page| *page += 1)>"Next people"</button>
+                        <button type="button" disabled=move || page.get() == 0 class="bruhs-control rounded-grape bg-longan-800 px-3 py-2 disabled:opacity-40 cursor-pointer" on:click=move |_| page.update(|page| *page = page.saturating_sub(1))>{people_copy::PREVIOUS_PAGE}</button>
+                        <span role="status">{move || people_copy::page_status(page.get(), page_count.get())}</span>
+                        <button type="button" disabled=move || { page.get() + 1 >= page_count.get() } class="bruhs-control rounded-grape bg-longan-800 px-3 py-2 disabled:opacity-40 cursor-pointer" on:click=move |_| page.update(|page| *page += 1)>{people_copy::NEXT_PAGE}</button>
                     </nav>
                 </Show>
             </Show>
@@ -463,406 +261,230 @@ pub fn PeoplePage() -> impl IntoView {
 }
 
 #[component]
-fn RelationshipPanel(person_id: String) -> impl IntoView {
-    use bruhs_models::{suggested_follow_ups, RelationshipItem, RelationshipItemKind};
-
-    let RelationshipsSignal(relationships) = expect_context::<RelationshipsSignal>();
-    let store = expect_context::<RelationshipStore>();
-    let InboxConversationsSignal(conversations) = expect_context::<InboxConversationsSignal>();
-    let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
-    let id = StoredValue::new(person_id);
-    let company = RwSignal::new(String::new());
-    let role = RwSignal::new(String::new());
-    let email = RwSignal::new(String::new());
-    let phone = RwSignal::new(String::new());
-    let location = RwSignal::new(String::new());
-    let notes = RwSignal::new(String::new());
-    let item_kind = RwSignal::new(RelationshipItemKind::Interaction);
-    let item_text = RwSignal::new(String::new());
-    let due_tomorrow = RwSignal::new(false);
-    let initialized = RwSignal::new(false);
-    let fields = [company, role, email, phone, location, notes];
-    let baseline = StoredValue::new(<[String; 6]>::default());
-    let last_reset = StoredValue::new(0);
-    let draft_error = RwSignal::new(Option::<&'static str>::None);
-    let saved_fields = move || {
-        relationships.with_untracked(|profiles| {
-            profiles
-                .iter()
-                .find(|profile| profile.person_id == id.get_value())
-                .map(profile_fields)
+fn PersonCard(
+    person_id: String,
+    directory: Memo<Directory>,
+    cards: CardState,
+) -> impl IntoView {
+    let workflow_executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
+    let saves = expect_context::<crate::task_saves::TaskSaves>();
+    let PeopleSignal(people) = expect_context::<PeopleSignal>();
+    let SelectedPersonSignal(expanded) = expect_context::<SelectedPersonSignal>();
+    let id = StoredValue::new(person_id.clone());
+    let summary = Memo::new(move |_| {
+        directory.with(|directory| {
+            directory
+                .summaries
+                .get(&id.get_value())
+                .cloned()
                 .unwrap_or_default()
         })
-    };
-    let read_draft = move || EditorDraft {
-        fields: fields.map(|field| field.get_untracked()),
-        baseline: baseline.get_value(),
-        item_kind: item_kind.get_untracked(),
-        item_text: item_text.get_untracked(),
-        due_tomorrow: due_tomorrow.get_untracked(),
-    };
-    let remember = move || {
-        draft_error.set(None);
-        store.keep_editor_draft(id.get_value(), read_draft());
-    };
-
-    Effect::new(move |_| {
-        if !store.ready() {
-            return;
-        }
-        relationships.track();
-        let reset = store.draft_reset.get();
-        let next = saved_fields();
-        let mut draft = if !initialized.get_untracked() || last_reset.get_value() != reset {
-            draft_error.set(None);
-            store
-                .editor_draft(&id.get_value())
-                .unwrap_or_else(|| EditorDraft::new(next.clone()))
-        } else {
-            read_draft()
-        };
-        draft.reconcile(next);
-        baseline.set_value(draft.baseline.clone());
-        for (field, value) in fields.into_iter().zip(&draft.fields) {
-            field.set(value.clone());
-        }
-        item_kind.set(draft.item_kind);
-        item_text.set(draft.item_text.clone());
-        due_tomorrow.set(draft.due_tomorrow);
-        last_reset.set_value(reset);
-        initialized.set(true);
-        store.keep_editor_draft(id.get_value(), draft);
     });
-
-    let save_details = move || {
-        let Some([company, role, email, phone, location, notes]) =
-            read_draft().details_to_save(saved_fields())
-        else {
-            draft_error.set(Some("Saved details changed while you were editing. Your draft is kept. Copy it before discarding to review the latest details."));
-            return;
-        };
-        if store.update(&id.get_value(), |profile| {
-            profile.company = company;
-            profile.role = role;
-            profile.email = email;
-            profile.phone = phone;
-            profile.location = location;
-            profile.notes = notes;
-            profile.updated_at_ms = crate::clock::now_ms();
-        }) {
-            // Submitted details now belong to the save queue. An unsubmitted
-            // item remains a separate draft and must not be cleared by Save.
-            let mut draft = read_draft();
-            draft.reconcile(saved_fields());
-            baseline.set_value(draft.baseline.clone());
-            store.keep_editor_draft(id.get_value(), draft);
-            draft_error.set(None);
+    let display_name = Signal::derive(move || summary.with(|summary| summary.name.clone()));
+    let obs_count = Signal::derive(move || summary.with(|summary| summary.observations));
+    let tracked = Signal::derive(move || summary.with(|summary| summary.tracked));
+    let is_expanded = move || expanded.get().as_deref() == Some(id.get_value().as_str());
+    let is_renaming = move || cards.renaming.get().as_deref() == Some(id.get_value().as_str());
+    let is_merge_open = move || cards.merge_open.get().as_deref() == Some(id.get_value().as_str());
+    let is_delete_open = move || cards.delete_open.get().as_deref() == Some(id.get_value().as_str());
+    let observations = Memo::new(move |_| {
+        if !is_expanded() {
+            return Vec::new();
         }
-    };
-    let add_item = move || {
-        let now = crate::clock::now_ms();
-        let mut item =
-            RelationshipItem::new(item_kind.get_untracked(), item_text.get_untracked(), now);
-        if item.text.is_empty() {
+        people.with(|people| {
+            people
+                .iter()
+                .find(|person| person.id == id.get_value())
+                .map(|person| person.observations.clone())
+                .unwrap_or_default()
+        })
+    });
+    let commit_rename = move || {
+        if cards.renaming.get_untracked().as_deref() != Some(id.get_value().as_str()) {
             return;
         }
-        if due_tomorrow.get_untracked()
-            && matches!(
-                item.kind,
-                RelationshipItemKind::Commitment | RelationshipItemKind::Reminder
-            )
-        {
-            item.due_at_ms = Some(now + 86_400_000);
-        }
-        if store.update(&id.get_value(), |profile| {
-            profile.add_item(item, now);
-        }) {
-            item_text.set(String::new());
-            due_tomorrow.set(false);
-            remember();
+        let name = cards.rename_value.get_untracked();
+        cards.renaming.set(None);
+        workflow_executor.rename_person(id.get_value(), name);
+    };
+    let card_class = move || {
+        if tracked.get() {
+            "bg-longan-900/50 inset-ring inset-ring-longan-700 rounded-seed p-3 space-y-2"
+        } else {
+            "bg-longan-900/50 inset-ring inset-ring-longan-700 rounded-seed p-3 space-y-2 opacity-60"
         }
     };
+    let action = "bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer";
 
-    let suggestions = move || {
-        let suggestions = relationships.with(|profiles| {
-            conversations.with(|conversations| {
-                profiles
-                    .iter()
-                    .find(|profile| profile.person_id == id.get_value())
-                    .map(|profile| {
-                        suggested_follow_ups(
-                            std::slice::from_ref(profile),
-                            conversations,
-                            crate::clock::now_ms(),
-                        )
-                    })
-                    .unwrap_or_default()
-            })
-        });
-        (!suggestions.is_empty()).then(|| {
-            let rows = suggestions
-                .into_iter()
-                .map(|suggestion| {
-                    let source = suggestion.source_record_id.clone();
-                    let open = move |_| {
-                        if let Some(conversation_id) = source.clone() {
-                            set_active_view.set(AppView::ConversationDetail { conversation_id });
-                        }
-                    };
-                    view! {
+    view! {
+        <li class=card_class>
+            // Narrow cards wrap the actions under the name instead of overflowing.
+            <div class="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                <Show
+                    when=is_renaming
+                    fallback=move || view! {
                         <button
                             type="button"
-                            class="block w-full truncate text-left text-body-sm text-rambutan-200 hover:text-blueberry-200 cursor-pointer"
-                            on:click=open
+                            id=format!("person-record-{}", id.get_value())
+                            aria-expanded=move || is_expanded().to_string()
+                            class="flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 text-left cursor-pointer"
+                            on:click=move |_| {
+                                let current = id.get_value();
+                                expanded.update(|open| {
+                                    *open = if open.as_deref() == Some(current.as_str()) { None } else { Some(current) };
+                                });
+                            }
                         >
-                            {suggestion.reason}
+                            <span class="min-w-0 break-words [overflow-wrap:anywhere] text-body-sm text-rambutan-200">{move || display_name.get()}</span>
+                            <Show when=move || !tracked.get()>
+                                <span class="shrink-0 whitespace-nowrap text-label-sm uppercase tracking-wide text-rambutan-300 bg-longan-800 inset-ring inset-ring-longan-600 rounded-seed px-1 py-0.5">
+                                    "Not tracked"
+                                </span>
+                            </Show>
                         </button>
                     }
-                })
-                .collect_view();
-            view! {
-                <div class="rounded-grape bg-blueberry-500/8 p-2.5 inset-ring inset-ring-blueberry-500/20">
-                    <p class="text-label-sm uppercase tracking-wide text-blueberry-300">"Suggested follow ups"</p>
-                    <div class="mt-1 space-y-1">{rows}</div>
-                </div>
-            }
-        })
-    };
-    let kind_button = move |kind: RelationshipItemKind| {
-        view! {
-            <button
-                type="button"
-                aria-pressed=move || (item_kind.get() == kind).to_string()
-                class=move || if item_kind.get() == kind {
-                    "rounded-seed bg-blueberry-500/15 px-2 py-1 text-label-sm text-blueberry-300 cursor-pointer"
-                } else {
-                    "rounded-seed px-2 py-1 text-label-sm text-rambutan-500 hover:bg-longan-800 cursor-pointer"
-                }
-                on:click=move |_| {
-                    item_kind.set(kind);
-                    remember();
-                }
-            >
-                {kind.label()}
-            </button>
-        }
-    };
-    let items = move || {
-        relationships
-            .with(|profiles| {
-                profiles
-                    .iter()
-                    .find(|profile| profile.person_id == id.get_value())
-                    .cloned()
-            })
-            .map(|profile| {
-                let rows = profile
-                    .items
-                    .into_iter()
-                    .map(|item| {
-                        let item_id = item.id.clone();
-                        let complete = item.completed_at_ms.is_some();
-                        let toggle = move |_| {
-                            store.update(&id.get_value(), |profile| {
-                                profile.toggle_item(&item_id, crate::clock::now_ms());
-                            });
-                        };
-                        view! {
-                            <li>
-                                <button
-                                    type="button"
-                                    class="flex w-full items-start gap-2 rounded-seed px-2 py-1.5 text-left hover:bg-longan-800/70 cursor-pointer"
-                                    on:click=toggle
-                                >
-                                    <span class=move || if complete { "mt-0.5 text-pandan-300" } else { "mt-0.5 text-rambutan-400" }>
-                                        {if complete { "✓" } else { "○" }}
-                                    </span>
-                                    <span class="min-w-0 flex-1">
-                                        <span class=move || if complete {
-                                            "block text-body-sm text-rambutan-400 line-through"
-                                        } else {
-                                            "block text-body-sm text-rambutan-300"
-                                        }>{item.text}</span>
-                                        <span class="block text-label-sm text-rambutan-400">
-                                            {item.kind.label()}
-                                            {if item.due_at_ms.is_some() { ", due" } else { "" }}
-                                        </span>
-                                    </span>
-                                </button>
-                            </li>
-                        }
-                    })
-                    .collect_view();
-                view! { <ol class="space-y-1">{rows}</ol> }
-            })
-    };
-
-    view! {
-        <section aria-label="Relationship details" class="space-y-3">
-            {move || draft_error.get().map(|message| view! {
-                <p role="alert" class="text-body-sm text-lychee-300">{message}</p>
-            })}
-            <fieldset disabled=move || !initialized.get() || !store.editable(&id.get_value()) class="min-w-0 space-y-3 disabled:opacity-60">
-            <div class="flex items-baseline justify-between">
-                <div>
-                    <h3 class="text-label text-rambutan-200">"Relationship"</h3>
-                    <p class="text-label-sm text-rambutan-500">"Private context, commitments, and timely follow ups."</p>
-                </div>
-                <button
-                    type="button"
-                    class="rounded-seed px-2 py-1 text-label-sm text-persimmon-300 hover:bg-longan-800 cursor-pointer"
-                    on:click=move |_| save_details()
                 >
-                    "Save details"
-                </button>
-            </div>
-            <div class="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                <RelationshipField label="Company" value=company on_edit=Callback::new(move |_| remember()) />
-                <RelationshipField label="Role" value=role on_edit=Callback::new(move |_| remember()) />
-                <RelationshipField label="Email" value=email on_edit=Callback::new(move |_| remember()) />
-                <RelationshipField label="Phone" value=phone on_edit=Callback::new(move |_| remember()) />
-                <RelationshipField label="Location" value=location on_edit=Callback::new(move |_| remember()) />
-                <label class="block space-y-1 sm:col-span-2 lg:col-span-3">
-                    <span class="text-label-sm text-rambutan-500">"Notes"</span>
-                    <Textarea rows=4 value=Signal::derive(move || notes.get())
-                        on_input=Callback::new(move |value| { notes.set(value); remember(); }) class="text-body-sm" />
-                </label>
-            </div>
-
-            {suggestions}
-
-            <div class="rounded-grape bg-longan-900/60 p-2.5 inset-ring inset-ring-longan-800">
-                <div class="flex flex-wrap gap-1">
-                    {[
-                        RelationshipItemKind::Interaction,
-                        RelationshipItemKind::Commitment,
-                        RelationshipItemKind::Reminder,
-                        RelationshipItemKind::Note,
-                    ]
-                    .into_iter()
-                    .map(kind_button)
-                    .collect_view()}
-                </div>
-                <div class="mt-2 flex flex-col gap-2 sm:flex-row">
-                    <input
-                        type="text"
-                        class="min-w-0 flex-1 rounded-grape bg-white/5 px-3 py-2 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
-                        placeholder="Add interaction, commitment, reminder, or note…"
-                        prop:value=move || item_text.get()
-                        on:input=move |event| {
-                            item_text.set(event_target_value(&event));
-                            remember();
-                        }
-                        on:keydown=move |event: web_sys::KeyboardEvent| {
-                            if event.key() == "Enter" {
-                                event.prevent_default();
-                                add_item();
-                            }
-                        }
-                    />
-                    <label class="flex items-center gap-1.5 text-label-sm text-rambutan-500">
+                    // The rename field sits beside the actions, never inside the expand button.
+                    <div class="flex min-w-0 flex-1 basis-40 items-center">
                         <input
-                            type="checkbox"
-                            prop:checked=move || due_tomorrow.get()
-                            on:change=move |event| {
-                                due_tomorrow.set(event_target_checked(&event));
-                                remember();
+                            type="text"
+                            aria-label="Profile name"
+                            class="bruhs-control w-full rounded-seed bg-longan-800 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-longan-600 focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                            prop:value=move || cards.rename_value.get()
+                            on:input=move |event| cards.rename_value.set(event_target_value(&event))
+                            on:keydown=move |event: web_sys::KeyboardEvent| match event.key().as_str() {
+                                "Enter" => {
+                                    event.prevent_default();
+                                    commit_rename();
+                                }
+                                "Escape" => cards.renaming.set(None),
+                                _ => {}
                             }
+                            on:blur=move |_| commit_rename()
+                            autofocus=true
                         />
-                        "Due tomorrow"
-                    </label>
+                    </div>
+                </Show>
+                <div class="flex flex-wrap items-center justify-end gap-x-2">
+                    <span class="whitespace-nowrap text-label-sm text-rambutan-500">
+                        {move || obs_count.get().to_string()}" obs"
+                    </span>
                     <button
                         type="button"
-                        class="rounded-grape bg-blueberry-500/15 px-3 py-2 text-label-sm text-blueberry-300 hover:bg-blueberry-500/25 cursor-pointer"
-                        on:click=move |_| add_item()
+                        title="Rename profile"
+                        aria-label=move || format!("Rename {}", display_name.get())
+                        class=action
+                        on:click=move |_| {
+                            cards.rename_value.set(display_name.get_untracked());
+                            cards.renaming.set(Some(id.get_value()));
+                            if is_merge_open() { cards.merge_open.set(None); }
+                        }
+                    >"rename"</button>
+                    <button
+                        type="button"
+                        title=move || if tracked.get() { "Stop collecting observations about this person and hide saved ones from agents" } else { "Collect observations about this person again" }
+                        aria-label=move || format!("{} {}", if tracked.get() { "Untrack" } else { "Track" }, display_name.get())
+                        class=move || if tracked.get() {
+                            "bruhs-control inline-flex items-center justify-center text-label-sm text-pandan-400 hover:text-pandan-200 cursor-pointer"
+                        } else {
+                            "bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-400 cursor-pointer"
+                        }
+                        on:click=move |_| workflow_executor.set_person_tracked(id.get_value(), !tracked.get_untracked())
                     >
-                        "Add"
+                        {move || if tracked.get() { "untrack" } else { "track" }}
                     </button>
+                    <button
+                        type="button"
+                        title="Merge this profile into another"
+                        aria-label=move || format!("Merge {} into another profile", display_name.get())
+                        aria-expanded=move || is_merge_open().to_string()
+                        class=action
+                        on:click=move |_| {
+                            let current = id.get_value();
+                            cards.merge_confirming.set(false);
+                            cards.merge_open.update(|open| {
+                                *open = if open.as_deref() == Some(current.as_str()) {
+                                    None
+                                } else {
+                                    cards.merge_target.set(String::new());
+                                    Some(current)
+                                };
+                            });
+                        }
+                    >"⋯"</button>
+                    <button
+                        type="button"
+                        title="Record voice sample for this person"
+                        aria-label=move || format!("Enroll voice for {}", display_name.get())
+                        class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-pandan-300 cursor-pointer"
+                        on:click=move |_| cards.enroll_open.set(Some(id.get_value()))
+                    >"enroll"</button>
+                    <button
+                        type="button"
+                        title="Delete this profile"
+                        aria-label=move || format!("Delete {}", display_name.get())
+                        aria-expanded=move || is_delete_open().to_string()
+                        class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-lychee-300 cursor-pointer"
+                        on:click=move |_| {
+                            let current = id.get_value();
+                            cards.delete_open.update(|open| {
+                                *open = if open.as_deref() == Some(current.as_str()) { None } else { Some(current) };
+                            });
+                        }
+                    >"delete"</button>
                 </div>
             </div>
-
-            {items}
-            </fieldset>
-        </section>
-    }
-}
-
-#[component]
-fn RelationshipField(
-    label: &'static str,
-    value: RwSignal<String>,
-    on_edit: Callback<()>,
-) -> impl IntoView {
-    view! {
-        <label class="space-y-1">
-            <span class="text-label-sm text-rambutan-500">{label}</span>
-            <input
-                type="text"
-                class="block w-full rounded-seed bg-white/5 px-2.5 py-1.5 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
-                prop:value=move || value.get()
-                on:input=move |event| {
-                    value.set(event_target_value(&event));
-                    on_edit.run(());
-                }
-            />
-        </label>
-    }
-}
-
-/// Inline merge selection panel rendered within the profile card.
-#[component]
-fn MergePanel(
-    source_id: String,
-    people: ReadSignal<Vec<PersonProfile>>,
-    merge_target_id: ReadSignal<String>,
-    set_merge_target_id: WriteSignal<String>,
-    on_confirm: impl Fn() + 'static,
-    on_cancel: impl Fn() + 'static,
-) -> impl IntoView {
-    // All profiles except the source.
-    let options = move || {
-        people.with(|ps| {
-            ps.iter()
-                .filter(|p| p.id != source_id)
-                .cloned()
-                .collect::<Vec<_>>()
-        })
-    };
-
-    view! {
-        <div class="mt-1 p-2 bg-longan-800/80 inset-ring inset-ring-longan-700 rounded-seed space-y-2">
-            <div class="text-label-sm text-rambutan-400">"Merge into:"</div>
-            <Dropdown
-                options=Signal::derive(move || {
-                    options()
-                        .into_iter()
-                        .map(|p| DropdownOption::new(p.id, p.display_name))
-                        .collect::<Vec<_>>()
-                })
-                value=Signal::derive(move || merge_target_id.get())
-                on_change=Callback::new(move |v: String| set_merge_target_id.set(v))
-                placeholder="Pick a profile"
-                label="Merge into"
-                class="w-full"
-            />
-            <div class="flex gap-2 justify-end">
-                <button
-                    type="button"
-                    class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer"
-                    on:click=move |_| on_cancel()
-                >
-                    "Cancel"
-                </button>
-                <button
-                    type="button"
-                    class="bruhs-control inline-flex items-center justify-center text-label-sm text-persimmon-400 hover:text-persimmon-200 cursor-pointer disabled:opacity-40"
-                    prop:disabled=move || merge_target_id.get().is_empty()
-                    on:click=move |_| on_confirm()
-                >
-                    "Merge"
-                </button>
-            </div>
-        </div>
+            <Show when=is_merge_open>
+                <confirm::MergePanel
+                    source_id=id.get_value()
+                    source_name=display_name
+                    target=cards.merge_target
+                    confirming=cards.merge_confirming
+                    on_confirm=Callback::new(move |target: String| {
+                        cards.merge_open.set(None);
+                        cards.merge_confirming.set(false);
+                        workflow_executor.merge_people(id.get_value(), target);
+                    })
+                    on_cancel=Callback::new(move |_| {
+                        cards.merge_open.set(None);
+                        cards.merge_confirming.set(false);
+                    })
+                />
+            </Show>
+            <Show when=is_delete_open>
+                <confirm::DeletePanel
+                    name=display_name
+                    busy=Signal::derive(move || workflow_executor.people_busy())
+                    on_confirm=Callback::new(move |_| {
+                        cards.delete_open.set(None);
+                        workflow_executor.delete_person(id.get_value(), saves.saving_links());
+                    })
+                    on_cancel=Callback::new(move |_| cards.delete_open.set(None))
+                />
+            </Show>
+            // Closed cards do not allocate recording state or effects.
+            <Show when=move || cards.enroll_open.get().as_deref() == Some(id.get_value().as_str())>
+                <VoiceEnrollModal
+                    person_id=id.get_value()
+                    person_name=display_name
+                    show=Signal::derive(move || cards.enroll_open.get().as_deref() == Some(id.get_value().as_str()))
+                    on_close=move || cards.enroll_open.set(None)
+                />
+            </Show>
+            <Show when=is_expanded>
+                <div class="space-y-4 border-t border-longan-700/70 pt-3">
+                    <Show when=move || !tracked.get()>
+                        <p class="text-label-sm text-rambutan-400" data-people-opt-out>
+                            "Observation tracking is off. Summaries add no observations about this person, and agents cannot read the saved ones."
+                        </p>
+                    </Show>
+                    <profile::AliasesPanel person_id=id.get_value() />
+                    <profile::LinkedRecords person_id=id.get_value() />
+                    <relationship::RelationshipPanel person_id=id.get_value() />
+                    {move || view! { <ObservationsByKind observations=observations.get() /> }}
+                </div>
+            </Show>
+        </li>
     }
 }
 
