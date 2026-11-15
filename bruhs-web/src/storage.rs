@@ -20,6 +20,7 @@ use serde_wasm_bindgen::Serializer;
 use wasm_bindgen::JsValue;
 
 pub mod day_plans;
+pub(crate) mod mail_compose;
 pub mod meeting_generations;
 pub mod meeting_notes;
 mod messages;

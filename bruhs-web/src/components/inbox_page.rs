@@ -16,9 +16,15 @@ use crate::ui::{Dialog, Dropdown, DropdownOption, Input, Textarea};
 #[component]
 pub fn InboxPage(#[prop(optional)] conversation_id: Option<String>) -> impl IntoView {
     let executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
+    let mail = expect_context::<crate::state::MailState>();
     let content = match conversation_id {
         Some(id) => view! { <ConversationDetail conversation_id=id /> }.into_any(),
-        None => view! { <InboxLibrary /> }.into_any(),
+        None => view! {
+            <div class="h-full min-h-0">
+                <div class="h-full min-h-0" class:hidden=move || mail.visible.get()><InboxLibrary /></div>
+                <Show when=move || mail.visible.get()><super::connected_inbox::ConnectedInbox /></Show>
+            </div>
+        }.into_any(),
     };
     view! {
         <div class="flex h-full min-h-0 flex-col">
@@ -37,6 +43,7 @@ pub fn InboxPage(#[prop(optional)] conversation_id: Option<String>) -> impl Into
 
 #[component]
 fn InboxLibrary() -> impl IntoView {
+    let mail = expect_context::<crate::state::MailState>();
     let executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
     let InboxConversationsSignal(conversations) = expect_context::<InboxConversationsSignal>();
     let SetInboxConversationsSignal(set_conversations) =
@@ -58,6 +65,7 @@ fn InboxLibrary() -> impl IntoView {
 
     Effect::new(move |_| {
         if create_request.take() {
+            mail.visible.set(false);
             import_open.set(true);
         }
     });
@@ -111,6 +119,9 @@ fn InboxLibrary() -> impl IntoView {
     view! {
         <div class="flex h-full flex-col bg-longan-950 text-rambutan-300">
             <crate::ui::PageHeader title="Inbox" subtitle="Imported conversations and local reply drafts.">
+                <crate::ui::Button variant=crate::ui::ButtonVariant::Outline size=crate::ui::ButtonSize::Small on_click=Callback::new(move |_| mail.open())>
+                    "Email"
+                </crate::ui::Button>
                 <crate::ui::Button size=crate::ui::ButtonSize::Small on_click=Callback::new(move |_| import_open.set(true))>
                     "Import conversation"
                 </crate::ui::Button>
@@ -146,7 +157,7 @@ fn InboxLibrary() -> impl IntoView {
                     <span>{move || format!("{} need reply", counts.get().needs_reply)}</span>
                     <span>{move || format!("{} snoozed", counts.get().snoozed)}</span>
                 </div>
-                <p class="text-label-sm text-rambutan-400">"Imported messages and replies stay on this device. Email sync and delivery are not available yet."</p>
+                <p class="text-label-sm text-rambutan-400">"Imported messages and replies stay on this device. Choose Email to read and sync connected Gmail."</p>
             </div>
             </div>
         </div>
@@ -189,7 +200,7 @@ fn InboxRow(card: InboxCard) -> impl IntoView {
     }
 }
 
-fn inbox_date(timestamp_ms: i64) -> (String, String) {
+pub(super) fn inbox_date(timestamp_ms: i64) -> (String, String) {
     let Ok(timestamp) = bruhs_models::EpochMs::new(timestamp_ms) else {
         return ("Unknown date".into(), "Unknown date".into());
     };

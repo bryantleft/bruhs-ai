@@ -8,6 +8,7 @@ use crate::task_saves::TaskSaves;
 
 pub(crate) fn install() {
     let saves = expect_context::<TaskSaves>();
+    let mail = expect_context::<crate::state::MailComposeState>();
     let relationships = expect_context::<RelationshipStore>();
     let turns = expect_context::<crate::state::Turns>();
     let LifeContextSignal(life) = expect_context();
@@ -22,6 +23,7 @@ pub(crate) fn install() {
         let relationships_pending = relationships.pending();
         let composer_pending = composer.with(|draft| !draft.trim().is_empty());
         pending
+            || mail.pending()
             || streaming
             || life_pending
             || automation_pending
