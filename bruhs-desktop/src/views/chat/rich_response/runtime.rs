@@ -17,7 +17,13 @@ pub(super) fn action_button(
         ButtonState::Enabled,
     )
     .child(label.into())
-    .on_click(cx.listener(move |this, _, window, cx| click(this, window, cx)))
+    // GPUI also clicks a focused control on key up, after the key down
+    // below already ran the action; only the pointer clicks here.
+    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+        if !event.is_keyboard() {
+            click(this, window, cx);
+        }
+    }))
     .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
         if is_web_button_activation_key(&event.keystroke.key) {
             keyboard(this, window, cx);
@@ -25,6 +31,76 @@ pub(super) fn action_button(
             cx.stop_propagation();
         }
     }))
+}
+
+/// A labelled checkbox for the export panel (web `<input type=checkbox>`):
+/// Space toggles it, like the other desktop checkboxes.
+fn export_checkbox(
+    id: impl Into<ElementId>,
+    label: &'static str,
+    checked: bool,
+    cx: &Context<'_, ChatView>,
+    toggle: impl Fn(&mut RichEmbeds) + 'static,
+) -> Stateful<Div> {
+    let toggle = Rc::new(toggle);
+    let toggle_for_key = Rc::clone(&toggle);
+    div()
+        .id(id)
+        .min_h(px(28.0))
+        .flex()
+        .items_center()
+        .gap_2()
+        .role(Role::CheckBox)
+        .aria_label(label)
+        .aria_toggled(if checked {
+            Toggled::True
+        } else {
+            Toggled::False
+        })
+        .tab_index(0)
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        .cursor_pointer()
+        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+            if !event.is_keyboard() {
+                toggle(&mut this.rich_embeds.borrow_mut());
+                cx.notify();
+            }
+        }))
+        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+            if event.keystroke.key == "space" {
+                window.prevent_default();
+                cx.stop_propagation();
+                toggle_for_key(&mut this.rich_embeds.borrow_mut());
+                cx.notify();
+            }
+        }))
+        .child(
+            div()
+                .size(px(14.0))
+                .flex_shrink_0()
+                .rounded(px(4.0))
+                .border_1()
+                .border_color(if checked {
+                    theme::persimmon_500()
+                } else {
+                    theme::rambutan_500()
+                })
+                .bg(if checked {
+                    theme::persimmon_500()
+                } else {
+                    theme::longan_900()
+                })
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(10.0))
+                .text_color(theme::longan_950())
+                .child(if checked { "✓" } else { "" }),
+        )
+        .child(label)
 }
 
 /// Persist directly on Tokio: GPUI stops ordinary foreground dispatch while
@@ -275,56 +351,141 @@ impl ChatView {
         .detach();
     }
 
+    /// Web `ExportResponse`: one quiet "Export reply" toggle; its choices
+    /// open in a panel under the turn's meta row.
     pub(in crate::views::chat) fn render_response_export(
         &self,
         message: usize,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let include = self.rich_embeds.borrow().export_state.contains(&message);
-        let external = self.rich_embeds.borrow().export_remote.contains(&message);
-        div()
-            .flex()
-            .flex_wrap()
-            .gap_1()
-            .child(action_button(
-                ("export-response", message),
-                "Export bundle",
-                cx,
-                move |this, _, cx| this.export_response_bundle(message, cx),
-            ))
-            .child(action_button(
-                ("export-widget-state", message),
-                if include {
-                    "Include widget state: on"
-                } else {
-                    "Include widget state: off"
-                },
-                cx,
-                move |this, _, cx| {
+        let open = self.rich_embeds.borrow().export_open.contains(&message);
+        action_button(
+            ("export-reply", message),
+            "Export reply",
+            cx,
+            move |this, _, cx| {
+                {
                     let mut embeds = this.rich_embeds.borrow_mut();
-                    if !embeds.export_state.remove(&message) {
-                        embeds.export_state.insert(message);
+                    if !embeds.export_open.remove(&message) {
+                        embeds.export_open.insert(message);
                     }
-                    cx.notify();
-                },
-            ))
-            .child(action_button(
-                ("export-external-media", message),
-                if external {
-                    "Include external media: on"
+                }
+                cx.notify();
+            },
+        )
+        .debug_selector(move || format!("desktop-export-reply-{message}"))
+        .aria_expanded(open)
+        .into_any_element()
+    }
+
+    /// Reply `message`'s export choices: (saved widget values, external media).
+    #[cfg(test)]
+    pub(in crate::views::chat) fn export_choices(&self, message: usize) -> (bool, bool) {
+        let embeds = self.rich_embeds.borrow();
+        (
+            embeds.export_state.contains(&message),
+            embeds.export_remote.contains(&message),
+        )
+    }
+
+    /// The open "Export reply" panel (web `data-response-export`): whether
+    /// to fetch linked media and include saved widget values, then saving
+    /// the bundle (a ZIP, through the save dialog).
+    pub(in crate::views::chat) fn render_response_export_panel(
+        &self,
+        message: usize,
+        cx: &Context<'_, Self>,
+    ) -> Option<AnyElement> {
+        let (include_state, include_remote) = {
+            let embeds = self.rich_embeds.borrow();
+            if !embeds.export_open.contains(&message) {
+                return None;
+            }
+            (
+                embeds.export_state.contains(&message),
+                embeds.export_remote.contains(&message),
+            )
+        };
+        let note = |text: &'static str| div().text_color(theme::rambutan_500()).child(text);
+        Some(
+            div()
+                .id(("export-panel", message))
+                .debug_selector(move || format!("desktop-export-panel-{message}"))
+                .role(Role::Group)
+                .aria_label("Export reply")
+                .mt_1()
+                .flex()
+                .flex_col()
+                .gap_2()
+                .p_3()
+                .rounded(px(8.0))
+                .bg(theme::longan_900().opacity(0.6))
+                .border_1()
+                .border_color(theme::longan_800())
+                .text_size(px(12.0))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .text_color(theme::rambutan_300())
+                .child(
+                    export_checkbox(
+                        ("export-external-media", message),
+                        "Include external media",
+                        include_remote,
+                        cx,
+                        move |embeds| {
+                            if !embeds.export_remote.remove(&message) {
+                                embeds.export_remote.insert(message);
+                            }
+                        },
+                    )
+                    .debug_selector(move || format!("desktop-export-external-media-{message}")),
+                )
+                .child(note(if include_remote {
+                    "Downloads linked media for this bundle."
                 } else {
-                    "Include external media: off"
-                },
-                cx,
-                move |this, _, cx| {
-                    let mut embeds = this.rich_embeds.borrow_mut();
-                    if !embeds.export_remote.remove(&message) {
-                        embeds.export_remote.insert(message);
-                    }
-                    cx.notify();
-                },
-            ))
-            .into_any_element()
+                    "External media stays as links. Local media and interactive content are included."
+                }))
+                .child(
+                    export_checkbox(
+                        ("export-widget-state", message),
+                        "Include saved widget values",
+                        include_state,
+                        cx,
+                        move |embeds| {
+                            if !embeds.export_state.remove(&message) {
+                                embeds.export_state.insert(message);
+                            }
+                        },
+                    )
+                    .debug_selector(move || format!("desktop-export-widget-state-{message}")),
+                )
+                .child(note("Saved values can include text entered in widget forms."))
+                .child(
+                    div().flex().child(
+                        web_button(
+                            ("export-response", message),
+                            WebButtonVariant::Outline,
+                            WebButtonSize::Small,
+                            ButtonState::Enabled,
+                        )
+                        .debug_selector(move || format!("desktop-export-save-{message}"))
+                        .aria_label("Save ZIP")
+                        .child("Save ZIP")
+                        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
+                            if !event.is_keyboard() {
+                                this.export_response_bundle(message, cx);
+                            }
+                        }))
+                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                            if is_web_button_activation_key(&event.keystroke.key) {
+                                window.prevent_default();
+                                cx.stop_propagation();
+                                this.export_response_bundle(message, cx);
+                            }
+                        })),
+                    ),
+                )
+                .into_any_element(),
+        )
     }
 
     pub(super) fn rich_scope(&self, message: usize, block: usize) -> String {
