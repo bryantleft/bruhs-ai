@@ -26,7 +26,7 @@ pub(super) const CHAT_PROSE_CODE_Y_PADDING_PX: f32 = 10.0;
 pub(super) const CHAT_PROSE_CODE_LINE_HEIGHT: f32 = 1.55;
 pub(super) const CHAT_PROSE_CODE_BORDER_OPACITY: f32 = 1.0;
 
-pub(super) fn desktop_markdown_style(cx: &App) -> TextViewStyle {
+pub(crate) fn desktop_markdown_style(cx: &App) -> TextViewStyle {
     let mut style = TextViewStyle::default()
         .paragraph_gap(rems(CHAT_PROSE_PARAGRAPH_GAP_REM))
         .heading_font_size(|level, _base| match level {

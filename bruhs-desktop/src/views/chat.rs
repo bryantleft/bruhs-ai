@@ -60,6 +60,8 @@ actions!(
 );
 
 mod assistant_content;
+/// Chat replies' Markdown style, which Knowledge previews reuse.
+pub(crate) use assistant_content::desktop_markdown_style;
 mod auth;
 #[cfg(test)]
 mod behavior_tests;

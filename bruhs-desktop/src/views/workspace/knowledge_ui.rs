@@ -3,12 +3,17 @@
 //! state snapshot; attachment payloads are copied beside that snapshot.
 
 use std::cell::RefCell;
+use std::collections::BTreeSet;
 
 use bruhs_models::logic::knowledge_library::{self as library, source_host, Card};
+use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::num::ToFloatLossy;
 use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent};
+use gpui_component::text::TextView;
+
+use crate::views::chat::desktop_markdown_style;
 
 use super::knowledge_storage::{self, attachment_path as knowledge_attachment_path};
 use super::library_pages_ui::LibraryPage;
@@ -20,12 +25,15 @@ use super::*;
 pub(super) const KNOWLEDGE_PAGE_SIZE: usize = library::PAGE_SIZE;
 
 /// The library's search box and the shared index it reads (web
-/// `KnowledgeLibrary`'s query and memos).
+/// `KnowledgeLibrary`'s query and memos), and the open document's preview.
 pub(super) struct KnowledgeState {
     pub(super) search_input: Entity<InputState>,
     /// Rebuilt when a document or source is added or removed, or when the
     /// workspace saves an edit; never on a keystroke.
     index: RefCell<Option<LibraryIndex>>,
+    /// The open document shows its rendered Markdown instead of the editor
+    /// (web `DocumentEditor`'s Preview). Each document opens in the editor.
+    pub(super) preview: bool,
 }
 
 struct LibraryIndex {
@@ -64,6 +72,7 @@ impl KnowledgeState {
         Self {
             search_input,
             index: RefCell::new(None),
+            preview: false,
         }
     }
 
@@ -158,11 +167,19 @@ impl Workspace {
         self.active_view = AppView::DocumentDetail {
             document_id: id.to_string(),
         };
+        self.knowledge.preview = false;
         self.clip_create_visible = false;
         self.persist_and_notify(cx);
         self.knowledge_title_input.update(cx, |input, cx| {
             input.focus(window, cx);
         });
+    }
+
+    /// Web `DocumentEditor`'s Preview and Edit: show the body's rendered
+    /// Markdown, including unsaved changes, or the editor again.
+    pub(super) fn toggle_knowledge_preview(&mut self, cx: &mut Context<'_, Self>) {
+        self.knowledge.preview = !self.knowledge.preview;
+        cx.notify();
     }
 
     pub(super) fn start_source_clip(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -1177,6 +1194,33 @@ impl Workspace {
                             )
                             .child(
                                 web_button(
+                                    "preview-knowledge-document",
+                                    WebButtonVariant::Outline,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(|| "desktop-knowledge-preview".to_string())
+                                .aria_label("Preview")
+                                .aria_toggled(if self.knowledge.preview {
+                                    Toggled::True
+                                } else {
+                                    Toggled::False
+                                })
+                                .child(if self.knowledge.preview {
+                                    "Edit"
+                                } else {
+                                    "Preview"
+                                })
+                                // GPUI clicks a focused button on Enter and
+                                // Space too; a key handler would toggle twice.
+                                .on_click(cx.listener(
+                                    |this, _event, _window, cx| {
+                                        this.toggle_knowledge_preview(cx);
+                                    },
+                                )),
+                            )
+                            .child(
+                                web_button(
                                     "save-knowledge-document",
                                     WebButtonVariant::Primary,
                                     WebButtonSize::Small,
@@ -1221,11 +1265,19 @@ impl Workspace {
                                             .w_full()
                                             .aria_label("Document title"),
                                     )
-                                    .child(
-                                        Input::new(&self.knowledge_body_input)
-                                            .aria_label("Document Markdown body")
-                                            .w_full(),
-                                    )
+                                    .child(if self.knowledge.preview {
+                                        self.render_document_preview(cx)
+                                    } else {
+                                        div()
+                                            .debug_selector(|| "desktop-knowledge-body".to_string())
+                                            .w_full()
+                                            .child(
+                                                Input::new(&self.knowledge_body_input)
+                                                    .aria_label("Document Markdown body")
+                                                    .w_full(),
+                                            )
+                                            .into_any_element()
+                                    })
                                     .child(
                                         div()
                                             .text_size(px(11.0))
@@ -1285,6 +1337,34 @@ impl Workspace {
                             ),
                     ),
             )
+    }
+
+    /// Web's preview `article`: the editor's current Markdown, rendered by the
+    /// chat replies' renderer. Like the web's untrusted renderer it drops raw
+    /// HTML and keeps images as links, so a preview never loads a remote
+    /// image.
+    fn render_document_preview(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let markdown = preview_markdown(&self.knowledge_body_input.read(cx).value());
+        div()
+            .id("knowledge-document-preview")
+            .debug_selector(|| "desktop-knowledge-document-preview".to_string())
+            .role(Role::Article)
+            .aria_label("Document preview")
+            .w_full()
+            .min_h(px(320.0))
+            .rounded(px(8.0))
+            .bg(theme::longan_900().opacity(0.3))
+            .border_1()
+            .border_color(theme::longan_800())
+            .p_4()
+            .text_size(px(14.0))
+            .text_color(theme::rambutan_200())
+            .child(
+                TextView::markdown("knowledge-document-preview-markdown", markdown)
+                    .style(desktop_markdown_style(cx))
+                    .selectable(true),
+            )
+            .into_any_element()
     }
 
     pub(super) fn render_source_clip_editor(&self, creating: bool, cx: &Context<'_, Self>) -> Div {
@@ -1603,6 +1683,12 @@ fn knowledge_meta_panel(
         .children(rows)
 }
 
+/// A document body as the preview shows it: without raw HTML, and with every
+/// image written as a link to its source (web `render_untrusted`).
+fn preview_markdown(body: &str) -> String {
+    markdown_with_allowed_images(body, &BTreeSet::new())
+}
+
 fn format_epoch_ms(timestamp_ms: i64) -> String {
     Local
         .timestamp_millis_opt(timestamp_ms)
@@ -1717,7 +1803,20 @@ mod parity_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::mime_guess_from_name;
+    use super::{mime_guess_from_name, preview_markdown};
+
+    #[test]
+    fn previews_drop_raw_html_and_keep_images_as_links() {
+        let body = "# Plan\n\n<script>alert(1)</script>\n\n![Chart](https://example.invalid/c.png) and **bold**";
+        let markdown = preview_markdown(body);
+        assert!(!markdown.contains("<script>"), "{markdown}");
+        assert!(markdown.contains("[Chart](https://example.invalid/c.png)"));
+        assert!(
+            !markdown.contains("![Chart]"),
+            "a preview never loads the image"
+        );
+        assert!(markdown.contains("# Plan") && markdown.contains("**bold**"));
+    }
 
     #[test]
     fn mime_guess_covers_common_knowledge_files() {
