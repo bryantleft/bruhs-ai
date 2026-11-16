@@ -219,10 +219,10 @@ pub(super) fn ComposerOptions(
                                 let age = crate::format::relative_time(entry.at_ms, now);
                                 view! {
                                     <div role="listitem" class="flex items-center gap-1">
-                                        <button type="button" data-stash-entry="" class="bruhs-control min-h-[32px] min-w-0 flex-1 rounded-seed px-2 py-1 text-left text-label-sm text-rambutan-300 hover:bg-longan-800/60" title=entry.text on:click=move |_| restore(restore_id.clone())>
+                                        <button type="button" data-stash-entry="" class="bruhs-control min-h-control min-w-0 flex-1 rounded-seed px-2 py-1 text-left text-label-sm text-rambutan-300 hover:bg-longan-800/60" title=entry.text on:click=move |_| restore(restore_id.clone())>
                                             <span class="block truncate">{preview}</span><span class="block text-rambutan-500">{age}</span>
                                         </button>
-                                        <button type="button" aria-label="Delete saved prompt" class="bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-seed text-rambutan-500 hover:bg-lychee-500/10 hover:text-lychee-300" on:click=move |_| { stash.update(|items| { items.remove(&delete_id); }); }><Icon name="x" size=14 /></button>
+                                        <button type="button" aria-label="Delete saved prompt" class="bruhs-control inline-flex size-control-xs shrink-0 items-center justify-center rounded-seed text-rambutan-500 hover:bg-lychee-500/10 hover:text-lychee-300" on:click=move |_| { stash.update(|items| { items.remove(&delete_id); }); }><Icon name="x" size=16 /></button>
                                     </div>
                                 }
                             }).collect_view()}
@@ -397,7 +397,7 @@ fn ComposerPopupSurface(
             class="fixed z-50 flex w-80 max-w-[calc(100vw-1rem)] flex-col overflow-hidden rounded-grape bg-longan-700 inset-ring inset-ring-white/15">
             <div class="flex shrink-0 items-center justify-between gap-2 border-b border-white/10 px-3 py-2">
                 <h2 class="text-label text-rambutan-100">{label}</h2>
-                <button type="button" aria-label=format!("Close {label}") class="bruhs-control inline-flex size-8 items-center justify-center rounded-seed text-rambutan-400 hover:bg-longan-800/60 hover:text-rambutan-100" on:click=move |_| open.set(false)><Icon name="x" size=14 /></button>
+                <button type="button" aria-label=format!("Close {label}") class="bruhs-control inline-flex size-control items-center justify-center rounded-seed text-rambutan-400 hover:bg-longan-800/60 hover:text-rambutan-100" on:click=move |_| open.set(false)><Icon name="x" size=16 /></button>
             </div>
             <div data-composer-options-scroll="" class="min-h-0 overflow-y-auto p-2">{content()}</div>
         </div>

@@ -129,7 +129,7 @@ pub fn context_usage(usage: &UsageInfo) -> u64 {
     usage.window()
 }
 
-const QUEUE_HIT: &str = "inline-flex size-6 shrink-0 items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 cursor-pointer";
+const QUEUE_HIT: &str = "inline-flex size-control-xs shrink-0 items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 cursor-pointer";
 
 /// Signals a queued-message edit reads and writes. One value keeps each
 /// helper under the argument limit.
@@ -633,7 +633,7 @@ pub fn Composer(
                                                 class=QUEUE_HIT
                                                 on:click=move |_| commit_queued_edit(edit_ctx)
                                             >
-                                                <Icon name="check" size=14 />
+                                                <Icon name="check" size=16 />
                                             </button>
                                             <button
                                                 type="button"
@@ -641,7 +641,7 @@ pub fn Composer(
                                                 class=QUEUE_HIT
                                                 on:click=move |_| cancel_queued_edit(edit_ctx)
                                             >
-                                                <Icon name="x" size=14 />
+                                                <Icon name="x" size=16 />
                                             </button>
                                         })}
                                         {(!editing).then(|| view! {
@@ -651,7 +651,7 @@ pub fn Composer(
                                                 class=QUEUE_HIT
                                                 on:click=move |_| open_queued_edit(edit_id.clone(), edit_text.clone(), edit_chips.clone(), edit_ctx)
                                             >
-                                                <Icon name="pencil" size=14 />
+                                                <Icon name="pencil" size=16 />
                                             </button>
                                             <button
                                                 type="button"
@@ -662,7 +662,7 @@ pub fn Composer(
                                                     queue.update(|items| { items.remove(&id); });
                                                 }
                                             >
-                                                <Icon name="x" size=14 />
+                                                <Icon name="x" size=16 />
                                             </button>
                                         })}
                                     </div>
@@ -680,7 +680,7 @@ pub fn Composer(
                                 let name = item.name;
                                 let label = name.clone();
                                 view! {
-                                    <div class="flex h-6 items-center gap-1 px-2 text-label-sm" data-paste-name=name>
+                                    <div class="flex h-control-xs items-center gap-1 px-2 text-label-sm" data-paste-name=name>
                                         <span class="min-w-0 flex-1 truncate text-rambutan-300">{label}</span>
                                         <button
                                             type="button"
@@ -694,7 +694,7 @@ pub fn Composer(
                                                 });
                                             }
                                         >
-                                            <Icon name="x" size=14 />
+                                            <Icon name="x" size=16 />
                                         </button>
                                     </div>
                                 }
@@ -734,7 +734,7 @@ pub fn Composer(
                         <label class="flex items-center gap-2 px-4 pb-1 text-label-sm text-rambutan-400">
                             "Comment"
                             <input
-                                class="h-6 min-w-0 flex-1 rounded-seed bg-longan-800 px-2 text-label-sm text-rambutan-100"
+                                class="h-control-xs min-w-0 flex-1 rounded-seed bg-longan-800 px-2 text-label-sm text-rambutan-100"
                                 data-chip-comment=""
                                 aria-label="Citation comment"
                                 prop:value=comment
@@ -1023,7 +1023,7 @@ fn ApprovalPanel(
                 <code class="min-w-0 flex-1 max-h-20 overflow-auto whitespace-pre text-code-sm text-rambutan-200 [scrollbar-width:thin]">{summary}</code>
                 <button
                     type="button"
-                    class="h-6 shrink-0 rounded-seed px-2 text-label-sm text-lychee-300 transition-colors hover:bg-longan-800/60 disabled:opacity-50 cursor-pointer"
+                    class="min-h-control-xs shrink-0 rounded-seed px-2 text-label-sm text-lychee-300 transition-colors hover:bg-longan-800/60 disabled:opacity-50 cursor-pointer"
                     disabled=move || in_flight.get()
                     on:click=move |_| respond(deny())
                 >
@@ -1031,7 +1031,7 @@ fn ApprovalPanel(
                 </button>
                 <button
                     type="button"
-                    class="h-6 shrink-0 rounded-seed px-2 text-label-sm text-rambutan-100 transition-colors hover:bg-longan-800/60 disabled:opacity-50 cursor-pointer"
+                    class="min-h-control-xs shrink-0 rounded-seed px-2 text-label-sm text-rambutan-100 transition-colors hover:bg-longan-800/60 disabled:opacity-50 cursor-pointer"
                     disabled=move || in_flight.get()
                     on:click=move |_| respond(Decision::Allow)
                 >
@@ -1208,7 +1208,7 @@ fn ContextStrip(
         >
             <button
                 type="button"
-                class="inline-flex h-6 min-w-0 items-center gap-1.5 rounded-seed px-1.5 transition-colors hover:bg-longan-800/50 hover:text-rambutan-200 cursor-pointer"
+                class="inline-flex min-h-control-xs min-w-0 items-center gap-1.5 rounded-seed px-1.5 transition-colors hover:bg-longan-800/50 hover:text-rambutan-200 cursor-pointer"
                 title="Change project"
                 on:click=move |_| set_project_picker_open.set(true)
             >
@@ -1220,7 +1220,7 @@ fn ContextStrip(
                 trigger=move || view! {
                     <button
                         type="button"
-                        class="inline-flex h-6 max-w-[14rem] items-center gap-1.5 rounded-seed px-1.5 transition-colors hover:bg-longan-800/50 hover:text-rambutan-200 cursor-pointer"
+                        class="inline-flex min-h-control-xs max-w-[14rem] items-center gap-1.5 rounded-seed px-1.5 transition-colors hover:bg-longan-800/50 hover:text-rambutan-200 cursor-pointer"
                         data-run-choice=move || run_choice.get().as_str()
                         aria-haspopup="menu"
                         aria-expanded=move || workspace_open.get().to_string()
@@ -1273,7 +1273,7 @@ fn ContextStrip(
                         view! {
                             <button
                                 type="button"
-                                class="inline-flex h-6 max-w-[16rem] items-center gap-1.5 rounded-seed px-1.5 transition-colors hover:bg-longan-800/50 hover:text-rambutan-200 cursor-pointer"
+                                class="inline-flex min-h-control-xs max-w-[16rem] items-center gap-1.5 rounded-seed px-1.5 transition-colors hover:bg-longan-800/50 hover:text-rambutan-200 cursor-pointer"
                                 data-branch-chip=""
                                 data-base-branch=move || base_branch.get()
                                 aria-haspopup="menu"

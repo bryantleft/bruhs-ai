@@ -33,6 +33,9 @@ pub const ICON_PX: f32 = 16.0;
 pub const ICON_INLINE_PX: f32 = 14.0;
 /// Icons that decorate 12px text that is not clickable.
 pub const ICON_INLINE_SM_PX: f32 = 12.0;
+/// Icons beside 12px text inside a chip or button, such as the composer's
+/// model and branch chips (shadcn `xs` Button: `size-3`).
+pub const ICON_XS_PX: f32 = 12.0;
 
 pub const APP_UI_TEXT_SIZE_PX: f32 = 13.0;
 pub const APP_BODY_TEXT_SIZE_PX: f32 = 13.0;

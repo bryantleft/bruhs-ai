@@ -77,7 +77,8 @@ pub const CHIP_RADIUS_PX: f32 = 8.0;
 pub const CHIP_TEXT_SIZE_PX: f32 = 12.0;
 /// Icons in the composer's square buttons, such as Attach and Options.
 pub const CHIP_ICON_SIZE_PX: f32 = theme::ICON_PX;
-pub const CHIP_CHEVRON_SIZE_PX: f32 = 12.0;
+/// The model chip's chevron, beside its 12px label.
+pub const CHIP_CHEVRON_SIZE_PX: f32 = theme::ICON_XS_PX;
 pub const CHIP_HOVER_BG_OPACITY: f32 = 0.50;
 pub const CHIP_MODEL_MAX_WIDTH_PX: f32 = 160.0;
 
@@ -96,8 +97,8 @@ pub const STRIP_RADIUS_PX: f32 = 14.0;
 pub const STRIP_BG_OPACITY: f32 = 0.70;
 pub const STRIP_RING_OPACITY: f32 = 0.05;
 pub const STRIP_TEXT_SIZE_PX: f32 = 12.0;
-pub const STRIP_CHIP_HEIGHT_PX: f32 = 24.0;
-pub const STRIP_ICON_SIZE_PX: f32 = 12.0;
+pub const STRIP_CHIP_HEIGHT_PX: f32 = theme::CONTROL_XS_PX;
+pub const STRIP_ICON_SIZE_PX: f32 = theme::ICON_XS_PX;
 pub const STRIP_DIRTY_BG_OPACITY: f32 = 0.15;
 
 // Menus floated above the composer.
@@ -1691,7 +1692,7 @@ impl ChatView {
                 div()
                     .id(SharedString::from(format!("paste-chip-{index}")))
                     .flex()
-                    .h(px(24.0))
+                    .h(px(theme::CONTROL_XS_PX))
                     .items_center()
                     .gap_1()
                     .px(px(8.0))
@@ -1767,7 +1768,7 @@ impl ChatView {
                     .id(SharedString::from(format!("file-offer-name-{open_id}")))
                     .min_w_0()
                     .flex_1()
-                    .h(px(24.0))
+                    .h(px(theme::CONTROL_XS_PX))
                     .flex()
                     .items_center()
                     .truncate()
@@ -1802,7 +1803,7 @@ impl ChatView {
                 el.child(
                     div()
                         .id(SharedString::from(format!("file-offer-retry-{retry_id}")))
-                        .h(px(24.0))
+                        .h(px(theme::CONTROL_XS_PX))
                         .px(px(6.0))
                         .flex()
                         .items_center()
@@ -1978,7 +1979,7 @@ impl ChatView {
         let direction = if earlier { "earlier" } else { "later" };
         div()
             .id(SharedString::from(format!("queued-{direction}-{id}")))
-            .size(px(24.0))
+            .size(px(theme::CONTROL_XS_PX))
             .flex()
             .items_center()
             .justify_center()
@@ -2015,7 +2016,7 @@ impl ChatView {
     ) -> AnyElement {
         div()
             .id(id)
-            .size(px(24.0))
+            .size(px(theme::CONTROL_XS_PX))
             .flex()
             .items_center()
             .justify_center()
@@ -2028,7 +2029,7 @@ impl ChatView {
             .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .on_click(on_click)
-            .child(icon(path, 14.0, theme::rambutan_400()))
+            .child(icon(path, theme::ICON_PX, theme::rambutan_400()))
             .into_any_element()
     }
 
@@ -2712,7 +2713,7 @@ impl ChatView {
                         div()
                             .id(ElementId::Name(format!("stash-delete-{key}").into()))
                             .debug_selector(move || format!("desktop-stash-delete-{key}"))
-                            .size(px(24.0))
+                            .size(px(theme::CONTROL_XS_PX))
                             .rounded(px(4.0))
                             .flex()
                             .items_center()
@@ -2732,7 +2733,7 @@ impl ChatView {
                             }))
                             .child(icon(
                                 assets::CLOSE_ICON_PATH,
-                                CHIP_CHEVRON_SIZE_PX,
+                                theme::ICON_PX,
                                 theme::rambutan_500(),
                             )),
                     )
