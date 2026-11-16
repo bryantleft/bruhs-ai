@@ -74,6 +74,11 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- Fixed the thread menu in the desktop app opening at the bottom of the
+  sidebar. It now opens under the "…" on its card, or above it near the bottom
+  of the window. The arrow keys move through it, Escape closes it and returns
+  you to the "…" button, and a click outside closes it without also clicking
+  what is under it.
 - Fixed the landing page's tour progress indicators cutting dots in half.
   Each tab now fills with complete dots, centered under its label.
 

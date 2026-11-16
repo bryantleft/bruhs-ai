@@ -47,6 +47,9 @@ pub(super) struct InstalledBinding {
 enum KeyDecision {
     Undo,
     SidebarFocus(bool),
+    /// Tab (true: Shift+Tab) in an open thread menu: close it and move on
+    /// from its "…" button, before gpui-component's Tab binding runs.
+    CloseThreadMenu(bool),
     Swallow,
     Pass,
 }
@@ -239,6 +242,14 @@ fn intercept_keybinding(
             cx.stop_propagation();
             workspace.update(cx, |this, cx| this.undo_sidebar(window, cx));
         }
+        KeyDecision::CloseThreadMenu(backwards) => {
+            cx.stop_propagation();
+            workspace.update(cx, |this, cx| {
+                this.close_thread_menu(window, cx);
+                this.sidebar_viewport.borrow().tab(backwards, window, cx);
+                cx.notify();
+            });
+        }
         KeyDecision::SidebarFocus(backwards) => {
             workspace.update(cx, |this, cx| {
                 if this.sidebar_viewport.borrow().tab(backwards, window, cx) {
@@ -287,6 +298,20 @@ impl Workspace {
         cx: &App,
     ) -> KeyDecision {
         let modifiers = event.keystroke.modifiers;
+        // Only while focus is in this window's thread menu: the interceptor
+        // sees every window's keys.
+        if event.keystroke.key == "tab"
+            && !modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+            && self.thread_menu_id.is_some()
+            && self
+                .thread_menu_items
+                .iter()
+                .any(|item| item.is_focused(window))
+        {
+            return KeyDecision::CloseThreadMenu(modifiers.shift);
+        }
         let chord = chord_from_event(
             "",
             &event.keystroke.key,

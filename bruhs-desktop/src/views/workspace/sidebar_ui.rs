@@ -9,7 +9,9 @@ use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::ActiveTheme;
+use std::rc::Rc;
 
+mod menu_popover;
 mod viewport;
 pub(super) use viewport::SidebarViewport;
 
@@ -68,6 +70,14 @@ const SIDEBAR_CARD_ROW_GAP_PX: f32 = 6.0;
 const SIDEBAR_CARD_DOT_PX: f32 = 9.0;
 const SIDEBAR_CARD_DELETE_PX: f32 = 24.0;
 const SIDEBAR_CARD_DELETE_INSET_PX: f32 = 8.0;
+/// Web `right-8`: the actions button sits left of delete.
+const SIDEBAR_CARD_MENU_RIGHT_PX: f32 = SIDEBAR_CARD_DELETE_INSET_PX + SIDEBAR_CARD_DELETE_PX + 4.0;
+/// Web thread menu: `w-52`.
+const THREAD_MENU_WIDTH_PX: f32 = 208.0;
+/// Web thread menu rows: `min-h-10`.
+const THREAD_MENU_ROW_PX: f32 = 40.0;
+/// Focus slots: one per `ThreadMenuItem`.
+pub(super) const THREAD_MENU_MAX_ITEMS: usize = 9;
 const SIDEBAR_SETTLED_TOP_PADDING_PX: f32 = 8.0;
 const SIDEBAR_SETTLED_X_PADDING_PX: f32 = 4.0;
 const SIDEBAR_FOOTER_PADDING_PX: f32 = 8.0;
@@ -160,6 +170,99 @@ fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
         .flex_shrink_0()
 }
 
+/// What a thread menu row runs, given the thread id.
+type ThreadMenuAction = Rc<dyn Fn(&mut Workspace, &str, &mut Window, &mut Context<'_, Workspace>)>;
+
+/// Box a thread menu row's action (gives the closure its signature).
+fn menu_action(
+    action: impl Fn(&mut Workspace, &str, &mut Window, &mut Context<'_, Workspace>) + 'static,
+) -> ThreadMenuAction {
+    Rc::new(action)
+}
+
+/// The thread menu's rows. Each has a fixed focus slot.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ThreadMenuItem {
+    Pin,
+    Settle,
+    Wake,
+    InAnHour,
+    LaterToday,
+    Tomorrow,
+    NextWeek,
+    Regenerate,
+    Discard,
+}
+
+impl ThreadMenuItem {
+    const ALL: [Self; THREAD_MENU_MAX_ITEMS] = [
+        Self::Pin,
+        Self::Settle,
+        Self::Wake,
+        Self::InAnHour,
+        Self::LaterToday,
+        Self::Tomorrow,
+        Self::NextWeek,
+        Self::Regenerate,
+        Self::Discard,
+    ];
+
+    /// Index into `Workspace::thread_menu_items`.
+    fn slot(self) -> usize {
+        Self::ALL
+            .iter()
+            .position(|item| *item == self)
+            .unwrap_or_default()
+    }
+
+    /// Element id and debug selector.
+    fn id(self) -> &'static str {
+        match self {
+            Self::Pin => "desktop-thread-menu-pin",
+            Self::Settle => "desktop-thread-menu-settle",
+            Self::Wake => "desktop-thread-menu-wake",
+            Self::InAnHour => "desktop-thread-menu-hour",
+            Self::LaterToday => "desktop-thread-menu-later",
+            Self::Tomorrow => "desktop-thread-menu-tomorrow",
+            Self::NextWeek => "desktop-thread-menu-next-week",
+            Self::Regenerate => "desktop-thread-menu-regenerate",
+            Self::Discard => "desktop-thread-menu-discard",
+        }
+    }
+}
+
+/// Hairline between thread menu groups (web: `my-1 h-px bg-white/10`).
+fn thread_menu_separator() -> AnyElement {
+    div()
+        .my_1()
+        .h(px(1.0))
+        .flex_shrink_0()
+        .bg(gpui::white().opacity(RING_WHITE_10))
+        .into_any_element()
+}
+
+/// Item to focus after `key` in a menu of `count` items, from the focused
+/// item `current`: Down and Up wrap, Home and End jump. `None` for other keys.
+pub(super) fn thread_menu_step(current: Option<usize>, count: usize, key: &str) -> Option<usize> {
+    if count == 0 {
+        return None;
+    }
+    let last = count - 1;
+    match key {
+        "down" => Some(current.map_or(0, |index| if index >= last { 0 } else { index + 1 })),
+        "up" => Some(current.map_or(last, |index| {
+            if index == 0 || index > last {
+                last
+            } else {
+                index - 1
+            }
+        })),
+        "home" => Some(0),
+        "end" => Some(last),
+        _ => None,
+    }
+}
+
 impl Workspace {
     pub(super) fn sidebar_query(&self, cx: &App) -> String {
         self.sidebar_search.read(cx).value().to_string()
@@ -179,29 +282,12 @@ impl Workspace {
             .text_color(theme::rambutan_300())
             .flex()
             .flex_col()
-            .on_mouse_down_out(cx.listener(|this, _ev, _window, cx| {
-                let mut changed = false;
-                if this.sidebar_filter_open {
-                    this.sidebar_filter_open = false;
-                    changed = true;
-                }
-                if this.thread_menu_id.is_some() {
-                    this.thread_menu_id = None;
-                    changed = true;
-                }
-                if changed {
-                    cx.notify();
-                }
-            }))
             .child(self.render_sidebar_header())
             .child(self.render_sidebar_controls(cx))
             .child(self.render_sidebar_list(cx))
             .child(self.render_sidebar_undo(cx))
             .children(self.render_sidebar_update_button(cx))
             .child(self.render_sidebar_footer(cx))
-            .when(self.thread_menu_id.is_some(), |el| {
-                el.child(self.render_thread_menu(cx))
-            })
             .when(self.sidebar_filter_open, |el| {
                 el.child(self.render_sidebar_filter_menu(cx))
             })
@@ -717,10 +803,15 @@ impl Workspace {
         let chat = thread.chat.read(cx);
         let title = bruhs_models::logic::text::plain_title(&chat.thread_title).into_owned();
         let is_active = self.active_thread_id.as_deref() == Some(thread.id.as_str());
+        // While its menu is open the card keeps its hover look: the backdrop
+        // that closes the menu covers the card.
+        let menu_open = self.thread_menu_id.as_deref() == Some(thread.id.as_str());
         let status = self.card_status(thread, cx);
         let key = thread.chat.entity_id();
         let debug_key = element_key(&thread.id);
         let row_group: SharedString = format!("desktop-thread-row-{key}").into();
+        let menu_group: SharedString = format!("desktop-thread-actions-{key}").into();
+        let delete_group: SharedString = format!("desktop-thread-delete-{key}").into();
         let age = relative_age(thread.updated_at_ms, EpochMs::now());
         let project_label = if thread.project_name.is_empty() {
             SIDEBAR_FILTER_NONE_LABEL.to_string()
@@ -733,6 +824,7 @@ impl Workspace {
         let id_for_delete = thread.id.clone();
         let id_for_delete_key = thread.id.clone();
         let id_for_menu = thread.id.clone();
+        let id_for_menu_key = thread.id.clone();
 
         let status_slot: AnyElement = match status {
             CardStatus::Idle => div()
@@ -783,6 +875,9 @@ impl Workspace {
                     div()
                         .debug_selector(move || format!("desktop-thread-pin-{debug_key}"))
                         .flex_shrink_0()
+                        // The row's buttons cover this spot, like the age.
+                        .group_hover(row_group.clone(), |el| el.invisible())
+                        .when(menu_open, |el| el.invisible())
                         .child(icon(
                             assets::PIN_ICON_PATH,
                             SIDEBAR_SMALL_ICON_PX,
@@ -798,6 +893,7 @@ impl Workspace {
                     .justify_end()
                     .h(px(SIDEBAR_CARD_LINE_HEIGHT_PX))
                     .group_hover(row_group.clone(), |el| el.invisible())
+                    .when(menu_open, |el| el.invisible())
                     .child(status_slot),
             );
 
@@ -875,13 +971,11 @@ impl Workspace {
             .flex()
             .items_center()
             .justify_center()
+            .group(delete_group.clone())
             .invisible()
             .group_hover(row_group.clone(), |el| el.visible())
-            .text_color(theme::rambutan_500())
-            .hover(|el| {
-                el.bg(theme::longan_700().opacity(ACTIVE_BG_OPACITY_60))
-                    .text_color(theme::lychee_400())
-            })
+            .when(menu_open, |el| el.visible())
+            .hover(|el| el.bg(theme::longan_700().opacity(ACTIVE_BG_OPACITY_60)))
             .tab_index(0)
             .role(Role::Button)
             .aria_label(SIDEBAR_DELETE_LABEL)
@@ -900,20 +994,25 @@ impl Workspace {
                     this.delete_thread_by_id(&id_for_delete_key, cx);
                 }
             }))
-            .child(icon(
-                assets::CLOSE_ICON_PATH,
-                SIDEBAR_SMALL_ICON_PX,
-                theme::rambutan_500(),
-            ));
+            .child(
+                icon(
+                    assets::CLOSE_ICON_PATH,
+                    SIDEBAR_SMALL_ICON_PX,
+                    theme::rambutan_500(),
+                )
+                .group_hover(delete_group, |el| el.text_color(theme::lychee_400())),
+            );
 
+        // Web: an `ellipsis` icon button, `hover:bg-longan-700/60
+        // hover:text-rambutan-100`. Enter and Space click it too (GPUI
+        // keyboard clicks), and the menu takes focus when it opens.
         let menu_button = div()
             .id(("desktop-thread-actions", key))
             .track_focus(&focus.menu)
             .debug_selector(move || format!("desktop-thread-actions-{debug_key}"))
+            .group(menu_group.clone())
             .absolute()
-            .right(px(SIDEBAR_CARD_DELETE_INSET_PX
-                + SIDEBAR_CARD_DELETE_PX
-                + 4.0))
+            .right(px(SIDEBAR_CARD_MENU_RIGHT_PX))
             .top(px(SIDEBAR_CARD_DELETE_INSET_PX))
             .size(px(SIDEBAR_CARD_DELETE_PX))
             .rounded(px(SIDEBAR_RADIUS_SEED_PX))
@@ -922,21 +1021,58 @@ impl Workspace {
             .justify_center()
             .invisible()
             .group_hover(row_group.clone(), |el| el.visible())
-            .text_color(theme::rambutan_500())
             .hover(|el| el.bg(theme::longan_700().opacity(ACTIVE_BG_OPACITY_60)))
+            .when(menu_open, |el| {
+                el.visible()
+                    .bg(theme::longan_700().opacity(ACTIVE_BG_OPACITY_60))
+            })
             .tab_index(0)
             .role(Role::Button)
             .aria_label("Thread actions")
+            .aria_expanded(menu_open)
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.visible().border_color(theme::persimmon_400()))
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
+            .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                 cx.stop_propagation();
-                this.thread_menu_id = Some(id_for_menu.clone());
-                cx.notify();
+                // Keys open it on key down, before the card can see them.
+                if !event.is_keyboard() {
+                    this.toggle_thread_menu(&id_for_menu, window, cx);
+                }
             }))
-            .child("…");
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.toggle_thread_menu(&id_for_menu_key, window, cx);
+                }
+            }))
+            .child(
+                icon(
+                    assets::ELLIPSIS_ICON_PATH,
+                    SIDEBAR_SMALL_ICON_PX,
+                    if menu_open {
+                        theme::rambutan_100()
+                    } else {
+                        theme::rambutan_500()
+                    },
+                )
+                .group_hover(menu_group, |el| el.text_color(theme::rambutan_100())),
+            );
+        // The menu hangs from a box over the button (same insets), so it
+        // follows the card as the list scrolls.
+        let menu_anchor = menu_open.then(|| {
+            div()
+                .absolute()
+                .right(px(SIDEBAR_CARD_MENU_RIGHT_PX))
+                .top(px(SIDEBAR_CARD_DELETE_INSET_PX))
+                .size(px(SIDEBAR_CARD_DELETE_PX))
+                .child(menu_popover::menu_popover(
+                    size(px(SIDEBAR_CARD_DELETE_PX), px(SIDEBAR_CARD_DELETE_PX)),
+                    self.render_thread_menu(thread, cx),
+                ))
+        });
 
         div()
             .id(("desktop-thread-row", key))
@@ -981,6 +1117,7 @@ impl Workspace {
             .children(meta_line)
             .child(menu_button)
             .child(delete_button)
+            .children(menu_anchor)
             .into_any_element()
     }
 
@@ -1034,116 +1171,113 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_thread_menu(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let Some(id) = self.thread_menu_id.clone() else {
-            return div().into_any_element();
-        };
-        let Some(thread) = self.threads.iter().find(|thread| thread.id == id) else {
-            return div().into_any_element();
-        };
+    /// The card's action menu (web `data-thread-menu`): the floating tone,
+    /// shelf actions, snooze times, then title and draft actions, split by
+    /// hairlines. Arrow keys, Home and End move between items; Tab and
+    /// Escape close it and return focus to its button.
+    fn render_thread_menu(&self, thread: &DesktopThread, cx: &Context<'_, Self>) -> AnyElement {
+        let id = thread.id.clone();
         let chat = thread.chat.read(cx);
         let streaming = chat.is_streaming;
-        let pinned = thread.pinned;
-        let settled = thread.settled;
         let now = EpochMs::now().as_millis();
         let snoozed = thread.snoozed_until_ms.is_some_and(|until| until > now);
         let show_discard = self.active_thread_id.as_deref() == Some(id.as_str())
             && !chat.input_state.read(cx).value().is_empty();
         let presets = snooze_presets(now, threads_ui::utc_offset_minutes_east());
+        // Focusable items in visual order, for the arrow keys.
+        let mut enabled: Vec<ThreadMenuItem> = Vec::new();
         let mut rows: Vec<AnyElement> = Vec::new();
-        rows.push(self.thread_menu_item(
-            "desktop-thread-menu-pin",
-            if pinned { "Unpin" } else { "Pin" },
-            false,
-            cx,
-            {
-                let id = id.clone();
-                move |this, _window, cx| {
-                    this.toggle_pinned_by_id(&id, cx);
-                    this.thread_menu_id = None;
-                    cx.notify();
-                }
-            },
-        ));
-        rows.push(self.thread_menu_item(
-            "desktop-thread-menu-settle",
-            if settled { "Unsettle" } else { "Settle" },
-            false,
-            cx,
-            {
-                let id = id.clone();
-                move |this, _window, cx| {
-                    this.toggle_settled_by_id(&id, cx);
-                    this.thread_menu_id = None;
-                    cx.notify();
-                }
-            },
-        ));
+        let mut push = |item: ThreadMenuItem,
+                        label: &'static str,
+                        on: bool,
+                        action: ThreadMenuAction,
+                        rows: &mut Vec<AnyElement>| {
+            if on {
+                enabled.push(item);
+            }
+            rows.push(self.thread_menu_item(item, label, on, &id, cx, action));
+        };
+        push(
+            ThreadMenuItem::Pin,
+            if thread.pinned { "Unpin" } else { "Pin" },
+            true,
+            menu_action(|this, id, _window, cx| {
+                this.toggle_pinned_by_id(id, cx);
+            }),
+            &mut rows,
+        );
+        push(
+            ThreadMenuItem::Settle,
+            if thread.settled { "Unsettle" } else { "Settle" },
+            true,
+            menu_action(|this, id, _window, cx| {
+                this.toggle_settled_by_id(id, cx);
+            }),
+            &mut rows,
+        );
         if snoozed {
-            rows.push(self.thread_menu_item(
-                "desktop-thread-menu-wake",
+            push(
+                ThreadMenuItem::Wake,
                 "Wake thread",
-                false,
-                cx,
+                true,
+                menu_action(|this, id, _window, cx| this.wake_thread_by_id(id, cx)),
+                &mut rows,
+            );
+        }
+        rows.push(thread_menu_separator());
+        // Soonest first: the relative hour, then the web's presets.
+        push(
+            ThreadMenuItem::InAnHour,
+            "In 1 hour",
+            true,
+            menu_action(|this, id, _window, cx| {
+                if let Some(until) = snooze_after(EpochMs::now().as_millis(), 1, SnoozeUnit::Hours)
                 {
-                    let id = id.clone();
-                    move |this, _window, cx| this.wake_thread_by_id(&id, cx)
-                },
-            ));
-        }
-        for preset in presets {
-            let until = preset.until_ms;
-            let item_id: &'static str = match preset.label {
-                "Later today" => "desktop-thread-menu-later",
-                "Tomorrow" => "desktop-thread-menu-tomorrow",
-                _ => "desktop-thread-menu-next-week",
-            };
-            rows.push(self.thread_menu_item(item_id, preset.label, false, cx, {
-                let id = id.clone();
-                move |this, _window, cx| this.snooze_thread_by_id(&id, until, cx)
-            }));
-        }
-        rows.push(
-            self.thread_menu_item("desktop-thread-menu-hour", "In 1 hour", false, cx, {
-                let id = id.clone();
-                move |this, _window, cx| {
-                    if let Some(until) =
-                        snooze_after(EpochMs::now().as_millis(), 1, SnoozeUnit::Hours)
-                    {
-                        this.snooze_thread_by_id(&id, until, cx);
-                    }
+                    this.snooze_thread_by_id(id, until, cx);
                 }
             }),
+            &mut rows,
         );
-        rows.push(self.thread_menu_item(
-            "desktop-thread-menu-regenerate",
+        for preset in presets {
+            let until = preset.until_ms;
+            let item = match preset.label {
+                "Later today" => ThreadMenuItem::LaterToday,
+                "Tomorrow" => ThreadMenuItem::Tomorrow,
+                _ => ThreadMenuItem::NextWeek,
+            };
+            push(
+                item,
+                preset.label,
+                true,
+                menu_action(move |this, id, _window, cx| this.snooze_thread_by_id(id, until, cx)),
+                &mut rows,
+            );
+        }
+        rows.push(thread_menu_separator());
+        push(
+            ThreadMenuItem::Regenerate,
             "Regenerate title",
-            streaming,
-            cx,
-            {
-                let id = id.clone();
-                move |this, _window, cx| this.regenerate_title_by_id(&id, cx)
-            },
-        ));
+            !streaming,
+            menu_action(|this, id, _window, cx| this.regenerate_title_by_id(id, cx)),
+            &mut rows,
+        );
         if show_discard {
-            rows.push(self.thread_menu_item(
-                "desktop-thread-menu-discard",
+            push(
+                ThreadMenuItem::Discard,
                 "Discard draft",
-                false,
-                cx,
-                move |this, window, cx| this.discard_active_draft(window, cx),
-            ));
+                true,
+                menu_action(|this, _id, window, cx| this.discard_active_draft(window, cx)),
+                &mut rows,
+            );
         }
         div()
             .id("desktop-thread-menu")
             .debug_selector(|| "desktop-thread-menu".to_string())
-            .absolute()
-            .left(px(8.0))
-            .bottom(px(52.0))
-            .w(px(208.0))
+            .key_context("ThreadMenu")
+            .w(px(THREAD_MENU_WIDTH_PX))
             .p_1()
             .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
-            .bg(theme::longan_900())
+            .bg(theme::longan_700())
             .border_1()
             .border_color(theme::ring_floating())
             .occlude()
@@ -1151,22 +1285,55 @@ impl Workspace {
             .flex_col()
             .role(Role::Menu)
             .aria_label("Thread actions")
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                let modifiers = event.keystroke.modifiers;
+                if modifiers.platform || modifiers.control || modifiers.alt || modifiers.function {
+                    return;
+                }
+                // Tab is routed by the workspace keystroke interceptor, which
+                // runs before gpui-component's Tab binding (`key_decision`).
+                let current = enabled
+                    .iter()
+                    .position(|item| this.thread_menu_items[item.slot()].is_focused(window));
+                let next = thread_menu_step(current, enabled.len(), event.keystroke.key.as_str());
+                if let Some(item) = next.and_then(|next| enabled.get(next)) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.thread_menu_items[item.slot()].focus(window, cx);
+                }
+            }))
             .children(rows)
             .into_any_element()
     }
 
+    /// One menu row (web: `min-h-10 rounded-seed px-2.5 text-label-sm`).
+    /// Choosing a row closes the menu and returns focus to the card's
+    /// button. Each item keeps its own focus slot, so a row that appears or
+    /// disables while the menu is open never shifts focus onto another action.
     fn thread_menu_item(
         &self,
-        id: &'static str,
+        item: ThreadMenuItem,
         label: &'static str,
-        disabled: bool,
+        enabled: bool,
+        thread_id: &str,
         cx: &Context<'_, Self>,
-        action: impl Fn(&mut Workspace, &mut Window, &mut Context<'_, Workspace>) + 'static,
+        action: ThreadMenuAction,
     ) -> AnyElement {
+        let id = item.id();
+        let thread_id = thread_id.to_string();
+        let run =
+            move |this: &mut Workspace, window: &mut Window, cx: &mut Context<'_, Workspace>| {
+                this.thread_menu_id = None;
+                action(this, &thread_id, window, cx);
+                this.focus_thread_menu_button(&thread_id, window, cx);
+                cx.notify();
+            };
+        let run_for_key = run.clone();
+        let focus = self.thread_menu_items[item.slot()].clone();
         div()
             .id(id)
             .debug_selector(move || id.to_string())
-            .min_h(px(40.0))
+            .min_h(px(THREAD_MENU_ROW_PX))
             .w_full()
             .px(px(10.0))
             .flex()
@@ -1179,19 +1346,111 @@ impl Workspace {
             .text_color(theme::rambutan_200())
             .role(Role::MenuItem)
             .aria_label(label)
-            .when(disabled, |el| el.opacity(0.5).cursor_not_allowed())
-            .when(!disabled, |el| {
-                el.cursor_pointer()
+            .when(!enabled, |el| el.opacity(0.5).cursor_not_allowed())
+            .when(enabled, |el| {
+                el.track_focus(&focus)
                     .tab_index(0)
+                    .cursor_pointer()
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .hover(|el| el.bg(theme::longan_800().opacity(0.6)))
-                    .on_click(cx.listener(move |this, _ev, window, cx| {
+                    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
                         cx.stop_propagation();
-                        action(this, window, cx);
+                        if !event.is_keyboard() {
+                            run(this, window, cx);
+                        }
+                    }))
+                    // Keys stop here: the menu hangs from its card, whose
+                    // Enter would open the thread.
+                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            run_for_key(this, window, cx);
+                        }
                     }))
             })
             .child(label)
             .into_any_element()
+    }
+
+    /// Open thread `id`'s menu with its first item focused, or close it when
+    /// it is already open.
+    pub(super) fn toggle_thread_menu(
+        &mut self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.thread_menu_id.as_deref() == Some(id) {
+            self.close_thread_menu(window, cx);
+            return;
+        }
+        self.thread_menu_id = Some(id.to_string());
+        self.thread_menu_items[ThreadMenuItem::Pin.slot()].focus(window, cx);
+        cx.notify();
+    }
+
+    /// Whether thread `id`'s card is in the shown sidebar list this frame
+    /// (sidebar shown; folds, filter and search applied).
+    fn thread_card_shown(&self, id: &str, compact: bool, cx: &App) -> bool {
+        let sidebar_shown = if compact {
+            self.compact_sidebar_open
+        } else {
+            self.sidebar_visible
+        };
+        sidebar_shown
+            && viewport::sidebar_rows(self, &self.sidebar_shelves(cx), cx)
+                .into_iter()
+                .any(|row| {
+                    matches!(row, viewport::SidebarRow::Thread { index, .. }
+                        if self.threads[index].id == id)
+                })
+    }
+
+    /// Whether the open thread menu's card is shown. The menu draws with it.
+    pub(super) fn thread_menu_card_shown(&self, compact: bool, cx: &App) -> bool {
+        self.thread_menu_id
+            .as_deref()
+            .is_some_and(|id| self.thread_card_shown(id, compact, cx))
+    }
+
+    /// Whether keyboard focus is on one of the thread menu's items.
+    pub(super) fn thread_menu_has_focus(&self, window: &Window) -> bool {
+        self.thread_menu_items
+            .iter()
+            .any(|item| item.is_focused(window))
+    }
+
+    /// Close the open thread menu and return focus to its card's button.
+    pub(super) fn close_thread_menu(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if let Some(id) = self.thread_menu_id.take() {
+            self.focus_thread_menu_button(&id, window, cx);
+            cx.notify();
+        }
+    }
+
+    /// Focus thread `id`'s "…" button. When an action moved the card out of
+    /// the list (into a closed fold, say), focus the workspace instead: a
+    /// handle that no longer draws would take every shortcut down with it.
+    pub(super) fn focus_thread_menu_button(
+        &self,
+        id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let button = self
+            .thread_card_shown(id, Self::compact_layout(window), cx)
+            .then(|| self.threads.iter().find(|thread| thread.id == id))
+            .flatten()
+            .and_then(|thread| {
+                self.sidebar_viewport
+                    .borrow()
+                    .menu_focus(thread.chat.entity_id())
+            });
+        match button {
+            Some(button) => button.focus(window, cx),
+            None => self.workspace_focus_handle.focus(window, cx),
+        }
     }
 
     fn render_sidebar_nav_icon(

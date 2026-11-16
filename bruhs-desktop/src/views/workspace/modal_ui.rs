@@ -48,6 +48,7 @@ impl Workspace {
         self.palette_mode = PaletteMode::Commands;
         self.task_create_error = None;
         self.task_detail_menu_open = None;
+        self.close_sidebar_menus();
     }
 
     pub(super) fn focus_first_modal_tab_stop(
@@ -124,6 +125,7 @@ impl Workspace {
     /// or project picker it was started from.
     pub(super) fn open_overlay(&mut self, overlay: Overlay) {
         self.cancel_picker_tasks();
+        self.close_sidebar_menus();
         self.modal_scroll.set_offset(Point::default());
         self.top_layer = None;
         self.overlay = Some(overlay);
@@ -133,8 +135,15 @@ impl Workspace {
     /// is not a form behind which either belongs, so it closes.
     pub(super) fn open_top_layer(&mut self, top_layer: TopLayer) {
         self.cancel_picker_tasks();
+        self.close_sidebar_menus();
         self.dismiss_overlay(|overlay| matches!(overlay, Overlay::Settings { .. }));
         self.top_layer = Some(top_layer);
+    }
+
+    /// A dialog or the command bar takes over: the thread menu (and its
+    /// backdrop) must not stay above it.
+    fn close_sidebar_menus(&mut self) {
+        self.thread_menu_id = None;
     }
 
     /// Closes the dialog if `is_open` says it is the one showing.
@@ -230,17 +239,23 @@ impl Workspace {
     pub(super) fn close_overlays(
         &mut self,
         _: &CloseOverlays,
-        _window: &mut Window,
+        window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
         let had_overlay = self.overlay_open();
+        let thread_menu = self.thread_menu_id.clone();
+        let had_menu = thread_menu.is_some();
         self.close_transient_surfaces();
+        // A menu returns focus to the button that opened it.
+        if let Some(id) = thread_menu {
+            self.focus_thread_menu_button(&id, window, cx);
+        }
         if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
             chat.update(cx, |chat, cx| chat.close_composer_menus(cx));
         }
         // Nothing was open, so the focused control keeps Escape: a speaker
         // rename, a text field, or the terminal.
-        if !had_overlay {
+        if !had_overlay && !had_menu {
             cx.propagate();
         }
         cx.notify();

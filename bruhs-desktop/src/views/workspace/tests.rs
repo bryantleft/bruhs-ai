@@ -2589,6 +2589,267 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     assert_rendered_bounds(cx, "desktop-project-picker-dialog");
 }
 
+/// A workspace with two sidebar threads ("General chat" active, "Alpha
+/// session"), Escape bound like the app. Returns the two thread ids.
+fn thread_menu_workspace(
+    cx: &mut gpui::TestAppContext,
+) -> (
+    Entity<Workspace>,
+    &mut gpui::VisualTestContext,
+    String,
+    String,
+) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        cx.bind_keys([
+            gpui::KeyBinding::new("escape", super::CloseOverlays, None),
+            gpui::KeyBinding::new("cmd-k", FocusCommandBar, None),
+        ]);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        theme::apply_bruhs_theme(cx);
+        cx.set_global(DesktopState::new().expect("desktop state should initialize"));
+    });
+    let workspace_cell: Rc<RefCell<Option<Entity<Workspace>>>> = Rc::new(RefCell::new(None));
+    let workspace_for_window = workspace_cell.clone();
+    let (_root, cx) = cx.add_window_view(|window, cx| {
+        let workspace = cx.new(|cx| Workspace::new(window, cx));
+        *workspace_for_window.borrow_mut() = Some(workspace.clone());
+        gpui_component::Root::new(workspace, window, cx)
+    });
+    let workspace = workspace_cell
+        .borrow()
+        .clone()
+        .expect("workspace entity should be captured");
+    let (general_id, code_id) = workspace.update_in(cx, |workspace, window, cx| {
+        workspace.active_view = AppView::Chat;
+        workspace.sidebar_visible = true;
+        let general = Workspace::create_thread_with_title(
+            String::new(),
+            String::new(),
+            workspace.current_model.clone(),
+            workspace.permission_mode,
+            "General chat",
+            window,
+            cx,
+        );
+        let code = Workspace::create_thread_with_title(
+            "Alpha".to_string(),
+            "/tmp/alpha".to_string(),
+            workspace.current_model.clone(),
+            workspace.permission_mode,
+            "Alpha session",
+            window,
+            cx,
+        );
+        let ids = (general.id.clone(), code.id.clone());
+        workspace.active_thread_id = Some(general.id.clone());
+        workspace.threads = vec![general, code];
+        cx.notify();
+        ids
+    });
+    cx.run_until_parked();
+    (workspace, cx, general_id, code_id)
+}
+
+/// A full key press. GPUI clicks a focused control on key up, which
+/// `simulate_keystrokes` never sends.
+fn press_key(cx: &mut gpui::VisualTestContext, key: &str) {
+    let keystroke = gpui::Keystroke::parse(key).expect("test keystroke should parse");
+    cx.simulate_event(gpui::KeyDownEvent {
+        keystroke: keystroke.clone(),
+        is_held: false,
+        prefer_character_input: false,
+    });
+    cx.simulate_event(gpui::KeyUpEvent { keystroke });
+    cx.run_until_parked();
+}
+
+fn open_thread_menu_by_pointer(cx: &mut gpui::VisualTestContext, thread_id: &str) {
+    hover_debug_selector(cx, thread_row_debug_selector(thread_id));
+    cx.run_until_parked();
+    click_debug_selector(cx, thread_actions_debug_selector(thread_id));
+    cx.run_until_parked();
+}
+
+/// The card's "…" menu opens under the button that opened it (web: the
+/// button's left edge, 4 px below it), and Escape closes it again.
+#[gpui::test]
+fn desktop_thread_menu_should_open_under_its_trigger_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, general_id, code_id) = thread_menu_workspace(cx);
+    for id in [&general_id, &code_id] {
+        open_thread_menu_by_pointer(cx, id);
+        workspace.update_in(cx, |workspace, _window, _cx| {
+            assert_eq!(workspace.thread_menu_id.as_deref(), Some(id.as_str()));
+        });
+        let trigger = rendered_bounds(cx, thread_actions_debug_selector(id));
+        let menu = rendered_bounds(cx, "desktop-thread-menu");
+        assert_eq!(
+            menu.origin,
+            gpui::point(trigger.left(), trigger.bottom() + gpui::px(4.0)),
+            "the menu should hang 4 px under its trigger ({trigger:?}), not {menu:?}"
+        );
+        // Shelf actions, then snooze times soonest first, then the title.
+        let tops: Vec<_> = [
+            "desktop-thread-menu-pin",
+            "desktop-thread-menu-settle",
+            "desktop-thread-menu-hour",
+            "desktop-thread-menu-later",
+            "desktop-thread-menu-tomorrow",
+            "desktop-thread-menu-next-week",
+            "desktop-thread-menu-regenerate",
+        ]
+        .into_iter()
+        .map(|selector| rendered_bounds(cx, selector).top())
+        .collect();
+        assert!(tops.windows(2).all(|pair| pair[0] < pair[1]), "{tops:?}");
+
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, _window, _cx| {
+            assert_eq!(workspace.thread_menu_id, None, "Escape closes the menu");
+        });
+        assert_no_rendered_bounds(cx, "desktop-thread-menu");
+    }
+}
+
+/// Keyboard: the menu takes focus, arrows move through it, Escape hands
+/// focus back to "…", Tab moves on from it, and Enter runs an item. A click
+/// outside closes it without reaching what is underneath.
+#[gpui::test]
+fn desktop_thread_menu_should_keep_focus_and_dismiss_like_a_menu(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, general_id, code_id) = thread_menu_workspace(cx);
+    let entity = workspace.update_in(cx, |workspace, _window, _cx| {
+        workspace.threads[0].chat.entity_id()
+    });
+    // The focused item's slot: Pin 0, Settle 1, Wake 2, In 1 hour 3, Later
+    // today 4, Tomorrow 5, Next week 6, Regenerate title 7, Discard draft 8.
+    let item_focused = |workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext| {
+        workspace.update_in(cx, |workspace, window, _cx| {
+            workspace
+                .thread_menu_items
+                .iter()
+                .position(|handle| handle.is_focused(window))
+        })
+    };
+    // Which of the card's targets has focus: card 0, "…" 1, delete 2.
+    let row_focused = |workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext| {
+        workspace.update_in(cx, |workspace, window, _cx| {
+            workspace
+                .sidebar_viewport
+                .borrow()
+                .row_targets(entity)
+                .expect("the card is listed")
+                .iter()
+                .position(|handle| handle.is_focused(window))
+        })
+    };
+
+    open_thread_menu_by_pointer(cx, &general_id);
+    assert_eq!(item_focused(&workspace, cx), Some(0), "Pin takes focus");
+    cx.simulate_keystrokes("down");
+    assert_eq!(item_focused(&workspace, cx), Some(1));
+    cx.simulate_keystrokes("up up");
+    assert_eq!(item_focused(&workspace, cx), Some(7), "Up from Pin wraps");
+    cx.simulate_keystrokes("home");
+    assert_eq!(item_focused(&workspace, cx), Some(0));
+    cx.simulate_keystrokes("end");
+    assert_eq!(item_focused(&workspace, cx), Some(7));
+
+    cx.simulate_keystrokes("escape");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.thread_menu_id, None, "Escape closes the menu");
+    });
+    assert_eq!(row_focused(&workspace, cx), Some(1), "Escape returns to …");
+
+    // Enter on the focused button opens the menu; Tab closes it and moves
+    // on to delete, Shift+Tab back to the card.
+    press_key(cx, "enter");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(
+            workspace.thread_menu_id.as_deref(),
+            Some(general_id.as_str())
+        );
+    });
+    assert_eq!(item_focused(&workspace, cx), Some(0));
+    press_key(cx, "tab");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.thread_menu_id, None, "Tab closes the menu");
+    });
+    assert_eq!(row_focused(&workspace, cx), Some(2), "Tab moves on from …");
+    open_thread_menu_by_pointer(cx, &general_id);
+    press_key(cx, "shift-tab");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.thread_menu_id, None);
+    });
+    assert_eq!(row_focused(&workspace, cx), Some(0), "Shift+Tab moves back");
+
+    // Enter on Pin pins and hands focus back to "…".
+    open_thread_menu_by_pointer(cx, &general_id);
+    press_key(cx, "enter");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.thread_menu_id, None);
+        assert!(workspace.threads[0].pinned, "Enter on Pin pins the thread");
+    });
+    assert_eq!(row_focused(&workspace, cx), Some(1), "focus returns to …");
+
+    // Settle moves the card into the Settled fold. Wherever focus lands,
+    // workspace shortcuts keep working.
+    open_thread_menu_by_pointer(cx, &general_id);
+    cx.simulate_keystrokes("down");
+    press_key(cx, "enter");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.thread_menu_id, None);
+        assert!(workspace.threads[0].settled, "Enter on Settle settles it");
+    });
+    cx.simulate_keystrokes("cmd-k");
+    assert_rendered_bounds(cx, "desktop-command-bar");
+    cx.simulate_keystrokes("escape");
+    assert_no_rendered_bounds(cx, "desktop-command-bar");
+
+    // A shortcut that opens another surface closes the menu and its
+    // backdrop, so neither sits above the command bar.
+    open_thread_menu_by_pointer(cx, &code_id);
+    cx.simulate_keystrokes("cmd-k");
+    assert_rendered_bounds(cx, "desktop-command-bar");
+    assert_no_rendered_bounds(cx, "desktop-thread-menu");
+    assert_no_rendered_bounds(cx, "desktop-thread-menu-backdrop");
+    cx.simulate_keystrokes("escape");
+
+    // A click outside lands on the backdrop: the menu closes and the button
+    // under the pointer (new thread) does not run.
+    open_thread_menu_by_pointer(cx, &code_id);
+    assert_rendered_bounds(cx, "desktop-thread-menu-backdrop");
+    let threads_before = workspace.update_in(cx, |workspace, _window, _cx| workspace.threads.len());
+    click_debug_selector(cx, "desktop-sidebar-new-thread");
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(
+            workspace.thread_menu_id, None,
+            "the backdrop closes the menu"
+        );
+        assert_eq!(
+            workspace.threads.len(),
+            threads_before,
+            "the click does not reach the button under the backdrop"
+        );
+    });
+    assert_no_rendered_bounds(cx, "desktop-thread-menu-backdrop");
+
+    // A menu whose card goes away (here ⌘B hides the sidebar) takes its
+    // backdrop along, so no invisible layer swallows the next click.
+    open_thread_menu_by_pointer(cx, &code_id);
+    assert_rendered_bounds(cx, "desktop-thread-menu-backdrop");
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.sidebar_visible = false;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-thread-menu-backdrop");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.thread_menu_id, None);
+    });
+}
+
 #[gpui::test]
 fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
@@ -4103,6 +4364,13 @@ fn task_detail_project_option_debug_selector(project_id: &str) -> &'static str {
 fn thread_row_debug_selector(thread_id: &str) -> &'static str {
     leaked_debug_selector(format!(
         "desktop-thread-row-{}",
+        super::element_key(thread_id)
+    ))
+}
+
+fn thread_actions_debug_selector(thread_id: &str) -> &'static str {
+    leaked_debug_selector(format!(
+        "desktop-thread-actions-{}",
         super::element_key(thread_id)
     ))
 }

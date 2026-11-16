@@ -82,6 +82,22 @@ impl Workspace {
         }
     }
 
+    /// Thread of the last card in the sidebar list, folds included.
+    fn smoke_bottom_card_id(&self, cx: &App) -> Option<String> {
+        let shelves = self.sidebar_shelves(cx);
+        let bottom = [
+            (&shelves.settled, self.sidebar_settled_open),
+            (&shelves.snoozed, self.sidebar_snoozed_open),
+            (&shelves.working, self.sidebar_working_open),
+            (&shelves.active, true),
+            (&shelves.pinned, true),
+        ]
+        .into_iter()
+        .find_map(|(threads, open)| open.then(|| threads.last()).flatten())
+        .map(|thread| thread.id.clone());
+        bottom
+    }
+
     /// `BRUHS_DESKTOP_SMOKE_SCENE`: put the window in one named state for a
     /// comparison screenshot. Returns false for an unknown scene.
     pub fn smoke_scene(
@@ -141,6 +157,18 @@ impl Workspace {
                 self.toggle_date_picker(date_picker_ui::DatePickerTarget::EventStart, window, cx);
             }
             "settings" => self.open_settings(&OpenSettings, window, cx),
+            // The active card's menu, or the bottom card's (opens upward).
+            "thread-menu" | "thread-menu-last" => {
+                let id = if scene == "thread-menu" {
+                    self.active_thread_id.clone()
+                } else {
+                    self.smoke_bottom_card_id(cx)
+                };
+                let Some(id) = id else {
+                    return false;
+                };
+                self.toggle_thread_menu(&id, window, cx);
+            }
             "settings-roles" => {
                 // The role editor with a role open, scrolled into view, for
                 // a comparison with the web's. Use a scratch state file: the
