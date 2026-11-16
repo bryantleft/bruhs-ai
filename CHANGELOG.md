@@ -70,6 +70,11 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - The dot Bruh in Settings → About now places its eyes and mouth exactly
   where the logo has them, at every size.
 
+### Fixed
+
+- Fixed the landing page's tour progress indicators cutting dots in half.
+  Each tab now fills with complete dots, centered under its label.
+
 ## [0.1.1] - 2026-11-09
 
 This release fixes the calendar around daylight saving time and tidies the
