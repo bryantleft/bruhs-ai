@@ -11,7 +11,7 @@ pub fn WorkflowReview(workflow_id: String) -> impl IntoView {
         <details class="w-full min-w-0" on:toggle=move |event: web_sys::Event| {
             opened.set(event.target().and_then(|target| target.dyn_into::<web_sys::HtmlDetailsElement>().ok()).is_some_and(|details| details.open()));
         }>
-            <summary class="flex min-h-11 items-center text-label-sm text-rambutan-400 cursor-pointer">"Review workflow"</summary>
+            <summary class="bruhs-control flex min-h-control items-center text-label-sm text-rambutan-400 cursor-pointer">"Review workflow"</summary>
             <Show when=move || opened.get()>
                 {move || automation.with(|state| workflow_id.with_value(|id| {
                     state.workflows.iter().find(|workflow| &workflow.id == id).map(|workflow| {

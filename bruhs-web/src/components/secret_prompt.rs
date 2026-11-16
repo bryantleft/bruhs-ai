@@ -104,7 +104,7 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
     });
     // JSON preserves argv boundaries and escapes control characters in the review.
     let command = serde_json::to_string(&request.operation.command).unwrap_or_default();
-    let button = "min-h-11 rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50 cursor-pointer sm:min-h-10";
+    let button = "bruhs-control min-h-control rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50 cursor-pointer";
     view! {
         <section aria-label="Private credential request" class="mx-auto mb-3 max-h-[60vh] w-full max-w-3xl overflow-y-auto rounded-grape bg-longan-900 inset-ring inset-ring-blueberry-400/30 p-3 text-body-sm text-rambutan-200">
             <div class="flex items-center gap-2 font-medium text-rambutan-100">
@@ -133,7 +133,7 @@ fn SecretPrompt(request: SecretRequest) -> impl IntoView {
                         placeholder=move || if saved.get() { "Enter a replacement or use saved" } else { "Enter privately" }
                         disabled=move || busy.get()
                         on:keydown=move |event| event.stop_propagation()
-                        class="min-h-10 min-w-0 flex-1 rounded-seed bg-longan-950 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-longan-700 focus:outline focus:outline-2 focus:outline-persimmon-400"
+                        class="min-h-control min-w-0 flex-1 rounded-seed bg-longan-950 px-3 text-body-sm text-rambutan-100 inset-ring inset-ring-longan-700 focus:outline focus:outline-2 focus:outline-persimmon-400"
                     />
                     <button type="button" class=button disabled=move || busy.get() aria-pressed=move || revealed.get() on:click=move |_| revealed.update(|value| *value = !*value)>
                         {move || if revealed.get() { "Hide" } else { "Show" }}

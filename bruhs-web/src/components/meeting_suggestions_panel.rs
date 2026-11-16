@@ -6,7 +6,7 @@ use leptos::prelude::*;
 
 use crate::meeting_suggestions::MeetingSuggestions;
 
-const ACTION: &str = "min-h-11 sm:min-h-[28px] rounded-seed px-2 text-label-sm text-rambutan-200 hover:bg-longan-800 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400";
+const ACTION: &str = "bruhs-control min-h-control-sm rounded-seed px-2 text-label-sm text-rambutan-200 hover:bg-longan-800 disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400";
 
 /// "2 new suggestions", for the collapsed pill. None when there is nothing new.
 pub fn unseen_label(count: usize) -> Option<String> {

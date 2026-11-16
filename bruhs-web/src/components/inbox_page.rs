@@ -31,7 +31,7 @@ pub fn InboxPage(#[prop(optional)] conversation_id: Option<String>) -> impl Into
             <Show when=move || executor.load_error.get().is_some()>
                 <section aria-label="Inbox loading status" class="shrink-0 border-b border-longan-800 px-4 py-3 text-body-sm text-rambutan-300">
                     <p role="alert">"Local records could not be loaded. Existing storage was left unchanged; conversation changes made here are kept."</p>
-                    <button type="button" class="mt-2 min-h-11 rounded-grape bg-longan-800 px-3 py-2 text-label text-rambutan-200 hover:bg-longan-700 disabled:opacity-40 cursor-pointer"
+                    <button type="button" class="bruhs-control mt-2 min-h-control rounded-grape bg-longan-800 px-3 py-2 text-label text-rambutan-200 hover:bg-longan-700 disabled:opacity-40 cursor-pointer"
                         disabled=move || executor.loading.get()
                         on:click=move |_| executor.load()>"Retry loading records"</button>
                 </section>

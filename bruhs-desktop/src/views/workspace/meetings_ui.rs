@@ -594,8 +594,8 @@ impl Workspace {
                                 ButtonState::disabled_if(hub.capture_action_in_flight()),
                             )
                             .debug_selector(|| "desktop-local-focus-toggle".into())
-                            .min_h(px(44.0))
-                            .min_w(px(44.0))
+                            .min_h(px(theme::CONTROL_PX))
+                            .min_w(px(theme::CONTROL_PX))
                             .aria_label(if enabled {
                                 "Turn off local app context"
                             } else {
@@ -2130,7 +2130,7 @@ impl Workspace {
                     .child(
                         div()
                             .w_full()
-                            .h(px(40.0))
+                            .h(px(theme::CONTROL_PX))
                             .rounded(px(8.0))
                             .bg(theme::control_surface())
                             .border_1()

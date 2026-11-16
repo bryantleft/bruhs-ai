@@ -56,7 +56,7 @@ fn Field(
 
 #[component]
 fn Check(label: &'static str, value: RwSignal<bool>) -> impl IntoView {
-    view! { <label class="flex min-h-11 cursor-pointer items-center gap-2 text-label-sm text-rambutan-300 sm:min-h-[32px]">
+    view! { <label class="bruhs-control flex min-h-control cursor-pointer items-center gap-2 text-label-sm text-rambutan-300">
         <input type="checkbox" class="size-4 accent-persimmon-500" prop:checked=move || value.get() on:change=move |event| value.set(event_target_checked(&event)) />
         <span>{label}</span>
     </label> }

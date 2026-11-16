@@ -117,7 +117,7 @@ pub fn ThreadHistoryStatus() -> impl IntoView {
                 class="flex shrink-0 flex-wrap items-center gap-2 border-b border-longan-700 px-3 py-2 text-body-sm text-rambutan-300 sm:px-5">
                 <span>{reason}</span>
                 <Show when=move || history.0.with(|state| matches!(state, State::Failed(_)))>
-                    <button type="button" class="min-h-11 rounded-grape px-2 text-label-sm text-persimmon-300 hover:bg-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
+                    <button type="button" class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-persimmon-300 hover:bg-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
                         on:click=move |_| {
                             if let Some(id) = active.get_untracked() {
                                 crate::state::activate_thread(history, active, id, set_active, messages, turns, unread);

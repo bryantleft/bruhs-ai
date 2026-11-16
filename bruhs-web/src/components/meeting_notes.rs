@@ -55,7 +55,7 @@ pub fn MeetingNotes() -> impl IntoView {
                 <p role="status" class="mt-3 text-body-sm text-rambutan-400">"Loading local meeting notes…"</p>
                 {move || executor.load_error.get().map(|message| view! {
                     <p role="alert" class="mt-2 text-body-sm text-rambutan-200">{message}</p>
-                    <button type="button" class="min-h-11 rounded-grape px-3 py-2 text-label-sm text-persimmon-300"
+                    <button type="button" class="bruhs-control min-h-control rounded-grape px-3 py-2 text-label-sm text-persimmon-300"
                         on:click=move |_| executor.load()>"Retry loading notes"</button>
                 })}
             }>
@@ -66,7 +66,7 @@ pub fn MeetingNotes() -> impl IntoView {
                     <For each=move || rows.get() key=|(id, title)| (id.clone(), title.clone()) children=move |(id, title)| {
                         let selected_id = id.clone();
                         view! {
-                            <button type="button" class="block min-h-11 w-full rounded-grape px-3 py-2 text-left text-body-sm text-rambutan-200 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 break-words [overflow-wrap:anywhere]"
+                            <button type="button" class="bruhs-control block min-h-control w-full rounded-grape px-3 py-2 text-left text-body-sm text-rambutan-200 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 break-words [overflow-wrap:anywhere]"
                                 aria-pressed=move || selected.with(|current| if current.as_ref() == Some(&selected_id) { "true" } else { "false" })
                                 on:click=move |_| selected.set(Some(id.clone()))>{title}</button>
                         }
@@ -74,11 +74,11 @@ pub fn MeetingNotes() -> impl IntoView {
                 </div>
                 <Show when=move || { total.get() > PAGE_SIZE }>
                     <nav aria-label="Meeting notes pagination" class="mt-2 flex flex-wrap items-center gap-2 text-label-sm text-rambutan-300">
-                        <button type="button" class="min-h-11 rounded-grape px-3 py-2 hover:bg-longan-800 disabled:opacity-40"
+                        <button type="button" class="bruhs-control min-h-control rounded-grape px-3 py-2 hover:bg-longan-800 disabled:opacity-40"
                             disabled=move || start.get() == 0
                             on:click=move |_| page.set((start.get_untracked() / PAGE_SIZE).saturating_sub(1))>"Previous notes"</button>
                         <span role="status">{move || format!("{} to {} of {}", start.get() + 1, (start.get() + PAGE_SIZE).min(total.get()), total.get())}</span>
-                        <button type="button" class="min-h-11 rounded-grape px-3 py-2 hover:bg-longan-800 disabled:opacity-40"
+                        <button type="button" class="bruhs-control min-h-control rounded-grape px-3 py-2 hover:bg-longan-800 disabled:opacity-40"
                             disabled=move || { start.get() + PAGE_SIZE >= total.get() }
                             on:click=move |_| page.set(start.get_untracked() / PAGE_SIZE + 1)>"Next notes"</button>
                     </nav>
@@ -88,7 +88,7 @@ pub fn MeetingNotes() -> impl IntoView {
                 <section aria-label="Meeting note content" tabindex="0" class="mt-4 max-h-96 overflow-y-auto whitespace-pre-wrap rounded-grape border border-longan-800 p-3 text-body-sm text-rambutan-200 [overflow-wrap:anywhere]">
                     {text}
                 </section>
-                <button type="button" class="mt-2 min-h-11 rounded-grape px-3 py-2 text-label-sm text-persimmon-300 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                <button type="button" class="bruhs-control mt-2 min-h-control rounded-grape px-3 py-2 text-label-sm text-persimmon-300 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400"
                     on:click=move |_| { if let Some(note_id) = selected.get_untracked() {
                         set_active_view.set(crate::state::AppView::MeetingNoteDetail { note_id });
                     } }>"Open note"</button>

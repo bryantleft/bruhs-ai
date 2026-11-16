@@ -1259,7 +1259,7 @@ fn ErrorRow(
             {can_retry.then(|| view! {
                 <button
                     type="button"
-                    class="inline-flex min-h-11 shrink-0 items-center gap-1 rounded-seed px-2 text-lychee-100 transition-colors hover:bg-lychee-500/20 sm:min-h-[24px]"
+                    class="bruhs-control inline-flex min-h-control-xs shrink-0 items-center gap-1 rounded-seed px-2 text-lychee-100 transition-colors hover:bg-lychee-500/20"
                     on:click=move |_| {
                         if let Some(p) = prompt.get_value() {
                             on_retry.run((mid.get_value(), p));

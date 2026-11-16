@@ -238,13 +238,13 @@ pub fn AutomationsPage() -> impl IntoView {
                                     let review_id = job.workflow_id.clone();
                                     let actions = if status == BackgroundJobStatus::Running && next_step < total {
                                         view! {
-                                            <button type="button" class="min-h-11 min-w-11 text-button text-persimmon-300 hover:text-persimmon-200 cursor-pointer" on:click=move |_| run_next_step(run_id.clone())>"Run next step"</button>
-                                            <button type="button" disabled=auto_run class="min-h-11 min-w-11 text-button text-persimmon-300 disabled:opacity-40 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.enable_background(&background_id); })>"Run in background"</button>
-                                            <button type="button" class="min-h-11 min-w-11 text-button text-rambutan-400 hover:text-rambutan-200 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.pause_job(&pause_id, crate::clock::now_ms()); })>"Pause"</button>
+                                            <button type="button" class="bruhs-control min-h-control min-w-control text-button text-persimmon-300 hover:text-persimmon-200 cursor-pointer" on:click=move |_| run_next_step(run_id.clone())>"Run next step"</button>
+                                            <button type="button" disabled=auto_run class="bruhs-control min-h-control min-w-control text-button text-persimmon-300 disabled:opacity-40 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.enable_background(&background_id); })>"Run in background"</button>
+                                            <button type="button" class="bruhs-control min-h-control min-w-control text-button text-rambutan-400 hover:text-rambutan-200 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.pause_job(&pause_id, crate::clock::now_ms()); })>"Pause"</button>
                                         }.into_any()
                                     } else if status == BackgroundJobStatus::Paused {
                                         view! {
-                                            <button type="button" class="min-h-11 min-w-11 text-button text-persimmon-300 hover:text-persimmon-200 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.resume_job(&resume_id, crate::clock::now_ms()); })>"Resume"</button>
+                                            <button type="button" class="bruhs-control min-h-control min-w-control text-button text-persimmon-300 hover:text-persimmon-200 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.resume_job(&resume_id, crate::clock::now_ms()); })>"Resume"</button>
                                         }.into_any()
                                     } else {
                                         view! { <span class="text-label-sm text-pandan-300">"Checkpointed"</span> }.into_any()

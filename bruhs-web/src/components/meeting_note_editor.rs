@@ -55,15 +55,15 @@ pub fn MeetingNoteEditor() -> impl IntoView {
                     <Show when=move || editor.draft.with(|draft| draft.as_ref().is_some_and(|draft| draft.recording_id.is_some()))>
                         <p class="text-body-sm text-rambutan-300 [overflow-wrap:anywhere]">{move || editor.draft.with(|draft| draft.as_ref().and_then(|draft| draft.recording_id.as_ref()).map(|id| format!("Linked recording: {id}")).unwrap_or_default())}</p>
                         <button type="button" disabled=move || editor.saving.get()
-                            class="min-h-11 rounded-grape px-3 py-2 text-label-sm text-rambutan-300 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                            class="bruhs-control min-h-control rounded-grape px-3 py-2 text-label-sm text-rambutan-300 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400"
                             on:click=move |_| { if !editor.saving.get_untracked() {
                                 editor.draft.update(|draft| { if let Some(draft) = draft { draft.recording_id = None; } }); changed();
                             } }>"Remove recording link"</button>
                     </Show>
                     <button type="submit" disabled=move || editor.saving.get()
-                        class="min-h-11 rounded-grape bg-persimmon-500 px-3 py-2 text-label-sm text-longan-950 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400">"Save note"</button>
+                        class="bruhs-control min-h-control rounded-grape bg-persimmon-500 px-3 py-2 text-label-sm text-longan-950 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400">"Save note"</button>
                     <button type="button" disabled=move || editor.saving.get() on:click=move |_| editor.discard()
-                        class="min-h-11 rounded-grape px-3 py-2 text-label-sm text-rambutan-300 hover:bg-longan-800 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400">"Close editor / discard unsaved changes"</button>
+                        class="bruhs-control min-h-control rounded-grape px-3 py-2 text-label-sm text-rambutan-300 hover:bg-longan-800 disabled:opacity-50 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400">"Close editor / discard unsaved changes"</button>
                 </div>
                 {move || editor.message.get().map(|message| view! {
                     <p role=move || if editor.failed.get() { "alert" } else { "status" }

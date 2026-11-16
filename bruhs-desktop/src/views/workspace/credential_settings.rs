@@ -209,7 +209,7 @@ impl CredentialSettings {
             WebButtonSize::Small,
             ButtonState::disabled_if(self.busy),
         )
-        .min_h(px(40.0))
+        .min_h(px(theme::CONTROL_PX))
         .aria_label(format!(
             "{} credential {}",
             if delete { "Delete" } else { "Replace" },
@@ -294,7 +294,7 @@ impl CredentialSettings {
         panel = match editor {
             Editor::Replace { input, .. } => panel.child("New credential value").child(
                 Input::new(input)
-                    .h(px(40.0))
+                    .h(px(theme::CONTROL_PX))
                     .aria_label("New credential value")
                     .content_type(InputContentType::Password)
                     .disabled(self.busy),
@@ -314,7 +314,7 @@ impl CredentialSettings {
                             WebButtonSize::Small,
                             ButtonState::disabled_if(self.busy),
                         )
-                        .min_h(px(40.0))
+                        .min_h(px(theme::CONTROL_PX))
                         .aria_label(if matches!(editor, Editor::Delete(_)) {
                             "Delete credential"
                         } else {
@@ -342,7 +342,7 @@ impl CredentialSettings {
                             WebButtonSize::Small,
                             ButtonState::disabled_if(self.busy),
                         )
-                        .min_h(px(40.0))
+                        .min_h(px(theme::CONTROL_PX))
                         .aria_label("Cancel credential change")
                         .child("Cancel")
                         .on_click(cx.listener(|this, _, _, cx| {
@@ -381,8 +381,8 @@ impl Render for CredentialSettings {
             .collect();
         div().id("credential-manager").p_4().min_w_0().font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200()).flex().flex_col().gap_3()
             .child(self.connections.clone())
-            .child(Input::new(&self.search).h(px(40.0)).aria_label("Search saved credentials"))
-            .child(web_button("refresh-credentials", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(self.busy)).min_h(px(40.0)).aria_label("Refresh credentials").child("Refresh credentials")
+            .child(Input::new(&self.search).h(px(theme::CONTROL_PX)).aria_label("Search saved credentials"))
+            .child(web_button("refresh-credentials", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(self.busy)).min_h(px(theme::CONTROL_PX)).aria_label("Refresh credentials").child("Refresh credentials")
                 .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
                 .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| { if is_web_button_activation_key(event.keystroke.key.as_str()) { cx.stop_propagation(); this.refresh(cx); } })))
             .child("Values are never displayed. Replace a key to rotate it. Deleting removes the saved copy; running commands may finish with the value they already received.")

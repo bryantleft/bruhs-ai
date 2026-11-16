@@ -74,7 +74,7 @@ pub fn WhisperModelSettings() -> impl IntoView {
                     placeholder="Model ID from your server"
                     prop:value=move || transcription.get().remote_model
                     on:input=move |event| transcription.update(|settings| settings.remote_model = event_target_value(&event))
-                    class="min-h-10 w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm inset-ring inset-ring-longan-700 focus:outline focus:outline-persimmon-400 sm:w-80"
+                    class="min-h-control w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm inset-ring inset-ring-longan-700 focus:outline focus:outline-persimmon-400 sm:w-80"
                 />
             </SettingsRow>
             {move || transcription.get().validate().err().map(|error| view! {

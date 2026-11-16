@@ -29,7 +29,7 @@ impl Workspace {
             ButtonState::disabled_if(disabled),
         )
         .debug_selector(move || selector.into())
-        .min_h(px(44.0))
+        .min_h(px(theme::CONTROL_PX))
         .aria_label(title)
         .when(!disabled, |el| {
             el.on_click(

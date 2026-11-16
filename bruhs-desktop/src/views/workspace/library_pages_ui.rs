@@ -155,7 +155,7 @@ impl Workspace {
         )
         .debug_selector(move || debug_id)
         .aria_label(format!("{direction} {label} page"))
-        .min_h(px(44.0))
+        .min_h(px(theme::CONTROL_PX))
         .when(!disabled, |button| {
             button
                 .on_click(cx.listener(move |this, _, _, cx| {

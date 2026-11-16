@@ -5,7 +5,7 @@ use bruhs_models::{
 };
 use leptos::prelude::*;
 
-const BUTTON: &str = "min-h-11 rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50 cursor-pointer sm:min-h-10";
+const BUTTON: &str = "bruhs-control min-h-control rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50 cursor-pointer";
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Work {
@@ -226,7 +226,7 @@ pub fn ConnectionControl(
                 <button type="button" class=BUTTON disabled=move || busy.get() on:click=move |_| { error.set(None); refresh.run(()); }>"Refresh"</button>
             </div>
             <Show when=move || current.with(|row| row.as_ref().is_some_and(|row| !row.scopes.is_empty()))>
-                <details class="mt-2 text-label-sm text-rambutan-400"><summary class="bruhs-control min-h-11 cursor-pointer rounded-seed px-2 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400">"Permissions"</summary><p class="mt-1 break-all">{move || current.get().map(|row| row.scopes.join(", ")).unwrap_or_default()}</p></details>
+                <details class="mt-2 text-label-sm text-rambutan-400"><summary class="bruhs-control min-h-control cursor-pointer rounded-seed px-2 py-3 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400">"Permissions"</summary><p class="mt-1 break-all">{move || current.get().map(|row| row.scopes.join(", ")).unwrap_or_default()}</p></details>
             </Show>
             {move || link.get().map(|url| view! { <a class="mt-2 inline-block text-blueberry-300 underline" href=url target="_blank" rel="noopener noreferrer">"Continue in your browser"</a> })}
             {move || error.get().map(|message| view! { <p role="alert" class="mt-2 text-label-sm text-lychee-300">{message}</p> })}

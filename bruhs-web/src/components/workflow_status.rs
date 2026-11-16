@@ -106,9 +106,9 @@ pub fn WorkflowStatus() -> impl IntoView {
                         <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
                             <p role=role aria-live="polite" class=color>{item.message}</p>
                             <div class="flex flex-wrap items-center gap-2">
-                                <button type="button" class="min-h-11 rounded-grape px-2 text-label-sm text-persimmon-300 cursor-pointer" on:click=move |_| set_active.set(AppView::Automations)>"Open workflows"</button>
+                                <button type="button" class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-persimmon-300 cursor-pointer" on:click=move |_| set_active.set(AppView::Automations)>"Open workflows"</button>
                                 {item.dismiss_key.map(|key| view! {
-                                    <button type="button" aria-label="Dismiss workflow status" class="min-h-11 rounded-grape px-2 text-label-sm text-rambutan-400 cursor-pointer" on:click=move |_| dismissed.set(Some(key.clone()))>"Dismiss"</button>
+                                    <button type="button" aria-label="Dismiss workflow status" class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-rambutan-400 cursor-pointer" on:click=move |_| dismissed.set(Some(key.clone()))>"Dismiss"</button>
                                 })}
                             </div>
                         </div>

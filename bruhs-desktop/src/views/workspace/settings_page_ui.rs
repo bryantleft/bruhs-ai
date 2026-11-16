@@ -909,7 +909,7 @@ impl Workspace {
                 settings_ui::control_column(
                     div()
                         .w(px(240.0))
-                        .h(px(40.0))
+                        .h(px(theme::CONTROL_PX))
                         .child(Input::new(&self.autocompact_input).aria_label("Automatic compaction token count"))
                         .into_any_element(),
                 ),
@@ -956,7 +956,7 @@ impl Workspace {
                         .gap_2()
                         .child(
                             div()
-                                .h(px(40.0))
+                                .h(px(theme::CONTROL_PX))
                                 .child(Input::new(&self.title_project_input).aria_label("Project name for title instructions")),
                         )
                         .child(

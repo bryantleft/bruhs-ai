@@ -79,7 +79,7 @@ impl Workspace {
                                     ButtonState::Enabled,
                                 )
                                 .debug_selector(move || format!("desktop-meeting-note-{key}"))
-                                .min_h(px(44.0))
+                                .min_h(px(theme::CONTROL_PX))
                                 .justify_start()
                                 .w_full()
                                 .aria_label(note.title.clone())
@@ -162,7 +162,7 @@ impl Workspace {
                     )
                     .debug_selector(|| "desktop-open-selected-note".into())
                     .aria_label("Open note")
-                    .min_h(px(44.0))
+                    .min_h(px(theme::CONTROL_PX))
                     .on_click(cx.listener(move |this, _, window, cx| {
                         this.open_local_meeting_note(id.clone(), window, cx)
                     }))
@@ -194,7 +194,7 @@ impl Workspace {
             ButtonState::disabled_if(disabled),
         )
         .debug_selector(move || id.into())
-        .min_h(px(44.0))
+        .min_h(px(theme::CONTROL_PX))
         .aria_label(title)
         .when(!disabled, |el| {
             el.on_click(cx.listener(move |this, _, _, cx| {

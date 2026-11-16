@@ -186,7 +186,7 @@ async fn native_meeting_action_keyboard_activation_and_navigation_keep_one_owned
     server.state.lock().unwrap().delay_ms = 200;
     cx.run_until_parked();
     let bounds = cx.debug_bounds("desktop-meeting-resummarize").unwrap();
-    assert!(bounds.size.height >= gpui::px(44.0));
+    assert_eq!(bounds.size.height, gpui::px(crate::theme::CONTROL_PX));
     // Focus without completing a click; Enter must be the activation.
     cx.simulate_mouse_down(
         bounds.center(),

@@ -179,7 +179,7 @@ impl SecretPrompt {
             WebButtonSize::Small,
             ButtonState::disabled_if(self.busy),
         )
-        .min_h(px(40.0))
+        .min_h(px(theme::CONTROL_PX))
         .aria_label(label)
         .child(label)
         .on_click(cx.listener(move |this, _, window, cx| this.respond(action, window, cx)))
@@ -227,7 +227,7 @@ impl Render for SecretPrompt {
             .when(self.request.storage_unavailable, |element| element.child(div().text_color(theme::durian_300()).child("Saved credentials could not be checked. Unlock your OS keychain or use a credential once.")))
             .child(div().id("credential-operation").max_h(px(160.0)).overflow_y_scroll().child(format!("Command: {command}\nFolder: {}\nVariable: {}", bruhs_models::secrets::review_text(&self.request.cwd), self.request.operation.env_var)))
             .child(div().text_color(theme::rambutan_400()).child("This command can access the credential. Only its exit status returns to the AI."))
-            .child(Input::new(&self.input).h(px(40.0)).aria_label("Credential").content_type(InputContentType::Password).mask_toggle().disabled(self.busy))
+            .child(Input::new(&self.input).h(px(theme::CONTROL_PX)).aria_label("Credential").content_type(InputContentType::Password).mask_toggle().disabled(self.busy))
             .when_some(self.error.clone(), |element, error| element.child(div().id("credential-error").role(Role::Alert).text_color(theme::lychee_300()).child(format!("{error} Enter the credential again or decline."))))
             .child(div().flex().flex_wrap().gap_2()
                 .child(self.action_button("once", "Use once", cx))
