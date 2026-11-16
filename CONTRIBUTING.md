@@ -20,8 +20,10 @@ cargo run -p bruhs-mcp              # MCP server over stdio
 cd bruhs-site && npm test           # landing page (Node 22.18+)
 ```
 
-The desktop and web apps are two renderings of one product: a change to one
-should land on the other, with the web app as the reference.
+The desktop and web apps are two renderings of one product. Every capability
+present in either must reach both; assess new features and fixes on both
+surfaces. Web is the visual reference. Track missing counterparts and verify
+actual behavior under the [bidirectional parity goal](docs/web-desktop-parity-goal-2026-11-15.md).
 
 ## The gate
 

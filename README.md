@@ -82,6 +82,11 @@ must pass functional, Bruhs design, accessibility, persistence/privacy, and
 web/desktop parity checks before it is called complete. The goal records current
 Inbox gaps and acceptance criteria; it does not claim those features have shipped.
 
+The standing [web and desktop parity goal](docs/web-desktop-parity-goal-2026-11-15.md)
+requires every capability present in either app to reach both, including settings,
+agent tools, and recovery paths. It tracks missing features in both directions
+and the evidence needed to verify equivalent behavior and appearance.
+
 ## Install
 
 Download **Bruhs** for macOS (13 or later, Apple silicon) from the
