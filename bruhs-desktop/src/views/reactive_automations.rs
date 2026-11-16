@@ -444,6 +444,18 @@ impl ReactiveAutomations {
             .as_ref()
             .map_or(0, ReactiveSnapshot::unread_count)
     }
+    /// Show `snapshot` as if the server had sent it, for tests outside this
+    /// module.
+    #[cfg(test)]
+    pub(crate) fn show_snapshot_for_test(
+        &mut self,
+        snapshot: ReactiveSnapshot,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.loaded = true;
+        self.set_snapshot(snapshot, cx);
+        cx.notify();
+    }
     /// The workspace listens for arrivals once; the subscription lives with the panel.
     pub(crate) fn has_awareness(&self) -> bool {
         self.awareness.is_some()

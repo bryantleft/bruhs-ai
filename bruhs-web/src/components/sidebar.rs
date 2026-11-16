@@ -302,7 +302,7 @@ pub fn Sidebar() -> impl IntoView {
                 <Show when=move || { unread.get() > 0 }>
                     <span
                         aria-hidden="true"
-                        class="pointer-events-none absolute -right-0.5 -top-0.5 h-[16px] min-w-[16px] rounded-orb bg-blueberry-400 px-1 text-center text-label-xs leading-[16px] text-longan-950"
+                        class="pointer-events-none absolute -right-0.5 -top-0.5 h-[16px] min-w-[16px] rounded-orb bg-blueberry-400 px-1 text-center text-[11px] leading-[16px] text-longan-950"
                     >
                         {move || if unread.get() > 99 { "99+".to_string() } else { unread.get().to_string() }}
                     </span>
@@ -1506,8 +1506,15 @@ pub fn Sidebar() -> impl IntoView {
             </crate::ui::Dialog>
             // T3's update button: only while a provider CLI or the app is behind.
             <crate::components::updates::SidebarUpdateButton />
-            // Footer: the other surfaces as an icon row, settings at the end.
-            <div class="flex items-center gap-0.5 px-2 py-2" role="group" aria-label="Views">
+            // Footer: the other surfaces as icon buttons, settings at the end.
+            // Ten views and settings would need 372px in one row of 32px
+            // buttons and the row has 232px, so they sit in rows of six spread
+            // across it; settings takes the last column.
+            <div
+                class="grid grid-cols-[repeat(6,var(--size-control))] justify-between gap-y-1 px-2 py-2"
+                role="group"
+                aria-label="Views"
+            >
                 {nav_icon(AppView::Today, "sun", "Today")}
                 {nav_icon(AppView::Inbox, "inbox", "Inbox")}
                 {nav_icon(AppView::Knowledge, "book-open", "Knowledge")}
@@ -1518,8 +1525,9 @@ pub fn Sidebar() -> impl IntoView {
                 {nav_icon(AppView::Meetings, "mic", "Meetings")}
                 {nav_icon(AppView::People, "users", "People")}
                 {agent_workflows_nav()}
-                <span class="flex-1"></span>
-                {nav_icon(AppView::Settings, "settings", "Settings")}
+                <div class="col-start-6 flex">
+                    {nav_icon(AppView::Settings, "settings", "Settings")}
+                </div>
             </div>
         </nav>
     }

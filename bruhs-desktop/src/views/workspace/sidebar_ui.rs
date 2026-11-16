@@ -83,7 +83,19 @@ pub(super) const THREAD_MENU_MAX_ITEMS: usize = 10;
 const SIDEBAR_SETTLED_TOP_PADDING_PX: f32 = 8.0;
 const SIDEBAR_SETTLED_X_PADDING_PX: f32 = 4.0;
 const SIDEBAR_FOOTER_PADDING_PX: f32 = 8.0;
-const SIDEBAR_FOOTER_GAP_PX: f32 = 2.0;
+/// Ten views and settings would need 372px in one row of 32px buttons; the
+/// footer has 232px. They sit in rows of six spread across the row (web: a
+/// six-column grid with `justify-between`), 4px apart (`gap-y-1`).
+pub(super) const SIDEBAR_FOOTER_COLUMNS: usize = 6;
+const SIDEBAR_FOOTER_ROW_GAP_PX: f32 = 4.0;
+/// Agent workflows' unread count, pinned 2px outside the button's top right
+/// corner (web: `h-[16px] min-w-[16px] px-1 text-[11px]`).
+const SIDEBAR_BADGE_HEIGHT_PX: f32 = 16.0;
+const SIDEBAR_BADGE_X_PADDING_PX: f32 = 4.0;
+const SIDEBAR_BADGE_TEXT_PX: f32 = 11.0;
+/// Insets start inside the button's 1px focus border, so 2px outside its
+/// edge is 3px from there.
+const SIDEBAR_BADGE_OFFSET_PX: f32 = -3.0;
 const HOVER_BG_OPACITY_40: f32 = 0.40;
 const HOVER_BG_OPACITY_50: f32 = 0.50;
 const ACTIVE_BG_OPACITY_60: f32 = 0.60;
@@ -1195,14 +1207,66 @@ impl Workspace {
         label: &'static str,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        self.sidebar_nav_button(view, icon_path, label, cx)
+            .into_any_element()
+    }
+
+    /// Agent workflows, with the unread update count pinned to its corner
+    /// and in its name, like the web's entry.
+    fn render_agent_workflows_nav(&self, cx: &Context<'_, Self>) -> AnyElement {
+        const LABEL: &str = "Agent workflows";
+        let unread = self.reactive_automations.read(cx).unread_count();
+        self.sidebar_nav_button(AppView::Automations, assets::BOT_ICON_PATH, LABEL, cx)
+            .relative()
+            .aria_label(crate::views::reactive_automations::unread_label(
+                LABEL, unread,
+            ))
+            .when(unread > 0, |el| {
+                el.child(
+                    div()
+                        .debug_selector(|| "desktop-sidebar-agent-workflows-badge".to_string())
+                        .absolute()
+                        .top(px(SIDEBAR_BADGE_OFFSET_PX))
+                        .right(px(SIDEBAR_BADGE_OFFSET_PX))
+                        .h(px(SIDEBAR_BADGE_HEIGHT_PX))
+                        .min_w(px(SIDEBAR_BADGE_HEIGHT_PX))
+                        .px(px(SIDEBAR_BADGE_X_PADDING_PX))
+                        .rounded(px(SIDEBAR_BADGE_HEIGHT_PX / 2.0))
+                        .bg(theme::blueberry_400())
+                        .text_color(theme::longan_950())
+                        .text_size(px(SIDEBAR_BADGE_TEXT_PX))
+                        .line_height(px(SIDEBAR_BADGE_HEIGHT_PX))
+                        .flex()
+                        .justify_center()
+                        .child(if unread > 99 {
+                            "99+".to_string()
+                        } else {
+                            unread.to_string()
+                        }),
+                )
+            })
+            .into_any_element()
+    }
+
+    fn sidebar_nav_button(
+        &self,
+        view: AppView,
+        icon_path: &'static str,
+        label: &'static str,
+        cx: &Context<'_, Self>,
+    ) -> Stateful<Div> {
         let active = self.active_view == view && !self.settings_visible();
-        let selector = format!("desktop-sidebar-nav-{}", label.to_ascii_lowercase());
+        let selector = format!(
+            "desktop-sidebar-nav-{}",
+            label.to_ascii_lowercase().replace(' ', "-")
+        );
         let click_view = view.clone();
         let key_view = view;
         div()
             .id(ElementId::Name(selector.clone().into()))
             .debug_selector(move || selector)
             .size(px(SIDEBAR_ICON_BUTTON_PX))
+            .flex_shrink_0()
             .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
             .flex()
             .items_center()
@@ -1249,16 +1313,17 @@ impl Workspace {
                     theme::rambutan_500()
                 },
             ))
-            .into_any_element()
     }
 
-    /// Footer view switcher: tasks · terminal · calendar · meetings · people, settings last.
+    /// Footer view switcher, like the web's: the views in rows of six, then
+    /// settings in the last row's last column.
     fn render_sidebar_footer(&self, cx: &Context<'_, Self>) -> AnyElement {
         let settings_active = self.settings_visible();
         let settings = div()
             .id("desktop-sidebar-nav-settings")
             .debug_selector(|| "desktop-sidebar-nav-settings".to_string())
             .size(px(SIDEBAR_ICON_BUTTON_PX))
+            .flex_shrink_0()
             .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
             .flex()
             .items_center()
@@ -1305,6 +1370,56 @@ impl Workspace {
                     theme::rambutan_500()
                 },
             ));
+        let mut cells = vec![
+            self.render_sidebar_nav_icon(AppView::Today, assets::SUN_ICON_PATH, "Today", cx),
+            self.render_sidebar_nav_icon(AppView::Inbox, assets::INBOX_ICON_PATH, "Inbox", cx),
+            self.render_sidebar_nav_icon(
+                AppView::Knowledge,
+                assets::BOOK_OPEN_ICON_PATH,
+                "Knowledge",
+                cx,
+            ),
+            self.render_sidebar_nav_icon(
+                AppView::Tasks,
+                assets::LIST_CHECKS_ICON_PATH,
+                "Tasks",
+                cx,
+            ),
+            self.render_sidebar_nav_icon(
+                AppView::Terminal,
+                assets::TOOL_TERMINAL_ICON_PATH,
+                "Terminal",
+                cx,
+            ),
+            self.render_sidebar_nav_icon(AppView::Workbench, "icons/wrench.svg", "Workbench", cx),
+            self.render_sidebar_nav_icon(AppView::Calendar, "icons/calendar.svg", "Calendar", cx),
+            self.render_sidebar_nav_icon(AppView::Meetings, assets::MIC_ICON_PATH, "Meetings", cx),
+            self.render_sidebar_nav_icon(AppView::People, assets::USERS_ICON_PATH, "People", cx),
+            self.render_agent_workflows_nav(cx),
+        ];
+        // Settings takes the last column, under the first row's last view:
+        // empty cells fill the views' last row up to it, and settings starts
+        // a row of its own when the views fill theirs (web `col-start-6`).
+        let free = SIDEBAR_FOOTER_COLUMNS - cells.len() % SIDEBAR_FOOTER_COLUMNS;
+        let empty = (free + SIDEBAR_FOOTER_COLUMNS - 1) % SIDEBAR_FOOTER_COLUMNS;
+        cells.extend((0..empty).map(|_| {
+            div()
+                .size(px(SIDEBAR_ICON_BUTTON_PX))
+                .flex_shrink_0()
+                .into_any_element()
+        }));
+        cells.push(settings.into_any_element());
+        let mut rows = Vec::new();
+        let mut cells = cells.into_iter().peekable();
+        while cells.peek().is_some() {
+            rows.push(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .children(cells.by_ref().take(SIDEBAR_FOOTER_COLUMNS)),
+            );
+        }
         div()
             .id("sidebar-footer")
             .debug_selector(|| "desktop-sidebar-footer".to_string())
@@ -1313,60 +1428,10 @@ impl Workspace {
             .px(px(SIDEBAR_FOOTER_PADDING_PX))
             .py(px(SIDEBAR_FOOTER_PADDING_PX))
             .flex()
-            .items_center()
-            .gap(px(SIDEBAR_FOOTER_GAP_PX))
+            .flex_col()
+            .gap(px(SIDEBAR_FOOTER_ROW_GAP_PX))
             .flex_shrink_0()
-            .child(self.render_sidebar_nav_icon(AppView::Today, assets::SUN_ICON_PATH, "Today", cx))
-            .child(self.render_sidebar_nav_icon(
-                AppView::Inbox,
-                assets::INBOX_ICON_PATH,
-                "Inbox",
-                cx,
-            ))
-            .child(self.render_sidebar_nav_icon(
-                AppView::Knowledge,
-                assets::BOOK_OPEN_ICON_PATH,
-                "Knowledge",
-                cx,
-            ))
-            .child(self.render_sidebar_nav_icon(
-                AppView::Tasks,
-                assets::LIST_CHECKS_ICON_PATH,
-                "Tasks",
-                cx,
-            ))
-            .child(self.render_sidebar_nav_icon(
-                AppView::Terminal,
-                assets::TOOL_TERMINAL_ICON_PATH,
-                "Terminal",
-                cx,
-            ))
-            .child(self.render_sidebar_nav_icon(
-                AppView::Workbench,
-                "icons/wrench.svg",
-                "Workbench",
-                cx,
-            ))
-            .child(self.render_sidebar_nav_icon(
-                AppView::Calendar,
-                "icons/calendar.svg",
-                "Calendar",
-                cx,
-            ))
-            .child(self.render_sidebar_nav_icon(
-                AppView::Meetings,
-                assets::MIC_ICON_PATH,
-                "Meetings",
-                cx,
-            ))
-            .child(self.render_sidebar_nav_icon(
-                AppView::People,
-                assets::USERS_ICON_PATH,
-                "People",
-                cx,
-            ))
-            .child(div().flex_1())
-            .child(settings)
+            .children(rows)
             .into_any_element()
     }
 
