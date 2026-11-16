@@ -65,6 +65,8 @@ impl LiveEvents {
             opened: Cell::new(false),
             open: RefCell::new(None),
             banners,
+            outage: Cell::new(Outage::default()),
+            lost_banner: RefCell::new(None),
         });
         Connection::open(&connection);
         Connection::follow_page(&connection);
@@ -77,6 +79,7 @@ struct OpenStream {
     source: EventSource,
     _listeners: Vec<Closure<dyn FnMut(MessageEvent)>>,
     _on_error: Closure<dyn FnMut(web_sys::Event)>,
+    _on_open: Closure<dyn FnMut(web_sys::Event)>,
 }
 
 impl Drop for OpenStream {
@@ -97,6 +100,28 @@ struct Connection {
     opened: Cell<bool>,
     open: RefCell<Option<OpenStream>>,
     banners: Option<BannerStackSignal>,
+    outage: Cell<Outage>,
+    /// The lost-connection banner for the current outage, if it is showing.
+    lost_banner: RefCell<Option<String>>,
+}
+
+/// One lost-connection banner per outage, as desktop announces a lost stream
+/// once: the first error raises it, later retries stay quiet, and an open
+/// stream ends the outage.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+struct Outage {
+    announced: bool,
+}
+
+impl Outage {
+    /// Whether this stream error should raise the banner.
+    fn on_error(&mut self) -> bool {
+        !std::mem::replace(&mut self.announced, true)
+    }
+
+    fn on_open(&mut self) {
+        self.announced = false;
+    }
 }
 
 impl Connection {
@@ -143,11 +168,30 @@ impl Connection {
             }
         });
         source.set_onerror(Some(on_error.as_ref().unchecked_ref()));
+        let weak = Rc::downgrade(connection);
+        let on_open = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {
+            if let Some(connection) = weak.upgrade() {
+                Connection::reconnected(&connection);
+            }
+        });
+        source.set_onopen(Some(on_open.as_ref().unchecked_ref()));
         *connection.open.borrow_mut() = Some(OpenStream {
             source,
             _listeners: listeners,
             _on_error: on_error,
+            _on_open: on_open,
         });
+    }
+
+    /// The stream is open again: end the outage and take its banner down.
+    fn reconnected(connection: &Rc<Self>) {
+        let mut outage = connection.outage.get();
+        outage.on_open();
+        connection.outage.set(outage);
+        let banner = connection.lost_banner.borrow_mut().take();
+        if let (Some(id), Some(banners)) = (banner, connection.banners) {
+            banners.dismiss(&id);
+        }
     }
 
     /// Close the broken stream (the browser would retry at its own pace) and
@@ -160,12 +204,17 @@ impl Connection {
         let delay = connection.backoff_ms.get();
         connection.backoff_ms.set(next_backoff(delay));
         log::warn!("live events stream error; reconnecting in {delay}ms");
-        if let Some(banners) = connection.banners {
-            banners.push(
+        let mut outage = connection.outage.get();
+        let announce = outage.on_error();
+        connection.outage.set(outage);
+        if let (true, Some(banners)) = (announce, connection.banners) {
+            // Stays until the stream opens again or the user closes it.
+            let id = banners.push_keyed(
                 BannerKind::Warning,
                 "Lost the connection to bruhs-server, reconnecting…",
-                Some(delay + 500),
+                None,
             );
+            *connection.lost_banner.borrow_mut() = Some(id);
         }
         let generation = connection.generation.get();
         let weak = Rc::downgrade(connection);
@@ -222,7 +271,17 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_backoff, stream_url, BACKOFF_INITIAL_MS, BACKOFF_MAX_MS};
+    use super::{next_backoff, stream_url, Outage, BACKOFF_INITIAL_MS, BACKOFF_MAX_MS};
+
+    #[test]
+    fn an_outage_is_announced_once_until_the_stream_opens() {
+        let mut outage = Outage::default();
+        assert!(outage.on_error(), "the first error announces the outage");
+        assert!(!outage.on_error(), "a retry that fails stays quiet");
+        assert!(!outage.on_error());
+        outage.on_open();
+        assert!(outage.on_error(), "a new outage is announced again");
+    }
 
     #[test]
     fn stream_follows_the_configured_api_origin() {
