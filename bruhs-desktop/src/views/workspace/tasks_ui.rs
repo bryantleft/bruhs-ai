@@ -1595,7 +1595,7 @@ impl Workspace {
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
                             .bg(theme::longan_800().opacity(TASK_BOARD_COUNT_BG_OPACITY))
                             .text_color(theme::rambutan_500())
-                            .font(theme::tabular_system_font())
+                            .font_features(theme::tabular_nums())
                             .child(items.len().to_string()),
                     ),
             )

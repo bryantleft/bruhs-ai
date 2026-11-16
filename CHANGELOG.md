@@ -79,6 +79,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   of the window. The arrow keys move through it, Escape closes it and returns
   you to the "…" button, and a click outside closes it without also clicking
   what is under it.
+- Fixed desktop labels such as message times, model names and Edit from here
+  appearing in the system font instead of Monaspace.
 - Fixed the landing page's tour progress indicators cutting dots in half.
   Each tab now fills with complete dots, centered under its label.
 

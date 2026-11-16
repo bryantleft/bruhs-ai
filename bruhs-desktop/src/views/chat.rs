@@ -1632,7 +1632,7 @@ impl ChatView {
                     .flex_shrink_0()
                     .text_size(px(12.0))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
-                    .font(theme::tabular_system_font())
+                    .font_features(theme::tabular_nums())
                     .text_color(theme::rambutan_400())
                     .child(count_label),
             )

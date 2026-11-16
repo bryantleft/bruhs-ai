@@ -95,7 +95,7 @@ impl Workspace {
                         .id("page-status")
                         .role(Role::Status)
                         .text_center()
-                        .font(theme::tabular_system_font())
+                        .font_features(theme::tabular_nums())
                         .text_size(px(11.0))
                         .text_color(theme::rambutan_400())
                         .child(format!(
