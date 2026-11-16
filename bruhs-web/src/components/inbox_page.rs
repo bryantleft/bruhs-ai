@@ -1,8 +1,9 @@
 //! Provider-neutral, local-first communication triage.
 
 use bruhs_models::{
-    inbox_agent_prompt, InboxCard, InboxConversation, InboxDirectory, InboxFilter, InboxMessage,
-    InboxParticipant, InboxSource, MessageDirection, MessageSendState, INBOX_PAGE_SIZE,
+    inbox_agent_prompt, unique_person_named, InboxCard, InboxConversation, InboxDirectory,
+    InboxFilter, InboxMessage, InboxParticipant, InboxSource, MessageDirection, MessageSendState,
+    DELETE_CONVERSATION_DETAIL, DELETE_CONVERSATION_TITLE, INBOX_PAGE_SIZE,
 };
 use leptos::prelude::*;
 
@@ -11,7 +12,9 @@ use crate::state::{
     PeopleSignal, SetActiveView, SetInboxConversationsSignal,
 };
 use crate::storage;
-use crate::ui::{Dialog, Dropdown, DropdownOption, Input, Textarea};
+use crate::ui::{
+    button_class, ButtonSize, ButtonVariant, Dialog, Dropdown, DropdownOption, Input, Textarea,
+};
 
 #[component]
 pub fn InboxPage(#[prop(optional)] conversation_id: Option<String>) -> impl IntoView {
@@ -50,6 +53,7 @@ fn InboxLibrary() -> impl IntoView {
         expect_context::<SetInboxConversationsSignal>();
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
     let InboxCreateRequest(create_request) = expect_context::<InboxCreateRequest>();
+    let PeopleSignal(people) = expect_context::<PeopleSignal>();
 
     let InboxBrowseState {
         filter,
@@ -90,11 +94,17 @@ fn InboxLibrary() -> impl IntoView {
             return;
         }
         let now = crate::clock::now_ms();
+        let display_name = sender_value.trim().to_string();
+        // Like desktop: display names and aliases, Unicode case folded; a
+        // name two profiles answer to links to neither.
+        let person_id = people.with_untracked(|people| {
+            unique_person_named(people, &display_name).map(|person| person.id.clone())
+        });
         let participant = InboxParticipant {
             id: uuid::Uuid::new_v4().to_string(),
-            display_name: sender_value.trim().to_string(),
+            display_name,
             address: String::new(),
-            person_id: None,
+            person_id,
         };
         let mut conversation = InboxConversation::new(
             source.get_untracked(),
@@ -246,6 +256,24 @@ fn ConversationDetail(conversation_id: String) -> impl IntoView {
     let id = StoredValue::new(conversation_id);
     let draft = RwSignal::new(String::new());
     let initialized = RwSignal::new(false);
+    // Deleting asks first, as on desktop: the conversation and its messages
+    // are gone for good.
+    let pending_delete = RwSignal::new(false);
+    let confirm_delete = move || {
+        pending_delete.set(false);
+        let conversation_id = id.get_value();
+        let original = conversations.with_untracked(|items| {
+            items
+                .iter()
+                .find(|item| item.id == conversation_id)
+                .cloned()
+        });
+        set_conversations.update(|items| items.retain(|item| item.id != conversation_id));
+        if let Some(original) = original {
+            storage::forget_inbox_conversation(original);
+        }
+        set_active_view.set(AppView::Inbox);
+    };
 
     Effect::new(move |_| {
         if initialized.get() {
@@ -300,15 +328,7 @@ fn ConversationDetail(conversation_id: String) -> impl IntoView {
                                 <ActionButton label=if important { "Unstar" } else { "Important" } on_click=Callback::new(move |_| update_conversation(set_conversations, &id.get_value(), |item| item.toggle_label("important"))) />
                                 <ActionButton label=if archived { "Unarchive" } else { "Archive" } on_click=Callback::new(move |_| update_conversation(set_conversations, &id.get_value(), |item| item.set_archived(!archived))) />
                                 <ActionButton label="Ask agent" on_click=Callback::new(move |_| { composer_draft.set(inbox_agent_prompt(&conversation_for_agent)); set_active_view.set(AppView::Chat); }) />
-                                <ActionButton label="Delete" on_click=Callback::new(move |_| {
-                                    let conversation_id = id.get_value();
-                                    let original = conversations.with_untracked(|items| items.iter().find(|item| item.id == conversation_id).cloned());
-                                    set_conversations.update(|items| items.retain(|item| item.id != conversation_id));
-                                    if let Some(original) = original {
-                                        storage::forget_inbox_conversation(original);
-                                    }
-                                    set_active_view.set(AppView::Inbox);
-                                }) />
+                                <ActionButton label="Delete" on_click=Callback::new(move |_| pending_delete.set(true)) />
                             </div>
                         </header>
                         <div class="flex shrink-0 flex-wrap items-center justify-between gap-3 border-b border-longan-800/70 px-3 py-2 sm:px-5">
@@ -333,6 +353,18 @@ fn ConversationDetail(conversation_id: String) -> impl IntoView {
                 }.into_any()
             }
         )}
+        <Show when=move || pending_delete.get()>
+            <Dialog open=Signal::derive(move || pending_delete.get()) on_close=Callback::new(move |_| pending_delete.set(false)) max_width="max-w-sm" label=DELETE_CONVERSATION_TITLE>
+                <div class="space-y-4 p-4" data-inbox-delete-confirm="">
+                    <h2 class="text-h4 text-rambutan-100">{DELETE_CONVERSATION_TITLE}</h2>
+                    <p class="text-body-sm text-rambutan-300">{DELETE_CONVERSATION_DETAIL}</p>
+                    <div class="flex justify-end gap-2">
+                        <button type="button" aria-label="Cancel deletion" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "cursor-pointer") on:click=move |_| pending_delete.set(false)>"Cancel"</button>
+                        <button type="button" aria-label="Confirm deletion" class=button_class(ButtonVariant::Destructive, ButtonSize::Small, "cursor-pointer") on:click=move |_| confirm_delete()>"Delete"</button>
+                    </div>
+                </div>
+            </Dialog>
+        </Show>
     }
 }
 
