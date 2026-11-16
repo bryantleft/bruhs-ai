@@ -4,6 +4,32 @@ use super::*;
 
 /// Web "Calendar →" at the right of Now & next.
 const TODAY_CALENDAR_LINK_LABEL: &str = "Calendar →";
+/// Today's day-plan wording, as the web's Today page and day-plan store
+/// say it.
+const DAY_PLAN_APPLIED: &str = "Day plan applied.";
+const DAY_PLAN_SAVING: &str = "Saving day plan…";
+const DAY_PLAN_SAVING_SHORT: &str = "Saving…";
+const DAY_PLAN_NOT_SAVED: &str = "Day plan was not saved.";
+const DAY_PLAN_NOT_LOADED: &str =
+    "Day-plan recovery has not loaded. Retry loading before planning.";
+const DAY_PLAN_REFRESH_LABEL: &str = "Refresh saved tasks and calendar";
+const DAY_PLAN_RETRY_LABEL: &str = "Retry day-plan recovery";
+const DAY_PLAN_DISMISS_LABEL: &str = "Dismiss";
+/// Desktop reads the saved workspace for both recoveries; these say when
+/// it could not.
+const DAY_PLAN_UNREADABLE: &str =
+    "The saved day plan could not be read. Keep this window open and retry.";
+const DAY_PLAN_SOURCES_UNREADABLE: &str =
+    "Saved tasks and calendar could not be read. Keep this window open and retry.";
+
+/// What the saved workspace held when Today's refresh read it again.
+enum SavedSources {
+    /// The version this window last read or wrote: nothing newer exists.
+    Unchanged,
+    /// Another instance saved over it.
+    Changed,
+    Unreadable,
+}
 
 impl Workspace {
     pub(super) fn planning_work_items(&self) -> Vec<WorkItem> {
@@ -87,9 +113,17 @@ impl Workspace {
     }
 
     pub(super) fn apply_desktop_day_plan(&mut self, cx: &mut Context<'_, Self>) {
+        if self.day_plan_busy() {
+            return;
+        }
         let Some(proposal) = self.day_plan_proposal.as_ref() else {
             return;
         };
+        if !self.day_plan_loaded {
+            self.day_plan_error = Some(DAY_PLAN_NOT_LOADED.into());
+            cx.notify();
+            return;
+        }
         if !self.save_status.is_saved() {
             self.day_plan_error =
                 Some("Finish saving current changes before applying the day plan.".into());
@@ -155,13 +189,21 @@ impl Workspace {
         });
         self.day_plan_proposal = None;
         self.day_plan_error = None;
-        self.persist_and_notify(cx);
+        self.save_day_plan(cx);
     }
 
     pub(super) fn undo_desktop_day_plan(&mut self, cx: &mut Context<'_, Self>) {
+        if self.day_plan_busy() {
+            return;
+        }
         let Some(applied) = self.day_plan_undo.as_ref() else {
             return;
         };
+        if !self.day_plan_loaded {
+            self.day_plan_error = Some(DAY_PLAN_NOT_LOADED.into());
+            cx.notify();
+            return;
+        }
         if !self.save_status.is_saved() {
             self.day_plan_error =
                 Some("Finish saving current changes before undoing the day plan.".into());
@@ -198,7 +240,177 @@ impl Workspace {
             .retain(|event| !prepared.removed_event_ids.contains(&event.id));
         self.day_plan_undo = None;
         self.day_plan_error = None;
+        self.save_day_plan(cx);
+    }
+
+    /// Web `DayPlanState::busy`: a day plan's save or a recovery read is
+    /// running.
+    pub(super) fn day_plan_busy(&self) -> bool {
+        self.day_plan_saving || self.day_plan_reading
+    }
+
+    /// Saves an applied or undone plan and waits for that save, so Today
+    /// can say whether it reached the disk.
+    fn save_day_plan(&mut self, cx: &mut Context<'_, Self>) {
         self.persist_and_notify(cx);
+        // A workspace without a state file (most tests) saves nothing.
+        self.day_plan_saving = self.save_status == SaveStatus::Saving;
+    }
+
+    /// The save carrying a day plan ended. Once it is on disk Today stops
+    /// saying "Saving…"; when it failed, Today says so and offers the web's
+    /// recovery.
+    pub(super) fn finish_day_plan_save(&mut self) {
+        if self.save_status.is_saved() && self.day_plan_error.as_deref() == Some(DAY_PLAN_NOT_SAVED)
+        {
+            // A later save, such as the save strip's Retry, carried the plan.
+            self.day_plan_error = None;
+        }
+        if !self.day_plan_saving {
+            return;
+        }
+        match self.save_status {
+            // A later batch carries the plan.
+            SaveStatus::Saving => {}
+            SaveStatus::Saved => self.day_plan_saving = false,
+            SaveStatus::Failed(_) | SaveStatus::Conflict | SaveStatus::RecoveryRequired(_) => {
+                self.day_plan_saving = false;
+                self.day_plan_error = Some(DAY_PLAN_NOT_SAVED.into());
+            }
+        }
+    }
+
+    #[cfg(not(test))]
+    fn saved_workspace_path(&self) -> Option<PathBuf> {
+        desktop_state_path()
+    }
+
+    /// Tests save only when they opt in with a file of their own.
+    #[cfg(test)]
+    fn saved_workspace_path(&self) -> Option<PathBuf> {
+        self.persistence_test_path.clone()
+    }
+
+    /// Web "Refresh saved tasks and calendar". The web re-reads its stores
+    /// because another tab may have changed them. Desktop has one writer
+    /// per workspace, so its saved tasks and calendar are never newer than
+    /// this window's unless another instance saved over them. The saved
+    /// workspace is read again off the UI thread: when it is still the
+    /// version this window last read or wrote, the window's records stay
+    /// (they hold every unsaved change), the error clears and a failed
+    /// save is tried again; when another instance changed it, Today says so
+    /// and saving pauses, as the save strip's conflict does.
+    pub(super) fn refresh_day_plan_sources(&mut self, cx: &mut Context<'_, Self>) {
+        if self.day_plan_busy() {
+            return;
+        }
+        if !self.day_plan_loaded {
+            self.day_plan_error = Some(DAY_PLAN_NOT_LOADED.into());
+            cx.notify();
+            return;
+        }
+        if let SaveStatus::RecoveryRequired(_) = self.save_status {
+            // Saving is paused until the saved workspace is recovered.
+            self.day_plan_error = self.save_status.alert().map(str::to_string);
+            cx.notify();
+            return;
+        }
+        let Some(path) = self.saved_workspace_path() else {
+            self.finish_day_plan_refresh(SavedSources::Unchanged, cx);
+            return;
+        };
+        self.day_plan_reading = true;
+        cx.notify();
+        let coordinator = self.persistence.clone();
+        cx.spawn(async move |workspace, cx| {
+            let sources = cx
+                .background_spawn(async move {
+                    // Holding the writer's lock keeps a save from landing
+                    // between the two reads.
+                    let Ok(expected) = coordinator.write_lock.lock() else {
+                        return SavedSources::Unreadable;
+                    };
+                    let sources = match DiskVersion::read(&path) {
+                        Ok(actual) if actual == *expected => SavedSources::Unchanged,
+                        Ok(_) => SavedSources::Changed,
+                        Err(_) => SavedSources::Unreadable,
+                    };
+                    drop(expected);
+                    sources
+                })
+                .await;
+            let _ = workspace.update(cx, |this, cx| this.finish_day_plan_refresh(sources, cx));
+        })
+        .detach();
+    }
+
+    fn finish_day_plan_refresh(&mut self, sources: SavedSources, cx: &mut Context<'_, Self>) {
+        self.day_plan_reading = false;
+        match sources {
+            SavedSources::Unchanged => {
+                self.day_plan_error = None;
+                if matches!(self.save_status, SaveStatus::Failed(_)) {
+                    self.save_day_plan(cx);
+                }
+            }
+            SavedSources::Changed => {
+                self.day_plan_error = Some(SaveError::Conflict.to_string());
+                self.save_status = SaveStatus::Conflict;
+            }
+            SavedSources::Unreadable => {
+                self.day_plan_error = Some(DAY_PLAN_SOURCES_UNREADABLE.into());
+            }
+        }
+        cx.notify();
+    }
+
+    /// Web "Retry day-plan recovery": read the saved day plan again after
+    /// the saved workspace could not be read at startup, from the state
+    /// file or its backup as startup does. Only the plan's undo receipt is
+    /// restored; saving stays paused until the workspace is recovered.
+    pub(super) fn retry_day_plan_recovery(&mut self, cx: &mut Context<'_, Self>) {
+        if self.day_plan_loaded || self.day_plan_busy() {
+            return;
+        }
+        let Some(path) = self.saved_workspace_path() else {
+            self.finish_day_plan_recovery(Ok(None), cx);
+            return;
+        };
+        self.day_plan_reading = true;
+        cx.notify();
+        cx.spawn(async move |workspace, cx| {
+            let receipt = cx
+                .background_spawn(async move {
+                    match load_desktop_state_with_backup(&path) {
+                        (Some(state), _, _) => Ok(state.day_plan_undo),
+                        // No saved workspace: no plan to recover.
+                        (None, None, _) => Ok(None),
+                        (None, Some(_), _) => Err(()),
+                    }
+                })
+                .await;
+            let _ = workspace.update(cx, |this, cx| this.finish_day_plan_recovery(receipt, cx));
+        })
+        .detach();
+    }
+
+    fn finish_day_plan_recovery(
+        &mut self,
+        receipt: Result<Option<DesktopAppliedPlan>, ()>,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.day_plan_reading = false;
+        match receipt {
+            Ok(receipt) => {
+                if self.day_plan_undo.is_none() {
+                    self.day_plan_undo = receipt;
+                }
+                self.day_plan_loaded = true;
+                self.day_plan_error = None;
+            }
+            Err(()) => self.day_plan_error = Some(DAY_PLAN_UNREADABLE.into()),
+        }
+        cx.notify();
     }
 
     fn open_today_calendar_event(
@@ -368,6 +580,207 @@ impl Workspace {
             }))
             .child(TODAY_CALENDAR_LINK_LABEL)
             .into_any_element()
+    }
+
+    /// A quiet text action on Today: web's `text-button` buttons.
+    fn today_text_action(
+        id: &'static str,
+        label: &'static str,
+        color: Hsla,
+        hover: Hsla,
+        min_height: f32,
+    ) -> Stateful<Div> {
+        div()
+            .id(id)
+            .debug_selector(move || format!("desktop-{id}"))
+            .flex_shrink_0()
+            .min_h(px(min_height))
+            .flex()
+            .items_center()
+            .rounded(px(4.0))
+            .font_family(theme::UI_FONT_FAMILY)
+            .font_weight(FontWeight::MEDIUM)
+            .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
+            .text_color(color)
+            .hover(move |el| el.text_color(hover))
+            .cursor_pointer()
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(label)
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .child(label)
+    }
+
+    /// Web's day-plan recovery above Today's cards: the error with Dismiss
+    /// and "Refresh saved tasks and calendar" while no review is open,
+    /// "Saving day plan…" while busy, and "Retry day-plan recovery" while
+    /// the saved plan is unread.
+    fn render_day_plan_recovery(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
+        let busy = self.day_plan_busy();
+        let reviewing = self.day_plan_proposal.is_some();
+        let mut rows = Vec::new();
+        if let Some(error) = self.day_plan_error.clone().filter(|_| !reviewing) {
+            rows.push(
+                div()
+                    .id("desktop-day-plan-error")
+                    .debug_selector(|| "desktop-day-plan-error".to_string())
+                    .role(Role::Alert)
+                    .aria_label(error.clone())
+                    .rounded(px(8.0))
+                    .border_1()
+                    .border_color(theme::lychee_400().opacity(0.2))
+                    .bg(theme::lychee_500().opacity(0.1))
+                    .px_3()
+                    .py_2()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .text_color(theme::lychee_200())
+                            .child(error),
+                    )
+                    .child(
+                        Self::today_text_action(
+                            "day-plan-dismiss",
+                            DAY_PLAN_DISMISS_LABEL,
+                            theme::lychee_200(),
+                            theme::lychee_100(),
+                            theme::CONTROL_XS_PX,
+                        )
+                        .on_click(cx.listener(
+                            |this, _event, _window, cx| {
+                                this.day_plan_error = None;
+                                cx.notify();
+                            },
+                        )),
+                    )
+                    .into_any_element(),
+            );
+            if !busy {
+                rows.push(
+                    div()
+                        .flex()
+                        .child(
+                            Self::today_text_action(
+                                "day-plan-refresh",
+                                DAY_PLAN_REFRESH_LABEL,
+                                theme::persimmon_300(),
+                                theme::persimmon_200(),
+                                theme::CONTROL_PX,
+                            )
+                            .px_2()
+                            .on_click(cx.listener(
+                                |this, _event, _window, cx| {
+                                    this.refresh_day_plan_sources(cx);
+                                },
+                            )),
+                        )
+                        .into_any_element(),
+                );
+            }
+        }
+        if busy {
+            rows.push(
+                div()
+                    .id("desktop-day-plan-saving")
+                    .debug_selector(|| "desktop-day-plan-saving".to_string())
+                    .role(Role::Status)
+                    .aria_label(DAY_PLAN_SAVING)
+                    .font_family(theme::CODE_FONT_FAMILY)
+                    .text_size(px(13.0))
+                    .text_color(theme::rambutan_400())
+                    .child(DAY_PLAN_SAVING)
+                    .into_any_element(),
+            );
+        }
+        if !self.day_plan_loaded && !busy {
+            rows.push(
+                div()
+                    .flex()
+                    .child(
+                        Self::today_text_action(
+                            "day-plan-retry",
+                            DAY_PLAN_RETRY_LABEL,
+                            theme::persimmon_300(),
+                            theme::persimmon_200(),
+                            theme::CONTROL_XS_PX,
+                        )
+                        .on_click(cx.listener(
+                            |this, _event, _window, cx| {
+                                this.retry_day_plan_recovery(cx);
+                            },
+                        )),
+                    )
+                    .into_any_element(),
+            );
+        }
+        rows
+    }
+
+    /// Web "Day plan applied." with Undo, or "Saving…" while busy.
+    fn render_day_plan_applied(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        self.day_plan_undo.as_ref()?;
+        let busy = self.day_plan_busy();
+        Some(
+            div()
+                .id("desktop-day-plan-applied")
+                .debug_selector(|| "desktop-day-plan-applied".to_string())
+                .role(Role::Status)
+                .aria_label(DAY_PLAN_APPLIED)
+                .rounded(px(8.0))
+                .border_1()
+                .border_color(theme::pandan_400().opacity(0.2))
+                .bg(theme::pandan_500().opacity(0.1))
+                .px_3()
+                .py_2()
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_3()
+                .font_family(theme::CODE_FONT_FAMILY)
+                .text_size(px(13.0))
+                .text_color(theme::pandan_200())
+                .child(DAY_PLAN_APPLIED)
+                .map(|banner| {
+                    if busy {
+                        banner.child(
+                            div()
+                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                .font_weight(FontWeight::MEDIUM)
+                                .text_size(px(12.0))
+                                .text_color(theme::pandan_300().opacity(0.7))
+                                .child(DAY_PLAN_SAVING_SHORT),
+                        )
+                    } else {
+                        banner.child(
+                            web_button(
+                                "desktop-undo-day-plan",
+                                WebButtonVariant::Ghost,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .debug_selector(|| "desktop-today-plan-undo".to_string())
+                            .aria_label("Undo")
+                            .text_color(theme::pandan_100())
+                            .child("Undo")
+                            .on_click(cx.listener(
+                                |this, _event, _window, cx| {
+                                    this.undo_desktop_day_plan(cx);
+                                },
+                            )),
+                        )
+                    }
+                })
+                .into_any_element(),
+        )
     }
 
     pub(super) fn render_today_task_row(
@@ -746,6 +1159,20 @@ impl Workspace {
                 .flex()
                 .flex_col()
                 .gap_2()
+                // Web shows the error inside the open review.
+                .when_some(self.day_plan_error.clone(), |card, error| {
+                    card.child(
+                        div()
+                            .id("desktop-day-plan-review-error")
+                            .debug_selector(|| "desktop-day-plan-review-error".to_string())
+                            .role(Role::Alert)
+                            .aria_label(error.clone())
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .text_color(theme::lychee_200())
+                            .child(error),
+                    )
+                })
                 .child(
                     div()
                         .text_size(px(13.0))
@@ -781,7 +1208,9 @@ impl Workspace {
                                 "apply-day-plan",
                                 WebButtonVariant::Primary,
                                 WebButtonSize::Small,
-                                ButtonState::disabled_if(proposal.blocks.is_empty()),
+                                ButtonState::disabled_if(
+                                    proposal.blocks.is_empty() || self.day_plan_busy(),
+                                ),
                             )
                             .debug_selector(|| "desktop-today-plan-apply".to_string())
                             .aria_label("Apply plan")
@@ -853,7 +1282,9 @@ impl Workspace {
                                 "plan-my-day",
                                 WebButtonVariant::Primary,
                                 WebButtonSize::Small,
-                                ButtonState::disabled_if(self.day_plan_proposal.is_some()),
+                                ButtonState::disabled_if(
+                                    self.day_plan_proposal.is_some() || self.day_plan_busy(),
+                                ),
                             )
                             .debug_selector(|| "desktop-today-plan".to_string())
                             .aria_label("Plan my day")
@@ -883,57 +1314,10 @@ impl Workspace {
                             .flex()
                             .flex_col()
                             .gap_4()
-                            .when_some(self.day_plan_error.clone(), |element, error| {
-                                element.child(
-                                    div()
-                                        .id("desktop-day-plan-error")
-                                        .role(Role::Alert)
-                                        .text_size(px(12.0))
-                                        .text_color(theme::lychee_300())
-                                        .child(error),
-                                )
-                            })
+                            .children(self.render_day_plan_recovery(cx))
                             .children(proposal)
+                            .children(self.render_day_plan_applied(cx))
                             .children(suggestion)
-                            .when_some(self.day_plan_undo.as_ref(), |element, _| {
-                                element.child(
-                                    div()
-                                        .rounded(px(6.0))
-                                        .bg(theme::pandan_500().opacity(0.1))
-                                        .px_3()
-                                        .py_2()
-                                        .flex()
-                                        .items_center()
-                                        .justify_between()
-                                        .text_size(px(12.0))
-                                        .text_color(theme::pandan_300())
-                                        .child(if self.save_status.is_saved() {
-                                            "Day plan applied."
-                                        } else {
-                                            "Saving day plan…"
-                                        })
-                                        .child(
-                                            web_button(
-                                                "desktop-undo-day-plan",
-                                                WebButtonVariant::Ghost,
-                                                WebButtonSize::Small,
-                                                ButtonState::disabled_if(
-                                                    !self.save_status.is_saved(),
-                                                ),
-                                            )
-                                            .debug_selector(|| {
-                                                "desktop-today-plan-undo".to_string()
-                                            })
-                                            .aria_label("Undo")
-                                            .child("Undo")
-                                            .on_click(
-                                                cx.listener(|this, _event, _window, cx| {
-                                                    this.undo_desktop_day_plan(cx);
-                                                }),
-                                            ),
-                                        ),
-                                )
-                            })
                             .child(briefing)
                             .child(
                                 div()

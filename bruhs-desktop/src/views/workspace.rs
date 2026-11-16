@@ -1199,6 +1199,15 @@ pub struct Workspace {
     day_plan_proposal: Option<bruhs_models::DayPlanProposal>,
     day_plan_undo: Option<DesktopAppliedPlan>,
     day_plan_error: Option<String>,
+    /// An applied or undone plan waits for the workspace save that carries
+    /// it; a failed save says so on Today (web `DayPlanState::busy`).
+    day_plan_saving: bool,
+    /// Today's recovery is reading the saved workspace again.
+    day_plan_reading: bool,
+    /// The saved day plan was read at startup. False only when the saved
+    /// workspace could not be read, so Today offers "Retry day-plan
+    /// recovery" (web `DayPlanState::loaded`).
+    day_plan_loaded: bool,
     #[cfg(test)]
     day_plan_test_now: Option<chrono::DateTime<Local>>,
     persistence: Arc<PersistenceCoordinator>,
@@ -1469,6 +1478,8 @@ impl Workspace {
             .and_then(|state| state.current_model.clone())
             .unwrap_or_else(|| DEFAULT_AGENT_MODEL.to_string());
         let permission_mode = initial_permission_mode_from_persisted(persisted.as_ref());
+        // A missing file is a new workspace with no plan to recover.
+        let day_plan_loaded = persisted.is_some() || persistence_error.is_none();
         let mut subscriptions = Vec::new();
         let command_input = Self::new_command_input(window, cx, &mut subscriptions);
         let import_input = Self::new_import_input(window, cx, &mut subscriptions);
@@ -1857,6 +1868,9 @@ impl Workspace {
                 .as_ref()
                 .and_then(|state| state.day_plan_undo.clone()),
             day_plan_error: None,
+            day_plan_saving: false,
+            day_plan_reading: false,
+            day_plan_loaded,
             #[cfg(test)]
             day_plan_test_now: None,
             persistence: Arc::new(PersistenceCoordinator {

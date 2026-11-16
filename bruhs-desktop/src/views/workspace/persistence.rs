@@ -574,6 +574,7 @@ impl Workspace {
                     if saved && dirty {
                         this.persist(cx);
                     }
+                    this.finish_day_plan_save();
                     this.drive_background_automations(cx);
                     cx.notify();
                 });
