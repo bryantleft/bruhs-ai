@@ -83,7 +83,7 @@ pub(super) fn RecordPicker(
             on:click=move |_| { query.set(String::new()); highlighted.set(0); open.set(true); }>
             <span class="min-w-0 truncate">{placeholder}</span><Icon name="search" size=14 class="shrink-0 text-rambutan-500" />
         </button>
-        <Dialog open=Signal::derive(move || open.get()) label=label max_width="max-w-[calc(100vw-2rem)] sm:max-w-xl" padding_top="2rem"
+        <Dialog open=Signal::derive(move || open.get()) label=label max_width="max-w-[calc(100vw-2rem)] sm:max-w-xl" anchor_top=true padding_top="2rem"
             on_close=Callback::new(move |_| open.set(false))>
             <div class="flex max-h-[calc(100dvh-4rem)] min-h-0 flex-col">
                 <div class="shrink-0 border-b border-longan-700 px-3 pb-3">

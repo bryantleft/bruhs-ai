@@ -316,7 +316,7 @@ pub fn ImportThreadDialog() -> impl IntoView {
     };
 
     view! {
-        <Dialog open=open on_close=on_close max_width="max-w-lg".to_string() label="Import thread">
+        <Dialog open=open on_close=on_close max_width="max-w-lg".to_string() label="Import thread" anchor_top=true>
             <div class="border-b border-longan-800 px-4 py-3">
                 <h2 class="text-label-sm text-rambutan-200">"Import thread"</h2>
                 <div class="mt-2 flex gap-1" role="tablist" aria-label="Import from">

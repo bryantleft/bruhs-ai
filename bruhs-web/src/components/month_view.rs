@@ -362,7 +362,6 @@ pub fn MonthView() -> impl IntoView {
                 on_close=Callback::new(move |_| day_list.set(None))
                 max_width="max-w-sm".to_string()
                 label="Calendar day"
-                padding_top="1rem"
             >
                 {move || day_list.get().map(|day_ms| {
                     let (day_label, _) = day_names(day_ms);

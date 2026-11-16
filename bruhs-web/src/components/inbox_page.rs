@@ -163,7 +163,7 @@ fn InboxLibrary() -> impl IntoView {
         </div>
 
         <Show when=move || import_open.get()>
-            <Dialog open=Signal::derive(move || import_open.get()) label="Import conversation" padding_top="1rem" on_close=Callback::new(move |_| import_open.set(false))>
+            <Dialog open=Signal::derive(move || import_open.get()) label="Import conversation" on_close=Callback::new(move |_| import_open.set(false))>
                 <div class="border-b border-longan-700/70 px-4 py-3"><h2 class="text-h4 text-rambutan-100">"Import conversation"</h2><p class="mt-1 text-body-sm text-rambutan-500">"Paste a message from any provider. It stays available offline."</p></div>
                 <form class="max-h-[calc(100dvh-8rem)] overflow-y-auto space-y-3 px-4 py-3" on:submit=move |event| { event.prevent_default(); save_import(); }>
                     <div class="space-y-1"><label class="text-label-sm text-rambutan-400">"Provider"</label><div class="flex flex-wrap gap-1">{[InboxSource::Email, InboxSource::Slack, InboxSource::Discord, InboxSource::IMessage, InboxSource::X, InboxSource::Import].into_iter().map(|item| view! { <button type="button" aria-pressed=move || (source.get() == item).to_string() class=move || if source.get() == item { "bruhs-control min-h-[32px] rounded-seed bg-blueberry-500/15 px-2.5 py-1.5 text-label-sm text-blueberry-400 inset-ring inset-ring-blueberry-500/30 cursor-pointer" } else { "bruhs-control min-h-[32px] rounded-seed px-2.5 py-1.5 text-label-sm text-rambutan-400 inset-ring inset-ring-longan-700 hover:bg-longan-800 cursor-pointer" } on:click=move |_| source.set(item)>{item.label()}</button> }).collect_view()}</div></div>

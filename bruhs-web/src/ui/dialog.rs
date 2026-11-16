@@ -25,7 +25,12 @@ pub fn Dialog(
     /// Optional max-width class for the card. Defaults to `max-w-xl`.
     #[prop(optional, into)]
     max_width: Option<String>,
-    /// Optional padding-top distance from the top of the viewport.
+    /// Hang the dialog from the top instead of centering it: for the command
+    /// bar and pickers whose lists change length, so they do not jump while
+    /// you type or browse.
+    #[prop(optional)]
+    anchor_top: bool,
+    /// Distance from the top of the viewport for an `anchor_top` dialog.
     #[prop(optional, into)]
     padding_top: Option<String>,
     /// Accessible name for the dialog (announced by screen readers).
@@ -38,16 +43,24 @@ pub fn Dialog(
 
     // Keep the warm modal scrim without filtering the entire workspace on every
     // keystroke. Full-screen backdrop blur exceeded the command paint budget.
-    // Padding-top stays inline because it's a per-instance prop.
-    let backdrop_class = "fixed inset-0 z-50 flex items-start justify-center bg-longan-950/70";
-    let backdrop_style = format!("padding-top: {pt};");
+    // Dialogs are centered (shadcn `Dialog`): the card's auto margins center it
+    // while it fits and let a taller one start at the top and scroll. Padding
+    // stays inline because it's a per-instance prop.
+    let backdrop_class =
+        "fixed inset-0 z-50 flex items-start justify-center overflow-y-auto bg-longan-950/70";
+    let backdrop_style = if anchor_top {
+        format!("padding-top: {pt};")
+    } else {
+        "padding-top: 2rem; padding-bottom: 2rem;".to_string()
+    };
+    let center = if anchor_top { "" } else { " my-auto" };
 
     // Card = modal tone (bruhs §6): bg-longan-800 + inset-ring-white/20.
     // rounded-lychee (14px) is the bruhs panel/card radius. Lifting from
     // floating tone (longan-700/white-15) to modal tone (longan-800/white-20)
     // gives the dialog the strongest elevation step in the system.
     let card_class = format!(
-        "w-full {max_w} rounded-lychee bg-longan-800 inset-ring inset-ring-white/20 overflow-hidden"
+        "w-full {max_w} rounded-lychee bg-longan-800 inset-ring inset-ring-white/20 overflow-hidden{center}"
     );
 
     view! {

@@ -199,7 +199,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
     };
 
     view! {
-        <Dialog open=open on_close=on_close max_width="max-w-md".to_string() label="Choose project folder">
+        <Dialog open=open on_close=on_close max_width="max-w-md".to_string() label="Choose project folder" anchor_top=true>
             // ── Header: current path + Select-this-folder button ────────────
             // Mirrors apps/web/src/components/shell/project-picker-dialog.tsx
             <div class="flex items-center justify-between border-b border-longan-800 px-4 py-3">
