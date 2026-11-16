@@ -623,3 +623,40 @@ fn scheduling_drawer_overlays_calendar_and_has_real_scroll_extent(cx: &mut TestA
         assert!(workspace.scheduling_scroll.max_offset().y > gpui::px(0.0));
     });
 }
+
+/// Dialogs sit in the middle of the window (shadcn `Dialog`), not hung from
+/// the top. The command bar and the pickers whose lists change length stay
+/// anchored at the top so they do not jump while you type or browse.
+#[gpui::test]
+fn dialogs_are_centered_in_the_window(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    for (width, height) in [(640.0, 480.0), (1280.0, 800.0)] {
+        cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
+        cx.run_until_parked();
+        for (selector, open) in [
+            ("desktop-task-create-dialog", 0),
+            ("desktop-event-create-dialog", 1),
+            ("desktop-modal-dialog", 2),
+        ] {
+            workspace.update_in(cx, |workspace, window, cx| match open {
+                0 => workspace.open_task_create(window, cx),
+                1 => workspace.open_event_create(None, window, cx),
+                _ => workspace.open_capture_dialog(&super::OpenCapture, window, cx),
+            });
+            cx.run_until_parked();
+            let dialog = cx.debug_bounds(selector).expect(selector);
+            let above = dialog.top();
+            let below = gpui::px(height) - dialog.bottom();
+            assert!(
+                (above - below).abs() <= gpui::px(1.0),
+                "{selector} at {width}x{height} is not centered: {above:?} above, {below:?} below"
+            );
+            assert!(above >= gpui::px(0.0) && below >= gpui::px(0.0));
+            workspace.update(cx, |workspace, cx| {
+                workspace.close_transient_surfaces();
+                cx.notify();
+            });
+            cx.run_until_parked();
+        }
+    }
+}

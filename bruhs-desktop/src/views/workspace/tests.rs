@@ -3267,6 +3267,20 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
     assert_rendered_bounds(cx, "desktop-collapsed-sidebar-strip");
     assert_no_rendered_bounds(cx, "desktop-workspace-threads");
     assert_no_rendered_bounds(cx, "desktop-workspace-mode-code");
+
+    // shadcn `SidebarTrigger`: a 28 px ghost button around a 16 px icon.
+    let toggle = rendered_bounds(cx, "desktop-sidebar-toggle");
+    assert_eq!(
+        (f32::from(toggle.size.width), f32::from(toggle.size.height)),
+        (28.0, 28.0)
+    );
+    // One key press toggles once (the click above left focus on it).
+    for shown in [false, true] {
+        press_key(cx, "enter");
+        workspace.update_in(cx, |workspace, _window, _cx| {
+            assert_eq!(workspace.sidebar_visible, shown, "Enter toggles once");
+        });
+    }
 }
 
 #[gpui::test]

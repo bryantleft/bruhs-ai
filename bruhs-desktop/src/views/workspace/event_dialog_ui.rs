@@ -540,13 +540,7 @@ impl Workspace {
             .as_ref()
             .and_then(|provider| provider.html_link.clone())
             .filter(|link| is_provider_web_link(link));
-        let dialog_height = (f32::from(window.viewport_size().height)
-            - DESKTOP_DIALOG_TOP_PADDING_PX
-            - DESKTOP_DIALOG_BOTTOM_GAP_PX)
-            .clamp(
-                DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX,
-                FORM_DIALOG_PREFERRED_HEIGHT_PX,
-            );
+        let dialog_height = modal_ui::form_dialog_height(window);
         let fields = div()
             .flex_shrink_0()
             .px(px(FORM_DIALOG_SECTION_X_PADDING_PX))
@@ -642,9 +636,9 @@ impl Workspace {
             .debug_selector(|| "desktop-event-create-overlay".to_string())
             .bg(theme::longan_950().opacity(EVENT_CREATE_OVERLAY_OPACITY))
             .flex()
-            .items_start()
+            .items_center()
             .justify_center()
-            .pt(px(DESKTOP_DIALOG_TOP_PADDING_PX))
+            .py(px(DESKTOP_DIALOG_EDGE_GAP_PX))
             .on_click(cx.listener(|this, _ev, _window, cx| {
                 this.close_transient_surfaces();
                 cx.notify();

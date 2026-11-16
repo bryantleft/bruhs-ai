@@ -77,6 +77,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   its threads.
 - The desktop app no longer shows a Threads tab above each page. To return to
   a conversation, choose its card in the sidebar or use ⌘K.
+- Desktop dialogs, such as New task, New event and Update providers, now open
+  in the middle of the window. The command palette and the project and import
+  pickers stay at the top, so they do not move while their lists change.
 
 ### Fixed
 
@@ -99,6 +102,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - The live transcript notice now appears once, when a recording loses its
   connection, instead of after every reconnect attempt. It no longer appears
   when the server was never running.
+- The desktop Update providers and Restart to update dialogs show their
+  question once, as the dialog's title, instead of twice.
+- The desktop sidebar toggle is now a 28px button, the size shadcn uses, and
+  Enter or Space on it toggles the sidebar once instead of twice.
 - Fixed the landing page's tour progress indicators cutting dots in half.
   Each tab now fills with complete dots, centered under its label.
 
