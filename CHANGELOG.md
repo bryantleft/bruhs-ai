@@ -81,6 +81,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   what is under it.
 - Fixed desktop labels such as message times, model names and Edit from here
   appearing in the system font instead of Monaspace.
+- The desktop app now shows one Export reply button under a reply, as the web
+  does, instead of three export controls. It opens the media and widget
+  choices and Save ZIP. Enter or Space on a button in a reply no longer runs
+  its action twice.
 - Fixed the landing page's tour progress indicators cutting dots in half.
   Each tab now fills with complete dots, centered under its label.
 

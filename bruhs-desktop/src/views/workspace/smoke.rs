@@ -157,6 +157,12 @@ impl Workspace {
                 self.toggle_date_picker(date_picker_ui::DatePickerTarget::EventStart, window, cx);
             }
             "settings" => self.open_settings(&OpenSettings, window, cx),
+            "export-reply" => {
+                let Some(chat) = self.smoke_active_chat() else {
+                    return false;
+                };
+                return chat.update(cx, |chat, cx| chat.smoke_open_export_panel(cx));
+            }
             // The active card's menu, or the bottom card's (opens upward).
             "thread-menu" | "thread-menu-last" => {
                 let id = if scene == "thread-menu" {

@@ -166,6 +166,8 @@ pub(super) struct RichEmbeds {
     client: Option<crate::server_client::ServerClient>,
     export_state: HashSet<usize>,
     export_remote: HashSet<usize>,
+    /// Replies whose "Export reply" panel is open.
+    export_open: HashSet<usize>,
     quit_subscription: Option<Subscription>,
     parent_subscription: Option<Subscription>,
     parent_window: Option<WindowId>,
@@ -191,6 +193,7 @@ impl Default for RichEmbeds {
             client: None,
             export_state: HashSet::new(),
             export_remote: HashSet::new(),
+            export_open: HashSet::new(),
             quit_subscription: None,
             parent_subscription: None,
             parent_window: None,
@@ -265,6 +268,7 @@ impl RichEmbeds {
         self.prose.clear();
         self.export_state.clear();
         self.export_remote.clear();
+        self.export_open.clear();
         self.seen.clear();
         self.shell_task = None;
         self.shell = ShellStatus::Unchecked;
@@ -276,6 +280,7 @@ impl RichEmbeds {
         self.prose.retain(|(message, _), _| *message < len);
         self.export_state.retain(|message| *message < len);
         self.export_remote.retain(|message| *message < len);
+        self.export_open.retain(|message| *message < len);
     }
 
     fn hide(&mut self) {
@@ -495,6 +500,22 @@ fn embed_body(block: &ResponseBlock, base: &str, project: &str) -> String {
 }
 
 impl ChatView {
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=export-reply`: open the last reply's
+    /// "Export reply" panel. False without a reply.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_open_export_panel(&mut self, cx: &mut Context<'_, Self>) -> bool {
+        let Some(index) = self
+            .messages
+            .iter()
+            .rposition(|message| message.role == MessageRole::Assistant)
+        else {
+            return false;
+        };
+        self.rich_embeds.borrow_mut().export_open.insert(index);
+        cx.notify();
+        true
+    }
+
     #[cfg(debug_assertions)]
     pub(crate) fn smoke_rich_response_report(&self) {
         let embeds = self.rich_embeds.borrow();
@@ -1043,12 +1064,15 @@ mod tests {
         let mut embeds = RichEmbeds::default();
         embeds.export_state.extend([1, 3]);
         embeds.export_remote.extend([1, 3]);
+        embeds.export_open.extend([1, 3]);
         embeds.truncate(2);
         assert_eq!(embeds.export_state, [1].into());
         assert_eq!(embeds.export_remote, [1].into());
+        assert_eq!(embeds.export_open, [1].into());
         embeds.clear();
         assert!(embeds.export_state.is_empty());
         assert!(embeds.export_remote.is_empty());
+        assert!(embeds.export_open.is_empty());
     }
 
     #[test]

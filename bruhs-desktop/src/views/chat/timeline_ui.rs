@@ -1504,7 +1504,8 @@ impl ChatView {
             .or(msg.started_at_ms)
             .and_then(clock_time);
         let has_text = !msg.content.trim().is_empty();
-        div()
+        let exportable = has_text || self.has_published_artifacts(msg);
+        let row = div()
             .debug_selector(move || format!("desktop-usage-meta-{index}"))
             .min_h(px(TRANSCRIPT_ROW_MIN_HEIGHT_PX))
             .flex()
@@ -1512,7 +1513,6 @@ impl ChatView {
             .items_center()
             .gap_2()
             .px_1()
-            .pb_4()
             .font_family(LABEL_FONT_FAMILY)
             .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -1565,7 +1565,17 @@ impl ChatView {
             .children(msg.model.clone().map(|m| div().truncate().child(m)))
             .children(duration.map(|d| div().child(d)))
             .children(tokens.map(|t| div().child(t)))
-            .children(time.map(|t| div().child(t)))
+            .children(time.map(|t| div().child(t)));
+        div()
+            .pb_4()
+            .flex()
+            .flex_col()
+            .child(row)
+            .children(
+                exportable
+                    .then(|| self.render_response_export_panel(index, cx))
+                    .flatten(),
+            )
             .into_any_element()
     }
 }

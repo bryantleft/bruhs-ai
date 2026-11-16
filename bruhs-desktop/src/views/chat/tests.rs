@@ -1332,6 +1332,117 @@ fn desktop_thinking_and_usage_meta_should_match_web_interaction_flow(
     assert_chat_rendered_bounds(cx, usage_meta);
 }
 
+/// Web `ExportResponse`: a reply shows one quiet "Export reply" toggle.
+/// Its panel holds the media and widget choices and the save button, and
+/// the choices belong to that reply.
+#[gpui::test]
+fn desktop_export_reply_should_open_one_panel_like_web(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        theme::apply_bruhs_theme(cx);
+        cx.set_global(DesktopState::new().expect("desktop state should initialize"));
+    });
+    let chat_cell: Rc<RefCell<Option<gpui::Entity<ChatView>>>> = Rc::new(RefCell::new(None));
+    let chat_for_window = chat_cell.clone();
+    let (_root, cx) = cx.add_window_view(|window, cx| {
+        let chat = cx.new(|cx| {
+            let mut chat = ChatView::new(window, cx);
+            chat.start_thread("thread-1", "New thread", cx);
+            chat.messages.push(Message {
+                role: MessageRole::Assistant,
+                content: "Done.".to_string(),
+                model: Some("claude-sonnet-4-6".to_string()),
+                thinking: String::new(),
+                usage: None,
+                duration_ms: None,
+                started_at_ms: Some(1_700_000_000_000),
+                completed_at_ms: Some(1_700_000_001_250),
+                state: TurnState::Finished,
+                files: Vec::new(),
+                checkpoint: None,
+                tool_calls: Vec::new(),
+            });
+            cx.notify();
+            chat
+        });
+        *chat_for_window.borrow_mut() = Some(chat.clone());
+        gpui_component::Root::new(chat, window, cx)
+    });
+    let chat = chat_cell
+        .borrow()
+        .clone()
+        .expect("chat entity should be captured");
+    cx.run_until_parked();
+
+    assert_chat_rendered_bounds(cx, "desktop-export-reply-0");
+    assert_chat_no_rendered_bounds(cx, "desktop-export-panel-0");
+    click_chat_debug_selector(cx, "desktop-export-reply-0");
+    cx.run_until_parked();
+    assert_chat_rendered_bounds(cx, "desktop-export-panel-0");
+    assert_chat_rendered_bounds(cx, "desktop-export-save-0");
+    chat.update(cx, |chat, _cx| {
+        assert_eq!(chat.export_choices(0), (false, false))
+    });
+
+    click_chat_debug_selector(cx, "desktop-export-external-media-0");
+    cx.run_until_parked();
+    chat.update(cx, |chat, _cx| {
+        assert_eq!(chat.export_choices(0), (false, true))
+    });
+    click_chat_debug_selector(cx, "desktop-export-widget-state-0");
+    cx.run_until_parked();
+    chat.update(cx, |chat, _cx| {
+        assert_eq!(chat.export_choices(0), (true, true))
+    });
+
+    click_chat_debug_selector(cx, "desktop-export-reply-0");
+    cx.run_until_parked();
+    assert_chat_no_rendered_bounds(cx, "desktop-export-panel-0");
+    chat.update(cx, |chat, _cx| {
+        assert_eq!(
+            chat.export_choices(0),
+            (true, true),
+            "closing keeps the choices"
+        );
+    });
+
+    // One key press acts once. GPUI also clicks a focused control on key up,
+    // which used to undo the key down's toggle in the same press. The
+    // pointer clicks above left focus on the toggle.
+    press_chat_key(cx, "enter");
+    assert_chat_rendered_bounds(cx, "desktop-export-panel-0");
+    press_chat_key(cx, "space");
+    assert_chat_no_rendered_bounds(cx, "desktop-export-panel-0");
+    press_chat_key(cx, "enter");
+    click_chat_debug_selector(cx, "desktop-export-external-media-0");
+    cx.run_until_parked();
+    chat.update(cx, |chat, _cx| {
+        assert_eq!(chat.export_choices(0), (true, false))
+    });
+    // Space toggles a checkbox once; Enter leaves it alone, as on the web.
+    press_chat_key(cx, "space");
+    chat.update(cx, |chat, _cx| {
+        assert_eq!(chat.export_choices(0), (true, true))
+    });
+    press_chat_key(cx, "enter");
+    chat.update(cx, |chat, _cx| {
+        assert_eq!(chat.export_choices(0), (true, true))
+    });
+}
+
+/// A full key press (`simulate_keystrokes` never sends the key up).
+fn press_chat_key(cx: &mut gpui::VisualTestContext, key: &str) {
+    let keystroke = gpui::Keystroke::parse(key).expect("test keystroke should parse");
+    cx.simulate_event(gpui::KeyDownEvent {
+        keystroke: keystroke.clone(),
+        is_held: false,
+        prefer_character_input: false,
+    });
+    cx.simulate_event(gpui::KeyUpEvent { keystroke });
+    cx.run_until_parked();
+}
+
 #[gpui::test]
 fn desktop_composer_hint_keyboard_should_match_web_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
