@@ -771,7 +771,7 @@ pub fn Shell() -> impl IntoView {
                 </Show>
                 <super::workflow_status::WorkflowStatus />
                 <crate::thread_catalog::ThreadCatalogStatus />
-                <div class="flex min-h-0 flex-1 flex-col overflow-hidden">
+                <div class="relative flex min-h-0 flex-1 flex-col overflow-hidden">
                 {move || match active_view.get() {
                     AppView::Today => view! { <TodayPage /> }.into_any(),
                     AppView::Inbox => view! { <InboxPage /> }.into_any(),
@@ -795,10 +795,10 @@ pub fn Shell() -> impl IntoView {
                     AppView::Search => view! { <SearchPage /> }.into_any(),
                     AppView::Terminal => view! { <TerminalPage /> }.into_any(),
                 }}
-                </div>
-                // Notifications reserve their own bounded space, so failures
-                // cannot cover a page header, focused input, or touch navigation.
+                // Notifications float over the view below its header row, so
+                // the page and the composer stay put as they come and go.
                 <super::banner::BannerStack />
+                </div>
                 <crate::task_saves::TaskSaveNotice />
             </main>
 

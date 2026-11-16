@@ -1,8 +1,9 @@
 //! Error/warning/info banner system.
 //!
-//! `<BannerStack />` renders up to 5 banners in a bounded, in-flow notification
-//! rail below the active view. Banners auto-dismiss after `ttl_ms` milliseconds;
-//! users can also dismiss manually via the × button.
+//! `<BannerStack />` renders up to 5 banners in a bounded rail that floats over
+//! the active view, below its header row, so nothing moves when a banner comes
+//! or goes. Banners auto-dismiss after `ttl_ms` milliseconds; users can also
+//! dismiss manually via the × button.
 //!
 //! Usage: push banners via `BannerStackSignal` in the Leptos context.
 
@@ -86,8 +87,8 @@ impl BannerStackSignal {
     }
 }
 
-/// Reserve space below page content without covering controls. Long queues
-/// scroll within 30% of the viewport, keeping the active view and navigation usable.
+/// Float over the active view without taking its height. Only the banners take
+/// pointer input; long queues scroll within 30% of the viewport.
 #[component]
 pub fn BannerStack() -> impl IntoView {
     let Some(BannerStackSignal(banners)) = use_context::<BannerStackSignal>() else {
@@ -101,8 +102,8 @@ pub fn BannerStack() -> impl IntoView {
             role="status"
             aria-live="polite"
             aria-label="Notifications"
-            class="flex min-h-0 max-h-[30dvh] shrink-0 flex-col gap-2 overflow-y-auto px-3"
-            class:py-2=move || !banners.with(|queue| queue.is_empty())
+            data-banner-stack=""
+            class="pointer-events-none absolute inset-x-0 top-[52px] z-30 flex max-h-[30dvh] flex-col items-center gap-2 overflow-y-auto px-3"
         >
             <For
                 each=move || {
@@ -166,7 +167,7 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
 
     view! {
         <div class=format!(
-            "flex w-full min-w-0 max-w-[480px] shrink-0 self-center items-center gap-2 rounded-seed px-3 py-2 text-body-sm {bg_class}"
+            "pointer-events-auto flex w-full min-w-0 max-w-[480px] shrink-0 self-center items-center gap-2 rounded-seed px-3 py-2 text-body-sm {bg_class}"
         )>
             <span class="shrink-0 text-label" aria-hidden="true">{icon}</span>
             <span class="min-w-0 flex-1 [overflow-wrap:anywhere]">{message}</span>
