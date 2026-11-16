@@ -378,6 +378,10 @@ pub struct MeetingsHub {
     pub google_error: Option<String>,
     pub enroll: Option<(String, EnrollState)>,
     pub server_online: bool,
+    /// When set, a recording start is kept here instead of reaching the
+    /// server, so tests can check what it would create.
+    #[cfg(test)]
+    pub(crate) test_recording_starts: Option<Vec<CreateMeetingBody>>,
 }
 
 impl EventEmitter<HubEvent> for MeetingsHub {}
@@ -484,6 +488,8 @@ impl MeetingsHub {
             google_error: None,
             enroll: None,
             server_online: false,
+            #[cfg(test)]
+            test_recording_starts: None,
         }
     }
 
@@ -1075,6 +1081,11 @@ impl MeetingsHub {
 
     fn create_and_capture(&mut self, body: CreateMeetingBody, cx: &mut Context<'_, Self>) {
         if self.auto_record_in_flight || self.live_meeting_id.is_some() {
+            return;
+        }
+        #[cfg(test)]
+        if let Some(starts) = self.test_recording_starts.as_mut() {
+            starts.push(body);
             return;
         }
         let client = self.client.clone();
