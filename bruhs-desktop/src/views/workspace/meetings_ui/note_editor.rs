@@ -228,16 +228,34 @@ impl Workspace {
         .child(title)
     }
 
+    /// Web: an outline, small button beside the section title.
     pub(in crate::views::workspace) fn new_note_button(
         &self,
         cx: &Context<'_, Self>,
     ) -> impl IntoElement {
-        self.note_editor_button(
-            "desktop-new-meeting-note",
-            "New meeting note",
-            EditorAction::New,
-            cx,
+        let id = "desktop-new-meeting-note";
+        web_button(
+            id,
+            WebButtonVariant::Outline,
+            WebButtonSize::Small,
+            ButtonState::Enabled,
         )
+        .debug_selector(move || id.into())
+        .flex_shrink_0()
+        .aria_label("New meeting note")
+        .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
+            if !event.is_keyboard() {
+                this.note_editor_action(EditorAction::New, window, cx)
+            }
+        }))
+        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+            if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                window.prevent_default();
+                cx.stop_propagation();
+                this.note_editor_action(EditorAction::New, window, cx);
+            }
+        }))
+        .child("New meeting note")
     }
 
     pub(in crate::views::workspace) fn render_note_editor(

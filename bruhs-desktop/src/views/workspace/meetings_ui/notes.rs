@@ -25,14 +25,31 @@ impl Workspace {
             .py_3()
             .border_b_1()
             .border_color(theme::longan_800())
-            .child(body("Meeting notes", BODY_PX, theme::rambutan_100()))
-            .child(self.new_note_button(cx))
+            // Web: the title and its note on the left, the action on the right.
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_start()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex_1()
+                            .child(body("Meeting notes", BODY_PX, theme::rambutan_100()))
+                            .child(
+                                body(
+                                    "Local text notes, separate from recordings and generated summaries.",
+                                    BODY_SM_PX,
+                                    theme::rambutan_400(),
+                                )
+                                .mt_1(),
+                            ),
+                    )
+                    .child(self.new_note_button(cx)),
+            )
             .child(self.render_note_editor(cx))
-            .child(body(
-                "Local text notes, separate from recordings and generated summaries.",
-                BODY_SM_PX,
-                theme::rambutan_400(),
-            ))
             .when(total == 0, |el| {
                 el.child(
                     body(
