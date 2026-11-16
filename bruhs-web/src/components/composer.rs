@@ -783,14 +783,14 @@ pub fn Composer(
 
                 <div data-composer-footer="" class="flex min-w-0 items-center justify-between gap-2 px-3 pb-3">
                     <div data-composer-controls="" class="flex min-w-0 flex-1 items-center gap-1">
-                        <button type="button" class="composer-action bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-grape text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
+                        <button type="button" class="composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-grape text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
                             data-attach-file="" aria-label="Attach file" title="Attach a file" on:click=pick_files>
-                            <Icon name="paperclip" size=14 />
+                            <Icon name="paperclip" size=16 />
                         </button>
                         <input node_ref=file_input type="file" multiple=true class="sr-only" tabindex="-1" aria-hidden="true" on:change=on_file_input />
                         <div class="relative min-w-0 max-w-[160px] flex-1">
                             <button type="button" data-model-trigger=""
-                                class="composer-action bruhs-control inline-flex h-8 w-full min-w-0 items-center gap-1.5 rounded-grape px-2 text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
+                                class="composer-action bruhs-control inline-flex h-control w-full min-w-0 items-center gap-1.5 rounded-grape px-2 text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
                                 title=move || format!("{} ({})", model_label(&current_model.get()), current_model.get())
                                 aria-label=move || format!("Change model (⌘⇧M), {}", model_label(&current_model.get()))
                                 aria-haspopup="dialog" aria-expanded=move || model_select_open.get().to_string()
@@ -883,7 +883,7 @@ pub fn Composer(
                                 ComposerAction::SteerUnavailable => "bg-longan-800 text-rambutan-400 opacity-40 cursor-not-allowed",
                                 _ => "bg-persimmon-500 text-longan-950 hover:bg-persimmon-400 disabled:opacity-30 disabled:hover:bg-persimmon-500 disabled:cursor-not-allowed",
                             };
-                            let class = format!("composer-action bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-orb transition-colors {tone}");
+                            let class = format!("composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-orb transition-colors {tone}");
                             let aria = if matches!(action, ComposerAction::Send | ComposerAction::Queue) {
                                 format!("{label} message")
                             } else {
@@ -900,7 +900,7 @@ pub fn Composer(
                                         type="button"
                                         aria-label="Stop generation"
                                         title="Stop generation"
-                                        class="composer-action bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-orb bg-lychee-500 text-lychee-50 hover:bg-lychee-400"
+                                        class="composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-orb bg-lychee-500 text-lychee-50 hover:bg-lychee-400"
                                         on:click=move |_| stop_square.run(())
                                     >
                                         <svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true">
@@ -934,7 +934,7 @@ pub fn Composer(
                                             </svg>
                                         }.into_any()
                                     } else {
-                                        view! { <Icon name="arrow-up" size=14 /> }.into_any()
+                                        view! { <Icon name="arrow-up" size=16 /> }.into_any()
                                     }}
                                 </button>
                             }
