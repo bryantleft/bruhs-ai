@@ -2720,6 +2720,7 @@ fn desktop_thread_menu_should_open_under_its_trigger_like_web(cx: &mut gpui::Tes
             "desktop-thread-menu-later",
             "desktop-thread-menu-tomorrow",
             "desktop-thread-menu-next-week",
+            "desktop-thread-menu-custom",
             "desktop-thread-menu-regenerate",
         ]
         .into_iter()
@@ -2781,7 +2782,8 @@ fn desktop_thread_menu_should_keep_focus_and_dismiss_like_a_menu(cx: &mut gpui::
         workspace.threads[0].chat.entity_id()
     });
     // The focused item's slot: Pin 0, Settle 1, Wake 2, In 1 hour 3, Later
-    // today 4, Tomorrow 5, Next week 6, Regenerate title 7, Discard draft 8.
+    // today 4, Tomorrow 5, Next week 6, Regenerate title 7, Discard draft 8,
+    // Custom… 9.
     let item_focused = |workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext| {
         workspace.update_in(cx, |workspace, window, _cx| {
             workspace
@@ -2907,6 +2909,93 @@ fn desktop_thread_menu_should_keep_focus_and_dismiss_like_a_menu(cx: &mut gpui::
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.thread_menu_id, None);
     });
+}
+
+/// "Custom…" opens the web's "Snooze until" dialog. A duration wins and
+/// counts from now, a picked time snoozes until then, and an empty or past
+/// entry keeps the dialog open.
+#[gpui::test]
+fn desktop_thread_menu_custom_snooze_should_match_web(cx: &mut gpui::TestAppContext) {
+    use bruhs_models::logic::sidebar::SnoozeUnit;
+
+    let (workspace, cx, general_id, code_id) = thread_menu_workspace(cx);
+    let snoozed_until =
+        |workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext, id: &str| {
+            workspace.update_in(cx, |workspace, _window, _cx| {
+                workspace
+                    .threads
+                    .iter()
+                    .find(|thread| thread.id == id)
+                    .and_then(|thread| thread.snoozed_until_ms)
+            })
+        };
+    open_thread_menu_by_pointer(cx, &general_id);
+    click_debug_selector(cx, "desktop-thread-menu-custom");
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-snooze-custom");
+    assert_rendered_bounds(cx, "desktop-snooze-until-picker");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.thread_menu_id, None, "the menu closes");
+        assert_eq!(
+            workspace.snooze_custom(),
+            Some((general_id.as_str(), SnoozeUnit::Hours, false)),
+            "the dialog starts empty, on hours"
+        );
+    });
+
+    // Nothing entered: Snooze keeps the dialog open.
+    click_debug_selector(cx, "desktop-snooze-submit");
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-snooze-custom");
+    assert_eq!(snoozed_until(&workspace, cx, &general_id), None);
+
+    // Two days from now.
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .snooze_inputs
+            .amount
+            .update(cx, |input, cx| input.set_value("2", window, cx));
+    });
+    click_debug_selector(cx, "desktop-snooze-unit");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-snooze-unit-option-days");
+    cx.run_until_parked();
+    let before = EpochMs::now().as_millis();
+    click_debug_selector(cx, "desktop-snooze-submit");
+    cx.run_until_parked();
+    let after = EpochMs::now().as_millis();
+    assert_no_rendered_bounds(cx, "desktop-snooze-custom");
+    let two_days = 2 * 86_400_000;
+    let until = snoozed_until(&workspace, cx, &general_id).expect("snoozed for two days");
+    assert!(
+        (before + two_days..=after + two_days).contains(&until),
+        "{until} is two days from the click"
+    );
+
+    // A past time keeps the dialog open; a future one snoozes until then.
+    open_thread_menu_by_pointer(cx, &code_id);
+    click_debug_selector(cx, "desktop-thread-menu-custom");
+    cx.run_until_parked();
+    for (picked, closes) in [("2001-01-01T09:00", false), ("2099-06-15T09:30", true)] {
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace
+                .snooze_inputs
+                .when
+                .update(cx, |input, cx| input.set_value(picked, window, cx));
+        });
+        click_debug_selector(cx, "desktop-snooze-submit");
+        cx.run_until_parked();
+        if closes {
+            assert_no_rendered_bounds(cx, "desktop-snooze-custom");
+        } else {
+            assert_rendered_bounds(cx, "desktop-snooze-custom");
+        }
+    }
+    assert_eq!(
+        snoozed_until(&workspace, cx, &code_id),
+        super::snooze_ui::local_datetime_ms("2099-06-15T09:30"),
+        "snoozed until the picked local time"
+    );
 }
 
 #[gpui::test]

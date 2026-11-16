@@ -114,6 +114,7 @@ mod settings_ui;
 mod sidebar_ui;
 #[cfg(debug_assertions)]
 mod smoke;
+mod snooze_ui;
 mod state_file;
 #[cfg(test)]
 mod state_fixture_tests;
@@ -423,6 +424,13 @@ enum Overlay {
     UpdateConfirm,
     /// "Restart to update" for a downloaded release.
     RestartConfirm,
+    /// The thread menu's "Custom…" snooze (web "Snooze until").
+    SnoozeCustom {
+        thread_id: String,
+        unit: bruhs_models::logic::sidebar::SnoozeUnit,
+        /// The unit dropdown's listbox.
+        unit_open: bool,
+    },
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1226,6 +1234,8 @@ pub struct Workspace {
     thread_menu_id: Option<String>,
     /// Focus targets for the thread menu's items (`ThreadMenuItem` slots).
     thread_menu_items: Rc<[FocusHandle]>,
+    /// The thread menu's "Custom…" snooze fields.
+    snooze_inputs: snooze_ui::SnoozeInputs,
     sidebar_undo: Option<SidebarUndo>,
     sidebar_undo_generation: u32,
     threads: Vec<DesktopThread>,
@@ -1888,6 +1898,7 @@ impl Workspace {
             thread_menu_items: (0..sidebar_ui::THREAD_MENU_MAX_ITEMS)
                 .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
                 .collect(),
+            snooze_inputs: snooze_ui::SnoozeInputs::new(window, cx),
             sidebar_undo: None,
             sidebar_undo_generation: 0,
             threads,
@@ -2951,6 +2962,7 @@ impl Render for Workspace {
                     }
                     Overlay::UpdateConfirm => self.render_update_confirm(window, cx),
                     Overlay::RestartConfirm => self.render_restart_confirm(window, cx),
+                    Overlay::SnoozeCustom { .. } => self.render_snooze_custom(window, cx),
                 })
             })
             // Drawn after the form dialog so it sits on top of it.

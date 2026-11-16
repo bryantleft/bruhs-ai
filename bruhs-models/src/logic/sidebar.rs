@@ -270,6 +270,28 @@ pub enum SnoozeUnit {
     Days,
 }
 
+impl SnoozeUnit {
+    /// The custom snooze dialog's unit choices, in order.
+    pub const ALL: [Self; 3] = [Self::Minutes, Self::Hours, Self::Days];
+
+    /// Choice label, also the web `<select>` value.
+    pub fn label(self) -> &'static str {
+        match self {
+            Self::Minutes => "minutes",
+            Self::Hours => "hours",
+            Self::Days => "days",
+        }
+    }
+
+    /// The unit for a choice label. Anything else means hours, the default.
+    pub fn from_label(label: &str) -> Self {
+        Self::ALL
+            .into_iter()
+            .find(|unit| unit.label() == label)
+            .unwrap_or(Self::Hours)
+    }
+}
+
 /// A positive duration from `now_ms`. One day is 24 hours. `None` when the
 /// amount is zero or the sum overflows.
 pub fn snooze_after(now_ms: i64, amount: u64, unit: SnoozeUnit) -> Option<i64> {
@@ -285,15 +307,25 @@ pub fn snooze_after(now_ms: i64, amount: u64, unit: SnoozeUnit) -> Option<i64> {
     now_ms.checked_add(i64::try_from(delta).ok()?)
 }
 
+/// Which preset snooze time a menu row offers.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum SnoozeWhen {
+    InAnHour,
+    LaterToday,
+    Tomorrow,
+    NextWeek,
+}
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct SnoozePreset {
+    pub when: SnoozeWhen,
     pub label: &'static str,
     pub until_ms: i64,
 }
 
-/// Later today (18:00 local, or three hours when that has passed), tomorrow
-/// at 09:00, and a week from today at 09:00. `utc_offset_minutes` is minutes
-/// east of UTC.
+/// Soonest first: in an hour, later today (18:00 local, or three hours when
+/// that has passed), tomorrow at 09:00, and a week from today at 09:00.
+/// `utc_offset_minutes` is minutes east of UTC.
 pub fn snooze_presets(now_ms: i64, utc_offset_minutes: i32) -> Vec<SnoozePreset> {
     let offset_ms = i64::from(utc_offset_minutes).saturating_mul(60_000);
     let local = now_ms.saturating_add(offset_ms);
@@ -309,18 +341,145 @@ pub fn snooze_presets(now_ms: i64, utc_offset_minutes: i32) -> Vec<SnoozePreset>
         |day_index: i64, minute: i64| day_start + day_index * day + minute * 60_000 - offset_ms;
     vec![
         SnoozePreset {
+            when: SnoozeWhen::InAnHour,
+            label: "In 1 hour",
+            until_ms: now_ms.saturating_add(3_600_000),
+        },
+        SnoozePreset {
+            when: SnoozeWhen::LaterToday,
             label: "Later today",
             until_ms: later,
         },
         SnoozePreset {
+            when: SnoozeWhen::Tomorrow,
             label: "Tomorrow",
             until_ms: at_local(1, 9 * 60),
         },
         SnoozePreset {
+            when: SnoozeWhen::NextWeek,
             label: "Next week",
             until_ms: at_local(7, 9 * 60),
         },
     ]
+}
+
+/// The thread menu row that opens the custom snooze dialog.
+pub const SNOOZE_CUSTOM_LABEL: &str = "Custom…";
+/// Title of the dialog that snoozes a thread until a chosen time.
+pub const SNOOZE_CUSTOM_TITLE: &str = "Snooze until";
+
+/// When the custom snooze dialog snoozes a thread to: a positive whole
+/// `amount` of `unit` from now wins; otherwise `chosen_ms`, the picked date
+/// and time, while it is still ahead. `None` leaves the dialog open.
+pub fn custom_snooze_until(
+    now_ms: i64,
+    amount: &str,
+    unit: SnoozeUnit,
+    chosen_ms: Option<i64>,
+) -> Option<i64> {
+    match amount.trim().parse::<u64>() {
+        Ok(amount) if amount > 0 => snooze_after(now_ms, amount, unit),
+        _ => chosen_ms.filter(|&until| until > now_ms),
+    }
+}
+
+/// What a thread card's menu needs to know about its thread.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct ThreadMenuFacts {
+    pub pinned: bool,
+    pub settled: bool,
+    /// Snoozed until a time that is still ahead.
+    pub snoozed: bool,
+    /// A turn is running, so the title cannot be regenerated.
+    pub streaming: bool,
+    /// The thread is open and its composer holds a draft.
+    pub has_draft: bool,
+}
+
+/// One row of a thread card's menu.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum ThreadMenuEntry {
+    /// Pin, or Unpin when pinned.
+    Pin {
+        pinned: bool,
+    },
+    /// Settle, or Unsettle when settled.
+    Settle {
+        settled: bool,
+    },
+    Wake,
+    Snooze(SnoozePreset),
+    /// Opens the custom snooze dialog.
+    SnoozeCustom,
+    /// Disabled while a turn runs.
+    RegenerateTitle {
+        enabled: bool,
+    },
+    DiscardDraft,
+    /// Hairline between groups.
+    Separator,
+}
+
+impl ThreadMenuEntry {
+    pub fn label(&self) -> &'static str {
+        match self {
+            Self::Pin { pinned: true } => "Unpin",
+            Self::Pin { pinned: false } => "Pin",
+            Self::Settle { settled: true } => "Unsettle",
+            Self::Settle { settled: false } => "Settle",
+            Self::Wake => "Wake thread",
+            Self::Snooze(preset) => preset.label,
+            Self::SnoozeCustom => SNOOZE_CUSTOM_LABEL,
+            Self::RegenerateTitle { .. } => "Regenerate title",
+            Self::DiscardDraft => "Discard draft",
+            Self::Separator => "",
+        }
+    }
+
+    /// Whether the row can be chosen. Separators cannot.
+    pub fn enabled(&self) -> bool {
+        match self {
+            Self::RegenerateTitle { enabled } => *enabled,
+            Self::Separator => false,
+            _ => true,
+        }
+    }
+}
+
+/// A thread card's menu, the same rows on web and desktop: the shelf
+/// actions, the snooze times, then the title and draft actions, split by
+/// hairlines.
+pub fn thread_menu(
+    facts: ThreadMenuFacts,
+    now_ms: i64,
+    utc_offset_minutes: i32,
+) -> Vec<ThreadMenuEntry> {
+    let mut rows = vec![
+        ThreadMenuEntry::Pin {
+            pinned: facts.pinned,
+        },
+        ThreadMenuEntry::Settle {
+            settled: facts.settled,
+        },
+    ];
+    if facts.snoozed {
+        rows.push(ThreadMenuEntry::Wake);
+    }
+    rows.push(ThreadMenuEntry::Separator);
+    rows.extend(
+        snooze_presets(now_ms, utc_offset_minutes)
+            .into_iter()
+            .map(ThreadMenuEntry::Snooze),
+    );
+    rows.push(ThreadMenuEntry::SnoozeCustom);
+    rows.push(ThreadMenuEntry::Separator);
+    rows.push(ThreadMenuEntry::RegenerateTitle {
+        enabled: !facts.streaming,
+    });
+    if facts.has_draft {
+        rows.push(ThreadMenuEntry::DiscardDraft);
+    }
+    rows
 }
 
 /// Apply thread title instructions to a candidate title.
@@ -536,15 +695,118 @@ mod tests {
         let day = 86_400_000_i64;
         let noon = day * 100 + 15 * 3_600_000;
         let presets = snooze_presets(noon, 0);
-        assert_eq!(presets[0].label, "Later today");
-        assert_eq!(presets[0].until_ms, day * 100 + 18 * 3_600_000);
-        assert_eq!(presets[1].until_ms, day * 101 + 9 * 3_600_000);
-        assert_eq!(presets[2].until_ms, day * 107 + 9 * 3_600_000);
+        let labels: Vec<_> = presets.iter().map(|preset| preset.label).collect();
+        assert_eq!(
+            labels,
+            ["In 1 hour", "Later today", "Tomorrow", "Next week"]
+        );
+        assert_eq!(presets[0].when, SnoozeWhen::InAnHour);
+        assert_eq!(presets[0].until_ms, noon + 3_600_000);
+        assert_eq!(presets[1].until_ms, day * 100 + 18 * 3_600_000);
+        assert_eq!(presets[2].until_ms, day * 101 + 9 * 3_600_000);
+        assert_eq!(presets[3].until_ms, day * 107 + 9 * 3_600_000);
         let evening = day * 100 + 19 * 3_600_000;
         assert_eq!(
-            snooze_presets(evening, 0)[0].until_ms,
+            snooze_presets(evening, 0)[1].until_ms,
             evening + 3 * 3_600_000
         );
+    }
+
+    #[test]
+    fn custom_snooze_prefers_a_duration_then_a_future_time() {
+        let now = 1_000_000;
+        let later = now + 60_000;
+        assert_eq!(
+            custom_snooze_until(now, " 2 ", SnoozeUnit::Hours, Some(later)),
+            Some(now + 2 * 3_600_000),
+            "a duration wins over the picked time"
+        );
+        assert_eq!(
+            custom_snooze_until(now, "", SnoozeUnit::Hours, Some(later)),
+            Some(later)
+        );
+        assert_eq!(
+            custom_snooze_until(now, "0", SnoozeUnit::Days, Some(later)),
+            Some(later)
+        );
+        assert_eq!(
+            custom_snooze_until(now, "abc", SnoozeUnit::Days, Some(now)),
+            None,
+            "a past time keeps the dialog open"
+        );
+        assert_eq!(custom_snooze_until(now, "", SnoozeUnit::Days, None), None);
+        assert_eq!(SnoozeUnit::from_label("minutes"), SnoozeUnit::Minutes);
+        assert_eq!(
+            SnoozeUnit::from_label("weeks"),
+            SnoozeUnit::Hours,
+            "hours is the default"
+        );
+        assert_eq!(
+            SnoozeUnit::ALL.map(SnoozeUnit::label),
+            ["minutes", "hours", "days"]
+        );
+    }
+
+    #[test]
+    fn thread_menu_rows_are_one_list_for_both_apps() {
+        let labels = |facts: ThreadMenuFacts| -> Vec<&'static str> {
+            thread_menu(facts, 0, 0)
+                .iter()
+                .map(|row| {
+                    if *row == ThreadMenuEntry::Separator {
+                        "---"
+                    } else {
+                        row.label()
+                    }
+                })
+                .collect()
+        };
+        assert_eq!(
+            labels(ThreadMenuFacts::default()),
+            [
+                "Pin",
+                "Settle",
+                "---",
+                "In 1 hour",
+                "Later today",
+                "Tomorrow",
+                "Next week",
+                "Custom…",
+                "---",
+                "Regenerate title",
+            ]
+        );
+        let busy = ThreadMenuFacts {
+            pinned: true,
+            settled: true,
+            snoozed: true,
+            streaming: true,
+            has_draft: true,
+        };
+        assert_eq!(
+            labels(busy),
+            [
+                "Unpin",
+                "Unsettle",
+                "Wake thread",
+                "---",
+                "In 1 hour",
+                "Later today",
+                "Tomorrow",
+                "Next week",
+                "Custom…",
+                "---",
+                "Regenerate title",
+                "Discard draft",
+            ]
+        );
+        let rows = thread_menu(busy, 0, 0);
+        assert!(
+            !rows.contains(&ThreadMenuEntry::RegenerateTitle { enabled: true }),
+            "a running turn disables Regenerate title"
+        );
+        assert!(!ThreadMenuEntry::Separator.enabled());
+        assert!(ThreadMenuEntry::SnoozeCustom.enabled());
     }
 
     #[test]

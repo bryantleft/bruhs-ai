@@ -19,6 +19,7 @@ pub mod follow_up;
 pub mod git;
 pub mod handoff;
 pub mod keybindings;
+pub mod menu;
 pub mod pages;
 pub mod portable;
 pub mod preview;

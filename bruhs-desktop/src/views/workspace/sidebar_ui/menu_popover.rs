@@ -1,40 +1,33 @@
-//! Places a card menu at the button that opened it, like the web's
-//! `left: rect.left(); top: rect.bottom() + 4` for the thread menu. Without
-//! room below, the menu opens above the button instead; either way it stays
-//! inside the window.
+//! Places a card menu at the button that opened it, by the rule both apps
+//! share (`bruhs_models::logic::menu::menu_origin`): under the button's left
+//! edge, above it when the window has no room below, and inside the window.
 //!
 //! GPUI's `anchored()` flips around a single point, which would cover the
 //! button with the flipped menu, so this element knows the button's height.
 
+use bruhs_models::logic::menu::{self, MenuRect};
+use bruhs_models::num::ToFloatLossy;
 use gpui::*;
 
-/// Gap between the button and the menu (web: `rect.bottom() + 4`).
-pub(super) const MENU_GAP_PX: f32 = 4.0;
-/// Room kept between the menu and the window edges.
-pub(super) const WINDOW_MARGIN_PX: f32 = 8.0;
-
 /// Top-left corner of a `menu`-sized popover for `trigger`, in window
-/// coordinates: under the trigger's left edge, above it when the window
-/// has no room below, and clamped into the window margins.
+/// coordinates.
 pub(super) fn menu_origin(
     trigger: Bounds<Pixels>,
     menu: Size<Pixels>,
     viewport: Size<Pixels>,
 ) -> Point<Pixels> {
-    let margin = px(WINDOW_MARGIN_PX);
-    let gap = px(MENU_GAP_PX);
-    let max_top = (viewport.height - margin - menu.height).max(margin);
-    let below = trigger.bottom() + gap;
-    let above = trigger.top() - gap - menu.height;
-    let top = if below <= max_top {
-        below
-    } else if above >= margin {
-        above
-    } else {
-        max_top
-    };
-    let max_left = (viewport.width - margin - menu.width).max(margin);
-    point(trigger.left().max(margin).min(max_left), top)
+    let length = |pixels: Pixels| f64::from(f32::from(pixels));
+    let (left, top) = menu::menu_origin(
+        MenuRect {
+            left: length(trigger.left()),
+            top: length(trigger.top()),
+            width: length(trigger.size.width),
+            height: length(trigger.size.height),
+        },
+        (length(menu.width), length(menu.height)),
+        (length(viewport.width), length(viewport.height)),
+    );
+    point(px(left.to_f32_lossy()), px(top.to_f32_lossy()))
 }
 
 /// `content` placed for a trigger of `trigger_size` whose top-left corner is
@@ -125,8 +118,12 @@ impl Element for MenuPopover {
 
 #[cfg(test)]
 mod tests {
-    use super::{menu_origin, MENU_GAP_PX, WINDOW_MARGIN_PX};
+    use super::menu_origin;
     use gpui::{point, px, size, Bounds};
+
+    // `bruhs_models::logic::menu::{MENU_GAP_PX, MENU_WINDOW_MARGIN_PX}`.
+    const MENU_GAP_PX: f32 = 4.0;
+    const WINDOW_MARGIN_PX: f32 = 8.0;
 
     const MENU_W: f32 = 208.0;
     const MENU_H: f32 = 290.0;

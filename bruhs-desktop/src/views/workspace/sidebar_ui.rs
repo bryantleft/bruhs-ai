@@ -1,8 +1,8 @@
 //! The thread sidebar, 1:1 with `bruhs-web/src/components/sidebar.rs`:
-//! brand header, search + new-thread row, project filter + new-project row,
-//! three-line thread cards (project · title · branch + provider) with the
-//! Settled fold, and the footer view switcher. Sizes are the web's Tailwind
-//! values in px; colours are the same bruhs tokens.
+//! brand header, one control row (search, choose project folder, new
+//! thread), three-line thread cards (project · title · branch + provider)
+//! with the Settled fold, and the footer view switcher. Sizes are the web's
+//! Tailwind values in px; colours are the same bruhs tokens.
 
 use gpui::prelude::*;
 use gpui::*;
@@ -22,7 +22,10 @@ use super::{
 };
 use crate::views::sidebar_order::relative_age;
 use crate::{assets, theme};
-use bruhs_models::logic::sidebar::{snooze_after, snooze_presets, SnoozeUnit};
+use bruhs_models::logic::menu::menu_step;
+use bruhs_models::logic::sidebar::{
+    snooze_presets, thread_menu, SnoozeWhen, ThreadMenuEntry, ThreadMenuFacts,
+};
 use bruhs_models::{AppView, EpochMs};
 
 /// Shared app drawer width.
@@ -76,7 +79,7 @@ const THREAD_MENU_WIDTH_PX: f32 = 208.0;
 const THREAD_MENU_ROW_PX: f32 = theme::CONTROL_PX;
 const THREAD_MENU_ROW_X_PADDING_PX: f32 = 8.0;
 /// Focus slots: one per `ThreadMenuItem`.
-pub(super) const THREAD_MENU_MAX_ITEMS: usize = 9;
+pub(super) const THREAD_MENU_MAX_ITEMS: usize = 10;
 const SIDEBAR_SETTLED_TOP_PADDING_PX: f32 = 8.0;
 const SIDEBAR_SETTLED_X_PADDING_PX: f32 = 4.0;
 const SIDEBAR_FOOTER_PADDING_PX: f32 = 8.0;
@@ -130,7 +133,8 @@ fn menu_action(
     Rc::new(action)
 }
 
-/// The thread menu's rows. Each has a fixed focus slot.
+/// The thread menu's rows. Each has a fixed focus slot; the menu shows
+/// them in the shared order (`bruhs_models::logic::sidebar::thread_menu`).
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 enum ThreadMenuItem {
     Pin,
@@ -142,6 +146,7 @@ enum ThreadMenuItem {
     NextWeek,
     Regenerate,
     Discard,
+    Custom,
 }
 
 impl ThreadMenuItem {
@@ -155,7 +160,27 @@ impl ThreadMenuItem {
         Self::NextWeek,
         Self::Regenerate,
         Self::Discard,
+        Self::Custom,
     ];
+
+    /// The slot for a shared menu row. Separators have none.
+    fn for_entry(entry: &ThreadMenuEntry) -> Option<Self> {
+        Some(match entry {
+            ThreadMenuEntry::Pin { .. } => Self::Pin,
+            ThreadMenuEntry::Settle { .. } => Self::Settle,
+            ThreadMenuEntry::Wake => Self::Wake,
+            ThreadMenuEntry::Snooze(preset) => match preset.when {
+                SnoozeWhen::InAnHour => Self::InAnHour,
+                SnoozeWhen::LaterToday => Self::LaterToday,
+                SnoozeWhen::Tomorrow => Self::Tomorrow,
+                SnoozeWhen::NextWeek => Self::NextWeek,
+            },
+            ThreadMenuEntry::SnoozeCustom => Self::Custom,
+            ThreadMenuEntry::RegenerateTitle { .. } => Self::Regenerate,
+            ThreadMenuEntry::DiscardDraft => Self::Discard,
+            ThreadMenuEntry::Separator => return None,
+        })
+    }
 
     /// Index into `Workspace::thread_menu_items`.
     fn slot(self) -> usize {
@@ -177,7 +202,44 @@ impl ThreadMenuItem {
             Self::NextWeek => "desktop-thread-menu-next-week",
             Self::Regenerate => "desktop-thread-menu-regenerate",
             Self::Discard => "desktop-thread-menu-discard",
+            Self::Custom => "desktop-thread-menu-custom",
         }
+    }
+}
+
+/// What choosing `entry` does to thread `id`. Snooze times count from the
+/// click, not from when the menu opened.
+fn thread_menu_action(entry: ThreadMenuEntry) -> ThreadMenuAction {
+    match entry {
+        ThreadMenuEntry::Pin { .. } => menu_action(|this, id, _window, cx| {
+            this.toggle_pinned_by_id(id, cx);
+        }),
+        ThreadMenuEntry::Settle { .. } => menu_action(|this, id, _window, cx| {
+            this.toggle_settled_by_id(id, cx);
+        }),
+        ThreadMenuEntry::Wake => {
+            menu_action(|this, id, _window, cx| this.wake_thread_by_id(id, cx))
+        }
+        ThreadMenuEntry::Snooze(preset) => menu_action(move |this, id, _window, cx| {
+            let now = EpochMs::now().as_millis();
+            let until = snooze_presets(now, threads_ui::utc_offset_minutes_east())
+                .into_iter()
+                .find(|fresh| fresh.when == preset.when)
+                .map(|fresh| fresh.until_ms);
+            if let Some(until) = until {
+                this.snooze_thread_by_id(id, until, cx);
+            }
+        }),
+        ThreadMenuEntry::SnoozeCustom => {
+            menu_action(|this, id, window, cx| this.open_snooze_custom(id, window, cx))
+        }
+        ThreadMenuEntry::RegenerateTitle { .. } => {
+            menu_action(|this, id, _window, cx| this.regenerate_title_by_id(id, cx))
+        }
+        ThreadMenuEntry::DiscardDraft => {
+            menu_action(|this, _id, window, cx| this.discard_active_draft(window, cx))
+        }
+        ThreadMenuEntry::Separator => menu_action(|_this, _id, _window, _cx| {}),
     }
 }
 
@@ -189,28 +251,6 @@ fn thread_menu_separator() -> AnyElement {
         .flex_shrink_0()
         .bg(gpui::white().opacity(RING_WHITE_10))
         .into_any_element()
-}
-
-/// Item to focus after `key` in a menu of `count` items, from the focused
-/// item `current`: Down and Up wrap, Home and End jump. `None` for other keys.
-pub(super) fn thread_menu_step(current: Option<usize>, count: usize, key: &str) -> Option<usize> {
-    if count == 0 {
-        return None;
-    }
-    let last = count - 1;
-    match key {
-        "down" => Some(current.map_or(0, |index| if index >= last { 0 } else { index + 1 })),
-        "up" => Some(current.map_or(last, |index| {
-            if index == 0 || index > last {
-                last
-            } else {
-                index - 1
-            }
-        })),
-        "home" => Some(0),
-        "end" => Some(last),
-        _ => None,
-    }
 }
 
 impl Workspace {
@@ -933,104 +973,37 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// The card's action menu (web `data-thread-menu`): the floating tone,
-    /// shelf actions, snooze times, then title and draft actions, split by
-    /// hairlines. Arrow keys, Home and End move between items; Tab and
-    /// Escape close it and return focus to its button.
+    /// The card's action menu (web `data-thread-menu`): the floating tone and
+    /// the rows both apps share (`thread_menu`): shelf actions, snooze times,
+    /// then title and draft actions, split by hairlines. Arrow keys, Home and
+    /// End move between items; Tab and Escape close it and return focus to
+    /// its button.
     fn render_thread_menu(&self, thread: &DesktopThread, cx: &Context<'_, Self>) -> AnyElement {
         let id = thread.id.clone();
         let chat = thread.chat.read(cx);
-        let streaming = chat.is_streaming;
         let now = EpochMs::now().as_millis();
-        let snoozed = thread.snoozed_until_ms.is_some_and(|until| until > now);
-        let show_discard = self.active_thread_id.as_deref() == Some(id.as_str())
-            && !chat.input_state.read(cx).value().is_empty();
-        let presets = snooze_presets(now, threads_ui::utc_offset_minutes_east());
+        let facts = ThreadMenuFacts {
+            pinned: thread.pinned,
+            settled: thread.settled,
+            snoozed: thread.snoozed_until_ms.is_some_and(|until| until > now),
+            streaming: chat.is_streaming,
+            has_draft: self.active_thread_id.as_deref() == Some(id.as_str())
+                && !chat.input_state.read(cx).value().is_empty(),
+        };
         // Focusable items in visual order, for the arrow keys.
         let mut enabled: Vec<ThreadMenuItem> = Vec::new();
         let mut rows: Vec<AnyElement> = Vec::new();
-        let mut push = |item: ThreadMenuItem,
-                        label: &'static str,
-                        on: bool,
-                        action: ThreadMenuAction,
-                        rows: &mut Vec<AnyElement>| {
+        for entry in thread_menu(facts, now, threads_ui::utc_offset_minutes_east()) {
+            let Some(item) = ThreadMenuItem::for_entry(&entry) else {
+                rows.push(thread_menu_separator());
+                continue;
+            };
+            let on = entry.enabled();
             if on {
                 enabled.push(item);
             }
-            rows.push(self.thread_menu_item(item, label, on, &id, cx, action));
-        };
-        push(
-            ThreadMenuItem::Pin,
-            if thread.pinned { "Unpin" } else { "Pin" },
-            true,
-            menu_action(|this, id, _window, cx| {
-                this.toggle_pinned_by_id(id, cx);
-            }),
-            &mut rows,
-        );
-        push(
-            ThreadMenuItem::Settle,
-            if thread.settled { "Unsettle" } else { "Settle" },
-            true,
-            menu_action(|this, id, _window, cx| {
-                this.toggle_settled_by_id(id, cx);
-            }),
-            &mut rows,
-        );
-        if snoozed {
-            push(
-                ThreadMenuItem::Wake,
-                "Wake thread",
-                true,
-                menu_action(|this, id, _window, cx| this.wake_thread_by_id(id, cx)),
-                &mut rows,
-            );
-        }
-        rows.push(thread_menu_separator());
-        // Soonest first: the relative hour, then the web's presets.
-        push(
-            ThreadMenuItem::InAnHour,
-            "In 1 hour",
-            true,
-            menu_action(|this, id, _window, cx| {
-                if let Some(until) = snooze_after(EpochMs::now().as_millis(), 1, SnoozeUnit::Hours)
-                {
-                    this.snooze_thread_by_id(id, until, cx);
-                }
-            }),
-            &mut rows,
-        );
-        for preset in presets {
-            let until = preset.until_ms;
-            let item = match preset.label {
-                "Later today" => ThreadMenuItem::LaterToday,
-                "Tomorrow" => ThreadMenuItem::Tomorrow,
-                _ => ThreadMenuItem::NextWeek,
-            };
-            push(
-                item,
-                preset.label,
-                true,
-                menu_action(move |this, id, _window, cx| this.snooze_thread_by_id(id, until, cx)),
-                &mut rows,
-            );
-        }
-        rows.push(thread_menu_separator());
-        push(
-            ThreadMenuItem::Regenerate,
-            "Regenerate title",
-            !streaming,
-            menu_action(|this, id, _window, cx| this.regenerate_title_by_id(id, cx)),
-            &mut rows,
-        );
-        if show_discard {
-            push(
-                ThreadMenuItem::Discard,
-                "Discard draft",
-                true,
-                menu_action(|this, _id, window, cx| this.discard_active_draft(window, cx)),
-                &mut rows,
-            );
+            let label = entry.label();
+            rows.push(self.thread_menu_item(item, label, on, &id, cx, thread_menu_action(entry)));
         }
         div()
             .id("desktop-thread-menu")
@@ -1057,7 +1030,7 @@ impl Workspace {
                 let current = enabled
                     .iter()
                     .position(|item| this.thread_menu_items[item.slot()].is_focused(window));
-                let next = thread_menu_step(current, enabled.len(), event.keystroke.key.as_str());
+                let next = menu_step(current, enabled.len(), event.keystroke.key.as_str());
                 if let Some(item) = next.and_then(|next| enabled.get(next)) {
                     window.prevent_default();
                     cx.stop_propagation();
