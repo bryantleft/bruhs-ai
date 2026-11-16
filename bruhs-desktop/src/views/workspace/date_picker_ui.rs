@@ -31,14 +31,14 @@ pub(crate) const MONTHS: [&str; 12] = [
 pub(crate) const WEEKDAYS: [&str; 7] = ["Su", "Mo", "Tu", "We", "Th", "Fr", "Sa"];
 
 const TRIGGER_TEXT_PX: f32 = theme::APP_INPUT_TEXT_SIZE_PX;
-const TRIGGER_ICON_PX: f32 = 16.0;
+const TRIGGER_ICON_PX: f32 = theme::ICON_PX;
 const POPOVER_WIDTH_PX: f32 = 256.0;
 const POPOVER_GAP_PX: f32 = 4.0;
 /// Web `disabled:opacity-60` on the date-time trigger.
 const DATE_FIELD_DISABLED_OPACITY: f32 = 0.6;
 const CELL_PX: f32 = theme::APP_COMPACT_CONTROL_HEIGHT_PX;
 const GRID_GAP_PX: f32 = 2.0;
-const MONTH_BUTTON_PX: f32 = 28.0;
+const MONTH_BUTTON_PX: f32 = theme::CONTROL_SM_PX;
 const TIME_FIELD_WIDTH_PX: f32 = 56.0;
 const LABEL_PX: f32 = 14.0;
 const LABEL_SM_PX: f32 = 12.0;

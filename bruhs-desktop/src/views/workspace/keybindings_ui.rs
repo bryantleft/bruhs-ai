@@ -36,7 +36,7 @@ use super::{
 
 const KEY_INPUT_WIDTH_PX: f32 = 144.0;
 const WHEN_INPUT_WIDTH_PX: f32 = 160.0;
-const FIELD_HEIGHT_PX: f32 = 32.0;
+const FIELD_HEIGHT_PX: f32 = crate::theme::CONTROL_PX;
 
 #[derive(Clone)]
 pub(super) struct InstalledBinding {

@@ -36,7 +36,7 @@ const ROLE_SLOTS: [&str; MAX_ROLES] =
     ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"];
 
 /// Web `BUTTON` and `TEXT_INPUT`: `h-8`, and `text-label-sm` on the button.
-const CONTROL_HEIGHT_PX: f32 = 32.0;
+const CONTROL_HEIGHT_PX: f32 = theme::CONTROL_PX;
 const LABEL_TEXT_PX: f32 = 12.0;
 /// Web `text-body-sm` in a field, with `px-3`.
 const FIELD_TEXT_PX: f32 = 14.0;

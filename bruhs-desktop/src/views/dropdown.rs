@@ -16,7 +16,7 @@ use crate::views::web_button::is_web_button_activation_key;
 use crate::views::workspace::CloseOverlays;
 use crate::{assets, theme};
 
-const TRIGGER_HEIGHT_PX: f32 = 32.0;
+const TRIGGER_HEIGHT_PX: f32 = theme::CONTROL_PX;
 const TRIGGER_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const TRIGGER_RADIUS_PX: f32 = 8.0;
 const LIST_MAX_HEIGHT_PX: f32 = 420.0;
