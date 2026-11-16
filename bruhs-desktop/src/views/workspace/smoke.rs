@@ -157,6 +157,9 @@ impl Workspace {
                 self.toggle_date_picker(date_picker_ui::DatePickerTarget::EventStart, window, cx);
             }
             "settings" => self.open_settings(&OpenSettings, window, cx),
+            "notice" => self
+                .meetings_hub
+                .update(cx, |hub, cx| hub.smoke_post_notice(cx)),
             "export-reply" => {
                 let Some(chat) = self.smoke_active_chat() else {
                     return false;

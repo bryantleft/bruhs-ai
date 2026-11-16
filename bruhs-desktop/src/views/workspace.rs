@@ -2737,15 +2737,17 @@ impl Render for Workspace {
                     .child(self.render_workspace_navigation(compact, cx))
                     .child(
                         div()
+                            .relative()
                             .flex_1()
                             .min_h_0()
                             .min_w_0()
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            .child(self.render_main_surface(compact, window, cx)),
-                    )
-                    .children(self.render_hub_notice(window, cx));
+                            .child(self.render_main_surface(compact, window, cx))
+                            // Notices float over the view (no layout shift).
+                            .children(self.render_hub_notice(window, cx)),
+                    );
                 if !compact && self.right_panel_open() && self.active_view == AppView::Chat {
                     // Web: the panel's left edge drags; the width is clamped
                     // to [360, viewport − 360] and remembered.
