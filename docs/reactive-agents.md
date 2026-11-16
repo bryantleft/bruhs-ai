@@ -192,8 +192,38 @@ While the app's own server is running, the service's start fails on the shared
 automation database lock and retries every 30 seconds, so it takes over when the
 app quits. The desktop app uses an already running server from the same build.
 `bruhs-server service status` and `service uninstall` report or remove it. Logs
-go to `logs/bruhs-server.service.log` in the app data directory. Reinstall after
-moving or rebuilding to a different binary path.
+go to `logs/bruhs-server.service.log` in the app data directory.
+
+The service runs its own copy. Install copies this server binary and the web
+bundle into `service/releases/<id>` in the app data directory, checks every
+byte against the source, and points the definition there; nothing runs from
+the folder you built in. A background job could not start from a build under
+`~/Documents` in our checks, while the same binary started from elsewhere, so
+the copy keeps the source location out of it. Rebuilding or moving your
+checkout does not affect a running service: install again to update it.
+Install and uninstall take a lock in that directory, so only one runs at a
+time. The new definition replaces the old one in a single rename; a
+definition that exists but cannot be read stops the install before anything
+is written. The old service must be confirmed stopped (or confirmed absent:
+launchd's own "could not find service" answer, or systemd reporting the unit
+not found) before the new one loads; a failed or unclear status query counts
+as unknown, never as absent. After a stop command succeeds, launchd or systemd
+may keep listing the job for a moment while it shuts down, so a "still running"
+answer is checked again for up to 10 seconds before it counts. If the stop
+still cannot be confirmed, the old definition is kept and nothing new is
+loaded. If a follow-up query confirms that the job is gone, install attempts
+to reload the restored old definition. Query and reload failures are reported;
+an unavailable manager or a failed reload can still leave the service stopped. If
+the new service fails to load, it is stopped and the old definition is put
+back and loaded again. Any step that cannot be undone is
+reported together with the original error. Uninstall removes the definition
+and releases only after the service is confirmed stopped; otherwise it keeps
+both and says so. Install keeps the new
+release and the one before it. Only directories install itself marked are ever
+removed; anything else there, logs and all other app data are left alone.
+Copies, the manifest and the directories holding them are flushed before the
+definition switches, so after a crash the definition points either at the old
+setup or at a complete release, on file systems that honor flushes.
 
 Loaded is not the same as working. Status reports the service as serving only
 when the process the service manager started is the one answering on the port:
