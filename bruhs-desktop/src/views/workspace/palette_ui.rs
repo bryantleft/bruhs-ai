@@ -244,6 +244,12 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         hint: "⌘J",
     },
     CommandAction {
+        id: "new-terminal",
+        group: "View",
+        label: "New terminal",
+        hint: "project or home",
+    },
+    CommandAction {
         id: "open-terminal",
         group: "View",
         label: "Open in system Terminal",
@@ -272,6 +278,12 @@ pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
         group: "Actions",
         label: "Stash prompt",
         hint: "⌘S",
+    },
+    CommandAction {
+        id: "open-in-editor",
+        group: "Actions",
+        label: "Open project in editor",
+        hint: "⌘⌥O",
     },
     CommandAction {
         id: "model-picker",
@@ -522,6 +534,7 @@ impl Workspace {
             "import-thread" => self.open_import_thread(&ImportThread, window, cx),
             "open-terminal" => self.open_terminal(&OpenTerminal, window, cx),
             "toggle-terminal" => self.toggle_terminal(&ToggleTerminal, window, cx),
+            "new-terminal" => self.open_new_terminal(window, cx),
             "local-servers" => self.open_local_servers(&OpenLocalServers, window, cx),
             "nav-meetings" => self.open_meetings_list(cx),
             "nav-people" => self.activate_sidebar_view(AppView::People, window, cx),
@@ -564,6 +577,9 @@ impl Workspace {
                 if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
                     chat.update(cx, |chat, cx| chat.stash_current_draft(window, cx));
                 }
+            }
+            "open-in-editor" => {
+                self.open_project_in_editor_action(&OpenProjectInEditor, window, cx);
             }
             "pin-thread" => self.toggle_pin_active(cx),
             "settle-thread" => self.toggle_settle_active(cx),

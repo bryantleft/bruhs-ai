@@ -315,6 +315,44 @@ fn native_palette_stationary_pointer_should_not_reset_arrow_navigation(cx: &mut 
 }
 
 #[gpui::test]
+fn native_palette_terminal_and_editor_entries_should_act_like_web(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        // Off chat, a new terminal opens the Terminal view.
+        workspace.active_view = AppView::Today;
+        workspace.execute_command_action("new-terminal", window, cx);
+        assert_eq!(workspace.active_view, AppView::Terminal);
+        // From chat, it opens in the chat's drawer.
+        workspace.active_view = AppView::Chat;
+        workspace.terminal_drawer_open = false;
+        workspace.execute_command_action("new-terminal", window, cx);
+        assert_eq!(workspace.active_view, AppView::Chat);
+        assert!(workspace.terminal_drawer_open);
+        // With no project, the editor entry says so instead of doing nothing.
+        workspace.active_project = None;
+        let active = workspace.active_thread_id.clone();
+        for thread in &mut workspace.threads {
+            if Some(&thread.id) == active.as_ref() {
+                thread.project_path.clear();
+            }
+        }
+        workspace.execute_command_action("open-in-editor", window, cx);
+    });
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(
+            workspace
+                .meetings_hub
+                .read(cx)
+                .notice
+                .as_ref()
+                .map(|notice| notice.message.as_str()),
+            Some("No project to open")
+        );
+    });
+}
+
+#[gpui::test]
 fn native_palette_no_results_should_remain_editable_and_dismissible(cx: &mut TestAppContext) {
     let (workspace, cx) = workspace(cx);
     workspace.update_in(cx, |workspace, window, cx| {

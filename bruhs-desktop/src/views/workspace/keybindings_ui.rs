@@ -504,6 +504,9 @@ impl Workspace {
             })
             .filter(|path| !path.is_empty());
         let Some(path) = path else {
+            self.meetings_hub.update(cx, |hub, cx| {
+                hub.show_notice("No project to open", false, cx)
+            });
             return;
         };
         self.open_path_in_editor(&path, None, cx);
