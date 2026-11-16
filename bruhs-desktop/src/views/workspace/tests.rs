@@ -3407,6 +3407,113 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
     }
 }
 
+/// Ten views and settings do not fit one row of 32px buttons in the sidebar.
+/// Like the web's grid, they sit in rows of six spread across the footer,
+/// settings in the last column, and each button keeps its 32px. Agent
+/// workflows carries the unread count in its corner and opens its page.
+#[gpui::test]
+fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        theme::apply_bruhs_theme(cx);
+        let state = DesktopState::new().expect("desktop state should initialize");
+        cx.set_global(state);
+    });
+    let workspace_cell: Rc<RefCell<Option<Entity<Workspace>>>> = Rc::new(RefCell::new(None));
+    let workspace_for_window = workspace_cell.clone();
+    let (_root, cx) = cx.add_window_view(|window, cx| {
+        let workspace = cx.new(|cx| Workspace::new(window, cx));
+        *workspace_for_window.borrow_mut() = Some(workspace.clone());
+        gpui_component::Root::new(workspace, window, cx)
+    });
+    let workspace = workspace_cell
+        .borrow()
+        .clone()
+        .expect("workspace entity should be captured");
+    cx.run_until_parked();
+
+    let footer = rendered_bounds(cx, "desktop-sidebar-footer");
+    let first: Vec<_> = [
+        "desktop-sidebar-nav-today",
+        "desktop-sidebar-nav-inbox",
+        "desktop-sidebar-nav-knowledge",
+        "desktop-sidebar-nav-tasks",
+        "desktop-sidebar-nav-terminal",
+        "desktop-sidebar-nav-workbench",
+    ]
+    .into_iter()
+    .map(|selector| rendered_bounds(cx, selector))
+    .collect();
+    let second: Vec<_> = [
+        "desktop-sidebar-nav-calendar",
+        "desktop-sidebar-nav-meetings",
+        "desktop-sidebar-nav-people",
+        "desktop-sidebar-nav-agent-workflows",
+    ]
+    .into_iter()
+    .map(|selector| rendered_bounds(cx, selector))
+    .collect();
+    let settings = rendered_bounds(cx, "desktop-sidebar-nav-settings");
+    for button in first.iter().chain(&second).chain([&settings]) {
+        assert_eq!(
+            (f32::from(button.size.width), f32::from(button.size.height)),
+            (theme::CONTROL_PX, theme::CONTROL_PX),
+            "every footer button keeps its 32px"
+        );
+    }
+    assert!(first.iter().all(|button| button.top() == first[0].top()));
+    let second_top = first[0].top() + px(theme::CONTROL_PX + 4.0);
+    assert!(second.iter().all(|button| button.top() == second_top));
+    assert_eq!(settings.top(), second_top);
+    // Columns line up across the rows, edge to edge inside the 8px padding.
+    for (upper, lower) in first.iter().zip(&second) {
+        assert_eq!(upper.left(), lower.left());
+    }
+    assert_eq!(first[0].left(), footer.left() + px(8.0));
+    assert_eq!(first[5].right(), footer.right() - px(8.0));
+    assert_eq!(settings.left(), first[5].left());
+
+    assert_no_rendered_bounds(cx, "desktop-sidebar-agent-workflows-badge");
+    workspace.update_in(cx, |workspace, _window, cx| {
+        let unread = |id: &str| bruhs_models::reactive::OutboxItem {
+            id: id.into(),
+            agent_id: "agent-1".into(),
+            run_id: "run-1".into(),
+            kind: bruhs_models::reactive::OutboxKind::Notify,
+            title: "Water bill paid".into(),
+            message: String::new(),
+            created_at: EpochMs::UNIX_EPOCH,
+            read_at: None,
+            resolved_at: None,
+            answer: None,
+            system: Default::default(),
+        };
+        workspace.reactive_automations.update(cx, |panel, cx| {
+            panel.show_snapshot_for_test(
+                bruhs_models::reactive::ReactiveSnapshot {
+                    outbox: vec![unread("update-1"), unread("update-2"), unread("update-3")],
+                    ..Default::default()
+                },
+                cx,
+            );
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let button = rendered_bounds(cx, "desktop-sidebar-nav-agent-workflows");
+    let badge = rendered_bounds(cx, "desktop-sidebar-agent-workflows-badge");
+    assert_eq!(f32::from(badge.size.height), 16.0);
+    assert_eq!(badge.top(), button.top() - px(2.0));
+    assert_eq!(badge.right(), button.right() + px(2.0));
+
+    click_debug_selector(cx, "desktop-sidebar-nav-agent-workflows");
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.active_view, AppView::Automations);
+    });
+}
+
 #[gpui::test]
 fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
     cx: &mut gpui::TestAppContext,
