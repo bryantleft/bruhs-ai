@@ -307,7 +307,6 @@ pub fn EventCreateDialog() -> impl IntoView {
             on_close=on_close_cb
             max_width="max-w-md".to_string()
             label="Calendar event"
-            padding_top="1rem"
         >
             <div class="border-b border-longan-800 px-4 py-3">
                 <h2 class="text-h4 text-rambutan-100">{header_text}</h2>

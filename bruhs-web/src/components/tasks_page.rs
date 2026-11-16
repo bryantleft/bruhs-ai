@@ -146,7 +146,7 @@ pub fn TasksPage() -> impl IntoView {
 
             // Create dialog overlay
             <TaskCreateDialog />
-            <Dialog open=project_picker_open on_close=Callback::new(move |_| project_picker_open.set(false)) label="Task projects" max_width="max-w-sm" padding_top="2rem">
+            <Dialog open=project_picker_open on_close=Callback::new(move |_| project_picker_open.set(false)) label="Task projects" max_width="max-w-sm">
                 <div class="flex items-center justify-between px-3 py-2 text-rambutan-200">
                     <h2 class="text-h4">"Projects"</h2>
                     <button type="button" aria-label="Close projects" class="rounded-grape px-3 py-2 text-button" on:click=move |_| project_picker_open.set(false)>"Close"</button>

@@ -1028,6 +1028,7 @@ pub fn CommandBar() -> impl IntoView {
             open=Signal::derive(move || command_bar_open.get())
             on_close=on_close_cb
             label="Command bar"
+            anchor_top=true
         >
             // Announces the filtered result count to screen readers as the
             // query changes (WCAG 4.1.3); visually hidden.
