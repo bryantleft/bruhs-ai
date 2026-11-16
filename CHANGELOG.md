@@ -85,6 +85,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   does, instead of three export controls. It opens the media and widget
   choices and Save ZIP. Enter or Space on a button in a reply no longer runs
   its action twice.
+- Fixed the desktop New meeting note button reading as a heading. It now sits
+  beside the Meeting notes title, as on the web.
 - Fixed the landing page's tour progress indicators cutting dots in half.
   Each tab now fills with complete dots, centered under its label.
 
