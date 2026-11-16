@@ -159,6 +159,11 @@ pub fn pandan_100() -> Hsla {
     rgb(0xd4f0cd).into()
 }
 
+/// pandan-200 — Today's "Day plan applied." (bruhs `oklch(91.9% .072 138.94)`)
+pub fn pandan_200() -> Hsla {
+    rgb(0xccf1c3).into()
+}
+
 /// pandan-300 — Auth command / subtle success foreground
 pub fn pandan_300() -> Hsla {
     rgb(0x7fcc6e).into()
