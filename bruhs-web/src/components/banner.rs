@@ -52,6 +52,21 @@ impl BannerStackSignal {
         self.push_banner(kind, message.into(), ttl_ms, None);
     }
 
+    /// Like [`Self::push`], returning the banner's id for [`Self::dismiss`].
+    pub fn push_keyed(
+        self,
+        kind: BannerKind,
+        message: impl Into<String>,
+        ttl_ms: Option<u32>,
+    ) -> String {
+        self.push_banner(kind, message.into(), ttl_ms, None)
+    }
+
+    /// Remove a banner, if it is still showing.
+    pub fn dismiss(self, id: &str) {
+        self.0.update(|q| q.retain(|b| b.id != id));
+    }
+
     /// Like [`Self::push`], with an action button next to the message.
     pub fn push_with_action(
         self,
@@ -69,9 +84,10 @@ impl BannerStackSignal {
         message: String,
         ttl_ms: Option<u32>,
         action: Option<BannerAction>,
-    ) {
+    ) -> String {
+        let id = uuid::Uuid::new_v4().to_string();
         let banner = Banner {
-            id: uuid::Uuid::new_v4().to_string(),
+            id: id.clone(),
             kind,
             message,
             ttl_ms,
@@ -84,6 +100,7 @@ impl BannerStackSignal {
                 q.pop_front();
             }
         });
+        id
     }
 }
 
