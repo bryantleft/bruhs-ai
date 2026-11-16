@@ -340,8 +340,8 @@ impl Workspace {
                 "This permanently deletes the source and removes its citations from your documents.",
             ),
             RecordDeleteTarget::Conversation(_) => (
-                "Delete conversation",
-                "This permanently deletes the local conversation and its messages.",
+                bruhs_models::DELETE_CONVERSATION_TITLE,
+                bruhs_models::DELETE_CONVERSATION_DETAIL,
             ),
         };
         self.render_modal_shell(

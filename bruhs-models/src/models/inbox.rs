@@ -10,6 +10,11 @@ use uuid::Uuid;
 mod directory;
 pub use directory::{InboxCard, InboxCounts, InboxDirectory, InboxFilter, INBOX_PAGE_SIZE};
 
+/// The confirmation both apps show before deleting an imported conversation.
+pub const DELETE_CONVERSATION_TITLE: &str = "Delete conversation";
+pub const DELETE_CONVERSATION_DETAIL: &str =
+    "This permanently deletes the local conversation and its messages.";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum InboxSource {
