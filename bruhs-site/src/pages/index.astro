@@ -3,11 +3,7 @@ import Base from "../layouts/Base.astro";
 import Icon from "../components/Icon.astro";
 import GetButton from "../components/GetButton.astro";
 import SurfacePanel from "../components/SurfacePanel.astro";
-import CHANGELOG from "../../../CHANGELOG.md?raw";
-import { inline, longDate, parseChangelog } from "../lib/changelog.js";
 
-const latest = parseChangelog(CHANGELOG)[0];
-if (!latest) throw new Error("CHANGELOG.md has no released version for the What's new section");
 const surfaces = [
   { id: "tasks", label: "Today", color: "tasks", file: "tasks", width: 1168,
     alt: "The Today view: a briefing, the current focus block and the rest of the day's schedule, a ranked focus queue with priorities and estimates, and columns for overdue work, waiting on, follow-ups and decisions.",
@@ -118,26 +114,6 @@ const surfaces = [
             </div>
           </li>
         </ul>
-      </div>
-    </section>
-
-    <section class="section flow-section" id="flow" aria-labelledby="flow-title">
-      <div class="wrap">
-        <h2 class="h2" id="flow-title" tabindex="-1">One thing leads to the next.</h2>
-        <ol class="flow" role="list">
-          <li><span class="flow-dot dot-meetings" aria-hidden="true"></span><b>A meeting ends</b><span>and its action items land in Today.</span></li>
-          <li><span class="flow-dot dot-agent" aria-hidden="true"></span><b>A task goes to Claude</b><span>and runs in its own thread, with a diff to review.</span></li>
-          <li><span class="flow-dot dot-calendar" aria-hidden="true"></span><b>Your calendar makes room</b><span>to review what it did.</span></li>
-        </ol>
-      </div>
-    </section>
-
-    <section class="section" id="new" aria-labelledby="new-title">
-      <div class="wrap news">
-        <h2 class="h2" id="new-title" tabindex="-1">What's new in v{latest.version}</h2>
-        <p class="muted"><time datetime={latest.date}>{longDate(latest.date)}</time></p>
-        {latest.summary && <p class="news-summary" set:html={inline(latest.summary)} />}
-        <a class="btn btn-ghost" href={`/changelog#v${latest.version}`}>Read the changelog</a>
       </div>
     </section>
 

@@ -53,6 +53,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Changed
 
+- Removed the workflow overview and What's new sections from the landing
+  page. The Changelog remains available in the navigation and command menu.
 - Chat and coding conversations now share one thread list on web and desktop.
   New threads keep the current conversation’s optional project, and project
   filters help you focus without switching modes. Choose a project folder

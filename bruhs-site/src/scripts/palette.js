@@ -96,22 +96,6 @@ export const COMMANDS = [
     target: "/privacy",
   },
   {
-    id: "flow",
-    tag: "page",
-    label: "How it connects",
-    detail: "meeting to task to agent to calendar",
-    keywords: "workflow connect together one window flow",
-    target: "#flow",
-  },
-  {
-    id: "whats-new",
-    tag: "page",
-    label: "What's new",
-    detail: "the latest release",
-    keywords: "new latest release update version",
-    target: "#new",
-  },
-  {
     id: "faq",
     tag: "page",
     label: "Questions",
