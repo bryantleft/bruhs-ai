@@ -115,7 +115,7 @@ async fn batch_rejects_any_missing_grant_or_invalid_adapter_before_creating_work
     ));
     workspace.update_in(cx, |w, _, _| {
         assert!(w.automation_state.workflows.is_empty());
-        assert!(w.mcp_bridge.proposals.is_empty());
+        assert!(w.mcp_bridge.reviews.proposals.is_empty());
         assert!(w.work_items.is_empty());
         w.mcp_bridge = WorkspaceBridge::default();
     });

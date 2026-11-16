@@ -179,7 +179,7 @@ async fn declined_undo_cannot_be_resurfaced_by_repeating_the_request(cx: &mut Te
     workspace.update_in(cx, |w, _, _| {
         assert_eq!(w.work_items.len(), 1);
         assert_eq!(
-            w.mcp_bridge.rollback_reviews.get(&id),
+            w.mcp_bridge.reviews.rollback_reviews.get(&id),
             Some(&RollbackReview::Declined)
         );
         assert!(!w.mcp_bridge.pending_review(&w.automation_state));
@@ -222,7 +222,7 @@ async fn reconnect_drops_undo_requests_without_deleting_saved_records(cx: &mut T
         BridgeResponse::Error(_)
     ));
     workspace.update_in(cx, |w, _, _| {
-        assert!(w.mcp_bridge.rollback_reviews.is_empty());
+        assert!(w.mcp_bridge.reviews.rollback_reviews.is_empty());
         assert_eq!(w.work_items.len(), 1);
         w.mcp_bridge = WorkspaceBridge::default();
     });

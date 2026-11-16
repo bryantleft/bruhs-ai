@@ -26,6 +26,8 @@ sha2 = { workspace = true }
 shell-words = "=1.1.1"
 base64 = "0.22"
 email_address = { version = "=0.2.9", default-features = false }
+# Case-insensitive ASCII scans of workspace reads (`workspace_bridge::query`).
+memchr = "2"
 
 [[bench]]
 name = "search"

@@ -264,8 +264,8 @@ impl Seed {
         w.captures = vec![self.capture.clone()];
         w.work_items.clear();
         w.reviewed_workflow_id = None;
-        w.mcp_bridge.proposals.clear();
-        w.mcp_bridge.rollback_reviews.clear();
+        w.mcp_bridge.reviews.proposals.clear();
+        w.mcp_bridge.reviews.rollback_reviews.clear();
         // 99 reserves one of the existing 100 session slots for fresh submission.
         for workflow in self.state.workflows.iter().rev().take(99) {
             let key = if workflow.id == self.id {
@@ -273,7 +273,7 @@ impl Seed {
             } else {
                 format!("request-{}", workflow.id)
             };
-            w.mcp_bridge.proposals.insert(
+            w.mcp_bridge.reviews.proposals.insert(
                 key,
                 (
                     workflow.id.clone(),
@@ -297,11 +297,13 @@ impl Seed {
             Case::StatusUnsaved | Case::RollbackUnsaved => w.save_status = SaveStatus::Saving,
             Case::RollbackPending => {
                 w.mcp_bridge
+                    .reviews
                     .rollback_reviews
                     .insert(self.id.clone(), RollbackReview::Pending);
             }
             Case::RollbackDeclined => {
                 w.mcp_bridge
+                    .reviews
                     .rollback_reviews
                     .insert(self.id.clone(), RollbackReview::Declined);
             }
@@ -361,7 +363,7 @@ fn pending_proposal_selection_preserves_owner_priority_through_history_mutations
                     state.workflows.push(workflow);
                 }
                 for index in 0..proposals {
-                    bridge.proposals.insert(
+                    bridge.reviews.proposals.insert(
                         format!("request-{index}"),
                         (
                             format!("workflow-{}", index % records.max(1)),
@@ -374,6 +376,7 @@ fn pending_proposal_selection_preserves_owner_priority_through_history_mutations
                 }
                 for mutation in 0..8 {
                     let expected = bridge
+                        .reviews
                         .proposals
                         .values()
                         .find(|(id, _)| {
@@ -382,7 +385,7 @@ fn pending_proposal_selection_preserves_owner_priority_through_history_mutations
                             })
                         })
                         .map(|(id, _)| id.as_str());
-                    let actual = bridge.pending_proposal_id(&state);
+                    let actual = bridge.reviews.pending_proposal_id(&state);
                     assert_eq!(
                         actual, expected,
                         "{records}/{proposals}/{previews}/{mutation}"
@@ -405,7 +408,7 @@ fn pending_proposal_selection_preserves_owner_priority_through_history_mutations
                         }
                     }
                     if mutation == 4 {
-                        bridge.proposals.insert(
+                        bridge.reviews.proposals.insert(
                             "inserted-owner".into(),
                             (
                                 "workflow-0".into(),
@@ -417,7 +420,7 @@ fn pending_proposal_selection_preserves_owner_priority_through_history_mutations
                         );
                     }
                     if mutation == 5 {
-                        bridge.proposals.remove("request-0");
+                        bridge.reviews.proposals.remove("request-0");
                     }
                 }
             }
@@ -458,7 +461,7 @@ async fn workflow_performance_fixture_checks_all_tool_variants(cx: &mut TestAppC
 fn pending_proposals_ignore_unowned_previews_and_reflect_duplicate_history_changes() {
     let mut bridge = WorkspaceBridge::default();
     for id in ["owned-a", "owned-b"] {
-        bridge.proposals.insert(
+        bridge.reviews.proposals.insert(
             id.into(),
             (id.into(), WorkflowProposal::single(operation())),
         );
@@ -474,15 +477,15 @@ fn pending_proposals_ignore_unowned_previews_and_reflect_duplicate_history_chang
         };
         state.workflows.push(workflow);
     }
-    assert!(bridge.pending_proposal_id(&state).is_none());
+    assert!(bridge.reviews.pending_proposal_id(&state).is_none());
     let mut duplicate = state.workflows[1].clone();
     duplicate.status = WorkflowStatus::Previewed;
     state.workflows.push(duplicate);
-    assert_eq!(bridge.pending_proposal_id(&state), Some("owned-b"));
+    assert_eq!(bridge.reviews.pending_proposal_id(&state), Some("owned-b"));
     state.workflows.reverse();
-    assert_eq!(bridge.pending_proposal_id(&state), Some("owned-b"));
+    assert_eq!(bridge.reviews.pending_proposal_id(&state), Some("owned-b"));
     state.workflows[0].id = "other-b".into();
-    assert!(bridge.pending_proposal_id(&state).is_none());
+    assert!(bridge.reviews.pending_proposal_id(&state).is_none());
 }
 
 #[gpui::test]
@@ -515,7 +518,7 @@ async fn workflow_native_action_cost(cx: &mut TestAppContext) {
                     prepare(&workspace, cx, &seed, case).await;
                 } else if case == Case::RollbackRequest {
                     workspace.update_in(cx, |w, _, _| {
-                        w.mcp_bridge.rollback_reviews.clear();
+                        w.mcp_bridge.reviews.rollback_reviews.clear();
                         w.reviewed_workflow_id = None;
                     });
                 }
@@ -601,7 +604,7 @@ async fn workflow_native_action_cost(cx: &mut TestAppContext) {
                     prepare(&workspace, cx, &seed, case).await;
                 } else if case == Case::RollbackRequest {
                     workspace.update_in(cx, |w, _, _| {
-                        w.mcp_bridge.rollback_reviews.clear();
+                        w.mcp_bridge.reviews.rollback_reviews.clear();
                         w.reviewed_workflow_id = None;
                     });
                 }

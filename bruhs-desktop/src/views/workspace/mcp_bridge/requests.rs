@@ -1,88 +1,15 @@
+//! Answers each request from the live workspace with the shared logic in
+//! `bruhs_models::workspace_bridge`, which the web answers with too.
 use super::*;
 use bruhs_core::workspace_bridge::{BridgeRequest, BridgeResponse, WorkflowProposal};
-use bruhs_models::{AgentAccess, AgentDomain, WorkflowOperation};
-use query::LowercaseQuery;
-use serde_json::{json, Value};
+use bruhs_models::workspace_bridge::{self as bridge, Proposed};
+use bruhs_models::AgentDomain;
+use serde_json::Value;
 
-const RECORD_LIMIT: usize = 50;
-const PROPOSAL_LIMIT: usize = 100;
 mod chat_read;
-mod finance_read;
-mod health_read;
-mod life_read;
-mod meeting_note_read;
 mod meeting_read;
 mod people_read;
-mod query;
-mod read_page;
 mod rollback;
-mod status;
-
-fn supported(domain: AgentDomain) -> bool {
-    matches!(
-        domain,
-        AgentDomain::Chat
-            | AgentDomain::Meetings
-            | AgentDomain::Tasks
-            | AgentDomain::Calendar
-            | AgentDomain::Capture
-            | AgentDomain::Knowledge
-            | AgentDomain::Inbox
-            | AgentDomain::Finance
-            | AgentDomain::Health
-            | AgentDomain::People
-    )
-}
-
-fn read_records<T: Serialize>(records: &[T], query: &str, offset: usize) -> Result<Value, String> {
-    if query.len() > 512 || offset > 100_000 {
-        return Err("Query or offset is too large.".into());
-    }
-    let query = LowercaseQuery::new(query);
-    let mut matcher = query.matcher();
-    let mut encoded = Vec::new();
-    let mut matching = Vec::new();
-    let mut skipped = 0;
-    for record in records {
-        // Unfiltered paging must not serialize all earlier pages on the UI thread.
-        if query.is_empty() && skipped < offset {
-            skipped += 1;
-            continue;
-        }
-        let value =
-            serde_json::to_value(record).map_err(|_| "A workspace record could not be encoded.")?;
-        if !query.is_empty() {
-            encoded.clear();
-            serde_json::to_writer(&mut encoded, &value)
-                .map_err(|_| "A workspace record could not be encoded.")?;
-            // SAFETY: the cleared buffer was written only by the successful
-            // default serde_json serializer, which always emits valid UTF-8.
-            // serde_json::to_string relies on the same guarantee.
-            let text = unsafe { std::str::from_utf8_unchecked(&encoded) };
-            if !matcher.matches(text) {
-                continue;
-            }
-        }
-        if skipped < offset {
-            skipped += 1;
-            continue;
-        }
-        matching.push(value);
-        if matching.len() > RECORD_LIMIT {
-            break;
-        }
-    }
-    // Scanning is finished. Release a large normalized field before allocating
-    // the final response envelope and checking its encoded size.
-    drop(matcher);
-    let more = matching.len() > RECORD_LIMIT;
-    matching.truncate(RECORD_LIMIT);
-    let result = json!({"records":matching,"next_offset":more.then_some(offset + RECORD_LIMIT)});
-    if result.to_string().len() > 512 * 1024 {
-        return Err("Records are too large for one response. Use a more specific query.".into());
-    }
-    Ok(result)
-}
 
 impl Workspace {
     pub(super) fn handle_bridge_request(
@@ -90,10 +17,7 @@ impl Workspace {
         request: BridgeRequest,
         cx: &mut Context<'_, Self>,
     ) -> BridgeResponse {
-        match self.bridge_request(request, cx) {
-            Ok(value) => BridgeResponse::Ok(value),
-            Err(message) => BridgeResponse::Error(message),
-        }
+        self.bridge_request(request, cx).into()
     }
 
     fn bridge_request(
@@ -101,21 +25,24 @@ impl Workspace {
         request: BridgeRequest,
         cx: &mut Context<'_, Self>,
     ) -> Result<Value, String> {
+        let permissions = &self.automation_state.permissions;
         match request {
             BridgeRequest::ReadFinance {
                 section,
                 query,
                 offset,
-            } => self.read_bridge_finance(section, &query, offset),
+            } => bridge::read_finance(permissions, &self.life_context, section, &query, offset),
             BridgeRequest::ReadHealth {
                 section,
                 query,
                 offset,
-            } => self.read_bridge_health(section, &query, offset),
+            } => bridge::read_health(permissions, &self.life_context, section, &query, offset),
             BridgeRequest::ReadMeetingNotes { query, offset } => {
-                self.read_bridge_meeting_notes(&query, offset)
+                bridge::read_meeting_notes(permissions, &self.meeting_notes, &query, offset)
             }
-            BridgeRequest::ReadMeetingNote { note_id } => self.read_bridge_meeting_note(&note_id),
+            BridgeRequest::ReadMeetingNote { note_id } => {
+                bridge::read_meeting_note(permissions, &self.meeting_notes, &note_id)
+            }
             BridgeRequest::ReadMeeting {
                 meeting_id,
                 section,
@@ -134,60 +61,47 @@ impl Workspace {
                 query,
                 offset,
             } => {
-                if !self
-                    .automation_state
-                    .permissions
-                    .allows(domain, AgentAccess::Read)
-                {
-                    return Err("Read access is not granted for this domain.".into());
-                }
+                bridge::require_read(permissions, domain)?;
                 match domain {
                     AgentDomain::Chat => self.read_bridge_chat(&query, offset, cx),
                     AgentDomain::Meetings => self.read_bridge_meetings(&query, offset, cx),
                     AgentDomain::People => self.read_bridge_people(&query, offset, cx),
-                    AgentDomain::Finance => {
-                        self.read_bridge_finance(Default::default(), &query, offset)
+                    AgentDomain::Finance => bridge::read_finance(
+                        permissions,
+                        &self.life_context,
+                        Default::default(),
+                        &query,
+                        offset,
+                    ),
+                    AgentDomain::Health => bridge::read_health(
+                        permissions,
+                        &self.life_context,
+                        Default::default(),
+                        &query,
+                        offset,
+                    ),
+                    AgentDomain::Tasks => bridge::read_records(&self.work_items, &query, offset),
+                    AgentDomain::Calendar => {
+                        bridge::read_records(&self.calendar_events, &query, offset)
                     }
-                    AgentDomain::Health => {
-                        self.read_bridge_health(Default::default(), &query, offset)
-                    }
-                    AgentDomain::Tasks => read_records(&self.work_items, &query, offset),
-                    AgentDomain::Calendar => read_records(&self.calendar_events, &query, offset),
-                    AgentDomain::Capture => read_records(&self.captures, &query, offset),
+                    AgentDomain::Capture => bridge::read_records(&self.captures, &query, offset),
                     AgentDomain::Knowledge => {
-                        read_records(&self.knowledge_documents, &query, offset)
+                        bridge::read_records(&self.knowledge_documents, &query, offset)
                     }
-                    AgentDomain::Inbox => read_records(&self.inbox_conversations, &query, offset),
+                    AgentDomain::Inbox => {
+                        bridge::read_records(&self.inbox_conversations, &query, offset)
+                    }
                 }
             }
             BridgeRequest::Preview { operation } => {
-                Self::validate_bridge_operation(&operation)?;
-                Ok(
-                    json!({"dry_run":true,"operation":operation,"allowed":self.automation_state.permissions.allows(operation.domain(), AgentAccess::Write),"requires_user_approval":true,"executed":false}),
-                )
+                bridge::preview_operation(permissions, &operation)
             }
             BridgeRequest::Propose {
                 request_id,
                 operation,
             } => self.propose_bridge_workflow(request_id, WorkflowProposal::single(operation), cx),
             BridgeRequest::PreviewWorkflow { proposal } => {
-                Self::validate_bridge_proposal(&proposal)?;
-                let blocked_domains: Vec<_> = AgentDomain::ALL
-                    .into_iter()
-                    .filter(|domain| {
-                        proposal
-                            .operations
-                            .iter()
-                            .any(|operation| operation.domain() == *domain)
-                            && !self
-                                .automation_state
-                                .permissions
-                                .allows(*domain, AgentAccess::Write)
-                    })
-                    .collect();
-                Ok(
-                    json!({"dry_run":true,"proposal":proposal,"allowed":blocked_domains.is_empty(),"blocked_domains":blocked_domains,"requires_user_approval":true,"executed":false}),
-                )
+                bridge::preview_workflow(permissions, &proposal)
             }
             BridgeRequest::ProposeWorkflow {
                 request_id,
@@ -201,28 +115,10 @@ impl Workspace {
         }
     }
 
-    fn validate_bridge_operation(operation: &WorkflowOperation) -> Result<(), String> {
-        if !supported(operation.domain()) {
-            return Err("This write adapter is not connected. Nothing was changed.".into());
-        }
-        if !operation.is_valid() {
-            return Err("Invalid operation payload. Nothing was changed.".into());
-        }
-        Ok(())
-    }
-
-    fn validate_bridge_proposal(proposal: &WorkflowProposal) -> Result<(), String> {
-        proposal.validate().map_err(|e| e.to_string())?;
-        if proposal
-            .operations
-            .iter()
-            .any(|operation| !supported(operation.domain()))
-        {
-            return Err(
-                "This workflow includes an unconnected write adapter. Nothing was changed.".into(),
-            );
-        }
-        Ok(())
+    pub(super) fn bridge_workflow_status(&self, id: &str) -> Result<Value, String> {
+        self.mcp_bridge
+            .reviews
+            .status(&self.automation_state, self.save_status.is_saved(), id)
     }
 
     fn propose_bridge_workflow(
@@ -231,226 +127,21 @@ impl Workspace {
         proposal: WorkflowProposal,
         cx: &mut Context<'_, Self>,
     ) -> Result<Value, String> {
-        Self::validate_bridge_proposal(&proposal)?;
-        if proposal.operations.iter().any(|operation| {
-            !self
-                .automation_state
-                .permissions
-                .allows(operation.domain(), AgentAccess::Write)
-        }) {
-            return Err(
-                "Write access is not granted for this domain. Review permissions in the app."
-                    .into(),
-            );
-        }
-        if request_id.is_empty() || request_id.len() > 128 {
-            return Err("A request_id of 1 to 128 bytes is required.".into());
-        }
-        if let Some((id, existing)) = self.mcp_bridge.proposals.get(&request_id) {
-            if existing != &proposal {
-                return Err(
-                    "This request_id was already used for a different title or ordered payload."
-                        .into(),
-                );
-            }
-            return self.bridge_workflow_status(id);
-        }
-        if !self.save_status.is_saved() {
-            return Err(
-                "Resolve the pending local save before submitting another proposal.".into(),
-            );
-        }
-        if self.mcp_bridge.proposals.len() >= PROPOSAL_LIMIT {
-            return Err(
-                "Session proposal limit reached. Review existing workflows before reconnecting."
-                    .into(),
-            );
-        }
-        if self
-            .mcp_bridge
-            .pending_review_id(&self.automation_state)
-            .is_some()
-        {
-            return Err(
-                "Review or decline the existing MCP request first. No records were changed.".into(),
-            );
-        }
-        if self.automation_state.workflows.iter().any(|workflow| {
-            matches!(
-                workflow.status,
-                bruhs_models::WorkflowStatus::Draft
-                    | bruhs_models::WorkflowStatus::Previewed
-                    | bruhs_models::WorkflowStatus::Running
-                    | bruhs_models::WorkflowStatus::Paused
-            )
-        }) {
-            return Err("Review, finish, or decline the existing workflow before submitting another proposal.".into());
-        }
-        let id = self.automation_state.create_workflow(
-            proposal.title.clone(),
-            proposal.operations.clone(),
+        let saved = self.save_status.is_saved();
+        let id = match self.mcp_bridge.reviews.propose(
+            &mut self.automation_state,
+            saved,
+            request_id,
+            proposal,
             EpochMs::now().as_millis(),
-        );
-        self.automation_state
-            .preview(&id, EpochMs::now().as_millis())
-            .ok_or("The proposal could not be previewed.")?;
-        self.mcp_bridge
-            .proposals
-            .insert(request_id, (id.clone(), proposal));
-        self.reviewed_workflow_id = Some(id.clone());
-        self.persist_and_notify(cx);
+        )? {
+            Proposed::Existing(id) => id,
+            Proposed::Created(id) => {
+                self.reviewed_workflow_id = Some(id.clone());
+                self.persist_and_notify(cx);
+                id
+            }
+        };
         self.bridge_workflow_status(&id)
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::read_records;
-    use serde_json::json;
-
-    #[test]
-    fn serialized_record_queries_keep_the_original_casing_and_escape_semantics() {
-        let record =
-            json!({"id":"case-record", "title":"ΟΣ Café İ K", "controls":"\0A", "literal":"\\n"});
-        for query in [
-            "Σ",
-            "ς",
-            "i",
-            "İ",
-            "k",
-            "K",
-            "CAFÉ",
-            "cafe\u{301}",
-            "\\u0000",
-            "\0",
-            "\\n",
-            "TITLE",
-        ] {
-            let expected = record
-                .to_string()
-                .to_lowercase()
-                .contains(&query.to_lowercase());
-            let page = read_records(std::slice::from_ref(&record), query, 0).unwrap();
-            let records = page["records"].as_array().unwrap();
-            assert_eq!(records.len(), usize::from(expected), "{query:?}");
-            if expected {
-                assert_eq!(records[0], record);
-            }
-            assert!(page["next_offset"].is_null());
-        }
-    }
-
-    #[test]
-    fn pages_are_bounded_and_offsets_apply_to_filtered_records() {
-        let records: Vec<_> = (0..123)
-            .map(|id| json!({"id":id,"title":if id % 2 == 0 {"Needle"} else {"other"}}))
-            .collect();
-        let page = read_records(&records, "", 50).expect("page");
-        assert_eq!(page["records"].as_array().expect("records").len(), 50);
-        assert_eq!(page["records"][0]["id"], 50);
-        assert_eq!(page["next_offset"], 100);
-        let filtered = read_records(&records, "NEEDLE", 50).expect("filtered page");
-        assert_eq!(filtered["records"].as_array().expect("records").len(), 12);
-        assert_eq!(filtered["records"][0]["id"], 100);
-        assert!(filtered["next_offset"].is_null());
-        assert!(read_records(&records, &"x".repeat(513), 0).is_err());
-        assert!(read_records(&records, "", 100_001).is_err());
-    }
-
-    #[test]
-    fn complete_json_search_keeps_sorted_keys_nested_text_and_reused_buffer_boundaries() {
-        #[derive(serde::Serialize)]
-        struct Record {
-            z_last: &'static str,
-            a_first: &'static str,
-            history: Vec<&'static str>,
-        }
-        let records: Vec<_> = (0..123)
-            .map(|index| Record {
-                z_last: if index % 2 == 0 { "Needle" } else { "other" },
-                a_first: "ΟΣ Café İ K\0\n\"\\",
-                history: vec!["Earlier complete nested context", "👩🏽‍💻 e\u{301}"],
-            })
-            .collect();
-        let values: Vec<_> = records
-            .iter()
-            .map(|record| serde_json::to_value(record).unwrap())
-            .collect();
-        for query in [
-            "needle",
-            "NESTED",
-            "Σ",
-            "ς",
-            "i",
-            "K",
-            "CAFÉ",
-            "cafe\u{301}",
-            "\\u0000",
-            "\0",
-            "\\n",
-            "👩🏽‍💻",
-            "] ,",
-            "\"],\"z_last\":",
-            "no matching value",
-        ] {
-            for offset in [0, 1, 49, 50, 51, 99, 123] {
-                let mut expected: Vec<_> = values
-                    .iter()
-                    .filter(|value| {
-                        value
-                            .to_string()
-                            .to_lowercase()
-                            .contains(&query.to_lowercase())
-                    })
-                    .skip(offset)
-                    .take(51)
-                    .cloned()
-                    .collect();
-                let more = expected.len() > 50;
-                expected.truncate(50);
-                assert_eq!(
-                    read_records(&records, query, offset).unwrap(),
-                    json!({"records":expected,"next_offset":more.then_some(offset + 50)}),
-                    "{query:?}, {offset}"
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn a_large_nonmatching_record_does_not_change_later_matches_or_page_limits() {
-        let records = [
-            json!({"id":"large", "body":"x".repeat(600_000)}),
-            json!({"id":"match", "body":"Needle ΟΣ İ"}),
-            json!({"id":"short", "body":"unrelated"}),
-        ];
-        for query in ["needle", "ς", "İ"] {
-            let page = read_records(&records, query, 0).unwrap();
-            assert_eq!(page["records"], json!([records[1]]), "{query}");
-            assert!(page["next_offset"].is_null());
-        }
-        assert!(read_records(&records, "", 0).is_err());
-        assert_eq!(
-            read_records(&records, "", 1).unwrap()["records"],
-            json!(records[1..])
-        );
-    }
-
-    #[test]
-    fn serialization_failures_still_abort_scans_but_unread_pages_are_not_encoded() {
-        struct Record(usize);
-        impl serde::Serialize for Record {
-            fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-                if self.0 == 99 {
-                    return Err(serde::ser::Error::custom("unencodable record"));
-                }
-                serializer.serialize_u64(u64::try_from(self.0).expect("fixture integer"))
-            }
-        }
-        let records: Vec<_> = (0..123).map(Record).collect();
-        assert!(read_records(&records, "", 0).is_ok());
-        assert!(read_records(&records, "absent", 0).is_err());
-        assert!(read_records(&records, "", 50).is_err());
-        assert_eq!(read_records(&records, "", 100).unwrap()["records"][0], 100);
     }
 }

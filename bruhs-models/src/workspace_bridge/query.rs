@@ -2,7 +2,7 @@
 // Keep the ASCII flags at their pre-fragment offsets; native scan controls
 // measure this layout alongside the Unicode rejection path.
 #[repr(C)]
-pub(super) struct LowercaseQuery {
+pub struct LowercaseQuery {
     text: String,
     ascii: bool,
     has_i: bool,
@@ -12,13 +12,13 @@ pub(super) struct LowercaseQuery {
 }
 
 impl LowercaseQuery {
-    pub(super) fn matcher(&self) -> Matcher<'_> {
+    pub fn matcher(&self) -> Matcher<'_> {
         Matcher {
             query: self,
             normalized: String::new(),
         }
     }
-    pub(super) fn new(query: &str) -> Self {
+    pub fn new(query: &str) -> Self {
         let text = query.to_lowercase();
         let ascii = text.is_ascii();
         let ascii_fragment = if ascii {
@@ -57,7 +57,7 @@ impl LowercaseQuery {
             .unwrap_or(0..0)
     }
 
-    pub(super) fn is_empty(&self) -> bool {
+    pub fn is_empty(&self) -> bool {
         self.text.is_empty()
     }
 
@@ -203,17 +203,17 @@ impl LowercaseQuery {
 
 /// Scratch belongs to one read call and is released with its matcher.
 /// Keeping it separate preserves the immutable query layout.
-pub(super) struct Matcher<'q> {
+pub struct Matcher<'q> {
     query: &'q LowercaseQuery,
     normalized: String,
 }
 impl Matcher<'_> {
     // Preserve the direct matcher's inline boundary through this mutable facade.
     #[inline(always)]
-    pub(super) fn matches(&mut self, field: &str) -> bool {
+    pub fn matches(&mut self, field: &str) -> bool {
         self.query.matches_with(field, &mut self.normalized)
     }
-    pub(super) fn matches_fields(&mut self, fields: &[&str]) -> bool {
+    pub fn matches_fields(&mut self, fields: &[&str]) -> bool {
         self.query.matches_fields_with(fields, &mut self.normalized)
     }
 }

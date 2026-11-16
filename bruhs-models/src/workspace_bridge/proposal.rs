@@ -1,4 +1,4 @@
-use bruhs_models::WorkflowOperation;
+use crate::WorkflowOperation;
 use serde::{Deserialize, Serialize};
 
 /// One ordered review unit, not authorization to execute any of its steps.

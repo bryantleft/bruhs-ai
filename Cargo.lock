@@ -1251,6 +1251,7 @@ version = "0.1.0"
 dependencies = [
  "base64",
  "email_address",
+ "memchr",
  "percent-encoding",
  "pulldown-cmark",
  "serde",

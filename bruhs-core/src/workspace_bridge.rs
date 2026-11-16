@@ -1,13 +1,16 @@
 //! Opt-in, session-scoped IPC to the running workspace. The transport cannot
 //! grant permissions or execute operations: the app owns those decisions.
+//! The protocol and the logic apps answer it with live in
+//! `bruhs_models::workspace_bridge`.
 
-mod proposal;
 #[cfg(test)]
 mod tests;
 mod wire;
-pub use proposal::{ProposalError, WorkflowProposal};
+pub use bruhs_models::workspace_bridge::{
+    BridgeRequest, BridgeResponse, FinanceReadSection, HealthReadSection, MeetingReadSection,
+    PersonReadSection, ProposalError, WorkflowProposal, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES,
+};
 
-use bruhs_models::{AgentDomain, WorkflowOperation};
 use rand::TryRngCore;
 use serde::{Deserialize, Serialize};
 use std::{
@@ -22,131 +25,7 @@ use tokio::{
     task::JoinHandle,
 };
 
-pub const MAX_REQUEST_BYTES: usize = 64 * 1024;
-pub const MAX_RESPONSE_BYTES: usize = 1024 * 1024;
 const TIMEOUT: Duration = Duration::from_secs(15);
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum PersonReadSection {
-    #[default]
-    Profile,
-    Observations,
-    RelationshipItems,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum MeetingReadSection {
-    #[default]
-    Summary,
-    Transcript,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum FinanceReadSection {
-    Accounts,
-    #[default]
-    Transactions,
-    Budgets,
-    IncomeStreams,
-    Holdings,
-}
-
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(rename_all = "snake_case")]
-pub enum HealthReadSection {
-    #[default]
-    Workouts,
-    Sleep,
-    Recovery,
-    Habits,
-}
-
-#[derive(Clone, Debug, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
-pub enum BridgeRequest {
-    ReadFinance {
-        #[serde(default)]
-        section: FinanceReadSection,
-        #[serde(default)]
-        query: String,
-        #[serde(default)]
-        offset: usize,
-    },
-    ReadHealth {
-        #[serde(default)]
-        section: HealthReadSection,
-        #[serde(default)]
-        query: String,
-        #[serde(default)]
-        offset: usize,
-    },
-    ReadMeetingNotes {
-        #[serde(default)]
-        query: String,
-        #[serde(default)]
-        offset: usize,
-    },
-    ReadMeetingNote {
-        note_id: String,
-    },
-    ReadMeeting {
-        meeting_id: String,
-        #[serde(default)]
-        section: MeetingReadSection,
-        #[serde(default)]
-        offset: usize,
-    },
-    ReadPerson {
-        person_id: String,
-        #[serde(default)]
-        section: PersonReadSection,
-        #[serde(default)]
-        offset: usize,
-    },
-    ReadChatMessages {
-        thread_id: String,
-        #[serde(default)]
-        offset: usize,
-    },
-    Read {
-        domain: AgentDomain,
-        #[serde(default)]
-        query: String,
-        #[serde(default)]
-        offset: usize,
-    },
-    Preview {
-        operation: WorkflowOperation,
-    },
-    Propose {
-        request_id: String,
-        operation: WorkflowOperation,
-    },
-    PreviewWorkflow {
-        proposal: WorkflowProposal,
-    },
-    ProposeWorkflow {
-        request_id: String,
-        proposal: WorkflowProposal,
-    },
-    Status {
-        workflow_id: String,
-    },
-    RequestRollback {
-        workflow_id: String,
-        dry_run: bool,
-    },
-}
-
-#[derive(Debug, Serialize, Deserialize)]
-#[serde(tag = "status", content = "value", rename_all = "snake_case")]
-pub enum BridgeResponse {
-    Ok(serde_json::Value),
-    Error(String),
-}
 
 /// The receiver processes requests on its own UI thread and rechecks current
 /// grants. A dropped receiver or response cancels the request, never succeeds.
