@@ -27,6 +27,7 @@ use super::{
     InputMoveUp, PermissionMode, StashDraft,
 };
 use crate::views::sidebar_order::relative_age;
+use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{assets, theme};
 use bruhs_models::EpochMs;
 
@@ -103,6 +104,14 @@ pub const STRIP_DIRTY_BG_OPACITY: f32 = 0.15;
 
 // Menus floated above the composer.
 pub const STASH_MENU_WIDTH_PX: f32 = 320.0;
+/// The options and saved prompts panels (web `ComposerPopupSurface`): `px-3
+/// py-2` header, `p-2` body, `gap-4` between sections.
+const COMPOSER_PANEL_HEADER_X_PADDING_PX: f32 = 12.0;
+const COMPOSER_PANEL_HEADER_Y_PADDING_PX: f32 = 8.0;
+const COMPOSER_PANEL_BODY_PADDING_PX: f32 = 8.0;
+const COMPOSER_PANEL_SECTION_GAP_PX: f32 = 16.0;
+/// Web `text-label-sm` rows and section headings in the panels.
+const COMPOSER_PANEL_TEXT_PX: f32 = 12.0;
 pub const MENU_ROW_TEXT_SIZE_PX: f32 = 12.0;
 pub const MENU_MODE_LEFT_PX: f32 = CHAT_COMPOSER_FOOTER_X_PADDING_PX;
 pub const MENU_STASH_LEFT_PX: f32 = CHAT_COMPOSER_FOOTER_X_PADDING_PX;
@@ -112,7 +121,10 @@ pub const CHAT_INPUT_PLACEHOLDER: &str = bruhs_models::logic::commands::COMPOSER
 pub const CHAT_HERO_PROJECT_PREFIX: &str = "What should we build in ";
 pub const CHAT_HERO_PROJECT_SUFFIX: &str = "?";
 pub const CHAT_HERO_GENERAL: &str = "What's on your mind?";
-pub const CHAT_STASH_EMPTY: &str = "No stashed prompts. ⌘S stashes the current draft.";
+pub const CHAT_STASH_EMPTY: &str = "No saved prompts";
+/// Web `DictationButton`'s idle status line.
+pub const CHAT_DICTATION_HINT: &str =
+    "Audio is transcribed on this computer. Review the draft before sending.";
 pub const CHAT_BUILD_LABEL: &str = "Build";
 pub const CHAT_PLAN_LABEL: &str = "Plan";
 
@@ -253,6 +265,86 @@ fn composer_popover(
         limits,
     })
     .with_priority(1)
+}
+
+/// One row of the composer panels (web `ROW`).
+struct PanelRow {
+    id: SharedString,
+    selector: SharedString,
+    label: &'static str,
+    /// A check, a count or a shortcut at the right edge.
+    trailing: Option<AnyElement>,
+    /// Whether it is the chosen row of a set; `None` outside a set.
+    selected: Option<bool>,
+    enabled: bool,
+}
+
+/// The look web `ROW` and `ACTION` share: 32px, `px-2`, 12px labels, and
+/// the hover and selected tones. Disabled controls take no focus.
+fn panel_control(
+    id: SharedString,
+    selector: SharedString,
+    label: &'static str,
+    selected: bool,
+    enabled: bool,
+) -> Stateful<Div> {
+    div()
+        .id(id)
+        .debug_selector(move || selector.to_string())
+        .min_h(px(theme::CONTROL_PX))
+        .px_2()
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(hsla(0.0, 0.0, 0.0, 0.0))
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_size(px(COMPOSER_PANEL_TEXT_PX))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .text_color(theme::rambutan_300())
+        .role(Role::Button)
+        .aria_label(label)
+        .when(selected, |el| {
+            el.bg(theme::longan_800()).text_color(theme::rambutan_100())
+        })
+        .when(enabled, |el| {
+            el.tab_index(0)
+                .cursor_pointer()
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .hover(|el| {
+                    el.bg(theme::longan_800().opacity(0.60))
+                        .text_color(theme::rambutan_100())
+                })
+        })
+        .when(!enabled, |el| el.opacity(0.5).cursor_not_allowed())
+}
+
+/// A panel section's heading (web `h3`: `px-2 text-label-sm`).
+fn panel_heading(label: &'static str) -> Div {
+    div()
+        .px_2()
+        .text_size(px(COMPOSER_PANEL_TEXT_PX))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .text_color(theme::rambutan_500())
+        .child(label)
+}
+
+/// A row's trailing count or shortcut.
+fn panel_hint(text: impl Into<SharedString>) -> AnyElement {
+    div()
+        .text_color(theme::rambutan_500())
+        .child(text.into())
+        .into_any_element()
+}
+
+/// A chosen row's check, beside its 12px label.
+fn panel_check() -> AnyElement {
+    icon(
+        assets::CHECK_ICON_PATH,
+        theme::ICON_XS_PX,
+        theme::rambutan_100(),
+    )
+    .into_any_element()
 }
 
 fn composer_access_label(mode: PermissionMode) -> &'static str {
@@ -759,7 +851,7 @@ impl ChatView {
                         .occlude()
                         .child(composer_popover(
                             "desktop-stash-popover",
-                            self.render_stash_menu(cx),
+                            self.render_stash_menu(window, cx),
                             window,
                             self.composer_options_trigger_bounds.get(),
                         )),
@@ -1116,7 +1208,11 @@ impl ChatView {
         }
     }
 
-    fn open_composer_options(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+    pub(super) fn open_composer_options(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         self.close_composer_menus(cx);
         self.model_picker_open = false;
         self.composer_options_open = true;
@@ -1179,13 +1275,16 @@ impl ChatView {
             .iter()
             .position(|section| section.contains_focused(window, cx))
         {
+            // Children of the scrolling body: Access, Mode, Effort while
+            // shown, Prompts, Dictation, Context.
+            let effort = usize::from(self.effort_chip_visible());
             let row = match section {
-                0 => 1,
-                1 => 2,
-                2 => 3,
-                3 => 3 + usize::from(self.effort_chip_visible()),
-                4 => 5 + usize::from(self.effort_chip_visible()),
-                _ => 4 + usize::from(self.effort_chip_visible()),
+                0 => 0,
+                1 => 1,
+                2 => 2,
+                3 => 2 + effort,
+                4 => 4 + effort,
+                _ => 3 + effort,
             };
             self.composer_options_scroll.scroll_to_item(row);
         }
@@ -1261,6 +1360,152 @@ impl ChatView {
             .into_any_element()
     }
 
+    /// Run `action` on a click or on Enter or Space.
+    fn panel_activation(
+        &self,
+        control: Stateful<Div>,
+        action: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + Clone + 'static,
+        cx: &Context<'_, Self>,
+    ) -> Stateful<Div> {
+        let key_action = action.clone();
+        control
+            .on_click(cx.listener(move |this, _, window, cx| {
+                cx.stop_propagation();
+                action(this, window, cx);
+            }))
+            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+                if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    key_action(this, window, cx);
+                }
+            }))
+    }
+
+    /// A row in the composer panels (web `ROW`): the label at the left and
+    /// `trailing`, such as a check, a count or a shortcut, at the right.
+    fn panel_row(
+        &self,
+        row: PanelRow,
+        action: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + Clone + 'static,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let PanelRow {
+            id,
+            selector,
+            label,
+            trailing,
+            selected,
+            enabled,
+        } = row;
+        let control = panel_control(id, selector, label, selected == Some(true), enabled)
+            .w_full()
+            .justify_between()
+            .when_some(selected, |el, selected| {
+                el.aria_toggled(if selected {
+                    Toggled::True
+                } else {
+                    Toggled::False
+                })
+            })
+            .child(label)
+            .children(trailing);
+        if enabled {
+            self.panel_activation(control, action, cx)
+                .into_any_element()
+        } else {
+            control.into_any_element()
+        }
+    }
+
+    /// A centered button in the composer panels (web `ACTION`), filling its
+    /// grid cell or flex slot.
+    fn panel_action(
+        &self,
+        id: SharedString,
+        selector: SharedString,
+        label: &'static str,
+        selected: bool,
+        action: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + Clone + 'static,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let control = panel_control(id, selector, label, selected, true)
+            .w_full()
+            .justify_center()
+            .aria_toggled(if selected {
+                Toggled::True
+            } else {
+                Toggled::False
+            })
+            .child(label);
+        self.panel_activation(control, action, cx)
+            .into_any_element()
+    }
+
+    /// The panels' header (web: the title and a 32px close button over a
+    /// hairline).
+    fn panel_header(
+        &self,
+        title: &'static str,
+        close_selector: &'static str,
+        close: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + Clone + 'static,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let close_button = div()
+            .id(close_selector)
+            .debug_selector(move || close_selector.to_string())
+            .size(px(theme::CONTROL_PX))
+            .flex_shrink_0()
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.0))
+            .border_1()
+            .border_color(hsla(0.0, 0.0, 0.0, 0.0))
+            .text_color(theme::rambutan_400())
+            .hover(|el| {
+                el.bg(theme::longan_800().opacity(0.60))
+                    .text_color(theme::rambutan_100())
+            })
+            .cursor_pointer()
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(format!("Close {title}"))
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .child(
+                svg()
+                    .path(assets::CLOSE_ICON_PATH)
+                    .size(px(theme::ICON_PX))
+                    .text_color(theme::rambutan_400()),
+            );
+        div()
+            .flex_shrink_0()
+            .px(px(COMPOSER_PANEL_HEADER_X_PADDING_PX))
+            .py(px(COMPOSER_PANEL_HEADER_Y_PADDING_PX))
+            .border_b_1()
+            .border_color(gpui::white().opacity(0.10))
+            .flex()
+            .items_center()
+            .justify_between()
+            .gap_2()
+            .child(
+                div()
+                    .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
+                    .text_color(theme::rambutan_100())
+                    .child(title),
+            )
+            .child(self.panel_activation(close_button, close, cx))
+            .into_any_element()
+    }
+
+    /// Close the saved prompts panel and return to the options button, the
+    /// control both panels open from.
+    fn close_stash_panel(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.stash_open = false;
+        self.composer_options_trigger_focus.focus(window, cx);
+        cx.notify();
+    }
+
     fn render_composer_options(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         let section = |index: usize, label: &'static str, controls: AnyElement| {
             div()
@@ -1270,12 +1515,7 @@ impl ChatView {
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(
-                    div()
-                        .text_size(px(12.0))
-                        .text_color(theme::rambutan_500())
-                        .child(label),
-                )
+                .child(panel_heading(label))
                 .child(controls)
         };
         let is_plan = self.permission_mode == PermissionMode::Plan;
@@ -1284,7 +1524,7 @@ impl ChatView {
             .gap_1()
             .children([false, true].into_iter().map(|plan| {
                 let key = if plan { "plan" } else { "build" };
-                self.composer_option(
+                div().flex_1().child(self.panel_action(
                     format!("composer-mode-{key}").into(),
                     format!("desktop-composer-mode-{key}").into(),
                     if plan {
@@ -1292,42 +1532,48 @@ impl ChatView {
                     } else {
                         CHAT_BUILD_LABEL
                     },
-                    Some(is_plan == plan),
+                    is_plan == plan,
                     move |this, _, cx| {
                         if (this.permission_mode == PermissionMode::Plan) != plan {
                             this.toggle_plan(cx);
                         }
                     },
                     cx,
-                )
+                ))
             }))
             .into_any_element();
+        let has_draft = !self.input_state.read(cx).value().trim().is_empty();
         let prompts = div()
             .flex()
-            .flex_wrap()
-            .items_center()
+            .flex_col()
             .gap_1()
-            .when(!self.input_state.read(cx).value().trim().is_empty(), |el| {
-                el.child(self.composer_option(
-                    "composer-stash-draft".into(),
-                    "desktop-stash-draft".into(),
-                    "Stash draft",
-                    None,
-                    |this, window, cx| {
-                        this.stash_draft(&StashDraft, window, cx);
-                        this.composer_options_open = false;
-                        this.effort_menu_open = false;
-                        this.focus_composer(window, cx);
-                        cx.notify();
-                    },
-                    cx,
-                ))
-            })
-            .child(self.composer_option(
-                "composer-saved-prompts".into(),
-                "desktop-saved-prompts".into(),
-                "Saved prompts",
-                None,
+            .child(self.panel_row(
+                PanelRow {
+                    id: "composer-stash-draft".into(),
+                    selector: "desktop-stash-draft".into(),
+                    label: "Stash draft",
+                    trailing: Some(panel_hint("⌘S")),
+                    selected: None,
+                    enabled: has_draft,
+                },
+                |this, window, cx| {
+                    this.stash_draft(&StashDraft, window, cx);
+                    this.composer_options_open = false;
+                    this.effort_menu_open = false;
+                    this.focus_composer(window, cx);
+                    cx.notify();
+                },
+                cx,
+            ))
+            .child(self.panel_row(
+                PanelRow {
+                    id: "composer-saved-prompts".into(),
+                    selector: "desktop-saved-prompts".into(),
+                    label: "Saved prompts",
+                    trailing: Some(panel_hint(self.stash.len().to_string())),
+                    selected: None,
+                    enabled: true,
+                },
                 |this, _, cx| {
                     this.composer_options_open = false;
                     this.effort_menu_open = false;
@@ -1336,19 +1582,102 @@ impl ChatView {
                 },
                 cx,
             ))
+            .into_any_element();
+        let dictation = div()
+            .id(("composer-options-section", 5_usize))
+            .track_focus(&self.composer_options_section_focus[5])
+            .flex_shrink_0()
+            .flex()
+            .flex_col()
+            .gap_1()
+            .child(panel_heading("Dictation"))
+            .when(!self.dictation.active(), |el| {
+                el.child(
+                    div().flex().child(
+                        self.panel_activation(
+                            web_button(
+                                "composer-dictate",
+                                WebButtonVariant::Outline,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .debug_selector(|| "desktop-composer-dictate".to_string())
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .aria_label("Dictate locally")
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .child("Dictate locally"),
+                            |this, _, cx| {
+                                this.start_dictation(cx);
+                                this.composer_options_open = false;
+                            },
+                            cx,
+                        ),
+                    ),
+                )
+            })
             .child(
                 div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_500())
-                    .child(self.stash.len().to_string()),
-            )
-            .into_any_element();
+                    .text_size(px(COMPOSER_PANEL_TEXT_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .text_color(theme::rambutan_400())
+                    .child(CHAT_DICTATION_HINT),
+            );
+        let has_usage = self.messages.iter().any(|message| message.usage.is_some());
+        let reveal = self.composer_options_reveal.clone();
+        let scroll = self.composer_options_scroll.clone();
+        let view = cx.entity_id();
+        let body = div()
+            // Scroll to a requested section once the body has a size.
+            .on_children_prepainted(move |_, _, cx| {
+                if scroll.bounds().size.height > px(0.0) {
+                    if let Some(item) = reveal.take() {
+                        let scroll = scroll.clone();
+                        cx.defer(move |cx| {
+                            scroll.scroll_to_item(item);
+                            cx.notify(view);
+                        });
+                    }
+                }
+            })
+            .id("desktop-composer-options-body")
+            .debug_selector(|| "desktop-composer-options-body".to_string())
+            .min_h_0()
+            .overflow_y_scroll()
+            .track_scroll(&self.composer_options_scroll)
+            .p(px(COMPOSER_PANEL_BODY_PADDING_PX))
+            .flex()
+            .flex_col()
+            .gap(px(COMPOSER_PANEL_SECTION_GAP_PX))
+            .child(section(0, "Access", self.render_permission_menu(cx)))
+            .child(section(1, "Mode", mode))
+            .when(self.effort_chip_visible(), |el| {
+                el.child(section(2, "Effort", self.render_effort_menu(cx)))
+            })
+            .child(section(3, "Prompts", prompts))
+            .child(dictation)
+            .when(self.return_chip_visible() || has_usage, |el| {
+                el.child(section(
+                    4,
+                    "Context",
+                    div()
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .when(has_usage, |el| el.child(self.render_compact_control(cx)))
+                        .when(self.return_chip_visible(), |el| {
+                            el.child(self.render_return_chip(cx))
+                        })
+                        .into_any_element(),
+                ))
+            })
+            .vertical_scrollbar(&self.composer_options_scroll);
         div()
             .id("desktop-composer-options-panel")
             .debug_selector(|| "desktop-composer-options-panel".to_string())
             .role(Role::Dialog)
             .aria_label("Composer options")
-            .w(px(320.0))
+            .w(px(STASH_MENU_WIDTH_PX))
             .max_w(window.viewport_size().width - px(18.0))
             .max_h(composer_popover_max_height(
                 window,
@@ -1357,11 +1686,10 @@ impl ChatView {
             .rounded(px(8.0))
             .border_1()
             .border_color(theme::ring_floating())
-            .bg(theme::longan_900())
-            .p_3()
+            .bg(theme::longan_700())
+            .overflow_hidden()
             .flex()
             .flex_col()
-            .gap_3()
             .track_focus(&self.composer_options_focus)
             .tab_group()
             .on_mouse_down_out(cx.listener(|this, event: &MouseDownEvent, _, cx| {
@@ -1375,53 +1703,13 @@ impl ChatView {
                     cx.notify();
                 }
             }))
-            .overflow_y_scroll()
-            .track_scroll(&self.composer_options_scroll)
-            .child(
-                div()
-                    .text_size(px(13.0))
-                    .text_color(theme::rambutan_100())
-                    .child("Composer options"),
-            )
-            .child(section(0, "Access", self.render_permission_menu(cx)))
-            .child(section(1, "Mode", mode))
-            .when(self.effort_chip_visible(), |el| {
-                el.child(section(2, "Effort", self.render_effort_menu(cx)))
-            })
-            .child(section(3, "Prompts", prompts))
-            .child(
-                div().track_focus(&self.composer_options_section_focus[5])
-                    .flex_shrink_0().flex().flex_col().gap_1()
-                    .child(div().text_size(px(12.0)).text_color(theme::rambutan_500()).child("Dictation"))
-                    .when(!self.dictation.active(), |el| el.child(self.composer_option(
-                        "composer-dictate".into(), "desktop-composer-dictate".into(), "Dictate locally", None,
-                        |this,_,cx| {this.start_dictation(cx);this.composer_options_open=false;},cx,
-                    )))
-                    .child(div().text_size(px(12.0)).text_color(theme::rambutan_400()).child("Uses your microphone and local Whisper. Review the draft before sending.")),
-            )
-            .when(
-                self.return_chip_visible()
-                    || self.messages.iter().any(|message| message.usage.is_some()),
-                |el| {
-                    el.child(section(
-                        4,
-                        "Context",
-                        div()
-                            .flex()
-                            .flex_wrap()
-                            .gap_1()
-                            .when(self.return_chip_visible(), |el| {
-                                el.child(self.render_return_chip(cx))
-                            })
-                            .when(
-                                self.messages.iter().any(|message| message.usage.is_some()),
-                                |el| el.child(self.render_compact_control(cx)),
-                            )
-                            .into_any_element(),
-                    ))
-                },
-            )
-            .vertical_scrollbar(&self.composer_options_scroll)
+            .child(self.panel_header(
+                "Composer options",
+                "desktop-composer-options-close",
+                |this, window, cx| this.close_composer_options(window, cx),
+                cx,
+            ))
+            .child(body)
             .into_any_element()
     }
 
@@ -1525,19 +1813,20 @@ impl ChatView {
         div()
             .id("compact-context")
             .debug_selector(|| "desktop-compact-context".to_string())
-            .h(px(32.0))
+            .min_h(px(theme::CONTROL_PX))
+            .w_full()
             .px(px(8.0))
             .rounded(px(4.0))
             .border_1()
             .border_color(hsla(0.0, 0.0, 0.0, 0.0))
             .flex()
             .items_center()
-            .text_size(px(12.0))
+            .text_size(px(COMPOSER_PANEL_TEXT_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
-            .text_color(theme::rambutan_400())
+            .text_color(theme::rambutan_300())
             .hover(|el| {
                 el.bg(theme::longan_800().opacity(0.60))
-                    .text_color(theme::rambutan_200())
+                    .text_color(theme::rambutan_100())
             })
             .cursor_pointer()
             .tab_index(0)
@@ -1556,15 +1845,14 @@ impl ChatView {
                     this.apply_local_command("/compact", cx);
                 }
             }))
-            .child("Compact")
+            .child("Compact thread")
             .into_any_element()
     }
 
-    /// Compact or Full beside send after a Claude thread has been idle for
-    /// one prompt-cache window.
+    /// Send full draft, checked while on, once a Claude thread has been idle
+    /// for one prompt-cache window. Off, the draft goes out after a summary.
     fn render_return_chip(&self, cx: &Context<'_, Self>) -> AnyElement {
         let full = self.compact_full;
-        let label = if full { "Full" } else { "Compact" };
         let title = if full {
             "Send the full draft"
         } else {
@@ -1573,19 +1861,22 @@ impl ChatView {
         div()
             .id("return-compact")
             .debug_selector(|| "desktop-return-compact".to_string())
-            .h(px(32.0))
+            .min_h(px(theme::CONTROL_PX))
+            .w_full()
             .px(px(8.0))
             .rounded(px(4.0))
             .border_1()
             .border_color(hsla(0.0, 0.0, 0.0, 0.0))
             .flex()
             .items_center()
-            .text_size(px(12.0))
+            .justify_between()
+            .gap_2()
+            .text_size(px(COMPOSER_PANEL_TEXT_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
-            .text_color(theme::rambutan_400())
+            .text_color(theme::rambutan_300())
             .hover(|el| {
                 el.bg(theme::longan_800().opacity(0.60))
-                    .text_color(theme::rambutan_200())
+                    .text_color(theme::rambutan_100())
             })
             .cursor_pointer()
             .tab_index(0)
@@ -1607,7 +1898,8 @@ impl ChatView {
                     cx.notify();
                 }
             }))
-            .child(label)
+            .child("Send full draft")
+            .when(full, |el| el.child(panel_check()))
             .into_any_element()
     }
 
@@ -2183,8 +2475,9 @@ impl ChatView {
         } else {
             self.open_composer_options(window, cx);
             self.effort_menu_open = true;
+            // Effort follows Access and Mode in the scrolling body.
+            self.composer_options_reveal.set(Some(2));
             cx.defer_in(window, |this, window, cx| {
-                this.composer_options_scroll.scroll_to_item(3);
                 this.composer_effort_focus.focus(window, cx);
                 cx.notify();
             });
@@ -2226,8 +2519,8 @@ impl ChatView {
         }
         div()
             .id("desktop-effort-menu")
-            .flex()
-            .flex_wrap()
+            .grid()
+            .grid_cols(3)
             .gap_1()
             .children(rows)
             .into_any_element()
@@ -2244,18 +2537,22 @@ impl ChatView {
         div()
             .id(ElementId::Name(format!("effort-{key}").into()))
             .debug_selector(move || format!("desktop-effort-option-{key}"))
-            .min_h(px(32.0))
+            .min_h(px(theme::CONTROL_PX))
             .px_2()
-            .py(px(6.0))
             .rounded(px(4.0))
             .flex()
             .items_center()
             .justify_center()
-            .text_size(px(MENU_ROW_TEXT_SIZE_PX))
+            .text_size(px(COMPOSER_PANEL_TEXT_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
-            .text_color(theme::rambutan_200())
-            .when(selected, |el| el.bg(theme::longan_800().opacity(0.5)))
-            .hover(|el| el.bg(theme::longan_800().opacity(0.6)))
+            .text_color(theme::rambutan_300())
+            .when(selected, |el| {
+                el.bg(theme::longan_800()).text_color(theme::rambutan_100())
+            })
+            .hover(|el| {
+                el.bg(theme::longan_800().opacity(0.6))
+                    .text_color(theme::rambutan_100())
+            })
             .tab_index(0)
             .role(Role::MenuItem)
             .aria_label(label)
@@ -2616,14 +2913,27 @@ impl ChatView {
             .gap_px()
     }
 
+    /// Access rows (web: a radio group of rows, checked at the right). Plan
+    /// is read only, so while it is on no row is checked and a note says so.
     fn render_permission_menu(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let plan = self.permission_mode == PermissionMode::Plan;
         let selected = self.composer_access_mode();
         div()
             .id("desktop-permission-menu")
             .debug_selector(|| "desktop-permission-menu".to_string())
             .flex()
-            .flex_wrap()
+            .flex_col()
             .gap_1()
+            .when(plan, |el| {
+                el.child(
+                    div()
+                        .px_2()
+                        .text_size(px(COMPOSER_PANEL_TEXT_PX))
+                        .font_family(theme::UI_SMALL_FONT_FAMILY)
+                        .text_color(theme::rambutan_400())
+                        .child("Plan is read only"),
+                )
+            })
             .children(
                 [
                     PermissionMode::Default,
@@ -2633,11 +2943,16 @@ impl ChatView {
                 .into_iter()
                 .map(|mode| {
                     let key = mode.as_str();
-                    self.composer_option(
-                        SharedString::from(format!("permission-mode-{key}")),
-                        SharedString::from(format!("desktop-permission-mode-{key}")),
-                        composer_access_label(mode),
-                        Some(selected == mode),
+                    let checked = !plan && selected == mode;
+                    self.panel_row(
+                        PanelRow {
+                            id: SharedString::from(format!("permission-mode-{key}")),
+                            selector: SharedString::from(format!("desktop-permission-mode-{key}")),
+                            label: composer_access_label(mode),
+                            trailing: checked.then(panel_check),
+                            selected: Some(checked),
+                            enabled: true,
+                        },
                         move |this, _, cx| this.choose_permission_mode(mode, cx),
                         cx,
                     )
@@ -2647,21 +2962,7 @@ impl ChatView {
     }
 
     /// Parked drafts: click restores, × deletes (web prompt stash).
-    fn render_stash_menu(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let frame = self.menu_frame("desktop-stash-menu", STASH_MENU_WIDTH_PX, "Prompt stash");
-        if self.stash.is_empty() {
-            return frame
-                .child(
-                    div()
-                        .px_3()
-                        .py_2()
-                        .text_size(px(MENU_ROW_TEXT_SIZE_PX))
-                        .font_family(theme::UI_SMALL_FONT_FAMILY)
-                        .text_color(theme::rambutan_500())
-                        .child(CHAT_STASH_EMPTY),
-                )
-                .into_any_element();
-        }
+    fn render_stash_menu(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         let now = EpochMs::now();
         let rows: Vec<AnyElement> = self
             .stash
@@ -2682,13 +2983,16 @@ impl ChatView {
                             .debug_selector(move || format!("desktop-stash-entry-{key}"))
                             .min_w_0()
                             .flex_1()
+                            .min_h(px(theme::CONTROL_PX))
                             .px_2()
-                            .py(px(6.0))
-                            .rounded(px(CHIP_RADIUS_PX))
+                            .py_1()
+                            .rounded(px(4.0))
                             .flex()
                             .flex_col()
-                            .text_size(px(MENU_ROW_TEXT_SIZE_PX))
+                            .justify_center()
+                            .text_size(px(COMPOSER_PANEL_TEXT_PX))
                             .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .text_color(theme::rambutan_300())
                             .hover(|el| el.bg(theme::longan_800().opacity(0.6)))
                             .tab_index(0)
                             .role(Role::MenuItem)
@@ -2701,12 +3005,7 @@ impl ChatView {
                                 cx.stop_propagation();
                                 this.restore_stash(&restore_id, window, cx);
                             }))
-                            .child(
-                                div()
-                                    .truncate()
-                                    .text_color(theme::rambutan_200())
-                                    .child(preview),
-                            )
+                            .child(div().truncate().child(preview))
                             .child(div().text_color(theme::rambutan_500()).child(when)),
                     )
                     .child(
@@ -2714,12 +3013,16 @@ impl ChatView {
                             .id(ElementId::Name(format!("stash-delete-{key}").into()))
                             .debug_selector(move || format!("desktop-stash-delete-{key}"))
                             .size(px(theme::CONTROL_XS_PX))
+                            .flex_shrink_0()
                             .rounded(px(4.0))
                             .flex()
                             .items_center()
                             .justify_center()
                             .text_color(theme::rambutan_500())
-                            .hover(|el| el.text_color(theme::lychee_300()))
+                            .hover(|el| {
+                                el.bg(theme::lychee_500().opacity(0.10))
+                                    .text_color(theme::lychee_300())
+                            })
                             .tab_index(0)
                             .role(Role::Button)
                             .aria_label("Delete stashed prompt")
@@ -2740,7 +3043,52 @@ impl ChatView {
                     .into_any_element()
             })
             .collect();
-        frame.children(rows).into_any_element()
+        let body = div()
+            .id("desktop-stash-body")
+            .min_h_0()
+            .overflow_y_scroll()
+            .p(px(COMPOSER_PANEL_BODY_PADDING_PX))
+            .flex()
+            .flex_col()
+            .gap_1()
+            .when(rows.is_empty(), |el| {
+                el.child(
+                    div()
+                        .px_2()
+                        .py_3()
+                        .text_size(px(COMPOSER_PANEL_TEXT_PX))
+                        .font_family(theme::UI_SMALL_FONT_FAMILY)
+                        .text_color(theme::rambutan_500())
+                        .child(CHAT_STASH_EMPTY),
+                )
+            })
+            .children(rows);
+        div()
+            .id("desktop-stash-menu")
+            .debug_selector(|| "desktop-stash-menu".to_string())
+            .role(Role::Dialog)
+            .aria_label("Saved prompts")
+            .w(px(STASH_MENU_WIDTH_PX))
+            .max_w(window.viewport_size().width - px(18.0))
+            .max_h(composer_popover_max_height(
+                window,
+                self.composer_options_trigger_bounds.get(),
+            ))
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(theme::ring_floating())
+            .bg(theme::longan_700())
+            .overflow_hidden()
+            .flex()
+            .flex_col()
+            .child(self.panel_header(
+                "Saved prompts",
+                "desktop-stash-close",
+                |this, window, cx| this.close_stash_panel(window, cx),
+                cx,
+            ))
+            .child(body)
+            .into_any_element()
     }
 
     fn choose_permission_mode(&mut self, mode: PermissionMode, cx: &mut Context<'_, Self>) {

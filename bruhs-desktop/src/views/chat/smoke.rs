@@ -33,6 +33,15 @@ impl ChatView {
         self.send_follow_up(false, window, cx);
     }
 
+    /// Open the composer options panel, as its button does.
+    pub(crate) fn smoke_open_composer_options(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.open_composer_options(window, cx);
+    }
+
     /// The composer's text.
     pub(crate) fn smoke_composer(&self, cx: &App) -> String {
         self.input_state.read(cx).value().to_string()

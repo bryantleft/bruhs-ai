@@ -178,6 +178,13 @@ impl Workspace {
                 };
                 self.toggle_thread_menu(&id, window, cx);
             }
+            // The composer options panel, open at its top.
+            "composer-options" => {
+                let Some(chat) = self.smoke_active_chat() else {
+                    return false;
+                };
+                chat.update(cx, |chat, cx| chat.smoke_open_composer_options(window, cx));
+            }
             // The thread menu's "Custom…" snooze dialog (web "Snooze until").
             "snooze-custom" => {
                 let Some(id) = self.active_thread_id.clone() else {

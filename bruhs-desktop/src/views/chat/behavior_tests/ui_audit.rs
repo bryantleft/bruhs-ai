@@ -596,3 +596,59 @@ fn compact_options_preserve_effort_and_saved_prompt_workflows(cx: &mut TestAppCo
     });
     assert!(cx.debug_bounds("desktop-stash-menu").is_some());
 }
+
+/// The options and saved prompts panels look like the web's
+/// `ComposerPopupSurface`: a titled header with a 32px close button, then
+/// full-width 32px rows. Close returns focus to the options button.
+#[gpui::test]
+fn composer_panels_have_the_web_header_and_rows(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    let trigger = cx.debug_bounds("desktop-composer-options").unwrap();
+    cx.simulate_click(trigger.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    let panel = cx.debug_bounds("desktop-composer-options-panel").unwrap();
+    let close = cx.debug_bounds("desktop-composer-options-close").unwrap();
+    let control = px(crate::theme::CONTROL_PX);
+    assert_eq!(close.size, size(control, control));
+    assert!(close.right() <= panel.right() && close.top() >= panel.top());
+    let body = cx.debug_bounds("desktop-composer-options-body").unwrap();
+    assert!(
+        body.top() >= close.bottom(),
+        "the body sits under the header"
+    );
+    let row = cx
+        .debug_bounds("desktop-permission-mode-default")
+        .expect("access row");
+    assert_eq!(row.size.height, control);
+    assert!(
+        row.size.width > body.size.width - px(24.0),
+        "access rows span the body like web rows: {row:?} in {body:?}"
+    );
+    cx.simulate_click(close.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-composer-options-panel").is_none());
+    chat.update_in(cx, |chat, window, _| {
+        assert!(chat.composer_options_trigger_focus.is_focused(window));
+    });
+
+    // Saved prompts opens in the same kind of panel.
+    let trigger = cx.debug_bounds("desktop-composer-options").unwrap();
+    cx.simulate_click(trigger.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    scroll_options_to_lower_actions(cx);
+    let saved = cx.debug_bounds("desktop-saved-prompts").unwrap();
+    cx.simulate_click(saved.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-stash-menu").is_some());
+    let close = cx
+        .debug_bounds("desktop-stash-close")
+        .expect("saved prompts close");
+    assert_eq!(close.size, size(control, control));
+    cx.simulate_click(close.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-stash-menu").is_none());
+    chat.update_in(cx, |chat, window, _| {
+        assert!(!chat.stash_open);
+        assert!(chat.composer_options_trigger_focus.is_focused(window));
+    });
+}

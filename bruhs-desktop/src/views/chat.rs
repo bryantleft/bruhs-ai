@@ -540,6 +540,9 @@ pub struct ChatView {
     composer_options_trigger_focus: FocusHandle,
     composer_options_trigger_bounds: std::rc::Rc<std::cell::Cell<Bounds<Pixels>>>,
     composer_options_scroll: ScrollHandle,
+    /// A child of the options panel's body to scroll into view once the
+    /// panel has laid out; a scroll area ignores requests before then.
+    composer_options_reveal: std::rc::Rc<std::cell::Cell<Option<usize>>>,
     composer_options_section_focus: [FocusHandle; 6],
     stash_open: bool,
     /// Parked drafts (⌘S), newest first.
@@ -1035,6 +1038,7 @@ impl ChatView {
             composer_options_trigger_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             composer_options_trigger_bounds: Default::default(),
             composer_options_scroll: ScrollHandle::new(),
+            composer_options_reveal: Default::default(),
             composer_options_section_focus: std::array::from_fn(|_| {
                 cx.focus_handle().tab_stop(false)
             }),
