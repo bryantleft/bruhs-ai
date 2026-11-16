@@ -1016,8 +1016,14 @@ const DESKTOP_MODAL_TITLE_TEXT_SIZE_PX: f32 = 16.0;
 const DESKTOP_MODAL_OVERLAY_OPACITY: f32 = 0.70;
 const DESKTOP_MODAL_HEADER_X_PADDING_PX: f32 = 16.0;
 const DESKTOP_MODAL_HEADER_Y_PADDING_PX: f32 = 10.0;
+/// Where top-anchored overlays hang: the command bar and the pickers whose
+/// lists change length, so they do not jump while you type or browse.
 const DESKTOP_DIALOG_TOP_PADDING_PX: f32 = 80.0;
 const DESKTOP_DIALOG_BOTTOM_GAP_PX: f32 = 16.0;
+/// Room kept above and below a centered dialog (shadcn `Dialog` centers).
+const DESKTOP_DIALOG_EDGE_GAP_PX: f32 = 32.0;
+/// shadcn `SidebarTrigger` (`size-7`).
+const SIDEBAR_TRIGGER_PX: f32 = 28.0;
 const DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX: f32 = 240.0;
 const FORM_DIALOG_PREFERRED_HEIGHT_PX: f32 = 650.0;
 fn form_text_input(input: Input) -> Input {
@@ -2396,11 +2402,13 @@ impl Workspace {
     /// With the sidebar hidden, the traffic lights still need a drag strip and
     /// there has to be a way back (the web only needs its floating "≡" on
     /// narrow viewports).
+    /// The sidebar toggle in the top bar: shadcn's `SidebarTrigger`, a 28 px
+    /// ghost button around a 16 px icon.
     fn render_collapsed_sidebar_strip(&self, cx: &Context<'_, Self>) -> AnyElement {
         div()
             .id("collapsed-sidebar-strip")
             .debug_selector(|| "desktop-collapsed-sidebar-strip".to_string())
-            .size(px(44.0))
+            .h_full()
             .flex()
             .items_center()
             .flex_shrink_0()
@@ -2408,16 +2416,13 @@ impl Workspace {
                 div()
                     .id("collapsed-sidebar-toggle")
                     .debug_selector(|| "desktop-sidebar-toggle".to_string())
-                    .size(px(44.0))
+                    .group("desktop-sidebar-toggle")
+                    .size(px(SIDEBAR_TRIGGER_PX))
                     .rounded(px(8.0))
                     .flex()
                     .items_center()
                     .justify_center()
-                    .text_color(theme::rambutan_400())
-                    .hover(|el| {
-                        el.bg(theme::longan_800().opacity(0.5))
-                            .text_color(theme::rambutan_100())
-                    })
+                    .hover(|el| el.bg(theme::longan_800().opacity(0.5)))
                     .tab_index(0)
                     .role(Role::Button)
                     .aria_label("Toggle sidebar (⌘B)")
@@ -2425,9 +2430,13 @@ impl Workspace {
                     .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
-                    .on_click(cx.listener(|this, _ev, window, cx| {
+                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
                         cx.stop_propagation();
-                        this.toggle_sidebar_for_window(window, cx);
+                        // Keys toggle on key down; GPUI's key-up click would
+                        // toggle back.
+                        if !event.is_keyboard() {
+                            this.toggle_sidebar_for_window(window, cx);
+                        }
                     }))
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         if is_web_button_activation_key(event.keystroke.key.as_str()) {
@@ -2440,7 +2449,10 @@ impl Workspace {
                         svg()
                             .path("icons/panel-left.svg")
                             .size(px(16.0))
-                            .text_color(theme::rambutan_400()),
+                            .text_color(theme::rambutan_400())
+                            .group_hover("desktop-sidebar-toggle", |el| {
+                                el.text_color(theme::rambutan_100())
+                            }),
                     ),
             )
             .into_any_element()

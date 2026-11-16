@@ -7,10 +7,25 @@ pub(super) const DESKTOP_MODAL_FOCUS_TRAP_KEY: &str = "tab";
 pub(super) const DESKTOP_MODAL_FOCUS_START_TAB_INDEX: isize = 0;
 pub(super) const DESKTOP_MODAL_FOCUS_END_TAB_INDEX: isize = 999;
 
+/// Tallest a centered dialog may grow: the window less a gap above and below.
 pub(super) fn dialog_max_height(window: &Window) -> Pixels {
+    (window.viewport_size().height - px(DESKTOP_DIALOG_EDGE_GAP_PX * 2.0)).max(px(0.0))
+}
+
+/// Tallest a top-anchored picker may grow below its anchor.
+pub(super) fn picker_max_height(window: &Window) -> Pixels {
     (window.viewport_size().height
         - px(DESKTOP_DIALOG_TOP_PADDING_PX + DESKTOP_DIALOG_BOTTOM_GAP_PX))
     .max(px(0.0))
+}
+
+/// Height a form dialog takes: its preferred height, or what the window
+/// allows around a centered dialog.
+pub(super) fn form_dialog_height(window: &Window) -> f32 {
+    (f32::from(window.viewport_size().height) - DESKTOP_DIALOG_EDGE_GAP_PX * 2.0).clamp(
+        DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX,
+        FORM_DIALOG_PREFERRED_HEIGHT_PX,
+    )
 }
 
 impl Overlay {
@@ -472,12 +487,15 @@ impl Workspace {
 
     pub(super) fn render_modal_shell(
         &self,
-        title: &'static str,
+        title: impl Into<SharedString>,
         content: Div,
         footer: Option<Div>,
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        // The header carries the dialog's one title; the content does not
+        // repeat it (web: the visible heading is the only title).
+        let title: SharedString = title.into();
         div()
             .absolute()
             .top_0()
@@ -488,9 +506,9 @@ impl Workspace {
             .id("desktop-modal-overlay")
             .bg(theme::longan_950().opacity(DESKTOP_MODAL_OVERLAY_OPACITY))
             .flex()
-            .items_start()
+            .items_center()
             .justify_center()
-            .pt(px(DESKTOP_DIALOG_TOP_PADDING_PX))
+            .py(px(DESKTOP_DIALOG_EDGE_GAP_PX))
             .on_click(cx.listener(|this, _ev, _window, cx| {
                 this.close_transient_surfaces();
                 cx.notify();
@@ -498,8 +516,9 @@ impl Workspace {
             .child(
                 div()
                     .id("desktop-modal-dialog")
+                    .debug_selector(|| "desktop-modal-dialog".to_string())
                     .role(Role::Dialog)
-                    .aria_label(title)
+                    .aria_label(title.clone())
                     .child(self.blur_scrim.backdrop())
                     .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
                     .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))

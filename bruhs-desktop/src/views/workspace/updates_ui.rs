@@ -14,7 +14,6 @@ use bruhs_models::updates::{
 };
 use std::collections::HashSet;
 
-const UPDATE_CONFIRM_LABEL: &str = "Update providers";
 const RESTART_CONFIRM_LABEL: &str = "Restart to update";
 
 /// A packaged build's own update (T3: download in the background, then
@@ -665,24 +664,20 @@ impl Workspace {
             AppInstall::Ready { version, .. } => version.clone(),
             _ => String::new(),
         };
+        let title = if version.is_empty() {
+            "Restart to update?".to_string()
+        } else {
+            format!("Restart to update to v{version}?")
+        };
         let content = div()
             .debug_selector(|| "desktop-restart-confirm".to_string())
             .p(px(16.0))
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(
-                div()
-                    .child(
-                        div()
-                            .text_size(px(18.0))
-                            .text_color(theme::rambutan_100())
-                            .child(format!("Restart to update to v{version}?")),
-                    )
-                    .child(meta(
-                        "Bruhs quits, swaps in the new version and opens again. Running chats stop; their threads stay.",
-                    )),
-            )
+            .child(meta(
+                "Bruhs quits, swaps in the new version and opens again. Running chats stop; their threads stay.",
+            ))
             .child(
                 div()
                     .flex()
@@ -718,7 +713,7 @@ impl Workspace {
                         .on_click(cx.listener(|this, _, _, cx| this.restart_to_update(cx))),
                     ),
             );
-        self.render_modal_shell(RESTART_CONFIRM_LABEL, content, None, window, cx)
+        self.render_modal_shell(title, content, None, window, cx)
     }
 
     pub(super) fn close_update_confirm(&mut self, cx: &mut Context<'_, Self>) {
@@ -794,18 +789,9 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap(px(12.0))
-            .child(
-                div()
-                    .child(
-                        div()
-                            .text_size(px(18.0))
-                            .text_color(theme::rambutan_100())
-                            .child(confirm_title(targets.len())),
-                    )
-                    .child(meta(
-                        "Running chats keep the CLI they started with. New sessions use the update.",
-                    )),
-            )
+            .child(meta(
+                "Running chats keep the CLI they started with. New sessions use the update.",
+            ))
             .child(div().flex().flex_col().gap(px(6.0)).children(rows))
             .when(skipped_count > 0, |el| {
                 el.child(
@@ -814,7 +800,11 @@ impl Workspace {
                         .flex_col()
                         .gap(px(4.0))
                         .child(meta(format!("{skipped_count} skipped")))
-                        .children(skipped_lines.into_iter().map(|line| meta(line).pl(px(16.0)))),
+                        .children(
+                            skipped_lines
+                                .into_iter()
+                                .map(|line| meta(line).pl(px(16.0))),
+                        ),
                 )
             });
         let footer = div()
@@ -854,7 +844,13 @@ impl Workspace {
                 })),
             );
 
-        self.render_modal_shell(UPDATE_CONFIRM_LABEL, content, Some(footer), window, cx)
+        self.render_modal_shell(
+            confirm_title(targets.len()),
+            content,
+            Some(footer),
+            window,
+            cx,
+        )
     }
 
     pub(super) fn render_settings_updates_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {

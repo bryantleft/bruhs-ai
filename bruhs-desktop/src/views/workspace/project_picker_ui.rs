@@ -584,7 +584,7 @@ impl Workspace {
                     .debug_selector(|| "desktop-project-picker-dialog".to_string())
                     .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
                     .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
-                    .max_h(modal_ui::dialog_max_height(window))
+                    .max_h(modal_ui::picker_max_height(window))
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))
                     .border_1()
                     .border_color(theme::ring_modal())
