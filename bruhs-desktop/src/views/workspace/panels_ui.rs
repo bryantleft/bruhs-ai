@@ -370,14 +370,18 @@ impl Workspace {
             bruhs_core::editor::open_in_editor(&editor, Path::new(&full), line)
         });
         cx.spawn(async move |this, cx| {
-            if let Err(error) = opened.await {
-                tracing::warn!("open in editor failed: {error}");
-                let _ = this.update(cx, |this, cx| {
-                    this.meetings_hub.update(cx, |hub, cx| {
-                        hub.show_notice(format!("Open in editor failed: {error}"), true, cx)
-                    });
-                });
-            }
+            // Like web, say which editor opened, or why none did.
+            let (message, warning) = match opened.await {
+                Ok(editor) => (format!("Opened in {}", editor.label), false),
+                Err(error) => {
+                    tracing::warn!("open in editor failed: {error}");
+                    (format!("Open in editor failed: {error}"), true)
+                }
+            };
+            let _ = this.update(cx, |this, cx| {
+                this.meetings_hub
+                    .update(cx, |hub, cx| hub.show_notice(message, warning, cx));
+            });
         })
         .detach();
     }
@@ -455,6 +459,23 @@ impl Workspace {
         self.active_view = AppView::Terminal;
         self.compact_sidebar_open = false;
         self.close_transient_surfaces();
+        self.persist_and_notify(cx);
+    }
+
+    /// Palette "New terminal", like web: another shell in the thread's
+    /// project (else the active project, else home), shown in the chat
+    /// drawer from chat and in the Terminal view from anywhere else.
+    pub(super) fn open_new_terminal(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.close_transient_surfaces();
+        if self.active_view == AppView::Chat {
+            self.terminal_drawer_open = true;
+        } else {
+            self.active_view = AppView::Terminal;
+            self.compact_sidebar_open = false;
+        }
+        self.sync_terminal_context(cx);
+        self.terminal_panel
+            .update(cx, |panel, cx| panel.open_default(window, cx));
         self.persist_and_notify(cx);
     }
 

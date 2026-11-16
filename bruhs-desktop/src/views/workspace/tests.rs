@@ -5106,11 +5106,13 @@ fn command_actions_should_match_web_reference() {
             ("toggle-panel", "View", "Toggle right panel", "⌘⌥B"),
             ("toggle-tasks", "View", "Toggle tasks panel", "⌘⇧T"),
             ("toggle-terminal", "View", "Toggle terminal", "⌘J"),
+            ("new-terminal", "View", "New terminal", "project or home"),
             ("open-terminal", "View", "Open in system Terminal", "app"),
             ("local-servers", "View", "Open a local server…", "servers"),
             ("toggle-preview", "View", "Toggle preview", "⌘⇧J"),
             ("toggle-files", "View", "Toggle files panel", "project tree"),
             ("stash-prompt", "Actions", "Stash prompt", "⌘S"),
+            ("open-in-editor", "Actions", "Open project in editor", "⌘⌥O"),
             ("model-picker", "Actions", "Model", "switch provider"),
             ("settings", "Actions", "Settings", "preferences"),
         ]
@@ -5167,11 +5169,13 @@ fn command_action_filter_should_match_web_raw_query_behavior() {
             "Toggle right panel",
             "Toggle tasks panel",
             "Toggle terminal",
+            "New terminal",
             "Open in system Terminal",
             "Open a local server…",
             "Toggle preview",
             "Toggle files panel",
             "Stash prompt",
+            "Open project in editor",
             "Model",
         ]
     );
