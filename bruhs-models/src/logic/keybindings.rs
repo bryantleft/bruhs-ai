@@ -72,6 +72,7 @@ pub const UNBOUND_BY_DEFAULT: &[&str] = &[
     "thread.copyResumeCommand",
     "thread.copyMarkdown",
     "thread.continueInT3",
+    "thread.continueInWorkbench",
 ];
 
 /// Bindings the app ships. Several rows can share a command id.

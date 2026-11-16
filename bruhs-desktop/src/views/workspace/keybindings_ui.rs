@@ -24,14 +24,15 @@ use crate::views::chat::{FindInThread, StashDraft};
 use crate::views::diff_panel::FindInDiff;
 
 use super::{
-    CloseOverlays, ClosePanel, ContinueInT3, CopyPullLink, CopyPullNumber, CopyResumeCommand,
-    CopyThreadLink, CopyThreadMarkdown, FocusChatInput, FocusCommandBar, ImportThread, JumpThread,
-    MentionFile, NavigateBack, NavigateForward, NewThread, NextThread, OpenCapture, OpenInboxView,
-    OpenKnowledgeView, OpenProjectInEditor, OpenSettings, OpenTaskCreateShortcut, OpenTodayView,
-    PinThread, PrevThread, SaveKnowledgeDocument, SearchThreads, SettleThread, ToggleBranchMenu,
-    ToggleDiff, ToggleEffortMenu, ToggleModelPicker, TogglePanel, TogglePreview, ToggleSidebar,
-    ToggleTasks, ToggleTerminal, ToggleWorkspaceMenu, UndoSidebar, UsePreviousWorktree, Workspace,
-    SETTINGS_CODE_RADIUS_PX, SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
+    CloseOverlays, ClosePanel, ContinueInT3, ContinueInWorkbench, CopyPullLink, CopyPullNumber,
+    CopyResumeCommand, CopyThreadLink, CopyThreadMarkdown, FocusChatInput, FocusCommandBar,
+    ImportThread, JumpThread, MentionFile, NavigateBack, NavigateForward, NewThread, NextThread,
+    OpenCapture, OpenInboxView, OpenKnowledgeView, OpenProjectInEditor, OpenSettings,
+    OpenTaskCreateShortcut, OpenTodayView, PinThread, PrevThread, SaveKnowledgeDocument,
+    SearchThreads, SettleThread, ToggleBranchMenu, ToggleDiff, ToggleEffortMenu, ToggleModelPicker,
+    TogglePanel, TogglePreview, ToggleSidebar, ToggleTasks, ToggleTerminal, ToggleWorkspaceMenu,
+    UndoSidebar, UsePreviousWorktree, Workspace, SETTINGS_CODE_RADIUS_PX,
+    SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
 };
 
 const KEY_INPUT_WIDTH_PX: f32 = 144.0;
@@ -154,6 +155,7 @@ pub(super) fn binding_names(command: &str) -> &'static [&'static str] {
         "thread.copyResumeCommand" => &["workspace::CopyResumeCommand"],
         "thread.copyMarkdown" => &["workspace::CopyThreadMarkdown"],
         "thread.continueInT3" => &["workspace::ContinueInT3"],
+        "thread.continueInWorkbench" => &["workspace::ContinueInWorkbench"],
         "settings.open" => &["workspace::OpenSettings"],
         "terminal.toggle" => &["workspace::ToggleTerminal"],
         "preview.toggle" => &["workspace::TogglePreview"],
@@ -731,6 +733,9 @@ fn push_rule_bindings(
         }
         "thread.copyMarkdown" => bind(&shortcut, CopyThreadMarkdown, name, None, add, installed),
         "thread.continueInT3" => bind(&shortcut, ContinueInT3, name, None, add, installed),
+        "thread.continueInWorkbench" => {
+            bind(&shortcut, ContinueInWorkbench, name, None, add, installed)
+        }
         "settings.open" => bind(&shortcut, OpenSettings, name, None, add, installed),
         "terminal.toggle" => bind(&shortcut, ToggleTerminal, name, None, add, installed),
         "preview.toggle" => bind(&shortcut, TogglePreview, name, None, add, installed),
@@ -829,7 +834,9 @@ fn bind_action(
 
 #[cfg(test)]
 mod tests {
-    use super::super::{FocusCommandBar, JumpThread, OpenProjectInEditor, UndoSidebar};
+    use super::super::{
+        ContinueInWorkbench, FocusCommandBar, JumpThread, OpenProjectInEditor, UndoSidebar,
+    };
     use super::{binding_names, rules_from_saved};
     use crate::views::chat::StashDraft;
     use crate::views::diff_panel::FindInDiff;
@@ -898,6 +905,10 @@ mod tests {
         assert_eq!(
             <UndoSidebar as Action>::name(&UndoSidebar),
             "workspace::UndoSidebar"
+        );
+        assert_eq!(
+            <ContinueInWorkbench as Action>::name(&ContinueInWorkbench),
+            binding_names("thread.continueInWorkbench")[0]
         );
     }
 }

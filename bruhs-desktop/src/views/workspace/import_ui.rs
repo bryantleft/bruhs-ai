@@ -655,6 +655,15 @@ impl Workspace {
         self.continue_in_t3(cx);
     }
 
+    pub(super) fn continue_in_workbench_action(
+        &mut self,
+        _: &ContinueInWorkbench,
+        _window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.continue_in_workbench(cx);
+    }
+
     fn render_import_source_tabs(&self, cx: &Context<'_, Self>) -> AnyElement {
         let current = self.import_picker.source;
         div()
