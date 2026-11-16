@@ -40,12 +40,15 @@ const SIDEBAR_BRAND_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const SIDEBAR_CONTROLS_X_PADDING_PX: f32 = 8.0;
 const SIDEBAR_CONTROLS_BOTTOM_PADDING_PX: f32 = 8.0;
 const SIDEBAR_CONTROLS_GAP_PX: f32 = 4.0;
-const SIDEBAR_SEARCH_HEIGHT_PX: f32 = 32.0;
+const SIDEBAR_SEARCH_HEIGHT_PX: f32 = theme::CONTROL_PX;
 const SIDEBAR_SEARCH_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
-const SIDEBAR_ICON_BUTTON_PX: f32 = 32.0;
+const SIDEBAR_ICON_BUTTON_PX: f32 = theme::CONTROL_PX;
 const SIDEBAR_LABEL_TEXT_PX: f32 = 12.0;
-const SIDEBAR_ICON_PX: f32 = 14.0;
-const SIDEBAR_SMALL_ICON_PX: f32 = 12.0;
+/// Icons inside controls: buttons, the search field, fold headers, card
+/// actions and the footer.
+const SIDEBAR_ICON_PX: f32 = theme::ICON_PX;
+/// Icons beside a card's 12px project and branch text.
+const SIDEBAR_SMALL_ICON_PX: f32 = theme::ICON_INLINE_SM_PX;
 const SIDEBAR_RADIUS_GRAPE_PX: f32 = 8.0;
 const SIDEBAR_RADIUS_LYCHEE_PX: f32 = 14.0;
 const SIDEBAR_RADIUS_SEED_PX: f32 = 4.0;
@@ -63,21 +66,21 @@ const SIDEBAR_CARD_ROLE_MAX_WIDTH_PX: f32 = 96.0;
 const SIDEBAR_CARD_TITLE_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const SIDEBAR_CARD_ROW_GAP_PX: f32 = 6.0;
 const SIDEBAR_CARD_DOT_PX: f32 = 9.0;
-const SIDEBAR_CARD_DELETE_PX: f32 = 24.0;
+const SIDEBAR_CARD_DELETE_PX: f32 = theme::CONTROL_XS_PX;
 const SIDEBAR_CARD_DELETE_INSET_PX: f32 = 8.0;
-/// Web `right-8`: the actions button sits left of delete.
+/// Web `right-9`: the actions button sits 4px left of delete.
 const SIDEBAR_CARD_MENU_RIGHT_PX: f32 = SIDEBAR_CARD_DELETE_INSET_PX + SIDEBAR_CARD_DELETE_PX + 4.0;
 /// Web thread menu: `w-52`.
 const THREAD_MENU_WIDTH_PX: f32 = 208.0;
-/// Web thread menu rows: `min-h-10`.
-const THREAD_MENU_ROW_PX: f32 = 40.0;
+/// Thread menu rows: shadcn `DropdownMenuItem` (32px, `px-2`).
+const THREAD_MENU_ROW_PX: f32 = theme::CONTROL_PX;
+const THREAD_MENU_ROW_X_PADDING_PX: f32 = 8.0;
 /// Focus slots: one per `ThreadMenuItem`.
 pub(super) const THREAD_MENU_MAX_ITEMS: usize = 9;
 const SIDEBAR_SETTLED_TOP_PADDING_PX: f32 = 8.0;
 const SIDEBAR_SETTLED_X_PADDING_PX: f32 = 4.0;
 const SIDEBAR_FOOTER_PADDING_PX: f32 = 8.0;
 const SIDEBAR_FOOTER_GAP_PX: f32 = 2.0;
-const SIDEBAR_FOOTER_ICON_PX: f32 = 16.0;
 const HOVER_BG_OPACITY_40: f32 = 0.40;
 const HOVER_BG_OPACITY_50: f32 = 0.50;
 const ACTIVE_BG_OPACITY_60: f32 = 0.60;
@@ -493,6 +496,7 @@ impl Workspace {
             .mt(px(SIDEBAR_SETTLED_TOP_PADDING_PX))
             .px(px(SIDEBAR_SETTLED_X_PADDING_PX))
             .py_1()
+            .min_h(px(theme::CONTROL_PX))
             .w_full()
             .flex()
             .items_center()
@@ -527,7 +531,7 @@ impl Workspace {
             .child(
                 icon(
                     assets::CHEVRON_DOWN_ICON_PATH,
-                    SIDEBAR_SMALL_ICON_PX,
+                    SIDEBAR_ICON_PX,
                     theme::rambutan_500(),
                 )
                 .when(open, |el| {
@@ -617,7 +621,7 @@ impl Workspace {
             .text_color(theme::rambutan_500())
             .child(icon(
                 assets::FOLDER_ICON_PATH,
-                SIDEBAR_ICON_PX,
+                SIDEBAR_SMALL_ICON_PX,
                 theme::rambutan_500(),
             ))
             .child(
@@ -755,7 +759,7 @@ impl Workspace {
             .child(
                 icon(
                     assets::CLOSE_ICON_PATH,
-                    SIDEBAR_SMALL_ICON_PX,
+                    SIDEBAR_ICON_PX,
                     theme::rambutan_500(),
                 )
                 .group_hover(delete_group, |el| el.text_color(theme::lychee_400())),
@@ -809,7 +813,7 @@ impl Workspace {
             .child(
                 icon(
                     assets::ELLIPSIS_ICON_PATH,
-                    SIDEBAR_SMALL_ICON_PX,
+                    SIDEBAR_ICON_PX,
                     if menu_open {
                         theme::rambutan_100()
                     } else {
@@ -907,7 +911,7 @@ impl Workspace {
                 div()
                     .id("desktop-sidebar-undo-button")
                     .debug_selector(|| "desktop-sidebar-undo-button".to_string())
-                    .min_h(px(32.0))
+                    .min_h(px(theme::CONTROL_PX))
                     .px_2()
                     .flex()
                     .items_center()
@@ -1064,7 +1068,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// One menu row (web: `min-h-10 rounded-seed px-2.5 text-label-sm`).
+    /// One menu row (web: `min-h-control rounded-seed px-2 text-label-sm`).
     /// Choosing a row closes the menu and returns focus to the card's
     /// button. Each item keeps its own focus slot, so a row that appears or
     /// disables while the menu is open never shifts focus onto another action.
@@ -1093,7 +1097,7 @@ impl Workspace {
             .debug_selector(move || id.to_string())
             .min_h(px(THREAD_MENU_ROW_PX))
             .w_full()
-            .px(px(10.0))
+            .px(px(THREAD_MENU_ROW_X_PADDING_PX))
             .flex()
             .items_center()
             .rounded(px(SIDEBAR_RADIUS_SEED_PX))
@@ -1265,7 +1269,7 @@ impl Workspace {
             }))
             .child(icon(
                 icon_path,
-                SIDEBAR_FOOTER_ICON_PX,
+                SIDEBAR_ICON_PX,
                 if active {
                     theme::rambutan_100()
                 } else {
@@ -1321,7 +1325,7 @@ impl Workspace {
             }))
             .child(icon(
                 "icons/settings.svg",
-                SIDEBAR_FOOTER_ICON_PX,
+                SIDEBAR_ICON_PX,
                 if settings_active {
                     theme::rambutan_100()
                 } else {

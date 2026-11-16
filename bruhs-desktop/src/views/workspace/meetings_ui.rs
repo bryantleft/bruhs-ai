@@ -2657,8 +2657,9 @@ impl Workspace {
                                 theme::rambutan_100(),
                             )
                             .debug_selector(|| "desktop-hub-notice-action".into())
-                            .min_h(px(44.0))
-                            .min_w(px(44.0))
+                            .my_neg_1()
+                            .min_h(px(theme::CONTROL_PX))
+                            .min_w(px(theme::CONTROL_PX))
                             .flex_shrink_0()
                             .flex()
                             .items_center()
@@ -2684,8 +2685,9 @@ impl Workspace {
                                 theme::rambutan_100(),
                             )
                             .debug_selector(|| "desktop-hub-notice-dismiss".into())
-                            .min_h(px(44.0))
-                            .min_w(px(44.0))
+                            .my_neg_1()
+                            .min_h(px(theme::CONTROL_PX))
+                            .min_w(px(theme::CONTROL_PX))
                             .flex_shrink_0()
                             .flex()
                             .items_center()

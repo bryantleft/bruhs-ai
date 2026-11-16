@@ -1023,7 +1023,7 @@ const DESKTOP_DIALOG_BOTTOM_GAP_PX: f32 = 16.0;
 /// Room kept above and below a centered dialog (shadcn `Dialog` centers).
 const DESKTOP_DIALOG_EDGE_GAP_PX: f32 = 32.0;
 /// shadcn `SidebarTrigger` (`size-7`).
-const SIDEBAR_TRIGGER_PX: f32 = 28.0;
+const SIDEBAR_TRIGGER_PX: f32 = theme::CONTROL_SM_PX;
 const DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX: f32 = 240.0;
 const FORM_DIALOG_PREFERRED_HEIGHT_PX: f32 = 650.0;
 fn form_text_input(input: Input) -> Input {
@@ -2448,7 +2448,7 @@ impl Workspace {
                     .child(
                         svg()
                             .path("icons/panel-left.svg")
-                            .size(px(16.0))
+                            .size(px(theme::ICON_PX))
                             .text_color(theme::rambutan_400())
                             .group_hover("desktop-sidebar-toggle", |el| {
                                 el.text_color(theme::rambutan_100())

@@ -112,7 +112,7 @@ pub fn MenuItem(
         "text-rambutan-200 hover:bg-longan-800/60 hover:text-rambutan-100"
     };
     let base = format!(
-        "flex w-full flex-col items-start gap-0.5 rounded-seed px-2.5 py-1.5 text-left text-label-sm transition-colors cursor-pointer {tone} {class}"
+        "flex min-h-control w-full flex-col items-start justify-center gap-0.5 rounded-seed px-2 py-1.5 text-left text-label-sm transition-colors cursor-pointer {tone} {class}"
     );
     let base_selected = format!("{base} bg-longan-800/60 text-rambutan-100");
     let has_description = !description.is_empty();

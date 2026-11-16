@@ -294,7 +294,7 @@ pub fn Sidebar() -> impl IntoView {
                 title=label
                 aria-pressed=move || is_on.get().to_string()
                 class=move || format!(
-                    "inline-flex size-8 items-center justify-center rounded-grape transition-colors {}",
+                    "inline-flex size-control items-center justify-center rounded-grape transition-colors {}",
                     if is_on.get() {
                         "bg-longan-800/60 text-rambutan-100"
                     } else {
@@ -326,7 +326,7 @@ pub fn Sidebar() -> impl IntoView {
                 title=move || label.get()
                 aria-pressed=move || is_on.get().to_string()
                 class=move || format!(
-                    "relative inline-flex size-8 items-center justify-center rounded-grape transition-colors {}",
+                    "relative inline-flex size-control items-center justify-center rounded-grape transition-colors {}",
                     if is_on.get() {
                         "bg-longan-800/60 text-rambutan-100"
                     } else {
@@ -766,7 +766,7 @@ pub fn Sidebar() -> impl IntoView {
                     }
                 >
                     <span class="flex h-5 items-center gap-1.5">
-                        <Icon name="folder" size=14 class="shrink-0 text-rambutan-500" />
+                        <Icon name="folder" size=12 class="shrink-0 text-rambutan-500" />
                         <span class="min-w-0 flex-1 truncate text-label-sm text-rambutan-500">{move || project.get()}</span>
                         // The row's buttons cover this spot on hover, like the time.
                         {move || live.get().is_some_and(|t| t.pinned).then(|| view! {
@@ -827,7 +827,7 @@ pub fn Sidebar() -> impl IntoView {
                     type="button"
                     aria-label="Thread actions"
                     title="Thread actions"
-                    class="absolute right-8 top-2 hidden size-6 items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 group-hover/row:inline-flex group-focus-within/row:inline-flex"
+                    class="absolute right-9 top-2 hidden size-control-xs items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 group-hover/row:inline-flex group-focus-within/row:inline-flex"
                     on:click=move |ev: web_sys::MouseEvent| {
                         ev.stop_propagation();
                         ev.prevent_default();
@@ -841,19 +841,19 @@ pub fn Sidebar() -> impl IntoView {
                         menu_thread.set(Some(menu_id.clone()));
                     }
                 >
-                    <Icon name="ellipsis" size=12 />
+                    <Icon name="ellipsis" size=16 />
                 </button>
                 <button
                     type="button"
                     aria-label="Delete thread"
                     title="Delete thread"
-                    class="absolute right-2 top-2 hidden size-6 items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-lychee-400 group-hover/row:inline-flex group-focus-within/row:inline-flex"
+                    class="absolute right-2 top-2 hidden size-control-xs items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-lychee-400 group-hover/row:inline-flex group-focus-within/row:inline-flex"
                     on:click=move |ev| {
                         ev.stop_propagation();
                         delete_thread(id_delete.clone());
                     }
                 >
-                    <Icon name="x" size=12 />
+                    <Icon name="x" size=16 />
                 </button>
             </li>
         }
@@ -923,7 +923,7 @@ pub fn Sidebar() -> impl IntoView {
                     Some(signal) => view! {
                         <button
                             type="button"
-                            class="flex min-h-11 w-full items-center gap-2 py-1 text-label-sm text-rambutan-500 transition-colors hover:text-rambutan-300"
+                            class="bruhs-control flex min-h-control w-full items-center gap-2 py-1 text-label-sm text-rambutan-500 transition-colors hover:text-rambutan-300"
                             aria-expanded=move || open.get().to_string()
                             on:click=move |_| signal.update(|value| *value = !*value)
                         >
@@ -934,12 +934,12 @@ pub fn Sidebar() -> impl IntoView {
                                     "shrink-0 transition-transform duration-200 {}",
                                     if open.get() { "rotate-180" } else { "" }
                                 );
-                                view! { <Icon name="chevron-down" size=12 class=class /> }
+                                view! { <Icon name="chevron-down" size=16 class=class /> }
                             }}
                         </button>
                     }.into_any(),
                     None => view! {
-                        <div class="flex min-h-11 w-full items-center gap-2 py-1 text-label-sm text-rambutan-500">
+                        <div class="flex min-h-control w-full items-center gap-2 py-1 text-label-sm text-rambutan-500">
                             <span class="shrink-0">{move || label.get()}</span>
                             <span class="h-px flex-1 bg-longan-800/80"></span>
                         </div>
@@ -1132,7 +1132,7 @@ pub fn Sidebar() -> impl IntoView {
                     <span class="min-w-0 flex-1 truncate">{entry.message}</span>
                     <button
                         type="button"
-                        class="inline-flex min-h-10 items-center rounded-seed px-2 text-label-sm text-persimmon-400 transition-colors hover:bg-longan-700/60"
+                        class="bruhs-control inline-flex min-h-control items-center rounded-seed px-2 text-label-sm text-persimmon-400 transition-colors hover:bg-longan-700/60"
                         on:click=move |_| {
                             let Some(entry) = sidebar_undo.take() else { return };
                             match entry.restore {
@@ -1187,14 +1187,14 @@ pub fn Sidebar() -> impl IntoView {
                         class="fixed z-50 w-52 rounded-grape bg-longan-700 p-1 inset-ring inset-ring-white/15"
                         style=format!("left:{left}px;top:{top}px")
                     >
-                        <button type="button" role="menuitem" class="flex min-h-10 w-full items-center rounded-seed px-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click={
+                        <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click={
                             let id = id.clone();
                             move |_| {
                                 let id = id.clone();
                                 if pinned { mutate_thread(id, pin_off, Some("Thread unpinned")); } else { mutate_thread(id, pin_on, None); }
                             }
                         }>{if pinned { "Unpin" } else { "Pin" }}</button>
-                        <button type="button" role="menuitem" class="flex min-h-10 w-full items-center rounded-seed px-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click={
+                        <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click={
                             let id = id.clone();
                             move |_| {
                                 let id = id.clone();
@@ -1203,7 +1203,7 @@ pub fn Sidebar() -> impl IntoView {
                         }>{if settled { "Unsettle" } else { "Settle" }}</button>
                         {snoozed.then({
                             let id = id.clone();
-                            move || view! { <button type="button" role="menuitem" class="flex min-h-10 w-full items-center rounded-seed px-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| mutate_thread(id.clone(), wake_on, None)>"Wake thread"</button> }
+                            move || view! { <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| mutate_thread(id.clone(), wake_on, None)>"Wake thread"</button> }
                         })}
                         <div role="separator" class="my-1 h-px bg-white/10"></div>
                         {presets.into_iter().map({
@@ -1212,13 +1212,13 @@ pub fn Sidebar() -> impl IntoView {
                                 let id = id.clone();
                                 let until = preset.until_ms;
                                 view! {
-                                    <button type="button" role="menuitem" class="flex min-h-10 w-full items-center rounded-seed px-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| snooze_thread_until(id.clone(), until)>
+                                    <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| snooze_thread_until(id.clone(), until)>
                                         {preset.label}
                                     </button>
                                 }
                             }
                         }).collect_view()}
-                        <button type="button" role="menuitem" class="flex min-h-10 w-full items-center rounded-seed px-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| {
+                        <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| {
                             custom_when.set(String::new());
                             custom_amount.set(String::new());
                             custom_unit.set("hours".to_string());
@@ -1230,7 +1230,7 @@ pub fn Sidebar() -> impl IntoView {
                             type="button"
                             role="menuitem"
                             disabled=streaming
-                            class="flex min-h-10 w-full items-center rounded-seed px-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60 disabled:opacity-50"
+                            class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60 disabled:opacity-50"
                             on:click=move |_| {
                                 if turns.is_running_untracked(&regenerate_id) { return; }
                                 menu_thread.set(None);
@@ -1249,7 +1249,7 @@ pub fn Sidebar() -> impl IntoView {
                             }
                         >"Regenerate title"</button>
                         {show_discard.then(|| view! {
-                            <button type="button" role="menuitem" class="flex min-h-10 w-full items-center rounded-seed px-2.5 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| {
+                            <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| {
                                 menu_thread.set(None);
                                 let text = composer_draft.get_untracked();
                                 if text.is_empty() { return; }
@@ -1276,7 +1276,7 @@ pub fn Sidebar() -> impl IntoView {
                         "Date and time"
                         <input
                             type="datetime-local"
-                            class="min-h-10 rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
+                            class="min-h-control rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
                             prop:value=move || custom_when.get()
                             on:input=move |ev| custom_when.set(event_target_value(&ev))
                         />
@@ -1288,13 +1288,13 @@ pub fn Sidebar() -> impl IntoView {
                                 type="number"
                                 min="1"
                                 aria-label="Snooze amount"
-                                class="min-h-10 w-24 rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
+                                class="min-h-control w-24 rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
                                 prop:value=move || custom_amount.get()
                                 on:input=move |ev| custom_amount.set(event_target_value(&ev))
                             />
                             <select
                                 aria-label="Snooze unit"
-                                class="min-h-10 flex-1 rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
+                                class="min-h-control flex-1 rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
                                 on:change=move |ev| custom_unit.set(event_target_value(&ev))
                             >
                                 <option value="minutes" selected=move || custom_unit.get() == "minutes">"minutes"</option>
@@ -1305,7 +1305,7 @@ pub fn Sidebar() -> impl IntoView {
                     </label>
                     <button
                         type="button"
-                        class="inline-flex min-h-10 items-center justify-center rounded-grape bg-persimmon-500 px-3 text-label text-longan-950"
+                        class="bruhs-control inline-flex min-h-control items-center justify-center rounded-grape bg-persimmon-500 px-3 text-label text-longan-950"
                         on:click=move |_| {
                             let Some(id) = custom_for.get_untracked() else { return };
                             let now = js_sys::Date::now();
