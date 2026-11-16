@@ -50,42 +50,16 @@ mod test_fixture;
 mod transcript_view_tests;
 #[cfg(all(test, unix))]
 mod workflow_performance_tests;
+#[cfg(test)]
 use rollback_review::RollbackReview;
 #[cfg(all(test, unix))]
 mod tests;
 
 #[cfg(unix)]
-const MCP_SESSION_ACTIVE_NOTE: &str =
-    "Session active. Grant reads and writes separately below. Chat reads include summaries \
-    and completed messages. Drafts, voice fingerprints, and transaction notes stay private. \
-    Finance and Health also need Life consent. Sharing finance amounts and quantities needs \
-    separate consent; labels remain visible when values are hidden. Writes require review \
-    and start, and create local records. They never send messages, make payments, or change \
-    providers. Disabling disconnects all clients.";
-#[cfg(unix)]
-const MCP_OFF_NOTE: &str =
-    "Off by default. Connect only a trusted local client. Grant reads and writes separately \
-    below. Chat reads include summaries and completed messages. Drafts, voice fingerprints, \
-    and transaction notes stay private. Finance and Health also need Life consent. Sharing \
-    finance amounts and quantities needs separate consent; labels remain visible when \
-    values are hidden. Writes require review and start, and create local records. They \
-    never send messages, make payments, or change providers.";
-/// The `mcpServers` entry a client pastes to reach this session.
-#[cfg(unix)]
-fn mcp_client_config(connection_path: impl serde::Serialize) -> serde_json::Value {
-    serde_json::json!({
-        "mcpServers": {
-            "bruhs": {
-                "command": "bruhs-mcp",
-                "env": { "BRUHS_WORKSPACE_BRIDGE": connection_path }
-            }
-        }
-    })
-}
-
-#[cfg(unix)]
-const MCP_CONNECTION_FAILED_NOTE: &str =
-    "The local connection is unavailable. Access is disabled; you can retry.";
+use bruhs_models::workspace_bridge::{
+    mcp_client_config, CONNECTION_FAILED_NOTE as MCP_CONNECTION_FAILED_NOTE,
+    SESSION_ACTIVE_NOTE as MCP_SESSION_ACTIVE_NOTE, SESSION_OFF_NOTE as MCP_OFF_NOTE,
+};
 
 fn mcp_bridge_panel() -> Div {
     div()
@@ -101,14 +75,12 @@ fn mcp_bridge_panel() -> Div {
 
 #[derive(Default)]
 pub(super) struct WorkspaceBridge {
-    rollback_reviews: std::collections::HashMap<String, RollbackReview>,
+    /// This session's proposals and undo requests (shared with the web).
+    reviews: bruhs_models::workspace_bridge::BridgeReviews,
     #[cfg(unix)]
     state: ConnectionState,
     #[cfg(unix)]
     worker: Option<gpui::Task<()>>,
-    #[cfg(unix)]
-    proposals:
-        std::collections::HashMap<String, (String, bruhs_core::workspace_bridge::WorkflowProposal)>,
 }
 
 #[cfg(unix)]
@@ -126,66 +98,11 @@ enum ConnectionState {
 
 impl WorkspaceBridge {
     pub(super) fn pending_review(&self, state: &AutomationState) -> bool {
-        self.pending_review_id(state).is_some()
+        self.reviews.pending_review(state)
     }
 
     pub(super) fn pending_review_id<'a>(&'a self, state: &AutomationState) -> Option<&'a str> {
-        if let Some((id, _)) = self.rollback_reviews.iter().find(|(id, review)| {
-            **review == RollbackReview::Pending
-                && state.workflows.iter().any(|workflow| {
-                    workflow.id == **id
-                        && workflow.status != bruhs_models::WorkflowStatus::RolledBack
-                })
-        }) {
-            return Some(id.as_str());
-        }
-        self.pending_proposal_id(state)
-    }
-
-    /// A proposal waiting for its preview to be reviewed.
-    #[cfg(unix)]
-    fn pending_proposal_id<'a>(&'a self, state: &AutomationState) -> Option<&'a str> {
-        // Zero or one owner already needs at most one history pass.
-        if self.proposals.len() <= 1 {
-            return self
-                .proposals
-                .values()
-                .find(|(id, _)| {
-                    state.workflows.iter().any(|workflow| {
-                        workflow.id == *id
-                            && workflow.status == bruhs_models::WorkflowStatus::Previewed
-                    })
-                })
-                .map(|(id, _)| id.as_str());
-        }
-        // Inactive history needs one pass, not one per session proposal. Keep
-        // the existing proposal iteration priority when several previews exist.
-        let mut first: Option<(usize, &str)> = None;
-        for workflow in state
-            .workflows
-            .iter()
-            .filter(|workflow| workflow.status == bruhs_models::WorkflowStatus::Previewed)
-        {
-            for (rank, (id, _)) in self.proposals.values().enumerate() {
-                if first.is_some_and(|(best, _)| rank >= best) {
-                    break;
-                }
-                if workflow.id == *id {
-                    if rank == 0 {
-                        return Some(id);
-                    }
-                    first = Some((rank, id.as_str()));
-                    break;
-                }
-            }
-        }
-        first.map(|(_, id)| id)
-    }
-
-    /// Proposals need the local socket, which only unix builds open.
-    #[cfg(not(unix))]
-    fn pending_proposal_id<'a>(&'a self, _state: &AutomationState) -> Option<&'a str> {
-        None
+        self.reviews.pending_review_id(state)
     }
 }
 
@@ -224,8 +141,7 @@ impl Workspace {
                             let _ = this.update(cx, |this, cx| {
                                 if matches!(&this.mcp_bridge.state, ConnectionState::Connected { id: current, .. } if current == &id) {
                                     this.mcp_bridge.state = ConnectionState::Failed;
-                                    this.mcp_bridge.proposals.clear();
-                                    this.mcp_bridge.rollback_reviews.clear();
+                                    this.mcp_bridge.reviews = Default::default();
                                     cx.notify();
                                 }
                             });
@@ -319,7 +235,9 @@ impl Workspace {
                                 if let ConnectionState::Connected { session, .. } =
                                     &this.mcp_bridge.state
                                 {
-                                    let config = mcp_client_config(session.connection_path());
+                                    let config = mcp_client_config(
+                                        &session.connection_path().to_string_lossy(),
+                                    );
                                     cx.write_to_clipboard(ClipboardItem::new_string(
                                         config.to_string(),
                                     ));

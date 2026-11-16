@@ -20,7 +20,7 @@ async fn unsaved_checkpoints_never_create_an_undo_review(cx: &mut TestAppContext
             BridgeResponse::Error(_)
         ));
         workspace.update_in(cx, |w, _, _| {
-            assert!(w.mcp_bridge.rollback_reviews.is_empty());
+            assert!(w.mcp_bridge.reviews.rollback_reviews.is_empty());
             assert_eq!(w.work_items.len(), 1);
         });
     }
@@ -42,7 +42,7 @@ async fn revoked_or_edited_targets_block_requested_and_user_approved_undo(cx: &m
         BridgeResponse::Error(_)
     ));
     workspace.update_in(cx, |w, _, _| {
-        assert!(w.mcp_bridge.rollback_reviews.is_empty());
+        assert!(w.mcp_bridge.reviews.rollback_reviews.is_empty());
         w.automation_state
             .permissions
             .set(AgentDomain::Tasks, AgentAccess::Write, true);
@@ -120,7 +120,7 @@ async fn agent_cannot_pause_a_running_background_job_to_authorize_undo(cx: &mut 
             w.automation_state.jobs[0].status,
             bruhs_models::BackgroundJobStatus::Running
         );
-        assert!(w.mcp_bridge.rollback_reviews.is_empty());
+        assert!(w.mcp_bridge.reviews.rollback_reviews.is_empty());
     });
     click(&workspace, cx, "desktop-pause-workflow").await;
     workspace.update_in(cx, |w, _, _| {

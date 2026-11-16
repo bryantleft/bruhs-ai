@@ -1,49 +1,38 @@
 use super::*;
-use crate::views::chat::{DesktopToolCall, Message};
+use crate::views::chat::Message;
+use bruhs_models::workspace_bridge::{
+    ChatMessageRecord, ChatThreadSummary, ChatToolCallRecord, ChatUsageRecord,
+};
 
-use super::read_page as page;
-
-#[derive(Serialize)]
-struct ThreadSummary<'a> {
-    id: &'a str,
-    title: &'a str,
-    project_name: &'a str,
-    updated_at_ms: i64,
-    pinned: bool,
-    settled: bool,
-    streaming: bool,
-}
-
-#[derive(Serialize)]
-struct MessageRecord<'a> {
-    role: &'a str,
-    content: &'a str,
-    model: &'a Option<String>,
-    thinking: &'a str,
-    usage: &'a Option<bruhs_core::UsageInfo>,
-    duration_ms: Option<u64>,
-    started_at_ms: Option<i64>,
-    completed_at_ms: Option<i64>,
-    tool_calls: &'a [DesktopToolCall],
-    stopped: bool,
-    error: Option<&'a str>,
-}
-
-impl<'a> From<&'a Message> for MessageRecord<'a> {
-    fn from(message: &'a Message) -> Self {
-        Self {
-            role: message.role.as_str(),
-            content: &message.content,
-            model: &message.model,
-            thinking: &message.thinking,
-            usage: &message.usage,
-            duration_ms: message.duration_ms,
-            started_at_ms: message.started_at_ms,
-            completed_at_ms: message.completed_at_ms,
-            tool_calls: &message.tool_calls,
-            stopped: message.state.is_stopped(),
-            error: message.state.error(),
-        }
+fn message_record(message: &Message) -> ChatMessageRecord<'_> {
+    ChatMessageRecord {
+        role: message.role.as_str(),
+        content: message.content.as_str().into(),
+        model: message.model.as_deref(),
+        thinking: message.thinking.as_str().into(),
+        usage: message.usage.as_ref().map(|usage| ChatUsageRecord {
+            input_tokens: usage.input_tokens,
+            output_tokens: usage.output_tokens,
+            cache_read_input_tokens: usage.cache_read_input_tokens,
+            cache_creation_input_tokens: usage.cache_creation_input_tokens,
+            context_tokens: usage.context_tokens,
+        }),
+        duration_ms: message.duration_ms,
+        started_at_ms: message.started_at_ms,
+        completed_at_ms: message.completed_at_ms,
+        tool_calls: message
+            .tool_calls
+            .iter()
+            .map(|call| ChatToolCallRecord {
+                id: &call.id,
+                tool: &call.tool,
+                input: &call.input,
+                output: call.output.as_deref(),
+                is_error: call.is_error,
+            })
+            .collect(),
+        stopped: message.state.is_stopped(),
+        error: message.state.error(),
     }
 }
 
@@ -54,27 +43,12 @@ impl Workspace {
         offset: usize,
         cx: &App,
     ) -> Result<Value, String> {
-        if query.len() > 512 {
-            return Err("Query is too large.".into());
-        }
-        let query = LowercaseQuery::new(query);
-        let mut matcher = query.matcher();
-        page::read_matching_page(
+        bridge::read_chat_threads(
             self.threads.iter(),
-            query.is_empty(),
             |thread| {
+                let thread = *thread;
                 let chat = thread.chat.read(cx);
-                [
-                    thread.id.as_str(),
-                    chat.thread_title.as_str(),
-                    thread.project_name.as_str(),
-                ]
-                .iter()
-                .any(|field| matcher.matches(field))
-            },
-            |thread| {
-                let chat = thread.chat.read(cx);
-                ThreadSummary {
+                ChatThreadSummary {
                     id: &thread.id,
                     title: &chat.thread_title,
                     project_name: &thread.project_name,
@@ -84,6 +58,7 @@ impl Workspace {
                     streaming: chat.is_streaming,
                 }
             },
+            query,
             offset,
         )
     }
@@ -95,30 +70,21 @@ impl Workspace {
         cx: &App,
     ) -> Result<Value, String> {
         // Check before even resolving the ID, so revocation cannot reveal existence.
-        if !self
-            .automation_state
-            .permissions
-            .allows(AgentDomain::Chat, AgentAccess::Read)
-        {
-            return Err("Read access is not granted for this domain.".into());
-        }
-        if thread_id.trim().is_empty() || thread_id.len() > 128 || offset > 100_000 {
-            return Err("Invalid thread ID or offset.".into());
-        }
+        bridge::authorize_chat_messages(&self.automation_state.permissions, thread_id, offset)?;
         let thread = self
             .threads
             .iter()
             .find(|thread| thread.id == thread_id)
-            .ok_or("Chat thread was not found in the current workspace.")?;
+            .ok_or(bridge::CHAT_THREAD_NOT_FOUND)?;
         let chat = thread.chat.read(cx);
         // Borrow only completed history. Never snapshot input, stashes or live provider buffers.
-        let messages = chat
-            .messages
-            .iter()
-            .filter(|message| !message.state.is_streaming())
-            .map(MessageRecord::from);
-        let mut result = page::read_page(messages, offset)?;
-        result["thread_id"] = thread_id.into();
-        Ok(result)
+        bridge::read_chat_messages(
+            chat.messages
+                .iter()
+                .filter(|message| !message.state.is_streaming()),
+            message_record,
+            thread_id,
+            offset,
+        )
     }
 }

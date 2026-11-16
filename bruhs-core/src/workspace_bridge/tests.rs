@@ -1,4 +1,5 @@
 use super::*;
+use bruhs_models::AgentDomain;
 
 #[test]
 fn life_read_wire_defaults_and_strict_fields_preserve_app_owned_privacy() {

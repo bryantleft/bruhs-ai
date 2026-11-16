@@ -1,22 +1,15 @@
 use super::*;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
-#[serde(rename_all = "snake_case")]
-pub(super) enum RollbackReview {
-    Pending,
-    Declined,
-    Approved,
-}
+#[cfg(test)]
+pub(in crate::views::workspace) use bruhs_models::workspace_bridge::RollbackReview;
 
 impl WorkspaceBridge {
     pub(in crate::views::workspace) fn finish_rollback_review(&mut self, id: &str) {
-        if let Some(review) = self.rollback_reviews.get_mut(id) {
-            *review = RollbackReview::Approved;
-        }
+        self.reviews.finish_rollback_review(id);
     }
 
     pub(in crate::views::workspace) fn rollback_pending(&self, id: &str) -> bool {
-        self.rollback_reviews.get(id) == Some(&RollbackReview::Pending)
+        self.reviews.rollback_pending(id)
     }
 }
 
@@ -34,7 +27,7 @@ impl Workspace {
             return div().into_any_element();
         }
         let id = id.to_owned();
-        let message = "An MCP client requests undo. Review this workflow's completed steps. Undo removes unchanged created records and restores prior relationship context for reminders; Keep changes declines the request.";
+        let message = bruhs_models::workspace_bridge::ROLLBACK_REVIEW_NOTE;
         div()
             .id("mcp-rollback-review")
             .role(Role::Group)
@@ -56,10 +49,7 @@ impl Workspace {
                 .mt_2()
                 .child("Keep changes")
                 .on_click(cx.listener(move |this, _, _, cx| {
-                    if this.mcp_bridge.rollback_pending(&id) {
-                        this.mcp_bridge
-                            .rollback_reviews
-                            .insert(id.clone(), RollbackReview::Declined);
+                    if this.mcp_bridge.reviews.decline_rollback(&id) {
                         cx.notify();
                     }
                 })),
