@@ -768,8 +768,9 @@ pub fn Sidebar() -> impl IntoView {
                     <span class="flex h-5 items-center gap-1.5">
                         <Icon name="folder" size=14 class="shrink-0 text-rambutan-500" />
                         <span class="min-w-0 flex-1 truncate text-label-sm text-rambutan-500">{move || project.get()}</span>
+                        // The row's buttons cover this spot on hover, like the time.
                         {move || live.get().is_some_and(|t| t.pinned).then(|| view! {
-                            <Icon name="pin" size=12 class="shrink-0 text-rambutan-500" />
+                            <Icon name="pin" size=12 class="shrink-0 text-rambutan-500 group-hover/row:invisible group-focus-within/row:invisible" />
                         })}
                         <span class="ml-auto flex h-5 shrink-0 items-center justify-end text-label-sm tabular-nums text-rambutan-500 group-hover/row:invisible group-focus-within/row:invisible">
                             {move || match status.get() {
