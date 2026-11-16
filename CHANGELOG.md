@@ -93,6 +93,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   with its title and a close button, a column of access rows checked at the
   right, a Build and Plan switch, a three-column effort grid, and the web's
   wording. Saved prompts opens in the same kind of panel.
+- The sidebar footer's view buttons sit in two rows, so each keeps its full
+  32px instead of shrinking to fit one row. The desktop footer gains Agent
+  workflows, with its unread count, like the web's.
 - The thread menu offers the same snooze times in both apps: In 1 hour,
   Later today, Tomorrow, Next week and Custom…. The desktop app gains
   Custom…, which snoozes a thread until a date and time you pick or for a
