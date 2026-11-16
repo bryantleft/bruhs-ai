@@ -94,9 +94,9 @@ pub(super) fn ComposerOptions(
         <div class="relative inline-flex shrink-0">
             <button node_ref=anchor type="button" data-composer-options-trigger=""
                 class=move || if access.get() == PermissionMode::BypassPermissions {
-                    "composer-action bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-grape text-lychee-300 hover:bg-lychee-500/10"
+                    "composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-grape text-lychee-300 hover:bg-lychee-500/10"
                 } else {
-                    "composer-action bruhs-control inline-flex size-8 shrink-0 items-center justify-center rounded-grape text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
+                    "composer-action bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-grape text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-100"
                 }
                 aria-label="Composer options" aria-haspopup="dialog" aria-expanded=move || open.get().to_string()
                 title=move || format!("Composer options. Access: {}. Mode: {}. Effort: {}. Saved prompts: {}.",
@@ -107,7 +107,7 @@ pub(super) fn ComposerOptions(
                     preferred.set("[data-option-access]");
                     open.update(|state| *state = !*state);
                 }>
-                <Icon name="settings" size=14 />
+                <Icon name="settings" size=16 />
             </button>
             <ComposerPopup open=open anchor=anchor label="Composer options" preferred=Signal::derive(move || preferred.get())>
                 <div class="flex flex-col gap-4">

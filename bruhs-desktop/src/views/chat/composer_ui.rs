@@ -40,11 +40,11 @@ pub const CHAT_HEADER_CRUMB_MAX_WIDTH_PX: f32 = 160.0;
 pub const CHAT_HEADER_ROLE_MAX_WIDTH_PX: f32 = 128.0;
 pub const CHAT_HEADER_ROLE_TEXT_SIZE_PX: f32 = 12.0;
 const CHAT_HEADER_ROLE_BG_OPACITY: f32 = 0.60;
-pub const CHAT_HEADER_TOGGLE_HEIGHT_PX: f32 = 28.0;
+pub const CHAT_HEADER_TOGGLE_HEIGHT_PX: f32 = theme::CONTROL_SM_PX;
 pub const CHAT_HEADER_TOGGLE_X_PADDING_PX: f32 = 8.0;
 pub const CHAT_HEADER_TOGGLE_GAP_PX: f32 = 4.0;
 pub const CHAT_HEADER_TOGGLE_TEXT_SIZE_PX: f32 = 12.0;
-pub const CHAT_HEADER_ICON_SIZE_PX: f32 = 14.0;
+pub const CHAT_HEADER_ICON_SIZE_PX: f32 = theme::ICON_PX;
 pub const CHAT_HEADER_TOGGLE_ACTIVE_BG_OPACITY: f32 = 0.60;
 pub const CHAT_HEADER_TOGGLE_HOVER_BG_OPACITY: f32 = 0.40;
 
@@ -69,20 +69,21 @@ pub const CHAT_HINTS_TEXT_SIZE_PX: f32 = 12.0;
 pub const CHAT_KBD_HEIGHT_PX: f32 = 20.0;
 pub const CHAT_KBD_MIN_WIDTH_PX: f32 = 20.0;
 
-// Chips (web `CHIP`: h-7 px-2.5 gap-1.5 rounded-grape text-label-sm).
-pub const CHIP_HEIGHT_PX: f32 = 32.0;
+// Chips (web composer actions: `h-control rounded-grape text-label-sm`).
+pub const CHIP_HEIGHT_PX: f32 = theme::CONTROL_PX;
 pub const CHIP_X_PADDING_PX: f32 = 10.0;
 pub const CHIP_GAP_PX: f32 = 6.0;
 pub const CHIP_RADIUS_PX: f32 = 8.0;
 pub const CHIP_TEXT_SIZE_PX: f32 = 12.0;
-pub const CHIP_ICON_SIZE_PX: f32 = 14.0;
+/// Icons in the composer's square buttons, such as Attach and Options.
+pub const CHIP_ICON_SIZE_PX: f32 = theme::ICON_PX;
 pub const CHIP_CHEVRON_SIZE_PX: f32 = 12.0;
 pub const CHIP_HOVER_BG_OPACITY: f32 = 0.50;
 pub const CHIP_MODEL_MAX_WIDTH_PX: f32 = 160.0;
 
-// Send / stop (web `size-8 rounded-orb`).
-pub const SEND_BUTTON_SIZE_PX: f32 = 32.0;
-pub const SEND_BUTTON_ICON_SIZE_PX: f32 = 14.0;
+// Send / stop (web `size-control rounded-orb`).
+pub const SEND_BUTTON_SIZE_PX: f32 = theme::CONTROL_PX;
+pub const SEND_BUTTON_ICON_SIZE_PX: f32 = theme::ICON_PX;
 pub const SEND_BUTTON_DISABLED_OPACITY: f32 = 0.30;
 pub const STOP_BUTTON_SQUARE_PX: f32 = 12.0;
 

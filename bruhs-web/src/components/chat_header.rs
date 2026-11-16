@@ -97,9 +97,9 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
                 <ol class="m-0 flex min-w-0 list-none items-center gap-2 p-0 text-label">
                     <li class="flex shrink-0 items-center">
                         <button type="button" title=move || project.get().unwrap_or_else(|| "Choose project folder".into()) aria-label="Choose project folder"
-                            class="inline-flex size-11 max-w-40 items-center justify-center gap-1.5 rounded-seed text-rambutan-400 transition-colors hover:text-rambutan-100 sm:h-8 sm:w-auto sm:justify-start"
+                            class="bruhs-control inline-flex size-control max-w-40 items-center justify-center gap-1.5 rounded-seed text-rambutan-400 transition-colors hover:text-rambutan-100 sm:h-control sm:w-auto sm:justify-start"
                             on:click=move |_| choose_project()>
-                            <Icon name="folder" size=14 class="shrink-0" />
+                            <Icon name="folder" size=16 class="shrink-0" />
                             <span class="hidden truncate sm:inline">{move || project.get().unwrap_or_else(|| "Add project".into())}</span>
                         </button>
                     </li>
@@ -131,10 +131,10 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
                                     type="button"
                                     aria-label="Rename thread"
                                     title="Rename thread"
-                                    class="ml-1 inline-flex size-6 shrink-0 items-center justify-center rounded-seed text-rambutan-500 opacity-0 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 group-hover/header:opacity-100 focus-visible:opacity-100"
+                                    class="ml-1 inline-flex size-control-xs shrink-0 items-center justify-center rounded-seed text-rambutan-500 opacity-0 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 group-hover/header:opacity-100 focus-visible:opacity-100"
                                     on:click=move |_| start_rename()
                                 >
-                                    <Icon name="pen-line" size=12 />
+                                    <Icon name="pen-line" size=16 />
                                 </button>
                             }
                         >
@@ -167,7 +167,7 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
                     title="Toggle right panel (⌘⌥B)"
                     aria-pressed=move || panel.get().open.to_string()
                     class=move || {
-                        let base = "inline-flex size-7 items-center justify-center rounded-grape transition-colors";
+                        let base = "inline-flex size-control-sm items-center justify-center rounded-grape transition-colors";
                         if panel.get().open {
                             format!("{base} bg-longan-800/60 text-rambutan-100")
                         } else {
@@ -176,7 +176,7 @@ pub fn ChatHeader(thread_id: String) -> impl IntoView {
                     }
                     on:click=move |_| panel.update(|p| p.toggle())
                 >
-                    <Icon name="panel-right" size=14 />
+                    <Icon name="panel-right" size=16 />
                 </button>
             </div>
         </header>
@@ -204,7 +204,7 @@ fn PanelToggle(
             aria-label=title
             aria-pressed=move || active.get().to_string()
             class=move || {
-                let base = "inline-flex h-7 items-center gap-1 rounded-grape px-2 text-label-sm transition-colors";
+                let base = "inline-flex h-control-sm items-center gap-1 rounded-grape px-2 text-label-sm transition-colors";
                 if active.get() {
                     format!("{base} bg-longan-800/60 text-rambutan-100")
                 } else {
@@ -213,7 +213,7 @@ fn PanelToggle(
             }
             on:click=move |_| panel.update(|p| p.toggle_surface(surface))
         >
-            <Icon name=icon size=14 />
+            <Icon name=icon size=16 />
             <span>{label}</span>
             {move || (badge.get() > 0).then(|| view! {
                 <span class="rounded-seed bg-pandan-400/20 px-1 text-label-sm tabular-nums text-pandan-300">{badge.get()}</span>
