@@ -1157,8 +1157,13 @@ impl ChatView {
     }
 
     #[cfg(test)]
-    pub(crate) fn run_slash_command_for_test(&mut self, command: &str, cx: &mut Context<'_, Self>) {
-        self.run_slash_command(command, cx);
+    pub(crate) fn run_slash_command_for_test(
+        &mut self,
+        command: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.run_slash_command(command, window, cx);
     }
 
     /// Fold and thinking open state is keyed by message index; drop it
