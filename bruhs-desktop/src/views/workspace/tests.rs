@@ -2494,9 +2494,24 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     assert_rendered_bounds(cx, "desktop-workspace-navigation");
     assert_rendered_bounds(cx, "desktop-workspace-threads");
     assert_no_rendered_bounds(cx, "desktop-workspace-mode-code");
-    assert_rendered_bounds(cx, "desktop-sidebar-filter");
-    assert_rendered_bounds(cx, "desktop-sidebar-new-project");
     assert_rendered_bounds(cx, "desktop-sidebar-footer");
+    // One control row: search, then choose project folder and new thread.
+    // There is no project filter; search matches project names instead.
+    assert_no_rendered_bounds(cx, "desktop-sidebar-filter");
+    let search = rendered_bounds(cx, "desktop-sidebar-search");
+    let new_project = rendered_bounds(cx, "desktop-sidebar-new-project");
+    let new_thread = rendered_bounds(cx, "desktop-sidebar-new-thread");
+    assert_eq!(
+        search.center().y,
+        new_project.center().y,
+        "{search:?} {new_project:?}"
+    );
+    assert_eq!(
+        search.center().y,
+        new_thread.center().y,
+        "{search:?} {new_thread:?}"
+    );
+    assert!(search.right() <= new_project.left() && new_project.right() <= new_thread.left());
     assert_rendered_bounds(cx, thread_row_debug_selector(&general_id));
     assert_rendered_bounds(cx, thread_row_debug_selector(&code_id));
 
@@ -2552,23 +2567,24 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
             .all(|thread| thread.id != new_general_id));
     });
 
-    // Project filters narrow the unified list.
-    assert_rendered_bounds(cx, "desktop-sidebar-filter");
-    click_debug_selector(cx, "desktop-sidebar-filter");
-    cx.run_until_parked();
-    assert_rendered_bounds(cx, "desktop-sidebar-filter-all");
-    assert_no_rendered_bounds(cx, "desktop-sidebar-filter-chat");
-    click_debug_selector(cx, "desktop-sidebar-filter-all");
-    workspace.update_in(cx, |workspace, _window, cx| {
-        workspace.sidebar_filter = super::sidebar_ui::SidebarFilter::Project("Alpha".to_string());
-        cx.notify();
-    });
-    cx.run_until_parked();
-    assert_rendered_bounds(cx, thread_row_debug_selector(&code_id));
-    assert_no_rendered_bounds(cx, thread_row_debug_selector(&general_id));
-    workspace.update_in(cx, |workspace, _window, cx| {
-        workspace.sidebar_filter = super::sidebar_ui::SidebarFilter::All;
-        cx.notify();
+    // Search narrows the list by project name as well as by title.
+    for (query, shown, hidden) in [
+        ("alpha", &code_id, &general_id),
+        ("general", &general_id, &code_id),
+    ] {
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace
+                .sidebar_search
+                .update(cx, |input, cx| input.set_value(query, window, cx));
+        });
+        cx.run_until_parked();
+        assert_rendered_bounds(cx, thread_row_debug_selector(shown));
+        assert_no_rendered_bounds(cx, thread_row_debug_selector(hidden));
+    }
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .sidebar_search
+            .update(cx, |input, cx| input.set_value("", window, cx));
     });
     cx.run_until_parked();
 

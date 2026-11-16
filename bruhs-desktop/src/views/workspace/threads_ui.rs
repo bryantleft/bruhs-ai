@@ -534,7 +534,6 @@ impl Workspace {
         self.active_thread_id = Some(thread.id.clone());
         self.threads.push(thread);
         self.active_view = AppView::Chat;
-        self.sidebar_filter = sidebar_ui::SidebarFilter::All;
         self.close_transient_surfaces();
         self.persist_and_notify(cx);
     }
@@ -720,9 +719,6 @@ impl Workspace {
             self.active_thread_id = Some(id.to_string());
             self.active_view = AppView::Chat;
             self.compact_sidebar_open = false;
-            if !self.sidebar_filter.matches(&thread.project_name) {
-                self.sidebar_filter = sidebar_ui::SidebarFilter::All;
-            }
             self.unread_thread_ids.remove(id);
             thread.chat.update(cx, |chat, cx| {
                 chat.tasks_panel_visible = self.tasks_panel_visible;
@@ -1086,9 +1082,9 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    /// Shelves for the current project filter and search. A search is one list.
+    /// Shelves for the current search (titles and project names). A search
+    /// is one list.
     pub(super) fn sidebar_shelves(&self, cx: &App) -> SidebarShelves<'_> {
-        let filter = self.sidebar_filter.clone();
         let query = self.sidebar_query(cx);
         let searching = !query.trim().is_empty();
         self.sidebar_buckets(
@@ -1096,7 +1092,6 @@ impl Workspace {
                 sidebar_ui::thread_matches(
                     &thread.project_name,
                     &thread.chat.read(cx).thread_title,
-                    &filter,
                     &query,
                 )
             },

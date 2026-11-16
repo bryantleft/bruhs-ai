@@ -219,7 +219,6 @@ impl Workspace {
         self.active_thread_id = Some(thread.id.clone());
         self.threads.push(thread);
         self.active_view = AppView::Chat;
-        self.sidebar_filter = sidebar_ui::SidebarFilter::All;
         self.close_transient_surfaces();
         self.active_project = Some(project.clone());
         push_recent_project(&mut self.recent_projects, project);
@@ -278,7 +277,6 @@ impl Workspace {
             self.active_thread_id = Some(thread.id.clone());
             self.active_view = AppView::Chat;
             self.stamp_chat_run_prefs(&chat, cx);
-            self.sidebar_filter = sidebar_ui::SidebarFilter::All;
             self.close_transient_surfaces();
             if self.diff_panel_visible {
                 self.sync_diff_panel_project(cx);
