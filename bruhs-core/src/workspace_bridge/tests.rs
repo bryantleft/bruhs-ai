@@ -80,7 +80,10 @@ async fn authenticated_request_reaches_only_the_app_receiver() {
 async fn invalid_token_never_reaches_app() {
     let (session, mut receiver) = BridgeSession::start().unwrap();
     let mut client = BridgeClient::from_file(session.connection_path()).unwrap();
-    client.connection.token = "0".repeat(64);
+    let Transport::Socket(connection) = &mut client.transport else {
+        panic!("a native session is a socket connection");
+    };
+    connection.token = "0".repeat(64);
     assert!(matches!(
         client
             .call(BridgeRequest::Read {
@@ -129,7 +132,9 @@ async fn disabling_session_revokes_existing_client_and_in_flight_request() {
 async fn oversized_frame_is_rejected_before_dispatch() {
     use tokio::io::AsyncWriteExt;
     let (session, mut receiver) = BridgeSession::start().unwrap();
-    let connection = wire::read_connection(session.connection_path()).unwrap();
+    let connection: Connection =
+        serde_json::from_slice(&wire::read_private_file(session.connection_path()).unwrap())
+            .unwrap();
     let mut stream = UnixStream::connect(connection.socket).await.unwrap();
     stream
         .write_u32(u32::try_from(MAX_REQUEST_BYTES + 1).unwrap())

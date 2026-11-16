@@ -31,7 +31,7 @@ fn assert_dispatched(name: &str, reply: &Value) {
     assert!(!text.contains("Unknown tool"), "{name}: {text}");
     assert!(!text.contains("not connected"), "{name}: {text}");
     assert!(
-        !text.contains("requires the native workspace"),
+        !text.contains("requires a workspace connection"),
         "{name}: {text}"
     );
 }

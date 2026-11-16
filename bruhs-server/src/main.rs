@@ -6,6 +6,8 @@ mod reactive_events;
 mod routes;
 mod service;
 mod static_assets;
+#[cfg(unix)]
+mod workspace_relay;
 
 #[cfg(test)]
 mod http_performance_tests;
@@ -330,8 +332,11 @@ fn router_with_capture_daemon(
         axum::http::HeaderName::from_static("x-bruhs-mail-export-size"),
     ]);
     let spa = static_assets::service(&state.config.spa_dir);
+    #[cfg(unix)]
+    let relay =
+        workspace_relay::WorkspaceRelay::new(format!("http://127.0.0.1:{}", state.config.port));
 
-    Router::new()
+    let router = Router::new()
         .merge(routes::mail::router())
         .route(
             "/api/agent-extensions/history/preview",
@@ -813,7 +818,28 @@ fn router_with_capture_daemon(
         )
         .layer(axum::extract::Extension(std::sync::Arc::new(
             capture_daemon,
-        )))
+        )));
+    // The MCP workspace relay to a web tab (`workspace_relay`). The live
+    // events stream above reaches it through the same extension.
+    #[cfg(unix)]
+    let router = router
+        .route(
+            workspace_relay::SESSION_PATH,
+            post(workspace_relay::enable_session).delete(workspace_relay::disable_session),
+        )
+        .route(
+            workspace_relay::REPLY_PATH,
+            post(workspace_relay::post_reply)
+                .layer(DefaultBodyLimit::max(workspace_relay::MAX_REPLY_BODY_BYTES)),
+        )
+        .route(
+            workspace_relay::CALL_PATH,
+            post(workspace_relay::post_call).layer(DefaultBodyLimit::max(
+                bruhs_models::workspace_bridge::MAX_REQUEST_BYTES,
+            )),
+        )
+        .layer(axum::Extension(relay));
+    router
         .fallback_service(spa)
         .layer(DefaultBodyLimit::max(MAX_BODY_BYTES))
         .layer(cors)

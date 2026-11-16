@@ -1,4 +1,5 @@
-//! Translates tool calls into requests for the running native app.
+//! Translates tool calls into requests for the running workspace: the native
+//! app or the web tab that enabled the session (the connection file says which).
 use crate::args::{self, ArgumentError, ReadPage, StrictReadPage, ToolId, WriteRequest};
 use crate::protocol::ToolResult;
 use crate::tools::Tool;

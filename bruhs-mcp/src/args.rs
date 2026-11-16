@@ -8,11 +8,12 @@ use serde::Deserialize;
 use serde_json::Value;
 
 /// Longest identifier a tool accepts, as the published schemas advertise.
-pub const MAX_ID_BYTES: usize = 128;
+/// The bounds are the ones both apps enforce (`bruhs_models::workspace_bridge`).
+pub const MAX_ID_BYTES: usize = bruhs_models::workspace_bridge::MAX_ID_BYTES;
 /// Longest `query` a read tool accepts, in UTF-8 bytes.
-pub const MAX_QUERY_BYTES: usize = 512;
+pub const MAX_QUERY_BYTES: usize = bruhs_models::workspace_bridge::MAX_QUERY_BYTES;
 /// Largest `offset` a read tool accepts.
-pub const MAX_OFFSET: usize = 100_000;
+pub const MAX_OFFSET: usize = bruhs_models::workspace_bridge::MAX_OFFSET;
 
 /// Why a tool call's arguments are rejected. Reported to the caller as a tool
 /// result with `isError: true` (see [`crate::protocol`]).

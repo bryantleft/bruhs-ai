@@ -2,7 +2,8 @@
 //! modes, so a tool is never advertised in a mode that cannot dispatch it.
 //!
 //! The standalone mode serves this process's own in-memory state; the bridge
-//! mode forwards to the running native app (see `workspace_bridge`). Tools
+//! mode forwards to the running workspace, the native app or a web tab (see
+//! `workspace_bridge`). Tools
 //! that only the app can answer are not listed, and are unknown, in
 //! standalone mode, and the other way around.
 use crate::args::{self, ReadPage, ToolId, WriteRequest};
@@ -27,7 +28,8 @@ mod workflow_schema;
 pub enum Mode {
     /// This process's own in-memory state (no `BRUHS_WORKSPACE_BRIDGE`).
     Standalone,
-    /// The running native app, over its private socket.
+    /// The running workspace: the native app over its private socket, or a
+    /// web tab through bruhs-server's relay.
     Bridge,
 }
 
@@ -130,7 +132,7 @@ fn build_registry() -> Vec<ToolSpec> {
         )),
         spec(Tool::ReadMeeting, Bridge, info(
             "bruhs_read_meeting",
-            "Read one loaded native meeting by exact ID from bruhs_read_meetings. Requires current Meetings Read independently of Write. summary returns metadata, speakers and optional generated summary (offset 0); transcript pages up to 50 cached segments within 512 KiB, including explicitly marked partial segments. Follow next_offset. Local audio paths are never returned. Live workspace cache, not a frozen export or durable receipt; missing transcript cache returns an error, not an empty transcript. No provider request or mutation. Open the meeting in the app to load uncached content.",
+            "Read one loaded meeting by exact ID from bruhs_read_meetings. Requires current Meetings Read independently of Write. summary returns metadata, speakers and optional generated summary (offset 0); transcript pages up to 50 cached segments within 512 KiB, including explicitly marked partial segments. Follow next_offset. Local audio paths are never returned. Live workspace cache, not a frozen export or durable receipt; missing transcript cache returns an error, not an empty transcript. No provider request or mutation. Open the meeting in the app to load uncached content.",
             json!({"type":"object","additionalProperties":false,"required":["meeting_id"],"properties":{
                 "meeting_id":{"type":"string","minLength":1,"maxLength":128},
                 "section":{"type":"string","enum":["summary","transcript"],"default":"summary"},
@@ -139,7 +141,7 @@ fn build_registry() -> Vec<ToolSpec> {
         )),
         spec(Tool::ReadPerson, Bridge, info(
             "bruhs_read_person",
-            "Read native People context by exact ID from bruhs_read_people. Requires current People Read independently of Write. section=profile returns identity, aliases and relationship metadata/notes (offset 0 only); observations and relationship_items return paginated full records, at most 50 within 512 KiB. Observations of a person whose tracked status is false are withheld: the page is empty with observations_withheld true. Follow next_offset, which can advance by less than 50. Voice fingerprints are never exposed. Live local state, not a frozen export or save receipt. No provider request or mutation. Oversized individual records fail explicitly.",
+            "Read People context by exact ID from bruhs_read_people. Requires current People Read independently of Write. section=profile returns identity, aliases and relationship metadata/notes (offset 0 only); observations and relationship_items return paginated full records, at most 50 within 512 KiB. Observations of a person whose tracked status is false are withheld: the page is empty with observations_withheld true. Follow next_offset, which can advance by less than 50. Voice fingerprints are never exposed. Live local state, not a frozen export or save receipt. No provider request or mutation. Oversized individual records fail explicitly.",
             json!({"type":"object","additionalProperties":false,"required":["person_id"],"properties":{
                 "person_id":{"type":"string","minLength":1,"maxLength":128},
                 "section":{"type":"string","enum":["profile","observations","relationship_items"],"default":"profile"},
@@ -148,7 +150,7 @@ fn build_registry() -> Vec<ToolSpec> {
         )),
         spec(Tool::ReadChatMessages, Bridge, info(
             "bruhs_read_chat_messages",
-            "Read a page of completed local messages from one native workspace thread. Requires current Chat Read, independently of Write. Use IDs from bruhs_read_chat. Excludes streaming messages, unsent input and stashed drafts. Returns at most 50 records with next_offset; pages are live, not frozen snapshots or save receipts. No provider request or mutation. Oversized individual records return an explicit error.",
+            "Read a page of completed local messages from one workspace thread. Requires current Chat Read, independently of Write. Use IDs from bruhs_read_chat. Excludes streaming messages, unsent input and stashed drafts. Returns at most 50 records with next_offset; pages are live, not frozen snapshots or save receipts. No provider request or mutation. Oversized individual records return an explicit error.",
             json!({"type":"object","additionalProperties":false,"required":["thread_id"],"properties":{
                 "thread_id":{"type":"string","minLength":1,"maxLength":128},
                 "offset":{"type":"integer","minimum":0,"maximum":100000,"default":0}
@@ -163,7 +165,7 @@ fn build_registry() -> Vec<ToolSpec> {
         )),
         spec(Tool::RequestWorkflowRollback, Bridge, info(
             "bruhs_request_workflow_rollback",
-            "Preview rollback eligibility for a workflow proposed in this native connection session. With dry_run=false, request user review in the app; never delete records or grant approval. Current Write grants, a saved checkpoint, and unchanged created records are required. The user must pause any running background job first. Repeats do not override a declined request. Use bruhs_workflow_status for durable rollback progress.",
+            "Preview rollback eligibility for a workflow proposed in this connection session. With dry_run=false, request user review in the app; never delete records or grant approval. Current Write grants, a saved checkpoint, and unchanged created records are required. The user must pause any running background job first. Repeats do not override a declined request. Use bruhs_workflow_status for durable rollback progress.",
             json!({"type":"object","additionalProperties":false,"required":["workflow_id"],"properties":{
                 "workflow_id":{"type":"string","minLength":1,"maxLength":128},
                 "dry_run":{"type":"boolean","default":true}
@@ -235,11 +237,11 @@ fn build_registry() -> Vec<ToolSpec> {
             }),
         };
         let description = if definition.domain == AgentDomain::Chat && definition.access == AgentAccess::Read {
-            "Read paginated native Chat thread summaries, not message bodies. Requires current Chat Read. query filters ID, title and project name; offset pages matching threads. Use bruhs_read_chat_messages with a returned thread ID for completed history. Live workspace state, not a save receipt; no mutation or provider request.".into()
+            "Read paginated Chat thread summaries, not message bodies. Requires current Chat Read. query filters ID, title and project name; offset pages matching threads. Use bruhs_read_chat_messages with a returned thread ID for completed history. Live workspace state, not a save receipt; no mutation or provider request.".into()
         } else if definition.domain == AgentDomain::Meetings && definition.access == AgentAccess::Read {
-            "Read paginated native meeting identity summaries from the current workspace cache with Meetings Read. query filters ID/title only, never transcript text, summaries or local audio paths. Use bruhs_read_meeting with a returned ID for loaded summary/transcript context. At most 50 records within 512 KiB; follow next_offset. Not a durable receipt. No provider request or mutation.".into()
+            "Read paginated meeting identity summaries from the current workspace cache with Meetings Read. query filters ID/title only, never transcript text, summaries or local audio paths. Use bruhs_read_meeting with a returned ID for loaded summary/transcript context. At most 50 records within 512 KiB; follow next_offset. Not a durable receipt. No provider request or mutation.".into()
         } else if definition.domain == AgentDomain::People && definition.access == AgentAccess::Read {
-            "Read paginated native People identity summaries by current People Read grant. query filters ID, display name and aliases. Summaries include tracked status, timestamps and alias/observation counts (the observation count is null with observations_withheld true for untracked people), not histories, relationship notes or voice fingerprints. Use bruhs_read_person with an exact returned ID for context. At most 50 records within 512 KiB; follow next_offset. Live local state, no mutation or provider request.".into()
+            "Read paginated People identity summaries by current People Read grant. query filters ID, display name and aliases. Summaries include tracked status, timestamps and alias/observation counts (the observation count is null with observations_withheld true for untracked people), not histories, relationship notes or voice fingerprints. Use bruhs_read_person with an exact returned ID for context. At most 50 records within 512 KiB; follow next_offset. Live local state, no mutation or provider request.".into()
         } else if definition.access == AgentAccess::Read && matches!(definition.domain, AgentDomain::Finance | AgentDomain::Health) {
             life_schema::read_description(definition.domain).into()
         } else {
@@ -306,7 +308,7 @@ pub async fn call_standalone(
         | Tool::ProposeWorkflow
         | Tool::WorkflowStatus
         | Tool::RequestWorkflowRollback => {
-            ToolResult::err("This tool requires the native workspace connection.")
+            ToolResult::err("This tool requires a workspace connection (BRUHS_WORKSPACE_BRIDGE).")
         }
     }
 }
