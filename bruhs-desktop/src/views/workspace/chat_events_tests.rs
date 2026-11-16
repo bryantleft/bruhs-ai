@@ -73,7 +73,9 @@ fn a_slash_command_that_changes_messages_saves(cx: &mut TestAppContext) {
     let chat = active_chat(&workspace, cx);
     let before = persist_requests(&workspace, cx);
 
-    chat.update(cx, |chat, cx| chat.run_slash_command_for_test("/help", cx));
+    chat.update_in(cx, |chat, window, cx| {
+        chat.run_slash_command_for_test("/help", window, cx);
+    });
     cx.run_until_parked();
 
     assert!(persist_requests(&workspace, cx) > before);

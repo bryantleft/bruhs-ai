@@ -929,6 +929,44 @@ mod claude_login {
     }
 }
 
+#[gpui::test]
+fn model_slash_command_opens_the_model_picker_like_web(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    let opened_settings = Rc::new(std::cell::Cell::new(false));
+    let seen = opened_settings.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&chat, move |_, event: &super::ChatViewEvent, _| {
+            if matches!(event, super::ChatViewEvent::OpenSettings) {
+                seen.set(true);
+            }
+        })
+        .detach();
+    });
+    chat.update_in(cx, |chat, window, cx| {
+        chat.input_state.update(cx, |input, cx| {
+            input.set_value("/model", window, cx);
+            input.set_selected_range(6..6, cx);
+        });
+        chat.run_slash_command_for_test("/model", window, cx);
+        // The composer's slash handlers clear the trigger text next.
+        chat.clear_active_slash_trigger(window, cx);
+    });
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        assert!(chat.model_picker_open, "/model opens the model picker");
+        assert!(
+            gpui::Focusable::focus_handle(&chat.model_picker_query, cx).is_focused(window),
+            "the picker's search takes focus after the slash text clears"
+        );
+        assert!(chat.input_state.read(cx).value().is_empty());
+        chat.close_model_picker(window, cx);
+        chat.run_slash_command_for_test("/settings", window, cx);
+    });
+    cx.run_until_parked();
+    assert!(opened_settings.get(), "/settings still opens Settings");
+    chat.read_with(cx, |chat, _| assert!(!chat.model_picker_open));
+}
+
 mod expansion_state {
     use super::super::{Message, TurnState};
     use super::chat_window;
@@ -952,9 +990,9 @@ mod expansion_state {
     #[gpui::test]
     fn clearing_the_thread_forgets_open_thinking_blocks(cx: &mut TestAppContext) {
         let (chat, cx) = chat_window(cx);
-        chat.update(cx, |chat, cx| {
+        chat.update_in(cx, |chat, window, cx| {
             failed_turn(chat);
-            chat.run_slash_command_for_test("/clear", cx);
+            chat.run_slash_command_for_test("/clear", window, cx);
             assert!(chat.messages.is_empty());
             assert!(chat.expanded_thinking.is_empty());
             assert!(chat.expanded_folds.is_empty());

@@ -261,7 +261,12 @@ impl ChatView {
         cx.notify();
     }
 
-    pub(super) fn run_slash_command(&mut self, content: &str, cx: &mut Context<'_, Self>) -> bool {
+    pub(super) fn run_slash_command(
+        &mut self,
+        content: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
         let command = content.split_whitespace().next().unwrap_or_default();
         match command {
             "/clear" => {
@@ -293,7 +298,15 @@ impl ChatView {
                 cx.notify();
                 true
             }
-            "/model" | "/settings" => {
+            "/model" => {
+                // Like web: open the picker. Deferred so it takes focus after
+                // the caller clears the `/model` text from the composer.
+                cx.defer_in(window, |this, window, cx| {
+                    this.open_model_picker(window, cx)
+                });
+                true
+            }
+            "/settings" => {
                 cx.emit(ChatViewEvent::OpenSettings);
                 true
             }
@@ -400,7 +413,7 @@ impl ChatView {
                             }
                         }))
                         .on_click(cx.listener(move |this, _ev, window, cx| {
-                            if this.run_slash_command(name, cx) {
+                            if this.run_slash_command(name, window, cx) {
                                 this.clear_active_slash_trigger(window, cx);
                             }
                         }))
@@ -564,7 +577,7 @@ impl ChatView {
             let Some(command) = matches.get(selected_index).copied() else {
                 return false;
             };
-            if self.run_slash_command(command.name, cx) {
+            if self.run_slash_command(command.name, window, cx) {
                 self.clear_active_slash_trigger(window, cx);
                 return true;
             }
