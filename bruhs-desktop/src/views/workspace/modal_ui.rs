@@ -562,7 +562,7 @@ impl Workspace {
                                 web_button(
                                     "close-modal",
                                     WebButtonVariant::Ghost,
-                                    WebButtonSize::Small,
+                                    WebButtonSize::IconSmall,
                                     ButtonState::Enabled,
                                 )
                                 .debug_selector(|| "desktop-modal-close".to_string())
@@ -570,7 +570,7 @@ impl Workspace {
                                 .child(
                                     svg()
                                         .path(assets::CLOSE_ICON_PATH)
-                                        .size(px(14.0))
+                                        .size(px(theme::ICON_PX))
                                         .text_color(theme::rambutan_400()),
                                 )
                                 .tab_index(0)

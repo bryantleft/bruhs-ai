@@ -149,7 +149,7 @@ fn FileTree() -> impl IntoView {
                                     }
                                 }
                             >
-                                <Icon name=icon size=14 class="shrink-0 text-rambutan-400" />
+                                <Icon name=icon size=12 class="shrink-0 text-rambutan-400" />
                                 <span class="truncate">{label}</span>
                             </button>
                         }

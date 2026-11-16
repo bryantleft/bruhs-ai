@@ -6,7 +6,8 @@ pub(super) const PROJECT_PICKER_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const PROJECT_PICKER_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const PROJECT_PICKER_PATH_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const PROJECT_PICKER_ROW_RADIUS_PX: f32 = 8.0;
-pub(super) const PROJECT_PICKER_ICON_SIZE_PX: f32 = 14.0;
+/// Row icons, beside the rows' 12px names.
+pub(super) const PROJECT_PICKER_ICON_SIZE_PX: f32 = theme::ICON_XS_PX;
 pub(super) const PROJECT_PICKER_PARENT_ICON_SLOT_WIDTH_PX: f32 = 14.0;
 pub(super) const PROJECT_PICKER_CONTENT_MAX_HEIGHT_PX: f32 = 288.0;
 pub(super) const PROJECT_PICKER_LABEL_TEXT_SIZE_PX: f32 = 12.0;
@@ -734,6 +735,13 @@ impl Workspace {
                                         }
                                     },
                                 ))
+                                .child(
+                                    svg()
+                                        .path(assets::MESSAGE_SQUARE_ICON_PATH)
+                                        .size(px(PROJECT_PICKER_ICON_SIZE_PX))
+                                        .flex_shrink_0()
+                                        .text_color(theme::rambutan_500()),
+                                )
                                 .child("No project"),
                         )
                     })

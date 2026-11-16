@@ -48,6 +48,7 @@ const TASKS_PANEL_STATUS_TEXT_SIZE_PX: f32 = 12.0;
 const TASKS_PANEL_LOG_TEXT_SIZE_PX: f32 = 12.0;
 const TASKS_PANEL_RADIUS_PX: f32 = 8.0;
 const TASKS_PANEL_HEADER_HEIGHT_PX: f32 = 42.0;
+/// The header's activity icon, beside its title.
 const TASKS_PANEL_ICON_SIZE_PX: f32 = 14.0;
 const TASKS_PANEL_CLOSE_BUTTON_SIZE_PX: f32 = theme::CONTROL_PX;
 const TASKS_PANEL_LOG_MAX_HEIGHT_PX: f32 = 128.0;
@@ -346,7 +347,7 @@ impl TasksPanelView {
                                 .child(
                                     svg()
                                         .path(assets::CLOSE_ICON_PATH)
-                                        .size(px(14.0))
+                                        .size(px(theme::ICON_PX))
                                         .text_color(theme::rambutan_400()),
                                 ),
                             ),
@@ -452,7 +453,7 @@ impl Render for TasksPanelView {
                             .child(
                                 svg()
                                     .path(assets::CLOSE_ICON_PATH)
-                                    .size(px(TASKS_PANEL_ICON_SIZE_PX))
+                                    .size(px(theme::ICON_PX))
                                     .text_color(theme::rambutan_300()),
                             ),
                     ),

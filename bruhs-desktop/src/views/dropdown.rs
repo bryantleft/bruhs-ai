@@ -322,10 +322,11 @@ fn dropdown_trigger(
         .hover(|el| el.border_color(theme::rambutan_500().opacity(0.5)))
         .child(div().min_w_0().truncate().child(label))
         .child(
-            div()
+            svg()
+                .path(assets::CHEVRON_DOWN_ICON_PATH)
+                .size(px(theme::ICON_PX))
                 .flex_shrink_0()
-                .text_color(theme::rambutan_500())
-                .child(if open { "⌃" } else { "⌄" }),
+                .text_color(theme::rambutan_500()),
         )
 }
 

@@ -108,7 +108,7 @@ pub fn Stepper(
                 disabled=move || disabled.get() || at_min.get()
                 on:click=move |_| nudge(-1.0)
             >
-                <Icon name="minus" size=12 />
+                <Icon name="minus" size=16 />
             </button>
             <input
                 type="text"
@@ -130,7 +130,7 @@ pub fn Stepper(
                 disabled=move || disabled.get() || at_max.get()
                 on:click=move |_| nudge(1.0)
             >
-                <Icon name="plus" size=12 />
+                <Icon name="plus" size=16 />
             </button>
         </div>
     }

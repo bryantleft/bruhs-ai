@@ -204,11 +204,11 @@ pub(super) const SETTINGS_PAGE_HEADER_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_
 pub(super) const SETTINGS_PAGE_X_PADDING_PX: f32 = 20.0;
 pub(super) const SETTINGS_PAGE_TITLE_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const SETTINGS_PAGE_CRUMB_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const SETTINGS_PAGE_CLOSE_ICON_PX: f32 = 14.0;
+pub(super) const SETTINGS_PAGE_CLOSE_ICON_PX: f32 = theme::ICON_PX;
 pub(super) const SETTINGS_PAGE_CONTENT_MAX_WIDTH_PX: f32 = 704.0;
 pub(super) const SETTINGS_PAGE_CONTENT_MIN_WIDTH_PX: f32 = 320.0;
 pub(super) const SETTINGS_CODE_FONT_FAMILY: &str = "Monaspace Neon";
-pub(super) const SETTINGS_CLOSE_BUTTON_SIZE_PX: f32 = theme::CONTROL_PX;
+pub(super) const SETTINGS_CLOSE_BUTTON_SIZE_PX: f32 = theme::CONTROL_SM_PX;
 pub(super) const SETTINGS_CONTROL_RADIUS_PX: f32 = 8.0;
 /// Settings body spacing and scroll-spy fold.
 pub(super) const SETTINGS_BODY_X_PADDING_PX: f32 = 24.0;
@@ -772,7 +772,7 @@ impl Workspace {
                     .child(
                         svg()
                             .path(section.icon_path())
-                            .size(px(14.0))
+                            .size(px(theme::ICON_PX))
                             .text_color(theme::rambutan_500())
                             .flex_shrink_0(),
                     )

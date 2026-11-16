@@ -251,7 +251,7 @@ pub fn FileTiles() -> impl IntoView {
                                         offers.update(|items| items.retain(|item| item.id != remove_id));
                                     }
                                 >
-                                    <Icon name="x" size=14 />
+                                    <Icon name="x" size=16 />
                                 </button>
                             </div>
                         }

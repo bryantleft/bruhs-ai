@@ -125,7 +125,7 @@ pub(super) fn ComposerOptions(
                                         class=move || format!("{ROW} {}", if access.get() == mode { "bg-longan-800 text-rambutan-100" } else { "" })
                                         on:click=move |_| { set_access.set(mode); plan_toggle.set_value(PlanToggle::new(mode)); }>
                                         <span>{mode.label()}</span>
-                                        {move || (access.get() == mode).then(|| view! { <Icon name="check" size=14 /> })}
+                                        {move || (access.get() == mode).then(|| view! { <Icon name="check" size=12 /> })}
                                     </button>
                                 }).collect_view()}
                         </div>
@@ -197,7 +197,7 @@ pub(super) fn ComposerOptions(
                                 <button type="button" class=ROW aria-pressed=move || full_draft.get().to_string()
                                     on:click=move |_| full_draft.update(|full| *full = !*full)>
                                     <span>"Send full draft"</span>
-                                    {move || full_draft.get().then(|| view! { <Icon name="check" size=14 /> })}
+                                    {move || full_draft.get().then(|| view! { <Icon name="check" size=12 /> })}
                                 </button>
                             })}
                         </section>

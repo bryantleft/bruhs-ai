@@ -251,7 +251,7 @@ pub(super) const PROJECT_SIDEBAR_FOOTER_X_PADDING_PX: f32 = 12.0;
 pub(super) const PROJECT_SIDEBAR_FOOTER_Y_PADDING_PX: f32 = 8.0;
 pub(super) const PROJECT_SIDEBAR_FOOTER_BORDER_OPACITY: f32 = 0.50;
 pub(super) const PROJECT_SIDEBAR_FOOTER_HOVER_BORDER_OPACITY: f32 = 0.50;
-pub(super) const PROJECT_SIDEBAR_DELETE_ICON_SIZE_PX: f32 = 14.0;
+pub(super) const PROJECT_SIDEBAR_DELETE_ICON_SIZE_PX: f32 = theme::ICON_PX;
 pub(super) const PROJECT_SIDEBAR_ROW_ACTION_RADIUS_PX: f32 = 4.0;
 pub(super) const PROJECT_SIDEBAR_ROW_ACTION_PADDING_PX: f32 = 2.0;
 pub(super) const PROJECT_SIDEBAR_ROW_ACTION_HOVER_BG_OPACITY: f32 = 0.50;
@@ -1089,6 +1089,10 @@ impl Workspace {
                     .invisible()
                     .flex_shrink_0()
                     .rounded(px(PROJECT_SIDEBAR_ROW_ACTION_RADIUS_PX))
+                    .size(px(theme::CONTROL_XS_PX))
+                    .flex()
+                    .items_center()
+                    .justify_center()
                     .p(px(PROJECT_SIDEBAR_ROW_ACTION_PADDING_PX))
                     .text_color(theme::rambutan_500())
                     .tab_index(0)

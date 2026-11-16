@@ -164,9 +164,9 @@ pub fn ProjectSidebar() -> impl IntoView {
                                     on:click=on_delete
                                     title="Delete project"
                                     aria-label="Delete project"
-                                    class="shrink-0 rounded-seed p-0.5 text-rambutan-500 opacity-0 transition-opacity hover:bg-longan-700/50 hover:text-lychee-400 group-hover/proj:opacity-100 group-focus-within/proj:opacity-100"
+                                    class="inline-flex size-control-xs shrink-0 items-center justify-center rounded-seed text-rambutan-500 opacity-0 transition-opacity hover:bg-longan-700/50 hover:text-lychee-400 group-hover/proj:opacity-100 group-focus-within/proj:opacity-100"
                                 >
-                                    <Icon name="trash" />
+                                    <Icon name="trash" size=16 />
                                 </button>
                             </div>
                         }

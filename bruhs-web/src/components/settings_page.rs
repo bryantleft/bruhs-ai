@@ -685,7 +685,7 @@ pub fn SettingsPage() -> impl IntoView {
                     class="inline-flex size-7 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/60 hover:text-rambutan-100"
                     on:click=move |_| set_active_view.set(AppView::Chat)
                 >
-                    <Icon name="x" size=14 />
+                    <Icon name="x" size=16 />
                 </button>
             </header>
             <div class="flex min-h-0 flex-1">

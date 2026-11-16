@@ -81,7 +81,7 @@ pub(super) fn RecordPicker(
         <button type="button" aria-label=label aria-haspopup="dialog" aria-expanded=move || open.get().to_string()
             class="bruhs-control inline-flex min-h-control w-full items-center justify-between gap-2 rounded-grape bg-white/5 px-3 py-2 text-left text-body-sm text-rambutan-300 inset-ring inset-ring-white/10 hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 cursor-pointer"
             on:click=move |_| { query.set(String::new()); highlighted.set(0); open.set(true); }>
-            <span class="min-w-0 truncate">{placeholder}</span><Icon name="search" size=14 class="shrink-0 text-rambutan-500" />
+            <span class="min-w-0 truncate">{placeholder}</span><Icon name="search" size=16 class="shrink-0 text-rambutan-500" />
         </button>
         <Dialog open=Signal::derive(move || open.get()) label=label max_width="max-w-[calc(100vw-2rem)] sm:max-w-xl" anchor_top=true padding_top="2rem"
             on_close=Callback::new(move |_| open.set(false))>

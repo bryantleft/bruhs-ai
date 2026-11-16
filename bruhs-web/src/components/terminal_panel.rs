@@ -662,10 +662,10 @@ pub fn TerminalPanel(
                             <button
                                 type="button"
                                 aria-label="Close terminal"
-                                class="inline-flex size-4 items-center justify-center rounded-seed text-rambutan-500 opacity-60 transition-opacity hover:text-lychee-300 group-hover/tab:opacity-100 cursor-pointer"
+                                class="inline-flex size-control-xs items-center justify-center rounded-seed text-rambutan-500 opacity-60 transition-opacity hover:text-lychee-300 group-hover/tab:opacity-100 cursor-pointer"
                                 on:click=move |ev| { ev.stop_propagation(); close_session(id_close.clone()); }
                             >
-                                <Icon name="x" size=10 />
+                                <Icon name="x" size=16 />
                             </button>
                         </div>
                     }
@@ -788,7 +788,7 @@ pub fn TerminalPanel(
                         class="inline-flex size-6 shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 cursor-pointer"
                         on:click=move |_| open.set(false)
                     >
-                        <Icon name="x" size=12 />
+                        <Icon name="x" size=16 />
                     </button>
                 })}
             </div>

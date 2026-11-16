@@ -220,7 +220,7 @@ pub fn Dropdown(
                         }.into_any()
                     }
                 }}
-                <Icon name="chevron-down" size=12 class="shrink-0 text-rambutan-500" />
+                <Icon name="chevron-down" size=16 class="shrink-0 text-rambutan-500" />
             </button>
             {move || open.get().then(|| view! {
                 <div class="fixed inset-0 z-40 cursor-default" aria-hidden="true" on:click=move |_| close(false)></div>
@@ -266,7 +266,7 @@ pub fn Dropdown(
                                         {desc.map(|d| view! { <span class="text-label-sm text-rambutan-400">{d}</span> })}
                                     </span>
                                     {move || is_selected.get().then(|| view! {
-                                        <Icon name="check" size=14 class="shrink-0 text-rambutan-100" />
+                                        <Icon name="check" size=12 class="shrink-0 text-rambutan-100" />
                                     })}
                                 </button>
                             }

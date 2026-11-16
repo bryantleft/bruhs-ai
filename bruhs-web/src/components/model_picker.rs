@@ -350,7 +350,7 @@ pub fn ModelPicker() -> impl IntoView {
                 class="fixed z-50 flex w-[22rem] max-w-[calc(100vw-2rem)] flex-col overflow-hidden rounded-grape bg-longan-700 inset-ring inset-ring-white/15"
             >
                 <label class="flex shrink-0 items-center gap-2 border-b border-white/10 px-3 py-2">
-                    <Icon name="search" size=14 class="shrink-0 text-rambutan-400" />
+                    <Icon name="search" size=16 class="shrink-0 text-rambutan-400" />
                     <input
                         node_ref=input_ref
                         type="text"
@@ -408,7 +408,7 @@ pub fn ModelPicker() -> impl IntoView {
                                             <Kbd class="text-rambutan-400">{format!("⌘{}", i + 1)}</Kbd>
                                         })}
                                         {move || is_selected.get().then(|| view! {
-                                            <Icon name="check" size=14 class="shrink-0 text-rambutan-100" />
+                                            <Icon name="check" size=16 class="shrink-0 text-rambutan-100" />
                                         })}
                                     </button>
                                 }
@@ -435,12 +435,12 @@ pub fn ModelPicker() -> impl IntoView {
                                 on:mouseenter=move |_| set_highlight.set(index)
                                 on:click=move |_| choose(id_choose.clone())
                             >
-                                <Icon name="bot" size=14 class="shrink-0 text-rambutan-400" />
+                                <Icon name="bot" size=16 class="shrink-0 text-rambutan-400" />
                                 <div class="min-w-0 flex-1">
                                     <div class="truncate text-label text-rambutan-100">"Use "{id}</div>
                                     <div class="mt-0.5 text-label-sm text-rambutan-400">"Use the model configured with this provider."</div>
                                 </div>
-                                {move || (current_model.get() == is_selected_id).then(|| view! { <Icon name="check" size=14 class="shrink-0 text-rambutan-100" /> })}
+                                {move || (current_model.get() == is_selected_id).then(|| view! { <Icon name="check" size=16 class="shrink-0 text-rambutan-100" /> })}
                             </button>
                         }
                     })}

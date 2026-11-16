@@ -45,7 +45,7 @@ const SWITCH_DISABLED_OPACITY: f32 = 0.5;
 const STEPPER_HEIGHT_PX: f32 = theme::CONTROL_PX;
 const STEPPER_SIDE_WIDTH_PX: f32 = theme::CONTROL_PX;
 const STEPPER_VALUE_WIDTH_PX: f32 = 48.0;
-const STEPPER_ICON_PX: f32 = 12.0;
+const STEPPER_ICON_PX: f32 = theme::ICON_PX;
 const STEPPER_DISABLED_OPACITY: f32 = 0.6;
 const STEPPER_SIDE_DISABLED_OPACITY: f32 = 0.4;
 /// Web `Slider`: `h-5` row, `h-1.5` track, `1rem` thumb.
