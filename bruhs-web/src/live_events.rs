@@ -8,7 +8,8 @@
 //! while the page is hidden in that cache.
 //!
 //! On an error the stream is closed and reopened after a backoff (1 s,
-//! doubling to 30 s) with a "reconnecting" banner. On every open the server
+//! doubling to 30 s) with a "reconnecting" banner, which names the live
+//! transcript while a meeting records. On every open the server
 //! sends the task list and the meetings handshake (which reloads open
 //! transcripts); a reopen also asks it to replay the calendar sync window,
 //! since another client may have taken events this tab missed.
@@ -17,6 +18,7 @@ use std::cell::{Cell, RefCell};
 use std::rc::Rc;
 
 use bruhs_models::api::live_events;
+use leptos::prelude::{GetUntracked, ReadSignal};
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::{EventSource, MessageEvent};
@@ -55,8 +57,13 @@ impl LiveEvents {
         self.handlers.push((name, Rc::new(handler)));
     }
 
-    /// Open the stream for the life of the page.
-    pub fn connect(self, banners: Option<BannerStackSignal>) {
+    /// Open the stream for the life of the page. `live_meeting` names the
+    /// recording meeting, whose transcript an outage interrupts.
+    pub fn connect(
+        self,
+        banners: Option<BannerStackSignal>,
+        live_meeting: Option<ReadSignal<Option<String>>>,
+    ) {
         let connection = Rc::new(Connection {
             handlers: self.handlers,
             backoff_ms: Cell::new(BACKOFF_INITIAL_MS),
@@ -65,6 +72,7 @@ impl LiveEvents {
             opened: Cell::new(false),
             open: RefCell::new(None),
             banners,
+            live_meeting,
             outage: Cell::new(Outage::default()),
             lost_banner: RefCell::new(None),
         });
@@ -100,9 +108,21 @@ struct Connection {
     opened: Cell<bool>,
     open: RefCell<Option<OpenStream>>,
     banners: Option<BannerStackSignal>,
+    live_meeting: Option<ReadSignal<Option<String>>>,
     outage: Cell<Outage>,
     /// The lost-connection banner for the current outage, if it is showing.
     lost_banner: RefCell<Option<String>>,
+}
+
+/// What an outage's banner says. During a recording the news is the
+/// transcript, worded as desktop says it; otherwise the server connection,
+/// which every web view needs.
+fn lost_connection_message(recording: bool) -> &'static str {
+    if recording {
+        live_events::LIVE_TRANSCRIPT_DISCONNECTED
+    } else {
+        "Lost the connection to bruhs-server, reconnecting…"
+    }
 }
 
 /// One lost-connection banner per outage, as desktop announces a lost stream
@@ -208,10 +228,15 @@ impl Connection {
         let announce = outage.on_error();
         connection.outage.set(outage);
         if let (true, Some(banners)) = (announce, connection.banners) {
+            let recording = connection
+                .live_meeting
+                .and_then(|meeting| meeting.try_get_untracked())
+                .flatten()
+                .is_some();
             // Stays until the stream opens again or the user closes it.
             let id = banners.push_keyed(
                 BannerKind::Warning,
-                "Lost the connection to bruhs-server, reconnecting…",
+                lost_connection_message(recording),
                 None,
             );
             *connection.lost_banner.borrow_mut() = Some(id);
@@ -271,7 +296,22 @@ impl Connection {
 
 #[cfg(test)]
 mod tests {
-    use super::{next_backoff, stream_url, Outage, BACKOFF_INITIAL_MS, BACKOFF_MAX_MS};
+    use super::{
+        lost_connection_message, next_backoff, stream_url, Outage, BACKOFF_INITIAL_MS,
+        BACKOFF_MAX_MS,
+    };
+
+    #[test]
+    fn an_outage_during_a_recording_names_the_transcript_like_desktop() {
+        assert_eq!(
+            lost_connection_message(true),
+            bruhs_models::api::live_events::LIVE_TRANSCRIPT_DISCONNECTED
+        );
+        assert_eq!(
+            lost_connection_message(false),
+            "Lost the connection to bruhs-server, reconnecting…"
+        );
+    }
 
     #[test]
     fn an_outage_is_announced_once_until_the_stream_opens() {

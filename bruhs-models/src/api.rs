@@ -37,6 +37,9 @@ pub mod live_events {
     pub const MEETINGS: &str = "meetings";
     /// `reactive::OutboxSignal` whenever agent updates change.
     pub const REACTIVE: &str = "reactive";
+    /// Said once per outage when the stream drops while a meeting records,
+    /// on both apps, until the stream opens again.
+    pub const LIVE_TRANSCRIPT_DISCONNECTED: &str = "Live transcript disconnected. Reconnecting…";
 }
 
 // ── Background service ─────────────────────────────────────────────────────

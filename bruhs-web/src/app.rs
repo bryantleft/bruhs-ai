@@ -232,7 +232,10 @@ pub fn App() -> impl IntoView {
     );
     // Agent updates, for the unread badge and new-update banners.
     crate::agent_updates::subscribe(&mut live_events);
-    live_events.connect(use_context::<crate::components::banner::BannerStackSignal>());
+    live_events.connect(
+        use_context::<crate::components::banner::BannerStackSignal>(),
+        use_context::<crate::state::LiveMeetingIdSignal>().map(|signal| signal.0),
+    );
 
     // Wire the calendar-driven auto-record watcher. Reads settings +
     // live calendar events + capture status each tick to decide whether
