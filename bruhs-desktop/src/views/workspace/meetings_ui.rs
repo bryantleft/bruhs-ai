@@ -61,6 +61,8 @@ const PAGE_MAX_WIDTH_PX: f32 = 768.0;
 const LIVE_PANEL_WIDTH_PX: f32 = 480.0;
 const LIVE_PANEL_MAX_HEIGHT_PX: f32 = 260.0;
 const SEARCH_RESULT_PREVIEW_CHARS: usize = 120;
+/// Space between a view's header row and a floating notice.
+const NOTICE_TOP_GAP_PX: f32 = 8.0;
 
 pub const MERGE_DROPDOWN_ID: &str = "desktop-people-merge-target";
 const LOCAL_FOCUS_PRIVACY_NOTE: &str =
@@ -2592,9 +2594,11 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> Option<AnyElement> {
         let notice = self.meetings_hub.read(cx).notice.clone()?;
+        // Opaque: the notice floats over content. The warning keeps the look
+        // it had on the canvas (a 15% lychee tint over longan-950).
         let (bg, ring, fg) = if notice.warning {
             (
-                theme::lychee_500().opacity(0.15),
+                theme::longan_950().blend(theme::lychee_500().opacity(0.15)),
                 theme::lychee_400().opacity(0.4),
                 theme::lychee_100(),
             )
@@ -2605,18 +2609,20 @@ impl Workspace {
                 theme::rambutan_200(),
             )
         };
+        // The rail floats over the active view, under its header row, instead
+        // of taking height from it: the page and the composer stay put as
+        // notices come and go. Only the notice itself takes pointer input.
         Some(
             div()
                 .id("desktop-notification-rail")
                 .debug_selector(|| "desktop-notification-rail".into())
                 .role(Role::Status)
                 .aria_label("Notifications")
-                .min_h_0()
-                .max_h(px(f32::from(window.viewport_size().height) * 0.3))
-                .flex_shrink_0()
-                .overflow_y_scroll()
+                .absolute()
+                .top(px(theme::APP_HEADER_HEIGHT_PX + NOTICE_TOP_GAP_PX))
+                .left_0()
+                .right_0()
                 .px_3()
-                .py_2()
                 .flex()
                 .justify_center()
                 .child(
@@ -2627,6 +2633,8 @@ impl Workspace {
                         .w_full()
                         .min_w_0()
                         .max_w(px(480.0))
+                        .max_h(px(f32::from(window.viewport_size().height) * 0.3))
+                        .overflow_y_scroll()
                         .flex_shrink_0()
                         .rounded(px(8.0))
                         .bg(bg)

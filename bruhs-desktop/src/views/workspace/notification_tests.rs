@@ -41,8 +41,11 @@ fn show_notice(workspace: &Entity<Workspace>, cx: &mut VisualTestContext, messag
     cx.run_until_parked();
 }
 
+/// A notice floats over the view: the page keeps its place and size (no
+/// layout shift as notices come and go), the notice stays inside the window
+/// and bounded, and it sits below the view's header row.
 #[gpui::test]
-fn native_notifications_reserve_bounded_space_without_covering_search(cx: &mut TestAppContext) {
+fn native_notifications_float_without_moving_the_page(cx: &mut TestAppContext) {
     let (workspace, cx) = fixture(cx);
     for width in [320.0, 390.0, 1280.0] {
         cx.simulate_resize(gpui::size(px(width), px(844.0)));
@@ -54,14 +57,14 @@ fn native_notifications_reserve_bounded_space_without_covering_search(cx: &mut T
             .debug_bounds("desktop-notification-rail")
             .expect("notice rail");
         let notice = cx.debug_bounds("desktop-hub-notice").expect("notice");
-        assert_eq!(before.origin.y, search.origin.y, "notice moved the header");
+        assert_eq!(before, search, "a notice moved or resized the page");
         assert!(
-            search.bottom() <= rail.origin.y,
-            "notice covers page: {search:?} {rail:?}"
+            notice.origin.y >= search.origin.y + px(crate::theme::APP_HEADER_HEIGHT_PX),
+            "notice covers the view's header row: {search:?} {notice:?}"
         );
         assert!(
-            rail.size.height <= px(844.0 * 0.3 + 1.0),
-            "unbounded notice rail: {rail:?}"
+            notice.size.height <= px(844.0 * 0.3 + 1.0),
+            "unbounded notice: {notice:?}"
         );
         assert!(rail.bottom() <= px(844.0));
         assert!(notice.origin.x >= px(0.0) && notice.right() <= px(width));
@@ -72,6 +75,11 @@ fn native_notifications_reserve_bounded_space_without_covering_search(cx: &mut T
         });
         cx.run_until_parked();
         assert!(cx.debug_bounds("desktop-notification-rail").is_none());
+        assert_eq!(
+            cx.debug_bounds("desktop-search-page").expect("search page"),
+            before,
+            "dismissing moved the page"
+        );
     }
 }
 

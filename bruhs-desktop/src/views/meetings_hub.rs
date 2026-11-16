@@ -383,6 +383,8 @@ pub struct MeetingsHub {
 impl EventEmitter<HubEvent> for MeetingsHub {}
 
 /// Shown when bruhs-server sends a live event this build cannot read.
+/// A live meeting's transcript stream dropped; the stream reconnects itself.
+const STREAM_DISCONNECTED_NOTICE: &str = "Live transcript disconnected. Reconnecting…";
 const STALE_MEETINGS_NOTICE: &str =
     "Some live meeting updates could not be read; meetings may be out of date. Update bruhs-desktop to match bruhs-server.";
 const STALE_CALENDAR_NOTICE: &str =
@@ -529,6 +531,28 @@ impl MeetingsHub {
         cx: &mut Context<'_, Self>,
     ) {
         self.post_notice(message.into(), false, Some(action), cx);
+    }
+
+    /// The meetings stream dropped; `run_sse` retries with backoff and sends
+    /// this after every failed attempt. Only a live meeting losing a
+    /// connection it had is news, and it is said once: a server that was
+    /// never up, an idle hub, or another failed retry stays quiet.
+    fn meetings_stream_disconnected(&mut self, cx: &mut Context<'_, Self>) {
+        self.stop_local_focus(
+            "Local app context paused: meeting connection lost. Enable again after reconnecting.",
+            cx,
+        );
+        let was_online = std::mem::replace(&mut self.server_online, false);
+        if was_online && self.live_meeting().is_some() {
+            self.notify_notice(STREAM_DISCONNECTED_NOTICE, true, cx);
+        }
+    }
+
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=notice`: the disconnect warning, for a
+    /// layout screenshot.
+    #[cfg(debug_assertions)]
+    pub fn smoke_post_notice(&mut self, cx: &mut Context<'_, Self>) {
+        self.notify_notice(STREAM_DISCONNECTED_NOTICE, true, cx);
     }
 
     fn notify_notice(
@@ -737,11 +761,9 @@ impl MeetingsHub {
                     SseMessage::Undecodable => Box::new(|hub, cx| {
                         hub.notify_notice(STALE_MEETINGS_NOTICE, true, cx);
                     }),
-                    SseMessage::Disconnected => Box::new(move |hub, cx| {
-                        hub.stop_local_focus("Local app context paused: meeting connection lost. Enable again after reconnecting.", cx);
-                        hub.server_online = false;
-                        hub.notify_notice("Live transcript disconnected. Reconnecting…", true, cx);
-                    }),
+                    SseMessage::Disconnected => {
+                        Box::new(move |hub, cx| hub.meetings_stream_disconnected(cx))
+                    }
                 };
                 if jobs.send(job).is_err() {
                     break;
@@ -2073,6 +2095,50 @@ mod tests {
             prefs.transcription.provider,
             bruhs_models::TranscriptionProvider::LocalWhisper
         );
+    }
+
+    /// The meetings stream retries for as long as the server is down. A
+    /// live meeting losing a connection it had is announced once; failed
+    /// retries, a server that never answered, and an idle hub stay quiet.
+    #[gpui::test]
+    fn a_dropped_stream_is_announced_once_and_only_during_a_live_meeting(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        use gpui::AppContext as _;
+        let runtime = Arc::new(Runtime::new().unwrap());
+        let hub = cx.new(|cx| {
+            MeetingsHub::new(
+                ServerClient::new("http://127.0.0.1:9", "http://127.0.0.1:9").unwrap(),
+                runtime,
+                MeetingPrefs::default(),
+                cx,
+            )
+        });
+        hub.update(cx, |hub, cx| {
+            hub.notice = None;
+            hub.server_online = false;
+            hub.meetings_stream_disconnected(cx);
+            assert!(hub.notice.is_none(), "the server never answered");
+
+            hub.server_online = true;
+            hub.meetings_stream_disconnected(cx);
+            assert!(hub.notice.is_none(), "no meeting is recording");
+            assert!(!hub.server_online);
+
+            let meeting = Meeting::new("Standup", EpochMs::now().as_f64());
+            hub.live_meeting_id = Some(meeting.id.clone());
+            hub.meetings.push(meeting);
+            hub.server_online = true;
+            hub.meetings_stream_disconnected(cx);
+            assert_eq!(
+                hub.notice.as_ref().map(|notice| notice.message.as_str()),
+                Some(STREAM_DISCONNECTED_NOTICE)
+            );
+
+            hub.notice = None;
+            hub.meetings_stream_disconnected(cx);
+            assert!(hub.notice.is_none(), "a failed retry is not news");
+        });
     }
 
     #[gpui::test]

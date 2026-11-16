@@ -87,6 +87,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   its action twice.
 - Fixed the desktop New meeting note button reading as a heading. It now sits
   beside the Meeting notes title, as on the web.
+- Notices in the desktop app, such as a lost live transcript, now float over
+  the page instead of pushing it up, so the composer and the page stay where
+  they are.
+- The live transcript notice now appears once, when a recording loses its
+  connection, instead of after every reconnect attempt. It no longer appears
+  when the server was never running.
 - Fixed the landing page's tour progress indicators cutting dots in half.
   Each tab now fills with complete dots, centered under its label.
 
