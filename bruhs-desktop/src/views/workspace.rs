@@ -114,6 +114,7 @@ mod settings_ui;
 mod sidebar_ui;
 #[cfg(debug_assertions)]
 mod smoke;
+mod record_picker_ui;
 mod snooze_ui;
 mod state_file;
 #[cfg(test)]
@@ -454,6 +455,12 @@ enum TopLayer {
     },
     /// Import a thread from Claude Code, Codex, T3 Code or Cursor.
     ImportThread,
+    /// Connect a record or cite a source on the open document (web
+    /// `RecordPicker`), with the highlighted match.
+    RecordPicker {
+        target: record_picker_ui::RecordPickerTarget,
+        highlighted: usize,
+    },
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -1236,6 +1243,8 @@ pub struct Workspace {
     thread_menu_items: Rc<[FocusHandle]>,
     /// The thread menu's "Custom…" snooze fields.
     snooze_inputs: snooze_ui::SnoozeInputs,
+    /// The knowledge record picker's search field and list scroll.
+    record_picker: record_picker_ui::RecordPickerUi,
     sidebar_undo: Option<SidebarUndo>,
     sidebar_undo_generation: u32,
     threads: Vec<DesktopThread>,
@@ -1471,6 +1480,7 @@ impl Workspace {
         let mut subscriptions = Vec::new();
         let command_input = Self::new_command_input(window, cx, &mut subscriptions);
         let import_input = Self::new_import_input(window, cx, &mut subscriptions);
+        let record_picker = record_picker_ui::RecordPickerUi::new(window, cx, &mut subscriptions);
         let capture_input = Self::new_capture_input(window, cx, &mut subscriptions);
         let knowledge_ui::KnowledgeInputs {
             knowledge_title_input,
@@ -1899,6 +1909,7 @@ impl Workspace {
                 .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
                 .collect(),
             snooze_inputs: snooze_ui::SnoozeInputs::new(window, cx),
+            record_picker,
             sidebar_undo: None,
             sidebar_undo_generation: 0,
             threads,
@@ -2971,6 +2982,10 @@ impl Render for Workspace {
                     TopLayer::CommandBar => self.render_command_bar(window, cx),
                     TopLayer::ProjectPicker { .. } => self.render_project_picker(window, cx),
                     TopLayer::ImportThread => self.render_import_thread(window, cx),
+                    TopLayer::RecordPicker {
+                        target,
+                        highlighted,
+                    } => self.render_record_picker(target, highlighted, window, cx),
                 })
             })
             // Web: a transparent full-window layer under the thread menu

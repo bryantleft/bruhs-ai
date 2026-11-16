@@ -4,7 +4,6 @@
 //! action.
 
 use bruhs_models::agent::provider_for_model_id;
-use bruhs_models::num::ToIntSaturating;
 use bruhs_models::PermissionMode;
 use gloo_timers::callback::Interval;
 use leptos::prelude::*;
@@ -20,7 +19,6 @@ use crate::components::find_bar::reveal_message;
 use crate::components::mention_editor::MentionEditor;
 use crate::components::model_picker::ModelPicker;
 use crate::components::provider::{provider_logo_src_for_model, PROVIDER_LOGO_CLASS};
-use crate::format::{context_percentage, context_window_for, format_tokens};
 use crate::state::{
     activate_thread, ActiveThreadId, ActiveView, AppView, BaseBranchSignal, BranchMenuOpen,
     ChipRetargetGuard, CompactIdleSignal, ComposerChips, FollowUpSteerSignal, GitStatusSignal,
@@ -39,6 +37,7 @@ use bruhs_models::logic::composer_text::{
     MESSAGE_LIMIT_HINT,
 };
 use bruhs_models::logic::context_chip::{extra_limit_chars, replace_kind, ChipKind, ContextChip};
+use bruhs_models::logic::context_meter::ContextReading;
 use bruhs_models::logic::follow_up::{
     action_enabled_for, action_label, action_title, composer_action, composer_after_lost_edit,
     provider_can_steer, ComposerAction, FollowUp,
@@ -1049,19 +1048,16 @@ fn ApprovalPanel(
 
 #[component]
 fn ContextMeter(usage: UsageInfo, model: String) -> impl IntoView {
-    let used = context_usage(&usage);
-    let window = context_window_for(&model);
-    let pct = context_percentage(used, window);
+    let reading = ContextReading::new(context_usage(&usage), &model);
     let radius = 9.75_f64;
     let circumference = 2.0 * std::f64::consts::PI * radius;
-    let offset = circumference * (1.0 - pct / 100.0);
-    let color = if pct > 90.0 { "#f06b65" } else { "#c3afa1" };
-    let tip = format!(
-        "Context window, {}%, {} of {}",
-        pct.round().to_u64_saturating(),
-        format_tokens(used),
-        format_tokens(window)
-    );
+    let offset = circumference * (1.0 - reading.percent() / 100.0);
+    let color = if reading.is_warning() {
+        "#f06b65"
+    } else {
+        "#c3afa1"
+    };
+    let tip = reading.label();
     view! {
         <Tooltip tip=tip.clone()>
             <span

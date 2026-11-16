@@ -15,6 +15,7 @@ use gpui_component::tooltip::Tooltip;
 use bruhs_models::logic::commands::COMPACT_UNAVAILABLE;
 use bruhs_models::logic::composer_text::{exceeds_message_limit_with, MESSAGE_LIMIT_HINT};
 use bruhs_models::logic::context_chip::{extra_limit_chars, join_drafts, ContextChip};
+use bruhs_models::logic::context_meter::ContextReading;
 use bruhs_models::logic::follow_up::{
     action_enabled_for, action_label, action_title, composer_action, ComposerAction,
 };
@@ -335,6 +336,116 @@ fn panel_hint(text: impl Into<SharedString>) -> AnyElement {
         .text_color(theme::rambutan_500())
         .child(text.into())
         .into_any_element()
+}
+
+/// Web `ContextMeter` and its "N% used" line: a 20px ring in a 28px box,
+/// the share of the window the latest reply used, lychee past 90%.
+fn context_meter_row(reading: ContextReading) -> AnyElement {
+    let label: SharedString = reading.label().into();
+    let tooltip = label.clone();
+    div()
+        .mb_1()
+        .px_2()
+        .flex()
+        .items_center()
+        .gap_2()
+        .text_size(px(COMPOSER_PANEL_TEXT_PX))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .text_color(theme::rambutan_400())
+        .child(
+            div()
+                .id("desktop-context-meter")
+                .debug_selector(|| "desktop-context-meter".to_string())
+                .size(px(theme::CONTROL_SM_PX))
+                .flex_shrink_0()
+                .flex()
+                .items_center()
+                .justify_center()
+                .role(Role::Image)
+                .aria_label(label)
+                .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
+                .child(context_ring(reading)),
+        )
+        .child(reading.used_label())
+        .into_any_element()
+}
+
+/// The ring web draws in a 24-unit box shown at 20px: radius 9.75 and a
+/// 3-unit stroke, starting at the top and running clockwise.
+const CONTEXT_RING_PX: f32 = 20.0;
+const CONTEXT_RING_BOX_UNITS: f32 = 24.0;
+const CONTEXT_RING_RADIUS_UNITS: f32 = 9.75;
+const CONTEXT_RING_STROKE_UNITS: f32 = 3.0;
+/// Web's track: rambutan-500 at a quarter.
+const CONTEXT_RING_TRACK_OPACITY: f32 = 0.25;
+
+fn context_ring(reading: ContextReading) -> impl IntoElement {
+    use bruhs_models::num::ToFloatLossy;
+    let fraction = (reading.percent() / 100.0).to_f32_lossy();
+    let color = if reading.is_warning() {
+        theme::lychee_400()
+    } else {
+        theme::rambutan_400()
+    };
+    let track = theme::rambutan_500().opacity(CONTEXT_RING_TRACK_OPACITY);
+    canvas(
+        |_bounds, _window, _cx| {},
+        move |bounds, (), window, _cx| {
+            let scale = f32::from(bounds.size.width) / CONTEXT_RING_BOX_UNITS;
+            let radius = px(CONTEXT_RING_RADIUS_UNITS * scale);
+            let stroke = px(CONTEXT_RING_STROKE_UNITS * scale);
+            let center = bounds.center();
+            let at = |turn: f32| {
+                let angle = (turn - 0.25) * std::f32::consts::TAU;
+                point(
+                    center.x + radius * angle.cos(),
+                    center.y + radius * angle.sin(),
+                )
+            };
+            // Two half arcs: one arc cannot end where it starts.
+            let arc = |to: f32| {
+                let mut path = PathBuilder::stroke(stroke);
+                path.move_to(at(0.0));
+                path.arc_to(point(radius, radius), px(0.0), false, true, at(to / 2.0));
+                path.arc_to(point(radius, radius), px(0.0), false, true, at(to));
+                path.build().ok()
+            };
+            if let Some(path) = arc(1.0) {
+                window.paint_path(path, track);
+            }
+            if fraction <= 0.0 {
+                return;
+            }
+            if let Some(path) = arc(fraction) {
+                window.paint_path(path, color);
+            }
+            // Web's round line caps, as dots at both ends.
+            let cap_radius = stroke / 2.0;
+            for turn in [0.0, fraction] {
+                let end = at(turn);
+                let mut cap = PathBuilder::fill();
+                cap.move_to(point(end.x - cap_radius, end.y));
+                cap.arc_to(
+                    point(cap_radius, cap_radius),
+                    px(0.0),
+                    false,
+                    true,
+                    point(end.x + cap_radius, end.y),
+                );
+                cap.arc_to(
+                    point(cap_radius, cap_radius),
+                    px(0.0),
+                    false,
+                    true,
+                    point(end.x - cap_radius, end.y),
+                );
+                if let Ok(path) = cap.build() {
+                    window.paint_path(path, color);
+                }
+            }
+        },
+    )
+    .size(px(CONTEXT_RING_PX))
 }
 
 /// A chosen row's check, beside its 12px label.
@@ -1624,6 +1735,7 @@ impl ChatView {
                     .child(CHAT_DICTATION_HINT),
             );
         let has_usage = self.messages.iter().any(|message| message.usage.is_some());
+        let reading = self.latest_context_reading();
         let reveal = self.composer_options_reveal.clone();
         let scroll = self.composer_options_scroll.clone();
         let view = cx.entity_id();
@@ -1664,6 +1776,7 @@ impl ChatView {
                         .flex()
                         .flex_col()
                         .gap_1()
+                        .when_some(reading, |el, reading| el.child(context_meter_row(reading)))
                         .when(has_usage, |el| el.child(self.render_compact_control(cx)))
                         .when(self.return_chip_visible(), |el| {
                             el.child(self.render_return_chip(cx))
@@ -1804,6 +1917,28 @@ impl ChatView {
 
     /// Shown once a turn has reported usage. Claude sends `/compact`. Codex
     /// keeps the unavailable notice.
+    /// Web `last_usage`: the latest assistant reply that reported usage,
+    /// read against the window of the model that wrote it.
+    pub(super) fn latest_context_reading(&self) -> Option<ContextReading> {
+        self.messages
+            .iter()
+            .rev()
+            .filter(|message| message.role == super::MessageRole::Assistant)
+            .find_map(|message| {
+                message.usage.as_ref().map(|usage| {
+                    ContextReading::new(
+                        bruhs_models::logic::compact::window_tokens(
+                            usage.context_tokens,
+                            usage.input_tokens,
+                            usage.cache_read_input_tokens,
+                            usage.cache_creation_input_tokens,
+                        ),
+                        message.model.as_deref().unwrap_or_default(),
+                    )
+                })
+            })
+    }
+
     fn render_compact_control(&self, cx: &Context<'_, Self>) -> AnyElement {
         let title = if self.effort_chip_visible() {
             "Summarize this Claude thread"

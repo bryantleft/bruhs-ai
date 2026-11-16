@@ -660,3 +660,74 @@ fn dialogs_are_centered_in_the_window(cx: &mut TestAppContext) {
         }
     }
 }
+
+/// Like web, a document connects a record or cites a source through a
+/// search picker: the trigger opens it, typing narrows the matches, the
+/// arrow keys move the highlight, and Enter adds the highlighted match.
+#[gpui::test]
+fn knowledge_record_picker_searches_and_adds_like_web(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    let id = workspace.update_in(cx, |workspace, _window, cx| {
+        let document = bruhs_models::KnowledgeDocument::new("Plan", "Body", 0);
+        let id = document.id.clone();
+        workspace.knowledge_documents = vec![
+            document,
+            bruhs_models::KnowledgeDocument::new("Café notes", "Body", 0),
+            bruhs_models::KnowledgeDocument::new("Roadmap", "Body", 0),
+        ];
+        workspace.source_clips = vec![
+            bruhs_models::SourceClip::new("Pricing study", "https://example.com/a", "", 0),
+            bruhs_models::SourceClip::new("Survey", "https://example.com/b", "", 0),
+        ];
+        workspace.active_view = AppView::DocumentDetail {
+            document_id: id.clone(),
+        };
+        cx.notify();
+        id
+    });
+    let click = |cx: &mut VisualTestContext, selector: &'static str| {
+        cx.run_until_parked();
+        let bounds = cx
+            .debug_bounds(selector)
+            .unwrap_or_else(|| panic!("{selector} should be rendered"));
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+    };
+
+    click(cx, "desktop-record-picker-trigger-link");
+    assert!(cx.debug_bounds("desktop-record-picker").is_some());
+    cx.simulate_input("road");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-record-picker-option-0").is_some());
+    assert!(
+        cx.debug_bounds("desktop-record-picker-option-1").is_none(),
+        "only Roadmap matches"
+    );
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+
+    click(cx, "desktop-record-picker-trigger-citation");
+    cx.simulate_keystrokes("down enter");
+    cx.run_until_parked();
+
+    workspace.read_with(cx, |workspace, _| {
+        assert!(workspace.top_layer.is_none(), "choosing closes the picker");
+        let document = workspace
+            .knowledge_documents
+            .iter()
+            .find(|document| document.id == id)
+            .expect("the open document");
+        let links: Vec<_> = document
+            .links
+            .iter()
+            .map(|link| link.label.as_str())
+            .collect();
+        assert_eq!(links, ["Roadmap"]);
+        let cited = workspace
+            .source_clips
+            .iter()
+            .find(|clip| clip.id == document.citations[0].clip_id)
+            .map(|clip| clip.title.as_str());
+        assert_eq!(cited, Some("Survey"), "Down moved to the second source");
+    });
+}

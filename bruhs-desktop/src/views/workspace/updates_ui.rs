@@ -63,6 +63,8 @@ pub(super) struct DesktopUpdates {
     pub install: AppInstall,
     /// Runs that finished before this window opened stay out of the sidebar.
     loaded_at: EpochMs,
+    /// The copy button that shows its check, like web's.
+    pub copied: crate::views::copy_feedback::CopyFeedback,
     _poll: Option<Task<()>>,
 }
 
@@ -85,6 +87,7 @@ impl DesktopUpdates {
             dismissed: HashSet::new(),
             install: AppInstall::Idle,
             loaded_at: EpochMs::now(),
+            copied: Default::default(),
             _poll: None,
         };
         // Tests drive checks by hand; a real check spawns CLIs and dials out.
@@ -348,6 +351,32 @@ fn tone_failed() -> Tone {
     )
 }
 
+/// Web `animate-spin`: one turn a second.
+const SPINNER_TURN_MS: u64 = 1000;
+
+/// The running pill's loader. Like web's `motion-safe:animate-spin`, it
+/// turns unless the system asks for reduced motion.
+fn update_spinner(cx: &App) -> AnyElement {
+    let loader = icon_svg(
+        assets::LOADER_ICON_PATH,
+        theme::ICON_PX,
+        theme::rambutan_300(),
+    );
+    if crate::motion::reduce_motion(cx) {
+        return loader
+            .debug_selector(|| "desktop-sidebar-update-spinner-static".into())
+            .into_any_element();
+    }
+    loader
+        .debug_selector(|| "desktop-sidebar-update-spinner-animated".into())
+        .with_animation(
+            "desktop-sidebar-update-spinner",
+            Animation::new(std::time::Duration::from_millis(SPINNER_TURN_MS)).repeat(),
+            |loader, delta| loader.with_transformation(Transformation::rotate(percentage(delta))),
+        )
+        .into_any_element()
+}
+
 fn icon_svg(path: &'static str, size: f32, color: gpui::Hsla) -> Svg {
     svg()
         .path(path)
@@ -408,11 +437,7 @@ impl Workspace {
                     .on_click(cx.listener(|this, _, window, cx| {
                         this.open_updates_settings(window, cx);
                     }))
-                    .child(icon_svg(
-                        assets::REFRESH_ICON_PATH,
-                        theme::ICON_PX,
-                        theme::rambutan_300(),
-                    ))
+                    .child(update_spinner(cx))
                     .child(
                         div()
                             .flex_1()
@@ -1166,6 +1191,7 @@ impl Workspace {
                         copy_id,
                         command,
                         "Copy update command. Run it in a terminal when you are ready to update.",
+                        self.updates.read(cx).copied.is_shown(copy_id),
                         cx,
                     ))
                     .into_any_element()
@@ -1307,6 +1333,10 @@ impl Workspace {
                                 "desktop-settings-update-copy",
                                 command,
                                 "Copy update command",
+                                self.updates
+                                    .read(cx)
+                                    .copied
+                                    .is_shown("desktop-settings-update-copy"),
                                 cx,
                             )),
                     )
@@ -1321,6 +1351,7 @@ fn copy_button(
     id: &'static str,
     text: String,
     label: &'static str,
+    copied: bool,
     cx: &Context<'_, Workspace>,
 ) -> Stateful<Div> {
     web_button(
@@ -1336,13 +1367,26 @@ fn copy_button(
     .debug_selector(move || id.to_string())
     .aria_label(label)
     .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
-    .child(icon_svg(
-        assets::COPY_ICON_PATH,
-        theme::ICON_PX,
-        theme::rambutan_500(),
-    ))
-    .on_click(cx.listener(move |_, _, _, cx| {
+    // Web: a green check for a moment after copying.
+    .child(if copied {
+        icon_svg(assets::CHECK_ICON_PATH, theme::ICON_PX, theme::pandan_400())
+    } else {
+        icon_svg(
+            assets::COPY_ICON_PATH,
+            theme::ICON_PX,
+            theme::rambutan_500(),
+        )
+    })
+    .on_click(cx.listener(move |this, _, _, cx| {
         cx.write_to_clipboard(gpui::ClipboardItem::new_string(text.clone()));
+        this.updates.update(cx, |updates, cx| {
+            crate::views::copy_feedback::CopyFeedback::show(
+                updates,
+                |updates| &mut updates.copied,
+                id,
+                cx,
+            );
+        });
     }))
 }
 

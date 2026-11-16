@@ -3,6 +3,9 @@ use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
 use crate::ui::{Dialog, DropdownOption, Icon};
+use bruhs_models::logic::record_picker::{
+    match_count_label, page_label, PICKER_EMPTY, PICKER_KEY_HINT, PICKER_SEARCH_PLACEHOLDER,
+};
 
 mod search;
 use search::{Index, PAGE_SIZE};
@@ -95,11 +98,11 @@ pub(super) fn RecordPicker(
                         aria-controls=list_id.clone() aria-expanded="true" aria-autocomplete="list"
                         aria-activedescendant=move || (count.get() > 0).then(|| prefix.with_value(|id| format!("{id}-option-{}", current())))
                         class="block w-full rounded-grape bg-white/5 px-3 py-2 text-body text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400"
-                        placeholder="Type a name…" prop:value=move || query.get() on:keydown=move |event| keys.run(event)
+                        placeholder=PICKER_SEARCH_PLACEHOLDER prop:value=move || query.get() on:keydown=move |event| keys.run(event)
                         on:input=move |event| { query.set(event_target_value(&event)); highlighted.set(0); } />
                 </div>
                 <div class="shrink-0 px-3 py-2 text-label-sm tabular-nums text-rambutan-400" role="status" data-picker-result-count=move || count.get().to_string()>
-                    {move || format!("{} matching {}", count.get(), if count.get() == 1 { "record" } else { "records" })}
+                    {move || match_count_label(count.get())}
                 </div>
                 <div id=list_id.clone() node_ref=list_ref role="listbox" aria-label=label class="relative min-h-0 flex-1 overflow-y-auto px-1 pb-1">
                     {move || visible.get().into_iter().map(|(position, option)| {
@@ -114,16 +117,16 @@ pub(super) fn RecordPicker(
                             {option.group.map(|group| view! { <span class="max-w-24 shrink-0 truncate text-label-sm text-rambutan-400">{group}</span> })}
                         </button>
                     } }).collect_view()}
-                    <Show when=move || count.get() == 0><p class="px-3 py-5 text-body-sm text-rambutan-400">"No matching records. Try another name."</p></Show>
+                    <Show when=move || count.get() == 0><p class="px-3 py-5 text-body-sm text-rambutan-400">{PICKER_EMPTY}</p></Show>
                 </div>
                 <div class="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-longan-700 px-3 py-2 text-label-sm text-rambutan-400">
-                    <span>"↑↓ to move, Enter to choose"</span>
+                    <span>{PICKER_KEY_HINT}</span>
                     <Show when=move || { count.get() > PAGE_SIZE }>
                         <div class="flex items-center gap-2">
                             <button type="button" aria-label="Previous results" disabled=move || { current() < PAGE_SIZE }
                                 class="bruhs-control min-h-control rounded-grape px-2 hover:bg-longan-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
                                 on:click=move |_| highlighted.set((current() / PAGE_SIZE).saturating_sub(1) * PAGE_SIZE)>"Previous"</button>
-                            <span class="tabular-nums">{move || format!("{} / {}", current() / PAGE_SIZE + 1, count.get().div_ceil(PAGE_SIZE))}</span>
+                            <span class="tabular-nums">{move || page_label(count.get(), current())}</span>
                             <button type="button" aria-label="Next results" disabled=move || { current() / PAGE_SIZE + 1 >= count.get().div_ceil(PAGE_SIZE) }
                                 class="bruhs-control min-h-control rounded-grape px-2 hover:bg-longan-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
                                 on:click=move |_| highlighted.set((current() / PAGE_SIZE + 1) * PAGE_SIZE)>"Next"</button>

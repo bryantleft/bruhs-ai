@@ -652,3 +652,91 @@ fn composer_panels_have_the_web_header_and_rows(cx: &mut TestAppContext) {
         assert!(chat.composer_options_trigger_focus.is_focused(window));
     });
 }
+
+/// A model that is not in the catalog gets the web's "Use …" row, checked
+/// while it is the current model.
+#[gpui::test]
+fn model_picker_checks_the_current_custom_model(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    chat.update_in(cx, |chat, window, cx| {
+        chat.set_model("opencode/local/my-model", cx);
+        chat.open_model_picker(window, cx);
+    });
+    cx.run_until_parked();
+    let row = cx
+        .debug_bounds("desktop-model-picker-custom")
+        .expect("the custom row");
+    let check = cx
+        .debug_bounds("desktop-model-picker-custom-check")
+        .expect("its check");
+    assert!(check.left() > row.center().x, "the check sits at the right");
+}
+
+/// Like web, a transcript scrolled up from its end offers a "Scroll to end"
+/// pill centered over its bottom edge, and the pill returns to the end.
+#[gpui::test]
+fn scroll_to_end_is_a_centered_pill_like_the_web(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    cx.simulate_resize(size(px(900.0), px(600.0)));
+    chat.update(cx, |chat, cx| {
+        chat.messages = (0..40)
+            .map(|n| super::super::Message::user(format!("Message {n}\nwith a second line")))
+            .collect();
+        chat.scroll_messages_to_bottom();
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-scroll-to-bottom").is_none());
+
+    cx.simulate_event(ScrollWheelEvent {
+        position: point(px(450.0), px(250.0)),
+        delta: ScrollDelta::Pixels(point(px(0.0), px(4_000.0))),
+        ..Default::default()
+    });
+    cx.run_until_parked();
+    let pill = cx
+        .debug_bounds("desktop-scroll-to-bottom")
+        .expect("the pill shows once the transcript leaves its end");
+    assert_eq!(pill.size.height, px(28.0));
+    assert!(
+        (pill.center().x - px(450.0)).abs() < px(1.0),
+        "the pill is centered, not in a corner"
+    );
+
+    cx.simulate_click(pill.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-scroll-to-bottom").is_none(),
+        "the pill returns to the end"
+    );
+}
+
+/// Like web, the options panel's Context section leads with the meter: a
+/// 28px ring and "N% used" for the latest reply's window, against the
+/// window of the model that wrote it.
+#[gpui::test]
+fn composer_options_show_the_context_meter_like_the_web(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    chat.update_in(cx, |chat, window, cx| {
+        let mut reply =
+            super::super::Message::assistant_streaming(1, Some("claude-sonnet-4-6".into()));
+        reply.content = "Done".into();
+        reply.usage = Some(bruhs_core::UsageInfo {
+            context_tokens: Some(84_000),
+            ..Default::default()
+        });
+        chat.messages = vec![super::super::Message::user("Hi"), reply];
+        chat.open_composer_options(window, cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let meter = cx
+        .debug_bounds("desktop-context-meter")
+        .expect("the meter leads the Context section");
+    assert_eq!((meter.size.width, meter.size.height), (px(28.0), px(28.0)));
+    chat.read_with(cx, |chat, _| {
+        let reading = chat.latest_context_reading().expect("a reading");
+        assert_eq!(reading.label(), "Context window, 42%, 84k of 200k");
+        assert_eq!(reading.used_label(), "42% used");
+    });
+}

@@ -2932,8 +2932,14 @@ fn desktop_thread_menu_custom_snooze_should_match_web(cx: &mut gpui::TestAppCont
     open_thread_menu_by_pointer(cx, &general_id);
     click_debug_selector(cx, "desktop-thread-menu-custom");
     cx.run_until_parked();
-    assert_rendered_bounds(cx, "desktop-snooze-custom");
-    assert_rendered_bounds(cx, "desktop-snooze-until-picker");
+    let dialog = rendered_bounds(cx, "desktop-snooze-custom");
+    let picker = rendered_bounds(cx, "desktop-snooze-until-picker");
+    // Like web, the trigger fits its text instead of spanning the field.
+    assert!(
+        picker.size.width < dialog.size.width / 2.0,
+        "the date trigger fits its text"
+    );
+    assert_eq!(f32::from(picker.size.height), theme::CONTROL_PX);
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.thread_menu_id, None, "the menu closes");
         assert_eq!(
@@ -3512,6 +3518,53 @@ fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::Test
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert_eq!(workspace.active_view, AppView::Automations);
     });
+}
+
+/// Like the web, each capture destination shows its icon above its label.
+#[gpui::test]
+fn desktop_capture_kinds_should_show_their_icons_above_the_labels(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        theme::apply_bruhs_theme(cx);
+        let state = DesktopState::new().expect("desktop state should initialize");
+        cx.set_global(state);
+    });
+    let workspace_cell: Rc<RefCell<Option<Entity<Workspace>>>> = Rc::new(RefCell::new(None));
+    let workspace_for_window = workspace_cell.clone();
+    let (_root, cx) = cx.add_window_view(|window, cx| {
+        let workspace = cx.new(|cx| Workspace::new(window, cx));
+        *workspace_for_window.borrow_mut() = Some(workspace.clone());
+        gpui_component::Root::new(workspace, window, cx)
+    });
+    let workspace = workspace_cell
+        .borrow()
+        .clone()
+        .expect("workspace entity should be captured");
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.open_capture_dialog(&super::OpenCapture, window, cx);
+    });
+    cx.run_until_parked();
+    for kind in bruhs_models::CaptureKind::ALL {
+        let name = kind.label().to_lowercase();
+        let tab = rendered_bounds(
+            cx,
+            leaked_debug_selector(format!("desktop-capture-kind-{name}")),
+        );
+        let icon = rendered_bounds(
+            cx,
+            leaked_debug_selector(format!("desktop-capture-kind-{name}-icon")),
+        );
+        assert_eq!(f32::from(icon.size.width), theme::ICON_INLINE_PX, "{name}");
+        assert!(
+            (icon.center().x - tab.center().x).abs() < px(1.0),
+            "{name}'s icon is centered"
+        );
+        assert!(
+            icon.center().y < tab.center().y,
+            "{name}'s icon sits above its label"
+        );
+    }
 }
 
 #[gpui::test]
@@ -6697,6 +6750,20 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
     });
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-sidebar-update");
+    // Like web, its loader stays still with reduced motion (the default
+    // until the system says otherwise) and turns with full motion.
+    assert_rendered_bounds(cx, "desktop-sidebar-update-spinner-static");
+    workspace.update_in(cx, |_workspace, _window, cx| {
+        crate::motion::set_reduced_motion(false, cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-sidebar-update-spinner-animated");
+    assert_no_rendered_bounds(cx, "desktop-sidebar-update-spinner-static");
+    workspace.update_in(cx, |_workspace, _window, cx| {
+        crate::motion::set_reduced_motion(true, cx);
+        cx.notify();
+    });
 
     // A failed run stays until dismissed.
     seed(

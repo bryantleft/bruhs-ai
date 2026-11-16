@@ -8,7 +8,6 @@ use leptos::html::{Button, Div};
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-use crate::format::{context_percentage, context_window_for};
 use crate::stash::stash_preview;
 use crate::state::{
     ChipRetargetGuard, ClaudeEffortSignal, CompactFullSignal, ComposerChips, CurrentModel,
@@ -17,6 +16,7 @@ use crate::state::{
 };
 use crate::ui::dialog::focusable_descendants;
 use crate::ui::Icon;
+use bruhs_models::logic::context_meter::ContextReading;
 
 const ACTION: &str = "bruhs-control inline-flex min-h-[32px] items-center justify-center gap-2 rounded-seed px-2 text-label-sm text-rambutan-300 hover:bg-longan-800/60 hover:text-rambutan-100 disabled:opacity-50 disabled:cursor-not-allowed";
 const ROW: &str = "bruhs-control flex min-h-[32px] w-full items-center justify-between gap-2 rounded-seed px-2 text-left text-label-sm text-rambutan-300 hover:bg-longan-800/60 hover:text-rambutan-100 disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:bg-transparent disabled:hover:text-rambutan-300";
@@ -188,8 +188,8 @@ pub(super) fn ComposerOptions(
                         <section aria-label="Context">
                             <h3 class="mb-1 px-2 text-label-sm text-rambutan-500">"Context"</h3>
                             {move || last_usage.get().map(|(usage, used_model)| {
-                                let percentage = context_percentage(context_usage(&usage), context_window_for(&used_model));
-                                view! { <div class="mb-1 flex items-center gap-2 px-2 text-label-sm text-rambutan-400"><ContextMeter usage=usage model=used_model /><span>{format!("{percentage:.0}% used")}</span></div> }
+                                let used = ContextReading::new(context_usage(&usage), &used_model).used_label();
+                                view! { <div class="mb-1 flex items-center gap-2 px-2 text-label-sm text-rambutan-400"><ContextMeter usage=usage model=used_model /><span>{used}</span></div> }
                             })}
                             <button type="button" class=ROW disabled=move || !provider_can_steer(provider_for_model_id(&model.get()))
                                 on:click=move |_| { open.set(false); on_slash.run("/compact"); }><span>"Compact thread"</span></button>
