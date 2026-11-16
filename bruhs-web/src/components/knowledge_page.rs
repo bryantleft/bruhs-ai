@@ -1,6 +1,7 @@
 //! Local-first knowledge library: lightweight Markdown documents, source
 //! clips, typed links, citations, backlinks, attachments, and version history.
 
+use bruhs_models::logic::knowledge_library::{self as library, source_host};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_models::{
     backlinks_for, KnowledgeAttachment, KnowledgeCitation, KnowledgeDocument, KnowledgeLink,
@@ -18,7 +19,6 @@ use crate::storage;
 use crate::ui::{Dialog, DropdownOption, Icon, Input, Textarea};
 
 const MAX_ATTACHMENT_BYTES: u64 = 10 * 1024 * 1024;
-mod library;
 mod record_picker;
 use record_picker::RecordPicker;
 
@@ -1041,32 +1041,6 @@ fn parse_link_value(value: &str) -> Option<(KnowledgeLinkKind, String)> {
     Some((kind, id.to_string()))
 }
 
-fn document_preview(markdown: &str) -> String {
-    markdown
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map_or_else(
-            || "Empty document".to_string(),
-            |line| {
-                line.trim_start_matches('#')
-                    .trim()
-                    .chars()
-                    .take(100)
-                    .collect()
-            },
-        )
-}
-
-fn source_host(url: &str) -> String {
-    url.trim()
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split('/')
-        .next()
-        .unwrap_or(url)
-        .to_string()
-}
-
 fn format_bytes(bytes: u64) -> String {
     if bytes >= 1_048_576 {
         format!("{:.1} MB", bytes.to_f64_lossy() / 1_048_576.0)
@@ -1139,11 +1113,5 @@ mod tests {
             let value = link_option(kind, "id".into(), "Label".into()).value;
             assert_eq!(parse_link_value(&value), Some((kind, "id".into())));
         }
-    }
-
-    #[test]
-    fn previews_strip_heading_markers() {
-        assert_eq!(document_preview("\n## Decision\nBody"), "Decision");
-        assert_eq!(document_preview(""), "Empty document");
     }
 }

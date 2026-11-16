@@ -1360,6 +1360,8 @@ pub struct Workspace {
     clip_published_input: Entity<InputState>,
     clip_tags_input: Entity<InputState>,
     clip_excerpt_input: Entity<InputState>,
+    /// The Knowledge library's search.
+    knowledge: knowledge_ui::KnowledgeState,
     clip_create_visible: bool,
     inbox_import_visible: bool,
     inbox_mail_visible: bool,
@@ -1511,6 +1513,7 @@ impl Workspace {
             clip_tags_input,
             clip_excerpt_input,
         } = Self::new_knowledge_inputs(window, cx, &mut subscriptions);
+        let knowledge = knowledge_ui::KnowledgeState::new(window, cx, &mut subscriptions);
         let inbox_ui::InboxInputs {
             inbox_search_input,
             inbox_sender_input,
@@ -2028,6 +2031,7 @@ impl Workspace {
             clip_published_input,
             clip_tags_input,
             clip_excerpt_input,
+            knowledge,
             clip_create_visible: false,
             inbox_import_visible: false,
             inbox_mail_visible: false,
