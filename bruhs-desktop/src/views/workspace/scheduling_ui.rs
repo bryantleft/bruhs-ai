@@ -252,24 +252,56 @@ impl Workspace {
             .iter()
             .enumerate()
             .map(|(index, link)| {
+                let click_slug = link.slug.clone();
+                let key_slug = link.slug.clone();
+                // Web: the row's `#/book/{slug}` is a link to the booking page.
                 div()
                     .id(("desktop-scheduling-link", index))
                     .rounded(px(4.0))
                     .bg(theme::longan_900().opacity(0.55))
-                    .px_2()
-                    .py_1()
+                    .px(px(10.0))
+                    .py_2()
                     .flex()
+                    .items_center()
                     .justify_between()
+                    .gap_2()
                     .child(
                         div()
-                            .text_size(px(12.0))
+                            .min_w_0()
+                            .truncate()
+                            .text_size(px(13.0))
                             .text_color(theme::rambutan_300())
                             .child(format!("{}, {} min", link.title, link.duration_minutes)),
                     )
                     .child(
                         div()
-                            .text_size(px(10.0))
-                            .text_color(theme::blueberry_400())
+                            .id(("desktop-scheduling-link-open", index))
+                            .debug_selector(move || format!("desktop-scheduling-link-open-{index}"))
+                            .flex_shrink_0()
+                            .text_size(px(12.0))
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .text_color(theme::blueberry_300())
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .rounded(px(4.0))
+                            .role(Role::Link)
+                            .aria_label(format!("Open the booking page for {}", link.title))
+                            .tab_index(0)
+                            .cursor_pointer()
+                            .hover(|el| el.text_color(theme::blueberry_200()))
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .on_click(cx.listener(move |this, _ev, window, cx| {
+                                this.open_booking_page(click_slug.clone(), window, cx);
+                            }))
+                            .on_key_down(cx.listener(
+                                move |this, event: &KeyDownEvent, window, cx| {
+                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                                        window.prevent_default();
+                                        cx.stop_propagation();
+                                        this.open_booking_page(key_slug.clone(), window, cx);
+                                    }
+                                },
+                            ))
                             .child(format!("#/book/{}", link.slug)),
                     )
                     .into_any_element()

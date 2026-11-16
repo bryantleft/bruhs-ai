@@ -731,3 +731,83 @@ fn knowledge_record_picker_searches_and_adds_like_web(cx: &mut TestAppContext) {
         assert_eq!(cited, Some("Survey"), "Down moved to the second source");
     });
 }
+
+/// PARITY-02: like web's `#/book/{slug}`, the scheduling panel's link opens
+/// a booking page of its own (no sidebar or top bar) that offers the link's
+/// free times, books one as a local event widened by the link's buffers,
+/// and says so; a missing link says it is unavailable.
+#[gpui::test]
+fn booking_page_books_a_local_event_like_web(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    let slug = workspace.update_in(cx, |workspace, window, cx| {
+        let mut link = bruhs_models::SchedulingLink::new("Intro call", 30);
+        link.buffer_before_minutes = 10;
+        link.buffer_after_minutes = 5;
+        let slug = link.slug.clone();
+        workspace.scheduling_preferences.availability[0].weekdays = (0..=6).collect();
+        workspace.scheduling_preferences.links = vec![link];
+        workspace.open_booking_page(slug.clone(), window, cx);
+        slug
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-booking-page").is_some());
+    assert!(cx.debug_bounds("desktop-booking-title").is_some());
+    assert!(
+        cx.debug_bounds("desktop-workspace-sidebar").is_none(),
+        "the booking page has no sidebar"
+    );
+    let first = cx
+        .debug_bounds("desktop-booking-slot-0")
+        .expect("the link offers a free time");
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .booking
+            .name
+            .update(cx, |input, cx| input.set_value("Ada", window, cx));
+    });
+    cx.simulate_click(first.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-booking-status").is_some());
+    assert!(cx.debug_bounds("desktop-booking-slot-0").is_none());
+    workspace.read_with(cx, |workspace, _| {
+        let event = workspace
+            .calendar_events
+            .iter()
+            .find(|event| event.title == "Intro call, Ada")
+            .expect("the booking is a local event");
+        assert_eq!(event.color.as_deref(), Some("persimmon"));
+        assert!(event.provider.is_none(), "booked locally");
+        assert_eq!(
+            (event.end_at - event.start_at).num_minutes(),
+            45,
+            "the meeting plus both buffers"
+        );
+        assert!(event
+            .notes
+            .as_deref()
+            .is_some_and(|notes| notes.starts_with(&format!("Booked locally via #/book/{slug}"))));
+        // It saves and restores like any local event, so a restart keeps it.
+        let offset = crate::views::meetings_hub::local_offset_minutes_east;
+        let restored = super::persistence::restore_calendar_event(
+            super::persistence::persisted_calendar_event(event, offset),
+            offset,
+        )
+        .expect("the booking restores");
+        assert_eq!(
+            (restored.title.as_str(), restored.start_at, restored.end_at),
+            (event.title.as_str(), event.start_at, event.end_at)
+        );
+    });
+
+    let back = cx
+        .debug_bounds("desktop-booking-back")
+        .expect("the back link");
+    cx.simulate_click(back.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, window, cx| {
+        assert_eq!(workspace.active_view, AppView::Calendar);
+        workspace.open_booking_page("missing".into(), window, cx);
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-booking-unavailable").is_some());
+}

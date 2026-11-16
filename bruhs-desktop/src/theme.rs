@@ -251,6 +251,11 @@ pub fn blueberry_200() -> Hsla {
     rgb(0xbfddff).into()
 }
 
+/// blueberry-300 — Links and booking times (bruhs `oklch(83.6% .098 257.89)`)
+pub fn blueberry_300() -> Hsla {
+    rgb(0xa1cbff).into()
+}
+
 /// blueberry-400 — Informational
 pub fn blueberry_400() -> Hsla {
     rgb(0x5b9adf).into()

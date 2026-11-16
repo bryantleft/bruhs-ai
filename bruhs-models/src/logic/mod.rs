@@ -6,6 +6,7 @@
 //! catalog and provider routing in [`crate::agent`].
 
 pub mod attachments;
+pub mod booking;
 pub mod branch_pull;
 pub mod commands;
 pub mod compact;
