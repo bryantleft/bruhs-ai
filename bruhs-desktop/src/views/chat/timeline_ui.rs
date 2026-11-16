@@ -589,7 +589,11 @@ impl ChatView {
             .on_click(cx.listener(move |_, _, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
             }))
-            .child(icon(assets::COPY_ICON_PATH, 12.0, theme::rambutan_500()))
+            .child(icon(
+                assets::COPY_ICON_PATH,
+                theme::ICON_PX,
+                theme::rambutan_500(),
+            ))
     }
 
     // ── Assistant turn ───────────────────────────────────────────────────

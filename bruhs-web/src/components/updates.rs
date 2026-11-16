@@ -77,7 +77,7 @@ pub fn SidebarUpdateButton() -> impl IntoView {
                             class=format!("{PILL} {PILL_INFO}")
                             on:click=move |_| open_settings()
                         >
-                            <Icon name="loader" size=14 class="shrink-0 motion-safe:animate-spin" />
+                            <Icon name="loader" size=16 class="shrink-0 motion-safe:animate-spin" />
                             <span class="min-w-0 flex-1 truncate">{running_label(&active).unwrap_or_default()}</span>
                         </button>
                     }
@@ -104,9 +104,9 @@ pub fn SidebarUpdateButton() -> impl IntoView {
                                 on:click=move |_| open_settings()
                             >
                                 {if failed {
-                                    view! { <Icon name="alert-triangle" size=14 class="shrink-0" /> }.into_any()
+                                    view! { <Icon name="alert-triangle" size=16 class="shrink-0" /> }.into_any()
                                 } else {
-                                    view! { <Icon name="check" size=14 class="shrink-0 text-pandan-400" /> }.into_any()
+                                    view! { <Icon name="check" size=16 class="shrink-0 text-pandan-400" /> }.into_any()
                                 }}
                                 <span class="min-w-0 flex-1 truncate">{run.pill_label()}</span>
                             </button>
@@ -118,7 +118,7 @@ pub fn SidebarUpdateButton() -> impl IntoView {
                                     class="inline-flex size-6 shrink-0 items-center justify-center rounded-seed hover:bg-longan-800/60"
                                     on:click=move |_| updates.dismiss(id)
                                 >
-                                    <Icon name="x" size=12 />
+                                    <Icon name="x" size=16 />
                                 </button>
                             })}
                             {(!failed).then(|| view! {
@@ -150,7 +150,7 @@ pub fn SidebarUpdateButton() -> impl IntoView {
                                     }
                                 }
                             >
-                                <Icon name="download" size=14 class="shrink-0" />
+                                <Icon name="download" size=16 class="shrink-0" />
                                 <span class="min-w-0 flex-1 truncate">{sidebar_label(&report)}</span>
                                 {(count > 1).then(|| view! {
                                     <span class="text-label-sm text-persimmon-300/80">{count.to_string()}</span>

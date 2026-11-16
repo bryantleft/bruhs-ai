@@ -28,8 +28,10 @@ const HEADER_TEXT_SIZE_PX: f32 = 12.0;
 const TAB_HEIGHT_PX: f32 = theme::CONTROL_XS_PX;
 const TAB_MAX_WIDTH_PX: f32 = 160.0;
 const TAB_RADIUS_PX: f32 = 4.0;
+/// Icons beside the 12px header and menu text.
 const ICON_SIZE_PX: f32 = 12.0;
-const CLOSE_ICON_SIZE_PX: f32 = 10.0;
+/// The X in the tab and drawer close buttons.
+const CLOSE_ICON_SIZE_PX: f32 = theme::ICON_PX;
 const MENU_WIDTH_PX: f32 = 280.0;
 const MENU_ROW_HEIGHT_PX: f32 = 28.0;
 const EMPTY_TEXT_SIZE_PX: f32 = 13.0;
@@ -375,7 +377,7 @@ impl TerminalPanelView {
                 div()
                     .id(ElementId::Name(format!("terminal-tab-close-{key}").into()))
                     .debug_selector(move || format!("desktop-terminal-tab-close-{key}"))
-                    .size(px(16.0))
+                    .size(px(theme::CONTROL_XS_PX))
                     .rounded(px(3.0))
                     .flex()
                     .items_center()
@@ -684,7 +686,7 @@ impl TerminalPanelView {
                         .child(
                             svg()
                                 .path(assets::CLOSE_ICON_PATH)
-                                .size(px(ICON_SIZE_PX))
+                                .size(px(CLOSE_ICON_SIZE_PX))
                                 .text_color(theme::rambutan_400()),
                         ),
                 )

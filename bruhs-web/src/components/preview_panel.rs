@@ -198,7 +198,7 @@ pub fn PreviewPanel() -> impl IntoView {
                     disabled=move || url.get().is_none()
                     on:click=move |_| nonce.update(|n| *n += 1)
                 >
-                    <Icon name="refresh-cw" size=13 />
+                    <Icon name="refresh-cw" size=16 />
                 </button>
                 <button
                     type="button"
@@ -208,7 +208,7 @@ pub fn PreviewPanel() -> impl IntoView {
                     disabled=move || url.get().is_none()
                     on:click=move |_| open_external()
                 >
-                    <Icon name="globe" size=13 />
+                    <Icon name="globe" size=12 />
                     <span aria-hidden="true">"↗"</span>
                 </button>
                 <button
@@ -219,7 +219,7 @@ pub fn PreviewPanel() -> impl IntoView {
                     disabled=move || url.get().is_none()
                     on:click=move |_| clear()
                 >
-                    <Icon name="x" size=13 />
+                    <Icon name="x" size=16 />
                 </button>
             </form>
 
@@ -257,7 +257,7 @@ pub fn PreviewPanel() -> impl IntoView {
                                         class="inline-flex size-6 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 cursor-pointer"
                                         on:click=move |_| load_servers()
                                     >
-                                        <Icon name="refresh-cw" size=12 />
+                                        <Icon name="refresh-cw" size=16 />
                                     </button>
                                 </div>
                                 {move || {

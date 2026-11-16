@@ -232,7 +232,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
                 <div class="border-b border-longan-800/50 px-4 py-2">
                     <button type="button" class="bruhs-control flex min-h-control w-full items-center gap-2 rounded-grape px-2 text-label-sm text-rambutan-300 hover:bg-longan-800/50"
                         on:click=move |_| clear_project()>
-                        <Icon name="message-square" size=14 />
+                        <Icon name="message-square" size=12 />
                         "No project"
                     </button>
                 </div>
@@ -256,7 +256,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
                                 class="flex w-full items-center gap-2 truncate rounded-grape px-2 py-1.5 text-left text-label-sm text-rambutan-400 hover:bg-longan-800/50 hover:text-rambutan-200 transition-colors cursor-pointer"
                             >
                                 <span class="shrink-0 text-rambutan-500">
-                                    <Icon name="folder" />
+                                    <Icon name="folder" size=12 />
                                 </span>
                                 <span class="truncate">{p.path}</span>
                             </button>
@@ -323,7 +323,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
                                         class="flex w-full items-center gap-2 px-4 py-2 text-label-sm text-rambutan-400 hover:bg-longan-800/40 hover:text-rambutan-200 transition-colors cursor-pointer"
                                     >
                                         <span class="shrink-0 text-rambutan-500">
-                                            <Icon name="folder" />
+                                            <Icon name="folder" size=12 />
                                         </span>
                                         <span class="truncate">{d.name}</span>
                                     </button>

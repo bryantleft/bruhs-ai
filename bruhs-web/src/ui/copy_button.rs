@@ -72,9 +72,9 @@ pub fn CopyButton(
         >
             {move || {
                 if copied.get() {
-                    view! { <Icon name="check" size=12 class="text-pandan-400" /> }
+                    view! { <Icon name="check" size=16 class="text-pandan-400" /> }
                 } else {
-                    view! { <Icon name="copy" size=12 /> }
+                    view! { <Icon name="copy" size=16 /> }
                 }
             }}
         </button>

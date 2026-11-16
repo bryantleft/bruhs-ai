@@ -46,7 +46,8 @@ const HOVER_BG_OPACITY: f32 = 0.50;
 
 actions!(diff_panel, [FindInDiff]);
 const EMPTY_TEXT_SIZE_PX: f32 = 12.0;
-const ICON_SIZE_PX: f32 = 14.0;
+/// Icons in the toolbar's 28px actions.
+const ICON_SIZE_PX: f32 = theme::ICON_PX;
 
 const REFRESH_LABEL: &str = "Refresh diff";
 const OPEN_LABEL: &str = "Open in editor";
@@ -1148,7 +1149,7 @@ impl DiffPanelView {
                     .child(
                         svg()
                             .path(assets::CLOSE_ICON_PATH)
-                            .size(px(14.0))
+                            .size(px(theme::ICON_PX))
                             .text_color(theme::rambutan_400()),
                     ),
             )

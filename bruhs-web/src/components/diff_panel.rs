@@ -559,7 +559,7 @@ pub fn DiffPanel() -> impl IntoView {
                     class=move || icon_btn(wrap.get())
                     on:click=move |_| wrap.update(|w| *w = !*w)
                 >
-                    <Icon name="wrap-text" size=14 />
+                    <Icon name="wrap-text" size=16 />
                 </button>
                 {move || is_tree.get().then(|| view! {
                     <button
@@ -569,7 +569,7 @@ pub fn DiffPanel() -> impl IntoView {
                         class=icon_btn(false)
                         on:click=move |_| reload()
                     >
-                        <Icon name="refresh-cw" size=14 />
+                        <Icon name="refresh-cw" size=16 />
                     </button>
                 })}
             </div>

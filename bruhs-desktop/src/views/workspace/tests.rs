@@ -5324,7 +5324,7 @@ fn desktop_project_picker_typography_should_match_web_reference() {
     assert_eq!(PROJECT_PICKER_LABEL_FONT_FAMILY, "Monaspace Argon");
     assert_eq!(PROJECT_PICKER_PATH_FONT_FAMILY, "Monaspace Neon");
     assert_eq!(PROJECT_PICKER_ROW_RADIUS_PX, 8.0);
-    assert_eq!(PROJECT_PICKER_ICON_SIZE_PX, 14.0);
+    assert_eq!(PROJECT_PICKER_ICON_SIZE_PX, theme::ICON_XS_PX);
     assert_eq!(PROJECT_PICKER_PARENT_ICON_SLOT_WIDTH_PX, 14.0);
     assert_eq!(PROJECT_PICKER_CONTENT_MAX_HEIGHT_PX, 288.0);
     assert_eq!(PROJECT_PICKER_LABEL_TEXT_SIZE_PX, 12.0);
@@ -5739,7 +5739,7 @@ fn desktop_project_sidebar_copy_should_match_web_reference() {
     assert_eq!(PROJECT_SIDEBAR_FOOTER_Y_PADDING_PX, 8.0);
     assert_eq!(PROJECT_SIDEBAR_FOOTER_BORDER_OPACITY, 0.50);
     assert_eq!(PROJECT_SIDEBAR_FOOTER_HOVER_BORDER_OPACITY, 0.50);
-    assert_eq!(PROJECT_SIDEBAR_DELETE_ICON_SIZE_PX, 14.0);
+    assert_eq!(PROJECT_SIDEBAR_DELETE_ICON_SIZE_PX, theme::ICON_PX);
     assert_eq!(PROJECT_SIDEBAR_ROW_ACTION_RADIUS_PX, 4.0);
     assert_eq!(PROJECT_SIDEBAR_ROW_ACTION_PADDING_PX, 2.0);
     assert_eq!(PROJECT_SIDEBAR_ROW_ACTION_HOVER_BG_OPACITY, 0.50);
@@ -5789,7 +5789,7 @@ fn desktop_dialog_metrics_should_match_web_reference() {
     assert_eq!(DESKTOP_MODAL_FOCUS_START_TAB_INDEX, 0);
     assert_eq!(DESKTOP_MODAL_FOCUS_END_TAB_INDEX, 999);
     assert_eq!(SETTINGS_CODE_FONT_FAMILY, "Monaspace Neon");
-    assert_eq!(SETTINGS_CLOSE_BUTTON_SIZE_PX, 32.0);
+    assert_eq!(SETTINGS_CLOSE_BUTTON_SIZE_PX, theme::CONTROL_SM_PX);
     assert_eq!(SETTINGS_CONTROL_RADIUS_PX, 8.0);
     assert_eq!(SETTINGS_BODY_X_PADDING_PX, 24.0);
     assert_eq!(SETTINGS_BODY_Y_PADDING_PX, 20.0);

@@ -7,6 +7,8 @@ use wasm_bindgen::JsCast;
 
 use bruhs_models::logic::find::cycle;
 
+use crate::ui::Icon;
+
 /// Bumped by the shell on `Cmd+F`. `0` means the user has not asked yet.
 /// The open flags are shared so Escape in the shell can close the bar
 /// when focus has left the input.
@@ -118,10 +120,10 @@ pub fn FindBar(
             <button
                 type="button"
                 aria-label="Close find"
-                class="inline-flex size-6 items-center justify-center rounded-seed text-rambutan-400 hover:bg-longan-800/60 hover:text-rambutan-100"
+                class="inline-flex size-control-xs items-center justify-center rounded-seed text-rambutan-400 hover:bg-longan-800/60 hover:text-rambutan-100"
                 on:click=move |_| open.set(false)
             >
-                "×"
+                <Icon name="x" size=16 />
             </button>
         </div>
     }

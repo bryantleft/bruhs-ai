@@ -162,7 +162,7 @@ pub fn RightPanel() -> impl IntoView {
                     class="inline-flex size-6 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100"
                     on:click=move |_| close()
                 >
-                    <Icon name="x" size=14 />
+                    <Icon name="x" size=16 />
                 </button>
             </div>
 

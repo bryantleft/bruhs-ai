@@ -448,7 +448,7 @@ impl ChatView {
                             el.child(
                                 svg()
                                     .path(assets::CHECK_ICON_PATH)
-                                    .size(px(14.0))
+                                    .size(px(theme::ICON_PX))
                                     .text_color(theme::rambutan_100())
                                     .flex_shrink_0(),
                             )
@@ -501,7 +501,7 @@ impl ChatView {
                     .child(
                         svg()
                             .path(assets::BOT_ICON_PATH)
-                            .size(px(14.0))
+                            .size(px(theme::ICON_PX))
                             .text_color(theme::rambutan_400())
                             .flex_shrink_0(),
                     )
@@ -575,7 +575,7 @@ impl ChatView {
                     .child(
                         svg()
                             .path(assets::TOOL_SEARCH_ICON_PATH)
-                            .size(px(14.0))
+                            .size(px(theme::ICON_PX))
                             .text_color(theme::rambutan_400())
                             .flex_shrink_0(),
                     )

@@ -71,9 +71,10 @@ pub(super) fn clamp_right_panel_width(requested: f32, viewport_width: f32) -> f3
 }
 /// Matches the chat and sidebar header heights.
 pub(super) const WORKSPACE_PANEL_TAB_BAR_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
-pub(super) const WORKSPACE_PANEL_TAB_HEIGHT_PX: f32 = theme::CONTROL_SM_PX;
+pub(super) const WORKSPACE_PANEL_TAB_HEIGHT_PX: f32 = theme::CONTROL_XS_PX;
 pub(super) const WORKSPACE_PANEL_TAB_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const WORKSPACE_PANEL_TAB_ICON_SIZE_PX: f32 = 14.0;
+/// Tab icons, beside the tabs' 12px labels.
+pub(super) const WORKSPACE_PANEL_TAB_ICON_SIZE_PX: f32 = theme::ICON_XS_PX;
 
 impl Workspace {
     pub(super) fn right_panel_open(&self) -> bool {
@@ -631,7 +632,7 @@ impl Workspace {
                             .child(
                                 svg()
                                     .path(assets::CLOSE_ICON_PATH)
-                                    .size(px(14.0))
+                                    .size(px(theme::ICON_PX))
                                     .text_color(theme::rambutan_400()),
                             ),
                     ),
@@ -1176,7 +1177,7 @@ impl Workspace {
                         .child(
                             svg()
                                 .path(icon)
-                                .size(px(14.0))
+                                .size(px(theme::ICON_XS_PX))
                                 .text_color(theme::rambutan_400())
                                 .flex_shrink_0(),
                         )

@@ -18,7 +18,8 @@ use crate::{assets, theme};
 
 const HEADER_HEIGHT_PX: f32 = 40.0;
 const HEADER_TEXT_SIZE_PX: f32 = 12.0;
-const ICON_SIZE_PX: f32 = 13.0;
+/// Icons in the header's icon buttons.
+const ICON_SIZE_PX: f32 = theme::ICON_PX;
 const EMPTY_TEXT_SIZE_PX: f32 = 13.0;
 const EMPTY_HINT_TEXT_SIZE_PX: f32 = 12.0;
 const EMPTY_LIST_WIDTH_PX: f32 = 320.0;

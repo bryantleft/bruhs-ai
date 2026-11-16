@@ -318,7 +318,7 @@ fn pill(id: &'static str, (bg, border, text): Tone) -> Stateful<Div> {
         .border_color(border)
         .bg(bg)
         .text_color(text)
-        .text_size(px(14.0))
+        .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
         .flex()
         .items_center()
         .gap(px(8.0))
@@ -410,7 +410,7 @@ impl Workspace {
                     }))
                     .child(icon_svg(
                         assets::REFRESH_ICON_PATH,
-                        14.0,
+                        theme::ICON_PX,
                         theme::rambutan_300(),
                     ))
                     .child(
@@ -462,9 +462,13 @@ impl Workspace {
                             this.open_updates_settings(window, cx);
                         }))
                         .child(if failed {
-                            icon_svg(assets::ALERT_TRIANGLE_ICON_PATH, 14.0, theme::lychee_200())
+                            icon_svg(
+                                assets::ALERT_TRIANGLE_ICON_PATH,
+                                theme::ICON_PX,
+                                theme::lychee_200(),
+                            )
                         } else {
-                            icon_svg(assets::CHECK_ICON_PATH, 14.0, theme::pandan_400())
+                            icon_svg(assets::CHECK_ICON_PATH, theme::ICON_PX, theme::pandan_400())
                         })
                         .child(div().flex_1().min_w_0().truncate().child(run.pill_label())),
                 )
@@ -505,7 +509,11 @@ impl Workspace {
                                 this.updates
                                     .update(cx, |updates, cx| updates.dismiss(id, cx));
                             }))
-                            .child(icon_svg(assets::CLOSE_ICON_PATH, 12.0, theme::lychee_200())),
+                            .child(icon_svg(
+                                assets::CLOSE_ICON_PATH,
+                                theme::ICON_PX,
+                                theme::lychee_200(),
+                            )),
                     )
                 })
                 .into_any_element()
@@ -540,7 +548,7 @@ impl Workspace {
                     }))
                     .child(icon_svg(
                         assets::REFRESH_ICON_PATH,
-                        14.0,
+                        theme::ICON_PX,
                         theme::persimmon_200(),
                     ))
                     .child(
@@ -583,7 +591,7 @@ impl Workspace {
                     }))
                     .child(icon_svg(
                         assets::DOWNLOAD_ICON_PATH,
-                        14.0,
+                        theme::ICON_PX,
                         theme::persimmon_200(),
                     ))
                     .child(div().flex_1().min_w_0().truncate().child(label))
@@ -1321,12 +1329,16 @@ fn copy_button(
         WebButtonSize::IconSmall,
         ButtonState::Enabled,
     )
+    // A row action, like the web's copy button (`size-control-xs`).
+    .min_w(px(theme::CONTROL_XS_PX))
+    .min_h(px(theme::CONTROL_XS_PX))
+    .size(px(theme::CONTROL_XS_PX))
     .debug_selector(move || id.to_string())
     .aria_label(label)
     .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
     .child(icon_svg(
         assets::COPY_ICON_PATH,
-        12.0,
+        theme::ICON_PX,
         theme::rambutan_500(),
     ))
     .on_click(cx.listener(move |_, _, _, cx| {
