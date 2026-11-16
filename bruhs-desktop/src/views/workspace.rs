@@ -197,7 +197,8 @@ actions!(
         ImportThread,
         CopyResumeCommand,
         CopyThreadMarkdown,
-        ContinueInT3
+        ContinueInT3,
+        ContinueInWorkbench
     ]
 );
 
@@ -2950,6 +2951,7 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::copy_resume_command_action))
             .on_action(cx.listener(Self::copy_thread_markdown_action))
             .on_action(cx.listener(Self::continue_in_t3_action))
+            .on_action(cx.listener(Self::continue_in_workbench_action))
             .size_full()
             .relative()
             .bg(cx.theme().background)
