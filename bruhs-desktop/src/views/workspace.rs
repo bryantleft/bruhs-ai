@@ -1220,6 +1220,8 @@ pub struct Workspace {
     keybinding_installed: Vec<keybindings_ui::InstalledBinding>,
     /// Thread whose action menu is open.
     thread_menu_id: Option<String>,
+    /// Focus targets for the thread menu's items (`ThreadMenuItem` slots).
+    thread_menu_items: Rc<[FocusHandle]>,
     sidebar_undo: Option<SidebarUndo>,
     sidebar_undo_generation: u32,
     threads: Vec<DesktopThread>,
@@ -1881,6 +1883,9 @@ impl Workspace {
             keybinding_when_input,
             keybinding_installed: keybindings_ui::startup_bindings(),
             thread_menu_id: None,
+            thread_menu_items: (0..sidebar_ui::THREAD_MENU_MAX_ITEMS)
+                .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
+                .collect(),
             sidebar_undo: None,
             sidebar_undo_generation: 0,
             threads,
@@ -2630,6 +2635,25 @@ impl Render for Workspace {
             }
         }
         let compact = Self::compact_layout(window);
+        // The thread menu draws with its card and lives while focus is in
+        // it. When its card goes (the sidebar hid, a fold closed, a filter
+        // changed) or focus left it (a shortcut opened another surface), it
+        // closes, so its backdrop cannot swallow the next click.
+        let menu_focused = self.thread_menu_has_focus(window);
+        if self.thread_menu_id.is_some()
+            && (!menu_focused || !self.thread_menu_card_shown(compact, cx))
+        {
+            self.thread_menu_id = None;
+        }
+        // A focused item that no longer draws strands the keyboard: GPUI
+        // would dispatch from the window root, past every workspace action.
+        if self.thread_menu_id.is_none() && menu_focused {
+            cx.defer_in(window, |this, window, cx| {
+                if this.thread_menu_id.is_none() && this.thread_menu_has_focus(window) {
+                    this.workspace_focus_handle.focus(window, cx);
+                }
+            });
+        }
         // Retain filters while the same dialog is open. On close, remove them
         // from the native layers so the Metal-backed workspace stays crisp.
         if self.top_layer.is_none() && !self.overlay.as_ref().is_some_and(Overlay::blurs_backdrop) {
@@ -2926,6 +2950,34 @@ impl Render for Workspace {
                     TopLayer::ProjectPicker { .. } => self.render_project_picker(window, cx),
                     TopLayer::ImportThread => self.render_import_thread(window, cx),
                 })
+            })
+            // Web: a transparent full-window layer under the thread menu
+            // closes it, so that click does nothing else.
+            .when(self.thread_menu_id.is_some(), |el| {
+                el.child(
+                    div()
+                        .id("desktop-thread-menu-backdrop")
+                        .debug_selector(|| "desktop-thread-menu-backdrop".to_string())
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .occlude()
+                        .on_mouse_down(
+                            MouseButton::Left,
+                            cx.listener(|this, _event, window, cx| {
+                                cx.stop_propagation();
+                                this.close_thread_menu(window, cx);
+                            }),
+                        )
+                        .on_mouse_down(
+                            MouseButton::Right,
+                            cx.listener(|this, _event, window, cx| {
+                                cx.stop_propagation();
+                                this.close_thread_menu(window, cx);
+                            }),
+                        ),
+                )
             })
     }
 }

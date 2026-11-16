@@ -12,6 +12,8 @@ pub const CHECK_ICON_PATH: &str = "icons/check.svg";
 pub const ALERT_TRIANGLE_ICON_PATH: &str = "icons/alert-triangle.svg";
 pub const GIT_BRANCH_ICON_PATH: &str = "icons/git-branch.svg";
 pub const PIN_ICON_PATH: &str = "icons/pin.svg";
+/// Web `ellipsis` (lucide), the thread card's actions button.
+pub const ELLIPSIS_ICON_PATH: &str = "icons/ellipsis.svg";
 pub const FILE_DIFF_ICON_PATH: &str = "icons/file-diff.svg";
 pub const FOLDER_ICON_PATH: &str = "icons/folder.svg";
 pub const SQUARE_ICON_PATH: &str = "icons/square.svg";
@@ -142,6 +144,7 @@ const CHECK_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fi
 const ALERT_TRIANGLE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
 const GIT_BRANCH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>"#;
 const PIN_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>"#;
+const ELLIPSIS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>"#;
 const FILE_DIFF_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg>"#;
 const FOLDER_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"#;
 const SQUARE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect width="14" height="14" x="5" y="5" rx="2"/></svg>"#;
@@ -181,6 +184,7 @@ impl AssetSource for DesktopAssets {
             ALERT_TRIANGLE_ICON_PATH => Ok(Some(Cow::Borrowed(ALERT_TRIANGLE_ICON))),
             GIT_BRANCH_ICON_PATH => Ok(Some(Cow::Borrowed(GIT_BRANCH_ICON))),
             PIN_ICON_PATH => Ok(Some(Cow::Borrowed(PIN_ICON))),
+            ELLIPSIS_ICON_PATH => Ok(Some(Cow::Borrowed(ELLIPSIS_ICON))),
             FILE_DIFF_ICON_PATH => Ok(Some(Cow::Borrowed(FILE_DIFF_ICON))),
             FOLDER_ICON_PATH => Ok(Some(Cow::Borrowed(FOLDER_ICON))),
             SQUARE_ICON_PATH => Ok(Some(Cow::Borrowed(SQUARE_ICON))),
@@ -295,8 +299,8 @@ pub fn provider_logo_path(provider: AgentProvider) -> &'static str {
 mod tests {
     use super::{
         provider_logo_path, AgentProvider, DesktopAssets, ALERT_TRIANGLE_ICON_PATH,
-        CHECK_ICON_PATH, CLOSE_ICON_PATH, FOLDER_ICON_PATH, GIT_BRANCH_ICON_PATH,
-        PROVIDER_LOGO_OPACITY, PROVIDER_LOGO_SIZE_PX,
+        CHECK_ICON_PATH, CLOSE_ICON_PATH, ELLIPSIS_ICON_PATH, FOLDER_ICON_PATH,
+        GIT_BRANCH_ICON_PATH, PROVIDER_LOGO_OPACITY, PROVIDER_LOGO_SIZE_PX,
     };
     use gpui::AssetSource as _;
 
@@ -389,6 +393,15 @@ mod tests {
     #[test]
     fn folder_icon_path_should_match_web_icon_name() {
         assert_eq!(FOLDER_ICON_PATH, "icons/folder.svg");
+    }
+
+    #[test]
+    fn ellipsis_icon_should_load_like_web_icon_name() {
+        assert_eq!(ELLIPSIS_ICON_PATH, "icons/ellipsis.svg");
+        let svg = DesktopAssets.load(ELLIPSIS_ICON_PATH).unwrap().unwrap();
+        assert!(std::str::from_utf8(&svg)
+            .unwrap()
+            .contains(r#"<circle cx="19" cy="12" r="1"/>"#));
     }
 
     #[test]

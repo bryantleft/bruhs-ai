@@ -167,6 +167,29 @@ impl SidebarViewport {
         (self.start.clone(), self.end.clone())
     }
 
+    /// The card for chat `entity`'s focus targets: card, "…" button, delete.
+    #[cfg(test)]
+    pub(in crate::views::workspace) fn row_targets(
+        &self,
+        entity: EntityId,
+    ) -> Option<[FocusHandle; 3]> {
+        self.rows
+            .iter()
+            .position(|row| row.key() == RowKey::Thread(entity))
+            .map(|index| {
+                let focus = &self.focus[index];
+                [focus.card.clone(), focus.menu.clone(), focus.delete.clone()]
+            })
+    }
+
+    /// The "…" button of the card for chat `entity`, while the list has one.
+    pub(in crate::views::workspace) fn menu_focus(&self, entity: EntityId) -> Option<FocusHandle> {
+        self.rows
+            .iter()
+            .position(|row| row.key() == RowKey::Thread(entity))
+            .map(|index| self.focus[index].menu.clone())
+    }
+
     pub(super) fn prepare(
         &mut self,
         rows: Vec<SidebarRow>,
