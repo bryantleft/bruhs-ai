@@ -544,6 +544,9 @@ pub struct ChatView {
     composer_options_reveal: std::rc::Rc<std::cell::Cell<Option<usize>>>,
     /// The transcript copy button that shows its check, like web's.
     pub(super) copy_feedback: crate::views::copy_feedback::CopyFeedback,
+    /// Each turn's action row tracks a handle, keyed by (user row, index),
+    /// so the row shows while focus is inside it (web `focus-within`).
+    turn_actions_focus: std::cell::RefCell<std::collections::HashMap<(bool, usize), FocusHandle>>,
     composer_options_section_focus: [FocusHandle; 6],
     stash_open: bool,
     /// Parked drafts (⌘S), newest first.
@@ -1041,6 +1044,7 @@ impl ChatView {
             composer_options_scroll: ScrollHandle::new(),
             composer_options_reveal: Default::default(),
             copy_feedback: Default::default(),
+            turn_actions_focus: Default::default(),
             composer_options_section_focus: std::array::from_fn(|_| {
                 cx.focus_handle().tab_stop(false)
             }),

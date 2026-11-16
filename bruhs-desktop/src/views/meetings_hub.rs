@@ -384,7 +384,8 @@ impl EventEmitter<HubEvent> for MeetingsHub {}
 
 /// Shown when bruhs-server sends a live event this build cannot read.
 /// A live meeting's transcript stream dropped; the stream reconnects itself.
-const STREAM_DISCONNECTED_NOTICE: &str = "Live transcript disconnected. Reconnecting…";
+const STREAM_DISCONNECTED_NOTICE: &str =
+    bruhs_models::api::live_events::LIVE_TRANSCRIPT_DISCONNECTED;
 const STALE_MEETINGS_NOTICE: &str =
     "Some live meeting updates could not be read; meetings may be out of date. Update bruhs-desktop to match bruhs-server.";
 const STALE_CALENDAR_NOTICE: &str =
@@ -544,7 +545,26 @@ impl MeetingsHub {
         );
         let was_online = std::mem::replace(&mut self.server_online, false);
         if was_online && self.live_meeting().is_some() {
-            self.notify_notice(STREAM_DISCONNECTED_NOTICE, true, cx);
+            // Like web's banner, it stays until the stream opens again
+            // instead of expiring with the other notices.
+            self.notice = Some(HubNotice {
+                message: STREAM_DISCONNECTED_NOTICE.to_string(),
+                warning: true,
+                action: None,
+            });
+            cx.notify();
+        }
+    }
+
+    /// The stream is open again: take the disconnect notice down.
+    fn meetings_stream_reopened(&mut self, cx: &mut Context<'_, Self>) {
+        if self
+            .notice
+            .as_ref()
+            .is_some_and(|notice| notice.message == STREAM_DISCONNECTED_NOTICE)
+        {
+            self.notice = None;
+            cx.notify();
         }
     }
 
@@ -860,6 +880,7 @@ impl MeetingsHub {
                 );
             }
             MeetingEvent::StreamOpened => {
+                self.meetings_stream_reopened(cx);
                 self.refresh_people(cx);
                 self.recover_meeting_stream(cx);
             }
@@ -2138,6 +2159,16 @@ mod tests {
             hub.notice = None;
             hub.meetings_stream_disconnected(cx);
             assert!(hub.notice.is_none(), "a failed retry is not news");
+
+            // The notice stays through the outage and goes when the stream
+            // opens again, like web's banner.
+            hub.server_online = true;
+            hub.meetings_stream_disconnected(cx);
+            assert!(hub.notice.is_some());
+            // `MeetingEvent::StreamOpened` starts here (then refreshes over
+            // the network, which this test cannot run).
+            hub.meetings_stream_reopened(cx);
+            assert!(hub.notice.is_none(), "reconnecting clears the notice");
         });
     }
 

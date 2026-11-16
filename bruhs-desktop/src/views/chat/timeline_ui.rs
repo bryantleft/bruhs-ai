@@ -170,6 +170,15 @@ fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
         .flex_shrink_0()
 }
 
+/// The hover group that reveals a turn's action row.
+fn turn_group(user: bool, index: usize) -> SharedString {
+    if user {
+        format!("desktop-user-turn-{index}").into()
+    } else {
+        format!("desktop-turn-{index}").into()
+    }
+}
+
 fn chevron(path: &'static str, open: bool, quarter_turns: f32) -> Svg {
     let el = icon(
         path,
@@ -297,7 +306,7 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) -> AnyElement {
         match msg.role {
-            MessageRole::User => self.render_user_row(index, msg, cx),
+            MessageRole::User => self.render_user_row(index, msg, window, cx),
             MessageRole::Assistant => self.render_assistant_turn(index, msg, window, cx),
             MessageRole::Tool => div()
                 .w_full()
@@ -321,7 +330,13 @@ impl ChatView {
 
     /// Web `UserRow`: a right-aligned longan-800 bubble at 85% max width,
     /// with keyboard-reachable message actions beneath it.
-    fn render_user_row(&self, index: usize, msg: &Message, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_user_row(
+        &self,
+        index: usize,
+        msg: &Message,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         // A message another thread's agent sent shows who sent it, not the
         // header written for the model.
         let (caption, body) = match bruhs_models::thread_link::parse_delivery(&msg.content) {
@@ -330,6 +345,7 @@ impl ChatView {
         };
         div()
             .id(("desktop-user-turn", index))
+            .group(turn_group(true, index))
             .debug_selector(move || format!("desktop-user-message-{index}"))
             .w_full()
             .flex()
@@ -367,7 +383,7 @@ impl ChatView {
                         bubble.child(self.render_sent_files(index, msg, cx))
                     }),
             )
-            .child(self.render_user_actions(index, msg, cx))
+            .child(self.render_user_actions(index, msg, window, cx))
             .into_any_element()
     }
 
@@ -414,17 +430,53 @@ impl ChatView {
         list.into_any_element()
     }
 
-    /// Copy, clock, and Edit from here stay reachable without pointer hover.
+    /// The handle a turn's action row tracks, made on first render.
+    fn turn_actions_focus(&self, user: bool, index: usize, cx: &App) -> FocusHandle {
+        self.turn_actions_focus
+            .borrow_mut()
+            .entry((user, index))
+            .or_insert_with(|| cx.focus_handle())
+            .clone()
+    }
+
+    /// Whether a turn's action row shows without hover: while focus is in
+    /// it, or while its rewind waits for confirmation (web `focus-within`).
+    pub(super) fn turn_actions_shown(
+        &self,
+        user: bool,
+        index: usize,
+        window: &Window,
+        cx: &App,
+    ) -> bool {
+        let confirming = user && self.rewind_confirm == Some(index) && !self.is_streaming;
+        confirming
+            || self
+                .turn_actions_focus(user, index, cx)
+                .contains_focused(window, cx)
+    }
+
+    /// Copy, clock, and Edit from here, shown on hover, while focus is in
+    /// the row, or while a rewind waits for confirmation (web: hover or
+    /// `focus-within`). Hidden rows stay in the tab order.
     fn render_user_actions(
         &self,
         index: usize,
         msg: &Message,
+        window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let confirming = self.rewind_confirm == Some(index) && !self.is_streaming;
         let time = msg.started_at_ms.and_then(clock_time).unwrap_or_default();
         let copy_text = msg.content.clone();
+        let focus = self.turn_actions_focus(true, index, cx);
+        let shown = self.turn_actions_shown(true, index, window, cx);
         div()
+            .track_focus(&focus)
+            .debug_selector(move || format!("desktop-user-actions-{index}"))
+            .when(!shown, |row| {
+                row.opacity(0.0)
+                    .group_hover(turn_group(true, index), |row| row.opacity(1.0))
+            })
             .w_full()
             .max_w(relative(USER_BUBBLE_MAX_WIDTH))
             .flex()
@@ -640,6 +692,7 @@ impl ChatView {
 
         let mut turn = div()
             .id(("desktop-turn", index))
+            .group(turn_group(false, index))
             .debug_selector(move || format!("desktop-assistant-message-{index}"))
             .w_full()
             .flex()
@@ -697,7 +750,7 @@ impl ChatView {
         if !files.is_empty() {
             turn = turn.child(self.render_changed_files_card(index, &files, latest, cx));
         }
-        turn = turn.child(self.render_assistant_meta_row(index, msg, cx));
+        turn = turn.child(self.render_assistant_meta_row(index, msg, window, cx));
         turn.into_any_element()
     }
 
@@ -1500,13 +1553,18 @@ impl ChatView {
 
     // ── Meta ─────────────────────────────────────────────────────────────
 
-    /// Copy, citation and turn metadata remain reachable from the keyboard.
+    /// Copy, citation and turn metadata, shown on hover or while focus is
+    /// in the row (web: `group-hover/turn` or `focus-within`). Hidden rows
+    /// stay in the tab order, so the keyboard still reaches them.
     fn render_assistant_meta_row(
         &self,
         index: usize,
         msg: &Message,
+        window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        let focus = self.turn_actions_focus(false, index, cx);
+        let shown = self.turn_actions_shown(false, index, window, cx);
         let duration = turn_duration_ms(msg).map(fold_duration_label);
         let tokens = msg.usage.as_ref().map(|u| {
             format!(
@@ -1522,7 +1580,12 @@ impl ChatView {
         let has_text = !msg.content.trim().is_empty();
         let exportable = has_text || self.has_published_artifacts(msg);
         let row = div()
+            .track_focus(&focus)
             .debug_selector(move || format!("desktop-usage-meta-{index}"))
+            .when(!shown, |row| {
+                row.opacity(0.0)
+                    .group_hover(turn_group(false, index), |row| row.opacity(1.0))
+            })
             .min_h(px(TRANSCRIPT_ROW_MIN_HEIGHT_PX))
             .flex()
             .flex_wrap()

@@ -740,3 +740,46 @@ fn composer_options_show_the_context_meter_like_the_web(cx: &mut TestAppContext)
         assert_eq!(reading.used_label(), "42% used");
     });
 }
+
+/// Like web, a turn's action row shows on hover or while focus is inside
+/// it, and stays usable while hidden: a click on its copy button copies,
+/// and the focus it leaves in the row keeps the row shown.
+#[gpui::test]
+fn turn_actions_show_on_hover_or_focus_within_like_the_web(cx: &mut TestAppContext) {
+    let (chat, cx) = chat_window(cx);
+    chat.update(cx, |chat, cx| {
+        let mut reply =
+            super::super::Message::assistant_streaming(1, Some("claude-sonnet-4-6".into()));
+        reply.content = "Done".into();
+        reply.state = super::super::TurnState::Finished;
+        chat.messages = vec![super::super::Message::user("Hi"), reply];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        assert!(
+            !chat.turn_actions_shown(true, 0, window, cx),
+            "the user row rests hidden"
+        );
+        assert!(
+            !chat.turn_actions_shown(false, 1, window, cx),
+            "so does the reply's"
+        );
+    });
+    let copy = cx
+        .debug_bounds("desktop-turn-copy-1")
+        .expect("the hidden copy button keeps its place");
+    cx.simulate_click(copy.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        assert!(
+            chat.copy_feedback.is_shown("desktop-turn-copy-1"),
+            "the click copied"
+        );
+        assert!(
+            chat.turn_actions_shown(false, 1, window, cx),
+            "focus inside the row shows it"
+        );
+        assert!(!chat.turn_actions_shown(true, 0, window, cx));
+    });
+}
