@@ -34,6 +34,5 @@ AGENTS.md
 # Release bundles (scripts/bundle-macos.sh)
 /dist/
 
-# Full performance evidence ledger (40 MB, absolute local paths). Kept on disk
-# for the performance scripts; docs/ carries the compact summaries instead.
-/docs/performance-action-evidence.json
+# Full performance provenance stays under ignored target/performance-evidence-private/.
+# docs/performance-action-evidence.json is the compact public index.

@@ -1,0 +1,1754 @@
+{
+  "version": 1,
+  "kind": "performance_evidence_summary",
+  "purpose": "Compact publication index. Complete local provenance and raw arrays remain in the ignored archive.",
+  "semantic_inventory_complete": false,
+  "full_local_ledger": {
+    "path": "target/performance-evidence-private/ledger-e943d11b5b4e33800f678d3f35c001ce936c6ebc8b69b215ed2b3face417b247.json",
+    "sha256": "e943d11b5b4e33800f678d3f35c001ce936c6ebc8b69b215ed2b3face417b247",
+    "bytes": 40679821,
+    "git_tracked": false
+  },
+  "public_reports": {
+    "markdown": "docs/performance-action-log.md",
+    "numerical": "docs/performance-action-log.json",
+    "catalogue": "docs/performance-action-catalogue.json"
+  },
+  "counts": {
+    "partial_evidence_records": 246,
+    "normalized_timing_groups": 2296,
+    "request_count_cases": 34,
+    "response_body_observations": 40,
+    "whole_action_acceptances": 0,
+    "matched_t3_acceptances": 0
+  },
+  "entry_index": [
+    {
+      "evidence_id": "native-finance-transactions-ascii-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-read-query-matching-and-unix-socket-boundary"
+    },
+    {
+      "evidence_id": "mcp-discovery-stdio-2026-11-10",
+      "kind": "mcp_method",
+      "id": "tools/list",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#mcp-stdio-discovery-and-full-native-read-boundary"
+    },
+    {
+      "evidence_id": "mcp-initialize-warm-os-cache-2026-11-10",
+      "kind": "mcp_method",
+      "id": "initialize",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#mcp-stdio-discovery-and-full-native-read-boundary"
+    },
+    {
+      "evidence_id": "native-finance-transactions-full-stdio-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#mcp-stdio-discovery-and-full-native-read-boundary"
+    },
+    {
+      "evidence_id": "standalone-audit-default-empty-stdio-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_agent_audit",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#mcp-stdio-discovery-and-full-native-read-boundary"
+    },
+    {
+      "evidence_id": "standalone-chat-empty-stdio-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#mcp-stdio-discovery-and-full-native-read-boundary"
+    },
+    {
+      "evidence_id": "standalone-threads-empty-stdio-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_list_threads",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#mcp-stdio-discovery-and-full-native-read-boundary"
+    },
+    {
+      "evidence_id": "standalone-thread-tasks-empty-stdio-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_list_tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#mcp-stdio-discovery-and-full-native-read-boundary"
+    },
+    {
+      "evidence_id": "native-generic-tasks-json-buffer-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generic-native-record-reads-and-canonical-json-buffer-reuse"
+    },
+    {
+      "evidence_id": "native-generic-calendar-json-buffer-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_calendar",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generic-native-record-reads-and-canonical-json-buffer-reuse"
+    },
+    {
+      "evidence_id": "native-generic-capture-json-buffer-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_capture",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generic-native-record-reads-and-canonical-json-buffer-reuse"
+    },
+    {
+      "evidence_id": "native-generic-knowledge-json-buffer-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generic-native-record-reads-and-canonical-json-buffer-reuse"
+    },
+    {
+      "evidence_id": "native-generic-inbox-json-buffer-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_inbox",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generic-native-record-reads-and-canonical-json-buffer-reuse"
+    },
+    {
+      "evidence_id": "native-knowledge-unicode-query-scan-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#unicode-record-search-with-exact-lowercase-semantics"
+    },
+    {
+      "evidence_id": "native-projected-finance-pages-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#projected-native-reads-and-direct-deep-paging"
+    },
+    {
+      "evidence_id": "native-projected-health-pages-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#projected-native-reads-and-direct-deep-paging"
+    },
+    {
+      "evidence_id": "native-projected-meetings-pages-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#projected-native-reads-and-direct-deep-paging"
+    },
+    {
+      "evidence_id": "native-projected-meeting-notes-pages-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_meeting_notes",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#projected-native-reads-and-direct-deep-paging"
+    },
+    {
+      "evidence_id": "native-projected-people-pages-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#projected-native-reads-and-direct-deep-paging"
+    },
+    {
+      "evidence_id": "native-projected-chat-pages-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#projected-native-reads-and-direct-deep-paging"
+    },
+    {
+      "evidence_id": "standalone-chat-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-tasks-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-calendar-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_calendar",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-meetings-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-knowledge-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-inbox-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_inbox",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-people-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-finance-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-health-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-capture-preview-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_write_capture",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-complete-audit-growing-history-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_agent_audit",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "mcp-owned-tool-text-transfer-2026-11-10",
+      "kind": "mcp_method",
+      "id": "tools/call",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#standalone-workflow-history-and-audit-serialization"
+    },
+    {
+      "evidence_id": "standalone-audit-reused-storage-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_agent_audit",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#large-mcp-response-storage-reuse"
+    },
+    {
+      "evidence_id": "mcp-reused-frame-storage-2026-11-10",
+      "kind": "mcp_method",
+      "id": "tools/call",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#large-mcp-response-storage-reuse"
+    },
+    {
+      "evidence_id": "native-context-meeting-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_meeting",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-context-reads-and-transcript-validation-reuse"
+    },
+    {
+      "evidence_id": "native-context-note-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_meeting_note",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-context-reads-and-transcript-validation-reuse"
+    },
+    {
+      "evidence_id": "native-context-person-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_person",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-context-reads-and-transcript-validation-reuse"
+    },
+    {
+      "evidence_id": "native-context-chat-2026-11-10",
+      "kind": "mcp",
+      "id": "bruhs_read_chat_messages",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-context-reads-and-transcript-validation-reuse"
+    },
+    {
+      "evidence_id": "native-saved-transcript-overlay-components-2026-11-10",
+      "kind": "view",
+      "id": "MeetingDetail",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#saved-transcript-overlay-validation-and-cache-decoding"
+    },
+    {
+      "evidence_id": "native-continuous-cache-load-and-borrowed-restore-2026-11-10",
+      "kind": "view",
+      "id": "MeetingDetail",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-cache-loading-and-borrowed-transcript-restoration"
+    },
+    {
+      "evidence_id": "native-complete-workspace-load-and-record-transfer-2026-11-10",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-workspace-file-loading-and-record-transfer"
+    },
+    {
+      "evidence_id": "native-owned-saved-thread-restoration-and-file-load-2026-11-10",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-saved-thread-restoration-and-complete-file-loading"
+    },
+    {
+      "evidence_id": "native-saved-file-json-decoding-2026-11-10",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-saved-file-json-decoding"
+    },
+    {
+      "evidence_id": "native-backup-load-unused-digest-2026-11-10",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-backup-loading-without-an-unused-disk-digest"
+    },
+    {
+      "evidence_id": "native-sidebar-input-lazy-flex-minimum-2026-11-10",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-sidebar-input-and-lazy-flex-minimum-measurement"
+    },
+    {
+      "evidence_id": "native-restored-chat-known-project-construction-2026-11-10",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#restored-chat-construction-without-discarded-directory-lookup"
+    },
+    {
+      "evidence_id": "native-workspace-isolated-measurement-and-cpu-diagnosis-2026-11-10",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#workspace-measurement-isolation-and-cpu-diagnosis"
+    },
+    {
+      "evidence_id": "native-normal-platform-sidebar-baseline-2026-11-10",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-platform-baseline-and-the-next-sidebar-fix"
+    },
+    {
+      "evidence_id": "native-sidebar-virtualization-normal-platform-2026-11-11",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-sidebar-virtualization-and-frame-construction-measurements"
+    },
+    {
+      "evidence_id": "shared-initial-claude-auth-checks-2026-11-11",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-initial-claude-auth-checks"
+    },
+    {
+      "evidence_id": "native-restoration-auth-interpreter-2026-11-11",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-restoration-with-controlled-auth-and-native-frames"
+    },
+    {
+      "evidence_id": "new-thread-auth-process-counts-2026-11-11",
+      "kind": "palette",
+      "id": "desktop:new-thread",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#new-thread-initialization-without-duplicate-auth-subprocesses"
+    },
+    {
+      "evidence_id": "workspace-thread-catalog-storage-reuse-2026-11-11",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#thread-catalogue-publishing-without-repeated-reconstruction"
+    },
+    {
+      "evidence_id": "native-mixed-unicode-fragment-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#mixed-unicode-record-queries-without-unnecessary-whole-field-casing"
+    },
+    {
+      "evidence_id": "native-query-classification-tasks-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-calendar-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_calendar",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-capture-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_capture",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-knowledge-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-inbox-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_inbox",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-finance-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-health-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-meetings-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-meeting-notes-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meeting_notes",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-people-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-classification-chat-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#shared-record-query-checks-without-redundant-field-scans"
+    },
+    {
+      "evidence_id": "native-query-fallback-tasks-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-calendar-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_calendar",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-capture-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_capture",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-knowledge-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-inbox-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_inbox",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-finance-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-health-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-meetings-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-meeting-notes-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meeting_notes",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-people-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-query-fallback-chat-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#outlined-overlap-fallback-in-native-record-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-tasks-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-calendar-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_calendar",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-capture-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_capture",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-knowledge-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-inbox-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_inbox",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-finance-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-health-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-meetings-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-meeting-notes-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meeting_notes",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-people-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-health-single-field-chat-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#direct-single-field-matching-in-health-reads"
+    },
+    {
+      "evidence_id": "native-query-scratch-tasks-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-calendar-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_calendar",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-capture-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_capture",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-knowledge-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-inbox-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_inbox",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-finance-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-health-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-meetings-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-meeting_notes-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meeting_notes",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-people-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-query-scratch-chat-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#request-owned-normalization-in-native-read-scans"
+    },
+    {
+      "evidence_id": "native-workflow-propose_workflow-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_propose_workflow",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-workflow-tools-and-pending-review-scans"
+    },
+    {
+      "evidence_id": "native-workflow-workflow_status-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_workflow_status",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-workflow-tools-and-pending-review-scans"
+    },
+    {
+      "evidence_id": "native-workflow-request_workflow_rollback-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_request_workflow_rollback",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-workflow-tools-and-pending-review-scans"
+    },
+    {
+      "evidence_id": "native-read-inline-tasks-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-calendar-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_calendar",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-capture-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_capture",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-knowledge-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_knowledge",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-inbox-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_inbox",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-finance-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_finance",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-health-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-meetings-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-meeting_notes-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_meeting_notes",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-people-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-read-inline-chat-2026-11-12",
+      "kind": "mcp",
+      "id": "bruhs_read_chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#read-controls-after-restoring-direct-matcher-inlining"
+    },
+    {
+      "evidence_id": "native-http-health-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#actual-http-task-routes-and-event-stream-baselines"
+    },
+    {
+      "evidence_id": "native-http-tasks-all-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#actual-http-task-routes-and-event-stream-baselines"
+    },
+    {
+      "evidence_id": "native-http-delete-finished-2026-11-12",
+      "kind": "http",
+      "id": "DELETE /api/tasks/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#actual-http-task-routes-and-event-stream-baselines"
+    },
+    {
+      "evidence_id": "native-http-tasks-stream-opened-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/tasks/stream",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#actual-http-task-routes-and-event-stream-baselines"
+    },
+    {
+      "evidence_id": "native-http-combined-stream-opened-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/events/stream",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#actual-http-task-routes-and-event-stream-baselines"
+    },
+    {
+      "evidence_id": "native-http-buffered-health-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/health",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#buffered-task-event-encoding"
+    },
+    {
+      "evidence_id": "native-http-buffered-tasks-all-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#buffered-task-event-encoding"
+    },
+    {
+      "evidence_id": "native-http-buffered-delete-finished-2026-11-12",
+      "kind": "http",
+      "id": "DELETE /api/tasks/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#buffered-task-event-encoding"
+    },
+    {
+      "evidence_id": "native-http-buffered-tasks-stream-opened-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/tasks/stream",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#buffered-task-event-encoding"
+    },
+    {
+      "evidence_id": "native-http-buffered-combined-stream-opened-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/events/stream",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#buffered-task-event-encoding"
+    },
+    {
+      "evidence_id": "native-http-reads-meetings-all-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-meeting-first-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-people-all-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-versions-after-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people/versions",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-person-first-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-children-no-project-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/files/children",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-git-branches-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-branches",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-git-diff-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-diff",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-git-status-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-status",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-list-dir-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/list-dir",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-validate-directory-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/validate-path",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-profiles-batch-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people/profiles",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-reads-resolve-unmerged-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people/resolve-merges",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#persistent-and-filesystem-http-reads"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-meetings-all-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-meeting-first-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-people-all-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-versions-after-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people/versions",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-person-first-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-children-no-project-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/files/children",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-git-branches-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-branches",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-git-diff-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-diff",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-git-status-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-status",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-list-dir-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/list-dir",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-validate-directory-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/validate-path",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-profiles-batch-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people/profiles",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-file-child-sort-resolve-unmerged-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people/resolve-merges",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#cached-file-child-ordering"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-meetings-all-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-meeting-first-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-people-all-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-versions-after-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people/versions",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-person-first-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/people/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-children-no-project-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/files/children",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-git-branches-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-branches",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-git-diff-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-diff",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-git-status-unborn-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/git-status",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-list-dir-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/list-dir",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-validate-directory-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/agent/validate-path",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-profiles-batch-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people/profiles",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-bounded-file-children-resolve-unmerged-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people/resolve-merges",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#bounded-file-child-selection"
+    },
+    {
+      "evidence_id": "native-http-contact-writes-patch-2026-11-12",
+      "kind": "http",
+      "id": "PATCH /api/people/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#contact-write-http-coverage-and-name-statement-reuse"
+    },
+    {
+      "evidence_id": "native-http-contact-writes-rename-2026-11-12",
+      "kind": "http",
+      "id": "PATCH /api/people/{id}/rename",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#contact-write-http-coverage-and-name-statement-reuse"
+    },
+    {
+      "evidence_id": "native-http-contact-writes-tracked-2026-11-12",
+      "kind": "http",
+      "id": "PATCH /api/people/{id}/tracked",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#contact-write-http-coverage-and-name-statement-reuse"
+    },
+    {
+      "evidence_id": "native-http-contact-writes-create-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#contact-write-http-coverage-and-name-statement-reuse"
+    },
+    {
+      "evidence_id": "native-http-contact-writes-enroll-missing-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people/{id}/enroll",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#contact-write-http-coverage-and-name-statement-reuse"
+    },
+    {
+      "evidence_id": "native-http-contact-writes-merge-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/people/{source_id}/merge_into/{target_id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#contact-write-http-coverage-and-name-statement-reuse"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-delete-api-meetings-id-2026-11-12",
+      "kind": "http",
+      "id": "DELETE /api/meetings/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-delete-api-meetings-id-segments-segment-id-2026-11-12",
+      "kind": "http",
+      "id": "DELETE /api/meetings/{id}/segments/{segment_id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-get-api-meetings-id-local-focus-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}/local-focus",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-get-api-meetings-id-segment-removals-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}/segment-removals",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-patch-api-meetings-id-2026-11-12",
+      "kind": "http",
+      "id": "PATCH /api/meetings/{id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-patch-api-meetings-id-skip-observations-2026-11-12",
+      "kind": "http",
+      "id": "PATCH /api/meetings/{id}/skip_observations",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-patch-api-meetings-id-speakers-speaker-id-2026-11-12",
+      "kind": "http",
+      "id": "PATCH /api/meetings/{id}/speakers/{speaker_id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-post-api-meetings-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/meetings",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-post-api-meetings-id-local-focus-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/meetings/{id}/local-focus",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-post-api-meetings-id-speakers-speaker-id-link-person-id-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/meetings/{id}/speakers/{speaker_id}/link/{person_id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "native-http-meeting-writes-post-api-meetings-id-stop-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/meetings/{id}/stop",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#meeting-http-writes-and-distinct-contact-validation"
+    },
+    {
+      "evidence_id": "generation-tcp-delete--api-meetings--id--generations--request-id-2026-11-12",
+      "kind": "http",
+      "id": "DELETE /api/meetings/{id}/generations/{request_id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generation-receipts-and-tcp-transport"
+    },
+    {
+      "evidence_id": "generation-tcp-get--api-meetings--id--generations-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}/generations",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generation-receipts-and-tcp-transport"
+    },
+    {
+      "evidence_id": "generation-tcp-get--api-meetings--id--generations--request-id-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}/generations/{request_id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generation-receipts-and-tcp-transport"
+    },
+    {
+      "evidence_id": "generation-tcp-post--api-meetings--id--summarize-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/meetings/{id}/summarize",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generation-receipts-and-tcp-transport"
+    },
+    {
+      "evidence_id": "generation-tcp-repeat-delete--api-meetings--id--generations--request-id-2026-11-12",
+      "kind": "http",
+      "id": "DELETE /api/meetings/{id}/generations/{request_id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generation-tcp-comparison-with-fixture-socket-readiness"
+    },
+    {
+      "evidence_id": "generation-tcp-repeat-get--api-meetings--id--generations-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}/generations",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generation-tcp-comparison-with-fixture-socket-readiness"
+    },
+    {
+      "evidence_id": "generation-tcp-repeat-get--api-meetings--id--generations--request-id-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}/generations/{request_id}",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generation-tcp-comparison-with-fixture-socket-readiness"
+    },
+    {
+      "evidence_id": "generation-tcp-repeat-post--api-meetings--id--summarize-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/meetings/{id}/summarize",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#generation-tcp-comparison-with-fixture-socket-readiness"
+    },
+    {
+      "evidence_id": "native-local-focus-client-get--api-meetings--id--local-focus-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}/local-focus",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-local-context-client-reuse"
+    },
+    {
+      "evidence_id": "native-local-focus-client-post--api-meetings--id--local-focus-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/meetings/{id}/local-focus",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-local-context-client-reuse"
+    },
+    {
+      "evidence_id": "native-focus-initialization-get-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/{id}/local-focus",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-client-initialization-comparison"
+    },
+    {
+      "evidence_id": "native-focus-initialization-post-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/meetings/{id}/local-focus",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#native-client-initialization-comparison"
+    },
+    {
+      "evidence_id": "capture-proxy-network-get--api-capture-status-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/capture/status",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-proxy-payload-ownership"
+    },
+    {
+      "evidence_id": "capture-proxy-network-post--api-capture-start-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/capture/start",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-proxy-payload-ownership"
+    },
+    {
+      "evidence_id": "capture-proxy-network-post--api-capture-stop-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/capture/stop",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-proxy-payload-ownership"
+    },
+    {
+      "evidence_id": "capture-proxy-network-get--api-capture-activity-monitor-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/capture/activity-monitor",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-proxy-payload-ownership"
+    },
+    {
+      "evidence_id": "capture-proxy-network-post--api-capture-activity-monitor-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/capture/activity-monitor",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-proxy-payload-ownership"
+    },
+    {
+      "evidence_id": "capture-proxy-repeat2-get--api-capture-status-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/capture/status",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-payload-copy-two-round-transport-repeat"
+    },
+    {
+      "evidence_id": "capture-proxy-repeat2-post--api-capture-start-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/capture/start",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-payload-copy-two-round-transport-repeat"
+    },
+    {
+      "evidence_id": "capture-proxy-repeat2-post--api-capture-stop-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/capture/stop",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-payload-copy-two-round-transport-repeat"
+    },
+    {
+      "evidence_id": "capture-proxy-repeat2-get--api-capture-activity-monitor-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/capture/activity-monitor",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-payload-copy-two-round-transport-repeat"
+    },
+    {
+      "evidence_id": "capture-proxy-repeat2-post--api-capture-activity-monitor-2026-11-12",
+      "kind": "http",
+      "id": "POST /api/capture/activity-monitor",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-payload-copy-two-round-transport-repeat"
+    },
+    {
+      "evidence_id": "sse-frames1-get--api-meetings-stream-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/stream",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-event-stream-frame-copies-and-delivery-outcomes"
+    },
+    {
+      "evidence_id": "sse-forwardscan2-get--api-meetings-stream-2026-11-12",
+      "kind": "http",
+      "id": "GET /api/meetings/stream",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-event-stream-forward-scanning-and-allocation-probes"
+    },
+    {
+      "evidence_id": "sse-matched-tcp-get--api-meetings-stream-2026-11-13",
+      "kind": "http",
+      "id": "GET /api/meetings/stream",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-event-stream-matched-tcp-tails-and-parser-output-probe"
+    },
+    {
+      "evidence_id": "sse-factorial-get--api-meetings-stream-2026-11-13",
+      "kind": "http",
+      "id": "GET /api/meetings/stream",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#capture-event-stream-four-way-parser-comparison"
+    },
+    {
+      "evidence_id": "terminal-attach-network-2026-11-13",
+      "kind": "http",
+      "id": "GET /api/terminal/ws",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#terminal-replay-over-a-slow-connection"
+    },
+    {
+      "evidence_id": "web-history-storage-probe-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#web-conversation-storage-baseline"
+    },
+    {
+      "evidence_id": "web-conversation-history2-envelope-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#web-conversation-header-and-content-codec"
+    },
+    {
+      "evidence_id": "web-conversation-history3-envelope-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#web-conversation-header-and-content-codec"
+    },
+    {
+      "evidence_id": "web-static-assets-network-boot1-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#release-static-asset-network-startup"
+    },
+    {
+      "evidence_id": "web-resume-export-ui1-2026-11-13",
+      "kind": "palette",
+      "id": "web:CopyResumeCommand",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-goal-2026-11-09.md#resume-export-and-callback-discovery"
+    },
+    {
+      "evidence_id": "web-thread-open-row-index1-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-thread-open-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-pin-chat-mount1-2026-11-13",
+      "kind": "palette",
+      "id": "web:PinThread",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-chat-mount-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-conversation-snapshot1-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-conversation-snapshots-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-conversation-snapshot1-small-control1-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-conversation-snapshots-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-save-commit-boundary3-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-conversation-save-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-conversation-save2-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-conversation-save-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-conversation-save2-phase-control1-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-conversation-save-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-conversation-envelope3-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-conversation-envelope-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-conversation-bounded3-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-bounded-history-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-conversation-chunk5-2026-11-13",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-chunk-layout-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-stream2-paired-2026-11-13",
+      "kind": "http",
+      "id": "paired_task:GET /api/tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-stream-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-stream2-local-2026-11-13",
+      "kind": "http",
+      "id": "GET /api/coordination",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-stream-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-runtime6-2026-11-13",
+      "kind": "http",
+      "id": "paired_task:GET /api/tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-runtime-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-runtime6-stream-2026-11-13",
+      "kind": "http",
+      "id": "paired_task:GET /api/changes",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-runtime-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-runtime6-save-spec-2026-11-13",
+      "kind": "http",
+      "id": "paired_task:POST /api/commands",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-runtime-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-pair1-2026-11-13",
+      "kind": "http",
+      "id": "paired_task:GET /api/tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-pairing-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-compression3-2026-11-13",
+      "kind": "http",
+      "id": "paired_task:GET /api/tasks",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-compression-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-compression3-favicon-2026-11-13",
+      "kind": "http",
+      "id": "paired_task:GET /favicon.ico",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-compression-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-task-compression3-proposal-2026-11-13",
+      "kind": "http",
+      "id": "paired_task:POST /api/proposals",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-task-compression-2026-11-13.md"
+    },
+    {
+      "evidence_id": "web-agent-sse1-parser-native-2026-11-13",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-web-sse1/report.md"
+    },
+    {
+      "evidence_id": "web-agent-sse3-http-cohort-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-web-sse3/browser-timing-report.md"
+    },
+    {
+      "evidence_id": "web-agent-sse3-decoder-browser-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-web-sse3/browser-combined-report.md"
+    },
+    {
+      "evidence_id": "native-sse-gzip2-functional-bytes-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-sse-gzip2/report.md"
+    },
+    {
+      "evidence_id": "agent-stream-root-integration-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-agent-stream-integration1/report.md"
+    },
+    {
+      "evidence_id": "agent-acp-blocked-write-cancellation-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-acp-stop1/report.md"
+    },
+    {
+      "evidence_id": "native-acp-http-disconnect-kernel-exit-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-stop-http1/report.md"
+    },
+    {
+      "evidence_id": "browser-stop-actual-app-functional-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-browser-stop1/report.md"
+    },
+    {
+      "evidence_id": "browser-stop-large-history-functional-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-browser-stop2/report.md"
+    },
+    {
+      "evidence_id": "browser-stop-scoped-dom-baseline-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-browser-stop3/report.md"
+    },
+    {
+      "evidence_id": "web-conversation-snapshot-sharing-ui-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-conversation-sharing1/report.md"
+    },
+    {
+      "evidence_id": "web-fold-sharing-open-ui-2026-11-14",
+      "kind": "view",
+      "id": "Chat",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-fold-sharing1/report.md"
+    },
+    {
+      "evidence_id": "web-fold-sharing-send-stop-ui-2026-11-14",
+      "kind": "http",
+      "id": "POST /api/agent",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-fold-sharing1/report.md"
+    },
+    {
+      "evidence_id": "web-mail-read-browse-cancellation-2026-11-14",
+      "kind": "http",
+      "id": "GET /api/mail/mailboxes/{mailbox}/threads",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-mail-cancel1/report.md"
+    },
+    {
+      "evidence_id": "web-mail-read-detail-cancellation-2026-11-14",
+      "kind": "http",
+      "id": "GET /api/mail/mailboxes/{mailbox}/threads/{external}",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-mail-cancel1/report.md"
+    },
+    {
+      "evidence_id": "web-http-error-body-cancellation-2026-11-14",
+      "kind": "http",
+      "id": "GET /api/mail",
+      "status": "partial_variant_evidence",
+      "report": "docs/performance-http-error-2026-11-14.md"
+    },
+    {
+      "evidence_id": "whiteboard-rendering-existing-2026-11-14",
+      "kind": "view",
+      "id": "Whiteboards",
+      "status": "partial_variant_evidence",
+      "report": "target/performance-whiteboard-actions1/report.md"
+    }
+  ],
+  "limits": [
+    "This index is not a complete action inventory or performance acceptance.",
+    "Published numerical records retain their original order, boundary and scope; raw-input hashes name the unchanged private inputs.",
+    "Pass the public index or a full local ledger to --ledger. Regeneration requires the referenced local archive."
+  ]
+}

@@ -8,6 +8,7 @@ import argparse
 import hashlib
 import json
 from pathlib import Path
+from performance_evidence import PUBLIC_SUMMARY, load_ledger
 import re
 import subprocess
 
@@ -316,9 +317,10 @@ for surface, path, marker, pattern in [
 
 identities = [(i["kind"], i["id"]) for i in items]
 assert len(identities) == len(set(identities)), "Duplicate catalogue identity"
-evidence_path = ROOT / "docs/performance-action-evidence.json"
-if evidence_path.exists():
-    evidence = json.loads(evidence_path.read_text())
+evidence_path = ROOT / PUBLIC_SUMMARY
+loaded_evidence = load_ledger(ROOT, required=False)
+if loaded_evidence is not None:
+    _, evidence = loaded_evidence
     assert evidence["version"] == 1
     entries = {(item["kind"], item["id"]): item for item in items}
     reviewed = set()
