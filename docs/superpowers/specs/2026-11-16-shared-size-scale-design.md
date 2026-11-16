@@ -211,7 +211,13 @@ Each slice is checked as follows:
   value, such as the dropdown trigger, the calendar's month buttons and the
   diff panel's actions, now use its name.
 
-Still open: icons inside page controls. 29 web icons at 12 or 14px sit
-directly inside buttons, and desktop has matching constants (the settings
-close, the stepper, the diff and terminal panels, the dialog close icon).
-Each needs a call between `icon` and `icon-xs`.
+- Icon pass, the same day: icons inside controls follow the text beside
+  them on both surfaces, 16px in icon-only controls and beside 13 or 14px
+  text, 12px beside 12px text. That covered the diff, terminal, preview and
+  right panels, the updates pill, the settings close and navigation, the
+  stepper, the dropdowns, the project and model pickers, the files list, the
+  copy buttons and the dialog close. Close buttons smaller than 24px (the
+  terminal tabs, the project delete) became 24px targets.
+
+Nothing in this design is open. Controls that differ in kind rather than
+size are tracked as PARITY-14 in `docs/web-desktop-parity-goal-2026-11-15.md`.

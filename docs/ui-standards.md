@@ -15,10 +15,12 @@ Size controls with the shared size scale, from shadcn's dense Sidebar and menu s
 | control | 32px | `CONTROL_PX` | `h-control`, `min-h-control`, `size-control` | Buttons, inputs, menu rows, list rows, nav and footer buttons |
 | control-sm | 28px | `CONTROL_SM_PX` | `h-control-sm`, `size-control-sm` | Icon toggles in bars and headers, compact secondary buttons |
 | control-xs | 24px | `CONTROL_XS_PX` | `size-control-xs`, `min-h-control-xs` | Actions inside rows and cards, such as a thread card's menu and delete |
-| icon | 16px | `ICON_PX` | `size=16` | Every icon inside a control, except beside 12px text in a chip |
-| icon-xs | 12px | `ICON_XS_PX` | `size=12` | Icons beside 12px text inside a chip or button, such as the composer's model, project and branch chips (shadcn's `xs` Button) |
+| icon | 16px | `ICON_PX` | `size=16` | Icons in icon-only controls, and beside 13 or 14px text in a control |
+| icon-xs | 12px | `ICON_XS_PX` | `size=12` | Icons beside 12px text in a control: chips, small buttons, tabs, and menu, list and picker rows (shadcn's `xs` Button) |
 | icon-inline | 14px or 12px | `ICON_INLINE_PX`, `ICON_INLINE_SM_PX` | `size=14`, `size=12` | Icons beside text that is not clickable: 14px beside 13 to 14px text, 12px beside 12px text |
 | touch | 44px | none | `bruhs-control`, `[role=menuitem]`, `[role=option]` | Phones and other coarse pointers |
+
+An icon follows the text beside it: 16px in an icon-only control or beside 13 or 14px text, 12px beside 12px text. Brand logos, checkbox ticks (14px, as in shadcn's Checkbox) and the transcript's rows keep their own sizes. Every target, close buttons included, is at least 24px.
 
 Text controls take a minimum height, so larger text grows them instead of clipping; only icon buttons have a fixed size. Menu rows use 8px of horizontal padding, 32px text buttons 12px, and 28px text buttons 8px. Adjacent icon buttons sit 4px apart. On the web, give a control `bruhs-control` (or a menu role) instead of a hard-coded 44px class: the coarse pointer rule in `tailwind.css` makes it 44px on touch, and composer actions and inputs keep 44px targets and 16px text there. Bars and headers keep their own heights, such as the 44px app header, and so does the floating meeting dock.
 

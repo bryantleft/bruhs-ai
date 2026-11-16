@@ -85,9 +85,14 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   the desktop app, based on shadcn's compact sizes: 32px controls and menu
   rows, 28px header toggles, 24px actions on cards and 16px icons. Controls
   that were 40 or 44px tall with a mouse are 32px now, and phones keep 44px
-  touch targets. The composer's chips keep 12px icons beside their 12px
-  labels, as shadcn's small buttons do, and its queue, attachment and saved
-  prompt buttons show 16px icons.
+  touch targets. Icons follow the text beside them: 16px in icon buttons and
+  beside 13 or 14px labels, 12px beside 12px labels, as shadcn's small
+  buttons do. The terminal's tab close and the project list's delete button
+  are now 24px targets, and desktop dropdowns show a chevron icon.
+- The desktop composer options panel now matches the web's. It has a header
+  with its title and a close button, a column of access rows checked at the
+  right, a Build and Plan switch, a three-column effort grid, and the web's
+  wording. Saved prompts opens in the same kind of panel.
 - The thread menu offers the same snooze times in both apps: In 1 hour,
   Later today, Tomorrow, Next week and Custom…. The desktop app gains
   Custom…, which snoozes a thread until a date and time you pick or for a
