@@ -1,7 +1,6 @@
-//! Thread sidebar on the panel tone: search and a
-//! project filter up top, three-line thread cards (project, title, then
-//! branch and provider), in-flight and recent threads first, everything
-//! older and already seen folded under "Settled".
+//! Thread sidebar on the panel tone: search up top, three-line thread
+//! cards (project, title, then branch and provider), in-flight and recent
+//! threads first, everything older and already seen folded under "Settled".
 
 mod viewport;
 mod window;
@@ -22,10 +21,12 @@ use crate::state::{
     SetSidebarOpen, ShelfClock, SidebarChrome, SidebarUndo, Thread, TitleInstructionsSignal, Turns,
     UndoEntry, UndoRestore, UnreadThreads,
 };
-use crate::ui::Icon;
+use crate::ui::{DateTimePicker, Dropdown, DropdownOption, Icon};
 
+use bruhs_models::logic::menu::{menu_origin, menu_step, MenuRect};
 use bruhs_models::logic::sidebar::{
-    snooze_after, snooze_presets, FoldOpen, SidebarSection, SnoozeUnit,
+    custom_snooze_until, snooze_presets, thread_menu, FoldOpen, SidebarSection, SnoozeUnit,
+    ThreadMenuEntry, ThreadMenuFacts, SNOOZE_CUSTOM_TITLE,
 };
 
 /// Idle this long (ms) with nothing unread, and a thread folds under
@@ -351,12 +352,17 @@ pub fn Sidebar() -> impl IntoView {
     let messages = expect_context::<crate::state::MessagesSignal>().0;
     let dragging = RwSignal::new(None::<String>);
     let menu_thread = RwSignal::new(None::<String>);
-    let menu_x = RwSignal::new(0.0_f64);
-    let menu_y = RwSignal::new(0.0_f64);
+    // The open thread menu's top-left corner, measured from its "…" button.
+    // `None` until the first measure, which lands before the first paint.
+    let menu_at = RwSignal::new(None::<(f64, f64)>);
+    let menu_ref = NodeRef::<leptos::html::Div>::new();
+    // The card whose "…" takes focus back once the list settles.
+    let menu_return = RwSignal::new(None::<String>);
+    let window_resized = RwSignal::new(0_u32);
     let custom_for = RwSignal::new(None::<String>);
     let custom_when = RwSignal::new(String::new());
     let custom_amount = RwSignal::new(String::new());
-    let custom_unit = RwSignal::new("hours".to_string());
+    let custom_unit = RwSignal::new(SnoozeUnit::Hours);
     let shelves = Memo::new(move |_| {
         let list = visible.get();
         let searching = query.with(|q| !q.trim().is_empty());
@@ -415,10 +421,12 @@ pub fn Sidebar() -> impl IntoView {
         let height = viewport.height.get();
         let focused = focused.get();
         let requested = requested_focus.get();
+        // An open menu follows its card, so the card stays mounted too.
+        let menu = menu_thread.get();
         layout.with(|layout| {
             let mut slots = layout.slots(top, height);
             // Wheel scrolling must not unmount the keyboard's current focus target.
-            for id in [focused, requested].into_iter().flatten() {
+            for id in [focused, requested, menu].into_iter().flatten() {
                 let present = slots.iter().any(|slot| match slot {
                     window::Slot::Thread(row) => row.id == id,
                     window::Slot::Header(_) => false,
@@ -433,6 +441,125 @@ pub fn Sidebar() -> impl IntoView {
             slots
         })
     });
+    // The thread menu works like desktop's. It hangs under its card's "…"
+    // button (above it near the window's bottom) and follows the card. The
+    // arrow keys, Home and End move through it; Escape, Tab and every action
+    // close it and return focus to the button.
+    let menu_button = move |id: &str| -> Option<web_sys::HtmlElement> {
+        let list = viewport.node.try_get_untracked().flatten()?;
+        let buttons = list
+            .query_selector_all("button[data-thread-menu-for]")
+            .ok()?;
+        // Compare attributes rather than interpolating user-owned IDs into selectors.
+        (0..buttons.length())
+            .filter_map(|i| buttons.item(i)?.dyn_into::<web_sys::HtmlElement>().ok())
+            .find(|button| button.get_attribute("data-thread-menu-for").as_deref() == Some(id))
+    };
+    let menu_items = move || -> Vec<web_sys::HtmlElement> {
+        let Some(menu) = menu_ref.try_get_untracked().flatten() else {
+            return Vec::new();
+        };
+        let Ok(items) = menu.query_selector_all("[role=menuitem]:not([disabled])") else {
+            return Vec::new();
+        };
+        (0..items.length())
+            .filter_map(|i| items.item(i)?.dyn_into::<web_sys::HtmlElement>().ok())
+            .collect()
+    };
+    // `refocus` returns focus to the card's "…" button. It takes focus at
+    // once, so Tab moves on from it. An action that moves the card (Pin
+    // reorders the list) drops that focus, so the next frame gives it back;
+    // the button stays shown until then.
+    let close_menu = move |refocus: bool| {
+        let Some(id) = menu_thread.try_get_untracked().flatten() else {
+            return;
+        };
+        if refocus {
+            if let Some(button) = menu_button(&id) {
+                let _ = button.focus();
+            }
+            menu_return.set(Some(id.clone()));
+            request_animation_frame(move || {
+                if menu_return.try_get_untracked().flatten().as_deref() != Some(id.as_str()) {
+                    return;
+                }
+                let dropped = document()
+                    .active_element()
+                    .is_none_or(|element| element.tag_name() == "BODY");
+                if dropped {
+                    if let Some(button) = menu_button(&id) {
+                        let _ = button.focus();
+                    }
+                }
+                menu_return.set(None);
+            });
+        }
+        menu_thread.set(None);
+        menu_at.set(None);
+    };
+    let place_menu = move || {
+        let Some(id) = menu_thread.try_get_untracked().flatten() else {
+            return;
+        };
+        let Some(menu) = menu_ref.try_get_untracked().flatten() else {
+            return;
+        };
+        // The card left the list (a fold closed, the search changed), so
+        // its menu closes too.
+        let Some(button) = menu_button(&id) else {
+            close_menu(false);
+            return;
+        };
+        let Some(window) = web_sys::window() else {
+            return;
+        };
+        let length = |value: Result<wasm_bindgen::JsValue, wasm_bindgen::JsValue>| {
+            value.ok().and_then(|value| value.as_f64()).unwrap_or(0.0)
+        };
+        let trigger = button.get_bounding_client_rect();
+        let own = menu.get_bounding_client_rect();
+        let at = menu_origin(
+            MenuRect {
+                left: trigger.left(),
+                top: trigger.top(),
+                width: trigger.width(),
+                height: trigger.height(),
+            },
+            (own.width(), own.height()),
+            (length(window.inner_width()), length(window.inner_height())),
+        );
+        if menu_at.get_untracked() != Some(at) {
+            menu_at.set(Some(at));
+        }
+    };
+    let open_menu = move |id: String| {
+        menu_at.set(None);
+        menu_thread.set(Some(id));
+        // The menu mounts before the next frame. Place it and focus its
+        // first row there, before it paints.
+        request_animation_frame(move || {
+            place_menu();
+            if let Some(first) = menu_items().first() {
+                let _ = first.focus();
+            }
+        });
+    };
+    let resized = window_event_listener(leptos::ev::resize, move |_| {
+        window_resized.update(|count| *count = count.wrapping_add(1));
+    });
+    on_cleanup(move || resized.remove());
+    // Follow the card when the list scrolls or reflows and when the window
+    // resizes.
+    Effect::new(move |_| {
+        viewport.top.track();
+        viewport.height.track();
+        layout.track();
+        window_resized.track();
+        if menu_thread.with(Option::is_some) {
+            request_animation_frame(place_menu);
+        }
+    });
+
     // Thread activation republishes the destination mode even when unchanged.
     // Only an actual search change should reset a user's scroll position.
     let viewport_filter = Memo::new(move |_| query.get());
@@ -630,6 +757,15 @@ pub fn Sidebar() -> impl IntoView {
         let drag_id = id.clone();
         let drop_card_id = id.clone();
         let menu_id = id.clone();
+        let id_menu = id.clone();
+        let id_return = id.clone();
+        let menu_open =
+            Memo::new(move |_| menu_thread.with(|open| open.as_deref() == Some(id_menu.as_str())));
+        // While its menu is open, or its "…" is taking focus back, the card
+        // shows its buttons as on hover.
+        let menu_shown = Memo::new(move |_| {
+            menu_open.get() || menu_return.with(|card| card.as_deref() == Some(id_return.as_str()))
+        });
         let card_class = move || {
             let base = "w-full rounded-lychee px-2.5 py-2.5 text-left transition-colors";
             let unread = status.get() == CardStatus::Unread;
@@ -722,10 +858,19 @@ pub fn Sidebar() -> impl IntoView {
                         <Icon name="folder" size=12 class="shrink-0 text-rambutan-500" />
                         <span class="min-w-0 flex-1 truncate text-label-sm text-rambutan-500">{move || project.get()}</span>
                         // The row's buttons cover this spot on hover, like the time.
-                        {move || live.get().is_some_and(|t| t.pinned).then(|| view! {
-                            <Icon name="pin" size=12 class="shrink-0 text-rambutan-500 group-hover/row:invisible group-focus-within/row:invisible" />
+                        {move || live.get().is_some_and(|t| t.pinned).then(|| {
+                            let class = if menu_shown.get() {
+                                "invisible shrink-0 text-rambutan-500"
+                            } else {
+                                "shrink-0 text-rambutan-500 group-hover/row:invisible group-focus-within/row:invisible"
+                            };
+                            view! { <Icon name="pin" size=12 class=class /> }
                         })}
-                        <span class="ml-auto flex h-5 shrink-0 items-center justify-end text-label-sm tabular-nums text-rambutan-500 group-hover/row:invisible group-focus-within/row:invisible">
+                        <span class=move || if menu_shown.get() {
+                            "invisible ml-auto flex h-5 shrink-0 items-center justify-end text-label-sm tabular-nums text-rambutan-500"
+                        } else {
+                            "ml-auto flex h-5 shrink-0 items-center justify-end text-label-sm tabular-nums text-rambutan-500 group-hover/row:invisible group-focus-within/row:invisible"
+                        }>
                             {move || match status.get() {
                                 CardStatus::Working => view! {
                                     <span class="size-[9px] rounded-orb bg-blueberry-400 animate-status-pulse" role="img" aria-label="Working"></span>
@@ -780,18 +925,22 @@ pub fn Sidebar() -> impl IntoView {
                     type="button"
                     aria-label="Thread actions"
                     title="Thread actions"
-                    class="absolute right-9 top-2 hidden size-control-xs items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 group-hover/row:inline-flex group-focus-within/row:inline-flex"
+                    aria-haspopup="menu"
+                    aria-expanded=move || menu_open.get().to_string()
+                    data-thread-menu-for=menu_id.clone()
+                    class=move || if menu_shown.get() {
+                        "absolute right-9 top-2 inline-flex size-control-xs items-center justify-center rounded-seed bg-longan-700/60 text-rambutan-100 transition-colors"
+                    } else {
+                        "absolute right-9 top-2 hidden size-control-xs items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-rambutan-100 group-hover/row:inline-flex group-focus-within/row:inline-flex"
+                    }
                     on:click=move |ev: web_sys::MouseEvent| {
                         ev.stop_propagation();
                         ev.prevent_default();
-                        if let Some(target) = ev.current_target() {
-                            if let Some(element) = target.dyn_ref::<web_sys::Element>() {
-                                let rect = element.get_bounding_client_rect();
-                                menu_x.set(rect.left());
-                                menu_y.set(rect.bottom() + 4.0);
-                            }
+                        if menu_open.get_untracked() {
+                            close_menu(true);
+                        } else {
+                            open_menu(menu_id.clone());
                         }
-                        menu_thread.set(Some(menu_id.clone()));
                     }
                 >
                     <Icon name="ellipsis" size=16 />
@@ -800,7 +949,11 @@ pub fn Sidebar() -> impl IntoView {
                     type="button"
                     aria-label="Delete thread"
                     title="Delete thread"
-                    class="absolute right-2 top-2 hidden size-control-xs items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-lychee-400 group-hover/row:inline-flex group-focus-within/row:inline-flex"
+                    class=move || if menu_shown.get() {
+                        "absolute right-2 top-2 inline-flex size-control-xs items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-lychee-400"
+                    } else {
+                        "absolute right-2 top-2 hidden size-control-xs items-center justify-center rounded-seed text-rambutan-500 transition-colors hover:bg-longan-700/60 hover:text-lychee-400 group-hover/row:inline-flex group-focus-within/row:inline-flex"
+                    }
                     on:click=move |ev| {
                         ev.stop_propagation();
                         delete_thread(id_delete.clone());
@@ -949,6 +1102,104 @@ pub fn Sidebar() -> impl IntoView {
                 push_thread_undo(previous, message);
             }
         };
+    let crate::state::ComposerChips(composer_chips) = expect_context();
+    let regenerate_title = move |id: String| {
+        if turns.is_running_untracked(&id) {
+            return;
+        }
+        let prompt = if active_thread_id.get_untracked().as_deref() == Some(id.as_str()) {
+            messages.with_untracked(|rows| {
+                rows.iter()
+                    .find(|message| message.role == bruhs_models::agent::Role::User)
+                    .map(|message| message.text())
+            })
+        } else {
+            None
+        };
+        let project = threads
+            .with_untracked(|rows| {
+                rows.iter()
+                    .find(|row| row.id == id)
+                    .map(|row| row.project_name.clone())
+            })
+            .unwrap_or_default();
+        let instructions = title_instructions
+            .with_untracked(|store| instructions_text(&store.global, &store.by_project, &project));
+        set_threads.update(|rows| {
+            if let Some(thread) = rows.iter_mut().find(|row| row.id == id) {
+                let original = thread.clone();
+                thread.title = titled(&thread.title, prompt.as_deref(), &instructions);
+                catalog.persist(Some(original), thread.clone());
+            }
+        });
+    };
+    let discard_draft = move || {
+        let text = composer_draft.get_untracked();
+        if text.is_empty() {
+            return;
+        }
+        let chips = composer_chips.get_untracked();
+        sidebar_undo.push(UndoEntry {
+            message: "Draft discarded".into(),
+            restore: UndoRestore::Draft { text, chips },
+        });
+        composer_chips.set(Vec::new());
+        composer_draft.set(String::new());
+    };
+    let run_menu_row = move |id: String, row: ThreadMenuEntry| match row {
+        ThreadMenuEntry::Pin { pinned: true } => {
+            mutate_thread(id, pin_off, Some("Thread unpinned"));
+        }
+        ThreadMenuEntry::Pin { pinned: false } => mutate_thread(id, pin_on, None),
+        ThreadMenuEntry::Settle { settled: true } => mutate_thread(id, settle_off, None),
+        ThreadMenuEntry::Settle { settled: false } => {
+            mutate_thread(id, settle_on, Some("Thread settled"));
+        }
+        ThreadMenuEntry::Wake => mutate_thread(id, wake_on, None),
+        // Times count from the click, not from when the menu opened.
+        ThreadMenuEntry::Snooze(preset) => {
+            let now = clock_i64(js_sys::Date::now());
+            let until = snooze_presets(now, utc_offset_minutes_east())
+                .into_iter()
+                .find(|fresh| fresh.when == preset.when)
+                .map(|fresh| fresh.until_ms);
+            if let Some(until) = until {
+                snooze_thread_until(id, until);
+            }
+        }
+        ThreadMenuEntry::SnoozeCustom => {
+            custom_when.set(String::new());
+            custom_amount.set(String::new());
+            custom_unit.set(SnoozeUnit::Hours);
+            custom_for.set(Some(id));
+        }
+        ThreadMenuEntry::RegenerateTitle { .. } => regenerate_title(id),
+        ThreadMenuEntry::DiscardDraft => discard_draft(),
+        ThreadMenuEntry::Separator => {}
+    };
+    let menu_row = move |id: String, row: ThreadMenuEntry| -> AnyView {
+        if row == ThreadMenuEntry::Separator {
+            return view! { <div role="separator" class="my-1 h-px bg-white/10"></div> }.into_any();
+        }
+        let label = row.label();
+        let enabled = row.enabled();
+        view! {
+            <button
+                type="button"
+                role="menuitem"
+                tabindex="-1"
+                disabled=!enabled
+                class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60 disabled:opacity-50"
+                on:click=move |_| {
+                    close_menu(true);
+                    run_menu_row(id.clone(), row.clone());
+                }
+            >
+                {label}
+            </button>
+        }
+        .into_any()
+    };
 
     view! {
         <nav
@@ -1070,104 +1321,123 @@ pub fn Sidebar() -> impl IntoView {
 
             {move || {
                 let id = menu_thread.get()?;
-                let thread = threads.with(|rows| rows.iter().find(|row| row.id == id).cloned())?;
-                let id = thread.id.clone();
-                let streaming = turns.is_running(&id);
-                let now = clock_i64(js_sys::Date::now());
-                let offset = utc_offset_minutes_east();
-                let presets = snooze_presets(now, offset);
-                let snoozed = thread.snoozed_until_ms.is_some_and(|until| until > now);
-                let pinned = thread.pinned;
-                let settled = thread.settled;
-                let show_discard = active_thread_id.get().as_deref() == Some(id.as_str())
-                    && !composer_draft.with(String::is_empty);
-                let left = menu_x.get().min(web_sys::window().and_then(|window| window.inner_width().ok()).and_then(|width| width.as_f64()).unwrap_or(800.0) - 220.0).max(8.0);
-                let top = menu_y.get();
-                let regenerate_id = id.clone();
-                let discard_id = id.clone();
+                // The rows change only when this thread's facts do, so focus
+                // keeps its row while other threads update.
+                let facts = Memo::new({
+                    let id = id.clone();
+                    move |_| {
+                        let now = clock_i64(js_sys::Date::now());
+                        threads.with(|rows| {
+                            rows.iter().find(|row| row.id == id).map(|thread| ThreadMenuFacts {
+                                pinned: thread.pinned,
+                                settled: thread.settled,
+                                snoozed: thread.snoozed_until_ms.is_some_and(|until| until > now),
+                                streaming: turns.is_running(&id),
+                                has_draft: active_thread_id.get().as_deref() == Some(id.as_str())
+                                    && !composer_draft.with(String::is_empty),
+                            })
+                        })
+                    }
+                });
+                // A thread deleted elsewhere takes its menu with it.
+                Effect::new(move |_| {
+                    if facts.with(Option::is_none) {
+                        close_menu(false);
+                    }
+                });
+                let rows = Memo::new(move |_| {
+                    let Some(facts) = facts.get() else {
+                        return Vec::new();
+                    };
+                    let mut separators = 0;
+                    thread_menu(facts, clock_i64(js_sys::Date::now()), utc_offset_minutes_east())
+                        .into_iter()
+                        .map(|row| {
+                            let key = if row == ThreadMenuEntry::Separator {
+                                separators += 1;
+                                format!("---{separators}")
+                            } else {
+                                format!("{}:{}", row.label(), row.enabled())
+                            };
+                            (key, row)
+                        })
+                        .collect::<Vec<_>>()
+                });
+                let style = move || match menu_at.get() {
+                    Some((left, top)) => format!("left:{left}px;top:{top}px"),
+                    // Placed in the next frame, before paint. It can take
+                    // focus meanwhile.
+                    None => "left:0;top:0;opacity:0".to_string(),
+                };
                 Some(view! {
-                    <div class="fixed inset-0 z-40" on:click=move |_| menu_thread.set(None)></div>
                     <div
+                        class="fixed inset-0 z-40"
+                        aria-hidden="true"
+                        on:mousedown=|ev: web_sys::MouseEvent| ev.prevent_default()
+                        on:click=move |_| close_menu(true)
+                    ></div>
+                    <div
+                        node_ref=menu_ref
                         role="menu"
                         aria-label="Thread actions"
                         data-thread-menu
                         class="fixed z-50 w-52 rounded-grape bg-longan-700 p-1 inset-ring inset-ring-white/15"
-                        style=format!("left:{left}px;top:{top}px")
-                    >
-                        <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click={
-                            let id = id.clone();
-                            move |_| {
-                                let id = id.clone();
-                                if pinned { mutate_thread(id, pin_off, Some("Thread unpinned")); } else { mutate_thread(id, pin_on, None); }
+                        style=style
+                        // A click keeps focus where it is, so the row runs
+                        // before a focus change could close the menu.
+                        on:mousedown=|ev: web_sys::MouseEvent| ev.prevent_default()
+                        on:keydown=move |ev: web_sys::KeyboardEvent| {
+                            if ev.meta_key() || ev.ctrl_key() || ev.alt_key() {
+                                return;
                             }
-                        }>{if pinned { "Unpin" } else { "Pin" }}</button>
-                        <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click={
-                            let id = id.clone();
-                            move |_| {
-                                let id = id.clone();
-                                if settled { mutate_thread(id, settle_off, None); } else { mutate_thread(id, settle_on, Some("Thread settled")); }
-                            }
-                        }>{if settled { "Unsettle" } else { "Settle" }}</button>
-                        {snoozed.then({
-                            let id = id.clone();
-                            move || view! { <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| mutate_thread(id.clone(), wake_on, None)>"Wake thread"</button> }
-                        })}
-                        <div role="separator" class="my-1 h-px bg-white/10"></div>
-                        {presets.into_iter().map({
-                            let id = id.clone();
-                            move |preset| {
-                                let id = id.clone();
-                                let until = preset.until_ms;
-                                view! {
-                                    <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| snooze_thread_until(id.clone(), until)>
-                                        {preset.label}
-                                    </button>
+                            match ev.key().as_str() {
+                                "Escape" => {
+                                    ev.prevent_default();
+                                    ev.stop_propagation();
+                                    close_menu(true);
+                                }
+                                // Focus goes back to the button first, so the
+                                // browser's own Tab moves on from there.
+                                "Tab" => close_menu(true),
+                                key => {
+                                    let items = menu_items();
+                                    let focused = document().active_element();
+                                    let current = items.iter().position(|item| {
+                                        focused.as_ref() == Some(item.unchecked_ref::<web_sys::Element>())
+                                    });
+                                    let next = menu_step(current, items.len(), key)
+                                        .and_then(|next| items.get(next));
+                                    if let Some(next) = next {
+                                        ev.prevent_default();
+                                        ev.stop_propagation();
+                                        let _ = next.focus();
+                                    }
                                 }
                             }
-                        }).collect_view()}
-                        <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| {
-                            custom_when.set(String::new());
-                            custom_amount.set(String::new());
-                            custom_unit.set("hours".to_string());
-                            custom_for.set(Some(id.clone()));
-                            menu_thread.set(None);
-                        }>"Custom…"</button>
-                        <div role="separator" class="my-1 h-px bg-white/10"></div>
-                        <button
-                            type="button"
-                            role="menuitem"
-                            disabled=streaming
-                            class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60 disabled:opacity-50"
-                            on:click=move |_| {
-                                if turns.is_running_untracked(&regenerate_id) { return; }
-                                menu_thread.set(None);
-                                let prompt = if active_thread_id.get_untracked().as_deref() == Some(regenerate_id.as_str()) {
-                                    messages.with_untracked(|rows| rows.iter().find(|message| message.role == bruhs_models::agent::Role::User).map(|message| message.text()))
-                                } else { None };
-                                let project = threads.with_untracked(|rows| rows.iter().find(|row| row.id == regenerate_id).map(|row| row.project_name.clone())).unwrap_or_default();
-                                let instructions = title_instructions.with_untracked(|store| instructions_text(&store.global, &store.by_project, &project));
-                                set_threads.update(|rows| {
-                                    if let Some(thread) = rows.iter_mut().find(|row| row.id == regenerate_id) {
-                                        let original = thread.clone();
-                                        thread.title = titled(&thread.title, prompt.as_deref(), &instructions);
-                                        catalog.persist(Some(original), thread.clone());
-                                    }
-                                });
+                        }
+                        on:focusout=move |ev: web_sys::FocusEvent| {
+                            // Focus moving elsewhere (a shortcut opened the
+                            // command bar) closes the menu, so its backdrop
+                            // cannot swallow the next click.
+                            let Some(next) = ev
+                                .related_target()
+                                .and_then(|target| target.dyn_into::<web_sys::Node>().ok())
+                            else {
+                                return;
+                            };
+                            let inside = menu_ref
+                                .get_untracked()
+                                .is_some_and(|menu| menu.contains(Some(&next)));
+                            if !inside {
+                                close_menu(false);
                             }
-                        >"Regenerate title"</button>
-                        {show_discard.then(|| view! {
-                            <button type="button" role="menuitem" class="flex min-h-control w-full items-center rounded-seed px-2 text-left text-label-sm text-rambutan-200 hover:bg-longan-800/60" on:click=move |_| {
-                                menu_thread.set(None);
-                                let text = composer_draft.get_untracked();
-                                if text.is_empty() { return; }
-                                let crate::state::ComposerChips(composer_chips) = expect_context();
-                                let chips = composer_chips.get_untracked();
-                                sidebar_undo.push(UndoEntry { message: "Draft discarded".into(), restore: UndoRestore::Draft { text, chips } });
-                                composer_chips.set(Vec::new());
-                                composer_draft.set(String::new());
-                                let _ = discard_id;
-                            }>"Discard draft"</button>
-                        })}
+                        }
+                    >
+                        <For
+                            each=move || rows.get()
+                            key=|(key, _)| key.clone()
+                            children=move |(_, row)| menu_row(id.clone(), row)
+                        />
                     </div>
                 })
             }}
@@ -1175,21 +1445,19 @@ pub fn Sidebar() -> impl IntoView {
                 open=Signal::derive(move || custom_for.get().is_some())
                 on_close=Callback::new(move |_| custom_for.set(None))
                 max_width="max-w-sm".to_string()
-                label="Snooze until".to_string()
+                label=SNOOZE_CUSTOM_TITLE.to_string()
             >
-                <div class="flex flex-col gap-3 p-4">
-                    <h2 class="text-label text-rambutan-100">"Snooze until"</h2>
-                    <label class="flex flex-col gap-1 text-label-sm text-rambutan-400">
-                        "Date and time"
-                        <input
-                            type="datetime-local"
-                            class="min-h-control rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
-                            prop:value=move || custom_when.get()
-                            on:input=move |ev| custom_when.set(event_target_value(&ev))
+                <div data-snooze-custom class="flex flex-col gap-3 p-4">
+                    <h2 class="text-h4 text-rambutan-100">{SNOOZE_CUSTOM_TITLE}</h2>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-label-sm text-rambutan-400">"Date and time"</span>
+                        <DateTimePicker
+                            value=Signal::derive(move || custom_when.get())
+                            on_change=Callback::new(move |when: String| custom_when.set(when))
                         />
-                    </label>
-                    <label class="flex flex-col gap-1 text-label-sm text-rambutan-400">
-                        "Or a duration"
+                    </div>
+                    <div class="flex flex-col gap-1">
+                        <span class="text-label-sm text-rambutan-400">"Or a duration"</span>
                         <span class="flex gap-2">
                             <input
                                 type="number"
@@ -1199,36 +1467,34 @@ pub fn Sidebar() -> impl IntoView {
                                 prop:value=move || custom_amount.get()
                                 on:input=move |ev| custom_amount.set(event_target_value(&ev))
                             />
-                            <select
-                                aria-label="Snooze unit"
-                                class="min-h-control flex-1 rounded-grape bg-longan-950 px-2 text-body-sm text-rambutan-100 inset-ring inset-ring-white/10"
-                                on:change=move |ev| custom_unit.set(event_target_value(&ev))
-                            >
-                                <option value="minutes" selected=move || custom_unit.get() == "minutes">"minutes"</option>
-                                <option value="hours" selected=move || custom_unit.get() == "hours">"hours"</option>
-                                <option value="days" selected=move || custom_unit.get() == "days">"days"</option>
-                            </select>
+                            <Dropdown
+                                options=Signal::derive(|| {
+                                    SnoozeUnit::ALL
+                                        .map(|unit| DropdownOption::new(unit.label(), unit.label()))
+                                        .to_vec()
+                                })
+                                value=Signal::derive(move || custom_unit.get().label().to_string())
+                                on_change=Callback::new(move |unit: String| {
+                                    custom_unit.set(SnoozeUnit::from_label(&unit));
+                                })
+                                label="Snooze unit"
+                                class="flex-1"
+                            />
                         </span>
-                    </label>
+                    </div>
                     <button
                         type="button"
                         class="bruhs-control inline-flex min-h-control items-center justify-center rounded-grape bg-persimmon-500 px-3 text-label text-longan-950"
                         on:click=move |_| {
                             let Some(id) = custom_for.get_untracked() else { return };
-                            let now = js_sys::Date::now();
-                            let amount = custom_amount.get_untracked().trim().parse::<u64>().unwrap_or(0);
-                            let unit = match custom_unit.get_untracked().as_str() {
-                                "minutes" => SnoozeUnit::Minutes,
-                                "days" => SnoozeUnit::Days,
-                                _ => SnoozeUnit::Hours,
-                            };
-                            let until = if amount > 0 {
-                                snooze_after(clock_i64(now), amount, unit)
-                            } else {
-                                let parsed = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(&custom_when.get_untracked())).get_time();
-                                (parsed.is_finite() && parsed > now).then(|| clock_i64(parsed))
-                            };
-                            if let Some(until) = until {
+                            let now = clock_i64(js_sys::Date::now());
+                            // `YYYY-MM-DDTHH:MM` without an offset is local time.
+                            let chosen = custom_when.with_untracked(|when| {
+                                let at = js_sys::Date::new(&wasm_bindgen::JsValue::from_str(when)).get_time();
+                                at.is_finite().then(|| clock_i64(at))
+                            });
+                            let amount = custom_amount.get_untracked();
+                            if let Some(until) = custom_snooze_until(now, &amount, custom_unit.get_untracked(), chosen) {
                                 custom_for.set(None);
                                 snooze_thread_until(id, until);
                             }
