@@ -173,7 +173,7 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
             {action.map(|action| view! {
                 <button
                     type="button"
-                    class="-my-2 min-h-11 shrink-0 rounded-seed px-2 text-label-sm underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-persimmon-500 cursor-pointer"
+                    class="bruhs-control -my-1 min-h-control shrink-0 rounded-seed px-2 text-label-sm underline-offset-2 hover:underline focus-visible:outline focus-visible:outline-persimmon-500 cursor-pointer"
                     on:click=move |_| {
                         action.run.run(());
                         on_dismiss_action(id_for_action.clone());
@@ -185,7 +185,7 @@ fn BannerItem(banner: Banner, on_dismiss: impl Fn(String) + 'static + Clone) -> 
             <button
                 type="button"
                 aria-label="Dismiss notification"
-                class="-mr-2 -my-2 min-h-11 min-w-11 shrink-0 rounded-seed opacity-60 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-persimmon-500 transition-opacity cursor-pointer"
+                class="bruhs-control -mr-2 -my-1 min-h-control min-w-control shrink-0 rounded-seed opacity-60 hover:opacity-100 focus-visible:opacity-100 focus-visible:outline focus-visible:outline-persimmon-500 transition-opacity cursor-pointer"
                 on:click=move |_| on_dismiss_btn(id_for_dismiss.clone())
             >
                 "×"

@@ -36,7 +36,8 @@ pub const TRANSCRIPT_BODY_TEXT_SIZE_PX: f32 = theme::APP_BODY_TEXT_SIZE_PX;
 pub const TRANSCRIPT_LABEL_TEXT_SIZE_PX: f32 = 12.0;
 pub const TRANSCRIPT_ROW_MIN_HEIGHT_PX: f32 = 24.0;
 pub const TRANSCRIPT_ICON_BOX_PX: f32 = 24.0;
-pub const TRANSCRIPT_ICON_PX: f32 = 14.0;
+/// Icons beside transcript text (shared scale: inline icon).
+pub const TRANSCRIPT_ICON_PX: f32 = theme::ICON_INLINE_PX;
 pub const TRANSCRIPT_CHEVRON_PX: f32 = 12.0;
 pub const TRANSCRIPT_ROW_RADIUS_PX: f32 = 8.0;
 pub const TRANSCRIPT_CARD_RADIUS_PX: f32 = 14.0;

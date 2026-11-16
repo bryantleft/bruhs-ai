@@ -93,7 +93,9 @@ fn native_notification_dismiss_supports_pointer_and_keyboard_and_restores_focus(
         let dismiss = cx
             .debug_bounds("desktop-hub-notice-dismiss")
             .expect("dismiss control");
-        assert!(dismiss.size.width >= px(44.0) && dismiss.size.height >= px(44.0));
+        // The shared size scale: a 32px control, not the 44px touch size.
+        assert_eq!(dismiss.size.height, px(theme::CONTROL_PX));
+        assert!(dismiss.size.width >= px(theme::CONTROL_PX));
         if activation == "pointer" {
             cx.simulate_click(dismiss.center(), Modifiers::default());
         } else {

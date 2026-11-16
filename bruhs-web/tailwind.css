@@ -2,6 +2,16 @@
 @tailwind components;
 @tailwind utilities;
 
+/* Shared size scale (docs/ui-standards.md): shadcn's dense control sizes,
+   named once so an interface density setting can change them in one place.
+   Desktop mirrors these in bruhs-desktop/src/theme.rs. */
+:root {
+  --size-control: 32px;
+  --size-control-sm: 28px;
+  --size-control-xs: 24px;
+  --size-icon: 16px;
+}
+
 .bruhs-brand-logo {
   display: block !important;
   aspect-ratio: 1 / 1;

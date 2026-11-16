@@ -2736,6 +2736,41 @@ fn desktop_thread_menu_should_open_under_its_trigger_like_web(cx: &mut gpui::Tes
     }
 }
 
+/// The sidebar follows the shared size scale (docs/ui-standards.md):
+/// 32px controls and menu rows, 24px card actions.
+#[gpui::test]
+fn desktop_sidebar_should_use_the_shared_size_scale(cx: &mut gpui::TestAppContext) {
+    let (_workspace, cx, general_id, _code_id) = thread_menu_workspace(cx);
+    let control = gpui::size(gpui::px(theme::CONTROL_PX), gpui::px(theme::CONTROL_PX));
+    assert_eq!(
+        rendered_bounds(cx, "desktop-sidebar-search").size.height,
+        gpui::px(theme::CONTROL_PX)
+    );
+    for button in ["desktop-sidebar-new-project", "desktop-sidebar-new-thread"] {
+        assert_eq!(rendered_bounds(cx, button).size, control, "{button}");
+    }
+    open_thread_menu_by_pointer(cx, &general_id);
+    assert_eq!(
+        rendered_bounds(cx, thread_actions_debug_selector(&general_id)).size,
+        gpui::size(
+            gpui::px(theme::CONTROL_XS_PX),
+            gpui::px(theme::CONTROL_XS_PX)
+        )
+    );
+    for row in [
+        "desktop-thread-menu-pin",
+        "desktop-thread-menu-settle",
+        "desktop-thread-menu-hour",
+        "desktop-thread-menu-regenerate",
+    ] {
+        assert_eq!(
+            rendered_bounds(cx, row).size.height,
+            gpui::px(theme::CONTROL_PX),
+            "{row}"
+        );
+    }
+}
+
 /// Keyboard: the menu takes focus, arrows move through it, Escape hands
 /// focus back to "…", Tab moves on from it, and Enter runs an item. A click
 /// outside closes it without reaching what is underneath.

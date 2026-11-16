@@ -16,12 +16,30 @@ pub const CODE_FONT_FAMILY: &str = "Monaspace Neon";
 /// bruhs heading face (web: `text-h2` = `Monaspace Xenon`).
 pub const HEADING_FONT_FAMILY: &str = "Monaspace Xenon";
 
+// Shared size scale (docs/ui-standards.md), from shadcn's dense Sidebar and
+// menu sizes. Web defines the same values as CSS variables in
+// bruhs-web/tailwind.css. Call sites use these names, never raw numbers, so an
+// interface density setting can change them in one place.
+/// Default control: buttons, inputs in bars and menus, menu and list rows
+/// (shadcn `h-8`).
+pub const CONTROL_PX: f32 = 32.0;
+/// Compact control: icon toggles in bars and headers (shadcn `size-7`).
+pub const CONTROL_SM_PX: f32 = 28.0;
+/// Actions inside rows and cards.
+pub const CONTROL_XS_PX: f32 = 24.0;
+/// Every icon inside a control (shadcn `size-4`).
+pub const ICON_PX: f32 = 16.0;
+/// Icons that decorate 13 to 14px text that is not clickable.
+pub const ICON_INLINE_PX: f32 = 14.0;
+/// Icons that decorate 12px text that is not clickable.
+pub const ICON_INLINE_SM_PX: f32 = 12.0;
+
 pub const APP_UI_TEXT_SIZE_PX: f32 = 13.0;
 pub const APP_BODY_TEXT_SIZE_PX: f32 = 13.0;
 pub const APP_INPUT_TEXT_SIZE_PX: f32 = 14.0;
 pub const APP_HEADER_HEIGHT_PX: f32 = 44.0;
-pub const APP_CONTROL_HEIGHT_PX: f32 = 32.0;
-pub const APP_COMPACT_CONTROL_HEIGHT_PX: f32 = 28.0;
+pub const APP_CONTROL_HEIGHT_PX: f32 = CONTROL_PX;
+pub const APP_COMPACT_CONTROL_HEIGHT_PX: f32 = CONTROL_SM_PX;
 
 /// OpenType tabular numerals, like Tailwind `tabular-nums`: only the feature
 /// changes, so the text keeps its Monaspace face (bruhs is all mono).

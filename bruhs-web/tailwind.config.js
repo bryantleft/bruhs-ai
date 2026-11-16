@@ -20,9 +20,29 @@ module.exports = {
   theme: {
     extend: {
       // Trunk bundles Tailwind 3.3, before spacing-based min-size utilities.
-      // 10 is the 40px control. 11 matches the 44px mobile menu target.
-      minHeight: { 10: "40px", 11: "44px" },
-      minWidth: { 10: "40px", 11: "44px" },
+      // 10 is 40px. 11 matches the 44px touch target.
+      // `control*` and `icon` are the shared size scale (tailwind.css :root):
+      // h-control, size-control-sm, min-h-control, size-icon, and so on.
+      minHeight: {
+        10: "40px",
+        11: "44px",
+        control: "var(--size-control)",
+        "control-sm": "var(--size-control-sm)",
+        "control-xs": "var(--size-control-xs)",
+      },
+      minWidth: {
+        10: "40px",
+        11: "44px",
+        control: "var(--size-control)",
+        "control-sm": "var(--size-control-sm)",
+        "control-xs": "var(--size-control-xs)",
+      },
+      spacing: {
+        control: "var(--size-control)",
+        "control-sm": "var(--size-control-sm)",
+        "control-xs": "var(--size-control-xs)",
+        icon: "var(--size-icon)",
+      },
       colors: {
         longan: {
           50: "#f6f3ee",

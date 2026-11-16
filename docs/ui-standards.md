@@ -6,7 +6,20 @@ Use 640×480 as the compact desktop verification cell and 390×844 for touch. Wh
 
 Use direct labels and short sentences in app-owned interface copy. Do not use dash punctuation, bullet markers, or middle-dot separators. Use spacing and semantic layout to separate information, colons for labels, and “to” for ranges. Do not rewrite user-authored messages, document content, code, technical identifiers, dates, or mathematical minus signs.
 
-Use the shared compact scale: 13px interface labels, 14px desktop inputs, and 12px small labels. Default desktop controls use 32px targets; compact secondary controls use 28px. Shared controls and composer actions retain 44px touch targets and 16px touch inputs. Keep icons and labels centered in a common control box. Hover and focus must change paint without shifting content or resizing hit areas. Focus remains visible.
+Use the shared compact type scale: 13px interface labels, 14px desktop inputs, and 12px small labels. Keep icons and labels centered in a common control box. Hover and focus must change paint without shifting content or resizing hit areas. Focus remains visible.
+
+Size controls with the shared size scale, from shadcn's dense Sidebar and menu sizes. Each app defines it once: desktop in `bruhs-desktop/src/theme.rs`, web as CSS variables in `bruhs-web/tailwind.css` with Tailwind keys such as `min-h-control` and `size-control-sm`. Use the names, never raw numbers, so an interface density setting can change them in one place.
+
+| Name | Size | Desktop | Web | Use |
+| --- | --- | --- | --- | --- |
+| control | 32px | `CONTROL_PX` | `h-control`, `min-h-control`, `size-control` | Buttons, inputs, menu rows, list rows, nav and footer buttons |
+| control-sm | 28px | `CONTROL_SM_PX` | `h-control-sm`, `size-control-sm` | Icon toggles in bars and headers, compact secondary buttons |
+| control-xs | 24px | `CONTROL_XS_PX` | `size-control-xs`, `min-h-control-xs` | Actions inside rows and cards, such as a thread card's menu and delete |
+| icon | 16px | `ICON_PX` | `size=16` | Every icon inside a control |
+| icon-inline | 14px or 12px | `ICON_INLINE_PX`, `ICON_INLINE_SM_PX` | `size=14`, `size=12` | Icons beside text that is not clickable: 14px beside 13 to 14px text, 12px beside 12px text |
+| touch | 44px | none | `bruhs-control`, `[role=menuitem]`, `[role=option]` | Phones and other coarse pointers |
+
+Text controls take a minimum height, so larger text grows them instead of clipping; only icon buttons have a fixed size. Menu rows use 8px of horizontal padding, 32px text buttons 12px, and 28px text buttons 8px. Adjacent icon buttons sit 4px apart. On the web, give a control `bruhs-control` (or a menu role) instead of a hard-coded 44px class: the coarse pointer rule in `tailwind.css` makes it 44px on touch, and composer actions and inputs keep 44px targets and 16px text there. Bars and headers keep their own heights, such as the 44px app header, and so does the floating meeting dock.
 
 Every overflow region must have reachable content and a usable scrollbar. Use warm theme colors, a clearly visible thumb, a generous drag target, and scrolling and dragging on each axis where content overflows. Keep scroll handles on the element that owns overflow. Keyboard navigation must reveal the selected option. Respect platform high-contrast behavior.
 
