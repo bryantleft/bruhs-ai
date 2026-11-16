@@ -104,6 +104,7 @@ mod person_merge;
 #[cfg(test)]
 mod project_picker_tests;
 mod project_picker_ui;
+mod record_picker_ui;
 mod role_settings_ui;
 mod save_queue;
 mod save_status;
@@ -114,7 +115,6 @@ mod settings_ui;
 mod sidebar_ui;
 #[cfg(debug_assertions)]
 mod smoke;
-mod record_picker_ui;
 mod snooze_ui;
 mod state_file;
 #[cfg(test)]
