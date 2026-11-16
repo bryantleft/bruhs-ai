@@ -231,10 +231,6 @@ pub struct DiffScopeSignal(pub RwSignal<Option<DiffScope>>);
 #[derive(Copy, Clone)]
 pub struct DiffFocusPath(pub RwSignal<Option<String>>);
 
-/// Sidebar project filter: `None` = all, `Some("")` = general threads only.
-#[derive(Copy, Clone)]
-pub struct SidebarProjectFilter(pub RwSignal<Option<String>>);
-
 #[derive(Debug, Clone, PartialEq, Eq, Deserialize)]
 pub struct GitDirtyFile {
     pub path: String,
@@ -302,13 +298,6 @@ pub(super) fn provide() {
         );
     });
 
-    let initial_filter = load_pref("bruhs.sidebarProjectFilter").filter(|s| s != "*");
-    let sidebar_project_filter = RwSignal::new(initial_filter);
-    Effect::new(move |_| {
-        let v = sidebar_project_filter.get();
-        save_pref("bruhs.sidebarProjectFilter", v.as_deref().unwrap_or("*"));
-    });
-
     provide_context(SidebarOpen(sidebar_open));
     provide_context(SetSidebarOpen(set_sidebar_open));
     provide_context(CommandBarOpen(command_bar_open));
@@ -329,7 +318,6 @@ pub(super) fn provide() {
     provide_context(OpenFileSignal(RwSignal::new(None)));
     provide_context(DiffScopeSignal(RwSignal::new(Option::<DiffScope>::None)));
     provide_context(DiffFocusPath(RwSignal::new(Option::<String>::None)));
-    provide_context(SidebarProjectFilter(sidebar_project_filter));
     provide_context(GitStatusSignal(RwSignal::new(GitStatus::default())));
     provide_context(crate::components::banner::BannerStackSignal(RwSignal::new(
         VecDeque::<crate::components::banner::Banner>::new(),

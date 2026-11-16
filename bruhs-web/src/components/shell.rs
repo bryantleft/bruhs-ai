@@ -89,26 +89,6 @@ pub fn Shell() -> impl IntoView {
     let set_threads = expect_context::<crate::state::SetThreadsSignal>().0;
     let active_thread_id = expect_context::<crate::state::ActiveThreadId>().0;
     let set_active_thread_id = expect_context::<crate::state::SetActiveThreadId>().0;
-    let crate::state::SidebarProjectFilter(project_filter) =
-        expect_context::<crate::state::SidebarProjectFilter>();
-    let active_project_identity = Memo::new(move |_| {
-        active_thread_id.get().and_then(|id| {
-            threads.with(|rows| {
-                rows.iter()
-                    .find(|thread| thread.id == id)
-                    .map(|thread| (id, thread.project_name.clone()))
-            })
-        })
-    });
-    Effect::new(move |_| {
-        if let Some((_, project)) = active_project_identity.get() {
-            if project_filter
-                .with_untracked(|filter| filter.as_ref().is_some_and(|filter| filter != &project))
-            {
-                project_filter.set(None);
-            }
-        }
-    });
     let set_messages = expect_context::<crate::state::SetMessagesSignal>().0;
     let turns = expect_context::<Turns>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
@@ -164,13 +144,6 @@ pub fn Shell() -> impl IntoView {
                     },
                 )
                 .into_iter()
-                .filter(|thread| {
-                    project_filter.with_untracked(|filter| {
-                        filter
-                            .as_deref()
-                            .is_none_or(|name| thread.project_name == name)
-                    })
-                })
                 .collect::<Vec<_>>()
             })
         })
