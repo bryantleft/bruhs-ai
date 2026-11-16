@@ -56,9 +56,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - Removed the workflow overview and What's new sections from the landing
   page. The Changelog remains available in the navigation and command menu.
 - Chat and coding conversations now share one thread list on web and desktop.
-  New threads keep the current conversation’s optional project, and project
-  filters help you focus without switching modes. Choose a project folder
-  within a thread to continue the same conversation with files and tools.
+  New threads keep the current conversation’s optional project. Choose a
+  project folder within a thread to continue the same conversation with files
+  and tools.
 - The web app now runs threads side by side, up to three at once. Sending in
   one thread no longer waits for another thread's turn to end, a queued prompt
   starts when its thread is free even if that thread is not open, and each
@@ -71,15 +71,21 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   before the title instructions.
 - The dot Bruh in Settings → About now places its eyes and mouth exactly
   where the logo has them, at every size.
-- The desktop sidebar fits its controls on one line: Search, Choose project
-  folder and New thread. The All threads project filter is gone; search now
-  matches project names as well as titles, so typing a project's name lists
-  its threads.
-- The desktop app no longer shows a Threads tab above each page. To return to
-  a conversation, choose its card in the sidebar or use ⌘K.
-- Desktop dialogs, such as New task, New event and Update providers, now open
-  in the middle of the window. The command palette and the project and import
-  pickers stay at the top, so they do not move while their lists change.
+- The sidebar fits its controls on one line, on the web and in the desktop
+  app: Search, Choose project folder and New thread. The All threads project
+  filter is gone; search now matches project names as well as titles, so
+  typing a project's name lists its threads.
+- Neither app shows a Threads tab above each page any more. To return to a
+  conversation, choose its card in the sidebar or use ⌘K.
+- Dialogs, such as New task, New event and Update providers, now open in the
+  middle of the window on the web and in the desktop app. The command palette
+  and the project, import and record pickers stay at the top, so they do not
+  move while their lists change.
+- Buttons, inputs, menus and icons now share one size scale on the web and in
+  the desktop app, based on shadcn's compact sizes: 32px controls and menu
+  rows, 28px header toggles, 24px actions on cards and 16px icons. Controls
+  that were 40 or 44px tall with a mouse are 32px now, and phones keep 44px
+  touch targets.
 
 ### Fixed
 
@@ -96,16 +102,20 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   its action twice.
 - Fixed the desktop New meeting note button reading as a heading. It now sits
   beside the Meeting notes title, as on the web.
-- Notices in the desktop app, such as a lost live transcript, now float over
-  the page instead of pushing it up, so the composer and the page stay where
-  they are.
+- Notices, such as a lost live transcript in the desktop app, now float over
+  the page on the web and in the desktop app instead of pushing it up, so the
+  composer and the page stay where they are.
 - The live transcript notice now appears once, when a recording loses its
   connection, instead of after every reconnect attempt. It no longer appears
   when the server was never running.
+- The web app now shows one Lost the connection to bruhs-server notice while
+  the connection is down, and removes it when the connection returns, instead
+  of adding a new notice after every reconnect attempt.
 - The desktop Update providers and Restart to update dialogs show their
   question once, as the dialog's title, instead of twice.
-- The desktop sidebar toggle is now a 28px button, the size shadcn uses, and
-  Enter or Space on it toggles the sidebar once instead of twice.
+- The sidebar toggle is now a 28px button on the web and in the desktop app,
+  the size shadcn uses, instead of 44px. On the desktop, Enter or Space on it
+  toggles the sidebar once instead of twice.
 - Fixed the landing page's tour progress indicators cutting dots in half.
   Each tab now fills with complete dots, centered under its label.
 

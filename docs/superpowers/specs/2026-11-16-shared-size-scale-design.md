@@ -1,6 +1,6 @@
 # Shared size scale (shadcn alignment): design
 
-Date: 2026-11-16. Status: draft for approval.
+Date: 2026-11-16. Status: approved (B2) and rolled out; see Rollout status.
 
 ## Intent
 
@@ -184,3 +184,24 @@ Each slice is checked as follows:
 - Names for web helper classes, if a repeated pattern needs one.
 - Whether to add a source scan that flags new hard-coded 44px sizes outside
   the touch rules.
+
+## Rollout status
+
+2026-11-16, on both surfaces:
+
+- Slice 1: the names exist (`theme.rs`, `tailwind.css`, `tailwind.config.js`).
+  Web `button_class`, `Input` and `MenuItem`, desktop `web_button` (`px-3`),
+  and the thread menu rows (32px, `px-2`) use them.
+- Slice 2: the sidebar (search, buttons, card actions at 24px with 16px
+  icons, 32px fold headers, footer), the 28px sidebar toggle, and notice
+  buttons (32px, pulled into the notice's padding).
+- Slice 3: chat header toggles (28px, 16px icons), the rename button and the
+  composer's square actions (16px icons). Composer chips keep their sizes
+  under the composer rules.
+- Slice 4: every remaining web `min-h-11`, `size-11`, `min-w-11` and
+  `min-h-10` control outside bars, the undo bar and the meeting dock moved to
+  the scale with `bruhs-control`; desktop page controls at 40 or 44px moved
+  to `CONTROL_PX`. Tests that pinned 44px now pin the scale.
+
+Still open: page-specific desktop constants that repeat a scale value under
+another name, and composer chip icons.
