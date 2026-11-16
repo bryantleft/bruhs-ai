@@ -4,8 +4,9 @@ use leptos::prelude::*;
 
 use crate::state::{
     AppView, AutomationStateSignal, CalendarEventsSignal, CalendarMode, MeetingsSignal,
-    PeopleSignal, PlanDayRequest, SetActiveView, SetCalendarAnchor, SetCalendarModeSignal,
-    SetSelectedEventId, SetSelectedWorkItem, TodaySnapshot, WorkItem, WorkItemsSignal,
+    PeopleSignal, PlanDayRequest, SelectedPersonSignal, SetActiveView, SetCalendarAnchor,
+    SetCalendarModeSignal, SetSelectedEventId, SetSelectedWorkItem, TodaySnapshot, WorkItem,
+    WorkItemsSignal,
 };
 use crate::task_saves::TaskSaves;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog};
@@ -101,6 +102,17 @@ fn duration_label(start_at_ms: f64, end_at_ms: f64) -> String {
     }
 }
 
+/// A follow-up opens its person's profile on People, the way search
+/// results and whiteboard links open one.
+fn open_person(
+    person_id: String,
+    selected_person: RwSignal<Option<String>>,
+    set_active_view: WriteSignal<AppView>,
+) {
+    selected_person.set(Some(person_id));
+    set_active_view.set(AppView::People);
+}
+
 /// A card's empty state: a quiet line of text, not a box inside the card.
 fn empty_row(label: &'static str) -> impl IntoView {
     view! { <p class="py-1 text-body-sm text-rambutan-500">{label}</p> }
@@ -154,6 +166,7 @@ pub fn TodayPage() -> impl IntoView {
     let MeetingsSignal(meetings) = expect_context::<MeetingsSignal>();
     let PeopleSignal(people) = expect_context::<PeopleSignal>();
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
+    let SelectedPersonSignal(selected_person) = expect_context::<SelectedPersonSignal>();
     let SetSelectedWorkItem(set_selected_work_item) = expect_context::<SetSelectedWorkItem>();
     let SetSelectedEventId(set_selected_event_id) = expect_context::<SetSelectedEventId>();
     let SetCalendarAnchor(set_calendar_anchor) = expect_context::<SetCalendarAnchor>();
@@ -452,11 +465,14 @@ pub fn TodayPage() -> impl IntoView {
                                 {move || {
                                     let items = snapshot.get().follow_ups;
                                     if items.is_empty() { empty_row("No recent follow ups.").into_any() } else {
-                                        items.into_iter().take(4).map(|item| view! {
-                                            <button type="button" class="w-full rounded-grape px-2 py-2 text-left hover:bg-longan-800/60 cursor-pointer" on:click=move |_| set_active_view.set(AppView::People)>
-                                                <div class="truncate text-label text-rambutan-200">{item.person_name}</div>
-                                                <div class="mt-0.5 line-clamp-2 text-body-sm text-rambutan-500">{item.text}</div>
-                                            </button>
+                                        items.into_iter().take(4).map(|item| {
+                                            let person_id = item.person_id.clone();
+                                            view! {
+                                                <button type="button" class="w-full rounded-grape px-2 py-2 text-left hover:bg-longan-800/60 cursor-pointer" on:click=move |_| open_person(person_id.clone(), selected_person, set_active_view)>
+                                                    <div class="truncate text-label text-rambutan-200">{item.person_name}</div>
+                                                    <div class="mt-0.5 line-clamp-2 text-body-sm text-rambutan-500">{item.text}</div>
+                                                </button>
+                                            }
                                         }).collect_view().into_any()
                                     }
                                 }}
@@ -563,5 +579,24 @@ fn TodayTaskSection(
                 }}
             </div>
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::open_person;
+    use crate::state::AppView;
+    use leptos::prelude::{GetUntracked, Owner, RwSignal};
+
+    #[test]
+    fn a_follow_up_opens_its_persons_profile_like_desktop() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let selected = RwSignal::new(None::<String>);
+            let view = RwSignal::new(AppView::Today);
+            open_person("ada".into(), selected, view.write_only());
+            assert_eq!(selected.get_untracked().as_deref(), Some("ada"));
+            assert_eq!(view.get_untracked(), AppView::People);
+        });
     }
 }

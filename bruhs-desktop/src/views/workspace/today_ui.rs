@@ -2,6 +2,9 @@
 
 use super::*;
 
+/// Web "Calendar →" at the right of Now & next.
+const TODAY_CALENDAR_LINK_LABEL: &str = "Calendar →";
+
 impl Workspace {
     pub(super) fn planning_work_items(&self) -> Vec<WorkItem> {
         self.work_items
@@ -215,6 +218,158 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
+    /// A recent decision opens the meeting it was made in (web
+    /// `MeetingDetail`).
+    fn open_today_decision(
+        &mut self,
+        meeting_id: String,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.open_meeting_detail(meeting_id, cx);
+        self.workspace_focus_handle.focus(window, cx);
+    }
+
+    /// A follow-up opens its person's profile on People.
+    fn open_today_follow_up(
+        &mut self,
+        person_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.open_person_profile(person_id, window, cx);
+        self.workspace_focus_handle.focus(window, cx);
+    }
+
+    /// A Today row that opens a record: web's `w-full rounded-grape px-2
+    /// py-2 text-left hover:bg-longan-800/60` button.
+    fn today_record_row(id: ElementId, label: String) -> Stateful<Div> {
+        div()
+            .id(id)
+            .w_full()
+            .rounded(px(6.0))
+            .px_2()
+            .py_2()
+            .flex()
+            .flex_col()
+            .hover(|element| element.bg(theme::longan_800().opacity(0.6)))
+            .cursor_pointer()
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(label)
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+    }
+
+    /// Web: the person's name over two lines of the follow-up.
+    fn render_today_follow_up_row(
+        &self,
+        index: usize,
+        item: &bruhs_models::models::planning::FollowUp,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let person_id = item.person_id.clone();
+        Self::today_record_row(
+            ElementId::from(("desktop-today-follow-up", index)),
+            format!("Open {}: {}", item.person_name, item.text),
+        )
+        .debug_selector(move || format!("desktop-today-follow-up-{index}"))
+        .on_click(cx.listener(move |this, _event, window, cx| {
+            this.open_today_follow_up(&person_id, window, cx);
+        }))
+        .child(
+            div()
+                .font_family(theme::UI_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_size(px(13.0))
+                .text_color(theme::rambutan_200())
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(item.person_name.clone()),
+        )
+        .child(
+            div()
+                .mt(px(2.0))
+                .line_clamp(2)
+                .font_family(theme::CODE_FONT_FAMILY)
+                .text_size(px(13.0))
+                .text_color(theme::rambutan_500())
+                .child(item.text.clone()),
+        )
+        .into_any_element()
+    }
+
+    /// Web: two lines of the decision over its meeting's title.
+    fn render_today_decision_row(
+        &self,
+        index: usize,
+        item: &bruhs_models::RecentDecision,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let meeting_id = item.meeting_id.clone();
+        Self::today_record_row(
+            ElementId::from(("desktop-today-decision", index)),
+            format!("Open meeting {}: {}", item.meeting_title, item.text),
+        )
+        .debug_selector(move || format!("desktop-today-decision-{index}"))
+        .on_click(cx.listener(move |this, _event, window, cx| {
+            this.open_today_decision(meeting_id.clone(), window, cx);
+        }))
+        .child(
+            div()
+                .line_clamp(2)
+                .font_family(theme::CODE_FONT_FAMILY)
+                .text_size(px(13.0))
+                .text_color(theme::rambutan_300())
+                .child(item.text.clone()),
+        )
+        .child(
+            div()
+                .mt(px(2.0))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_size(px(12.0))
+                .text_color(theme::rambutan_400())
+                .overflow_hidden()
+                .whitespace_nowrap()
+                .text_ellipsis()
+                .child(item.meeting_title.clone()),
+        )
+        .into_any_element()
+    }
+
+    /// Web "Calendar →" beside Now & next: a quiet text button that opens
+    /// the calendar.
+    fn render_today_calendar_link(&self, cx: &Context<'_, Self>) -> AnyElement {
+        div()
+            .id("desktop-today-calendar-link")
+            .debug_selector(|| "desktop-today-calendar-link".to_string())
+            .flex_shrink_0()
+            .min_h(px(theme::CONTROL_XS_PX))
+            .flex()
+            .items_center()
+            .rounded(px(4.0))
+            .font_family(theme::UI_FONT_FAMILY)
+            .font_weight(FontWeight::MEDIUM)
+            .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
+            .text_color(theme::rambutan_500())
+            .hover(|el| el.text_color(theme::rambutan_200()))
+            .cursor_pointer()
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(TODAY_CALENDAR_LINK_LABEL)
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .on_click(cx.listener(|this, _event, window, cx| {
+                this.activate_sidebar_view(AppView::Calendar, window, cx);
+            }))
+            .child(TODAY_CALENDAR_LINK_LABEL)
+            .into_any_element()
+    }
+
     pub(super) fn render_today_task_row(
         &self,
         item: &WorkItem,
@@ -265,9 +420,12 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// A Today card: its title, with `action` at the right of the title
+    /// row (web "Calendar →"), over its rows or `empty`.
     pub(super) fn render_today_section(
         &self,
         title: &'static str,
+        action: Option<AnyElement>,
         rows: Vec<AnyElement>,
         empty: &'static str,
     ) -> AnyElement {
@@ -287,11 +445,19 @@ impl Workspace {
             .gap_2()
             .child(
                 div()
-                    .font_family(theme::HEADING_FONT_FAMILY)
-                    .text_size(px(13.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::rambutan_100())
-                    .child(title),
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_2()
+                    .child(
+                        div()
+                            .font_family(theme::HEADING_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(theme::rambutan_100())
+                            .child(title),
+                    )
+                    .children(action),
             )
             .when(rows.is_empty(), |element| {
                 // Web `empty_row`: a quiet line, not a box inside the card.
@@ -395,6 +561,20 @@ impl Workspace {
                     )
                     .into_any_element()
             })
+            .collect::<Vec<_>>();
+        let follow_up_rows = snapshot
+            .follow_ups
+            .iter()
+            .take(4)
+            .enumerate()
+            .map(|(index, item)| self.render_today_follow_up_row(index, item, cx))
+            .collect::<Vec<_>>();
+        let decision_rows = snapshot
+            .recent_decisions
+            .iter()
+            .take(4)
+            .enumerate()
+            .map(|(index, item)| self.render_today_decision_row(index, item, cx))
             .collect::<Vec<_>>();
 
         let briefing = div()
@@ -762,11 +942,13 @@ impl Workspace {
                                     .gap_4()
                                     .child(self.render_today_section(
                                         "Now & next",
+                                        Some(self.render_today_calendar_link(cx)),
                                         schedule_rows,
                                         "Nothing else on the calendar today.",
                                     ))
                                     .child(self.render_today_section(
                                         "Focus queue",
+                                        None,
                                         focus_rows,
                                         "No ready tasks.",
                                     )),
@@ -779,57 +961,28 @@ impl Workspace {
                                     .gap_4()
                                     .child(self.render_today_section(
                                         "Overdue",
+                                        None,
                                         overdue_rows,
                                         "Nothing overdue.",
                                     ))
                                     .child(self.render_today_section(
                                         "Waiting on",
+                                        None,
                                         waiting_rows,
                                         "Nothing is blocked on someone else.",
                                     ))
-                                    .child(
-                                        self.render_today_section(
-                                            "Follow ups",
-                                            snapshot
-                                                .follow_ups
-                                                .into_iter()
-                                                .take(4)
-                                                .map(|item| {
-                                                    div()
-                                                        .px_2()
-                                                        .py_2()
-                                                        .text_size(px(12.0))
-                                                        .text_color(theme::rambutan_300())
-                                                        .child(format!(
-                                                            "{}, {}",
-                                                            item.person_name, item.text
-                                                        ))
-                                                        .into_any_element()
-                                                })
-                                                .collect(),
-                                            "No recent follow ups.",
-                                        ),
-                                    )
-                                    .child(
-                                        self.render_today_section(
-                                            "Decisions",
-                                            snapshot
-                                                .recent_decisions
-                                                .into_iter()
-                                                .take(4)
-                                                .map(|item| {
-                                                    div()
-                                                        .px_2()
-                                                        .py_2()
-                                                        .text_size(px(12.0))
-                                                        .text_color(theme::rambutan_300())
-                                                        .child(item.text)
-                                                        .into_any_element()
-                                                })
-                                                .collect(),
-                                            "No recent meeting decisions.",
-                                        ),
-                                    ),
+                                    .child(self.render_today_section(
+                                        "Follow ups",
+                                        None,
+                                        follow_up_rows,
+                                        "No recent follow ups.",
+                                    ))
+                                    .child(self.render_today_section(
+                                        "Decisions",
+                                        None,
+                                        decision_rows,
+                                        "No recent meeting decisions.",
+                                    )),
                             ),
                     ),
             )
@@ -878,6 +1031,7 @@ mod audit_tests {
                         .h(gpui::px(0.0));
                         workspace.render_today_section(
                             title,
+                            None,
                             vec![
                                 workspace.render_today_task_row(&task, String::new(), cx),
                                 probe.into_any_element(),

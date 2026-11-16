@@ -506,6 +506,35 @@ impl Workspace {
         self.select_inbox_conversation(conversation_id, window, cx);
     }
 
+    /// Open People on one profile, as the web's `SelectedPersonSignal`
+    /// does: the profile opens on its page, and a search that hides it is
+    /// cleared. A profile that is gone leaves People as it was.
+    pub(in crate::views::workspace) fn open_person_profile(
+        &mut self,
+        person_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let hidden_by_search = self.meetings_hub.read(cx).person(person_id).map(|person| {
+            let query = self.people_page.search_input.read(cx).value().to_string();
+            !person_matches_query(person, &query)
+        });
+        if let Some(hidden_by_search) = hidden_by_search {
+            if hidden_by_search {
+                self.people_page
+                    .search_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+            }
+            if self.expanded_person_id.as_deref() != Some(person_id) {
+                self.load_relationship_inputs(person_id, window, cx);
+            }
+            self.expanded_person_id = Some(person_id.to_string());
+            // Render moves the directory to the person's page.
+            *self.people_page.seen_expanded.borrow_mut() = None;
+        }
+        self.activate_sidebar_view(AppView::People, window, cx);
+    }
+
     /// Return to People with the person the detail was opened from.
     pub(in crate::views::workspace) fn back_to_people(
         &mut self,
