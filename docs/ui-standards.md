@@ -15,7 +15,8 @@ Size controls with the shared size scale, from shadcn's dense Sidebar and menu s
 | control | 32px | `CONTROL_PX` | `h-control`, `min-h-control`, `size-control` | Buttons, inputs, menu rows, list rows, nav and footer buttons |
 | control-sm | 28px | `CONTROL_SM_PX` | `h-control-sm`, `size-control-sm` | Icon toggles in bars and headers, compact secondary buttons |
 | control-xs | 24px | `CONTROL_XS_PX` | `size-control-xs`, `min-h-control-xs` | Actions inside rows and cards, such as a thread card's menu and delete |
-| icon | 16px | `ICON_PX` | `size=16` | Every icon inside a control |
+| icon | 16px | `ICON_PX` | `size=16` | Every icon inside a control, except beside 12px text in a chip |
+| icon-xs | 12px | `ICON_XS_PX` | `size=12` | Icons beside 12px text inside a chip or button, such as the composer's model, project and branch chips (shadcn's `xs` Button) |
 | icon-inline | 14px or 12px | `ICON_INLINE_PX`, `ICON_INLINE_SM_PX` | `size=14`, `size=12` | Icons beside text that is not clickable: 14px beside 13 to 14px text, 12px beside 12px text |
 | touch | 44px | none | `bruhs-control`, `[role=menuitem]`, `[role=option]` | Phones and other coarse pointers |
 
