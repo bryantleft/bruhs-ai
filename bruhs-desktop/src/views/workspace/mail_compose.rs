@@ -13,6 +13,7 @@ use std::{collections::HashMap, future::Future};
 
 mod render;
 
+mod sent;
 #[cfg(test)]
 mod tests;
 mod work;
@@ -29,6 +30,9 @@ enum Phase {
     Review,
     Send,
     Status,
+    Reconcile,
+    SentUnconfirmed,
+    SentError,
     Error,
 }
 struct Job {
@@ -49,7 +53,10 @@ impl Job {
             || self.value.pending_send.is_some()
             || self.value.consumed()
             || self.review.is_some()
-            || matches!(self.phase, Phase::Review | Phase::Send | Phase::Status)
+            || matches!(
+                self.phase,
+                Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+            )
     }
 }
 #[derive(Clone)]
@@ -60,6 +67,7 @@ enum Action {
     EditReview,
     Send,
     Status,
+    CheckSent,
     Cancel,
     Attach,
     Remove(String),
@@ -88,6 +96,7 @@ pub(super) struct MailComposer {
     feedback_focus: FocusHandle,
     surface_focus: FocusHandle,
     focus_review: bool,
+    focus_sent_feedback: Option<(String, u64)>,
     feedback_scroll: ScrollHandle,
 }
 impl EventEmitter<ComposeEvent> for MailComposer {}
@@ -175,6 +184,7 @@ impl MailComposer {
             feedback_focus: cx.focus_handle(),
             surface_focus: cx.focus_handle(),
             focus_review: false,
+            focus_sent_feedback: None,
             feedback_scroll: ScrollHandle::new(),
         }
     }
@@ -306,7 +316,10 @@ impl MailComposer {
             job.value.dirty
                 || job.selecting_files
                 || job.running
-                || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
+                || matches!(
+                    job.phase,
+                    Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                )
                 || job.sequence != job.saved
                 || !job.added.is_empty()
                 || job.value.pending_send.is_some()
@@ -554,6 +567,7 @@ impl MailComposer {
                 }
             }
             Action::Review => self.review(cx),
+            Action::CheckSent => self.check_sent(cx),
             Action::Send => self.send(cx),
             Action::Status => {
                 if let Some(k) = self.active.clone() {
@@ -564,7 +578,10 @@ impl MailComposer {
                 if let Some(k) = self.active.clone() {
                     if let Some(job) = self.jobs.get_mut(&k) {
                         if !job.running
-                            && !matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
+                            && !matches!(
+                                job.phase,
+                                Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                            )
                         {
                             job.review = None;
                             job.phase = Phase::Ready;

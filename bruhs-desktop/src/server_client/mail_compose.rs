@@ -135,6 +135,20 @@ impl ServerClient {
         self.compose_json::<_, ()>(reqwest::Method::GET, url, None)
             .await
     }
+    /// Explicit lookup only; cached send status never calls this method.
+    pub async fn mail_send_reconcile(
+        &self,
+        mailbox: &str,
+        operation: &str,
+        body: &MailSentReconcileRequest,
+    ) -> Result<MailSendStatus, ServerError> {
+        self.compose_json(
+            reqwest::Method::POST,
+            self.compose_url(mailbox, &["sends", operation, "reconcile"])?,
+            Some(body),
+        )
+        .await
+    }
     pub async fn mail_send_cancel(
         &self,
         host: &str,

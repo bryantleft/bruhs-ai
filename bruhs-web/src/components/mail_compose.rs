@@ -51,6 +51,13 @@ fn size(bytes: u64) -> String {
 pub(super) fn MailComposer() -> impl IntoView {
     let state = expect_context::<MailComposeState>();
     let cc = RwSignal::new(false);
+    let send_history = Memo::new(move |_| {
+        state.active.with(|value| {
+            value
+                .as_ref()
+                .is_some_and(|value| value.pending_send.is_some() || value.latest_send.is_some())
+        })
+    });
     let input: NodeRef<leptos::html::Input> = NodeRef::new();
     let body: NodeRef<leptos::html::Textarea> = NodeRef::new();
     Effect::new(move |_| {
@@ -73,12 +80,23 @@ pub(super) fn MailComposer() -> impl IntoView {
         <crate::ui::PageHeader title="Compose email" subtitle="Your draft stays saved while you move around Bruhs.">
             <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|state.close())>"Close editor"</Button>
         </crate::ui::PageHeader>
-        <div class="max-h-32 min-h-0 min-w-0 shrink-0 overflow-y-auto border-b border-longan-800 px-4 py-2 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-persimmon-400 sm:px-6" tabindex="0" aria-label="Draft status" data-mail-compose-status="">
-            <p role="status" class="text-label-sm text-rambutan-400">{move ||state.status.get()}</p>
-            {move ||state.error.get().map(|message|view!{<p role="alert" class="text-body-sm text-lychee-300">{message}</p>})}
-            <Show when=move ||state.error.with(Option::is_some)&&!state.busy.get()><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|state.retry())>"Retry saving"</Button></Show>
-            <Show when=move ||state.active.with(|value|value.as_ref().and_then(|value|value.latest_send.as_ref()).is_some_and(|status|status.state==MailDispatchState::Queued))&&!state.busy.get()><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|state.cancel_send())>"Cancel queued send"</Button></Show>
-            <Show when=move ||state.active.with(|value|value.as_ref().is_some_and(|value|value.pending_send.is_some()))&&!state.busy.get()><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|state.check_send())>"Check send status"</Button></Show>
+        // Keep recovery actions in a fixed footer while status details scroll.
+        // A busy message must not move another control under a second click.
+        <div class=move ||if send_history.get(){"flex h-[128px] max-h-32 min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-b border-longan-800 px-4 py-2 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-persimmon-400 sm:h-[96px] sm:px-6"}else{"flex max-h-32 min-h-0 min-w-0 shrink-0 flex-col overflow-hidden border-b border-longan-800 px-4 py-2 [overflow-wrap:anywhere] focus-visible:outline-2 focus-visible:outline-persimmon-400 sm:px-6"} tabindex="0" aria-label="Draft status" data-mail-compose-status="">
+            <div class=move ||if send_history.get(){"min-h-0 flex-1 overflow-y-auto focus-visible:outline-2 focus-visible:outline-persimmon-400"}else{"min-h-0 overflow-y-auto focus-visible:outline-2 focus-visible:outline-persimmon-400"} tabindex="0" role="region" aria-label="Draft status details">
+                <p role="status" class="text-label-sm text-rambutan-400">{move ||state.status.get()}</p>
+                {move ||state.error.get().map(|message|view!{<p role="alert" class="text-body-sm text-lychee-300">{message}</p>})}
+            </div>
+            <div class="grid shrink-0 grid-cols-[minmax(0,1fr)_auto] items-end gap-x-2">
+                <div class="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-1">
+                    <Show when=move ||state.error.with(Option::is_some)&&!state.sent_check_failed()><Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move ||state.busy.get()) on_click=Callback::new(move |_|state.retry())>"Retry saving"</Button></Show>
+                    <Show when=move ||state.active.with(|value|value.as_ref().and_then(|value|value.latest_send.as_ref()).is_some_and(|status|status.state==MailDispatchState::Queued))><Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move ||state.busy.get()) on_click=Callback::new(move |_|state.cancel_send())>"Cancel queued send"</Button></Show>
+                    <Show when=move ||state.active.with(|value|value.as_ref().is_some_and(|value|value.pending_send.is_some()))><Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move ||state.busy.get()) on_click=Callback::new(move |_|state.check_send())>"Check send status"</Button></Show>
+                </div>
+                <div class="flex items-end justify-end">
+                    <Show when=move ||state.active.with(|value|value.as_ref().and_then(|value|value.latest_send.as_ref()).is_some_and(|status|status.state==MailDispatchState::Uncertain))><Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move ||!state.can_check_sent()) on_click=Callback::new(move |_|state.check_sent())>"Check Sent"</Button></Show>
+                </div>
+            </div>
         </div>
         <Show when=move ||!state.loading.get() fallback=move ||view!{<p role="status" class="px-4 py-6 text-body-sm text-rambutan-400">"Loading the saved draft…"</p>}>
             <Show when=move ||state.review.with(Option::is_some) fallback=move ||view!{
@@ -90,7 +108,7 @@ pub(super) fn MailComposer() -> impl IntoView {
                         <div class="mt-3 flex min-w-0 flex-col gap-2" aria-label="Selected email files">
                             {move ||state.active.get().map(|value|value.files.into_iter().map(|file|{let id=file.id;view!{<div class="flex min-w-0 items-center justify-between gap-3 rounded-grape bg-longan-900 px-3 py-2 inset-ring inset-ring-longan-800"><div class="min-w-0"><p class="break-all text-label-sm">{file.file_name}</p><p class="text-label-xs text-rambutan-400">{format!("{}  {}",size(file.size_bytes),if file.server.is_some(){"Uploaded"}else{"Waiting to upload"})}</p></div><Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move ||state.files_locked.get()) on_click=Callback::new(move |_|state.remove_file(&id))>"Remove"</Button></div>}}).collect_view())}
                         </div>
-                        {move ||state.active.get().and_then(|value|value.latest_send).map(|status|view!{<SendStatus status />})}
+                        {move ||state.active.get().and_then(|value|value.latest_send.map(|status|{let newer=value.dirty||value.server_revision!=status.draft_revision;view!{<SendStatus status newer />}}))}
                     </div>
                 </div>
             }><ReviewPane /></Show>
@@ -128,10 +146,13 @@ fn ReviewPane() -> impl IntoView {
 }
 
 #[component]
-fn SendStatus(status: MailSendStatus) -> impl IntoView {
+fn SendStatus(status: MailSendStatus, #[prop(optional)] newer: bool) -> impl IntoView {
     let message = match status.state {
         MailDispatchState::Queued => "Email is queued.",
         MailDispatchState::Dispatching => "Sending the reviewed email.",
+        MailDispatchState::Accepted if newer => {
+            "The reviewed version was accepted. Newer edits remain a draft; recipient delivery is not confirmed."
+        }
         MailDispatchState::Accepted => {
             "The provider accepted this email. Recipient delivery is not confirmed."
         }

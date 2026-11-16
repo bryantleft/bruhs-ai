@@ -1,3 +1,4 @@
+mod sent;
 use super::super::Workspace;
 use super::{key, Action, Job, MailComposer, Phase};
 use crate::{app_state::DesktopState, server_client::ServerClient};

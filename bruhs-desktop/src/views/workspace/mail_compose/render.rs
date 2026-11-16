@@ -25,12 +25,22 @@ pub(super) fn status_text(job: &Job) -> &'static str {
         Phase::Review => "Preparing the saved email for review…",
         Phase::Send => "Sending the reviewed email. You can leave Email.",
         Phase::Status => "Checking saved send status…",
+        Phase::Reconcile => "Checking Sent for the reviewed email. Nothing will be resent.",
+        Phase::SentUnconfirmed => {
+            "No matching Sent copy was verified. Sending remains unconfirmed; nothing was resent."
+        }
+        Phase::SentError => {
+            "Sent could not be checked. Check saved send status or try Check Sent again."
+        }
         Phase::Error => "Your draft remains here. Resolve the error before continuing.",
         Phase::Ready if job.saved != job.sequence || !job.added.is_empty() => {
             "Waiting to save on this device…"
         }
         Phase::Ready if job.value.consumed() => {
             "The provider accepted this email. Recipient delivery is not confirmed."
+        }
+        Phase::Ready if job.value.pending_send.is_none() && job.value.latest_send.as_ref().is_some_and(|status| status.state == MailDispatchState::Accepted && (status.draft_revision != job.value.server_revision || job.value.dirty)) => {
+            "The reviewed version was accepted. Newer edits remain a draft; recipient delivery is not confirmed."
         }
         Phase::Ready if job.value.pending_send.is_some() => {
             "The send needs checking. It will not be sent again automatically."
@@ -187,6 +197,7 @@ impl MailComposer {
                 .child(div().min_w_0().flex_1().child(div().whitespace_normal().child(gpui::Text::new(("compose-file-name",element_key(&file.id)).into(),file.file_name.clone().into()))).child(meta(format!("{}  {}",file_bytes(file.size_bytes),if file.server.is_some(){"Uploaded"}else{"Waiting to upload"}))))
                 .child(self.button(("remove-compose-file",element_key(&file.id)),"Remove",Action::Remove(file.id.clone()),!files_locked,cx))))
             .when_some(job.value.latest_send.as_ref(),|el,status|el.child(meta(match status.state{
+                MailDispatchState::Accepted if status.draft_revision != job.value.server_revision || job.value.dirty => "The reviewed version was accepted. Newer edits remain a draft; recipient delivery is not confirmed.",
                 MailDispatchState::Accepted=>"The provider accepted this email. Recipient delivery is not confirmed.",
                 MailDispatchState::Uncertain=>"Sending could not be confirmed. Check Sent mail before starting another send.",
                 MailDispatchState::Queued=>"Email is queued.",MailDispatchState::Dispatching=>"Sending the reviewed email.",MailDispatchState::Cancelled=>"The send was cancelled. Your draft remains saved.",MailDispatchState::NeedsReview=>"The draft changed. Review the current version.",MailDispatchState::Rejected=>"The provider did not accept this email. Resolve the issue and review again.",
@@ -263,9 +274,18 @@ impl Render for MailComposer {
             self.focus_review = false;
             self.surface_focus.focus(window, cx);
         }
+        if let Some((key, generation)) = self.focus_sent_feedback.take() {
+            if self.generation == generation && self.active.as_deref() == Some(key.as_str()) {
+                self.feedback_focus.focus(window, cx);
+            }
+        }
         let job = self.active();
         let busy = job.is_some_and(|job| {
-            job.running || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
+            job.running
+                || matches!(
+                    job.phase,
+                    Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                )
         });
         let review = job.and_then(|job| job.review.as_ref());
         let locked = job.is_none_or(Job::locked);
@@ -274,6 +294,9 @@ impl Render for MailComposer {
         });
         let saved = job.is_some_and(|job| job.saved == job.sequence && job.added.is_empty());
         let pending = job.is_some_and(|job| job.value.pending_send.is_some());
+        let uncertain = job
+            .and_then(|job| job.value.latest_send.as_ref())
+            .is_some_and(|status| status.state == MailDispatchState::Uncertain);
         let queued = job
             .and_then(|job| job.value.latest_send.as_ref())
             .is_some_and(|status| status.state == MailDispatchState::Queued);
@@ -398,21 +421,35 @@ impl Render for MailComposer {
                                 .child(error),
                         )
                     })
-                    .when(error.is_some() && !busy, |el| {
-                        el.child(self.button(
-                            "desktop-compose-retry",
-                            "Retry saving",
-                            Action::Retry,
-                            true,
-                            cx,
-                        ))
-                    })
+                    .when(
+                        error.is_some()
+                            && !busy
+                            && job.is_none_or(|job| job.phase != Phase::SentError),
+                        |el| {
+                            el.child(self.button(
+                                "desktop-compose-retry",
+                                "Retry saving",
+                                Action::Retry,
+                                true,
+                                cx,
+                            ))
+                        },
+                    )
                     .when(pending && !busy, |el| {
                         el.child(self.button(
                             "desktop-compose-check",
                             "Check send status",
                             Action::Status,
                             true,
+                            cx,
+                        ))
+                    })
+                    .when(uncertain, |el| {
+                        el.child(self.button(
+                            "desktop-compose-check-sent",
+                            "Check Sent",
+                            Action::CheckSent,
+                            !busy && !self.loading && job.is_some_and(sent::available),
                             cx,
                         ))
                     })

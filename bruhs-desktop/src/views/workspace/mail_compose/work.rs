@@ -26,7 +26,12 @@ impl MailComposer {
         let Some(job) = self.jobs.get_mut(&k) else {
             return;
         };
-        if job.running || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status) {
+        if job.running
+            || matches!(
+                job.phase,
+                Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+            )
+        {
             return;
         }
         job.running = true;
@@ -92,7 +97,9 @@ impl MailComposer {
                 _ => return,
             }
             let local = store.clone();
-            let stage = if value.server_revision == 0 || !value.pending_remove.is_empty() {
+            let stage = if value.pending_send.is_some() {
+                Phase::Local
+            } else if value.server_revision == 0 || !value.pending_remove.is_empty() {
                 Phase::Server
             } else if value.files.iter().any(|file| file.server.is_none()) {
                 Phase::Upload
@@ -107,6 +114,11 @@ impl MailComposer {
             });
             let work = cx.update(|cx| {
                 operation(cx, async move {
+                    // Persist recovery acknowledgements without resuming any
+                    // server writer while the earlier send remains unresolved.
+                    if value.pending_send.is_some() {
+                        return Ok(Step::Done);
+                    }
                     if value.server_revision == 0 {
                         return client
                             .mail_draft_create(
@@ -316,7 +328,10 @@ impl MailComposer {
         if job.running
             || job.value.pending_send.is_some()
             || job.sequence != job.saved
-            || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
+            || matches!(
+                job.phase,
+                Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+            )
         {
             return;
         }
@@ -426,7 +441,12 @@ impl MailComposer {
         let Some(job) = self.jobs.get_mut(&k) else {
             return;
         };
-        if job.running || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status) {
+        if job.running
+            || matches!(
+                job.phase,
+                Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+            )
+        {
             return;
         }
         let Some(request) = job.value.pending_send.clone() else {
@@ -462,7 +482,10 @@ impl MailComposer {
             return;
         };
         if job.running
-            || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
+            || matches!(
+                job.phase,
+                Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+            )
             || job
                 .value
                 .latest_send
