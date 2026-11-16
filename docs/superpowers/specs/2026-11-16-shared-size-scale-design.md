@@ -219,5 +219,9 @@ Each slice is checked as follows:
   copy buttons and the dialog close. Close buttons smaller than 24px (the
   terminal tabs, the project delete) became 24px targets.
 
-Nothing in this design is open. Controls that differ in kind rather than
-size are tracked as PARITY-14 in `docs/web-desktop-parity-goal-2026-11-15.md`.
+Open: the sidebar footer's view buttons. Ten or eleven of them share one
+row, so both apps shrink them below 24px wide (about 19px on web, 23px on
+desktop); they need a second row or an overflow menu.
+
+Controls that differ in kind rather than size are tracked as PARITY-14 in
+`docs/web-desktop-parity-goal-2026-11-15.md`.
