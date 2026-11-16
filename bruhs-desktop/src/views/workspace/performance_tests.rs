@@ -180,6 +180,9 @@ fn show_knowledge_footer(
 #[gpui::test]
 fn knowledge_pages_reach_documents_and_sources_with_complete_text(cx: &mut TestAppContext) {
     let (workspace, cx) = fixture(cx);
+    // Like the web, the library lists the latest change first, so record 24
+    // (the oldest) is the 25th card and opens the second page.
+    let changed_at = |index: usize| 25 - i64::try_from(index).unwrap();
     workspace.update(cx, |workspace, cx| {
         workspace.active_view = AppView::Knowledge;
         workspace.knowledge_documents = (0..25)
@@ -187,7 +190,7 @@ fn knowledge_pages_reach_documents_and_sources_with_complete_text(cx: &mut TestA
                 let mut document = bruhs_models::KnowledgeDocument::new(
                     format!("Document {index}"),
                     "Full document content. ".repeat(100),
-                    0,
+                    changed_at(index),
                 );
                 document.id = format!("document-{index}");
                 document
@@ -199,7 +202,7 @@ fn knowledge_pages_reach_documents_and_sources_with_complete_text(cx: &mut TestA
                     format!("Source {index}"),
                     format!("https://example.invalid/{index}"),
                     "Full source excerpt. ".repeat(100),
-                    0,
+                    changed_at(index),
                 );
                 clip.id = format!("source-{index}");
                 clip
@@ -211,7 +214,8 @@ fn knowledge_pages_reach_documents_and_sources_with_complete_text(cx: &mut TestA
     let last_document = selector("desktop-knowledge-document-", "document-24");
     let last_source = selector("desktop-knowledge-source-", "source-24");
     assert!(cx.debug_bounds(last_document).is_none());
-    show_knowledge_footer(&workspace, 0, cx);
+    // The scroll's items: the search box, the documents, the sources.
+    show_knowledge_footer(&workspace, 1, cx);
     let next = cx.debug_bounds("desktop-knowledge-documents-next").unwrap();
     cx.simulate_click(next.center(), gpui::Modifiers::default());
     cx.run_until_parked();
@@ -242,7 +246,7 @@ fn knowledge_pages_reach_documents_and_sources_with_complete_text(cx: &mut TestA
         cx.notify();
     });
     cx.run_until_parked();
-    show_knowledge_footer(&workspace, 1, cx);
+    show_knowledge_footer(&workspace, 2, cx);
     let next = cx.debug_bounds("desktop-knowledge-sources-next").unwrap();
     cx.simulate_click(next.center(), gpui::Modifiers::default());
     cx.run_until_parked();

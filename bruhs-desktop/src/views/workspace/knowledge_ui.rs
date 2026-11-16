@@ -2,21 +2,113 @@
 //! hierarchy. Document and source mutations share the desktop's one atomic
 //! state snapshot; attachment payloads are copied beside that snapshot.
 
+use std::cell::RefCell;
+
+use bruhs_models::logic::knowledge_library::{self as library, source_host, Card};
 use bruhs_models::num::ToFloatLossy;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::Input;
+use gpui_component::input::{Input, InputEvent};
 
 use super::knowledge_storage::{self, attachment_path as knowledge_attachment_path};
 use super::library_pages_ui::LibraryPage;
 use super::record_picker_ui::RecordPickerTarget;
 use super::*;
 
-// Match the web knowledge library's 24-card budget. The native action fixture
+// The web knowledge library's 24-card budget. The native action fixture
 // measures libraries through 10,000 records; paging never truncates stored text.
-pub(super) const KNOWLEDGE_PAGE_SIZE: usize = 24;
+pub(super) const KNOWLEDGE_PAGE_SIZE: usize = library::PAGE_SIZE;
+
+/// The library's search box and the shared index it reads (web
+/// `KnowledgeLibrary`'s query and memos).
+pub(super) struct KnowledgeState {
+    pub(super) search_input: Entity<InputState>,
+    /// Rebuilt when a document or source is added or removed, or when the
+    /// workspace saves an edit; never on a keystroke.
+    index: RefCell<Option<LibraryIndex>>,
+}
+
+struct LibraryIndex {
+    counts: (usize, usize),
+    documents: library::Index,
+    sources: library::Index,
+}
+
+/// One library section's page of cards and how many records match.
+struct LibrarySection {
+    cards: Vec<Card>,
+    matches: usize,
+}
+
+impl KnowledgeState {
+    pub(super) fn new(
+        window: &mut Window,
+        cx: &mut Context<'_, Workspace>,
+        subscriptions: &mut Vec<Subscription>,
+    ) -> Self {
+        let search_input = cx.new(|cx| {
+            InputState::new(window, cx).placeholder("Search documents, tags, clips, and sources…")
+        });
+        // Web: a new query starts both sections on their first page.
+        subscriptions.push(cx.subscribe_in(
+            &search_input,
+            window,
+            |this: &mut Workspace, _, event: &InputEvent, _, cx| {
+                if matches!(event, InputEvent::Change) {
+                    this.library_pages.documents = 0;
+                    this.library_pages.sources = 0;
+                    cx.notify();
+                }
+            },
+        ));
+        Self {
+            search_input,
+            index: RefCell::new(None),
+        }
+    }
+
+    /// Drop the index so the next render searches the saved edit.
+    pub(super) fn invalidate(&mut self) {
+        self.index.get_mut().take();
+    }
+}
 
 impl Workspace {
+    /// Run `read` over the documents' and sources' shared search indexes.
+    fn with_knowledge_index<R>(
+        &self,
+        read: impl FnOnce(&library::Index, &library::Index) -> R,
+    ) -> R {
+        let counts = (self.knowledge_documents.len(), self.source_clips.len());
+        let mut cache = self.knowledge.index.borrow_mut();
+        if cache.as_ref().is_some_and(|index| index.counts != counts) {
+            cache.take();
+        }
+        let index = cache.get_or_insert_with(|| LibraryIndex {
+            counts,
+            documents: library::Index::documents(&self.knowledge_documents),
+            sources: library::Index::sources(&self.source_clips),
+        });
+        read(&index.documents, &index.sources)
+    }
+
+    fn knowledge_query(&self, cx: &App) -> String {
+        self.knowledge.search_input.read(cx).value().to_string()
+    }
+
+    /// The page of the library section that shows `id` under the current
+    /// search, when it matches.
+    fn knowledge_page_of(&self, target: LibraryPage, id: &str, cx: &App) -> Option<usize> {
+        let query = self.knowledge_query(cx);
+        self.with_knowledge_index(|documents, sources| {
+            let index = match target {
+                LibraryPage::Sources => sources,
+                _ => documents,
+            };
+            index.page_of(&index.matching(&query), id)
+        })
+    }
+
     pub(super) fn open_knowledge_view(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.active_view = AppView::Knowledge;
         self.clip_create_visible = false;
@@ -43,13 +135,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if let Some(index) = self
-            .knowledge_documents
-            .iter()
-            .position(|document| document.id == id)
-        {
-            self.library_pages
-                .select(LibraryPage::Documents, index / KNOWLEDGE_PAGE_SIZE);
+        if let Some(page) = self.knowledge_page_of(LibraryPage::Documents, id, cx) {
+            self.library_pages.select(LibraryPage::Documents, page);
         }
         let Some(document) = self
             .knowledge_documents
@@ -103,9 +190,8 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if let Some(index) = self.source_clips.iter().position(|clip| clip.id == id) {
-            self.library_pages
-                .select(LibraryPage::Sources, index / KNOWLEDGE_PAGE_SIZE);
+        if let Some(page) = self.knowledge_page_of(LibraryPage::Sources, id, cx) {
+            self.library_pages.select(LibraryPage::Sources, page);
         }
         let Some(clip) = self.source_clips.iter().find(|clip| clip.id == id).cloned() else {
             return;
@@ -578,27 +664,31 @@ impl Workspace {
         if self.clip_create_visible {
             return self.render_source_clip_editor(true, cx);
         }
-        let documents = self
-            .knowledge_documents
+        let query = self.knowledge_query(cx);
+        let (documents, sources) = self.with_knowledge_index(|documents, sources| {
+            let section = |index: &library::Index, page| {
+                let matches = index.matching(&query);
+                LibrarySection {
+                    cards: index.page(&matches, page),
+                    matches: matches.len(),
+                }
+            };
+            (
+                section(documents, self.library_pages.documents),
+                section(sources, self.library_pages.sources),
+            )
+        });
+        let document_count = documents.matches;
+        let source_count = sources.matches;
+        let document_cards = documents
+            .cards
             .iter()
-            .skip(self.library_pages.start(
-                LibraryPage::Documents,
-                self.knowledge_documents.len(),
-                KNOWLEDGE_PAGE_SIZE,
-            ))
-            .take(KNOWLEDGE_PAGE_SIZE)
-            .map(|document| self.render_document_card(document, cx))
+            .map(|card| self.render_document_card(card, cx))
             .collect::<Vec<_>>();
-        let clips = self
-            .source_clips
+        let source_cards = sources
+            .cards
             .iter()
-            .skip(self.library_pages.start(
-                LibraryPage::Sources,
-                self.source_clips.len(),
-                KNOWLEDGE_PAGE_SIZE,
-            ))
-            .take(KNOWLEDGE_PAGE_SIZE)
-            .map(|clip| self.render_source_card(clip, cx))
+            .map(|card| self.render_source_card(card, cx))
             .collect::<Vec<_>>();
         div()
             .debug_selector(|| "desktop-knowledge-page".to_string())
@@ -698,44 +788,69 @@ impl Workspace {
                     .flex_col()
                     .gap_5()
                     .items_center()
+                    // Web: the search box opens the scrolling content.
                     .child(
-                        knowledge_section("Documents", documents, "No documents yet.")
+                        div()
+                            .debug_selector(|| "desktop-knowledge-search".to_string())
                             .w_full()
                             .max_w(px(980.0))
                             .flex_shrink_0()
-                            .children(self.render_library_pages(
-                                LibraryPage::Documents,
-                                self.knowledge_documents.len(),
-                                KNOWLEDGE_PAGE_SIZE,
-                                "Documents",
-                                cx,
-                            )),
+                            .child(
+                                Input::new(&self.knowledge.search_input)
+                                    .aria_label("Search knowledge"),
+                            ),
                     )
                     .child(
-                        knowledge_section("Sources", clips, "Save a web source to cite it later.")
-                            .w_full()
-                            .max_w(px(980.0))
-                            .flex_shrink_0()
-                            .children(self.render_library_pages(
-                                LibraryPage::Sources,
-                                self.source_clips.len(),
-                                KNOWLEDGE_PAGE_SIZE,
-                                "Sources",
-                                cx,
-                            )),
+                        knowledge_section(
+                            "Documents",
+                            document_count,
+                            document_cards,
+                            "No documents match yet.",
+                        )
+                        .w_full()
+                        .max_w(px(980.0))
+                        .flex_shrink_0()
+                        .children(self.render_library_pages(
+                            LibraryPage::Documents,
+                            document_count,
+                            KNOWLEDGE_PAGE_SIZE,
+                            "Documents",
+                            cx,
+                        )),
+                    )
+                    .child(
+                        knowledge_section(
+                            "Sources",
+                            source_count,
+                            source_cards,
+                            "Save a web source to cite it later.",
+                        )
+                        .w_full()
+                        .max_w(px(980.0))
+                        .flex_shrink_0()
+                        .children(self.render_library_pages(
+                            LibraryPage::Sources,
+                            source_count,
+                            KNOWLEDGE_PAGE_SIZE,
+                            "Sources",
+                            cx,
+                        )),
                     )
                     .vertical_scrollbar(&self.library_pages.knowledge_scroll),
             )
     }
 
-    fn render_document_card(
-        &self,
-        document: &KnowledgeDocument,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let id = document.id.clone();
+    fn render_document_card(&self, card: &Card, cx: &Context<'_, Self>) -> AnyElement {
+        let id = card.id.clone();
         let keyboard_id = id.clone();
         let id_key = element_key(&id);
+        // Web: each tag as `#tag`, so a search by tag shows why it matched.
+        let tags = card
+            .tags
+            .iter()
+            .map(|tag| format!("#{tag}"))
+            .collect::<Vec<_>>()
+            .join(" ");
         div()
             .id(("knowledge-document", id_key))
             .debug_selector(move || format!("desktop-knowledge-document-{id_key}"))
@@ -748,7 +863,7 @@ impl Workspace {
             .cursor_pointer()
             .tab_index(0)
             .role(Role::Button)
-            .aria_label(format!("Open document {}", document.title))
+            .aria_label(format!("Open document {}", card.title))
             .hover(|element| element.border_color(theme::longan_700()))
             .on_click(cx.listener(move |this, _event, window, cx| {
                 this.select_knowledge_document(&id, window, cx);
@@ -763,7 +878,7 @@ impl Workspace {
                     .text_size(px(13.0))
                     .font_weight(FontWeight::MEDIUM)
                     .text_color(theme::rambutan_100())
-                    .child(document.title.clone()),
+                    .child(card.title.clone()),
             )
             .child(
                 div()
@@ -773,13 +888,25 @@ impl Workspace {
                     .overflow_hidden()
                     .whitespace_nowrap()
                     .text_ellipsis()
-                    .child(document_preview(&document.body_markdown)),
+                    .child(card.preview.clone()),
             )
+            .when(!tags.is_empty(), |card| {
+                card.child(
+                    div()
+                        .mt_1()
+                        .text_size(px(12.0))
+                        .text_color(theme::blueberry_300().opacity(0.8))
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(tags),
+                )
+            })
             .into_any_element()
     }
 
-    fn render_source_card(&self, clip: &SourceClip, cx: &Context<'_, Self>) -> AnyElement {
-        let id = clip.id.clone();
+    fn render_source_card(&self, card: &Card, cx: &Context<'_, Self>) -> AnyElement {
+        let id = card.id.clone();
         let keyboard_id = id.clone();
         let key = element_key(&id);
         div()
@@ -791,7 +918,7 @@ impl Workspace {
             .cursor_pointer()
             .tab_index(0)
             .role(Role::Button)
-            .aria_label(format!("Open source {}", clip.title))
+            .aria_label(format!("Open source {}", card.title))
             .hover(|element| element.bg(theme::longan_900().opacity(0.7)))
             .on_click(cx.listener(move |this, _event, window, cx| {
                 this.select_source_clip(&id, window, cx);
@@ -805,14 +932,27 @@ impl Workspace {
                 div()
                     .text_size(px(13.0))
                     .text_color(theme::rambutan_200())
-                    .child(clip.title.clone()),
+                    .child(card.title.clone()),
             )
             .child(
                 div()
                     .text_size(px(11.0))
                     .text_color(theme::blueberry_400())
-                    .child(source_host(&clip.source_url)),
+                    .child(card.detail.clone()),
             )
+            // Web shows the excerpt's start, which the search also reads.
+            .when(!card.preview.trim().is_empty(), |row| {
+                row.child(
+                    div()
+                        .mt_0p5()
+                        .text_size(px(12.0))
+                        .text_color(theme::rambutan_500())
+                        .overflow_hidden()
+                        .whitespace_nowrap()
+                        .text_ellipsis()
+                        .child(card.preview.clone()),
+                )
+            })
             .into_any_element()
     }
 
@@ -1385,17 +1525,39 @@ impl Workspace {
     }
 }
 
-fn knowledge_section(title: &'static str, rows: Vec<AnyElement>, empty: &'static str) -> Div {
+/// A library section: its title and how many records match the search
+/// (web's count beside each heading), then its cards.
+fn knowledge_section(
+    title: &'static str,
+    count: usize,
+    rows: Vec<AnyElement>,
+    empty: &'static str,
+) -> Div {
     div()
         .flex()
         .flex_col()
         .gap_2()
         .child(
             div()
-                .text_size(px(13.0))
-                .font_weight(FontWeight::MEDIUM)
-                .text_color(theme::rambutan_100())
-                .child(title),
+                .flex()
+                .items_baseline()
+                .justify_between()
+                .gap_3()
+                .child(
+                    div()
+                        .text_size(px(13.0))
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_color(theme::rambutan_100())
+                        .child(title),
+                )
+                .child(
+                    div()
+                        .debug_selector(move || format!("desktop-knowledge-count-{title}"))
+                        .font_features(theme::tabular_nums())
+                        .text_size(px(12.0))
+                        .text_color(theme::rambutan_500())
+                        .child(count.to_string()),
+                ),
         )
         .when(rows.is_empty(), |element| {
             element.child(
@@ -1439,32 +1601,6 @@ fn knowledge_meta_panel(
         // Web puts each panel's control above its list.
         .children(action)
         .children(rows)
-}
-
-fn document_preview(markdown: &str) -> String {
-    markdown
-        .lines()
-        .find(|line| !line.trim().is_empty())
-        .map_or_else(
-            || "Empty document".to_string(),
-            |line| {
-                line.trim_start_matches('#')
-                    .trim()
-                    .chars()
-                    .take(100)
-                    .collect()
-            },
-        )
-}
-
-fn source_host(url: &str) -> String {
-    url.trim()
-        .trim_start_matches("https://")
-        .trim_start_matches("http://")
-        .split('/')
-        .next()
-        .unwrap_or(url)
-        .to_string()
 }
 
 fn format_epoch_ms(timestamp_ms: i64) -> String {
@@ -1577,14 +1713,11 @@ impl Workspace {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{document_preview, mime_guess_from_name, source_host};
+mod parity_tests;
 
-    #[test]
-    fn document_preview_and_source_host_match_web_rules() {
-        assert_eq!(document_preview("\n## Decision\nBody"), "Decision");
-        assert_eq!(source_host("https://example.com/research"), "example.com");
-    }
+#[cfg(test)]
+mod tests {
+    use super::mime_guess_from_name;
 
     #[test]
     fn mime_guess_covers_common_knowledge_files() {

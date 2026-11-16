@@ -523,6 +523,7 @@ impl Workspace {
         // changes neither the collection length nor a coarse timestamp.
         self.universal_search_index.replace(None);
         self.inbox_directory.get_mut().take();
+        self.knowledge.invalidate();
         #[cfg(not(test))]
         let path = desktop_state_path();
         #[cfg(test)]

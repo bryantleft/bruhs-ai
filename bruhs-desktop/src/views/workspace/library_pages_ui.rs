@@ -54,11 +54,13 @@ impl LibraryPages {
             }
             LibraryPage::Documents => {
                 self.documents = page;
+                // The top, so the search box above the documents shows too.
                 self.knowledge_scroll.scroll_to_top_of_item(0);
             }
             LibraryPage::Sources => {
                 self.sources = page;
-                self.knowledge_scroll.scroll_to_top_of_item(1);
+                // After the search box and the documents.
+                self.knowledge_scroll.scroll_to_top_of_item(2);
             }
         }
     }

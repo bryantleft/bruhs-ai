@@ -1,4 +1,5 @@
 use super::*;
+use crate::{KnowledgeDocument, SourceClip};
 
 #[test]
 fn bounded_pages_reach_every_record_in_stable_latest_first_order() {
@@ -73,4 +74,43 @@ fn tied_timestamps_sort_by_identity_and_narrowed_pages_clamp() {
     assert_eq!(last_page(0), 0);
     assert_eq!(last_page(PAGE_SIZE), 0);
     assert_eq!(last_page(PAGE_SIZE + 1), 1);
+}
+
+#[test]
+fn previews_strip_heading_markers_and_hosts_drop_scheme_and_path() {
+    assert_eq!(document_preview("\n## Decision\nBody"), "Decision");
+    assert_eq!(document_preview("  \n"), "Empty document");
+    assert_eq!(document_preview(&"é".repeat(150)).chars().count(), 100);
+    assert_eq!(source_host("https://example.com/research"), "example.com");
+    assert_eq!(source_host(" http://example.com "), "example.com");
+    assert_eq!(source_host("example.com/path"), "example.com");
+}
+
+/// A record opened from elsewhere returns to the page that shows it, among
+/// the cards the current search matches.
+#[test]
+fn page_of_finds_a_record_among_the_matches() {
+    // Latest first: doc-29 is the first card and doc-05 the 25th.
+    let documents = (0..30)
+        .map(|n| {
+            let body = if n % 2 == 0 { "even" } else { "odd" };
+            let mut document = KnowledgeDocument::new(format!("Doc {n}"), body, n);
+            document.id = format!("doc-{n:02}");
+            document
+        })
+        .collect::<Vec<_>>();
+    let index = Index::documents(&documents);
+    let all = index.matching("");
+    assert_eq!(index.page_of(&all, "doc-29"), Some(0));
+    assert_eq!(index.page_of(&all, "doc-06"), Some(0));
+    assert_eq!(index.page_of(&all, "doc-05"), Some(1));
+    let odd = index.matching("ODD");
+    assert_eq!(odd.len(), 15);
+    assert_eq!(index.page_of(&odd, "doc-01"), Some(0));
+    assert_eq!(
+        index.page_of(&odd, "doc-04"),
+        None,
+        "even documents do not match"
+    );
+    assert_eq!(index.page_of(&all, "missing"), None);
 }
