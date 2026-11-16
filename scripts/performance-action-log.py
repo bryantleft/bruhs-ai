@@ -10,10 +10,12 @@ import json
 import math
 import os
 from pathlib import Path
+from performance_evidence import PUBLIC_SUMMARY, assert_publishable, load_ledger, make_summary
 
 ROOT=Path(__file__).resolve().parent.parent
 parser=argparse.ArgumentParser()
-parser.add_argument('--ledger',default='docs/performance-action-evidence.json')
+parser.add_argument('--ledger',default=PUBLIC_SUMMARY,help='Full local ledger or compact public index')
+parser.add_argument('--summary',help='Optional compact public index output; full input must be archived under target/')
 parser.add_argument('--inventory',default='target/performance-action-inventory.json')
 parser.add_argument('--comparisons',default='target/performance-t3-gaps1-matrix.json')
 parser.add_argument('--discovery-receipt',help='Pinned receipt for a newer source discovery snapshot')
@@ -23,7 +25,8 @@ args=parser.parse_args()
 link=lambda p:os.path.relpath(ROOT/p,(ROOT/args.markdown).parent)
 read=lambda p:json.loads((ROOT/p).read_text())
 sha=lambda p:hashlib.sha256((ROOT/p).read_bytes()).hexdigest()
-ledger,inventory,comparisons=read(args.ledger),read(args.inventory),read(args.comparisons)
+ledger_path,ledger=load_ledger(ROOT,args.ledger)
+inventory,comparisons=read(args.inventory),read(args.comparisons)
 # Presentation-only spacing corrections; preserve the pinned comparison input.
 for target in comparisons['targets']:
     for before,after in [('measures231.85ms','measures 231.85 ms'),('versus239.85ms','versus 239.85 ms'),('T3server','T3 server')]:
@@ -138,7 +141,7 @@ result={'version':1,'completion_status':'in_progress','semantic_inventory_comple
     'counts':{'source_entrypoints':len(actions),'binding_search_references':inventory['counts'].get('binding_reference',0),
               'partial_evidence_records':len(ledger['entries']),'normalized_observations':len(observations),'request_count_observations':len(request_counts),
               'whole_action_acceptances':0,'verified_faster_t3_targets':comparisons['comparison_wins_verified']},
-    'inputs_sha256':{'ledger':sha(args.ledger),'inventory':sha(args.inventory),'comparisons':sha(args.comparisons)},
+    'inputs_sha256':{'ledger':hashlib.sha256(ledger_path.read_bytes()).hexdigest(),'inventory':sha(args.inventory),'comparisons':sha(args.comparisons)},
     'actions':actions,'observations':observations,'request_count_observations':request_counts,'measurement_environments':environments,'t3_comparisons':comparisons['targets'],
     'remaining':['Review semantic user actions beyond source-discovered identities, including keyboard/pointer/context-menu, lifecycle/error/cancellation/retry variants and all supported clients.',
                  'Normalize historical timing receipts into typed observations with exact raw pointers.',
@@ -387,6 +390,13 @@ for a in sorted(actions,key=lambda a:(a['kind'],a['id'])):
     lines.append(f"| {a['kind']} | {escape(a['id'])} | [{Path(a['source']).name}:{a['line']}]({path}:{a['line']}) | {len(a['evidence_ids'])} | {a['timing_status']} |")
 lines += ['','## Completion requirements','']+[f'{i+1}. {s}' for i,s in enumerate(result['remaining'])]
 assert all(sha(p)==digest for p,(_,digest) in raw_cache.items()),'Timing source changed while rendering the log'
-(ROOT/args.json_path).write_text(json.dumps(result,ensure_ascii=False,indent=2)+'\n')
-(ROOT/args.markdown).write_text('\n'.join(lines)+'\n')
+json_text=json.dumps(result,ensure_ascii=False,indent=2)+'\n'
+markdown_text='\n'.join(lines)+'\n'
+assert_publishable(json_text)
+assert_publishable(markdown_text)
+summary=make_summary(ROOT,ledger_path,ledger,result['counts']) if args.summary else None
+(ROOT/args.json_path).write_text(json_text)
+(ROOT/args.markdown).write_text(markdown_text)
+if summary is not None:
+    (ROOT/args.summary).write_text(json.dumps(summary,ensure_ascii=False,indent=2)+'\n')
 print(json.dumps(result['counts']))
