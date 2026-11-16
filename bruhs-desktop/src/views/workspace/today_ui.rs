@@ -55,7 +55,7 @@ impl Workspace {
         )
     }
 
-    fn planning_now(&self) -> chrono::DateTime<Local> {
+    pub(super) fn planning_now(&self) -> chrono::DateTime<Local> {
         #[cfg(test)]
         if let Some(now) = self.day_plan_test_now {
             return now;

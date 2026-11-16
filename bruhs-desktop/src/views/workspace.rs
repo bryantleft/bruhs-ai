@@ -62,6 +62,7 @@ use bruhs_models::{
 };
 
 mod automations_ui;
+mod booking_ui;
 mod calendar_ui;
 mod capture_ui;
 #[cfg(test)]
@@ -1245,6 +1246,8 @@ pub struct Workspace {
     snooze_inputs: snooze_ui::SnoozeInputs,
     /// The knowledge record picker's search field and list scroll.
     record_picker: record_picker_ui::RecordPickerUi,
+    /// The booking page's name field and the booking made on it.
+    booking: booking_ui::BookingUi,
     sidebar_undo: Option<SidebarUndo>,
     sidebar_undo_generation: u32,
     threads: Vec<DesktopThread>,
@@ -1910,6 +1913,7 @@ impl Workspace {
                 .collect(),
             snooze_inputs: snooze_ui::SnoozeInputs::new(window, cx),
             record_picker,
+            booking: booking_ui::BookingUi::new(window, cx),
             sidebar_undo: None,
             sidebar_undo_generation: 0,
             threads,
@@ -2607,7 +2611,7 @@ impl Workspace {
                 let detail = self.render_conversation_detail(conversation_id, compact, cx);
                 self.with_back_to_people(detail, cx)
             }
-            AppView::Booking { .. } => self.render_calendar_page(cx),
+            AppView::Booking { slug } => self.render_booking_page(slug, compact, cx),
             AppView::Settings => self.render_web_only_view(cx),
         }
     }
@@ -2736,6 +2740,7 @@ impl Render for Workspace {
         if let Some(panel) = self.workbench_panel.as_ref() {
             panel.update(cx, |panel, cx| panel.set_shown(workbench_shown, cx));
         }
+        let booking = matches!(self.active_view, AppView::Booking { .. });
         let body = div()
             .id("workspace-body")
             .role(Role::Main)
@@ -2746,7 +2751,8 @@ impl Render for Workspace {
             .overflow_hidden()
             .flex()
             .flex_row()
-            .when(!compact && self.sidebar_visible, |el| {
+            // Like web, the booking page is a page of its own.
+            .when(!compact && self.sidebar_visible && !booking, |el| {
                 el.child(
                     div()
                         .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX))
@@ -2764,7 +2770,9 @@ impl Render for Workspace {
                     .min_h_0()
                     .flex()
                     .flex_col()
-                    .child(self.render_workspace_navigation(compact, cx))
+                    .when(!booking, |el| {
+                        el.child(self.render_workspace_navigation(compact, cx))
+                    })
                     .child(
                         div()
                             .relative()
