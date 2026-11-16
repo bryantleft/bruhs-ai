@@ -203,5 +203,15 @@ Each slice is checked as follows:
   the scale with `bruhs-control`; desktop page controls at 40 or 44px moved
   to `CONTROL_PX`. Tests that pinned 44px now pin the scale.
 
-Still open: page-specific desktop constants that repeat a scale value under
-another name, and composer chip icons.
+- Follow-up, the same day: the scale gained `icon-xs` (12px), for icons
+  beside 12px text in a chip or button, like shadcn's `xs` Button
+  (`size-3` icons). The composer chips use it and `control-xs` by name, and
+  the composer's queue, attachment and saved prompt buttons hold 16px icons
+  in 24px boxes on both surfaces. Desktop page constants that equal a scale
+  value, such as the dropdown trigger, the calendar's month buttons and the
+  diff panel's actions, now use its name.
+
+Still open: icons inside page controls. 29 web icons at 12 or 14px sit
+directly inside buttons, and desktop has matching constants (the settings
+close, the stepper, the diff and terminal panels, the dialog close icon).
+Each needs a call between `icon` and `icon-xs`.
