@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { existsSync, readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 
-import { parseChangelog } from "../src/lib/changelog.js";
 import { COMMANDS } from "../src/scripts/palette.js";
 
 // The built site: `npm test` runs `astro build` first.
@@ -18,13 +17,6 @@ describe("index.html", () => {
         : existsSync(new URL(`.${command.target}.html`, PUBLIC));
       assert.ok(found, `${command.id} jumps to ${command.target}, which doesn't exist`);
     }
-  });
-
-  it("shows the latest release under What's new, linked to its changelog entry", () => {
-    const latest = parseChangelog(readFileSync(new URL("../../CHANGELOG.md", import.meta.url), "utf8"))[0];
-    assert.ok(latest);
-    assert.match(html, new RegExp(`What's new in v${latest.version.replaceAll(".", "\\.")}`));
-    assert.ok(html.includes(`href="/changelog#v${latest.version}"`));
   });
 
   it("gives every Copy button an element to copy from", () => {

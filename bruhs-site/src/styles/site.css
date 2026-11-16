@@ -285,25 +285,7 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
 .provider-list li { min-width: 0; padding: 20px 0; border-bottom: 1px dotted var(--longan-700); }
 .provider-list p { margin: 6px 0 0; color: var(--rambutan-400); font-size: .875rem; }
 
-.flow-section h2, .news h2, .faq h2, .open-source h2 { text-wrap: balance; }
-
-/* How it connects: three steps on a dotted line. */
-.flow-section .wrap { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 48px; text-align: center; }
-.flow { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); width: 100%; max-width: 960px; }
-.flow li { position: relative; display: grid; justify-items: center; align-content: start; gap: 8px; padding: 0 16px; }
-.flow b { margin-top: 12px; font: 500 1.0625rem/1.3 var(--xenon); color: var(--rambutan-100); }
-.flow li > span:last-child { max-width: 26ch; color: var(--rambutan-400); text-wrap: balance; }
-.flow-dot { width: 14px; height: 14px; border-radius: var(--orb); background: currentColor; outline: 6px solid color-mix(in oklab, currentColor 18%, transparent); }
-.flow li + li::before {
-  content: ""; position: absolute; top: 5px; left: calc(-50% + 24px); right: calc(50% + 24px); height: 4px;
-  background: radial-gradient(circle, var(--longan-700) 1.5px, transparent 2px) 0 50% / 8px 4px repeat-x;
-}
-
-/* What's new: the latest release, built from CHANGELOG.md */
-.news { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 14px; text-align: center; max-width: 680px; }
-.news h2, .news p { margin: 0; }
-.news-summary { font-size: 1.0625rem; color: var(--rambutan-200); max-width: 52ch; text-wrap: balance; }
-.news-summary code, .faq code { font: 400 .875em/1.4 var(--neon); color: var(--rambutan-100); }
+.faq h2, .open-source h2 { text-wrap: balance; }
 
 /* Questions: plain disclosure rows */
 .faq { max-width: 720px; }
@@ -315,6 +297,7 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
 .faq details[open] summary::after { content: "–"; }
 .faq summary:hover::after { color: var(--rambutan-200); }
 .faq details p { margin: 0 4px 20px; color: var(--rambutan-300); max-width: 62ch; }
+.faq code { font: 400 .875em/1.4 var(--neon); color: var(--rambutan-100); }
 
 /* Open source: the license, the command, the repo */
 .open-source { display: grid; grid-template-columns: minmax(0, 1fr); justify-items: center; gap: 18px; text-align: center; }
@@ -416,9 +399,6 @@ dialog.palette-dialog .palette-item[aria-selected="true"] { background: var(--lo
    320×568 phone. */
 @media (max-width: 640px) {
   .nav .hide-sm { display: none; }
-  /* The flow runs top to bottom, the dotted line between the dots. */
-  .flow { grid-template-columns: minmax(0, 1fr); gap: 44px; }
-  .flow li + li::before { top: -36px; left: 50%; right: auto; width: 4px; height: 28px; translate: -2px 0; background: radial-gradient(circle, var(--longan-700) 1.5px, transparent 2px) 50% 0 / 4px 8px repeat-y; }
   .hero { padding: 24px 0 48px; }
   .hero-stack { gap: 20px; }
   .bruh-hero { max-width: min(200px, 22vh); }
