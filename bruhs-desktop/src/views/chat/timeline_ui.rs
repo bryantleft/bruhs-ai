@@ -5,6 +5,8 @@
 //! The pure helpers (tool labels, summaries, changed files) are ports of the
 //! web module so both surfaces say the same thing about the same turn.
 
+use crate::views::copy_feedback::CopyFeedback;
+use bruhs_models::logic::context_meter::format_tokens;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use chrono::{Local, TimeZone};
 use std::time::Duration;
@@ -16,9 +18,8 @@ use gpui_component::tooltip::Tooltip;
 #[cfg(any(test, debug_assertions))]
 use super::TurnState;
 use super::{
-    element_key, fold_duration_label, format_token_count, is_web_button_activation_key,
-    turn_duration_ms, turn_fold_label, ChatView, ChatViewEvent, DesktopToolCall, Message,
-    MessageRole,
+    element_key, fold_duration_label, is_web_button_activation_key, turn_duration_ms,
+    turn_fold_label, ChatView, ChatViewEvent, DesktopToolCall, Message, MessageRole,
 };
 use crate::views::diff_panel::{changed_files_from_tool_calls, split_path};
 use crate::{assets, theme};
@@ -443,7 +444,7 @@ impl ChatView {
                 row.child(self.render_edit_from_here(index, cx))
             })
             .child(self.render_copy_button(
-                ("desktop-user-copy", index),
+                format!("desktop-user-copy-{index}").into(),
                 "Copy message",
                 copy_text,
                 cx,
@@ -561,16 +562,21 @@ impl ChatView {
             .into_any_element()
     }
 
-    /// Web `CopyButton`: a 24px icon button that copies `text`.
+    /// Web `CopyButton`: a 24px icon button that copies `text`, then shows
+    /// a green check for a moment.
     fn render_copy_button(
         &self,
-        id: impl Into<ElementId>,
+        key: SharedString,
         label: &'static str,
         text: String,
         cx: &Context<'_, Self>,
     ) -> Stateful<Div> {
+        let copied = self.copy_feedback.is_shown(&key);
+        let selector = key.clone();
+        let click_key = key.clone();
         div()
-            .id(id)
+            .id(ElementId::Name(key))
+            .debug_selector(move || selector.to_string())
             .size(px(TRANSCRIPT_ICON_BOX_PX))
             .rounded(px(4.0))
             .flex()
@@ -586,14 +592,19 @@ impl ChatView {
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_800()).text_color(theme::rambutan_200()))
             .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
-            .on_click(cx.listener(move |_, _, _, cx| {
+            .on_click(cx.listener(move |this, _, _, cx| {
                 cx.write_to_clipboard(ClipboardItem::new_string(text.clone()));
+                CopyFeedback::show(this, |chat| &mut chat.copy_feedback, click_key.clone(), cx);
             }))
-            .child(icon(
-                assets::COPY_ICON_PATH,
-                theme::ICON_PX,
-                theme::rambutan_500(),
-            ))
+            .child(if copied {
+                icon(assets::CHECK_ICON_PATH, theme::ICON_PX, theme::pandan_400())
+            } else {
+                icon(
+                    assets::COPY_ICON_PATH,
+                    theme::ICON_PX,
+                    theme::rambutan_500(),
+                )
+            })
     }
 
     // ── Assistant turn ───────────────────────────────────────────────────
@@ -1500,8 +1511,8 @@ impl ChatView {
         let tokens = msg.usage.as_ref().map(|u| {
             format!(
                 "{} in, {} out",
-                format_token_count(u.input_tokens),
-                format_token_count(u.output_tokens)
+                format_tokens(u.input_tokens),
+                format_tokens(u.output_tokens)
             )
         });
         let time = msg
@@ -1557,7 +1568,7 @@ impl ChatView {
                         .child("Cite in composer"),
                 )
                 .child(self.render_copy_button(
-                    ("desktop-turn-copy", index),
+                    format!("desktop-turn-copy-{index}").into(),
                     "Copy response",
                     msg.content.clone(),
                     cx,

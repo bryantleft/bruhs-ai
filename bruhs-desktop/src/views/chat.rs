@@ -34,7 +34,6 @@ use gpui_component::input::{
 };
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::text::{TextView, TextViewStyle};
-use gpui_component::tooltip::Tooltip;
 use gpui_component::{ActiveTheme, RopeExt};
 use markdown::{mdast, ParseOptions};
 use serde::{Deserialize, Serialize};
@@ -543,6 +542,8 @@ pub struct ChatView {
     /// A child of the options panel's body to scroll into view once the
     /// panel has laid out; a scroll area ignores requests before then.
     composer_options_reveal: std::rc::Rc<std::cell::Cell<Option<usize>>>,
+    /// The transcript copy button that shows its check, like web's.
+    pub(super) copy_feedback: crate::views::copy_feedback::CopyFeedback,
     composer_options_section_focus: [FocusHandle; 6],
     stash_open: bool,
     /// Parked drafts (⌘S), newest first.
@@ -1039,6 +1040,7 @@ impl ChatView {
             composer_options_trigger_bounds: Default::default(),
             composer_options_scroll: ScrollHandle::new(),
             composer_options_reveal: Default::default(),
+            copy_feedback: Default::default(),
             composer_options_section_focus: std::array::from_fn(|_| {
                 cx.focus_handle().tab_stop(false)
             }),
@@ -1781,16 +1783,6 @@ pub fn turn_fold_label(duration_ms: Option<u64>, stopped: bool) -> String {
         (true, None) => "You stopped".to_string(),
         (false, Some(d)) => format!("Worked for {}", fold_duration_label(d)),
         (false, None) => "Worked".to_string(),
-    }
-}
-
-fn format_token_count(tokens: u64) -> String {
-    if tokens >= 10_000 {
-        format!("{}k", tokens / 1000)
-    } else if tokens >= 1_000 {
-        format!("{:.1}k", tokens.to_f64_lossy() / 1000.0)
-    } else {
-        tokens.to_string()
     }
 }
 

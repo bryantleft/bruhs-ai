@@ -24,7 +24,6 @@ const LIST_RADIUS_PX: f32 = 8.0;
 const OPTION_TEXT_SIZE_PX: f32 = 12.0;
 const OPTION_RADIUS_PX: f32 = 6.0;
 const GROUP_TEXT_SIZE_PX: f32 = 12.0;
-const CHECK_WIDTH_PX: f32 = 12.0;
 const HOVER_BG_OPACITY: f32 = 0.60;
 
 pub struct DropdownOption {
@@ -415,6 +414,7 @@ fn render_dropdown_list(
             let select_for_click = on_select.clone();
             let select_for_key = on_select.clone();
             let selector = format!("{id}-option-{}", option.value);
+            let check_selector = format!("{selector}-check");
             let index = option_index;
             option_index += 1;
             // a11y-exempt: Configures the focus handle; the row below draws its focus ring.
@@ -436,7 +436,7 @@ fn render_dropdown_list(
                     .py_1p5()
                     .rounded(px(OPTION_RADIUS_PX))
                     .flex()
-                    .items_start()
+                    .items_center()
                     .gap_2()
                     .text_size(px(OPTION_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -474,24 +474,6 @@ fn render_dropdown_list(
                     })
                     .child(
                         div()
-                            .w(px(CHECK_WIDTH_PX))
-                            .h(px(OPTION_TEXT_SIZE_PX * 1.5))
-                            .flex_shrink_0()
-                            .flex()
-                            .items_center()
-                            .justify_center()
-                            .text_color(theme::persimmon_400())
-                            .when(is_current, |el| {
-                                el.child(
-                                    svg()
-                                        .path(assets::CHECK_ICON_PATH)
-                                        .size(px(CHECK_WIDTH_PX))
-                                        .text_color(theme::persimmon_400()),
-                                )
-                            }),
-                    )
-                    .child(
-                        div()
                             .min_w_0()
                             .flex_1()
                             .flex()
@@ -500,9 +482,20 @@ fn render_dropdown_list(
                             .children(
                                 option
                                     .description
-                                    .map(|d| div().text_color(theme::rambutan_500()).child(d)),
+                                    .map(|d| div().text_color(theme::rambutan_400()).child(d)),
                             ),
                     )
+                    // Web: the chosen row's check sits at the right.
+                    .when(is_current, |el| {
+                        el.child(
+                            svg()
+                                .debug_selector(move || check_selector)
+                                .path(assets::CHECK_ICON_PATH)
+                                .size(px(theme::ICON_XS_PX))
+                                .flex_shrink_0()
+                                .text_color(theme::rambutan_100()),
+                        )
+                    })
                     .into_any_element(),
             );
         }
@@ -675,6 +668,32 @@ mod tests {
             assert_eq!(view.value, "a");
             assert!(!view.open);
         });
+    }
+
+    /// Like web, only the chosen option shows a check, at the right of its
+    /// label.
+    #[gpui::test]
+    fn dropdown_check_sits_at_the_right_of_the_chosen_option(cx: &mut TestAppContext) {
+        cx.update(gpui_component::init);
+        let (_view, cx) = cx.add_window_view(|_, _| DropdownHarness {
+            open: true,
+            value: "b",
+            dismissed: false,
+            long: false,
+        });
+        cx.run_until_parked();
+        let option = cx
+            .debug_bounds("test-dropdown-option-b")
+            .expect("chosen option");
+        let check = cx
+            .debug_bounds("test-dropdown-option-b-check")
+            .expect("its check");
+        assert!(
+            check.left() > option.center().x,
+            "the check sits at the right"
+        );
+        assert_eq!(check.size.width, gpui::px(crate::theme::ICON_XS_PX));
+        assert!(cx.debug_bounds("test-dropdown-option-a-check").is_none());
     }
 
     #[gpui::test]

@@ -43,6 +43,17 @@ impl CaptureKind {
         }
     }
 
+    /// The Lucide icon both apps show for this destination.
+    pub const fn icon(self) -> &'static str {
+        match self {
+            Self::Task => "list-checks",
+            Self::Note => "file-text",
+            Self::Event => "calendar",
+            Self::Contact => "user-plus",
+            Self::MessageDraft => "send",
+        }
+    }
+
     /// Input guidance tailored to the selected destination.
     pub const fn placeholder(self) -> &'static str {
         match self {

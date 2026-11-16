@@ -240,11 +240,12 @@ fn desktop_chat_shell_layout_should_match_web_reference() {
 #[test]
 fn desktop_scroll_to_bottom_control_should_match_web_threshold() {
     assert_eq!(CHAT_SCROLL_BOTTOM_THRESHOLD_PX, 100.0);
-    assert_eq!(CHAT_SCROLL_TO_BOTTOM_OFFSET_PX, 16.0);
-    assert_eq!(CHAT_SCROLL_TO_BOTTOM_SIZE_PX, 32.0);
+    // Web's "Scroll to end" pill: `bottom-3`, `h-7`, 12px label.
+    assert_eq!(CHAT_SCROLL_TO_BOTTOM_OFFSET_PX, 12.0);
+    assert_eq!(CHAT_SCROLL_TO_BOTTOM_SIZE_PX, 28.0);
     assert_eq!(CHAT_SCROLL_TO_BOTTOM_RADIUS_PX, 999.0);
-    assert_eq!(CHAT_SCROLL_TO_BOTTOM_TEXT_SIZE_PX, 16.0);
-    assert_eq!(CHAT_SCROLL_TO_BOTTOM_LABEL, "Scroll to bottom");
+    assert_eq!(CHAT_SCROLL_TO_BOTTOM_TEXT_SIZE_PX, 12.0);
+    assert_eq!(CHAT_SCROLL_TO_BOTTOM_LABEL, "Scroll to end");
     assert!(!desktop_scroll_to_bottom_control_visible(0.0, 0.0));
     assert!(!desktop_scroll_to_bottom_control_visible(-900.0, 1_000.0));
     assert!(desktop_scroll_to_bottom_control_visible(-899.0, 1_000.0));

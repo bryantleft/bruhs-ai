@@ -104,7 +104,7 @@ pub fn DatePicker(
     };
 
     let final_class = format!(
-        "inline-flex items-center gap-2 rounded-grape bg-white/5 px-3 py-2 text-body text-rambutan-100 inset-ring inset-ring-white/10 hover:inset-ring-white/20 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 cursor-pointer {class}"
+        "bruhs-control inline-flex min-h-control items-center gap-2 rounded-grape bg-white/5 px-3 py-1 text-body text-rambutan-100 inset-ring inset-ring-white/10 hover:inset-ring-white/20 focus-visible:outline-2 -outline-offset-1 focus-visible:outline-persimmon-400 cursor-pointer {class}"
     );
 
     // The day grid for the current view month (reactive on view_year/month).

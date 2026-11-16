@@ -201,8 +201,15 @@ impl Workspace {
                     .enumerate()
                     .map(|(index, kind)| {
                         let is_selected = kind == selected;
+                        let group = SharedString::from(format!("capture-kind-{index}"));
+                        let color = if is_selected {
+                            theme::rambutan_100()
+                        } else {
+                            theme::rambutan_500()
+                        };
                         div()
                             .id(("capture-kind", index))
+                            .group(group.clone())
                             .debug_selector(move || {
                                 format!("desktop-capture-kind-{}", kind.label().to_lowercase())
                             })
@@ -218,13 +225,14 @@ impl Workspace {
                             .rounded(px(6.0))
                             .px_1()
                             .py_2()
+                            // Web: the destination's icon above its label.
+                            .flex()
+                            .flex_col()
+                            .items_center()
+                            .gap_1()
                             .text_xs()
                             .text_center()
-                            .text_color(if is_selected {
-                                theme::rambutan_100()
-                            } else {
-                                theme::rambutan_500()
-                            })
+                            .text_color(color)
                             .when(is_selected, |element| element.bg(theme::longan_700()))
                             .cursor_pointer()
                             .hover(|element| {
@@ -250,7 +258,25 @@ impl Workspace {
                                     }
                                 },
                             ))
-                            .child(kind.label())
+                            .child(
+                                svg()
+                                    .debug_selector(move || {
+                                        format!(
+                                            "desktop-capture-kind-{}-icon",
+                                            kind.label().to_lowercase()
+                                        )
+                                    })
+                                    .path(SharedString::from(format!("icons/{}.svg", kind.icon())))
+                                    .size(px(theme::ICON_INLINE_PX))
+                                    .flex_shrink_0()
+                                    .text_color(color)
+                                    .when(!is_selected, |el| {
+                                        el.group_hover(group, |el| {
+                                            el.text_color(theme::rambutan_200())
+                                        })
+                                    }),
+                            )
+                            .child(div().max_w_full().truncate().child(kind.label()))
                     }),
             );
 

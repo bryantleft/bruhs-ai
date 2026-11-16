@@ -1,6 +1,7 @@
 pub(crate) mod api_client_panel;
 pub mod braille;
 pub mod chat;
+pub(crate) mod copy_feedback;
 pub(crate) mod database_panel;
 pub mod diff_panel;
 pub mod dropdown;

@@ -53,11 +53,15 @@ pub(super) const PERMISSION_PROMPT_ACTION_GAP_PX: f32 = 6.0;
 pub(super) const PERMISSION_PROMPT_DIVIDER_WIDTH_PX: f32 = 1.0;
 pub(super) const PERMISSION_PROMPT_DIVIDER_MIN_HEIGHT_PX: f32 = 34.0;
 pub(super) const CHAT_SCROLL_BOTTOM_THRESHOLD_PX: f32 = 100.0;
-pub(super) const CHAT_SCROLL_TO_BOTTOM_OFFSET_PX: f32 = 16.0;
-pub(super) const CHAT_SCROLL_TO_BOTTOM_SIZE_PX: f32 = 32.0;
+/// Web's "Scroll to end" pill: centered `bottom-3` over the transcript,
+/// `h-7` tall, `px-3`, a 12px chevron beside a 12px label.
+pub(super) const CHAT_SCROLL_TO_BOTTOM_OFFSET_PX: f32 = 12.0;
+pub(super) const CHAT_SCROLL_TO_BOTTOM_SIZE_PX: f32 = theme::CONTROL_SM_PX;
 pub(super) const CHAT_SCROLL_TO_BOTTOM_RADIUS_PX: f32 = 999.0;
-pub(super) const CHAT_SCROLL_TO_BOTTOM_TEXT_SIZE_PX: f32 = 16.0;
-pub(super) const CHAT_SCROLL_TO_BOTTOM_LABEL: &str = "Scroll to bottom";
+pub(super) const CHAT_SCROLL_TO_BOTTOM_TEXT_SIZE_PX: f32 = 12.0;
+pub(super) const CHAT_SCROLL_TO_BOTTOM_LABEL: &str = "Scroll to end";
+/// Web `gap-1.5` between the chevron and the label.
+const CHAT_SCROLL_TO_BOTTOM_GAP_PX: f32 = 6.0;
 
 pub(super) fn desktop_scroll_to_bottom_control_visible(
     offset_y_px: f32,
@@ -833,42 +837,62 @@ impl ChatView {
             .into_any_element()
     }
 
+    /// Web's "Scroll to end" pill, centered over the transcript's bottom
+    /// edge. The full-width row around it takes no pointer input.
     pub(super) fn render_scroll_to_bottom_control(&self, cx: &Context<'_, Self>) -> AnyElement {
+        const GROUP: &str = "desktop-scroll-to-bottom";
         div()
-            .id("desktop-scroll-to-bottom")
             .absolute()
+            .left_0()
+            .right_0()
             .bottom(px(CHAT_SCROLL_TO_BOTTOM_OFFSET_PX))
-            .right(px(CHAT_SCROLL_TO_BOTTOM_OFFSET_PX))
-            .size(px(CHAT_SCROLL_TO_BOTTOM_SIZE_PX))
-            .rounded(px(CHAT_SCROLL_TO_BOTTOM_RADIUS_PX))
-            .bg(theme::longan_700())
-            .border_1()
-            .border_color(theme::ring_floating())
             .flex()
-            .items_center()
             .justify_center()
-            .text_size(px(CHAT_SCROLL_TO_BOTTOM_TEXT_SIZE_PX))
-            .text_color(theme::rambutan_200())
-            .tab_index(0)
-            .role(Role::Button)
-            .aria_label(CHAT_SCROLL_TO_BOTTOM_LABEL)
-            .focus_visible(|el| el.border_color(theme::persimmon_400()))
-            .cursor_pointer()
-            .hover(|el| el.bg(theme::longan_600()))
-            .tooltip(|window, cx| Tooltip::new(CHAT_SCROLL_TO_BOTTOM_LABEL).build(window, cx))
-            .on_click(cx.listener(|this, _ev, _window, cx| {
-                this.scroll_messages_to_bottom();
-                cx.notify();
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.scroll_messages_to_bottom();
-                    cx.notify();
-                }
-            }))
-            .child("↓")
+            .child(
+                div()
+                    .id("desktop-scroll-to-bottom")
+                    .debug_selector(|| "desktop-scroll-to-bottom".to_string())
+                    .group(GROUP)
+                    .h(px(CHAT_SCROLL_TO_BOTTOM_SIZE_PX))
+                    .px_3()
+                    .flex()
+                    .items_center()
+                    .gap(px(CHAT_SCROLL_TO_BOTTOM_GAP_PX))
+                    .rounded(px(CHAT_SCROLL_TO_BOTTOM_RADIUS_PX))
+                    .bg(theme::longan_700())
+                    .border_1()
+                    .border_color(theme::ring_floating())
+                    .text_size(px(CHAT_SCROLL_TO_BOTTOM_TEXT_SIZE_PX))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .text_color(theme::rambutan_200())
+                    .tab_index(0)
+                    .role(Role::Button)
+                    .aria_label(CHAT_SCROLL_TO_BOTTOM_LABEL)
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                    .cursor_pointer()
+                    .hover(|el| el.text_color(theme::rambutan_100()))
+                    .on_click(cx.listener(|this, _ev, _window, cx| {
+                        this.scroll_messages_to_bottom();
+                        cx.notify();
+                    }))
+                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                            window.prevent_default();
+                            cx.stop_propagation();
+                            this.scroll_messages_to_bottom();
+                            cx.notify();
+                        }
+                    }))
+                    .child(
+                        svg()
+                            .path(assets::CHEVRON_DOWN_ICON_PATH)
+                            .size(px(theme::ICON_XS_PX))
+                            .flex_shrink_0()
+                            .text_color(theme::rambutan_200())
+                            .group_hover(GROUP, |el| el.text_color(theme::rambutan_100())),
+                    )
+                    .child(CHAT_SCROLL_TO_BOTTOM_LABEL),
+            )
             .into_any_element()
     }
 

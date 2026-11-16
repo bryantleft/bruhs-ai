@@ -34,6 +34,12 @@ pub const MIC_ICON_PATH: &str = "icons/mic.svg";
 pub const USERS_ICON_PATH: &str = "icons/users.svg";
 pub const CALENDAR_ICON_PATH: &str = "icons/calendar.svg";
 pub const PLUS_ICON_PATH: &str = "icons/plus.svg";
+// The capture dialog's destinations (`CaptureKind::icon`).
+pub const FILE_TEXT_ICON_PATH: &str = "icons/file-text.svg";
+pub const USER_PLUS_ICON_PATH: &str = "icons/user-plus.svg";
+pub const SEND_ICON_PATH: &str = "icons/send.svg";
+/// The update pill's spinner (web `loader`).
+pub const LOADER_ICON_PATH: &str = "icons/loader.svg";
 pub const MINUS_ICON_PATH: &str = "icons/minus.svg";
 pub const BOOK_OPEN_ICON_PATH: &str = "icons/book-open.svg";
 pub const SUN_ICON_PATH: &str = "icons/sun.svg";
@@ -155,6 +161,10 @@ const TOOL_PENCIL_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 
 const TOOL_FILE_PLUS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7Z"/><polyline points="14 2 14 8 20 8"/><line x1="12" x2="12" y1="18" y2="12"/><line x1="9" x2="15" y1="15" y2="15"/></svg>"#;
 const TOOL_FOLDER_SEARCH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M11 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H20a2 2 0 0 1 2 2v3.5"/><circle cx="17" cy="17" r="3"/><path d="m21 21-1.5-1.5"/></svg>"#;
 const TOOL_SEARCH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>"#;
+const FILE_TEXT_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg>"#;
+const USER_PLUS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>"#;
+const SEND_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>"#;
+const LOADER_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>"#;
 const TOOL_GLOBE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><path d="M12 2a14.5 14.5 0 0 0 0 20 14.5 14.5 0 0 0 0-20"/><path d="M2 12h20"/></svg>"#;
 const TOOL_MESSAGE_QUESTION_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M7.9 20A9 9 0 1 0 4 16.1L2 22Z"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>"#;
 const SHIELD_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 13c0 5-3.5 7.5-7.66 8.95a1 1 0 0 1-.67-.01C7.5 20.5 4 18 4 13V6a1 1 0 0 1 1-1c2 0 4.5-1.2 6.24-2.72a1.17 1.17 0 0 1 1.52 0C14.51 3.81 17 5 19 5a1 1 0 0 1 1 1z"/></svg>"#;
@@ -196,6 +206,10 @@ impl AssetSource for DesktopAssets {
             TOOL_FOLDER_SEARCH_ICON_PATH => Ok(Some(Cow::Borrowed(TOOL_FOLDER_SEARCH_ICON))),
             TOOL_SEARCH_ICON_PATH => Ok(Some(Cow::Borrowed(TOOL_SEARCH_ICON))),
             TOOL_GLOBE_ICON_PATH => Ok(Some(Cow::Borrowed(TOOL_GLOBE_ICON))),
+            FILE_TEXT_ICON_PATH => Ok(Some(Cow::Borrowed(FILE_TEXT_ICON))),
+            USER_PLUS_ICON_PATH => Ok(Some(Cow::Borrowed(USER_PLUS_ICON))),
+            SEND_ICON_PATH => Ok(Some(Cow::Borrowed(SEND_ICON))),
+            LOADER_ICON_PATH => Ok(Some(Cow::Borrowed(LOADER_ICON))),
             TOOL_MESSAGE_QUESTION_ICON_PATH => Ok(Some(Cow::Borrowed(TOOL_MESSAGE_QUESTION_ICON))),
             "icons/panel-left.svg" => Ok(Some(Cow::Borrowed(TOP_BAR_PANEL_LEFT_ICON))),
             "icons/bot.svg" => Ok(Some(Cow::Borrowed(TOP_BAR_BOT_ICON))),

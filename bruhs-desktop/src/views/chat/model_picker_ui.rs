@@ -525,6 +525,17 @@ impl ChatView {
                                     .child("Use the model configured with this provider."),
                             ),
                     )
+                    // Web checks the custom row while it is the current model.
+                    .when(self.model_id == *id, |el| {
+                        el.child(
+                            svg()
+                                .debug_selector(|| "desktop-model-picker-custom-check".to_string())
+                                .path(assets::CHECK_ICON_PATH)
+                                .size(px(theme::ICON_PX))
+                                .text_color(theme::rambutan_100())
+                                .flex_shrink_0(),
+                        )
+                    })
                     .into_any_element(),
             );
         }

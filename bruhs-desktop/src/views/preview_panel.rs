@@ -20,6 +20,8 @@ const HEADER_HEIGHT_PX: f32 = 40.0;
 const HEADER_TEXT_SIZE_PX: f32 = 12.0;
 /// Icons in the header's icon buttons.
 const ICON_SIZE_PX: f32 = theme::ICON_PX;
+/// The rescan button's padding around its 16px icon makes it 24px.
+const RESCAN_PADDING_PX: f32 = (theme::CONTROL_XS_PX - theme::ICON_PX) / 2.0;
 const EMPTY_TEXT_SIZE_PX: f32 = 13.0;
 const EMPTY_HINT_TEXT_SIZE_PX: f32 = 12.0;
 const EMPTY_LIST_WIDTH_PX: f32 = 320.0;
@@ -435,7 +437,7 @@ impl PreviewPanelView {
         enabled: bool,
         on_click: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + 'static,
         cx: &Context<'_, Self>,
-    ) -> AnyElement {
+    ) -> Stateful<Div> {
         let color = if enabled {
             theme::rambutan_400()
         } else {
@@ -458,7 +460,39 @@ impl PreviewPanelView {
             }
         }))
         .child(svg().path(icon).size(px(ICON_SIZE_PX)).text_color(color))
-        .into_any_element()
+    }
+
+    /// Web's Open in browser: a globe and "↗" in a 28px text button.
+    fn open_in_browser_button(&self, enabled: bool, cx: &Context<'_, Self>) -> Stateful<Div> {
+        let color = if enabled {
+            theme::rambutan_400()
+        } else {
+            theme::rambutan_500().opacity(0.5)
+        };
+        web_button(
+            "desktop-preview-open",
+            WebButtonVariant::Ghost,
+            WebButtonSize::Small,
+            ButtonState::disabled_if(!enabled),
+        )
+        .debug_selector(|| "desktop-preview-open".to_string())
+        .aria_label("Open in browser")
+        .gap_1()
+        .text_color(color)
+        .when(enabled, |el| el.cursor_pointer())
+        .on_click(cx.listener(move |this, _ev, _window, cx| {
+            cx.stop_propagation();
+            if enabled {
+                this.open_external(cx);
+            }
+        }))
+        .child(
+            svg()
+                .path(assets::TOOL_GLOBE_ICON_PATH)
+                .size(px(theme::ICON_XS_PX))
+                .text_color(color),
+        )
+        .child("↗")
     }
 
     fn render_header(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -520,14 +554,7 @@ impl PreviewPanelView {
                 |this, _window, cx| this.reload(cx),
                 cx,
             ))
-            .child(self.icon_button(
-                "desktop-preview-open",
-                "Open in browser",
-                assets::EXTERNAL_LINK_ICON_PATH,
-                has_url,
-                |this, _window, cx| this.open_external(cx),
-                cx,
-            ))
+            .child(self.open_in_browser_button(has_url, cx))
             .child(self.icon_button(
                 "desktop-preview-clear",
                 "Clear preview",
@@ -653,14 +680,20 @@ impl PreviewPanelView {
                                     .text_color(theme::rambutan_500())
                                     .child(SERVERS_LABEL),
                             )
-                            .child(self.icon_button(
-                                "desktop-preview-rescan",
-                                "Rescan local servers",
-                                assets::REFRESH_ICON_PATH,
-                                true,
-                                |this, _window, cx| this.refresh_servers(cx),
-                                cx,
-                            )),
+                            .child(
+                                self.icon_button(
+                                    "desktop-preview-rescan",
+                                    "Rescan local servers",
+                                    assets::REFRESH_ICON_PATH,
+                                    true,
+                                    |this, _window, cx| this.refresh_servers(cx),
+                                    cx,
+                                )
+                                // Web `size-6`: a 24px row action.
+                                .min_w(px(theme::CONTROL_XS_PX))
+                                .min_h(px(theme::CONTROL_XS_PX))
+                                .p(px(RESCAN_PADDING_PX)),
+                            ),
                     )
                     .children(rows)
                     .when_some(status, |el, text| {

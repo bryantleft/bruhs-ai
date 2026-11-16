@@ -330,10 +330,11 @@ impl Workspace {
             target,
             DatePickerTarget::EventStart | DatePickerTarget::EventEnd
         ) && self.event_dialog_read_only();
+        // Web: the trigger fits its text and never outgrows its field.
         let trigger = div()
             .id(selector)
             .debug_selector(move || selector.to_string())
-            .w_full()
+            .max_w_full()
             .min_w_0()
             .min_h(px(theme::APP_CONTROL_HEIGHT_PX))
             .flex()
@@ -343,7 +344,7 @@ impl Workspace {
             .bg(gpui::white().opacity(0.05))
             .border_1()
             .border_color(gpui::white().opacity(0.10))
-            .px_2()
+            .px_3()
             .py_1()
             .font_family(theme::CODE_FONT_FAMILY)
             .text_size(px(TRIGGER_TEXT_PX))
@@ -377,7 +378,7 @@ impl Workspace {
                     .flex_shrink_0()
                     .text_color(theme::rambutan_100()),
             )
-            .child(div().min_w_0().flex_1().truncate().child(text));
+            .child(div().min_w_0().truncate().child(text));
         div()
             .relative()
             .flex()

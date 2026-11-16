@@ -19,16 +19,6 @@ use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog, Icon, Textarea};
 const HALF_HOUR_MS: f64 = 30.0 * 60.0 * 1000.0;
 const EVENT_DURATION_MS: f64 = 60.0 * 60.0 * 1000.0;
 
-fn capture_icon(kind: CaptureKind) -> &'static str {
-    match kind {
-        CaptureKind::Task => "list-checks",
-        CaptureKind::Note => "file-text",
-        CaptureKind::Event => "calendar",
-        CaptureKind::Contact => "user-plus",
-        CaptureKind::MessageDraft => "send",
-    }
-}
-
 fn next_half_hour_ms(now_ms: f64) -> f64 {
     (now_ms / HALF_HOUR_MS).ceil() * HALF_HOUR_MS
 }
@@ -269,7 +259,7 @@ pub fn CaptureDialog() -> impl IntoView {
             <div class="min-h-0 overflow-y-auto px-4 py-3 space-y-3">
                 <div class="grid grid-cols-5 gap-1 rounded-grape bg-longan-900/50 p-1 inset-ring inset-ring-longan-700/70" role="radiogroup" aria-label="Capture type">
                     {CaptureKind::ALL.into_iter().map(|option| {
-                        let icon = capture_icon(option);
+                        let icon = option.icon();
                         view! {
                             <button
                                 type="button"

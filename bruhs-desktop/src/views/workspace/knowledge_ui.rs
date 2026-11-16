@@ -9,6 +9,7 @@ use gpui_component::input::Input;
 
 use super::knowledge_storage::{self, attachment_path as knowledge_attachment_path};
 use super::library_pages_ui::LibraryPage;
+use super::record_picker_ui::RecordPickerTarget;
 use super::*;
 
 // Match the web knowledge library's 24-card budget. The native action fixture
@@ -324,37 +325,38 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    fn add_next_knowledge_link(&mut self, cx: &mut Context<'_, Self>) {
+    /// Connect `link` to the open document, once (web `add_link`).
+    pub(super) fn add_knowledge_link(&mut self, link: KnowledgeLink, cx: &mut Context<'_, Self>) {
         let AppView::DocumentDetail { document_id } = &self.active_view else {
             return;
         };
-        let existing = self
-            .knowledge_documents
-            .iter()
-            .find(|document| document.id == *document_id)
-            .map(|document| document.links.clone())
-            .unwrap_or_default();
-        let candidates = self.knowledge_link_candidates(document_id, cx);
-        let Some(link) = candidates.into_iter().find(|candidate| {
-            !existing
-                .iter()
-                .any(|item| item.kind == candidate.kind && item.target_id == candidate.target_id)
-        }) else {
-            return;
-        };
-        if let Some(document) = self
+        let Some(document) = self
             .knowledge_documents
             .iter_mut()
             .find(|document| document.id == *document_id)
+        else {
+            return;
+        };
+        if document
+            .links
+            .iter()
+            .any(|item| item.kind == link.kind && item.target_id == link.target_id)
         {
-            let mut links = document.links.clone();
-            links.push(link);
-            document.update_links(links, EpochMs::now().as_millis());
-            self.persist_and_notify(cx);
+            return;
         }
+        let mut links = document.links.clone();
+        links.push(link);
+        document.update_links(links, EpochMs::now().as_millis());
+        self.persist_and_notify(cx);
     }
 
-    fn knowledge_link_candidates(&self, current_id: &str, cx: &App) -> Vec<KnowledgeLink> {
+    /// The records a document can connect to, in the web's order: other
+    /// documents, tasks, projects, meetings, then people.
+    pub(super) fn knowledge_link_candidates(
+        &self,
+        current_id: &str,
+        cx: &App,
+    ) -> Vec<KnowledgeLink> {
         self.knowledge_documents
             .iter()
             .filter(|document| document.id != current_id)
@@ -418,7 +420,9 @@ impl Workspace {
         }
     }
 
-    fn add_next_citation(&mut self, cx: &mut Context<'_, Self>) {
+    /// Cite the saved source `clip_id` in the open document, once (web
+    /// `add_citation`).
+    pub(super) fn add_citation(&mut self, clip_id: &str, cx: &mut Context<'_, Self>) {
         let AppView::DocumentDetail { document_id } = &self.active_view else {
             return;
         };
@@ -429,17 +433,16 @@ impl Workspace {
         else {
             return;
         };
-        let Some(clip) = self.source_clips.iter().find(|clip| {
-            !document
-                .citations
-                .iter()
-                .any(|citation| citation.clip_id == clip.id)
-        }) else {
+        if document
+            .citations
+            .iter()
+            .any(|citation| citation.clip_id == clip_id)
+        {
             return;
-        };
+        }
         let mut citations = document.citations.clone();
         citations.push(KnowledgeCitation {
-            clip_id: clip.id.clone(),
+            clip_id: clip_id.to_string(),
             locator: String::new(),
             note: String::new(),
         });
@@ -1106,40 +1109,18 @@ impl Workspace {
                                     .child(knowledge_meta_panel(
                                         "Connections",
                                         links,
-                                        Some(
-                                            web_button(
-                                                "add-knowledge-link",
-                                                WebButtonVariant::Ghost,
-                                                WebButtonSize::Small,
-                                                ButtonState::Enabled,
-                                            )
-                                            .aria_label("+ Connect next record")
-                                            .child("+ Connect next record")
-                                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                                this.add_next_knowledge_link(cx);
-                                            }))
-                                            .into_any_element(),
-                                        ),
+                                        Some(self.render_record_picker_trigger(
+                                            RecordPickerTarget::Link,
+                                            cx,
+                                        )),
                                     ))
                                     .child(knowledge_meta_panel(
                                         "Citations",
                                         citations,
-                                        Some(
-                                            web_button(
-                                                "add-knowledge-citation",
-                                                WebButtonVariant::Ghost,
-                                                WebButtonSize::Small,
-                                                ButtonState::disabled_if(
-                                                    self.source_clips.is_empty(),
-                                                ),
-                                            )
-                                            .aria_label("+ Cite next source")
-                                            .child("+ Cite next source")
-                                            .on_click(cx.listener(|this, _event, _window, cx| {
-                                                this.add_next_citation(cx);
-                                            }))
-                                            .into_any_element(),
-                                        ),
+                                        Some(self.render_record_picker_trigger(
+                                            RecordPickerTarget::Citation,
+                                            cx,
+                                        )),
                                     ))
                                     .child(knowledge_meta_panel(
                                         "Attachments",
@@ -1448,13 +1429,16 @@ fn knowledge_meta_panel(
         .gap_2()
         .child(
             div()
-                .text_size(px(10.0))
+                // Web `text-label-sm uppercase`.
+                .text_size(px(12.0))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
                 .font_weight(FontWeight::MEDIUM)
                 .text_color(theme::rambutan_500())
                 .child(title.to_uppercase()),
         )
-        .children(rows)
+        // Web puts each panel's control above its list.
         .children(action)
+        .children(rows)
 }
 
 fn document_preview(markdown: &str) -> String {
