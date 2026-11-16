@@ -324,7 +324,7 @@ impl Workspace {
         )
         .debug_selector(move || id.into())
         .aria_label(label)
-        .min_h(px(44.0))
+        .min_h(px(theme::CONTROL_PX))
         .when(!disabled, |button| {
             button
                 .on_click(cx.listener(move |this, _, _, cx| {

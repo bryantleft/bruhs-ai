@@ -79,7 +79,7 @@ pub(super) fn RecordPicker(
     });
     view! {
         <button type="button" aria-label=label aria-haspopup="dialog" aria-expanded=move || open.get().to_string()
-            class="inline-flex min-h-11 w-full items-center justify-between gap-2 rounded-grape bg-white/5 px-3 py-2 text-left text-body-sm text-rambutan-300 inset-ring inset-ring-white/10 hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 cursor-pointer"
+            class="bruhs-control inline-flex min-h-control w-full items-center justify-between gap-2 rounded-grape bg-white/5 px-3 py-2 text-left text-body-sm text-rambutan-300 inset-ring inset-ring-white/10 hover:bg-white/[0.07] focus-visible:outline-2 focus-visible:-outline-offset-1 focus-visible:outline-persimmon-400 cursor-pointer"
             on:click=move |_| { query.set(String::new()); highlighted.set(0); open.set(true); }>
             <span class="min-w-0 truncate">{placeholder}</span><Icon name="search" size=14 class="shrink-0 text-rambutan-500" />
         </button>
@@ -87,9 +87,9 @@ pub(super) fn RecordPicker(
             on_close=Callback::new(move |_| open.set(false))>
             <div class="flex max-h-[calc(100dvh-4rem)] min-h-0 flex-col">
                 <div class="shrink-0 border-b border-longan-700 px-3 pb-3">
-                    <div class="flex min-h-11 items-center justify-between gap-3">
+                    <div class="flex min-h-control items-center justify-between gap-3">
                         <label for=input_id.clone() class="text-label text-rambutan-200">{search_label}</label>
-                        <button type="button" aria-label="Close record picker" class="flex size-11 shrink-0 items-center justify-center rounded-grape text-rambutan-400 hover:bg-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer" on:click=move |_| open.set(false)><Icon name="x" size=16 /></button>
+                        <button type="button" aria-label="Close record picker" class="bruhs-control flex size-control shrink-0 items-center justify-center rounded-grape text-rambutan-400 hover:bg-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer" on:click=move |_| open.set(false)><Icon name="x" size=16 /></button>
                     </div>
                     <input id=input_id.clone() type="search" role="combobox" aria-label=search_label data-autofocus=""
                         aria-controls=list_id.clone() aria-expanded="true" aria-autocomplete="list"
@@ -108,7 +108,7 @@ pub(super) fn RecordPicker(
                         <button type="button" role="option" tabindex="-1" aria-label=accessible_label
                             id=prefix.with_value(|id| format!("{id}-option-{position}")) data-picker-value=option.value data-picker-position=position
                             aria-selected=move || (current() == position).to_string() aria-posinset=position + 1 aria-setsize=move || count.get()
-                            class=move || format!("flex min-h-11 w-full items-center justify-between gap-3 rounded-grape px-3 py-2 text-left text-body-sm cursor-pointer {}", if current() == position { "bg-blueberry-500/15 text-blueberry-200 inset-ring inset-ring-blueberry-400/30" } else { "text-rambutan-200 hover:bg-longan-700" })
+                            class=move || format!("bruhs-control flex min-h-control w-full items-center justify-between gap-3 rounded-grape px-3 py-2 text-left text-body-sm cursor-pointer {}", if current() == position { "bg-blueberry-500/15 text-blueberry-200 inset-ring inset-ring-blueberry-400/30" } else { "text-rambutan-200 hover:bg-longan-700" })
                             on:click=move |_| choose.run(position)>
                             <span class="min-w-0 truncate">{option.label}</span>
                             {option.group.map(|group| view! { <span class="max-w-24 shrink-0 truncate text-label-sm text-rambutan-400">{group}</span> })}
@@ -121,11 +121,11 @@ pub(super) fn RecordPicker(
                     <Show when=move || { count.get() > PAGE_SIZE }>
                         <div class="flex items-center gap-2">
                             <button type="button" aria-label="Previous results" disabled=move || { current() < PAGE_SIZE }
-                                class="min-h-11 rounded-grape px-2 hover:bg-longan-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
+                                class="bruhs-control min-h-control rounded-grape px-2 hover:bg-longan-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
                                 on:click=move |_| highlighted.set((current() / PAGE_SIZE).saturating_sub(1) * PAGE_SIZE)>"Previous"</button>
                             <span class="tabular-nums">{move || format!("{} / {}", current() / PAGE_SIZE + 1, count.get().div_ceil(PAGE_SIZE))}</span>
                             <button type="button" aria-label="Next results" disabled=move || { current() / PAGE_SIZE + 1 >= count.get().div_ceil(PAGE_SIZE) }
-                                class="min-h-11 rounded-grape px-2 hover:bg-longan-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
+                                class="bruhs-control min-h-control rounded-grape px-2 hover:bg-longan-700 disabled:opacity-40 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
                                 on:click=move |_| highlighted.set((current() / PAGE_SIZE + 1) * PAGE_SIZE)>"Next"</button>
                         </div>
                     </Show>

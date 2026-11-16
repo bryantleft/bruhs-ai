@@ -164,7 +164,7 @@ pub fn ThreadCatalogStatus() -> impl IntoView {
                     "Saved threads could not be loaded. Existing records and your current work were left unchanged."
                 } else { "Loading saved threads…" }}</span>
                 <Show when=move || catalog.status.get() == Status::Failed>
-                    <button type="button" class="min-h-11 rounded-grape px-2 text-label-sm text-persimmon-300 hover:bg-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
+                    <button type="button" class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-persimmon-300 hover:bg-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400 cursor-pointer"
                         on:click=move |_| catalog.load()>"Retry loading threads"</button>
                 </Show>
             </section>

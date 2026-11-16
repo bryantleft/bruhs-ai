@@ -7,8 +7,8 @@ use bruhs_models::api_client::*;
 use leptos::prelude::*;
 use std::collections::BTreeSet;
 use uuid::Uuid;
-const CONTROL:&str="min-h-[32px] w-full min-w-0 rounded-grape border border-longan-700 bg-longan-950 px-2 py-1 text-[16px] text-rambutan-200 outline-none focus:border-persimmon-400 max-md:min-h-11 md:text-[13px]";
-const BUTTON:&str="min-h-[32px] rounded-grape border border-longan-700 px-2 py-1 text-label-sm text-rambutan-300 hover:bg-longan-800 focus-visible:outline focus-visible:outline-persimmon-400 disabled:opacity-40 max-md:min-h-11";
+const CONTROL:&str="bruhs-control min-h-control w-full min-w-0 rounded-grape border border-longan-700 bg-longan-950 px-2 py-1 text-[16px] text-rambutan-200 outline-none focus:border-persimmon-400 md:text-[13px]";
+const BUTTON:&str="bruhs-control min-h-control rounded-grape border border-longan-700 px-2 py-1 text-label-sm text-rambutan-300 hover:bg-longan-800 focus-visible:outline focus-visible:outline-persimmon-400 disabled:opacity-40";
 #[derive(Clone, Copy)]
 struct Ui {
     project: Memo<Option<String>>,
@@ -423,7 +423,7 @@ fn Response(ui: Ui) -> impl IntoView {
         {move||{let Some(response)=ui.response.get()else{return ().into_any();};match ui.response_tab.get(){
             "headers"=>view!{<pre class="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-grape border border-longan-700 p-2">{format_headers(&response.headers)}</pre>}.into_any(),
             "body"=>view!{<pre class="max-h-80 overflow-auto whitespace-pre-wrap break-all rounded-grape border border-longan-700 p-2">{response.body}</pre>}.into_any(),
-            _=>match json_tree_lines(&response.body,&ui.expanded.get()){Err(error)=>view!{<p class="text-rambutan-500">{error}</p>}.into_any(),Ok(lines)=>view!{<div class="max-h-80 min-w-0 overflow-auto rounded-grape border border-longan-700 p-2" aria-label="JSON tree">{lines.into_iter().map(move|line|{let pointer=line.pointer;let padding=format!("padding-left:{}px",line.depth*12);let marker=if line.expandable{if line.expanded{"▾ "}else{"▸ "}}else{"  "};view!{<button type="button" class="block min-h-[32px] w-full whitespace-pre-wrap break-all text-left text-rambutan-300 max-md:min-h-11" style=padding aria-expanded=line.expandable.then(||line.expanded.to_string()) disabled=!line.expandable on:click=move |_|ui.expanded.update(|expanded|{if !expanded.remove(&pointer){expanded.insert(pointer.clone());}})>{format!("{marker}{}",line.text)}</button>}}).collect_view()}</div>}.into_any()}
+            _=>match json_tree_lines(&response.body,&ui.expanded.get()){Err(error)=>view!{<p class="text-rambutan-500">{error}</p>}.into_any(),Ok(lines)=>view!{<div class="max-h-80 min-w-0 overflow-auto rounded-grape border border-longan-700 p-2" aria-label="JSON tree">{lines.into_iter().map(move|line|{let pointer=line.pointer;let padding=format!("padding-left:{}px",line.depth*12);let marker=if line.expandable{if line.expanded{"▾ "}else{"▸ "}}else{"  "};view!{<button type="button" class="bruhs-control block min-h-control w-full whitespace-pre-wrap break-all text-left text-rambutan-300" style=padding aria-expanded=line.expandable.then(||line.expanded.to_string()) disabled=!line.expandable on:click=move |_|ui.expanded.update(|expanded|{if !expanded.remove(&pointer){expanded.insert(pointer.clone());}})>{format!("{marker}{}",line.text)}</button>}}).collect_view()}</div>}.into_any()}
         }}}
         <button type="button" class=BUTTON on:click=move |_|{if ui.current_project().is_none(){return;}
                 if let Some(response)=ui.response.get_untracked(){match response_attachment(&response){Ok(text)=>{draft.update(|draft|{if !draft.is_empty(){draft.push_str("\n\n");}draft.push_str(&text);});ui.notice.set(Some("Response added to the current unsent draft. Review and send when ready.".into()));},Err(error)=>ui.error.set(Some(error))}}}>"Add response to draft"</button>

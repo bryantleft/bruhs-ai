@@ -37,12 +37,12 @@ pub fn CredentialSettings() -> impl IntoView {
         });
     });
     Effect::new(move |_| refresh.run(()));
-    let button = "min-h-11 rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50 sm:min-h-10";
+    let button = "bruhs-control min-h-control rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50";
     view! {
         <div class="p-4 text-body-sm text-rambutan-200">
             <super::service_connections::ServiceConnections />
             <div class="flex flex-col gap-2 sm:flex-row sm:items-center">
-                <input type="search" aria-label="Search saved credentials" placeholder="Search by name or project" class="min-h-10 w-full min-w-0 rounded-seed bg-longan-950 px-3 inset-ring inset-ring-longan-700 focus:outline focus:outline-persimmon-400 sm:flex-1" on:input=move |event| query.set(event_target_value(&event)) />
+                <input type="search" aria-label="Search saved credentials" placeholder="Search by name or project" class="min-h-control w-full min-w-0 rounded-seed bg-longan-950 px-3 inset-ring inset-ring-longan-700 focus:outline focus:outline-persimmon-400 sm:flex-1" on:input=move |event| query.set(event_target_value(&event)) />
                 <button type="button" class=button disabled=move || busy.get() on:click=move |_| refresh.run(())>"Refresh credentials"</button>
             </div>
             <p class="mt-2 text-label-sm text-rambutan-400">"Values are never displayed. Replace a key to rotate it. Deleting removes the saved copy; running commands may finish with the value they already received."</p>
@@ -146,7 +146,7 @@ fn CredentialRow(
             busy.try_set(false);
         });
     });
-    let button = "min-h-11 rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50 sm:min-h-10";
+    let button = "bruhs-control min-h-control rounded-seed px-3 text-label-sm inset-ring inset-ring-longan-700 hover:bg-longan-800 focus-visible:outline focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:opacity-50";
     view! {
         <article aria-label=format!("Saved credential: {}", review_text(&row.name)) class="min-w-0 py-3">
             <div class="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
@@ -163,7 +163,7 @@ fn CredentialRow(
             <Show when=move || mode.get() == Edit::Replace>
                 <form class="mt-3 flex flex-wrap items-end gap-2" on:submit=move |event| { event.prevent_default(); mutate.run(false); }>
                     <label class="w-full min-w-0 text-label-sm sm:w-auto sm:flex-1">"New credential value"
-                        <input node_ref=input type="password" autocomplete="off" autocapitalize="none" spellcheck="false" disabled=move || busy.get() on:keydown=move |event| event.stop_propagation() class="mt-1 block min-h-10 w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm inset-ring inset-ring-longan-700 focus:outline focus:outline-persimmon-400" />
+                        <input node_ref=input type="password" autocomplete="off" autocapitalize="none" spellcheck="false" disabled=move || busy.get() on:keydown=move |event| event.stop_propagation() class="mt-1 block min-h-control w-full min-w-0 rounded-seed bg-longan-950 px-3 text-body-sm inset-ring inset-ring-longan-700 focus:outline focus:outline-persimmon-400" />
                     </label>
                     <button type="submit" class=button disabled=move || busy.get()>"Save replacement"</button>
                     <button type="button" class=button disabled=move || busy.get() on:click=move |_| reset.run(())>"Cancel"</button>

@@ -230,7 +230,7 @@ pub fn ProjectPickerDialog() -> impl IntoView {
 
             <Show when=move || picker_mode.get() != ProjectPickerMode::NewTerminal>
                 <div class="border-b border-longan-800/50 px-4 py-2">
-                    <button type="button" class="flex min-h-11 w-full items-center gap-2 rounded-grape px-2 text-label-sm text-rambutan-300 hover:bg-longan-800/50"
+                    <button type="button" class="bruhs-control flex min-h-control w-full items-center gap-2 rounded-grape px-2 text-label-sm text-rambutan-300 hover:bg-longan-800/50"
                         on:click=move |_| clear_project()>
                         <Icon name="message-square" size=14 />
                         "No project"

@@ -38,7 +38,7 @@ pub fn KnowledgePage(
             <Show when=move || executor.load_error.get().is_some()>
                 <section aria-label="Knowledge loading status" class="shrink-0 border-b border-longan-800 px-4 py-3 text-body-sm text-rambutan-300">
                     <p role="alert">"Local records could not be loaded. Existing storage was left unchanged; document and source changes made here are kept."</p>
-                    <button type="button" class="mt-2 min-h-11 rounded-grape bg-longan-800 px-3 py-2 text-label text-rambutan-200 hover:bg-longan-700 disabled:opacity-40 cursor-pointer"
+                    <button type="button" class="bruhs-control mt-2 min-h-control rounded-grape bg-longan-800 px-3 py-2 text-label text-rambutan-200 hover:bg-longan-700 disabled:opacity-40 cursor-pointer"
                         disabled=move || executor.loading.get() on:click=move |_| executor.load()>"Retry loading records"</button>
                 </section>
             </Show>
@@ -291,11 +291,11 @@ fn LibraryPagination(
         <Show when=move || { count.get() > library::PAGE_SIZE }>
             <nav aria-label=label class="flex items-center justify-between gap-3 pt-1 text-label-sm text-rambutan-400">
                 <button type="button" aria-label=format!("Previous {noun}") disabled=move || current() == 0
-                    class="min-h-11 rounded-grape px-3 py-2 inset-ring inset-ring-longan-700 hover:bg-longan-900 disabled:opacity-40 cursor-pointer"
+                    class="bruhs-control min-h-control rounded-grape px-3 py-2 inset-ring inset-ring-longan-700 hover:bg-longan-900 disabled:opacity-40 cursor-pointer"
                     on:click=move |_| page.set(current().saturating_sub(1))>"Previous"</button>
                 <span class="tabular-nums" aria-live="polite">{move || format!("Page {} of {}", current() + 1, library::last_page(count.get()) + 1)}</span>
                 <button type="button" aria-label=format!("Next {noun}") disabled=move || { current() >= library::last_page(count.get()) }
-                    class="min-h-11 rounded-grape px-3 py-2 inset-ring inset-ring-longan-700 hover:bg-longan-900 disabled:opacity-40 cursor-pointer"
+                    class="bruhs-control min-h-control rounded-grape px-3 py-2 inset-ring inset-ring-longan-700 hover:bg-longan-900 disabled:opacity-40 cursor-pointer"
                     on:click=move |_| page.set(current().saturating_add(1))>"Next"</button>
             </nav>
         </Show>

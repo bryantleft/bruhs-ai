@@ -64,7 +64,7 @@ impl Workspace {
         )
         .debug_selector(|| "desktop-new-linked-note".into())
         .aria_label("New linked note")
-        .min_h(px(44.0))
+        .min_h(px(theme::CONTROL_PX))
         .on_click(cx.listener(move |this, _, window, cx| this.begin_linked_note(&id, window, cx)))
         .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
             if is_web_button_activation_key(event.keystroke.key.as_str()) {
@@ -214,7 +214,7 @@ impl Workspace {
         )
         .debug_selector(move || id.into())
         .aria_label(title)
-        .min_h(px(44.0))
+        .min_h(px(theme::CONTROL_PX))
         .on_click(
             cx.listener(move |this, _, window, cx| this.note_editor_action(action, window, cx)),
         )

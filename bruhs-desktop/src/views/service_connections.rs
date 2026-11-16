@@ -208,7 +208,7 @@ impl ServiceConnections {
             WebButtonSize::Small,
             ButtonState::disabled_if(disabled),
         )
-        .min_h(px(40.0))
+        .min_h(px(theme::CONTROL_PX))
         .aria_label(format!("{label} {}", provider.name()))
         .child(label)
         .on_click(cx.listener(move |this, _, _, cx| match action {

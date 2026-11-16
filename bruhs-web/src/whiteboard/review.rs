@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 #[component]
 pub(crate) fn BoardNotices() -> impl IntoView {
     let host = expect_context::<WhiteboardHost>();
-    view! {<Show when=move||host.proposals.with(|p|p.iter().any(|p|host.statuses.with(|s|s.get(&p.id)==Some(&ProposalStatus::Pending))))><button class="fixed bottom-4 right-4 z-50 min-h-11 rounded-grape border border-persimmon-400 bg-longan-900 px-4 text-label text-rambutan-100" on:click=move|_|{let next=host.proposals.with_untracked(|p|p.iter().find(|p|host.statuses.with_untracked(|s|s.get(&p.id)==Some(&ProposalStatus::Pending))).map(|p|p.board_id.clone()));host.route(next);}>"Review whiteboard proposal"</button></Show>}
+    view! {<Show when=move||host.proposals.with(|p|p.iter().any(|p|host.statuses.with(|s|s.get(&p.id)==Some(&ProposalStatus::Pending))))><button class="bruhs-control fixed bottom-4 right-4 z-50 min-h-control rounded-grape border border-persimmon-400 bg-longan-900 px-4 text-label text-rambutan-100" on:click=move|_|{let next=host.proposals.with_untracked(|p|p.iter().find(|p|host.statuses.with_untracked(|s|s.get(&p.id)==Some(&ProposalStatus::Pending))).map(|p|p.board_id.clone()));host.route(next);}>"Review whiteboard proposal"</button></Show>}
 }
 #[component]
 pub(crate) fn ProposalReviews(id: String) -> impl IntoView {

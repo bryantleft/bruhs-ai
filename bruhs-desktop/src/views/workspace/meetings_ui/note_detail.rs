@@ -33,7 +33,7 @@ impl Workspace {
                         )
                         .debug_selector(|| "desktop-edit-meeting-note".into())
                         .aria_label("Edit note")
-                        .min_h(px(44.0))
+                        .min_h(px(theme::CONTROL_PX))
                         .on_click(cx.listener(move |this, _, window, cx| {
                             this.edit_note_by_id(&edit_id, window, cx)
                         }))
@@ -51,7 +51,7 @@ impl Workspace {
                         let available = self.meetings_hub.read(cx).meetings.iter().filter(|meeting| meeting.id == *id).count() == 1;
                         let click_id = id.clone(); let key_id = id.clone();
                         el.child(web_button("desktop-open-linked-recording", WebButtonVariant::Ghost, WebButtonSize::Default, ButtonState::disabled_if(!available))
-                            .debug_selector(|| "desktop-open-linked-recording".into()).aria_label("Open linked recording").min_h(px(44.0))
+                            .debug_selector(|| "desktop-open-linked-recording".into()).aria_label("Open linked recording").min_h(px(theme::CONTROL_PX))
                             .when(available, |button| button
                                 .on_click(cx.listener(move |this, _, _, cx| this.open_meeting_detail(click_id.clone(), cx)))
                                 .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
@@ -114,7 +114,7 @@ impl Workspace {
                                 ButtonState::Enabled,
                             )
                             .debug_selector(|| "desktop-back-to-meeting-notes".into())
-                            .min_h(px(44.0))
+                            .min_h(px(theme::CONTROL_PX))
                             .aria_label("Back to meeting notes")
                             .on_click(cx.listener(|this, _, window, cx| {
                                 this.activate_sidebar_view(AppView::Meetings, window, cx)

@@ -78,7 +78,7 @@ fn local_focus_panel_keeps_transcript_visible_at_narrow_widths(cx: &mut TestAppC
             "panel overflow"
         );
         assert!(
-            toggle.size.height >= px(44.0) && toggle.right() <= px(width),
+            toggle.size.height == px(crate::theme::CONTROL_PX) && toggle.right() <= px(width),
             "toggle clipped"
         );
         assert!(
