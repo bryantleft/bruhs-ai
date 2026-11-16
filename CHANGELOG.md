@@ -75,6 +75,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   folder and New thread. The All threads project filter is gone; search now
   matches project names as well as titles, so typing a project's name lists
   its threads.
+- The desktop app no longer shows a Threads tab above each page. To return to
+  a conversation, choose its card in the sidebar or use ⌘K.
 
 ### Fixed
 

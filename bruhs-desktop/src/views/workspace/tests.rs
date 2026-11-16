@@ -2492,7 +2492,8 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     assert_rendered_bounds(cx, "desktop-sidebar-search");
     assert_rendered_bounds(cx, "desktop-sidebar-new-thread");
     assert_rendered_bounds(cx, "desktop-workspace-navigation");
-    assert_rendered_bounds(cx, "desktop-workspace-threads");
+    // No Threads tab: the active card (and ⌘K) return to the conversation.
+    assert_no_rendered_bounds(cx, "desktop-workspace-threads");
     assert_no_rendered_bounds(cx, "desktop-workspace-mode-code");
     assert_rendered_bounds(cx, "desktop-sidebar-footer");
     // One control row: search, then choose project folder and new thread.
@@ -2526,9 +2527,16 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
         });
         chat.entity_id()
     });
-    click_debug_selector(cx, "desktop-workspace-threads");
+    // From another view, the active card returns to the same thread with its
+    // draft.
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.activate_sidebar_view(AppView::Today, window, cx);
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, thread_row_debug_selector(&general_id));
     cx.run_until_parked();
     workspace.update_in(cx, |workspace, _window, cx| {
+        assert_eq!(workspace.active_view, AppView::Chat);
         let chat = &workspace.active_thread().expect("same thread").chat;
         assert_eq!(chat.entity_id(), original_chat);
         assert_eq!(
@@ -3246,7 +3254,7 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
     });
     cx.run_until_parked();
 
-    // Mode controls and the sidebar toggle remain in the top bar.
+    // The sidebar toggle stays in the top bar; the bar has no Threads tab.
     workspace.update_in(cx, |workspace, window, cx| {
         workspace.toggle_sidebar_for_window(window, cx);
     });
@@ -3257,7 +3265,7 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
     cx.run_until_parked();
     assert_rendered_bounds(cx, "desktop-workspace-sidebar");
     assert_rendered_bounds(cx, "desktop-collapsed-sidebar-strip");
-    assert_rendered_bounds(cx, "desktop-workspace-threads");
+    assert_no_rendered_bounds(cx, "desktop-workspace-threads");
     assert_no_rendered_bounds(cx, "desktop-workspace-mode-code");
 }
 
