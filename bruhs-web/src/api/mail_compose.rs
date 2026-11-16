@@ -139,6 +139,25 @@ pub async fn mail_send_status(
     .await
 }
 
+/// Explicit provider lookup; never used by status recovery or automatic jobs.
+pub async fn mail_send_reconcile(
+    mailbox: &str,
+    operation: &str,
+    body: &MailSentReconcileRequest,
+) -> Result<MailSendStatus, ApiError> {
+    request(
+        Method::POST,
+        &format!(
+            "/api/mail/mailboxes/{}/sends/{}/reconcile",
+            segment(mailbox),
+            segment(operation)
+        ),
+        Some(body),
+        WORK_MS,
+    )
+    .await
+}
+
 pub async fn mail_send_cancel(
     host: &str,
     mailbox: &str,

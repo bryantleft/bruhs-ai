@@ -14,6 +14,8 @@ use leptos::prelude::*;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use wasm_bindgen::JsCast as _;
 
+mod sent;
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Phase {
     Ready,
@@ -23,6 +25,9 @@ enum Phase {
     Review,
     Send,
     Status,
+    Reconcile,
+    SentUnconfirmed,
+    SentError,
     Error,
 }
 
@@ -146,8 +151,10 @@ impl MailComposeState {
                 && status.draft_revision == value.server_revision
                 && !value.dirty
         });
-        let locked = matches!(phase, Phase::Review | Phase::Send | Phase::Status)
-            || review.is_some()
+        let locked = matches!(
+            phase,
+            Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+        ) || review.is_some()
             || value.pending_send.is_some()
             || consumed;
         let status = match phase {
@@ -157,10 +164,16 @@ impl MailComposeState {
             Phase::Review => "Preparing the saved email for review…",
             Phase::Send => "Sending the reviewed email. You can leave Email.",
             Phase::Status => "Checking saved send status…",
+            Phase::Reconcile => "Checking Sent for the reviewed email. Nothing will be resent.",
+            Phase::SentUnconfirmed => "No matching Sent copy was verified. Sending remains unconfirmed; nothing was resent.",
+            Phase::SentError => "Sent could not be checked. Check saved send status or try Check Sent again.",
             Phase::Error => "Your draft remains here. Resolve the error before continuing.",
             Phase::Ready if !local_saved => "Waiting to save on this device…",
             Phase::Ready if consumed => {
                 "The provider accepted this email. Recipient delivery is not confirmed."
+            }
+            Phase::Ready if value.pending_send.is_none() && value.latest_send.as_ref().is_some_and(|status| status.state == MailDispatchState::Accepted && (status.draft_revision != value.server_revision || value.dirty)) => {
+                "The reviewed version was accepted. Newer edits remain a draft; recipient delivery is not confirmed."
             }
             Phase::Ready if value.pending_send.is_some() => {
                 "The send needs checking. It will not be sent again automatically."
@@ -172,8 +185,13 @@ impl MailComposeState {
         self.active.set(Some(value));
         self.error.set(error);
         self.review.set(review);
-        self.busy
-            .set(running || matches!(phase, Phase::Review | Phase::Send | Phase::Status));
+        self.busy.set(
+            running
+                || matches!(
+                    phase,
+                    Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                ),
+        );
         self.locked.set(locked);
         self.files_locked.set(locked || phase == Phase::Upload);
         self.status.set(status.into());
@@ -206,7 +224,10 @@ impl MailComposeState {
         self.data().borrow_mut().retain(|_, job| {
             job.value.dirty
                 || job.running
-                || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
+                || matches!(
+                    job.phase,
+                    Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                )
                 || job.saved_sequence != job.sequence
                 || !job.blobs.is_empty()
                 || job.value.pending_send.is_some()
@@ -372,8 +393,10 @@ impl MailComposeState {
         {
             let mut jobs = data.borrow_mut();
             let Some(job) = jobs.get_mut(&k) else { return };
-            if matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
-                || job.review.is_some()
+            if matches!(
+                job.phase,
+                Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+            ) || job.review.is_some()
                 || job.value.pending_send.is_some()
             {
                 return;
@@ -400,7 +423,7 @@ impl MailComposeState {
             let Some(job) = jobs.get_mut(&k) else { return };
             if matches!(
                 job.phase,
-                Phase::Review | Phase::Send | Phase::Upload | Phase::Status
+                Phase::Review | Phase::Send | Phase::Upload | Phase::Status | Phase::Reconcile
             ) || job.review.is_some()
                 || job.value.pending_send.is_some()
             {
@@ -473,7 +496,7 @@ impl MailComposeState {
             let Some(job) = jobs.get_mut(&k) else { return };
             if matches!(
                 job.phase,
-                Phase::Review | Phase::Send | Phase::Upload | Phase::Status
+                Phase::Review | Phase::Send | Phase::Upload | Phase::Status | Phase::Reconcile
             ) || job.review.is_some()
                 || job.value.pending_send.is_some()
             {
@@ -514,7 +537,12 @@ impl MailComposeState {
         {
             let mut jobs = data.borrow_mut();
             let Some(job) = jobs.get_mut(&k) else { return };
-            if job.running || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status) {
+            if job.running
+                || matches!(
+                    job.phase,
+                    Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                )
+            {
                 return;
             }
             job.running = true;
@@ -558,6 +586,11 @@ impl MailComposeState {
                     }
                 }
                 let result: Result<bool, String> = async {
+                    // Acknowledge recovery on this device without resuming a
+                    // server writer while the earlier send remains unresolved.
+                    if value.pending_send.is_some() {
+                        return Ok(false);
+                    }
                     if value.server_revision == 0 {
                         self.phase(&k, &data, Phase::Server);
                         let draft = api::mail_draft_create(
@@ -698,7 +731,10 @@ impl MailComposeState {
             let mut jobs = data.borrow_mut();
             let Some(job) = jobs.get_mut(&k) else { return };
             if job.running
-                || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
+                || matches!(
+                    job.phase,
+                    Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                )
                 || job.review.is_some()
                 || job.value.dirty
                 || job.value.files.iter().any(|file| file.server.is_none())
@@ -767,8 +803,10 @@ impl MailComposeState {
         let k = key(&value);
         let data = self.data();
         if let Some(job) = data.borrow_mut().get_mut(&k) {
-            if matches!(job.phase, Phase::Review | Phase::Send | Phase::Status)
-                || job.running
+            if matches!(
+                job.phase,
+                Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+            ) || job.running
                 || job.value.pending_send.is_some()
             {
                 return;
@@ -902,7 +940,12 @@ impl MailComposeState {
             let Some(job) = jobs.get_mut(&k) else {
                 return;
             };
-            if job.running || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status) {
+            if job.running
+                || matches!(
+                    job.phase,
+                    Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                )
+            {
                 return;
             }
             if job.value.pending_send.is_none() {
@@ -1063,7 +1106,12 @@ impl MailComposeState {
             let Some(job) = jobs.get_mut(&k) else {
                 return;
             };
-            if job.running || matches!(job.phase, Phase::Review | Phase::Send | Phase::Status) {
+            if job.running
+                || matches!(
+                    job.phase,
+                    Phase::Review | Phase::Send | Phase::Status | Phase::Reconcile
+                )
+            {
                 return;
             }
             if job
