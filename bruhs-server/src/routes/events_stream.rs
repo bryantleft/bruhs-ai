@@ -18,6 +18,8 @@ use axum::{
     response::sse::{Event, KeepAlive, Sse},
 };
 use bruhs_core::AppState;
+#[cfg(unix)]
+use bruhs_models::api::live_events::WORKSPACE_BRIDGE;
 use bruhs_models::api::live_events::{CALENDAR, MEETINGS, REACTIVE, TASKS};
 use futures_core::Stream;
 use std::{convert::Infallible, sync::Arc};
@@ -35,9 +37,36 @@ pub struct StreamQuery {
 /// GET /api/events/stream
 pub async fn get_events_stream(
     State(state): State<Arc<AppState>>,
+    #[cfg(unix)] relay: Option<axum::Extension<crate::workspace_relay::WorkspaceRelay>>,
     Query(query): Query<StreamQuery>,
 ) -> Sse<impl Stream<Item = Result<Event, Infallible>>> {
-    Sse::new(events(state, query.resume)).keep_alive(KeepAlive::default())
+    let events = events(state, query.resume);
+    // Every stream opens with its relay ID (`workspace_relay`); an MCP
+    // workspace session bound to it ends when the stream closes.
+    #[cfg(unix)]
+    let events = events.merge(named(
+        relay_frames(relay.map(|axum::Extension(relay)| relay)),
+        WORKSPACE_BRIDGE,
+    ));
+    Sse::new(events).keep_alive(KeepAlive::default())
+}
+
+#[cfg(unix)]
+fn relay_frames(
+    relay: Option<crate::workspace_relay::WorkspaceRelay>,
+) -> impl Stream<Item = Result<Event, Infallible>> {
+    async_stream::stream! {
+        let Some(frames) = relay.as_ref().and_then(crate::workspace_relay::WorkspaceRelay::attach) else {
+            return;
+        };
+        let mut frames = std::pin::pin!(frames);
+        while let Some(frame) = frames.next().await {
+            match Event::default().json_data(&frame) {
+                Ok(event) => yield Ok(event),
+                Err(error) => tracing::warn!("A workspace relay frame could not be encoded: {error}"),
+            }
+        }
+    }
 }
 
 fn events(state: Arc<AppState>, resume: bool) -> impl Stream<Item = Result<Event, Infallible>> {
@@ -104,11 +133,16 @@ mod tests {
     #[tokio::test]
     async fn one_connection_carries_every_source() {
         let state = Arc::new(AppState::new());
-        let mut body = get_events_stream(State(state), Query(StreamQuery::default()))
-            .await
-            .into_response()
-            .into_body()
-            .into_data_stream();
+        let mut body = get_events_stream(
+            State(state),
+            #[cfg(unix)]
+            None,
+            Query(StreamQuery::default()),
+        )
+        .await
+        .into_response()
+        .into_body()
+        .into_data_stream();
         let mut text = String::new();
         while ["tasks", "calendar", "meetings"]
             .iter()

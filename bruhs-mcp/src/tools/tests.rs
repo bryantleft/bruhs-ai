@@ -56,7 +56,7 @@ fn standalone_dispatch_never_reaches_the_bridge_only_fallback() {
     for info in list_tools(Mode::Standalone) {
         let result = standalone(&info.name, json!({}));
         assert!(
-            !text(&result).contains("requires the native workspace connection"),
+            !text(&result).contains("requires a workspace connection"),
             "{}: {}",
             info.name,
             text(&result)

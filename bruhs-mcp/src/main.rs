@@ -22,7 +22,7 @@ enum Fatal {
     )]
     BridgeUnsupported,
     #[cfg(unix)]
-    #[error("The configured workspace connection is unavailable or not private. Enable a new connection in the app and copy its configuration.")]
+    #[error("The configured workspace connection is unavailable or not private. Enable a new connection in the app (native or web) and copy its configuration.")]
     BridgeUnavailable,
     #[error(transparent)]
     Serve(#[from] ServeError),

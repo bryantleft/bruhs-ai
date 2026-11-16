@@ -1,4 +1,3 @@
-use super::Connection;
 use serde::Serialize;
 use std::{
     fs,
@@ -19,7 +18,7 @@ pub(super) fn restrict_permissions(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o600))
 }
 
-pub(super) fn write_connection(path: &Path, connection: &Connection) -> io::Result<()> {
+pub(super) fn write_connection(path: &Path, connection: &impl Serialize) -> io::Result<()> {
     let mut file = fs::OpenOptions::new()
         .create_new(true)
         .write(true)
@@ -29,7 +28,9 @@ pub(super) fn write_connection(path: &Path, connection: &Connection) -> io::Resu
     file.sync_all()
 }
 
-pub(super) fn read_connection(path: &Path) -> io::Result<Connection> {
+/// The bytes of a connection file, only if it is a small regular file no
+/// other user can read or write, checked before and after opening it.
+pub(super) fn read_private_file(path: &Path) -> io::Result<Vec<u8>> {
     let metadata = fs::symlink_metadata(path)?;
     if !metadata.is_file() || metadata.permissions().mode() & 0o077 != 0 || metadata.len() > 4096 {
         return Err(io::Error::new(
@@ -47,14 +48,17 @@ pub(super) fn read_connection(path: &Path) -> io::Result<Connection> {
     }
     let mut bytes = Vec::new();
     file.take(4097).read_to_end(&mut bytes)?;
-    let connection: Connection = serde_json::from_slice(&bytes)?;
-    if bytes.len() > 4096 || connection.token.len() != 64 || !connection.socket.is_absolute() {
-        return Err(io::Error::new(
-            io::ErrorKind::InvalidData,
-            "Invalid workspace connection file.",
-        ));
+    if bytes.len() > 4096 {
+        return Err(invalid_connection());
     }
-    Ok(connection)
+    Ok(bytes)
+}
+
+pub(super) fn invalid_connection() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::InvalidData,
+        "Invalid workspace connection file.",
+    )
 }
 
 pub(super) fn remove_session_files(directory: &Path) {

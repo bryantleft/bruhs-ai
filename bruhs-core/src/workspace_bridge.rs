@@ -1,8 +1,12 @@
-//! Opt-in, session-scoped IPC to the running workspace. The transport cannot
+//! Opt-in, session-scoped transports to the running workspace. They cannot
 //! grant permissions or execute operations: the app owns those decisions.
-//! The protocol and the logic apps answer it with live in
-//! `bruhs_models::workspace_bridge`.
+//!
+//! The native app listens on a private Unix socket ([`BridgeSession`]). A web
+//! workspace answers through bruhs-server's relay
+//! (`bruhs_models::workspace_bridge::relay`); its private connection file is
+//! a [`RelayConnectionFile`]. [`BridgeClient`] reads either file.
 
+mod relay;
 #[cfg(test)]
 mod tests;
 mod wire;
@@ -10,8 +14,8 @@ pub use bruhs_models::workspace_bridge::{
     BridgeRequest, BridgeResponse, FinanceReadSection, HealthReadSection, MeetingReadSection,
     PersonReadSection, ProposalError, WorkflowProposal, MAX_REQUEST_BYTES, MAX_RESPONSE_BYTES,
 };
+pub use relay::{new_secret, same_secret, RelayConnectionFile};
 
-use rand::TryRngCore;
 use serde::{Deserialize, Serialize};
 use std::{
     io,
@@ -72,14 +76,7 @@ impl BridgeSession {
         let socket = directory.join("bridge.sock");
         let listener = UnixListener::bind(&socket)?;
         wire::restrict_permissions(&socket)?;
-        let mut random = [0u8; 32];
-        rand::rngs::OsRng
-            .try_fill_bytes(&mut random)
-            .map_err(io::Error::other)?;
-        let token = random
-            .iter()
-            .map(|byte| format!("{byte:02x}"))
-            .collect::<String>();
+        let token = new_secret()?;
         let connection_path = directory.join("connection.json");
         wire::write_connection(
             &connection_path,
@@ -167,37 +164,64 @@ async fn serve_connection(
 /// automatically, and contains no reusable provider credentials.
 #[derive(Clone)]
 pub struct BridgeClient {
-    connection: Connection,
+    transport: Transport,
+}
+
+#[derive(Clone)]
+enum Transport {
+    /// The native app's private socket.
+    Socket(Connection),
+    /// bruhs-server's relay to the web tab that enabled the session.
+    Relay(relay::Client),
 }
 
 impl BridgeClient {
     pub fn from_file(path: &Path) -> io::Result<Self> {
-        Ok(Self {
-            connection: wire::read_connection(path)?,
-        })
+        let bytes = wire::read_private_file(path)?;
+        let transport = if let Ok(connection) = serde_json::from_slice::<Connection>(&bytes) {
+            if connection.token.len() != 64 || !connection.socket.is_absolute() {
+                return Err(wire::invalid_connection());
+            }
+            Transport::Socket(connection)
+        } else {
+            Transport::Relay(relay::Client::from_bytes(&bytes)?)
+        };
+        Ok(Self { transport })
     }
 
     pub async fn call(&self, request: BridgeRequest) -> io::Result<BridgeResponse> {
-        tokio::time::timeout(TIMEOUT, async {
-            let mut stream = UnixStream::connect(&self.connection.socket).await?;
-            wire::write_frame(
-                &mut stream,
-                &Envelope {
-                    token: self.connection.token.clone(),
-                    request,
-                },
-                MAX_REQUEST_BYTES,
-            )
-            .await?;
-            let bytes = wire::read_frame(&mut stream, MAX_RESPONSE_BYTES).await?;
-            serde_json::from_slice(&bytes).map_err(io::Error::other)
-        })
-        .await
-        .map_err(|_| {
-            io::Error::new(
-                io::ErrorKind::TimedOut,
-                "Workspace request timed out; do not assume a proposal was saved.",
-            )
-        })?
+        match &self.transport {
+            Transport::Socket(connection) => call_socket(connection, request).await,
+            Transport::Relay(client) => client.call(request).await,
+        }
     }
+}
+
+async fn call_socket(
+    connection: &Connection,
+    request: BridgeRequest,
+) -> io::Result<BridgeResponse> {
+    tokio::time::timeout(TIMEOUT, async {
+        let mut stream = UnixStream::connect(&connection.socket).await?;
+        wire::write_frame(
+            &mut stream,
+            &Envelope {
+                token: connection.token.clone(),
+                request,
+            },
+            MAX_REQUEST_BYTES,
+        )
+        .await?;
+        let bytes = wire::read_frame(&mut stream, MAX_RESPONSE_BYTES).await?;
+        serde_json::from_slice(&bytes).map_err(io::Error::other)
+    })
+    .await
+    .map_err(|_| timed_out())?
+}
+
+fn timed_out() -> io::Error {
+    io::Error::new(
+        io::ErrorKind::TimedOut,
+        "Workspace request timed out; do not assume a proposal was saved.",
+    )
 }
