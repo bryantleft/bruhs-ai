@@ -710,7 +710,7 @@ pub fn SettingsPage() -> impl IntoView {
                                 )
                                 on:click=move |_| jump(id)
                             >
-                                <Icon name=*icon size=14 class="shrink-0 text-rambutan-500" />
+                                <Icon name=*icon size=16 class="shrink-0 text-rambutan-500" />
                                 <span>{*label}</span>
                             </button>
                         }
