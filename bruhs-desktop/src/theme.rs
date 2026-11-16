@@ -1,7 +1,7 @@
 // Bruhs design system color palette as GPUI Hsla values.
 // Approximates the OKLCH values from https://design.bruhs.dev/llms.txt
 
-use gpui::{font, hsla, rgb, App, Font, FontFeatures, Hsla};
+use gpui::{hsla, rgb, App, FontFeatures, Hsla};
 use gpui_component::{scroll::ScrollbarShow, Theme, ThemeTokens};
 use std::sync::Arc;
 
@@ -23,11 +23,10 @@ pub const APP_HEADER_HEIGHT_PX: f32 = 44.0;
 pub const APP_CONTROL_HEIGHT_PX: f32 = 32.0;
 pub const APP_COMPACT_CONTROL_HEIGHT_PX: f32 = 28.0;
 
-/// System UI with OpenType tabular numerals, matching Tailwind `tabular-nums`.
-pub fn tabular_system_font() -> Font {
-    let mut tabular = font(".SystemUIFont");
-    tabular.features = FontFeatures(Arc::new(vec![("tnum".to_string(), 1)]));
-    tabular
+/// OpenType tabular numerals, like Tailwind `tabular-nums`: only the feature
+/// changes, so the text keeps its Monaspace face (bruhs is all mono).
+pub fn tabular_nums() -> FontFeatures {
+    FontFeatures(Arc::new(vec![("tnum".to_string(), 1)]))
 }
 
 // =====================================================================
@@ -622,13 +621,37 @@ mod tests {
     }
 
     #[test]
-    fn tabular_system_font_should_match_web_tabular_nums_reference() {
-        let tabular = tabular_system_font();
-
-        assert_eq!(tabular.family.to_string(), ".SystemUIFont");
+    fn tabular_nums_should_match_web_tabular_nums_reference() {
         assert_eq!(
-            tabular.features.tag_value_list(),
+            tabular_nums().tag_value_list(),
             [("tnum".to_string(), 1)].as_slice()
         );
+    }
+
+    /// Web `tabular-nums` never swaps the family; nothing on desktop should
+    /// fall back to the system face either.
+    #[test]
+    fn desktop_sources_should_not_name_the_system_font() {
+        fn scan(dir: &std::path::Path, hits: &mut Vec<String>) {
+            for entry in std::fs::read_dir(dir).expect("source dir should be readable") {
+                let path = entry.expect("dir entry").path();
+                if path.is_dir() {
+                    scan(&path, hits);
+                } else if path.extension().is_some_and(|ext| ext == "rs")
+                    && path.file_name().is_some_and(|name| name != "theme.rs")
+                {
+                    let text = std::fs::read_to_string(&path).expect("source should read");
+                    if text.contains(".SystemUIFont") || text.contains("tabular_system_font") {
+                        hits.push(path.display().to_string());
+                    }
+                }
+            }
+        }
+        let mut hits = Vec::new();
+        scan(
+            &std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src"),
+            &mut hits,
+        );
+        assert!(hits.is_empty(), "system font in {hits:?}");
     }
 }

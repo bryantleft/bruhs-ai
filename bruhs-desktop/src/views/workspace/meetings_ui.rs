@@ -1357,7 +1357,7 @@ impl Workspace {
                 )
                 .child(
                     label(elapsed, LABEL_PX, theme::persimmon_400())
-                        .font(theme::tabular_system_font()),
+                        .font_features(theme::tabular_nums()),
                 )
                 .child(levels)
                 .child(
@@ -2493,7 +2493,7 @@ impl Workspace {
                                         LABEL_PX,
                                         theme::rambutan_400(),
                                     )
-                                    .font(theme::tabular_system_font()),
+                                    .font_features(theme::tabular_nums()),
                                 )
                                 .child(
                                     text_button(

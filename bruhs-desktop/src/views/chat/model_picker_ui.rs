@@ -440,7 +440,7 @@ impl ChatView {
                                     .px_1()
                                     .text_size(px(MODEL_PICKER_KBD_TEXT_SIZE_PX))
                                     .text_color(theme::rambutan_400())
-                                    .font(theme::tabular_system_font())
+                                    .font_features(theme::tabular_nums())
                                     .child(format!("⌘{}", index + 1)),
                             )
                         })
@@ -610,7 +610,7 @@ impl ChatView {
                             .px_1()
                             .text_size(px(MODEL_PICKER_KBD_TEXT_SIZE_PX))
                             .text_color(theme::rambutan_400())
-                            .font(theme::tabular_system_font())
+                            .font_features(theme::tabular_nums())
                             .child("esc"),
                     ),
             )

@@ -434,7 +434,7 @@ impl ChatView {
             .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_500())
-            .font(theme::tabular_system_font())
+            .font_features(theme::tabular_nums())
             .when(confirming, |row| {
                 row.child(self.render_rewind_confirm(index, cx))
             })
@@ -1120,7 +1120,7 @@ impl ChatView {
                     .font_family(BODY_FONT_FAMILY)
                     .text_size(px(TRANSCRIPT_BODY_TEXT_SIZE_PX))
                     .text_color(theme::rambutan_400())
-                    .font(theme::tabular_system_font())
+                    .font_features(theme::tabular_nums())
                     .child(
                         div()
                             .size(px(8.0))
@@ -1241,13 +1241,13 @@ impl ChatView {
                                     .child(
                                         div()
                                             .text_color(theme::pandan_400())
-                                            .font(theme::tabular_system_font())
+                                            .font_features(theme::tabular_nums())
                                             .child(format!("+{adds}")),
                                     )
                                     .child(
                                         div()
                                             .text_color(theme::lychee_400())
-                                            .font(theme::tabular_system_font())
+                                            .font_features(theme::tabular_nums())
                                             .child(format!("−{dels}")),
                                     ),
                             )
@@ -1363,13 +1363,13 @@ impl ChatView {
                             .child(
                                 div()
                                     .text_color(theme::pandan_400())
-                                    .font(theme::tabular_system_font())
+                                    .font_features(theme::tabular_nums())
                                     .child(format!("+{}", file.additions)),
                             )
                             .child(
                                 div()
                                     .text_color(theme::lychee_400())
-                                    .font(theme::tabular_system_font())
+                                    .font_features(theme::tabular_nums())
                                     .child(format!("−{}", file.deletions)),
                             )
                     }),
@@ -1517,7 +1517,7 @@ impl ChatView {
             .text_size(px(TRANSCRIPT_LABEL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
             .text_color(theme::rambutan_500())
-            .font(theme::tabular_system_font())
+            .font_features(theme::tabular_nums())
             .when(has_text, |el| {
                 let quote = msg.content.clone();
                 el.child(

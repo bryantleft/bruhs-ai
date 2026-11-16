@@ -814,7 +814,7 @@ impl DiffPanelView {
                         .items_center()
                         .gap(px(6.0))
                         .flex_shrink_0()
-                        .font(theme::tabular_system_font())
+                        .font_features(theme::tabular_nums())
                         .child(
                             div()
                                 .text_color(theme::pandan_400())
@@ -958,7 +958,7 @@ impl DiffPanelView {
                     .truncate()
                     .text_size(px(TOOLBAR_TEXT_SIZE_PX))
                     .font_family(PANEL_LABEL_FONT_FAMILY)
-                    .font(theme::tabular_system_font())
+                    .font_features(theme::tabular_nums())
                     .text_color(theme::rambutan_400())
                     .child(format!("{viewed_n} of {total} viewed")),
             )
@@ -1108,7 +1108,7 @@ impl DiffPanelView {
                     .flex_shrink_0()
                     .text_size(px(12.0))
                     .font_family(PANEL_LABEL_FONT_FAMILY)
-                    .font(theme::tabular_system_font())
+                    .font_features(theme::tabular_nums())
                     .text_color(theme::rambutan_400())
                     .child(count_label),
             )
@@ -1386,7 +1386,7 @@ impl DiffPanelView {
                     .flex_shrink_0()
                     .flex()
                     .gap_1()
-                    .font(theme::tabular_system_font())
+                    .font_features(theme::tabular_nums())
                     .child(
                         div()
                             .text_color(theme::pandan_400())
@@ -1467,7 +1467,7 @@ impl DiffPanelView {
                             .child(
                                 div()
                                     .flex_shrink_0()
-                                    .font(theme::tabular_system_font())
+                                    .font_features(theme::tabular_nums())
                                     .child(format!(
                                         "{gap} unmodified line{}",
                                         if gap == 1 { "" } else { "s" }
@@ -1556,7 +1556,7 @@ impl DiffPanelView {
                 .pr_1()
                 .text_align(TextAlign::Right)
                 .text_color(theme::rambutan_500())
-                .font(theme::tabular_system_font())
+                .font_features(theme::tabular_nums())
                 .child(n.map_or_else(String::new, |n| n.to_string()))
         };
         div()
