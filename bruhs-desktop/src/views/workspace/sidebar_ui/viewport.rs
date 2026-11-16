@@ -129,7 +129,6 @@ impl SidebarRowFocus {
 
 #[derive(PartialEq, Eq)]
 pub(super) struct SidebarScope {
-    pub(super) filter: SidebarFilter,
     pub(super) query: String,
 }
 

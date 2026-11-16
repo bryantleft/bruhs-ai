@@ -71,6 +71,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   before the title instructions.
 - The dot Bruh in Settings → About now places its eyes and mouth exactly
   where the logo has them, at every size.
+- The desktop sidebar fits its controls on one line: Search, Choose project
+  folder and New thread. The All threads project filter is gone; search now
+  matches project names as well as titles, so typing a project's name lists
+  its threads.
 
 ### Fixed
 

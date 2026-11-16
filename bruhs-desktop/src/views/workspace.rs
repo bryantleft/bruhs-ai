@@ -1194,8 +1194,6 @@ pub struct Workspace {
     persistence: Arc<PersistenceCoordinator>,
     save_queue: save_queue::SaveQueue,
 
-    sidebar_filter: sidebar_ui::SidebarFilter,
-    sidebar_filter_open: bool,
     /// Title search box in the sidebar (web: the `Search` input).
     sidebar_search: Entity<InputState>,
     /// Geometry and keyboard targets for visible sidebar rows.
@@ -1846,8 +1844,6 @@ impl Workspace {
             }),
             save_queue: save_queue::SaveQueue::default(),
             unread_thread_ids: HashSet::new(),
-            sidebar_filter: sidebar_ui::SidebarFilter::All,
-            sidebar_filter_open: false,
             sidebar_search,
             sidebar_viewport: RefCell::new(sidebar_ui::SidebarViewport::new(cx)),
             sidebar_settled_open: persisted

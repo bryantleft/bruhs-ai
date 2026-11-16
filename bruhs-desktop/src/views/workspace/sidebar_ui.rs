@@ -43,11 +43,6 @@ const SIDEBAR_CONTROLS_GAP_PX: f32 = 4.0;
 const SIDEBAR_SEARCH_HEIGHT_PX: f32 = 32.0;
 const SIDEBAR_SEARCH_TEXT_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 const SIDEBAR_ICON_BUTTON_PX: f32 = 32.0;
-const SIDEBAR_SMALL_BUTTON_PX: f32 = 28.0;
-const SIDEBAR_FILTER_HEIGHT_PX: f32 = 28.0;
-const SIDEBAR_FILTER_MAX_WIDTH_PX: f32 = 208.0;
-const SIDEBAR_FILTER_MENU_WIDTH_PX: f32 = 240.0;
-const SIDEBAR_FILTER_MENU_ROW_PX: f32 = 28.0;
 const SIDEBAR_LABEL_TEXT_PX: f32 = 12.0;
 const SIDEBAR_ICON_PX: f32 = 14.0;
 const SIDEBAR_SMALL_ICON_PX: f32 = 12.0;
@@ -90,13 +85,12 @@ const RING_WHITE_10: f32 = 0.10;
 
 pub const SIDEBAR_BRAND_LABEL: &str = "bruhs.ai";
 pub const SIDEBAR_SEARCH_PLACEHOLDER: &str = "Search";
-pub const SIDEBAR_FILTER_ALL_LABEL: &str = "All threads";
-pub const SIDEBAR_FILTER_NONE_LABEL: &str = "No project";
+/// A card's project line for a thread without a project.
+pub const SIDEBAR_NO_PROJECT_LABEL: &str = "No project";
 pub const SIDEBAR_EMPTY_LABEL: &str = "No threads yet. Press ⌘⇧O to start one.";
 pub const SIDEBAR_NO_MATCH_LABEL: &str = "No threads match.";
 pub const SIDEBAR_NEW_THREAD_LABEL: &str = "New thread (⌘⇧O)";
 pub const SIDEBAR_NEW_PROJECT_LABEL: &str = "Choose project folder";
-pub const SIDEBAR_FILTER_LABEL: &str = "Filter threads by project";
 pub const SIDEBAR_DELETE_LABEL: &str = "Delete thread";
 
 /// What a card shows at its right edge instead of the age.
@@ -108,58 +102,11 @@ pub enum CardStatus {
     Idle,
 }
 
-/// Every thread or the threads attached to one project.
-#[derive(Clone, Debug, Default, PartialEq, Eq)]
-pub enum SidebarFilter {
-    #[default]
-    All,
-    Project(String),
-}
-
-impl SidebarFilter {
-    pub fn matches(&self, project_name: &str) -> bool {
-        match self {
-            Self::All => true,
-            Self::Project(name) => project_name == name,
-        }
-    }
-
-    /// Label of the filter trigger for this selection.
-    pub fn label(&self) -> String {
-        match self {
-            Self::All => SIDEBAR_FILTER_ALL_LABEL.to_string(),
-            Self::Project(name) if name.is_empty() => SIDEBAR_FILTER_NONE_LABEL.to_string(),
-            Self::Project(name) => name.clone(),
-        }
-    }
-}
-
-/// Web `visible_threads`: the project filter and a case-insensitive title
-/// search.
-pub fn thread_matches(
-    project_name: &str,
-    title: &str,
-    filter: &SidebarFilter,
-    query: &str,
-) -> bool {
+/// Sidebar search: a case-insensitive match on the title or the project
+/// name, so typing a project's name lists its threads.
+pub fn thread_matches(project_name: &str, title: &str, query: &str) -> bool {
     let q = query.trim().to_lowercase();
-    filter.matches(project_name) && (q.is_empty() || title.to_lowercase().contains(&q))
-}
-
-/// Distinct project names, most recent activity first (web `project_names`).
-pub fn project_names(threads: &[DesktopThread]) -> Vec<String> {
-    let mut seen: Vec<(String, EpochMs)> = Vec::new();
-    for t in threads {
-        if t.project_name.is_empty() {
-            continue;
-        }
-        match seen.iter_mut().find(|(n, _)| *n == t.project_name) {
-            Some(entry) => entry.1 = entry.1.max(t.updated_at_ms),
-            None => seen.push((t.project_name.clone(), t.updated_at_ms)),
-        }
-    }
-    seen.sort_by_key(|entry| std::cmp::Reverse(entry.1));
-    seen.into_iter().map(|(n, _)| n).collect()
+    q.is_empty() || title.to_lowercase().contains(&q) || project_name.to_lowercase().contains(&q)
 }
 
 fn icon(path: &'static str, size: f32, color: Hsla) -> Svg {
@@ -288,9 +235,6 @@ impl Workspace {
             .child(self.render_sidebar_undo(cx))
             .children(self.render_sidebar_update_button(cx))
             .child(self.render_sidebar_footer(cx))
-            .when(self.sidebar_filter_open, |el| {
-                el.child(self.render_sidebar_filter_menu(cx))
-            })
     }
 
     /// Brand row; doubles as the window drag strip behind the traffic lights.
@@ -362,246 +306,63 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// Search + new thread, then the project filter + new project session.
+    /// One row: search, then choose project folder and new thread.
     fn render_sidebar_controls(&self, cx: &Context<'_, Self>) -> Div {
-        let filter_text = self.sidebar_filter.label();
         div()
             .px(px(SIDEBAR_CONTROLS_X_PADDING_PX))
             .pb(px(SIDEBAR_CONTROLS_BOTTOM_PADDING_PX))
             .flex()
-            .flex_col()
+            .items_center()
             .gap(px(SIDEBAR_CONTROLS_GAP_PX))
             .flex_shrink_0()
             .child(
                 div()
+                    .id("sidebar-search")
+                    .debug_selector(|| "desktop-sidebar-search".to_string())
+                    .h(px(SIDEBAR_SEARCH_HEIGHT_PX))
+                    .min_w_0()
+                    .flex_1()
+                    .px_2()
+                    .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
                     .flex()
                     .items_center()
-                    .gap(px(SIDEBAR_CONTROLS_GAP_PX))
+                    .gap_2()
+                    .text_color(theme::rambutan_400())
+                    .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_40)))
+                    .child(icon(
+                        assets::TOOL_SEARCH_ICON_PATH,
+                        SIDEBAR_ICON_PX,
+                        theme::rambutan_500(),
+                    ))
                     .child(
-                        div()
-                            .id("sidebar-search")
-                            .debug_selector(|| "desktop-sidebar-search".to_string())
-                            .h(px(SIDEBAR_SEARCH_HEIGHT_PX))
-                            .min_w_0()
-                            .flex_1()
-                            .px_2()
-                            .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
-                            .flex()
-                            .items_center()
-                            .gap_2()
-                            .text_color(theme::rambutan_400())
-                            .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_40)))
-                            .child(icon(
-                                assets::TOOL_SEARCH_ICON_PATH,
-                                SIDEBAR_ICON_PX,
-                                theme::rambutan_500(),
-                            ))
-                            .child(
-                                div().min_w_0().flex_1().child(
-                                    Input::new(&self.sidebar_search)
-                                        .aria_label("Search threads")
-                                        .appearance(false)
-                                        .bordered(false)
-                                        .focus_bordered(false)
-                                        .cleanable(false)
-                                        .font_family(theme::CODE_FONT_FAMILY)
-                                        .text_size(px(SIDEBAR_SEARCH_TEXT_PX)),
-                                ),
-                            ),
-                    )
-                    .child(self.sidebar_icon_button(
-                        "desktop-sidebar-new-thread",
-                        SIDEBAR_NEW_THREAD_LABEL,
-                        assets::SQUARE_PEN_ICON_PATH,
-                        SIDEBAR_ICON_BUTTON_PX,
-                        |this, window, cx| this.new_thread(&super::NewThread, window, cx),
-                        cx,
-                    )),
+                        div().min_w_0().flex_1().child(
+                            Input::new(&self.sidebar_search)
+                                .aria_label("Search threads and projects")
+                                .appearance(false)
+                                .bordered(false)
+                                .focus_bordered(false)
+                                .cleanable(false)
+                                .font_family(theme::CODE_FONT_FAMILY)
+                                .text_size(px(SIDEBAR_SEARCH_TEXT_PX)),
+                        ),
+                    ),
             )
-            .child(
-                div()
-                    .flex()
-                    .items_center()
-                    .gap(px(SIDEBAR_CONTROLS_GAP_PX))
-                    .child(
-                        div()
-                            .id("sidebar-filter")
-                            .debug_selector(|| "desktop-sidebar-filter".to_string())
-                            .h(px(SIDEBAR_FILTER_HEIGHT_PX))
-                            .max_w(px(SIDEBAR_FILTER_MAX_WIDTH_PX))
-                            .px_2()
-                            .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
-                            .flex()
-                            .items_center()
-                            .gap(px(SIDEBAR_CARD_ROW_GAP_PX))
-                            .text_size(px(SIDEBAR_LABEL_TEXT_PX))
-                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                            .text_color(theme::rambutan_300())
-                            .hover(|el| {
-                                el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_50))
-                                    .text_color(theme::rambutan_100())
-                            })
-                            .tab_index(0)
-                            .role(Role::Button)
-                            .aria_label(SIDEBAR_FILTER_LABEL)
-                            .aria_expanded(self.sidebar_filter_open)
-                            .border_1()
-                            .border_color(gpui::transparent_black())
-                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .cursor_pointer()
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                cx.stop_propagation();
-                                this.sidebar_filter_open = !this.sidebar_filter_open;
-                                cx.notify();
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                    this.sidebar_filter_open = !this.sidebar_filter_open;
-                                    cx.notify();
-                                }
-                            }))
-                            .child(icon(
-                                assets::FOLDER_ICON_PATH,
-                                SIDEBAR_ICON_PX,
-                                theme::rambutan_500(),
-                            ))
-                            .child(div().min_w_0().truncate().child(filter_text))
-                            .child(icon(
-                                assets::CHEVRON_DOWN_ICON_PATH,
-                                SIDEBAR_SMALL_ICON_PX,
-                                theme::rambutan_500(),
-                            )),
-                    )
-                    .child(div().flex_1())
-                    .child(self.sidebar_icon_button(
-                        "desktop-sidebar-new-project",
-                        SIDEBAR_NEW_PROJECT_LABEL,
-                        assets::FOLDER_PLUS_ICON_PATH,
-                        SIDEBAR_SMALL_BUTTON_PX,
-                        |this, window, cx| this.open_project_picker(&OpenProjectPicker, window, cx),
-                        cx,
-                    )),
-            )
-    }
-
-    fn render_sidebar_filter_row(
-        &self,
-        selector: String,
-        label: String,
-        icon_path: Option<&'static str>,
-        selected: bool,
-        filter: SidebarFilter,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
-        let filter_for_key = filter.clone();
-        div()
-            .id(ElementId::Name(selector.clone().into()))
-            .debug_selector(move || selector)
-            .h(px(SIDEBAR_FILTER_MENU_ROW_PX))
-            .w_full()
-            .px_2()
-            .rounded(px(SIDEBAR_RADIUS_SEED_PX))
-            .flex()
-            .items_center()
-            .gap_2()
-            .text_size(px(SIDEBAR_LABEL_TEXT_PX))
-            .font_family(theme::UI_SMALL_FONT_FAMILY)
-            .text_color(if selected {
-                theme::rambutan_100()
-            } else {
-                theme::rambutan_200()
-            })
-            .when(selected, |el| {
-                el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_50))
-            })
-            .hover(|el| el.bg(theme::longan_800().opacity(ACTIVE_BG_OPACITY_60)))
-            .tab_index(0)
-            .role(Role::MenuItem)
-            .aria_label(label.clone())
-            .aria_selected(selected)
-            .border_1()
-            .border_color(gpui::transparent_black())
-            .focus_visible(|el| el.border_color(theme::persimmon_400()))
-            .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                cx.stop_propagation();
-                this.sidebar_filter = filter.clone();
-                this.sidebar_filter_open = false;
-                cx.notify();
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.sidebar_filter = filter_for_key.clone();
-                    this.sidebar_filter_open = false;
-                    cx.notify();
-                }
-            }))
-            .when_some(icon_path, |el, path| {
-                el.child(icon(path, SIDEBAR_SMALL_ICON_PX, theme::rambutan_500()))
-            })
-            .child(div().min_w_0().truncate().child(label))
-            .into_any_element()
-    }
-
-    /// Filter conversations by their optional project.
-    fn render_sidebar_filter_menu(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let names = project_names(&self.threads);
-        let current = self.sidebar_filter.clone();
-        let mut rows: Vec<AnyElement> = vec![self.render_sidebar_filter_row(
-            "desktop-sidebar-filter-all".to_string(),
-            SIDEBAR_FILTER_ALL_LABEL.to_string(),
-            None,
-            current == SidebarFilter::All,
-            SidebarFilter::All,
-            cx,
-        )];
-        rows.push(self.render_sidebar_filter_row(
-            "desktop-sidebar-filter-none".into(),
-            SIDEBAR_FILTER_NONE_LABEL.into(),
-            None,
-            current == SidebarFilter::Project(String::new()),
-            SidebarFilter::Project(String::new()),
-            cx,
-        ));
-        for name in names {
-            let key = element_key(&name);
-            rows.push(self.render_sidebar_filter_row(
-                format!("desktop-sidebar-filter-{key}"),
-                name.clone(),
-                Some(assets::FOLDER_ICON_PATH),
-                matches!(&current, SidebarFilter::Project(selected) if *selected == name),
-                SidebarFilter::Project(name),
+            .child(self.sidebar_icon_button(
+                "desktop-sidebar-new-project",
+                SIDEBAR_NEW_PROJECT_LABEL,
+                assets::FOLDER_PLUS_ICON_PATH,
+                SIDEBAR_ICON_BUTTON_PX,
+                |this, window, cx| this.open_project_picker(&OpenProjectPicker, window, cx),
                 cx,
-            ));
-        }
-        div()
-            .id("sidebar-filter-menu")
-            .debug_selector(|| "desktop-sidebar-filter-menu".to_string())
-            .role(Role::Menu)
-            .aria_label(SIDEBAR_FILTER_LABEL)
-            .absolute()
-            .left(px(SIDEBAR_CONTROLS_X_PADDING_PX))
-            .top(px(SIDEBAR_HEADER_HEIGHT_PX
-                + SIDEBAR_SEARCH_HEIGHT_PX
-                + SIDEBAR_CONTROLS_GAP_PX
-                + SIDEBAR_FILTER_HEIGHT_PX
-                + SIDEBAR_CONTROLS_GAP_PX))
-            .w(px(SIDEBAR_FILTER_MENU_WIDTH_PX))
-            .p_1()
-            .rounded(px(SIDEBAR_RADIUS_GRAPE_PX))
-            .bg(theme::longan_900())
-            .border_1()
-            .border_color(theme::ring_floating())
-            .occlude()
-            .flex()
-            .flex_col()
-            .gap_px()
-            .children(rows)
-            .into_any_element()
+            ))
+            .child(self.sidebar_icon_button(
+                "desktop-sidebar-new-thread",
+                SIDEBAR_NEW_THREAD_LABEL,
+                assets::SQUARE_PEN_ICON_PATH,
+                SIDEBAR_ICON_BUTTON_PX,
+                |this, window, cx| this.new_thread(&super::NewThread, window, cx),
+                cx,
+            ))
     }
 
     /// Pinned and active cards, then the Working, Snoozed, and Settled folds.
@@ -617,10 +378,7 @@ impl Workspace {
         let rows = viewport::sidebar_rows(self, &shelves, cx);
         let (state, rows, focus) = self.sidebar_viewport.borrow_mut().prepare(
             rows,
-            viewport::SidebarScope {
-                filter: self.sidebar_filter.clone(),
-                query,
-            },
+            viewport::SidebarScope { query },
             cx.theme().font_size,
             cx,
         );
@@ -814,7 +572,7 @@ impl Workspace {
         let delete_group: SharedString = format!("desktop-thread-delete-{key}").into();
         let age = relative_age(thread.updated_at_ms, EpochMs::now());
         let project_label = if thread.project_name.is_empty() {
-            SIDEBAR_FILTER_NONE_LABEL.to_string()
+            SIDEBAR_NO_PROJECT_LABEL.to_string()
         } else {
             thread.project_name.clone()
         };
@@ -1760,37 +1518,15 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::{thread_matches, SidebarFilter};
+    use super::thread_matches;
 
     #[test]
-    fn thread_filter_and_search_match_web_visible_threads() {
-        let bruhs = SidebarFilter::Project("bruhs".to_string());
-        assert!(thread_matches(
-            "bruhs",
-            "Fix login",
-            &SidebarFilter::All,
-            ""
-        ));
-        assert!(thread_matches("", "Groceries", &SidebarFilter::All, ""));
-        assert!(thread_matches("bruhs", "Fix login", &bruhs, ""));
-        assert!(!thread_matches("other", "Fix login", &bruhs, ""));
-        assert!(thread_matches(
-            "bruhs",
-            "Add tests",
-            &SidebarFilter::All,
-            "TEST"
-        ));
-        assert!(!thread_matches(
-            "bruhs",
-            "Add tests",
-            &SidebarFilter::All,
-            "login"
-        ));
-    }
-
-    #[test]
-    fn filter_labels_match_web() {
-        assert_eq!(SidebarFilter::All.label(), "All threads");
-        assert_eq!(SidebarFilter::Project("bruhs".into()).label(), "bruhs");
+    fn search_matches_titles_and_project_names() {
+        assert!(thread_matches("bruhs", "Fix login", ""));
+        assert!(thread_matches("", "Groceries", "  "));
+        assert!(thread_matches("bruhs", "Add tests", "TEST"));
+        assert!(thread_matches("bruhs-ai", "Fix login", "Bruhs"));
+        assert!(!thread_matches("bruhs", "Add tests", "login"));
+        assert!(!thread_matches("", "Groceries", "bruhs"));
     }
 }
