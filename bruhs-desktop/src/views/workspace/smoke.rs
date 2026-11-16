@@ -178,6 +178,13 @@ impl Workspace {
                 };
                 self.toggle_thread_menu(&id, window, cx);
             }
+            // The thread menu's "Custom…" snooze dialog (web "Snooze until").
+            "snooze-custom" => {
+                let Some(id) = self.active_thread_id.clone() else {
+                    return false;
+                };
+                self.open_snooze_custom(&id, window, cx);
+            }
             "settings-roles" => {
                 // The role editor with a role open, scrolled into view, for
                 // a comparison with the web's. Use a scratch state file: the

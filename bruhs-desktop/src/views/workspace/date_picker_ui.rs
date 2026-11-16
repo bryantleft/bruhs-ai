@@ -59,6 +59,8 @@ pub(super) enum DatePickerTarget {
     EventStart,
     /// Event end (`YYYY-MM-DDTHH:MM`, web `DateTimePicker`).
     EventEnd,
+    /// The custom snooze's date and time (`YYYY-MM-DDTHH:MM`).
+    SnoozeUntil,
 }
 
 impl DatePickerTarget {
@@ -72,6 +74,7 @@ impl DatePickerTarget {
             Self::TaskDetailDue => "desktop-task-detail-due-picker",
             Self::EventStart => "desktop-event-start-picker",
             Self::EventEnd => "desktop-event-end-picker",
+            Self::SnoozeUntil => "desktop-snooze-until-picker",
         }
     }
 
@@ -80,6 +83,7 @@ impl DatePickerTarget {
             Self::TaskDue | Self::TaskDetailDue => "Task due date",
             Self::EventStart => "Event start",
             Self::EventEnd => "Event end",
+            Self::SnoozeUntil => "Snooze until",
         }
     }
 }
@@ -161,6 +165,7 @@ impl Workspace {
             DatePickerTarget::TaskDetailDue => &self.task_detail_due_input,
             DatePickerTarget::EventStart => &self.event_create_start_input,
             DatePickerTarget::EventEnd => &self.event_create_end_input,
+            DatePickerTarget::SnoozeUntil => &self.snooze_inputs.when,
         }
     }
 
@@ -316,7 +321,10 @@ impl Workspace {
         let tooltip = text.clone();
         let selector = target.selector();
         let open = self.date_picker.filter(|open| open.target == target);
-        let align_right = target != DatePickerTarget::EventStart;
+        let align_right = !matches!(
+            target,
+            DatePickerTarget::EventStart | DatePickerTarget::SnoozeUntil
+        );
         // A read-only provider event shows its times without a picker.
         let disabled = matches!(
             target,
