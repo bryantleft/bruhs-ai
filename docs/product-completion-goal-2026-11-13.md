@@ -17,10 +17,15 @@ storage, and per-domain agent permissions. Preserve intentional boundaries such
 as read-only Google Calendar, manual finance/health records, reviewed external
 writes, and explicit recording consent. Record any proposed expansion separately.
 
-Web and desktop must expose equivalent supported outcomes and match visually at
-the same viewport, with platform-appropriate interactions. Touch web and the
-existing native mobile companion must support their documented flows; this goal
-does not silently expand the companion into a copy of every desktop feature.
+Web and desktop must expose the union of capabilities present in either app:
+bring web features missing from desktop to desktop, and desktop features
+missing from web to web. This includes settings, agent tools, persistence, and
+recovery paths. Preserve existing capabilities and match visually at the same
+viewport, with platform-appropriate interactions. The standing
+[bidirectional parity goal](web-desktop-parity-goal-2026-11-15.md) tracks the
+inventory, initial gaps, and closure evidence. Touch web and the existing native
+mobile companion must support their documented flows; this goal does not
+silently expand the companion into a copy of every desktop feature.
 
 The [configurability goal](configurability-goal-2026-11-09.md),
 [transcription goal](transcription-goal-2026-11-09.md), and
