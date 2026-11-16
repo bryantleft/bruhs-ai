@@ -18,6 +18,7 @@ pub(super) const EVENT_EDIT_LABEL: &str = "Edit event";
 pub(super) const EVENT_READ_ONLY_LABEL: &str = "Google event (read only)";
 pub(super) const EVENT_PROVIDER_LINK_LABEL: &str = "Open in Google Calendar";
 pub(super) const EVENT_OPEN_TASK_LABEL: &str = "Open task";
+pub(super) const EVENT_RECORD_MEETING_LABEL: &str = "Record meeting";
 /// Shown for a provider event without its own color: it uses its
 /// calendar's color, not one of the local choices.
 pub(super) const EVENT_PROVIDER_DEFAULT_COLOR_LABEL: &str = "Calendar color";
@@ -180,6 +181,27 @@ impl Workspace {
             .iter()
             .find(|item| item.planning.has_time_block(event_id))
             .map(|item| item.id.clone())
+    }
+
+    /// Web "Record meeting": the same start as auto-record. The meeting
+    /// takes the saved event's title and the event's id as its link key; a
+    /// capture that does not start stops the meeting and says so.
+    pub(super) fn record_meeting_for_event(&mut self, event_id: &str, cx: &mut Context<'_, Self>) {
+        let Some(event) = self
+            .calendar_events
+            .iter()
+            .find(|event| event.id == event_id && !event.is_read_only())
+            .cloned()
+        else {
+            return;
+        };
+        let Some(event) =
+            today_ui::planning_calendar_events_in(vec![event], local_offset_minutes_east).pop()
+        else {
+            return;
+        };
+        self.meetings_hub
+            .update(cx, |hub, cx| hub.start_recording_for_event(event, cx));
     }
 
     /// Closes the event dialog and opens its focus block's source task.
@@ -535,6 +557,7 @@ impl Workspace {
         let source_task_id = delete_id
             .as_deref()
             .and_then(|id| self.event_source_task_id(id));
+        let record_id = delete_id.clone();
         let provider_link = self
             .event_dialog_provider
             .as_ref()
@@ -752,6 +775,9 @@ impl Workspace {
                                     })
                                     .when_some(source_task_id, |el, task_id| {
                                         el.child(self.render_event_open_task(task_id, cx))
+                                    })
+                                    .when_some(record_id, |el, event_id| {
+                                        el.child(self.render_event_record_meeting(event_id, cx))
                                     })
                                     .when_some(delete_id, |el, delete_id| {
                                         let delete_id_for_key = delete_id.clone();
@@ -995,6 +1021,38 @@ impl Workspace {
                     cx.open_url(&link_for_key);
                 }
             }))
+            .into_any_element()
+    }
+
+    /// Web "Record meeting": persimmon text beside Delete, for an event
+    /// this device owns.
+    pub(super) fn render_event_record_meeting(
+        &self,
+        event_id: String,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        div()
+            .id("event-record-meeting")
+            .debug_selector(|| "desktop-event-record-meeting".to_string())
+            .rounded(px(FORM_CONTROL_RADIUS_PX))
+            .px(px(EVENT_CREATE_DELETE_X_PADDING_PX))
+            .py(px(EVENT_CREATE_DELETE_Y_PADDING_PX))
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
+            .font_weight(FontWeight::MEDIUM)
+            .text_color(theme::persimmon_400())
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(EVENT_RECORD_MEETING_LABEL)
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .cursor_pointer()
+            .hover(|el| el.bg(theme::persimmon_500().opacity(EVENT_CREATE_DELETE_HOVER_BG_OPACITY)))
+            .on_click(cx.listener(move |this, _ev, _window, cx| {
+                this.record_meeting_for_event(&event_id, cx);
+            }))
+            .child(EVENT_RECORD_MEETING_LABEL)
             .into_any_element()
     }
 

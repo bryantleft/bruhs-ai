@@ -41,6 +41,30 @@ fn parity_workspace(
     (workspace, cx)
 }
 
+/// A read-only Google event half an hour long.
+fn google_event(id: &str, title: &str, start_ms: i64) -> bruhs_models::CalendarEvent {
+    bruhs_models::CalendarEvent {
+        id: id.into(),
+        title: title.into(),
+        start_at_ms: EpochMs::saturating_from_i64(start_ms).as_f64(),
+        end_at_ms: EpochMs::saturating_from_i64(start_ms + 1_800_000).as_f64(),
+        all_day: false,
+        color: None,
+        notes: Some("Provider notes".into()),
+        created_at: 1,
+        updated_at: 1,
+        source: bruhs_models::EventSource::Google,
+        google_event_id: Some(format!("g-{id}")),
+        calendar_id: Some("primary".into()),
+        attendees: Vec::new(),
+        organizer: None,
+        location: Some("Room 4".into()),
+        conferencing: None,
+        recurring_event_id: None,
+        html_link: Some("https://calendar.google.com/calendar/event?eid=synthetic".into()),
+    }
+}
+
 fn show_view(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext, view: AppView) {
     workspace.update_in(cx, |workspace, _window, cx| {
         workspace.active_view = view;
@@ -314,4 +338,60 @@ async fn today_recovers_a_day_plan_that_was_not_saved(cx: &mut gpui::TestAppCont
     assert_no_rendered_bounds(cx, "desktop-day-plan-retry");
     assert_rendered_bounds(cx, "desktop-day-plan-applied");
     fs::remove_dir_all(dir).unwrap();
+}
+
+/// PM-25: a local event's dialog records a meeting through the hub's
+/// auto-record start, with the event's title and id as its link key. A
+/// Google event's read-only dialog has no Record meeting, as on the web.
+#[gpui::test]
+fn event_dialog_records_a_meeting_for_a_local_event(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = parity_workspace(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .meetings_hub
+            .update(cx, |hub, _| hub.test_recording_starts = Some(Vec::new()));
+        let mut review = event(
+            "design-review",
+            dt(2026, 11, 16, 10, 0),
+            dt(2026, 11, 16, 11, 0),
+        );
+        review.title = "Design review".into();
+        workspace.calendar_events = vec![review];
+        workspace.open_event_edit("design-review".into(), window, cx);
+    });
+    cx.run_until_parked();
+    // The form's edits are not what records: the saved event is.
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .event_create_title_input
+            .update(cx, |input, cx| input.set_value("Unsaved title", window, cx));
+    });
+    click_debug_selector(cx, "desktop-event-record-meeting");
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, _window, cx| {
+        let starts = workspace
+            .meetings_hub
+            .read(cx)
+            .test_recording_starts
+            .clone()
+            .unwrap();
+        assert_eq!(starts.len(), 1);
+        assert_eq!(starts[0].title, "Design review");
+        assert_eq!(
+            starts[0].calendar_event_id.as_deref(),
+            Some("design-review")
+        );
+    });
+
+    let start_ms = EpochMs::now().as_millis() + 3_600_000;
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.close_event_create(window, cx);
+        workspace.meetings_hub.update(cx, |hub, _| {
+            hub.google_events = vec![google_event("google-sync", "Provider sync", start_ms)];
+        });
+        workspace.open_event_edit("google-sync".into(), window, cx);
+    });
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-event-create-dialog");
+    assert_no_rendered_bounds(cx, "desktop-event-record-meeting");
 }
