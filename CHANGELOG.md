@@ -11,6 +11,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- The desktop app has the web's booking page for a scheduling link. The
+  link in the scheduling panel opens it: pick one of the next free times
+  inside the link's availability and buffers, add a name, and the booking is
+  saved as a local event on your calendar.
 - The model picker now lists the models your Cursor account can run, under
   Cursor default, on the web and in the desktop app. Bruhs reads them from
   `cursor-agent --list-models`. When Cursor cannot list them, the picker says
