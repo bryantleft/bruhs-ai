@@ -96,6 +96,18 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - The sidebar footer's view buttons sit in two rows, so each keeps its full
   32px instead of shrinking to fit one row. The desktop footer gains Agent
   workflows, with its unread count, like the web's.
+- Controls that worked differently in the two apps now match. In the desktop
+  app, the options panel shows the context ring and "N% used", Scroll to end
+  is a labeled pill, a document connects records and cites sources through
+  the same search picker as the web, copy buttons show a check for a moment,
+  dropdown and custom model checks sit at the right, the update pill's
+  loader turns (still with reduced motion), Open in browser shows a globe
+  and "↗", the capture dialog's kinds show their icons, and date pickers fit
+  their text. Date pickers on the web are 32px tall, like other inputs.
+- A turn's copy and metadata row shows on hover or while it has keyboard
+  focus in both apps, so hidden rows stay reachable with Tab. During a
+  recording, a lost connection says "Live transcript disconnected.
+  Reconnecting…" once in both apps and stays until the connection returns.
 - The thread menu offers the same snooze times in both apps: In 1 hour,
   Later today, Tomorrow, Next week and Custom…. The desktop app gains
   Custom…, which snoozes a thread until a date and time you pick or for a
@@ -104,6 +116,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- The web capture dialog's Contact tab shows its icon instead of a dot, and
+  file sizes in the web email composer use the app's small label size
+  instead of falling back to 16px.
 - Fixed the thread menu in the desktop app opening at the bottom of the
   sidebar. It now opens under the "…" on its card, or above it near the bottom
   of the window. The arrow keys move through it, Escape closes it and returns
