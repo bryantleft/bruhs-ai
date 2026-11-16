@@ -19,10 +19,10 @@ use crate::state::{
     activate_thread, apply_drag, effect_for, groups_for, instructions_text, new_thread_in_context,
     set_settled, snooze_until, thread_facts, titled, wake, ActiveView, AppView, ComposerDraft,
     PendingPermissions, PendingPermissionsSignal, SetActiveView, SetProjectPickerOpen,
-    SetSidebarOpen, ShelfClock, SidebarChrome, SidebarProjectFilter, SidebarUndo, Thread,
-    TitleInstructionsSignal, Turns, UndoEntry, UndoRestore, UnreadThreads,
+    SetSidebarOpen, ShelfClock, SidebarChrome, SidebarUndo, Thread, TitleInstructionsSignal, Turns,
+    UndoEntry, UndoRestore, UnreadThreads,
 };
-use crate::ui::{Icon, Menu, MenuAlign, MenuItem};
+use crate::ui::Icon;
 
 use bruhs_models::logic::sidebar::{
     snooze_after, snooze_presets, FoldOpen, SidebarSection, SnoozeUnit,
@@ -162,21 +162,17 @@ fn updated_ms(thread: &Thread) -> f64 {
     thread.updated_at.as_f64()
 }
 
-/// Threads to show: filtered by project (`Some("")` = general threads),
-/// case-insensitive title search, newest activity first.
-pub fn visible_threads(threads: &[Thread], filter: Option<&str>, query: &str) -> Vec<Thread> {
-    matching_threads(threads.iter(), filter, query)
-}
-
-fn matching_threads<'a>(
-    threads: impl Iterator<Item = &'a Thread>,
-    filter: Option<&str>,
-    query: &str,
-) -> Vec<Thread> {
+/// Threads to show: a case-insensitive search of titles and project names
+/// (typing a project's name lists its threads), newest activity first.
+pub fn visible_threads(threads: &[Thread], query: &str) -> Vec<Thread> {
     let q = query.trim().to_lowercase();
     let mut out: Vec<Thread> = threads
-        .filter(|t| filter.is_none_or(|f| t.project_name == f))
-        .filter(|t| q.is_empty() || t.title.to_lowercase().contains(&q))
+        .iter()
+        .filter(|t| {
+            q.is_empty()
+                || t.title.to_lowercase().contains(&q)
+                || t.project_name.to_lowercase().contains(&q)
+        })
         .cloned()
         .collect();
     out.sort_by(|a, b| {
@@ -185,30 +181,6 @@ fn matching_threads<'a>(
             .unwrap_or(std::cmp::Ordering::Equal)
     });
     out
-}
-
-/// Distinct project names ordered by most recent activity.
-pub fn project_names(threads: &[Thread]) -> Vec<String> {
-    let mut seen: Vec<(String, f64)> = Vec::new();
-    let mut indices = HashMap::new();
-    for t in threads {
-        if t.project_name.is_empty() {
-            continue;
-        }
-        let ms = updated_ms(t);
-        match indices.get(t.project_name.as_str()).copied() {
-            Some(index) => {
-                let entry: &mut (String, f64) = &mut seen[index];
-                entry.1 = entry.1.max(ms);
-            }
-            None => {
-                indices.insert(t.project_name.as_str(), seen.len());
-                seen.push((t.project_name.clone(), ms));
-            }
-        }
-    }
-    seen.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-    seen.into_iter().map(|(n, _)| n).collect()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -231,7 +203,6 @@ pub fn Sidebar() -> impl IntoView {
     let turns = expect_context::<Turns>();
     let UnreadThreads(unread_threads) = expect_context::<UnreadThreads>();
     let roles = expect_context::<crate::state::RolesSignal>().0;
-    let SidebarProjectFilter(project_filter) = expect_context::<SidebarProjectFilter>();
     let SetProjectPickerOpen(set_project_picker_open) = expect_context::<SetProjectPickerOpen>();
     let ActiveView(active_view) = expect_context::<ActiveView>();
     let SetActiveView(set_active_view) = expect_context::<SetActiveView>();
@@ -246,21 +217,9 @@ pub fn Sidebar() -> impl IntoView {
     };
 
     let (query, set_query) = signal(String::new());
-    let filter_open = RwSignal::new(false);
-    let names = Memo::new(move |_| threads.with(|ts| project_names(ts)));
     let visible = Memo::new(move |_| {
-        let filter = project_filter.get();
         let q = query.get();
-        threads.with(|ts| visible_threads(ts, filter.as_deref(), &q))
-    });
-
-    // Reset a filter that no longer matches any project (e.g. after deletes).
-    Effect::new(move |_| {
-        if let Some(f) = project_filter.get() {
-            if !f.is_empty() && !names.with(|n| n.contains(&f)) {
-                project_filter.set(None);
-            }
-        }
+        threads.with(|ts| visible_threads(ts, &q))
     });
 
     let history = expect_context::<crate::thread_history::ThreadHistory>();
@@ -379,12 +338,6 @@ pub fn Sidebar() -> impl IntoView {
         }
     };
 
-    let filter_label = Signal::derive(move || match project_filter.get() {
-        None => "All threads".to_string(),
-        Some(f) if f.is_empty() => "No project".to_string(),
-        Some(f) => f,
-    });
-
     // Shelves. A search shows every match in one list.
     let SidebarChrome {
         working_open,
@@ -481,8 +434,8 @@ pub fn Sidebar() -> impl IntoView {
         })
     });
     // Thread activation republishes the destination mode even when unchanged.
-    // Only an actual filter change should reset a user's scroll position.
-    let viewport_filter = Memo::new(move |_| (query.get(), project_filter.get()));
+    // Only an actual search change should reset a user's scroll position.
+    let viewport_filter = Memo::new(move |_| query.get());
     Effect::new(move |_| {
         viewport_filter.with(|_| ());
         viewport.scroll(0.0);
@@ -1008,85 +961,39 @@ pub fn Sidebar() -> impl IntoView {
                 <span class="text-label text-rambutan-100">"bruhs.ai"</span>
             </div>
 
-            // Fixed control group: search + new thread, then the
-            // project filter + new project session.
-            <div class="flex flex-col gap-1 px-2 pb-2">
-                <div class="flex items-center gap-1">
-                    <label class="flex h-8 min-w-0 flex-1 items-center gap-2 rounded-grape px-2 text-rambutan-400 transition-colors focus-within:bg-longan-800/40 hover:bg-longan-800/40">
-                        <Icon name="search" size=14 class="shrink-0 text-rambutan-500" />
-                        <input
-                            type="search"
-                            placeholder="Search"
-                            aria-label="Search threads"
-                            class="min-w-0 flex-1 bg-transparent text-body-sm text-rambutan-100 placeholder:text-rambutan-500 focus:outline-none"
-                            prop:value=move || query.get()
-                            on:input=move |ev| set_query.set(event_target_value(&ev))
-                        />
-                    </label>
-                    <button
-                        type="button"
-                        aria-label="New thread (⌘⇧O)"
-                        title="New thread (⌘⇧O)"
-                        class="inline-flex size-8 shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100"
-                        on:click=move |_| new_thread()
-                    >
-                        <Icon name="square-pen" size=14 />
-                    </button>
-                </div>
-                <div class="flex items-center gap-1">
-                    <Menu open=filter_open align=MenuAlign::Start label="Filter threads by project"
-                        trigger=move || view! {
-                            <button
-                                type="button"
-                                aria-haspopup="menu"
-                                aria-expanded=move || filter_open.get().to_string()
-                                class="inline-flex h-7 max-w-[13rem] items-center gap-1.5 rounded-grape px-2 text-label-sm text-rambutan-300 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100"
-                                on:click=move |_| filter_open.update(|v| *v = !*v)
-                            >
-                                <Icon name="folder" size=14 class="shrink-0 text-rambutan-500" />
-                                <span class="truncate">{move || filter_label.get()}</span>
-                                <Icon name="chevron-down" size=12 class="shrink-0 text-rambutan-500" />
-                            </button>
-                        }.into_any()
-                    >
-                        <MenuItem
-                            selected=Signal::derive(move || project_filter.get().is_none())
-                            on_select=Callback::new(move |_| { project_filter.set(None); filter_open.set(false); })
-                        >
-                            "All threads"
-                        </MenuItem>
-                        <MenuItem
-                            selected=Signal::derive(move || project_filter.get().as_deref() == Some(""))
-                            on_select=Callback::new(move |_| { project_filter.set(Some(String::new())); filter_open.set(false); })
-                        >"No project"</MenuItem>
-                        <For
-                            each=move || names.get()
-                            key=|n| n.clone()
-                            children=move |name| {
-                                let n_sel = name.clone();
-                                let n_set = name.clone();
-                                view! {
-                                    <MenuItem
-                                        selected=Signal::derive(move || project_filter.get().as_deref() == Some(n_sel.as_str()))
-                                        on_select=Callback::new(move |_| { project_filter.set(Some(n_set.clone())); filter_open.set(false); })
-                                    >
-                                        <Icon name="folder" size=12 class="text-rambutan-500" />
-                                        <span class="truncate">{name.clone()}</span>
-                                    </MenuItem>
-                                }
-                            }
-                        />
-                    </Menu>
-                    <button
-                        type="button"
-                        aria-label="Choose project folder"
-                        title="Choose project folder"
-                        class="ml-auto inline-flex size-7 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100"
-                        on:click=move |_| set_project_picker_open.set(true)
-                    >
-                        <Icon name="folder-plus" size=14 />
-                    </button>
-                </div>
+            // One control row: search, then choose project folder and new
+            // thread. Search matches project names too, so it replaces the
+            // old project filter.
+            <div class="flex items-center gap-1 px-2 pb-2">
+                <label class="flex h-control min-w-0 flex-1 items-center gap-2 rounded-grape px-2 text-rambutan-400 transition-colors focus-within:bg-longan-800/40 hover:bg-longan-800/40">
+                    <Icon name="search" size=16 class="shrink-0 text-rambutan-500" />
+                    <input
+                        type="search"
+                        placeholder="Search"
+                        aria-label="Search threads and projects"
+                        class="min-w-0 flex-1 bg-transparent text-body-sm text-rambutan-100 placeholder:text-rambutan-500 focus:outline-none"
+                        prop:value=move || query.get()
+                        on:input=move |ev| set_query.set(event_target_value(&ev))
+                    />
+                </label>
+                <button
+                    type="button"
+                    aria-label="Choose project folder"
+                    title="Choose project folder"
+                    class="bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100"
+                    on:click=move |_| set_project_picker_open.set(true)
+                >
+                    <Icon name="folder-plus" size=16 />
+                </button>
+                <button
+                    type="button"
+                    aria-label="New thread (⌘⇧O)"
+                    title="New thread (⌘⇧O)"
+                    class="bruhs-control inline-flex size-control shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100"
+                    on:click=move |_| new_thread()
+                >
+                    <Icon name="square-pen" size=16 />
+                </button>
             </div>
 
             // Thread cards: fresh first, older seen threads under "Settled".
@@ -1432,39 +1339,27 @@ mod tests {
     }
 
     #[test]
-    fn visible_threads_filters_and_sorts() {
+    fn visible_threads_search_titles_and_projects_newest_first() {
         let all = vec![
             t("a", "bruhs", "Fix login", "100"),
             t("b", "", "Groceries", "300"),
             t("c", "bruhs", "Add tests", "200"),
             t("d", "other", "Legacy", "now"),
         ];
-        let ids: Vec<String> = visible_threads(&all, None, "")
-            .into_iter()
-            .map(|t| t.id)
-            .collect();
-        assert_eq!(ids, ["b", "c", "a", "d"]);
-        assert_eq!(visible_threads(&all, Some("bruhs"), "").len(), 2);
-        assert_eq!(visible_threads(&all, Some(""), "").len(), 1);
-        assert_eq!(visible_threads(&all, None, "TEST")[0].id, "c");
-    }
-
-    #[test]
-    fn unified_threads_include_general_and_project_conversations() {
-        let rows = vec![
-            t("general", "", "Notes", "300"),
-            t("alpha", "Alpha", "Notes", "200"),
-            t("beta", "Beta", "Notes", "100"),
-        ];
-        let ids = |filter| {
-            visible_threads(&rows, filter, "notes")
+        let ids = |query| {
+            visible_threads(&all, query)
                 .into_iter()
-                .map(|thread| thread.id)
+                .map(|t| t.id)
                 .collect::<Vec<_>>()
         };
-        assert_eq!(ids(None), ["general", "alpha", "beta"]);
-        assert_eq!(ids(Some("Alpha")), ["alpha"]);
-        assert_eq!(ids(Some("")), ["general"]);
+        assert_eq!(ids(""), ["b", "c", "a", "d"]);
+        assert_eq!(ids("TEST"), ["c"]);
+        assert_eq!(
+            ids("Bruhs"),
+            ["c", "a"],
+            "a project's name lists its threads"
+        );
+        assert!(ids("nothing").is_empty());
     }
 
     #[test]
@@ -1536,19 +1431,5 @@ mod tests {
         assert!(is_settled(&forced, now, false, false, false));
         assert!(is_settled(&pinned_old, now, false, false, false));
         assert!(!is_settled(&pinned, now, false, false, false));
-    }
-
-    #[test]
-    fn project_names_are_distinct_and_recent_first() {
-        let all = vec![
-            t("a", "bruhs", "x", "100"),
-            t("b", "other", "y", "300"),
-            t("c", "bruhs", "z", "200"),
-            t("d", "", "general", "400"),
-        ];
-        assert_eq!(
-            project_names(&all),
-            vec!["other".to_string(), "bruhs".to_string()]
-        );
     }
 }
