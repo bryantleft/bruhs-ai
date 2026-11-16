@@ -71,7 +71,7 @@ pub(super) fn clamp_right_panel_width(requested: f32, viewport_width: f32) -> f3
 }
 /// Matches the chat and sidebar header heights.
 pub(super) const WORKSPACE_PANEL_TAB_BAR_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
-pub(super) const WORKSPACE_PANEL_TAB_HEIGHT_PX: f32 = 28.0;
+pub(super) const WORKSPACE_PANEL_TAB_HEIGHT_PX: f32 = theme::CONTROL_SM_PX;
 pub(super) const WORKSPACE_PANEL_TAB_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const WORKSPACE_PANEL_TAB_ICON_SIZE_PX: f32 = 14.0;
 

@@ -25,7 +25,7 @@ pub fn clamp_terminal_drawer_height(height: f32) -> f32 {
 }
 const HEADER_HEIGHT_PX: f32 = 32.0;
 const HEADER_TEXT_SIZE_PX: f32 = 12.0;
-const TAB_HEIGHT_PX: f32 = 24.0;
+const TAB_HEIGHT_PX: f32 = theme::CONTROL_XS_PX;
 const TAB_MAX_WIDTH_PX: f32 = 160.0;
 const TAB_RADIUS_PX: f32 = 4.0;
 const ICON_SIZE_PX: f32 = 12.0;

@@ -39,7 +39,7 @@ const SIGN_WIDTH_PX: f32 = 12.0;
 const ROW_Y_PADDING_PX: f32 = 1.0;
 const ROW_BG_OPACITY: f32 = 0.10;
 const GAP_TEXT_SIZE_PX: f32 = 12.0;
-const ACTION_SIZE_PX: f32 = 28.0;
+const ACTION_SIZE_PX: f32 = theme::CONTROL_SM_PX;
 const RADIUS_PX: f32 = 8.0;
 const DIVIDER_OPACITY: f32 = 0.50;
 const HOVER_BG_OPACITY: f32 = 0.50;
@@ -57,7 +57,7 @@ const EMPTY_LABEL: &str = "No changes in the working tree";
 const SCOPE_LABEL: &str = "Uncommitted";
 const SCOPE_DROPDOWN_ID: &str = "desktop-diff-scope";
 /// Web scope chip: `h-6 max-w-[16rem] gap-1 rounded-grape bg-longan-800 px-2`.
-const SCOPE_CHIP_HEIGHT_PX: f32 = 24.0;
+const SCOPE_CHIP_HEIGHT_PX: f32 = theme::CONTROL_XS_PX;
 const SCOPE_CHIP_MAX_WIDTH_PX: f32 = 256.0;
 const WRAP_LABEL: &str = "Toggle line wrap";
 const SCOPE_LIST_WIDTH_PX: f32 = 300.0;

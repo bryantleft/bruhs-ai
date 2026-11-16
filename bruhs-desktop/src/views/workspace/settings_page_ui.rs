@@ -208,7 +208,7 @@ pub(super) const SETTINGS_PAGE_CLOSE_ICON_PX: f32 = 14.0;
 pub(super) const SETTINGS_PAGE_CONTENT_MAX_WIDTH_PX: f32 = 704.0;
 pub(super) const SETTINGS_PAGE_CONTENT_MIN_WIDTH_PX: f32 = 320.0;
 pub(super) const SETTINGS_CODE_FONT_FAMILY: &str = "Monaspace Neon";
-pub(super) const SETTINGS_CLOSE_BUTTON_SIZE_PX: f32 = 32.0;
+pub(super) const SETTINGS_CLOSE_BUTTON_SIZE_PX: f32 = theme::CONTROL_PX;
 pub(super) const SETTINGS_CONTROL_RADIUS_PX: f32 = 8.0;
 /// Settings body spacing and scroll-spy fold.
 pub(super) const SETTINGS_BODY_X_PADDING_PX: f32 = 24.0;

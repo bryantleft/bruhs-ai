@@ -42,8 +42,8 @@ const SWITCH_THUMB_OFF_X_PX: f32 = 2.0;
 const SWITCH_THUMB_ON_X_PX: f32 = 22.0;
 const SWITCH_DISABLED_OPACITY: f32 = 0.5;
 /// Web `Stepper`: `h-8`, `w-8` side buttons, `w-12` value, `rounded-grape`.
-const STEPPER_HEIGHT_PX: f32 = 32.0;
-const STEPPER_SIDE_WIDTH_PX: f32 = 32.0;
+const STEPPER_HEIGHT_PX: f32 = theme::CONTROL_PX;
+const STEPPER_SIDE_WIDTH_PX: f32 = theme::CONTROL_PX;
 const STEPPER_VALUE_WIDTH_PX: f32 = 48.0;
 const STEPPER_ICON_PX: f32 = 12.0;
 const STEPPER_DISABLED_OPACITY: f32 = 0.6;
