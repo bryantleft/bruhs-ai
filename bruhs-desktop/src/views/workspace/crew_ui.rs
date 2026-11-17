@@ -215,7 +215,8 @@ impl Workspace {
                     .map(|el| {
                         if ready {
                             on_press(
-                                el.tab_index(0)
+                                el.track_focus(&self.crew_new_focus)
+                                    .tab_index(0)
                                     .cursor_pointer()
                                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .hover(|el| {
@@ -303,7 +304,9 @@ impl Workspace {
                     .flex_col()
                     .gap(px(CREW_ROW_GAP_PX))
                     .children(
-                        rows.iter().map(|bruh| self.render_crew_row(bruh, cx)),
+                        rows.iter()
+                            .enumerate()
+                            .map(|(index, bruh)| self.render_crew_row(bruh, index == 0, cx)),
                     ),
             )
         });
@@ -369,11 +372,7 @@ impl Workspace {
             })
     }
 
-    fn render_crew_row(
-        &self,
-        bruh: &BruhState,
-        cx: &Context<'_, Self>,
-    ) -> AnyElement {
+    fn render_crew_row(&self, bruh: &BruhState, first: bool, cx: &Context<'_, Self>) -> AnyElement {
         let agent_id = bruh.agent_id.clone();
         let current = matches!(
             &self.active_view,
@@ -388,6 +387,7 @@ impl Workspace {
                 .debug_selector(move || selector)
                 .role(Role::Button)
                 .aria_label(row_label(bruh))
+                .when(first, |el| el.track_focus(&self.crew_row_focus))
                 .tab_index(0)
                 .w_full()
                 .min_h(px(theme::CONTROL_PX))
@@ -457,6 +457,51 @@ impl Workspace {
             },
         )
         .into_any_element()
+    }
+
+    /// ⌘⇧B: open the rail if it is folded and focus its first bruh, or the
+    /// New bruh button when there is none.
+    pub(super) fn focus_crew(
+        &mut self,
+        _: &FocusCrew,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.crew_rail_open {
+            self.focus_crew_target(window, cx);
+            return;
+        }
+        self.crew_rail_open = true;
+        self.persist_and_notify(cx);
+        // The rows draw next frame; focus them once they have.
+        cx.defer_in(window, |this, window, cx| {
+            this.focus_crew_target(window, cx)
+        });
+    }
+
+    fn focus_crew_target(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.reactive_automations.read(cx).crew().is_empty() {
+            self.crew_new_focus.focus(window, cx);
+        } else {
+            self.crew_row_focus.focus(window, cx);
+        }
+    }
+
+    /// ⌘.: stop the thread on screen as its Interrupt does, then every bruh.
+    pub(super) fn stop_all(
+        &mut self,
+        _: &StopAll,
+        _window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
+            chat.update(cx, |chat, cx| chat.stop_streaming(cx));
+        }
+        self.reactive_automations
+            .update(cx, |panel, cx| panel.stop_all_crew(cx));
+        self.meetings_hub.update(cx, |hub, cx| {
+            hub.show_notice("Stopped all bruhs.", false, cx)
+        });
     }
 
     fn toggle_crew_rail(&mut self, cx: &mut Context<'_, Self>) {
@@ -662,7 +707,10 @@ mod tests {
                 Some("id-amy")
             );
         });
-        assert!(cx.debug_bounds("desktop-bruh-page").is_some(), "its page shows");
+        assert!(
+            cx.debug_bounds("desktop-bruh-page").is_some(),
+            "its page shows"
+        );
         // Leaving the bruh closes its page; Automations draws the panel again.
         workspace.update_in(cx, |workspace, window, cx| {
             workspace.activate_sidebar_view(bruhs_models::AppView::Automations, window, cx);
@@ -670,7 +718,10 @@ mod tests {
         cx.run_until_parked();
         assert!(cx.debug_bounds("desktop-bruh-page").is_none());
         workspace.update(cx, |workspace, cx| {
-            assert_eq!(workspace.reactive_automations.read(cx).bruh_page_agent(), None);
+            assert_eq!(
+                workspace.reactive_automations.read(cx).bruh_page_agent(),
+                None
+            );
         });
     }
 
@@ -734,6 +785,136 @@ mod tests {
                 workspace.reactive_automations.read(cx).sent_for_test(),
                 [ReactiveCommand::ResumeAll]
             );
+        });
+    }
+
+    fn queued_run(id: &str) -> bruhs_models::reactive::ReactiveRun {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "agent_id": "id-amy", "source_id": null, "subscription_id": null,
+            "event_id": null, "status": "queued", "prompt": id, "thread_id": "t",
+            "session_id": null, "created_at": 1, "updated_at": 1,
+            "not_before": 1, "result": null, "error": null,
+        }))
+        .unwrap()
+    }
+
+    fn show_runs(
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+        protocol: u32,
+        runs: Vec<bruhs_models::reactive::ReactiveRun>,
+    ) {
+        workspace.update_in(cx, |workspace, _, cx| {
+            workspace.reactive_automations.update(cx, |panel, cx| {
+                panel.show_snapshot_for_test(
+                    bruhs_models::reactive::ReactiveSnapshot {
+                        protocol,
+                        runs,
+                        ..Default::default()
+                    },
+                    cx,
+                );
+            });
+        });
+        cx.run_until_parked();
+    }
+
+    fn sent(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) -> Vec<ReactiveCommand> {
+        workspace.update(cx, |workspace, cx| {
+            workspace
+                .reactive_automations
+                .read(cx)
+                .sent_for_test()
+                .to_vec()
+        })
+    }
+
+    fn dispatch(
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+        action: Box<dyn gpui::Action>,
+    ) {
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.workspace_focus_handle.focus(window, cx);
+            window.dispatch_action(action, cx);
+        });
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn stop_all_stops_the_streaming_thread_and_every_bruh(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.new_thread_in_project("proj".into(), "/tmp/bruhs-crew".into(), window, cx);
+            let chat = workspace.active_thread().unwrap().chat.clone();
+            chat.update(cx, |chat, _| chat.is_streaming = true);
+        });
+        show_runs(&workspace, cx, CREW_PROTOCOL, vec![queued_run("q")]);
+        dispatch(&workspace, cx, Box::new(super::StopAll));
+        workspace.update(cx, |workspace, cx| {
+            let chat = workspace.active_thread().unwrap().chat.read(cx);
+            assert!(!chat.is_streaming, "the thread on screen stopped");
+        });
+        assert_eq!(sent(&workspace, cx), [ReactiveCommand::StopAll]);
+        workspace.update(cx, |workspace, cx| {
+            let notice = workspace.meetings_hub.read(cx).notice.as_ref();
+            assert_eq!(
+                notice.map(|n| n.message.as_str()),
+                Some("Stopped all bruhs.")
+            );
+        });
+    }
+
+    #[gpui::test]
+    fn stop_all_cancels_each_live_run_on_an_old_service(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        show_runs(&workspace, cx, 0, vec![queued_run("q")]);
+        dispatch(&workspace, cx, Box::new(super::StopAll));
+        assert_eq!(
+            sent(&workspace, cx),
+            [ReactiveCommand::CancelRun { id: "q".into() }]
+        );
+    }
+
+    #[gpui::test]
+    fn cmd_shift_b_focuses_the_first_crew_row(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        show(
+            &workspace,
+            cx,
+            vec![
+                bruh("amy", BruhStatus::Asleep),
+                bruh("zed", BruhStatus::NeedsYou),
+            ],
+            CREW_PROTOCOL,
+        );
+        // Fold the rail first: the shortcut opens it.
+        workspace.update_in(cx, |workspace, _, cx| workspace.toggle_crew_rail(cx));
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-crew-row-id-zed").is_none());
+        dispatch(&workspace, cx, Box::new(super::FocusCrew));
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, window, _| {
+            assert!(workspace.crew_rail_open, "the rail opened");
+            assert!(
+                workspace.crew_row_focus.is_focused(window),
+                "the first row (whoever needs you) has focus"
+            );
+        });
+        assert!(cx.debug_bounds("desktop-crew-row-id-zed").is_some());
+    }
+
+    #[gpui::test]
+    fn cmd_shift_b_with_no_bruhs_focuses_the_new_button(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        show(&workspace, cx, Vec::new(), CREW_PROTOCOL);
+        dispatch(&workspace, cx, Box::new(super::FocusCrew));
+        workspace.update_in(cx, |workspace, window, _| {
+            assert!(workspace.crew_new_focus.is_focused(window));
         });
     }
 

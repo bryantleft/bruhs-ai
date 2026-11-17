@@ -161,6 +161,8 @@ actions!(
         ToggleTasks,
         FocusCommandBar,
         FocusChatInput,
+        FocusCrew,
+        StopAll,
         OpenTaskCreateShortcut,
         OpenCapture,
         CloseOverlays,
@@ -1254,6 +1256,9 @@ pub struct Workspace {
     sidebar_snoozed_open: bool,
     /// The crew rail above the threads; open unless closed.
     crew_rail_open: bool,
+    /// The crew rail's first row and its New bruh button, so ⌘⇧B can focus them.
+    crew_row_focus: FocusHandle,
+    crew_new_focus: FocusHandle,
     /// On unless this device saved it off.
     sidebar_working_section: bool,
     title_instructions: String,
@@ -1979,6 +1984,8 @@ impl Workspace {
             keybinding_key_input,
             keybinding_when_input,
             keybinding_installed: keybindings_ui::startup_bindings(),
+            crew_row_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            crew_new_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             thread_menu_id: None,
             thread_menu_items: (0..sidebar_ui::THREAD_MENU_MAX_ITEMS)
                 .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
@@ -3057,6 +3064,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::toggle_tasks))
             .on_action(cx.listener(Self::focus_command_bar))
             .on_action(cx.listener(Self::focus_chat_input))
+            .on_action(cx.listener(Self::focus_crew))
+            .on_action(cx.listener(Self::stop_all))
             .on_action(cx.listener(Self::open_task_create_shortcut))
             .on_action(cx.listener(Self::open_capture_dialog))
             .on_action(cx.listener(Self::close_overlays))

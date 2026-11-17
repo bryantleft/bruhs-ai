@@ -1342,6 +1342,18 @@ impl ReactiveAutomations {
     pub(crate) fn send_crew(&mut self, command: ReactiveCommand, cx: &mut Context<'_, Self>) {
         self.send_in(command, Scope::Crew, cx);
     }
+    /// Stop every bruh: one command to a current service, a cancel per live
+    /// run to an older one. Runs in order after any command on its way.
+    pub(crate) fn stop_all_crew(&mut self, cx: &mut Context<'_, Self>) {
+        let runs = self
+            .snapshot
+            .as_ref()
+            .map_or(&[][..], |snapshot| snapshot.runs.as_slice());
+        let commands = bruhs_models::crew::stop_commands(self.crew.protocol.unwrap_or(0), runs);
+        if !commands.is_empty() {
+            self.send_all(commands, Scope::Crew, cx);
+        }
+    }
     /// Read the crew again, such as after a failed load.
     pub(crate) fn reload_crew(&mut self, cx: &mut Context<'_, Self>) {
         self.refresh_snapshot(cx);

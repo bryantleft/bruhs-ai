@@ -8,3 +8,4 @@ pub mod face_editor;
 pub mod page;
 pub mod rail;
 pub mod settings;
+pub mod shortcuts;

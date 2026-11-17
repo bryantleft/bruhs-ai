@@ -10,10 +10,12 @@ use bruhs_models::crew::{
 };
 use bruhs_models::reactive::ReactiveCommand;
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 
 use super::create::CreateBruhDialog;
 use super::data::use_crew_snapshot;
 use super::face::BruhFace;
+use super::shortcuts::CrewFocusRequest;
 use crate::components::reactive_automations::local_time;
 use crate::state::{load_pref, save_pref, ActiveView, AppView, SetActiveView};
 use crate::ui::Icon;
@@ -44,6 +46,21 @@ fn installed_protocol(service: &BackgroundService) -> Option<u32> {
 /// Which older service to update, once the serving protocol is known.
 fn notice_for(protocol: Option<u32>, service: Option<&BackgroundService>) -> Option<ServiceNotice> {
     service_notice(protocol?, service.and_then(installed_protocol))
+}
+
+/// Focus the first bruh, or New bruh when there is none.
+fn focus_crew_target() {
+    let Some(document) = web_sys::window().and_then(|window| window.document()) else {
+        return;
+    };
+    for selector in ["[data-crew-row]", "[data-crew-new]:not(:disabled)"] {
+        if let Ok(Some(element)) = document.query_selector(selector) {
+            if let Ok(element) = element.dyn_into::<web_sys::HtmlElement>() {
+                let _ = element.focus();
+                return;
+            }
+        }
+    }
 }
 
 /// The bruhs in rail order.
@@ -198,6 +215,18 @@ pub fn CrewRail(
         }
     });
 
+    // ⌘⇧B: open the rail and focus its first row, or New bruh with no rows.
+    if let Some(CrewFocusRequest(request)) = use_context::<CrewFocusRequest>() {
+        Effect::new(move |previous: Option<u32>| {
+            let count = request.get();
+            if previous.is_some_and(|previous| previous != count) {
+                open.set(true);
+                save_pref(OPEN_PREF, "true");
+                request_animation_frame(focus_crew_target);
+            }
+            count
+        });
+    }
     let toggle = move |_| {
         let next = !open.get_untracked();
         open.set(next);

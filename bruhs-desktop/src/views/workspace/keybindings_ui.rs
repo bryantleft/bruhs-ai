@@ -26,12 +26,12 @@ use crate::views::diff_panel::FindInDiff;
 use super::{
     CloseOverlays, ClosePanel, ContinueInT3, ContinueInWorkbench, CopyPullLink, CopyPullNumber,
     CopyResumeCommand, CopyThreadLink, CopyThreadMarkdown, FocusChatInput, FocusCommandBar,
-    ImportThread, JumpThread, MentionFile, NavigateBack, NavigateForward, NewThread, NextThread,
-    OpenCapture, OpenInboxView, OpenKnowledgeView, OpenProjectInEditor, OpenSettings,
+    FocusCrew, ImportThread, JumpThread, MentionFile, NavigateBack, NavigateForward, NewThread,
+    NextThread, OpenCapture, OpenInboxView, OpenKnowledgeView, OpenProjectInEditor, OpenSettings,
     OpenTaskCreateShortcut, OpenTodayView, PinThread, PrevThread, SaveKnowledgeDocument,
-    SearchThreads, SettleThread, ToggleBranchMenu, ToggleDiff, ToggleEffortMenu, ToggleModelPicker,
-    TogglePanel, TogglePreview, ToggleSidebar, ToggleTasks, ToggleTerminal, ToggleWorkspaceMenu,
-    UndoSidebar, UsePreviousWorktree, Workspace, SETTINGS_CODE_RADIUS_PX,
+    SearchThreads, SettleThread, StopAll, ToggleBranchMenu, ToggleDiff, ToggleEffortMenu,
+    ToggleModelPicker, TogglePanel, TogglePreview, ToggleSidebar, ToggleTasks, ToggleTerminal,
+    ToggleWorkspaceMenu, UndoSidebar, UsePreviousWorktree, Workspace, SETTINGS_CODE_RADIUS_PX,
     SETTINGS_MODEL_LABEL_TEXT_SIZE_PX,
 };
 
@@ -165,6 +165,8 @@ pub(super) fn binding_names(command: &str) -> &'static [&'static str] {
         "project.openInEditor" => &["workspace::OpenProjectInEditor"],
         "dialog.dismiss" => &["workspace::CloseOverlays"],
         "composer.focus" => &["workspace::FocusChatInput"],
+        "crew.focus" => &["workspace::FocusCrew"],
+        "agents.stopAll" => &["workspace::StopAll"],
         "task.new" => &["workspace::OpenTaskCreateShortcut"],
         "thread.undo" => &[],
         other
@@ -743,6 +745,8 @@ fn push_rule_bindings(
         "project.openInEditor" => bind(&shortcut, OpenProjectInEditor, name, None, add, installed),
         "dialog.dismiss" => bind(&shortcut, CloseOverlays, name, None, add, installed),
         "composer.focus" => bind(&shortcut, FocusChatInput, name, None, add, installed),
+        "crew.focus" => bind(&shortcut, FocusCrew, name, None, add, installed),
+        "agents.stopAll" => bind(&shortcut, StopAll, name, None, add, installed),
         "task.new" => bind(
             &shortcut,
             OpenTaskCreateShortcut,
