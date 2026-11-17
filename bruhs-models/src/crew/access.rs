@@ -234,7 +234,9 @@ pub fn inside_folder(path: &str, folder: &str) -> bool {
     }
 }
 
-/// A one line summary of a tool call for an approval card.
+/// A one line summary of a tool call for an approval card. A command shows
+/// its first non-blank line and says how many lines follow; the card's
+/// [`approval_detail`] holds the rest.
 #[must_use]
 pub fn approval_summary(tool: &str, input: &Value) -> String {
     let path = || {
@@ -242,23 +244,93 @@ pub fn approval_summary(tool: &str, input: &Value) -> String {
             .as_str()
             .or_else(|| input["notebook_path"].as_str())
     };
-    let summary = match tool {
-        "Edit" | "MultiEdit" | "NotebookEdit" => path().map(|p| format!("Edit {p}")),
-        "Write" => path().map(|p| format!("Write {p}")),
-        "Bash" => input["command"]
-            .as_str()
-            .map(|c| format!("Run {}", c.lines().next().unwrap_or_default())),
-        "SandboxNetworkAccess" => input["host"].as_str().map(|host| format!("Reach {host}")),
-        _ => None,
-    }
-    .unwrap_or_else(|| tool.to_string());
-    if summary.chars().count() <= SUMMARY_MAX_CHARS {
+    let (summary, more) = match tool {
+        "Edit" | "MultiEdit" | "NotebookEdit" => (path().map(|p| format!("Edit {p}")), 0),
+        "Write" => (path().map(|p| format!("Write {p}")), 0),
+        "Bash" => match input["command"].as_str() {
+            Some(command) => {
+                let mut lines = command.lines().map(str::trim).filter(|l| !l.is_empty());
+                let first = lines.next().unwrap_or_default();
+                (Some(format!("Run {first}")), lines.count())
+            }
+            None => (None, 0),
+        },
+        "SandboxNetworkAccess" => (
+            input["host"].as_str().map(|host| format!("Reach {host}")),
+            0,
+        ),
+        _ => (None, 0),
+    };
+    let summary = summary.unwrap_or_else(|| tool.to_string());
+    let mut shown = if summary.chars().count() <= SUMMARY_MAX_CHARS {
         summary
     } else {
         let mut cut: String = summary.chars().take(SUMMARY_MAX_CHARS - 1).collect();
         cut.push('…');
         cut
+    };
+    match more {
+        0 => {}
+        1 => shown.push_str(" (+1 more line)"),
+        more => shown.push_str(&format!(" (+{more} more lines)")),
     }
+    shown
+}
+
+/// The most of a tool call an approval card shows, in bytes.
+pub const DETAIL_MAX_BYTES: usize = 4096;
+/// Ends a detail cut at [`DETAIL_MAX_BYTES`].
+pub const DETAIL_CUT_NOTE: &str = "Cut at 4 KB. The full call is longer.";
+
+/// What the call would do in full, for the card to show under its summary:
+/// the whole command, the text a write or edit puts in, or the input of any
+/// other tool. `None` when the summary already says it all. Cut at
+/// [`DETAIL_MAX_BYTES`], ending with [`DETAIL_CUT_NOTE`] when cut.
+#[must_use]
+pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
+    let text = match tool {
+        "Bash" => {
+            let command = input["command"].as_str()?;
+            let summary = approval_summary(tool, input);
+            if summary.strip_prefix("Run ") == Some(command.trim()) {
+                return None;
+            }
+            command.to_string()
+        }
+        "SandboxNetworkAccess" => return None,
+        "Write" => input["content"].as_str()?.to_string(),
+        "Edit" => edit_text(input),
+        "MultiEdit" => input["edits"]
+            .as_array()?
+            .iter()
+            .map(edit_text)
+            .collect::<Vec<_>>()
+            .join("\n\n"),
+        "NotebookEdit" => input["new_source"].as_str()?.to_string(),
+        _ => match input {
+            Value::Null => return None,
+            Value::Object(fields) if fields.is_empty() => return None,
+            input => serde_json::to_string_pretty(input).ok()?,
+        },
+    };
+    Some(bounded(text))
+}
+
+fn edit_text(edit: &Value) -> String {
+    let old = edit["old_string"].as_str().unwrap_or_default();
+    let new = edit["new_string"].as_str().unwrap_or_default();
+    format!("Replace:\n{old}\nWith:\n{new}")
+}
+
+fn bounded(text: String) -> String {
+    if text.len() <= DETAIL_MAX_BYTES {
+        return text;
+    }
+    let mut end = DETAIL_MAX_BYTES;
+    while !text.is_char_boundary(end) {
+        end -= 1;
+    }
+    format!("{}\n\n{DETAIL_CUT_NOTE}", &text[..end])
 }
 
 /// Identity of a tool call: lowercase hex SHA-256 of the tool, a newline
@@ -700,9 +772,67 @@ mod tests {
     }
 
     #[test]
+    fn a_command_summary_never_hides_lines_silently() {
+        let summary =
+            |command: &str| approval_summary("Bash", &serde_json::json!({"command": command}));
+        assert_eq!(summary("cargo test"), "Run cargo test");
+        assert_eq!(summary("\n  \ncargo test\n"), "Run cargo test");
+        assert_eq!(summary("cd x\n\nrm -rf y"), "Run cd x (+1 more line)");
+        assert_eq!(summary("a\nb\nc\n"), "Run a (+2 more lines)");
+        let long = summary(&format!("{}\nrm -rf /", "x".repeat(400)));
+        assert!(long.ends_with("… (+1 more line)"), "{long}");
+    }
+
+    #[test]
+    fn approval_details_hold_the_whole_call_up_to_4_kb() {
+        let detail = |tool: &str, input: serde_json::Value| approval_detail(tool, &input);
+        assert_eq!(
+            detail("Bash", serde_json::json!({"command": "cargo test"})),
+            None
+        );
+        assert_eq!(
+            detail("Bash", serde_json::json!({"command": "cd x\nrm -rf y"})).as_deref(),
+            Some("cd x\nrm -rf y")
+        );
+        assert_eq!(
+            detail("SandboxNetworkAccess", serde_json::json!({"host": "a.com"})),
+            None
+        );
+        assert_eq!(
+            detail(
+                "Write",
+                serde_json::json!({"file_path": "/w/a", "content": "hi"})
+            )
+            .as_deref(),
+            Some("hi")
+        );
+        assert_eq!(
+            detail(
+                "Edit",
+                serde_json::json!({"file_path": "/w/a", "old_string": "a", "new_string": "b"})
+            )
+            .as_deref(),
+            Some("Replace:\na\nWith:\nb")
+        );
+        assert_eq!(detail("WebFetch", serde_json::json!({})), None);
+        assert_eq!(
+            detail("WebFetch", serde_json::json!({"url": "https://a.com"})).as_deref(),
+            Some("{\n  \"url\": \"https://a.com\"\n}")
+        );
+        let huge = format!("é{}", "x".repeat(10_000));
+        let cut = detail("Write", serde_json::json!({"content": huge})).unwrap();
+        assert!(cut.ends_with(DETAIL_CUT_NOTE));
+        assert!(cut.len() <= DETAIL_MAX_BYTES + DETAIL_CUT_NOTE.len() + 2);
+        assert!(cut.starts_with('é'));
+    }
+
+    #[test]
     fn approvals_have_short_summaries_and_stable_fingerprints() {
         let input = serde_json::json!({"command": "cargo test\nsecond line"});
-        assert_eq!(approval_summary("Bash", &input), "Run cargo test");
+        assert_eq!(
+            approval_summary("Bash", &input),
+            "Run cargo test (+1 more line)"
+        );
         assert_eq!(
             approval_summary("Edit", &serde_json::json!({"file_path": "/w/a.rs"})),
             "Edit /w/a.rs"

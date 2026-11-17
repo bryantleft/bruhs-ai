@@ -261,6 +261,7 @@ mod tests {
             summary: "Run ls".into(),
             fingerprint: "f".into(),
             state: crate::crew::ApprovalState::Waiting,
+            detail: None,
         });
         let notify = item("i2", "a", OutboxKind::Notify, 7);
         let elsewhere = item("i3", "b", OutboxKind::Ask, 8);

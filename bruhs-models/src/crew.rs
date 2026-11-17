@@ -364,6 +364,9 @@ pub struct ApprovalRequest {
     pub fingerprint: String,
     #[serde(default)]
     pub state: ApprovalState,
+    /// The whole call when the summary can't show it, cut at 4 KB.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub detail: Option<String>,
 }
 
 /// Starting values for a new bruh.

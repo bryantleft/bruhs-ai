@@ -215,10 +215,10 @@ fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
 }
 
 fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
-    let summary = item
+    let (summary, detail) = item
         .approval
         .as_ref()
-        .map(|approval| approval.summary.clone())
+        .map(|approval| (approval.summary.clone(), approval.detail.clone()))
         .unwrap_or_default();
     let outcome = approval_outcome(&item);
     let id = StoredValue::new(item.id.clone());
@@ -233,6 +233,9 @@ fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
         <article class=CARD aria-label="Approval">
             <p class="text-label-sm text-rambutan-400">"Wants to"</p>
             <p class="whitespace-pre-wrap break-words text-body text-rambutan-100">{summary}</p>
+            {detail.map(|detail| view! {
+                <pre data-approval-detail="" aria-label="Full request" class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-grape bg-longan-950 p-2 text-code-sm text-rambutan-300">{detail}</pre>
+            })}
             {match outcome {
                 Some(outcome) => view! { <p class="text-label-sm text-rambutan-400">{outcome}</p> }.into_any(),
                 None => view! {

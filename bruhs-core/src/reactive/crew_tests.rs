@@ -691,6 +691,7 @@ async fn stop_all_cancels_every_run_and_pauses_every_bruh() {
             summary: "ls".into(),
             fingerprint: "f1".into(),
             state: ApprovalState::Waiting,
+            detail: None,
         }),
     };
     runtime

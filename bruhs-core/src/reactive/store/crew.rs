@@ -10,8 +10,9 @@ use crate::reactive::clock;
 use bruhs_models::{
     agent::AgentProvider,
     crew::{
-        approval_fingerprint, approval_summary, effective_level, level_unavailable, rail_order,
-        status_for, ApprovalRequest, ApprovalState, BruhAccess, BruhLook, BruhProfile, BruhState,
+        approval_detail, approval_fingerprint, approval_summary, effective_level,
+        level_unavailable, rail_order, status_for, ApprovalRequest, ApprovalState, BruhAccess,
+        BruhLook, BruhProfile, BruhState,
     },
     logic::run_place::claude_effort,
     reactive::{
@@ -236,6 +237,7 @@ pub(in crate::reactive) fn open_approval(
             summary,
             fingerprint: approval_fingerprint(tool, input),
             state: ApprovalState::Waiting,
+            detail: approval_detail(tool, input),
         }),
     };
     always_on::save_item(connection, &item)?;

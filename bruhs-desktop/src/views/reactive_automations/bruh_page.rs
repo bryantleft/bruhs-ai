@@ -43,6 +43,8 @@ const SM_BREAKPOINT_PX: f32 = 640.0;
 /// Web `max-w-[80%]` on chat bubbles and cards.
 const BUBBLE_SHARE: f32 = 0.8;
 const RADIUS_GRAPE_PX: f32 = 8.0;
+/// Web `max-h-64` on an approval's full request.
+const DETAIL_MAX_PX: f32 = 256.0;
 const RADIUS_SEED_PX: f32 = 4.0;
 /// Web `border-longan-800/50` hairlines.
 const HAIRLINE_OPACITY: f32 = 0.5;
@@ -1414,10 +1416,10 @@ impl ReactiveAutomations {
         layout: Layout,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let summary = item
+        let (summary, detail) = item
             .approval
             .as_ref()
-            .map(|approval| approval.summary.clone())
+            .map(|approval| (approval.summary.clone(), approval.detail.clone()))
             .unwrap_or_default();
         let card = self
             .render_bruh_card(&item.id, "Approval", layout)
@@ -1428,7 +1430,25 @@ impl ReactiveAutomations {
                     .text_size(px(BODY_TEXT_PX))
                     .text_color(theme::rambutan_100())
                     .child(summary),
-            );
+            )
+            .when_some(detail, |card, detail| {
+                let id = format!("desktop-bruh-detail-{}", item.id);
+                card.child(
+                    div()
+                        .id(SharedString::from(id.clone()))
+                        .debug_selector(move || id)
+                        .aria_label("Full request")
+                        .max_h(px(DETAIL_MAX_PX))
+                        .overflow_y_scroll()
+                        .p_2()
+                        .rounded(px(RADIUS_GRAPE_PX))
+                        .bg(theme::longan_950())
+                        .font_family(theme::CODE_FONT_FAMILY)
+                        .text_size(px(LABEL_TEXT_PX))
+                        .text_color(theme::rambutan_300())
+                        .child(detail),
+                )
+            });
         let card = match approval_outcome(item) {
             Some(outcome) => card.child(small_text(outcome, theme::rambutan_400())),
             None => {
@@ -1992,6 +2012,22 @@ mod tests {
                 approve: true,
             })
         );
+    }
+
+    #[gpui::test]
+    fn an_approval_card_shows_the_full_request(cx: &mut gpui::TestAppContext) {
+        let mut long = ask("i2", true);
+        if let Some(approval) = long.approval.as_mut() {
+            approval.summary = "Run cd x (+1 more line)".into();
+            approval.detail = Some("cd x\nrm -rf y".into());
+        }
+        let (_, cx) = open(
+            cx,
+            Some(snapshot(BruhStatus::NeedsYou, vec![ask("i1", true), long])),
+            BruhTab::Chat,
+        );
+        assert!(cx.debug_bounds("desktop-bruh-detail-i2").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-detail-i1").is_none());
     }
 
     #[test]
