@@ -412,6 +412,8 @@ impl Workspace {
             .justify_between()
             .child(
                 div()
+                    .debug_selector(|| "desktop-life-privacy-text".into())
+                    .min_w_0()
                     .child(card_title(if finance {
                         "Finance privacy"
                     } else {
@@ -1198,6 +1200,8 @@ impl Workspace {
                     .justify_between()
                     .child(
                         div()
+                            .debug_selector(|| "desktop-life-title".into())
+                            .min_w_0()
                             .child(
                                 div()
                                     .font_family(theme::HEADING_FONT_FAMILY)

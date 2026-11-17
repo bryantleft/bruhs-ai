@@ -769,10 +769,13 @@ impl Workspace {
                     .border_b_1()
                     .border_color(theme::longan_800().opacity(0.5))
                     .flex()
+                    .flex_wrap()
+                    .gap_3()
                     .items_center()
                     .justify_between()
                     .child(
                         div()
+                            .min_w_0()
                             .child(
                                 div()
                                     .font_family(theme::HEADING_FONT_FAMILY)
@@ -1189,12 +1192,14 @@ impl Workspace {
                     .border_b_1()
                     .border_color(theme::longan_800().opacity(0.5))
                     .flex()
+                    .flex_wrap()
+                    .gap_3()
                     .items_center()
                     .justify_between()
                     .child(
                         web_button(
                             "knowledge-back",
-                            WebButtonVariant::Ghost,
+                            WebButtonVariant::Outline,
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
