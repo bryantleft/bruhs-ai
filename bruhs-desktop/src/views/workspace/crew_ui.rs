@@ -503,11 +503,19 @@ impl Workspace {
         if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
             chat.update(cx, |chat, cx| chat.stop_streaming(cx));
         }
-        self.reactive_automations
+        let stopping = self
+            .reactive_automations
             .update(cx, |panel, cx| panel.stop_all_crew(cx));
-        self.meetings_hub.update(cx, |hub, cx| {
-            hub.show_notice("Stopped all bruhs.", false, cx)
-        });
+        // The notice waits for the sends, so it never claims a failed stop.
+        let hub = self.meetings_hub.clone();
+        cx.spawn(async move |_, cx| {
+            let outcome = stopping.await;
+            hub.update(cx, |hub, cx| match outcome {
+                Ok(message) => hub.show_notice(message, false, cx),
+                Err(error) => hub.show_notice(error, true, cx),
+            });
+        })
+        .detach();
     }
 
     fn toggle_crew_rail(&mut self, cx: &mut Context<'_, Self>) {
@@ -890,6 +898,29 @@ mod tests {
             assert_eq!(
                 notice.map(|n| n.message.as_str()),
                 Some("Stopped all bruhs.")
+            );
+        });
+    }
+
+    /// ⌘. never waits behind a command in flight, and says when it failed.
+    #[gpui::test]
+    fn stop_all_skips_the_queue_and_reports_a_failure(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        show_runs(&workspace, cx, CREW_PROTOCOL, vec![queued_run("q")]);
+        workspace.update(cx, |workspace, cx| {
+            workspace.reactive_automations.update(cx, |panel, _| {
+                panel.set_busy_for_test(true);
+                panel.fail_stops_for_test("offline");
+            });
+        });
+        dispatch(&workspace, cx, Box::new(super::StopAll));
+        assert_eq!(sent(&workspace, cx), [ReactiveCommand::StopAll]);
+        workspace.update(cx, |workspace, cx| {
+            let notice = workspace.meetings_hub.read(cx).notice.as_ref();
+            assert_eq!(
+                notice.map(|n| n.message.as_str()),
+                Some("Couldn't stop every bruh: offline")
             );
         });
     }

@@ -219,6 +219,9 @@ pub(crate) struct ReactiveAutomations {
     /// Every command sent, in order; tests never reach a server.
     #[cfg(test)]
     sent: Vec<ReactiveCommand>,
+    /// What each stop command of ⌘. fails with in a test.
+    #[cfg(test)]
+    stop_failure: Option<String>,
 }
 
 trait ReactiveButton {
@@ -511,6 +514,8 @@ impl ReactiveAutomations {
             queued: VecDeque::new(),
             #[cfg(test)]
             sent: Vec::new(),
+            #[cfg(test)]
+            stop_failure: None,
         };
         if cfg!(not(test)) {
             panel.start_crew_stream(cx);
@@ -1355,16 +1360,63 @@ impl ReactiveAutomations {
         self.send_in(command, Scope::Crew, cx);
     }
     /// Stop every bruh: one command to a current service, a cancel per live
-    /// run to an older one. Runs in order after any command on its way.
-    pub(crate) fn stop_all_crew(&mut self, cx: &mut Context<'_, Self>) {
+    /// run to an older one, going on past a cancel that fails. Sent at once,
+    /// beside any command in flight: Stop never waits in the queue, where a
+    /// failure ahead of it would drop it. The task ends with what ⌘. says.
+    pub(crate) fn stop_all_crew(
+        &mut self,
+        cx: &mut Context<'_, Self>,
+    ) -> Task<Result<&'static str, String>> {
         let runs = self
             .snapshot
             .as_ref()
             .map_or(&[][..], |snapshot| snapshot.runs.as_slice());
         let commands = bruhs_models::crew::stop_commands(self.crew.protocol.unwrap_or(0), runs);
-        if !commands.is_empty() {
-            self.send_all(commands, Scope::Crew, cx);
+        #[cfg(test)]
+        {
+            let _ = cx;
+            self.sent.extend(commands.iter().cloned());
+            let failed: Vec<String> = self
+                .stop_failure
+                .iter()
+                .cloned()
+                .cycle()
+                .take(commands.len())
+                .collect();
+            Task::ready(bruhs_models::crew::stop_all_result(&failed))
         }
+        #[cfg(not(test))]
+        {
+            let client = self.client.clone();
+            let sending = spawn_tokio(cx, async move {
+                bruhs_models::crew::send_stop_commands(commands, |command| {
+                    let client = client.clone();
+                    async move {
+                        client
+                            .reactive_command(&command)
+                            .await
+                            .map(|_| ())
+                            .map_err(reactive_error)
+                    }
+                })
+                .await
+            });
+            cx.spawn(async move |this, cx| {
+                let failed = sending.await;
+                let _ = this.update(cx, |this, cx| this.refresh_snapshot(cx));
+                bruhs_models::crew::stop_all_result(&failed)
+            })
+        }
+    }
+    /// Hold the panel as if a command were in flight.
+    #[cfg(test)]
+    pub(crate) fn set_busy_for_test(&mut self, busy: bool) {
+        self.busy = busy;
+    }
+    /// Make every stop command of ⌘. fail with `error`.
+    #[cfg(test)]
+    pub(crate) fn fail_stops_for_test(&mut self, error: &str) {
+        self.stop_failure = Some(error.to_string());
     }
     /// Read the crew again, such as after a failed load.
     pub(crate) fn reload_crew(&mut self, cx: &mut Context<'_, Self>) {

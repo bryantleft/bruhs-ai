@@ -470,10 +470,14 @@ pub fn Shell() -> impl IntoView {
                     }
                     let protocol =
                         agent_updates.and_then(|updates| updates.protocol.get_untracked());
-                    crate::components::crew::shortcuts::stop_all(protocol, move |message| {
-                        thread_notice.flash(message);
+                    // The notice waits for the sends: it never claims a stop
+                    // that failed.
+                    crate::components::crew::shortcuts::stop_all(protocol, move |outcome| {
+                        thread_notice.flash(match outcome {
+                            Ok(message) => message.to_string(),
+                            Err(error) => error,
+                        });
                     });
-                    thread_notice.flash("Stopped all bruhs.");
                 }
                 "crew.focus" => {
                     ev.prevent_default();

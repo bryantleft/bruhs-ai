@@ -1,7 +1,7 @@
 //! What the crew's two shortcuts do on the web: ⌘. stops every bruh and
 //! ⌘⇧B moves focus into the rail.
 
-use bruhs_models::crew::{service_is_current, stop_commands};
+use bruhs_models::crew::{send_stop_commands, service_is_current, stop_all_result, stop_commands};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
 use leptos::prelude::*;
 
@@ -22,21 +22,25 @@ pub fn stop_plan(
 }
 
 /// Stop every bruh. A current service gets `StopAll`; an older or unknown one
-/// gets the snapshot first, then a cancel for each live run.
-pub fn stop_all(protocol: Option<u32>, on_error: impl Fn(String) + 'static) {
+/// gets the snapshot first, then a cancel for each live run, going on past a
+/// cancel that fails. `on_done` hears the outcome once every send finished.
+pub fn stop_all(protocol: Option<u32>, on_done: impl Fn(Result<&'static str, String>) + 'static) {
     wasm_bindgen_futures::spawn_local(async move {
         let commands = match stop_plan(protocol, None) {
             Some(commands) => commands,
             None => match crate::api::reactive_snapshot().await {
                 Ok(snapshot) => stop_plan(protocol, Some(&snapshot)).unwrap_or_default(),
-                Err(error) => return on_error(error.to_string()),
+                Err(error) => return on_done(stop_all_result(&[error.to_string()])),
             },
         };
-        for command in commands {
-            if let Err(error) = crate::api::reactive_command(&command).await {
-                return on_error(error.to_string());
-            }
-        }
+        let failed = send_stop_commands(commands, |command| async move {
+            crate::api::reactive_command(&command)
+                .await
+                .map(|_| ())
+                .map_err(|error| error.to_string())
+        })
+        .await;
+        on_done(stop_all_result(&failed));
     });
 }
 

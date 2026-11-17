@@ -139,6 +139,37 @@ pub fn stop_commands(protocol: u32, runs: &[ReactiveRun]) -> Vec<ReactiveCommand
         .collect()
 }
 
+/// What ⌘. says once every stop command went through.
+pub const STOPPED_ALL: &str = "Stopped all bruhs.";
+
+/// Send each stop command in order, going on past a failure, so one
+/// rejected cancel never keeps the rest from stopping. Returns each error.
+pub async fn send_stop_commands<F, Fut>(commands: Vec<ReactiveCommand>, mut send: F) -> Vec<String>
+where
+    F: FnMut(ReactiveCommand) -> Fut,
+    Fut: std::future::Future<Output = Result<(), String>>,
+{
+    let mut failed = Vec::new();
+    for command in commands {
+        if let Err(error) = send(command).await {
+            failed.push(error);
+        }
+    }
+    failed
+}
+
+/// What ⌘. says after its sends: [`STOPPED_ALL`] only when none failed.
+pub fn stop_all_result(failed: &[String]) -> Result<&'static str, String> {
+    match failed {
+        [] => Ok(STOPPED_ALL),
+        [only] => Err(format!("Couldn't stop every bruh: {only}")),
+        [first, rest @ ..] => Err(format!(
+            "Couldn't stop every bruh: {first} ({} more failed)",
+            rest.len()
+        )),
+    }
+}
+
 /// A bruh's settings as the editor holds them.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct BruhSettings {
@@ -213,6 +244,7 @@ pub fn create_command(
 mod tests {
     use super::*;
     use crate::crew::{AccessLevel, BruhColor, BruhStatus, CREW_PROTOCOL};
+    use std::future::Future as _;
 
     fn at(ms: i64) -> EpochMs {
         EpochMs::saturating_from_i64(ms)
@@ -383,6 +415,42 @@ mod tests {
         assert_eq!(
             stop_commands(0, &runs),
             vec![cancel("q"), cancel("r"), cancel("a")]
+        );
+    }
+
+    #[test]
+    fn stop_commands_go_on_past_a_failure_and_say_so() {
+        let cancel = |id: &str| ReactiveCommand::CancelRun { id: id.into() };
+        let mut tried = Vec::new();
+        let failed = {
+            let sending =
+                send_stop_commands(vec![cancel("a"), cancel("b"), cancel("c")], |command| {
+                    tried.push(command.clone());
+                    std::future::ready(if command == cancel("b") {
+                        Err("already ended".to_string())
+                    } else {
+                        Ok(())
+                    })
+                });
+            let mut sending = std::pin::pin!(sending);
+            let std::task::Poll::Ready(failed) = sending
+                .as_mut()
+                .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+            else {
+                panic!("ready sends finish at once");
+            };
+            failed
+        };
+        assert_eq!(tried, vec![cancel("a"), cancel("b"), cancel("c")]);
+        assert_eq!(failed, vec!["already ended".to_string()]);
+        assert_eq!(
+            stop_all_result(&failed),
+            Err("Couldn't stop every bruh: already ended".to_string())
+        );
+        assert_eq!(stop_all_result(&[]), Ok(STOPPED_ALL));
+        assert_eq!(
+            stop_all_result(&["x".into(), "y".into(), "z".into()]),
+            Err("Couldn't stop every bruh: x (2 more failed)".to_string())
         );
     }
 
