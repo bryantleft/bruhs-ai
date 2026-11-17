@@ -2750,8 +2750,17 @@ impl Render for Workspace {
         self.preview_panel
             .update(cx, |panel, _| panel.set_shown(preview_shown));
         if self.active_view == AppView::Workbench && self.workbench_panel.is_none() {
-            self.workbench_panel =
-                Some(cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(window, cx)));
+            let panel = cx.new(|cx| crate::views::workbench::WorkbenchPanel::new(window, cx));
+            // Verification's "Use draft" fills the composer, as on the web.
+            self._subscriptions.push(cx.subscribe_in(
+                &panel,
+                window,
+                |this, _panel, event: &crate::views::workbench::WorkbenchEvent, window, cx| {
+                    let crate::views::workbench::WorkbenchEvent::DictationDraft(text) = event;
+                    this.receive_dictation_draft(text, window, cx);
+                },
+            ));
+            self.workbench_panel = Some(panel);
         }
         if let AppView::Whiteboards { board_id } = self.active_view.clone() {
             let project = self.whiteboard_project(cx);
