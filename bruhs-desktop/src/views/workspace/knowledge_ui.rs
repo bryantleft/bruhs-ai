@@ -1359,6 +1359,9 @@ impl Workspace {
                             )
                             .child(
                                 div()
+                                    .debug_selector(|| {
+                                        "desktop-knowledge-document-meta".to_string()
+                                    })
                                     .w(px(288.0))
                                     .when(compact, |metadata| metadata.w_full())
                                     .flex_shrink_0()

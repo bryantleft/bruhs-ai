@@ -55,6 +55,11 @@ impl ResizableState {
         &self.sizes
     }
 
+    /// Whether one of the group's handles is being dragged.
+    pub fn is_resizing(&self) -> bool {
+        self.resizing_panel_ix.is_some()
+    }
+
     /// Programmatically resize the panel at `ix` to `size`, redistributing
     /// space among siblings using the same logic as a drag.
     ///

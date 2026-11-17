@@ -1138,9 +1138,10 @@ impl Workspace {
     }
 
     /// Whether thread `id`'s card is in the shown sidebar list this frame
-    /// (sidebar shown; folds, filter and search applied).
-    fn thread_card_shown(&self, id: &str, compact: bool, cx: &App) -> bool {
-        let sidebar_shown = if compact {
+    /// (sidebar shown; folds, filter and search applied). `drawer`: the
+    /// window is narrow enough that the sidebar opens as a drawer.
+    fn thread_card_shown(&self, id: &str, drawer: bool, cx: &App) -> bool {
+        let sidebar_shown = if drawer {
             self.compact_sidebar_open
         } else {
             self.sidebar_visible
@@ -1155,10 +1156,10 @@ impl Workspace {
     }
 
     /// Whether the open thread menu's card is shown. The menu draws with it.
-    pub(super) fn thread_menu_card_shown(&self, compact: bool, cx: &App) -> bool {
+    pub(super) fn thread_menu_card_shown(&self, drawer: bool, cx: &App) -> bool {
         self.thread_menu_id
             .as_deref()
-            .is_some_and(|id| self.thread_card_shown(id, compact, cx))
+            .is_some_and(|id| self.thread_card_shown(id, drawer, cx))
     }
 
     /// Whether keyboard focus is on one of the thread menu's items.
@@ -1186,7 +1187,7 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         let button = self
-            .thread_card_shown(id, Self::compact_layout(window), cx)
+            .thread_card_shown(id, Self::sidebar_drawer_layout(window), cx)
             .then(|| self.threads.iter().find(|thread| thread.id == id))
             .flatten()
             .and_then(|thread| {

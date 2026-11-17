@@ -3,9 +3,11 @@ use super::*;
 impl Workspace {
     /// The main column's title bar row: window drag area, room for the
     /// traffic lights when the sidebar is hidden, and the sidebar toggle.
+    /// `sidebar_drawer`: the window is narrow enough that the sidebar opens
+    /// as a drawer, so it is not docked beside this row.
     pub(super) fn render_workspace_navigation(
         &self,
-        compact: bool,
+        sidebar_drawer: bool,
         cx: &Context<'_, Self>,
     ) -> Stateful<Div> {
         div()
@@ -18,7 +20,7 @@ impl Workspace {
             .h(px(44.0))
             .flex_shrink_0()
             .px(px(12.0))
-            .when(compact || !self.sidebar_visible, |el| {
+            .when(sidebar_drawer || !self.sidebar_visible, |el| {
                 el.pl(px(SIDEBAR_HEADER_LEFT_INSET_PX))
             })
             .flex()

@@ -197,22 +197,10 @@ pub struct RightPanelSignal(pub RwSignal<RightPanel>);
 #[derive(Copy, Clone)]
 pub struct RightPanelWidth(pub RwSignal<f64>);
 
-pub const RIGHT_PANEL_DEFAULT_WIDTH: f64 = 540.0;
-pub const RIGHT_PANEL_MIN_WIDTH: f64 = 360.0;
-/// The chat column never drops below this while the panel is open.
-pub const CHAT_COLUMN_MIN_WIDTH: f64 = 360.0;
-
-/// Clamp a requested panel width: at least the minimum, at most 70% of the
-/// viewport, and never so wide the chat column collapses.
-pub fn clamp_panel_width(requested: f64, viewport_width: f64) -> f64 {
-    let max = (viewport_width * 0.7)
-        .min(viewport_width - CHAT_COLUMN_MIN_WIDTH)
-        .round();
-    if max <= RIGHT_PANEL_MIN_WIDTH {
-        return RIGHT_PANEL_MIN_WIDTH;
-    }
-    requested.clamp(RIGHT_PANEL_MIN_WIDTH, max)
-}
+// Shared with desktop, which sizes its right panel the same way.
+pub use bruhs_models::logic::layout::{
+    clamp_panel_width, RIGHT_PANEL_DEFAULT_WIDTH, RIGHT_PANEL_MIN_WIDTH,
+};
 
 /// What the Diff surface is showing.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -385,15 +373,5 @@ mod tests {
         p.toggle_surface(PanelSurface::Pull);
         assert!(p.open);
         assert_eq!(p.surface, Some(PanelSurface::Pull));
-    }
-
-    #[test]
-    fn panel_width_clamps_to_viewport() {
-        assert_eq!(clamp_panel_width(540.0, 1440.0), 540.0);
-        assert_eq!(clamp_panel_width(100.0, 1440.0), RIGHT_PANEL_MIN_WIDTH);
-        assert_eq!(clamp_panel_width(2000.0, 1440.0), 1008.0);
-        // Narrow viewport: cap by the chat column floor, never below the minimum.
-        assert_eq!(clamp_panel_width(600.0, 800.0), 440.0);
-        assert_eq!(clamp_panel_width(600.0, 600.0), RIGHT_PANEL_MIN_WIDTH);
     }
 }

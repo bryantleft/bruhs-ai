@@ -64,6 +64,8 @@ use bruhs_models::{
 mod app_links;
 mod automations_ui;
 mod booking_ui;
+#[cfg(test)]
+mod breakpoint_tests;
 mod calendar_ui;
 mod capture_ui;
 #[cfg(test)]
@@ -1064,7 +1066,20 @@ fn form_textarea(input: Input, height_px: f32) -> Input {
 }
 /// bruhs type scale: every role is `line-height: 1.5`.
 const WORKSPACE_LINE_HEIGHT: f32 = 1.5;
+/// The web's Tailwind breakpoints (`sm`, `md`, `lg`). Its layouts change at
+/// these window widths, so each desktop layout switches where its web
+/// counterpart does.
+const SM_BREAKPOINT_PX: f32 = 640.0;
+const MD_BREAKPOINT_PX: f32 = 768.0;
+const LG_BREAKPOINT_PX: f32 = 1024.0;
+/// Where Today, Inbox conversations, Life and Agent workflows still change
+/// layout; their web breakpoints are not adopted yet (PM-53).
 const WORKSPACE_COMPACT_BREAKPOINT_PX: f32 = 960.0;
+/// Web `w-[min(88vw,24rem)]`: the right panel's width as a drawer below `md`.
+const RIGHT_PANEL_DRAWER_WIDTH_PX: f32 = 384.0;
+const RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE: f32 = 0.88;
+/// Web `bg-longan-950/70`: the scrim under the sidebar and right panel drawers.
+const DRAWER_SCRIM_OPACITY: f32 = 0.70;
 const CHAT_NO_ACTIVE_THREAD_LABEL: &str = "Pick a conversation, or start a new one.";
 const CHAT_NO_ACTIVE_THREAD_TEXT_SIZE_PX: f32 = 13.0;
 const WORKSPACE_SIDE_PANEL_WIDTH_PX: f32 = SIDEBAR_WIDTH_PX;
@@ -1072,9 +1087,8 @@ const WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX: f32 = 208.0;
 /// Diff rows need more room than the tasks list.
 /// Web `RIGHT_PANEL_DEFAULT_WIDTH`.
 const WORKSPACE_RIGHT_PANEL_WIDTH_PX: f32 = 540.0;
-/// Web `RIGHT_PANEL_MIN_WIDTH` / `CHAT_COLUMN_MIN_WIDTH`.
+/// Web `RIGHT_PANEL_MIN_WIDTH`.
 const RIGHT_PANEL_MIN_WIDTH_PX: f32 = 360.0;
-const CHAT_COLUMN_MIN_WIDTH_PX: f32 = 360.0;
 const WORKSPACE_SIDEBAR_BORDER_OPACITY: f32 = 0.50;
 const WORKSPACE_SIDEBAR_TAB_RADIUS_PX: f32 = 4.0;
 const WORKSPACE_THREAD_ROW_HOVER_BG_OPACITY: f32 = 0.30;
@@ -2212,12 +2226,31 @@ impl Workspace {
         self.set_permission_mode(permission_mode_after_cycle(self.permission_mode), cx);
     }
 
+    /// Whether the window is narrower than the web breakpoint
+    /// `breakpoint_px`: the web shows its layout without that `sm:`, `md:`
+    /// or `lg:` variant.
+    fn narrower_than(window: &Window, breakpoint_px: f32) -> bool {
+        f32::from(window.viewport_size().width) < breakpoint_px
+    }
+
     fn compact_layout(window: &Window) -> bool {
-        f32::from(window.viewport_size().width) < WORKSPACE_COMPACT_BREAKPOINT_PX
+        Self::narrower_than(window, WORKSPACE_COMPACT_BREAKPOINT_PX)
+    }
+
+    /// Web: below `sm` the sidebar is a drawer over a scrim; from `sm` it
+    /// docks. The window's 640px minimum keeps it docked outside tests.
+    fn sidebar_drawer_layout(window: &Window) -> bool {
+        Self::narrower_than(window, SM_BREAKPOINT_PX)
+    }
+
+    /// Web: below `md` the right panel is a drawer over a scrim; from `md`
+    /// it docks beside the chat.
+    fn right_panel_drawer_layout(window: &Window) -> bool {
+        Self::narrower_than(window, MD_BREAKPOINT_PX)
     }
 
     fn toggle_sidebar_for_window(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
-        if Self::compact_layout(window) {
+        if Self::sidebar_drawer_layout(window) {
             self.compact_sidebar_open = !self.compact_sidebar_open;
             self.close_transient_surfaces();
             cx.notify();
@@ -2526,7 +2559,8 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_main_surface(&self, compact: bool, window: &Window, cx: &Context<'_, Self>) -> Div {
+    fn render_main_surface(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
+        let compact = Self::compact_layout(window);
         match &self.active_view {
             AppView::Today => self.render_today_page(compact, cx),
             AppView::Inbox => self.render_inbox_page(cx),
@@ -2589,7 +2623,7 @@ impl Workspace {
                 .flex_col()
                 .child(self.render_terminal_page_header())
                 .child(self.terminal_panel.clone()),
-            AppView::Tasks => self.render_tasks_page(compact, cx),
+            AppView::Tasks => self.render_tasks_page(window, cx),
             AppView::Calendar => self.render_calendar_page(cx),
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
@@ -2645,15 +2679,21 @@ impl Workspace {
                 self.with_back_to_people(detail, cx)
             }
             AppView::MeetingNoteDetail { note_id } => self.render_local_meeting_note(note_id, cx),
-            AppView::DocumentDetail { document_id } => {
-                self.render_document_editor(document_id, compact, cx)
-            }
+            // Web: the document's metadata column docks from `lg`.
+            AppView::DocumentDetail { document_id } => self.render_document_editor(
+                document_id,
+                Self::narrower_than(window, LG_BREAKPOINT_PX),
+                cx,
+            ),
             AppView::ClipDetail { .. } => self.render_source_clip_editor(false, cx),
             AppView::ConversationDetail { conversation_id } => {
                 let detail = self.render_conversation_detail(conversation_id, compact, cx);
                 self.with_back_to_people(detail, cx)
             }
-            AppView::Booking { slug } => self.render_booking_page(slug, compact, cx),
+            // Web `sm:grid-cols-2`: two columns of times from `sm`.
+            AppView::Booking { slug } => {
+                self.render_booking_page(slug, Self::narrower_than(window, SM_BREAKPOINT_PX), cx)
+            }
             AppView::Settings => self.render_web_only_view(cx),
         }
     }
@@ -2710,14 +2750,15 @@ impl Render for Workspace {
                 return_focus.focus(window, cx);
             }
         }
-        let compact = Self::compact_layout(window);
+        let sidebar_drawer = Self::sidebar_drawer_layout(window);
+        let right_panel_drawer = Self::right_panel_drawer_layout(window);
         // The thread menu draws with its card and lives while focus is in
         // it. When its card goes (the sidebar hid, a fold closed, a filter
         // changed) or focus left it (a shortcut opened another surface), it
         // closes, so its backdrop cannot swallow the next click.
         let menu_focused = self.thread_menu_has_focus(window);
         if self.thread_menu_id.is_some()
-            && (!menu_focused || !self.thread_menu_card_shown(compact, cx))
+            && (!menu_focused || !self.thread_menu_card_shown(sidebar_drawer, cx))
         {
             self.thread_menu_id = None;
         }
@@ -2792,6 +2833,12 @@ impl Render for Workspace {
             panel.update(cx, |panel, cx| panel.set_shown(workbench_shown, cx));
         }
         let booking = matches!(self.active_view, AppView::Booking { .. });
+        let sidebar_docked = !sidebar_drawer && self.sidebar_visible && !booking;
+        let sidebar_drawer_open = sidebar_drawer && self.compact_sidebar_open && !booking;
+        let chat_panel_open = self.right_panel_open() && self.active_view == AppView::Chat;
+        let right_drawer_width = (f32::from(window.viewport_size().width)
+            * RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE)
+            .min(RIGHT_PANEL_DRAWER_WIDTH_PX);
         let body = div()
             .id("workspace-body")
             .role(Role::Main)
@@ -2803,7 +2850,7 @@ impl Render for Workspace {
             .flex()
             .flex_row()
             // Like web, the booking page is a page of its own.
-            .when(!compact && self.sidebar_visible && !booking, |el| {
+            .when(sidebar_docked, |el| {
                 el.child(
                     div()
                         .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX))
@@ -2822,7 +2869,7 @@ impl Render for Workspace {
                     .flex()
                     .flex_col()
                     .when(!booking, |el| {
-                        el.child(self.render_workspace_navigation(compact, cx))
+                        el.child(self.render_workspace_navigation(sidebar_drawer, cx))
                     })
                     .child(
                         div()
@@ -2833,17 +2880,32 @@ impl Render for Workspace {
                             .flex()
                             .flex_col()
                             .overflow_hidden()
-                            .child(self.render_main_surface(compact, window, cx))
+                            .child(self.render_main_surface(window, cx))
                             // Notices float over the view (no layout shift).
                             .children(self.render_hub_notice(window, cx)),
                     );
-                if !compact && self.right_panel_open() && self.active_view == AppView::Chat {
-                    // Web: the panel's left edge drags; the width is clamped
-                    // to [360, viewport − 360] and remembered.
+                if !right_panel_drawer && chat_panel_open {
+                    // Web: the panel's left edge drags and the width is
+                    // remembered, clamped, and gives way to the chat's 360px
+                    // minimum. A window resize never changes the remembered
+                    // width, so the panel holds it unless its edge is dragged.
                     let viewport_width = f32::from(window.viewport_size().width);
-                    let width = clamp_right_panel_width(self.right_panel_width, viewport_width);
-                    let max_width =
-                        (viewport_width - CHAT_COLUMN_MIN_WIDTH_PX).max(RIGHT_PANEL_MIN_WIDTH_PX);
+                    let sidebar_width = if sidebar_docked {
+                        WORKSPACE_SIDE_PANEL_WIDTH_PX
+                    } else {
+                        0.0
+                    };
+                    let width = docked_right_panel_width(
+                        self.right_panel_width,
+                        viewport_width,
+                        sidebar_width,
+                    );
+                    let (min_width, max_width) =
+                        if self.right_panel_split_state.read(cx).is_resizing() {
+                            docked_right_panel_range(viewport_width, sidebar_width)
+                        } else {
+                            (width, width)
+                        };
                     div()
                         .flex_1()
                         .h_full()
@@ -2856,7 +2918,7 @@ impl Render for Workspace {
                                 .child(
                                     resizable_panel()
                                         .size(px(width))
-                                        .size_range(px(RIGHT_PANEL_MIN_WIDTH_PX)..px(max_width))
+                                        .size_range(px(min_width)..px(max_width))
                                         .child(self.render_right_panel(cx)),
                                 ),
                         )
@@ -2867,14 +2929,14 @@ impl Render for Workspace {
             })
             .children(self.render_live_meeting_pill(cx))
             .children(self.render_auto_record_prompt(cx))
-            .when(compact && self.compact_sidebar_open, |el| {
+            .when(sidebar_drawer_open, |el| {
                 el.child(
                     div()
                         .id("compact-sidebar-backdrop")
                         .debug_selector(|| "desktop-compact-sidebar-backdrop".to_string())
                         .absolute()
                         .size_full()
-                        .bg(theme::longan_950().opacity(0.58))
+                        .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY))
                         .occlude()
                         .on_click(cx.listener(|this, _event, _window, cx| {
                             cx.stop_propagation();
@@ -2898,26 +2960,35 @@ impl Render for Workspace {
                         .child(self.render_sidebar(cx)),
                 )
             })
-            .when(
-                compact && self.right_panel_open() && self.active_view == AppView::Chat,
-                |el| {
-                    el.child(
-                        div()
-                            .id("compact-tasks-panel")
-                            .debug_selector(|| "desktop-compact-tasks-panel".to_string())
-                            .role(Role::Complementary)
-                            .aria_label("Right panel")
-                            .absolute()
-                            .right_0()
-                            .top_0()
-                            .w(px(WORKSPACE_RIGHT_PANEL_WIDTH_PX))
-                            .max_w_full()
-                            .h_full()
-                            .occlude()
-                            .child(self.render_right_panel(cx)),
-                    )
-                },
-            );
+            .when(right_panel_drawer && chat_panel_open, |el| {
+                el.child(
+                    div()
+                        .id("compact-right-panel-backdrop")
+                        .debug_selector(|| "desktop-compact-right-panel-backdrop".to_string())
+                        .absolute()
+                        .size_full()
+                        .bg(theme::longan_950().opacity(DRAWER_SCRIM_OPACITY))
+                        .occlude()
+                        .on_click(cx.listener(|this, _event, window, cx| {
+                            cx.stop_propagation();
+                            this.close_panel(&ClosePanel, window, cx);
+                        })),
+                )
+                .child(
+                    div()
+                        .id("compact-tasks-panel")
+                        .debug_selector(|| "desktop-compact-tasks-panel".to_string())
+                        .role(Role::Complementary)
+                        .aria_label("Right panel")
+                        .absolute()
+                        .right_0()
+                        .top_0()
+                        .w(px(right_drawer_width))
+                        .h_full()
+                        .occlude()
+                        .child(self.render_right_panel(cx)),
+                )
+            });
 
         div()
             .key_context("Workspace")

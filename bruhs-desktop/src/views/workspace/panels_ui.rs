@@ -2,6 +2,7 @@
 
 use super::*;
 use crate::app_state::spawn_tokio;
+use bruhs_models::{logic::layout, num::ToFloatLossy as _};
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProjectTool {
@@ -60,14 +61,27 @@ pub(super) fn showing_surface(
 pub(super) const TERMINAL_PAGE_TITLE: &str = "Terminal";
 pub(super) const TERMINAL_PAGE_HINT: &str = "Shells on this machine, independent of any thread.";
 
-/// Web `clamp_panel_width`: the right panel stays between 360px and the
-/// viewport minus the chat column's 360px.
-pub(super) fn clamp_right_panel_width(requested: f32, viewport_width: f32) -> f32 {
-    let max = viewport_width - CHAT_COLUMN_MIN_WIDTH_PX;
-    if max <= RIGHT_PANEL_MIN_WIDTH_PX {
-        return RIGHT_PANEL_MIN_WIDTH_PX;
-    }
-    requested.clamp(RIGHT_PANEL_MIN_WIDTH_PX, max)
+/// The docked right panel's (min, max) width beside a docked sidebar
+/// `sidebar_width` wide (0 when hidden); see [`layout::docked_panel_range`].
+pub(super) fn docked_right_panel_range(viewport_width: f32, sidebar_width: f32) -> (f32, f32) {
+    let (min, max) =
+        layout::docked_panel_range(f64::from(viewport_width), f64::from(sidebar_width));
+    (min.to_f32_lossy(), max.to_f32_lossy())
+}
+
+/// The docked right panel's width: the remembered `requested`, clamped,
+/// giving way to the chat column; see [`layout::docked_panel_width`].
+pub(super) fn docked_right_panel_width(
+    requested: f32,
+    viewport_width: f32,
+    sidebar_width: f32,
+) -> f32 {
+    layout::docked_panel_width(
+        f64::from(requested),
+        f64::from(viewport_width),
+        f64::from(sidebar_width),
+    )
+    .to_f32_lossy()
 }
 /// Matches the chat and sidebar header heights.
 pub(super) const WORKSPACE_PANEL_TAB_BAR_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
