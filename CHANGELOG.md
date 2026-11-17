@@ -29,6 +29,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   Codex model and Codex is signed out. Log in with Codex runs `codex login`
   and waits for it, and the model picker shows whether the Codex CLI is
   signed in.
+- The desktop app reopens the page you left when it restarts, as the web
+  does after a reload: Workbench, Whiteboards, a document, a source, a
+  conversation (with its draft), a meeting or a meeting note. A record you
+  deleted opens its list instead.
 - The desktop app has the web's booking page for a scheduling link. The
   link in the scheduling panel opens it: pick one of the next free times
   inside the link's availability and buffers, add a name, and the booking is
@@ -144,6 +148,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - The desktop app now says which editor opened a project or file, and says
   No project to open when there is none, as the web does. Both apps say when
   the system terminal could not open.
+- In the desktop app, Project title instructions picks the project from a
+  list, and an app event source picks its meeting event from a list, as on
+  the web, instead of asking you to type them.
 
 ### Fixed
 
