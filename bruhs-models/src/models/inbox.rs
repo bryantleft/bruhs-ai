@@ -14,6 +14,9 @@ pub use directory::{InboxCard, InboxCounts, InboxDirectory, InboxFilter, INBOX_P
 pub const DELETE_CONVERSATION_TITLE: &str = "Delete conversation";
 pub const DELETE_CONVERSATION_DETAIL: &str =
     "This permanently deletes the local conversation and its messages.";
+/// Under a conversation's reply box on both apps. Command Enter logs the
+/// reply; Save draft keeps it on this device.
+pub const REPLY_HINT: &str = "⌘↵ log reply, drafts stay local";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -235,6 +238,19 @@ impl InboxConversation {
             .map_or("", |message| message.body.as_str())
     }
 
+    /// The line under a conversation's title on both apps: its source, then
+    /// each participant, such as "Email, Ada Lovelace".
+    pub fn source_and_participants(&self) -> String {
+        std::iter::once(self.source.label())
+            .chain(
+                self.participants
+                    .iter()
+                    .map(|participant| participant.display_name.as_str()),
+            )
+            .collect::<Vec<_>>()
+            .join(", ")
+    }
+
     pub fn last_message(&self) -> Option<&InboxMessage> {
         self.messages
             .iter()
@@ -371,6 +387,28 @@ fn normalized_subject(subject: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_title_line_names_the_source_and_every_participant() {
+        let participant = |name: &str| InboxParticipant {
+            id: name.into(),
+            display_name: name.into(),
+            address: String::new(),
+            person_id: None,
+        };
+        let conversation = InboxConversation::new(
+            InboxSource::Email,
+            "Launch review",
+            vec![participant("Ada Lovelace"), participant("Grace")],
+            1,
+        );
+        assert_eq!(
+            conversation.source_and_participants(),
+            "Email, Ada Lovelace, Grace"
+        );
+        let alone = InboxConversation::new(InboxSource::Slack, "", vec![], 1);
+        assert_eq!(alone.source_and_participants(), "Slack");
+    }
 
     #[test]
     fn the_first_participant_carries_the_linked_person() {
