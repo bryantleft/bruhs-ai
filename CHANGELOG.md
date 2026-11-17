@@ -33,6 +33,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   does after a reload: Workbench, Whiteboards, a document, a source, a
   conversation (with its draft), a meeting or a meeting note. A record you
   deleted opens its list instead.
+- The desktop app keeps each contact's unsaved relationship edits until you
+  quit, as the web keeps them while its tab is open: opening another
+  contact no longer loses them. People lists unsaved drafts with Open,
+  Discard and a private copy. Save details changes only the fields you
+  edited, and if one of them was also saved elsewhere it keeps your draft
+  for review instead of overwriting.
 - The desktop app opens `bruhs://` links from other apps: a thread link
   (⌘⇧C copies one) selects that thread, and `bruhs://open/` followed by a
   page's web route opens that page, such as `bruhs://open/inbox/<id>` for a
