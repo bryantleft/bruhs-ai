@@ -335,8 +335,8 @@ fn ConversationDetail(conversation_id: String) -> impl IntoView {
                             <p class="text-label-sm text-rambutan-500">"Linked person"</p>
                             <Dropdown
                                 options=Signal::derive(move || std::iter::once(DropdownOption::new("", "Unlinked")).chain(people.get().into_iter().map(|person| DropdownOption::new(person.id, person.display_name))).collect())
-                                value=Signal::derive(move || conversations.with(|items| items.iter().find(|item| item.id == id.get_value()).and_then(|item| item.participants.first().and_then(|participant| participant.person_id.clone()))).unwrap_or_default())
-                                on_change=Callback::new(move |person_id: String| update_conversation(set_conversations, &id.get_value(), |item| if let Some(participant) = item.participants.first_mut() { participant.person_id = (!person_id.is_empty()).then_some(person_id); }))
+                                value=Signal::derive(move || conversations.with(|items| items.iter().find(|item| item.id == id.get_value()).and_then(|item| item.linked_person_id().map(str::to_string))).unwrap_or_default())
+                                on_change=Callback::new(move |person_id: String| update_conversation(set_conversations, &id.get_value(), |item| { item.link_person(Some(person_id)); }))
                                 label="Linked person"
                                 class="w-full sm:w-48"
                             />
