@@ -237,6 +237,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   conversations with a dot, People has its subtitle, the Workbench page no
   longer shows the preview's address bar on macOS, and the composer's
   Attach button is a paperclip.
+- The web app now saves a reply you stop as stopped. An MCP client reading
+  that chat through the local MCP connection sees `stopped: true` for it, as
+  it does from the desktop app, instead of `stopped: false`. Replies saved
+  before this change still load and read as not stopped.
 - In the desktop app, Ask agent is on a Knowledge document's page, as on
   the web, and puts the document in the composer. It was in the library,
   where it did nothing.

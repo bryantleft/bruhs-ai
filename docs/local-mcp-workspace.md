@@ -112,9 +112,12 @@ bounds and errors. The wire types are in
   closed, idle and unqueued; the executor checks again inside its transaction.
   Reads report the tab's live state, including provisional edits, and are
   never save receipts.
-- **Differences.** The web keeps no per-message stop marker, so its Chat
-  message records report `stopped: false`, and `duration_ms` is the time from
-  start to finish. Like the rest of bruhs-server's API, the tab-facing routes
+- **Stopped turns.** A reply the user stopped is saved as stopped, so its
+  Chat message record reports `stopped: true`, as on desktop; a turn that
+  failed reports its `error` instead, never both. Replies saved by earlier
+  versions, which did not record stops, report `stopped: false`.
+  `duration_ms` is the time from start to finish, or to the stop.
+- **Differences.** Like the rest of bruhs-server's API, the tab-facing routes
   trust loopback origins: a page on another loopback port could enable a
   session for its own stream, ending yours, but it would receive only that
   session's requests, never your tab's records, and your client keeps naming
@@ -128,14 +131,58 @@ cargo test -p bruhs-models workspace_bridge
 cargo test -p bruhs-core workspace_bridge
 cargo test -p bruhs-server workspace_relay
 cargo test -p bruhs-mcp --test web_relay
-cargo test -p bruhs-web -- workspace_bridge mcp_review workflow_status
+cargo test -p bruhs-web -- workspace_bridge mcp_review workflow_status state::chat storage::messages
 cargo test -p bruhs-desktop mcp_bridge
 ```
 
-The end-to-end check behind PARITY-03 ran an isolated bruhs-server (scratch
-`HOME`, `BRUHS_SERVER_PORT`, `BRUHS_WEB_DIST` with a bundle built for that
-port) and drove the web bundle in headless Chrome over CDP while the real
-`bruhs-mcp` binary called tools over stdio.
+The end-to-end check behind PARITY-03 is
+[`scripts/verify-mcp-web.mjs`](../scripts/verify-mcp-web.mjs) (opt-in; usage
+at its top). It runs an isolated bruhs-server (a disposable `HOME`, a capture
+URL nothing listens on, and a stand-in `claude` CLI that streams one line and
+waits to be stopped), drives the web bundle built for that server in headless
+Chrome over CDP, and calls tools with the real `bruhs-mcp` binary. Two
+contacts and an ended meeting with a summary and a three-segment transcript
+are seeded through the server; everything else goes through the app. On
+2026-11-16 it passed all 336 checks:
+
+- **Every write domain**, one workflow each: Tasks, Chat, Calendar, Capture,
+  Knowledge, Inbox, People reminders (for a contact with a relationship
+  profile and one without), Meeting notes, Finance and Health. Without the
+  domain's Write grant, a dry run reports it blocked and a proposal is
+  refused, creating nothing. With it, the proposal waits in Agent workflows
+  with its full payload; the same `request_id` returns the same workflow and
+  a changed payload under it is refused; nothing is saved before Start. Start
+  transaction and Run next step save the record, and the first status that
+  reports `executed` and `durable` already finds the record and its
+  checkpoint in IndexedDB; the domain's read tool and page show it. Undo
+  preview, the undo request (which deletes nothing) and the user's Undo
+  transaction reach a durable `rolled_back`: the record is gone from
+  IndexedDB, the page and the read, and People restores the earlier profile
+  exactly or removes the new one. Finance and Health reads need Read and Life
+  agent access; Finance amounts stay redacted until the user shares exact
+  amounts, then read as the exact decimal string.
+- **One workflow across all ten domains** is refused while any Write grant
+  is missing, runs step by step with each step durable before the next (an
+  amount beyond 2^53 saved exactly), and one undo reverts all ten steps,
+  restoring the contact's earlier profile exactly.
+- **Grants and open chats.** Revoking Write after Start makes the workflow's
+  status unavailable to the session and Run next step creates nothing;
+  granting it again lets the step run. A created chat cannot be undone while
+  it is the open thread (desktop has the same rule), and can once another
+  thread is open.
+- **People and Meetings reads over real records.** Both contacts, a name
+  query, a profile with its relationship and items, a contact without one
+  (`relationship: null`), an unknown ID's error, and a refusal once People
+  Read is revoked; the meeting with its summary and speakers, an explicit error
+  for its transcript before the meeting is opened, and its three segments in
+  order after.
+- **Stopped turns.** A web chat turn, sent from the composer through
+  bruhs-server to the stand-in CLI and stopped with Interrupt mid-reply, reads
+  back `stopped: true` with its partial text, before and after a reload; a
+  seeded row without the marker reads `stopped: false`.
+- **Revocation.** A reload revokes the session and removes its file without
+  a leave-page prompt, every workflow stays saved as rolled back, and a
+  session enabled afterwards works and is removed by Disable.
 
 ## Read, preview, propose, review
 
@@ -341,8 +388,10 @@ contact. Several reminders for one person are checked in reverse order.
 Later relationship edits or reminder completion block the whole undo. Save
 failure remains provisional, and Retry persists the same reminder ID. The web
 executor has the same People reminder adapter, and the web connection proposes
-these reminders; an end-to-end run of one through the web connection, and
-hardware crash/restart acceptance, remain open.
+these reminders. An end-to-end run through the web connection on 2026-11-16
+added one to a contact with an existing profile (undo restored the profile
+exactly) and one to a contact without (undo removed the new profile); see
+[Verification](#verification). Hardware crash/restart acceptance remains open.
 
 Native `bruhs_write_finance` supports `add_finance_transaction` with `merchant`,
 `category`, and `amount_minor` as an exact decimal **string** of signed USD cents
