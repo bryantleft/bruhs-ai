@@ -57,6 +57,16 @@ enum ServiceUpdate {
     Bundled,
 }
 
+/// Whether `update` may run without a click: only a release build installs
+/// itself. A debug server (a worktree's `cargo run`) or a debug app waits
+/// for Update service.
+fn auto_update_allowed(update: ServiceUpdate, serving_debug: bool, app_debug: bool) -> bool {
+    match update {
+        ServiceUpdate::InstallFromServer => !serving_debug,
+        ServiceUpdate::Bundled => !app_debug,
+    }
+}
+
 /// The update for `notice`, when this launch has one.
 fn service_update(notice: ServiceNotice, bundled: bool) -> Option<ServiceUpdate> {
     match notice {
@@ -75,6 +85,8 @@ struct CrewState {
     installed_protocol: Option<u32>,
     /// The serving protocol the installed service was last read for.
     installed_read_for: Option<u32>,
+    /// The answering server is a debug build.
+    serving_debug: bool,
     stream: Option<Task<()>>,
     service_request: Option<Task<()>>,
     updating: bool,
@@ -1441,6 +1453,7 @@ impl ReactiveAutomations {
                 }
                 if let Ok(status) = status {
                     this.crew.installed_protocol = installed_protocol(&status);
+                    this.crew.serving_debug = status.debug_build;
                     this.auto_update_service(cx);
                 }
                 cx.notify();
@@ -1450,9 +1463,13 @@ impl ReactiveAutomations {
     /// An older service is updated once per launch; the notice and its
     /// button stay for when that fails.
     fn auto_update_service(&mut self, cx: &mut Context<'_, Self>) {
-        if self.can_update_service()
-            && !AUTO_UPDATE_TRIED.swap(true, std::sync::atomic::Ordering::AcqRel)
-        {
+        let allowed = self
+            .crew_notice()
+            .and_then(|notice| service_update(notice, crate::helpers::bundled()))
+            .is_some_and(|update| {
+                auto_update_allowed(update, self.crew.serving_debug, cfg!(debug_assertions))
+            });
+        if allowed && !AUTO_UPDATE_TRIED.swap(true, std::sync::atomic::Ordering::AcqRel) {
             self.update_service(cx);
         }
     }
@@ -2249,7 +2266,9 @@ mod tests {
 
 #[cfg(test)]
 mod crew_tests {
-    use super::{installed_protocol, service_update, ReactiveAutomations, ServiceUpdate};
+    use super::{
+        auto_update_allowed, installed_protocol, service_update, ReactiveAutomations, ServiceUpdate,
+    };
     use crate::theme;
     use bruhs_models::api::BackgroundService;
     use bruhs_models::crew::{BruhAccess, BruhLook, BruhState, BruhStatus, ServiceNotice};
@@ -2267,6 +2286,7 @@ mod crew_tests {
             responder_pid: None,
             log_path: None,
             reactive_protocol: protocol,
+            debug_build: false,
         }
     }
 
@@ -2290,6 +2310,16 @@ mod crew_tests {
             Some(ServiceUpdate::Bundled)
         );
         assert_eq!(service_update(ServiceNotice::ServingOld, false), None);
+    }
+
+    /// A debug server or app never installs itself as the service unasked.
+    #[test]
+    fn only_a_release_build_updates_the_service_without_a_click() {
+        let from_server = ServiceUpdate::InstallFromServer;
+        assert!(auto_update_allowed(from_server, false, true));
+        assert!(!auto_update_allowed(from_server, true, false));
+        assert!(auto_update_allowed(ServiceUpdate::Bundled, true, false));
+        assert!(!auto_update_allowed(ServiceUpdate::Bundled, false, true));
     }
 
     #[gpui::test]

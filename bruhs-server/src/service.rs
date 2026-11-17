@@ -1085,6 +1085,7 @@ pub fn status(asker: Asker) -> BackgroundService {
         Err(error) => {
             return BackgroundService {
                 detail: error.to_string(),
+                debug_build: cfg!(debug_assertions),
                 ..BackgroundService::default()
             }
         }
@@ -1123,6 +1124,7 @@ pub fn status(asker: Asker) -> BackgroundService {
         },
         log_path,
         reactive_protocol,
+        debug_build: cfg!(debug_assertions),
     }
 }
 
@@ -1602,6 +1604,15 @@ mod tests {
             (old.service_pid, old.responder_pid, old.log_path),
             (None, None, None)
         );
+        assert!(!old.debug_build, "an older server reads as a release");
+    }
+
+    #[test]
+    fn the_status_says_whether_this_server_is_a_debug_build() {
+        let status = status(Asker::Server {
+            pid: std::process::id(),
+        });
+        assert_eq!(status.debug_build, cfg!(debug_assertions));
     }
 
     #[test]

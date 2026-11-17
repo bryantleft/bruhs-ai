@@ -48,6 +48,14 @@ fn notice_for(protocol: Option<u32>, service: Option<&BackgroundService>) -> Opt
     service_notice(protocol?, service.and_then(installed_protocol))
 }
 
+/// Whether to update the installed service without a click: it is older,
+/// and the server that would install itself is a release build. A debug
+/// server (a worktree's `cargo run`) waits for Update service.
+fn auto_update_wanted(notice: Option<ServiceNotice>, service: Option<&BackgroundService>) -> bool {
+    notice == Some(ServiceNotice::InstalledOld)
+        && service.is_some_and(|service| !service.debug_build)
+}
+
 /// Focus the first bruh, or New bruh when there is none.
 fn focus_crew_target() {
     let Some(document) = web_sys::window().and_then(|window| window.document()) else {
@@ -208,7 +216,7 @@ pub fn CrewRail(
         });
     });
     Effect::new(move |_| {
-        if notice.get() == Some(ServiceNotice::InstalledOld)
+        if service.with(|service| auto_update_wanted(notice.get(), service.as_ref()))
             && !AUTO_UPDATE_TRIED.swap(true, Ordering::AcqRel)
         {
             update.run(());
@@ -346,6 +354,7 @@ mod tests {
             responder_pid: None,
             log_path: None,
             reactive_protocol: protocol,
+            debug_build: false,
         }
     }
 
@@ -400,6 +409,24 @@ mod tests {
             notice_for(Some(CREW_PROTOCOL), Some(&service(false, None))),
             None
         );
+    }
+
+    #[test]
+    fn only_a_release_server_updates_the_service_without_a_click() {
+        let release = service(true, None);
+        let debug = BackgroundService {
+            debug_build: true,
+            ..release.clone()
+        };
+        let old = Some(ServiceNotice::InstalledOld);
+        assert!(auto_update_wanted(old, Some(&release)));
+        assert!(!auto_update_wanted(old, Some(&debug)));
+        assert!(!auto_update_wanted(old, None));
+        assert!(!auto_update_wanted(
+            Some(ServiceNotice::ServingOld),
+            Some(&release)
+        ));
+        assert!(!auto_update_wanted(None, Some(&release)));
     }
 
     #[test]
