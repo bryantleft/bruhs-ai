@@ -46,6 +46,11 @@ impl RelationshipStore {
         self.loaded.get()
     }
 
+    /// [`Self::hydrated`] outside any reactive scope, for request handlers.
+    pub fn hydrated_untracked(self) -> bool {
+        self.loaded.get_untracked()
+    }
+
     pub fn install() {
         let RelationshipsSignal(records) = expect_context::<RelationshipsSignal>();
         let SetRelationshipsSignal(set_records) = expect_context::<SetRelationshipsSignal>();

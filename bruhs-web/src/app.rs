@@ -35,6 +35,7 @@ pub fn App() -> impl IntoView {
     crate::meeting_actions::MeetingActions::install();
     crate::agent_updates::AgentUpdates::install();
     crate::meeting_suggestions::MeetingSuggestions::install();
+    crate::workspace_bridge::WorkspaceBridge::install();
 
     // ── URL hash routing ─────────────────────────────────────────────────────
     // On mount: read window.location.hash and set the initial AppView.
@@ -133,6 +134,9 @@ pub fn App() -> impl IntoView {
     );
     // Agent updates, for the unread badge and new-update banners.
     crate::agent_updates::subscribe(&mut live_events);
+    // The MCP workspace connection: this stream's relay ID and the requests
+    // of a session bound to it.
+    expect_context::<crate::workspace_bridge::WorkspaceBridge>().subscribe(&mut live_events);
     live_events.connect(
         use_context::<crate::components::banner::BannerStackSignal>(),
         use_context::<crate::state::LiveMeetingIdSignal>().map(|signal| signal.0),

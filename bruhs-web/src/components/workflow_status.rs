@@ -13,12 +13,24 @@ struct Notice {
 }
 
 // No workflow titles, operation contents, or private recovery data in chrome.
-fn notice(state: &AutomationState, save: &SaveState, load_failed: bool) -> Option<Notice> {
+fn notice(
+    state: &AutomationState,
+    save: &SaveState,
+    load_failed: bool,
+    pending_review: bool,
+) -> Option<Notice> {
     let (message, error, dismiss_key) = if load_failed || matches!(save, SaveState::Error { .. }) {
         (
             "Workflow needs attention. Open workflows to review the error and recovery options."
                 .into(),
             true,
+            None,
+        )
+    } else if pending_review {
+        // An MCP proposal or undo request; its payload stays in the review.
+        (
+            bruhs_models::workspace_bridge::PENDING_REVIEW_NOTICE.into(),
+            false,
             None,
         )
     } else if let Some(job) = state
@@ -86,13 +98,16 @@ pub fn WorkflowStatus() -> impl IntoView {
     let ActiveView(active) = expect_context();
     let SetActiveView(set_active) = expect_context();
     let executor = expect_context::<WorkflowExecutor>();
+    let bridge = expect_context::<crate::workspace_bridge::WorkspaceBridge>();
     let dismissed = RwSignal::new(None::<String>);
     let current = Memo::new(move |_| {
+        let pending_review = bridge.pending_review_id().is_some();
         automation.with(|state| {
             notice(
                 state,
                 &automation.status.get(),
                 executor.load_error.get().is_some(),
+                pending_review,
             )
         })
     });
@@ -131,6 +146,7 @@ mod tests {
                 conflict: true,
             },
             false,
+            true,
         )
         .unwrap();
         assert!(!result.message.contains("private fixture"));
@@ -138,6 +154,16 @@ mod tests {
     }
     #[test]
     fn empty_workspace_has_no_permanent_status_strip() {
-        assert!(notice(&AutomationState::default(), &SaveState::Saved, false).is_none());
+        assert!(notice(&AutomationState::default(), &SaveState::Saved, false, false).is_none());
+    }
+
+    #[test]
+    fn a_pending_mcp_review_is_announced_without_its_payload() {
+        let result = notice(&AutomationState::default(), &SaveState::Saved, false, true).unwrap();
+        assert_eq!(
+            result.message,
+            bruhs_models::workspace_bridge::PENDING_REVIEW_NOTICE
+        );
+        assert!(!result.error && result.dismiss_key.is_none());
     }
 }

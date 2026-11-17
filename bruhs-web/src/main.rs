@@ -33,6 +33,7 @@ mod ui;
 mod updates;
 mod whiteboard;
 mod workflow_executor;
+mod workspace_bridge;
 
 fn main() {
     console_error_panic_hook::set_once();

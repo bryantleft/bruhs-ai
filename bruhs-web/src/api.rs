@@ -85,6 +85,45 @@ pub async fn submit_thread_reply(
         send_json(Method::POST, "/api/agent/thread-reply", Some(body)).await?;
     Ok(())
 }
+/// Bind an MCP workspace session to this tab's live stream
+/// (`bruhs_models::workspace_bridge::relay`). The reply never holds the token.
+pub async fn enable_workspace_session(
+    body: &bruhs_models::workspace_bridge::relay::EnableSession,
+) -> Result<bruhs_models::workspace_bridge::relay::SessionEnabled, ApiError> {
+    send_json(
+        Method::POST,
+        bruhs_models::workspace_bridge::relay::SESSION_PATH,
+        Some(body),
+    )
+    .await
+}
+
+/// End this tab's MCP workspace session. Ending one that already ended succeeds.
+pub async fn disable_workspace_session(
+    body: &bruhs_models::workspace_bridge::relay::DisableSession,
+) -> Result<(), ApiError> {
+    let _: serde_json::Value = send_json(
+        Method::DELETE,
+        bruhs_models::workspace_bridge::relay::SESSION_PATH,
+        Some(body),
+    )
+    .await?;
+    Ok(())
+}
+
+/// This tab's answer to one relayed MCP workspace request.
+pub async fn reply_workspace_request(
+    body: &bruhs_models::workspace_bridge::relay::RelayReply,
+) -> Result<(), ApiError> {
+    let _: serde_json::Value = send_json(
+        Method::POST,
+        bruhs_models::workspace_bridge::relay::REPLY_PATH,
+        Some(body),
+    )
+    .await?;
+    Ok(())
+}
+
 pub async fn whiteboard_source_fingerprint(project: &str, path: &str) -> Result<String, ApiError> {
     #[derive(Deserialize)]
     struct Fingerprint {
