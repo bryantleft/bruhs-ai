@@ -82,6 +82,9 @@ impl KnowledgeState {
     }
 }
 
+/// The web Knowledge page's subtitle.
+const KNOWLEDGE_PAGE_SUBTITLE: &str = "Markdown documents and saved sources, local and searchable.";
+
 impl Workspace {
     /// Run `read` over the documents' and sources' shared search indexes.
     fn with_knowledge_index<R>(
@@ -737,7 +740,7 @@ impl Workspace {
                                 div()
                                     .text_size(px(11.0))
                                     .text_color(theme::rambutan_500())
-                                    .child("Living local context, links, and cited sources"),
+                                    .child(KNOWLEDGE_PAGE_SUBTITLE),
                             ),
                     )
                     .child(
@@ -746,29 +749,14 @@ impl Workspace {
                             .gap_2()
                             .child(
                                 web_button(
-                                    "ask-agent-about-document",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label("Ask agent")
-                                .child("Ask agent")
-                                .on_click(cx.listener(
-                                    |this, _event, window, cx| {
-                                        this.ask_agent_about_current_document(window, cx);
-                                    },
-                                )),
-                            )
-                            .child(
-                                web_button(
                                     "new-source-clip",
                                     WebButtonVariant::Ghost,
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
                                 .debug_selector(|| "desktop-knowledge-new-clip".to_string())
-                                .aria_label("+ Web clip")
-                                .child("+ Web clip")
+                                .aria_label("Web clip")
+                                .child("Web clip")
                                 .on_click(cx.listener(
                                     |this, _event, window, cx| {
                                         this.start_source_clip(window, cx);
@@ -783,8 +771,8 @@ impl Workspace {
                                     ButtonState::Enabled,
                                 )
                                 .debug_selector(|| "desktop-knowledge-new-document".to_string())
-                                .aria_label("+ Document")
-                                .child("+ Document")
+                                .aria_label("New document")
+                                .child("New document")
                                 .on_click(cx.listener(
                                     |this, _event, window, cx| {
                                         this.new_knowledge_document(window, cx);
@@ -1177,6 +1165,22 @@ impl Workspace {
                         div()
                             .flex()
                             .gap_2()
+                            .child(
+                                web_button(
+                                    "ask-agent-about-document",
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(|| "desktop-knowledge-ask-agent".to_string())
+                                .aria_label("Ask agent")
+                                .child("Ask agent")
+                                .on_click(cx.listener(
+                                    |this, _event, window, cx| {
+                                        this.ask_agent_about_current_document(window, cx);
+                                    },
+                                )),
+                            )
                             .child(
                                 web_button(
                                     "delete-knowledge-document",

@@ -218,3 +218,37 @@ fn document_preview_shows_the_unsaved_body_like_web(cx: &mut gpui::TestAppContex
     });
     assert!(shown(cx, "desktop-knowledge-document-preview"));
 }
+
+/// Like the web, Ask agent is on a document's page, not the library, and it
+/// puts the document's prompt in the composer.
+#[gpui::test]
+fn ask_agent_is_on_the_document_page_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        let mut plan = KnowledgeDocument::new("Plan", "Ship the beta", 1);
+        plan.id = "plan".into();
+        workspace.knowledge_documents = vec![plan];
+        workspace.open_knowledge_view(window, cx);
+    });
+    cx.run_until_parked();
+    assert!(shown(cx, document_card("plan")));
+    assert!(
+        !shown(cx, "desktop-knowledge-ask-agent"),
+        "the library offers no Ask agent"
+    );
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.select_knowledge_document("plan", window, cx);
+    });
+    cx.run_until_parked();
+    click(cx, "desktop-knowledge-ask-agent");
+    workspace.read_with(cx, |workspace, cx| {
+        let prompt = bruhs_models::document_agent_prompt(
+            &workspace.knowledge_documents[0],
+            &workspace.source_clips,
+        );
+        assert_eq!(workspace.active_view, AppView::Chat);
+        let chat = workspace.active_thread().expect("a thread").chat.read(cx);
+        assert_eq!(chat.input_state.read(cx).value().as_str(), prompt);
+    });
+}
