@@ -145,11 +145,10 @@ pub fn AuthBanner() -> impl IntoView {
                             {move || {
                                 let status = current_status();
                                 let name = provider_name(&current_provider());
-                                if let Some(err) = status.error {
-                                    format!("Could not check {name} auth: {err}")
-                                } else {
-                                    format!("{name} is not authenticated.")
-                                }
+                                bruhs_models::logic::cli_login::sign_in_banner_title(
+                                    name,
+                                    status.error.as_deref(),
+                                )
                             }}
                         </div>
                         {move || message.get().map(|m| view! {

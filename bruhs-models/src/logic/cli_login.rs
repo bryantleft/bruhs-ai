@@ -5,6 +5,15 @@
 pub const CODEX_SIGNED_IN_LINE: &str = "Codex CLI signed in";
 pub const CODEX_SIGNED_OUT_LINE: &str = "Codex CLI not signed in. Run `codex login`";
 
+/// The sign-in banner's title for a CLI named `name` (Claude, Codex), on
+/// both apps: why its status could not be read, or that it is signed out.
+pub fn sign_in_banner_title(name: &str, error: Option<&str>) -> String {
+    match error {
+        Some(error) => format!("Could not check {name} auth: {error}"),
+        None => format!("{name} is not authenticated."),
+    }
+}
+
 /// How a CLI answered its login status check.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum CliLogin {
@@ -59,6 +68,18 @@ pub fn codex_login_status(exit_ok: bool, stdout: &str, stderr: &str) -> CliLogin
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn sign_in_banner_titles_name_the_cli() {
+        assert_eq!(
+            sign_in_banner_title("Claude", None),
+            "Claude is not authenticated."
+        );
+        assert_eq!(
+            sign_in_banner_title("Codex", Some("Codex CLI not found. Install it first.")),
+            "Could not check Codex auth: Codex CLI not found. Install it first."
+        );
+    }
 
     #[test]
     fn codex_login_status_reads_the_cli() {

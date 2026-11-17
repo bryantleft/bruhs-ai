@@ -322,7 +322,7 @@ fn desktop_auth_banner_copy_should_match_web_reference() {
     assert_eq!(AUTH_BANNER_ICON_TOP_OFFSET_PX, 2.0);
     assert_eq!(
         CLAUDE_AUTH_NOT_AUTHENTICATED_LABEL,
-        "Claude Code not authenticated."
+        bruhs_models::logic::cli_login::sign_in_banner_title("Claude", None)
     );
     assert_eq!(CLAUDE_LOGIN_ACTION_LABEL, "Log in with Claude");
     assert_eq!(CLAUDE_LOGIN_WAITING_LABEL, "Waiting…");
