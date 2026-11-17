@@ -39,6 +39,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   Discard and a private copy. Save details changes only the fields you
   edited, and if one of them was also saved elsewhere it keeps your draft
   for review instead of overwriting.
+- Workbench Verification's Use draft works in the desktop app on macOS, as
+  on the web: the dictation goes into the active thread's composer and
+  Chat opens.
 - The desktop app opens `bruhs://` links from other apps: a thread link
   (⌘⇧C copies one) selects that thread, and `bruhs://open/` followed by a
   page's web route opens that page, such as `bruhs://open/inbox/<id>` for a
