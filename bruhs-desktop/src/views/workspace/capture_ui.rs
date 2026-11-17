@@ -1,6 +1,7 @@
 //! Keyboard-first universal capture for the native workspace.
 
 use super::*;
+use gpui_component::zoom::px;
 
 const CAPTURE_TEXTAREA_HEIGHT_PX: f32 = 118.0;
 

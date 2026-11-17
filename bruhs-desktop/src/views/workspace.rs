@@ -7,6 +7,7 @@ use gpui_component::resizable::{
 };
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::tooltip::Tooltip;
+use gpui_component::zoom::px;
 use gpui_component::{ActiveTheme, Icon, IconName, WindowExt};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -2249,7 +2250,9 @@ impl Workspace {
     /// `breakpoint_px`: the web shows its layout without that `sm:`, `md:`
     /// or `lg:` variant.
     fn narrower_than(window: &Window, breakpoint_px: f32) -> bool {
-        f32::from(window.viewport_size().width) < breakpoint_px
+        // In CSS pixels, so a zoomed window switches layouts at the widths a
+        // zoomed browser page does.
+        gpui_component::zoom::css_px(window.viewport_size().width) < breakpoint_px
     }
 
     /// Web: below `sm` the sidebar is a drawer over a scrim; from `sm` it
@@ -2272,30 +2275,32 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    /// Give the window the saved zoom, and keep the macOS traffic lights
-    /// centred in the zoomed header.
+    /// Draw the window's design lengths at the saved zoom (see
+    /// [`gpui_component::zoom`]), and keep the macOS traffic lights centred in
+    /// the zoomed header.
     fn apply_zoom(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        window.set_zoom(self.zoom, cx);
+        gpui_component::zoom::set_zoom(self.zoom, cx);
         #[cfg(target_os = "macos")]
         window.set_traffic_light_position(point(
-            px(12.0),
-            px(crate::zoom::traffic_light_top(
+            gpui_component::zoom::window_px(12.0),
+            gpui_component::zoom::window_px(crate::zoom::traffic_light_top(
                 theme::APP_HEADER_HEIGHT_PX,
                 self.zoom,
             )),
         ));
+        window.refresh();
     }
 
     /// Room for the macOS traffic lights, which stay in window points while
-    /// the content zooms.
-    fn traffic_light_inset_px(&self) -> f32 {
+    /// the page zooms; elsewhere a padding that zooms with the page.
+    fn traffic_light_inset(&self) -> Pixels {
         #[cfg(target_os = "macos")]
         {
-            crate::zoom::traffic_light_inset(SIDEBAR_HEADER_LEFT_INSET_PX, self.zoom)
+            gpui_component::zoom::window_px(SIDEBAR_HEADER_LEFT_INSET_PX)
         }
         #[cfg(not(target_os = "macos"))]
         {
-            SIDEBAR_HEADER_LEFT_INSET_PX
+            px(SIDEBAR_HEADER_LEFT_INSET_PX)
         }
     }
 
@@ -2889,7 +2894,7 @@ impl Render for Workspace {
         let sidebar_docked = !sidebar_drawer && self.sidebar_visible && !booking;
         let sidebar_drawer_open = sidebar_drawer && self.compact_sidebar_open && !booking;
         let chat_panel_open = self.right_panel_open() && self.active_view == AppView::Chat;
-        let right_drawer_width = (f32::from(window.viewport_size().width)
+        let right_drawer_width = (gpui_component::zoom::css_px(window.viewport_size().width)
             * RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE)
             .min(RIGHT_PANEL_DRAWER_WIDTH_PX);
         let body = div()
@@ -2942,7 +2947,7 @@ impl Render for Workspace {
                     // remembered, clamped, and gives way to the chat's 360px
                     // minimum. A window resize never changes the remembered
                     // width, so the panel holds it unless its edge is dragged.
-                    let viewport_width = f32::from(window.viewport_size().width);
+                    let viewport_width = gpui_component::zoom::css_px(window.viewport_size().width);
                     let sidebar_width = if sidebar_docked {
                         WORKSPACE_SIDE_PANEL_WIDTH_PX
                     } else {

@@ -1,15 +1,14 @@
+use crate::zoom::px;
 use std::ops::Range;
 
-use gpui::{
-    Along, App, Axis, Bounds, Context, ElementId, EventEmitter, IsZero, Pixels, Window, px,
-};
+use gpui::{Along, App, Axis, Bounds, Context, ElementId, EventEmitter, IsZero, Pixels, Window};
 
 mod panel;
 mod resize_handle;
 pub use panel::*;
 pub(crate) use resize_handle::*;
 
-pub(crate) const PANEL_MIN_SIZE: Pixels = px(100.);
+pub(crate) const PANEL_MIN_SIZE: Pixels = gpui::px(100.);
 
 /// Create a [`ResizablePanelGroup`] with horizontal resizing
 pub fn h_resizable(id: impl Into<ElementId>) -> ResizablePanelGroup {
@@ -319,7 +318,7 @@ impl ResizableState {
         if !total.is_finite() || total <= 0. {
             return;
         }
-        let total_size = px(total);
+        let total_size = crate::zoom::window_px(total);
 
         for i in 0..self.panels.len() {
             let size = self.sizes[i];

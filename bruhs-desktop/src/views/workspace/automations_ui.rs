@@ -1,6 +1,7 @@
 //! Native capability grants, transactional workflows, durable jobs, and audit.
 
 use super::*;
+use gpui_component::zoom::px;
 mod chat;
 mod draft_outcomes;
 mod history_ui;

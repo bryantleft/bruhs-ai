@@ -1,8 +1,10 @@
 // @reference: https://d3js.org/d3-shape/arc
 
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
 use std::{f32::consts::PI, fmt::Debug};
 
-use gpui::{Bounds, Hsla, Path, PathBuilder, Pixels, Point, Window, point, px};
+use gpui::{Bounds, Hsla, Path, PathBuilder, Pixels, Point, Window, point};
 
 const EPSILON: f32 = 1e-12;
 const HALF_PI: f32 = PI / 2.;

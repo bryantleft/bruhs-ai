@@ -1,7 +1,7 @@
 # GPUI Windows platform
 
 Source: `crates/gpui_windows` from
-https://github.com/bryantleft/zed/tree/47abf3f6a213244d9de96128d27693101defe986/crates/gpui_windows.
+https://github.com/zed-industries/zed/tree/2b9b3c7ea21293c9f271d993503e6d8dba2c6891/crates/gpui_windows.
 License: Apache-2.0; see `LICENSE-APACHE`.
 
 The DirectComposition target uses `topmost = false` so native WebView2 child

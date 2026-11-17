@@ -4,6 +4,7 @@
 
 use super::*;
 use bruhs_models::{Meeting, MeetingSummary, ObservationKind, PersonObservation, PersonProfile};
+use gpui_component::zoom::px;
 
 /// A workspace in a window, with the app's theme and dialogs root. Its hub
 /// talks to a closed loopback port (9), never a bruhs-server running on

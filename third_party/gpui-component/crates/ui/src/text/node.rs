@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::{
     cell::RefCell,
     collections::HashMap,
@@ -9,7 +10,7 @@ use gpui::{
     AnyElement, App, DefiniteLength, Div, ElementId, FontStyle, FontWeight, Half, HighlightStyle,
     Hsla, InteractiveElement as _, IntoElement, Length, ObjectFit, Overflow, ParentElement,
     ScrollHandle, SharedString, SharedUri, StatefulInteractiveElement, Styled, StyledImage as _,
-    Window, div, img, prelude::FluentBuilder as _, px, relative, rems,
+    Window, div, img, prelude::FluentBuilder as _, relative, rems,
 };
 use markdown::mdast;
 use ropey::Rope;
@@ -876,13 +877,13 @@ impl Paragraph {
                     }
                     if style.strikethrough {
                         highlight.strikethrough = Some(gpui::StrikethroughStyle {
-                            thickness: gpui::px(1.),
+                            thickness: px(1.),
                             ..Default::default()
                         });
                     }
                     if style.underline {
                         highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
+                            thickness: px(1.),
                             ..Default::default()
                         });
                     }
@@ -896,7 +897,7 @@ impl Paragraph {
                     if let Some(mut link_mark) = style.link.clone() {
                         highlight.color = Some(cx.theme().link);
                         highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
+                            thickness: px(1.),
                             ..Default::default()
                         });
 
@@ -990,13 +991,13 @@ impl Paragraph {
                     }
                     if style.strikethrough {
                         highlight.strikethrough = Some(gpui::StrikethroughStyle {
-                            thickness: gpui::px(1.),
+                            thickness: px(1.),
                             ..Default::default()
                         });
                     }
                     if style.underline {
                         highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
+                            thickness: px(1.),
                             ..Default::default()
                         });
                     }
@@ -1010,7 +1011,7 @@ impl Paragraph {
                     if let Some(mut link_mark) = style.link.clone() {
                         highlight.color = Some(cx.theme().link);
                         highlight.underline = Some(gpui::UnderlineStyle {
-                            thickness: gpui::px(1.),
+                            thickness: px(1.),
                             ..Default::default()
                         });
 
@@ -1436,7 +1437,8 @@ impl BlockNode {
                         .text_system()
                         .layout_line(line, font_size, &[run], None)
                         .width;
-                    w = w.max(f32::from(line_w));
+                    // In CSS pixels, like the padding and limits around it.
+                    w = w.max(crate::zoom::css_px(line_w));
                 }
                 *slot = slot.max((w + CELL_PAD_PX).min(CELL_MAX_PX));
             }

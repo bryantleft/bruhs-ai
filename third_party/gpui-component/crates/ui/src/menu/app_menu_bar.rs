@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use crate::{
     Selectable, Sizable,
     actions::{Cancel, SelectLeft, SelectRight},
@@ -10,7 +11,7 @@ use gpui::{
     App, AppContext as _, ClickEvent, Context, DismissEvent, Entity, FocusHandle, Focusable,
     InteractiveElement as _, IntoElement, KeyBinding, MouseButton, OwnedMenu, ParentElement,
     Render, Role, SharedString, StatefulInteractiveElement, Styled, Subscription, Window, anchored,
-    deferred, div, prelude::FluentBuilder, px,
+    deferred, div, prelude::FluentBuilder,
 };
 
 const CONTEXT: &str = "AppMenuBar";

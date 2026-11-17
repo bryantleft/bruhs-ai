@@ -3,6 +3,7 @@
 use super::*;
 use bruhs_models::secrets::{SecretDecision, SecretRequest};
 use gpui_component::input::InputContentType;
+use gpui_component::zoom::px;
 
 pub(super) struct SecretPrompt {
     request: SecretRequest,
@@ -206,7 +207,7 @@ impl Render for SecretPrompt {
                         && connection.configured
                 });
             return div().id("private-service-request").role(Role::Group).aria_label("Service connection request")
-                .max_h(px(f32::from(window.viewport_size().height) * 0.6)).overflow_y_scroll().p_3().rounded(px(8.0)).border_1().border_color(theme::blueberry_400().opacity(0.3)).bg(theme::longan_900())
+                .max_h(window.viewport_size().height * 0.6).overflow_y_scroll().p_3().rounded(px(8.0)).border_1().border_color(theme::blueberry_400().opacity(0.3)).bg(theme::longan_900())
                 .font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200()).flex().flex_col().gap_2()
                 .child(div().font_weight(FontWeight::MEDIUM).child("Account access needed"))
                 .child(self.request.operation.reason.clone())
@@ -218,7 +219,7 @@ impl Render for SecretPrompt {
                 .into_any_element();
         }
         div().id("private-credential-request").role(Role::Group).aria_label("Private credential request")
-            .max_h(px(f32::from(window.viewport_size().height) * 0.6)).overflow_y_scroll()
+            .max_h(window.viewport_size().height * 0.6).overflow_y_scroll()
             .p_3().rounded(px(8.0)).border_1().border_color(theme::blueberry_400().opacity(0.3)).bg(theme::longan_900())
             .font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200())
             .flex().flex_col().gap_2()

@@ -9,6 +9,7 @@ use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::tooltip::Tooltip;
+use gpui_component::zoom::px;
 
 use super::{is_web_button_activation_key, Workspace};
 use crate::{assets, theme};

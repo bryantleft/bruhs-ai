@@ -2,6 +2,7 @@
 
 use super::library_pages_ui::LibraryPage;
 use super::*;
+use gpui_component::zoom::px;
 
 // Match the web task list/board budgets. The native library action fixture
 // measures 100/1,000/10,000 tasks; complete records remain in work_items.
@@ -870,12 +871,12 @@ impl Workspace {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let height = f32::from(window.viewport_size().height) * 0.6;
+        let height = window.viewport_size().height * 0.6;
         self.render_modal_shell(
             TASKS_PROJECTS_LABEL,
             div()
                 .debug_selector(|| "desktop-task-projects-dialog".to_string())
-                .h(px(height))
+                .h(height)
                 .flex()
                 .child(self.project_list(true, cx)),
             None,

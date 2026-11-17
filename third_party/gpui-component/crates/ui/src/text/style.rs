@@ -1,6 +1,7 @@
+use crate::zoom::px;
 use std::sync::Arc;
 
-use gpui::{Pixels, Rems, StyleRefinement, px, rems};
+use gpui::{Pixels, Rems, StyleRefinement, rems};
 
 use crate::highlighter::HighlightTheme;
 

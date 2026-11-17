@@ -62,8 +62,13 @@ pub(crate) fn parse_window_size(raw: &str) -> Option<Size<Pixels>> {
     let (width, height) = raw.trim().split_once('x')?;
     let width: f32 = width.trim().parse().ok()?;
     let height: f32 = height.trim().parse().ok()?;
-    (width >= 640.0 && height >= 480.0 && width.is_finite() && height.is_finite())
-        .then(|| size(px(width), px(height)))
+    (width >= 640.0 && height >= 480.0 && width.is_finite() && height.is_finite()).then(|| {
+        // A window size, in window points: the zoom never sizes the window.
+        size(
+            gpui_component::zoom::window_px(width),
+            gpui_component::zoom::window_px(height),
+        )
+    })
 }
 
 pub(crate) fn desktop_window_smoke_enabled() -> bool {

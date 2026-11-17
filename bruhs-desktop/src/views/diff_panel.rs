@@ -2,6 +2,7 @@
 //! `bruhs_core::git` (status + unified diff), rendered as per-file sections
 //! with "N unmodified lines" separators, like bruhs-web's `diff_panel.rs`.
 
+use gpui_component::zoom::px;
 use std::collections::{hash_map::DefaultHasher, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;

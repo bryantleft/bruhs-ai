@@ -1,10 +1,11 @@
+use crate::zoom::px;
 use std::{cell::RefCell, rc::Rc};
 
 use gpui::{
     Anchor, AnyElement, App, Context, DismissEvent, Element, ElementId, Entity, Focusable,
     GlobalElementId, Hitbox, HitboxBehavior, InspectorElementId, InteractiveElement, IntoElement,
     MouseButton, MouseDownEvent, ParentElement, Pixels, Point, StyleRefinement, Styled,
-    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder, px,
+    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder,
 };
 
 use crate::menu::PopupMenu;

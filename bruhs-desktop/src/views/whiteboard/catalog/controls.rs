@@ -2,6 +2,7 @@ use super::*;
 use crate::views::web_button::{
     is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
 };
+use gpui_component::zoom::px;
 use gpui_component::{input::Input, scroll::ScrollableElement};
 use std::rc::Rc;
 

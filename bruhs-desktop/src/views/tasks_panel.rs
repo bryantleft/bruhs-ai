@@ -12,6 +12,7 @@ use gpui::prelude::*;
 use gpui::*;
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::tooltip::Tooltip;
+use gpui_component::zoom::px;
 use std::sync::Arc;
 
 pub struct TasksPanelView {

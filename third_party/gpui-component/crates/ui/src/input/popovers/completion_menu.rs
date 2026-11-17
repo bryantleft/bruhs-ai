@@ -1,16 +1,17 @@
+use crate::zoom::px;
 use std::rc::Rc;
 
 use gpui::{
     Action, AnyElement, App, AppContext, Context, DismissEvent, Empty, Entity, EventEmitter,
     Half as _, HighlightStyle, InteractiveElement as _, IntoElement, ParentElement, Pixels, Point,
     Render, RenderOnce, SharedString, Styled, StyledText, Subscription, Window, deferred, div,
-    prelude::FluentBuilder, px, relative,
+    prelude::FluentBuilder, relative,
 };
 use lsp_types::{CompletionItem, CompletionTextEdit};
 
-const MAX_MENU_WIDTH: Pixels = px(320.);
-const MAX_MENU_HEIGHT: Pixels = px(240.);
-const POPOVER_GAP: Pixels = px(4.);
+const MAX_MENU_WIDTH: Pixels = gpui::px(320.);
+const MAX_MENU_HEIGHT: Pixels = gpui::px(240.);
+const POPOVER_GAP: Pixels = gpui::px(4.);
 
 use crate::{
     ActiveTheme, IndexPath, Selectable, actions, h_flex,

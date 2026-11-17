@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use crate::{
     ActiveTheme, Disableable, Side, Sizable, Size, StyledExt, h_flex, text::Text,
     tooltip::ComponentTooltip,
@@ -5,7 +6,7 @@ use crate::{
 use gpui::{
     Animation, AnimationExt as _, App, Background, ElementId, Hsla, InteractiveElement,
     IntoElement, ParentElement as _, RenderOnce, SharedString, StyleRefinement, Styled, Window,
-    div, prelude::FluentBuilder as _, px,
+    div, prelude::FluentBuilder as _,
 };
 use std::{rc::Rc, time::Duration};
 

@@ -5,7 +5,7 @@ Stand-in for zed's `ztracing` crate, which is GPL-3.0-or-later. gpui's
 normal builds, so this crate provides that attribute and nothing else. It is
 original code under the workspace's MIT license.
 
-The root `Cargo.toml` `[patch."https://github.com/bryantleft/zed"]` entry points
+The root `Cargo.toml` `[patch."https://github.com/zed-industries/zed"]` entry points
 `ztracing` here, which also drops `zlog` and `ztracing_macro` from the build.
 When moving the gpui rev, check `cargo tree -p bruhs-desktop -i ztracing`
 still resolves to this path and that `sum_tree` uses nothing beyond

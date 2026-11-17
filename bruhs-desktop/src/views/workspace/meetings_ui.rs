@@ -5,6 +5,7 @@
 //! capture_status_banner,banner}.rs`. Data comes from `MeetingsHub`; sizes
 //! are the web's Tailwind values in px.
 
+use gpui_component::zoom::px;
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -2702,7 +2703,7 @@ impl Workspace {
                         .w_full()
                         .min_w_0()
                         .max_w(px(480.0))
-                        .max_h(px(f32::from(window.viewport_size().height) * 0.3))
+                        .max_h(window.viewport_size().height * 0.3)
                         .overflow_y_scroll()
                         .flex_shrink_0()
                         .rounded(px(8.0))

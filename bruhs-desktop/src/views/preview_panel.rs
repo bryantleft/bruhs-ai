@@ -12,6 +12,7 @@ use bruhs_models::logic::preview::normalize_preview_url;
 use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::zoom::px;
 
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{assets, theme};
@@ -67,17 +68,17 @@ mod host {
         messages: Option<async_channel::Sender<super::PageMessage>>,
     }
 
-    /// The page's frame in window points: content bounds times the zoom.
-    fn rect(bounds: gpui::Bounds<gpui::Pixels>, zoom: f32) -> Rect {
+    /// The page's frame, in window points like the layout's bounds.
+    fn rect(bounds: gpui::Bounds<gpui::Pixels>) -> Rect {
         Rect {
             position: LogicalPosition::new(
-                f64::from(f32::from(bounds.origin.x) * zoom),
-                f64::from(f32::from(bounds.origin.y) * zoom),
+                f64::from(f32::from(bounds.origin.x)),
+                f64::from(f32::from(bounds.origin.y)),
             )
             .into(),
             size: LogicalSize::new(
-                f64::from((f32::from(bounds.size.width) * zoom).max(1.0)),
-                f64::from((f32::from(bounds.size.height) * zoom).max(1.0)),
+                f64::from(f32::from(bounds.size.width).max(1.0)),
+                f64::from(f32::from(bounds.size.height).max(1.0)),
             )
             .into(),
         }
@@ -110,8 +111,9 @@ mod host {
             url: &str,
             bounds: gpui::Bounds<gpui::Pixels>,
         ) -> Result<(), String> {
-            // The window's zoom places the page and zooms its content too.
-            let zoom = window.zoom();
+            // The page's content zooms with the window's (see
+            // `gpui_component::zoom`); its frame is already in window points.
+            let zoom = gpui_component::zoom::zoom();
             let key = (
                 f32::from(bounds.origin.x),
                 f32::from(bounds.origin.y),
@@ -123,7 +125,7 @@ mod host {
                 None => {
                     let mut builder = WebViewBuilder::new()
                         .with_url(url)
-                        .with_bounds(rect(bounds, zoom))
+                        .with_bounds(rect(bounds))
                         .with_background_color(BACKGROUND);
                     if let Some(sender) = self.messages.clone() {
                         builder =
@@ -153,7 +155,7 @@ mod host {
                             webview.zoom(f64::from(zoom)).map_err(|e| e.to_string())?;
                         }
                         webview
-                            .set_bounds(rect(bounds, zoom))
+                            .set_bounds(rect(bounds))
                             .map_err(|e| e.to_string())?;
                         self.bounds = Some(key);
                     }

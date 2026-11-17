@@ -1,5 +1,6 @@
 //! User-controlled session boundary; never restored from the workspace file.
 use super::*;
+use gpui_component::zoom::px;
 
 #[cfg(all(test, unix))]
 mod batch_tests;

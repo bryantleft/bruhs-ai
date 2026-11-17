@@ -3,6 +3,7 @@
 //! way to auto-drive the window.
 
 use super::*;
+use gpui_component::zoom::px;
 
 impl Workspace {
     /// `BRUHS_DESKTOP_COMMANDS_SMOKE`: a fresh project-less chat, made

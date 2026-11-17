@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::zoom::px;
 
 impl Workspace {
     pub(in crate::views::workspace) fn open_local_meeting_note(

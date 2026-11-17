@@ -3,6 +3,7 @@ pub(crate) mod canvas;
 pub(crate) mod catalog;
 use bruhs_models::whiteboard as board;
 use gpui::{prelude::*, *};
+use gpui_component::zoom::px;
 use std::{
     cell::{Cell, RefCell},
     rc::Rc,

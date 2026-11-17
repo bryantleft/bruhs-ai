@@ -34,6 +34,7 @@ use gpui_component::input::{
 };
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::text::{TextView, TextViewStyle};
+use gpui_component::zoom::px;
 use gpui_component::{ActiveTheme, RopeExt};
 use markdown::{mdast, ParseOptions};
 use serde::{Deserialize, Serialize};
@@ -518,6 +519,8 @@ pub struct ChatView {
     pub thread_title: String,
     pub messages: Vec<Message>,
     messages_viewport: ListState,
+    /// The page zoom the rows were measured at (`gpui_component::zoom`).
+    messages_zoom: std::cell::Cell<f32>,
     messages_focus: FocusHandle,
     rendered_messages: std::cell::Cell<Option<(usize, usize)>>,
     #[cfg(test)]
@@ -699,7 +702,7 @@ pub struct ChatView {
     /// Web `Expanded`: open state of work groups, tool rows, changed-files
     /// cards, keyed by row.
     expanded_rows: HashMap<String, bool>,
-    /// The chat column's painted width; percentage widths inside the
+    /// The chat column's painted width in CSS pixels; percentage widths inside the
     /// transcript's scroll container measure as indefinite, so the column is
     /// sized from this instead.
     measured_width: std::rc::Rc<std::cell::Cell<f32>>,
@@ -1027,6 +1030,7 @@ impl ChatView {
                 state.set_follow_mode(FollowMode::Tail);
                 state
             },
+            messages_zoom: std::cell::Cell::new(gpui_component::zoom::zoom()),
             messages_focus: cx.focus_handle(),
             rendered_messages: std::cell::Cell::new(None),
             #[cfg(test)]
@@ -1917,7 +1921,9 @@ impl Render for ChatView {
                 let entity = cx.entity_id();
                 canvas(
                     move |bounds, _window, cx| {
-                        let width = f32::from(bounds.size.width);
+                        // In CSS pixels: it is compared with, and laid out
+                        // beside, design widths that zoom with the page.
+                        let width = gpui_component::zoom::css_px(bounds.size.width);
                         if (measured.get() - width).abs() > 0.5 {
                             measured.set(width);
                             cx.notify(entity);

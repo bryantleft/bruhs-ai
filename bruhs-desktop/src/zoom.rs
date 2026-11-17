@@ -1,8 +1,8 @@
 //! Page zoom for the desktop window, the counterpart of a browser's
-//! ⌘+ / ⌘− / ⌘0 on the web app: the window draws its content larger in a
-//! smaller layout viewport, so pages reflow at the web's widths
-//! (`gpui::Window::set_zoom`). The steps are Chrome's, from 67% to 300%;
+//! ⌘+ / ⌘− / ⌘0 on the web app. The levels are Chrome's, from 67% to 300%;
 //! below 67% the window header gets shorter than the macOS traffic lights.
+//! Drawing at a zoom is `gpui_component::zoom`: design lengths are CSS pixels
+//! scaled by the zoom, so pages reflow at the web's widths.
 
 /// The zoom steps, smallest first.
 pub const LEVELS: [f32; 12] = [
@@ -45,13 +45,6 @@ pub fn is_default(zoom: f32) -> bool {
     (zoom - DEFAULT).abs() < EPSILON
 }
 
-/// The macOS traffic lights stay in window points while the content zooms.
-/// Space reserved for them, in content points, is their window-point width
-/// divided by the zoom.
-pub fn traffic_light_inset(inset_px: f32, zoom: f32) -> f32 {
-    inset_px / zoom
-}
-
 /// The traffic lights' top, in window points, that keeps them centred in a
 /// header `header_px` content points tall: 15pt at 100% for the 44pt header.
 pub fn traffic_light_top(header_px: f32, zoom: f32) -> f32 {
@@ -85,7 +78,6 @@ mod tests {
 
     #[test]
     fn traffic_lights_keep_their_window_place() {
-        assert_eq!(traffic_light_inset(88.0, 2.0), 44.0);
         assert_eq!(traffic_light_top(44.0, 1.0), 15.0);
         assert_eq!(traffic_light_top(44.0, 2.0), 37.0);
     }

@@ -3,6 +3,7 @@
 //! and per-option descriptions. The owning view holds the value and open
 //! state; the element retains focus targets and scroll position across renders.
 
+use gpui_component::zoom::px;
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,

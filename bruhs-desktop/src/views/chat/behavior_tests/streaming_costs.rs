@@ -1,10 +1,11 @@
 //! Optimized, offscreen diagnostics for a token arriving in a long native reply.
 use super::*;
+use gpui_component::zoom::px;
 use std::{hint::black_box, time::Instant};
 
 #[gpui::test]
 fn visible_inline_geometry_matches_complete_shaped_text(cx: &mut TestAppContext) {
-    use gpui::{point, px, size, Bounds, SharedString, WrappedLineLayout};
+    use gpui::{point, size, Bounds, SharedString, WrappedLineLayout};
     use gpui_component::text::inline_geometry_matches_full_scan;
     let (_, cx) = chat_window(cx);
     let lines: String = (0..48)
@@ -51,7 +52,7 @@ fn visible_inline_geometry_matches_complete_shaped_text(cx: &mut TestAppContext)
 
 #[gpui::test]
 fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestAppContext) {
-    use gpui::{point, px, Modifiers, MouseButton};
+    use gpui::{point, Modifiers, MouseButton};
     use gpui_component::WindowExt as _;
     let (chat, cx) = chat_window(cx);
     cx.simulate_resize(gpui::size(px(1280.), px(800.)));

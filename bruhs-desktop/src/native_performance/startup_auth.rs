@@ -6,6 +6,7 @@ use super::{FixtureMode, Service};
 use crate::assets;
 use crate::views::workspace::Workspace;
 use gpui::*;
+use gpui_component::zoom::px;
 use gpui_component::Root;
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};

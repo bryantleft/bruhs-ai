@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::rc::Rc;
 
 use gpui::prelude::FluentBuilder as _;
@@ -5,7 +6,7 @@ use gpui::{
     AnyElement, App, DefiniteLength, Edges, EdgesRefinement, Entity, Hsla, InteractiveElement as _,
     IntoElement, MouseButton, MouseDownEvent, ParentElement as _, Rems, RenderOnce, Role,
     SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, Window, div,
-    px, relative,
+    relative,
 };
 
 use crate::button::{Button, ButtonVariants as _};

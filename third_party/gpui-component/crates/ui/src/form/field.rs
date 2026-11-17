@@ -1,9 +1,10 @@
+use crate::zoom::px;
 use std::rc::Rc;
 
 use gpui::{
     AlignItems, AnyElement, AnyView, App, Axis, Div, ElementId, InteractiveElement as _,
     IntoElement, ParentElement, Pixels, Rems, RenderOnce, SharedString, StyleRefinement, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    Window, div, prelude::FluentBuilder as _,
 };
 
 use crate::{ActiveTheme as _, AxisExt, Size, StyledExt, h_flex, v_flex};

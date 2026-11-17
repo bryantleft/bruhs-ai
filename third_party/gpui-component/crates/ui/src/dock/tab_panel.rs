@@ -1,10 +1,11 @@
+use crate::zoom::px;
 use std::sync::Arc;
 
 use gpui::{
     Anchor, App, AppContext, Context, DismissEvent, Div, DragMoveEvent, Empty, Entity,
     EventEmitter, FocusHandle, Focusable, InteractiveElement as _, IntoElement, ParentElement,
     Pixels, Render, ScrollHandle, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, WeakEntity, Window, div, prelude::FluentBuilder, px, relative, rems,
+    Styled, WeakEntity, Window, div, prelude::FluentBuilder, relative, rems,
 };
 use rust_i18n::t;
 

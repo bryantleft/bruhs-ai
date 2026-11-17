@@ -11,6 +11,7 @@ use gpui::*;
 use gpui_component::input::Input;
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::tooltip::Tooltip;
+use gpui_component::zoom::px;
 
 use bruhs_models::logic::commands::COMPACT_UNAVAILABLE;
 use bruhs_models::logic::composer_text::{exceeds_message_limit_with, MESSAGE_LIMIT_HINT};
@@ -396,9 +397,11 @@ fn context_ring(reading: ContextReading) -> impl IntoElement {
     canvas(
         |_bounds, _window, _cx| {},
         move |bounds, (), window, _cx| {
+            // Window points per ring unit: the painted box already carries the
+            // zoom, so these lengths must not be zoomed again.
             let scale = f32::from(bounds.size.width) / CONTEXT_RING_BOX_UNITS;
-            let radius = px(CONTEXT_RING_RADIUS_UNITS * scale);
-            let stroke = px(CONTEXT_RING_STROKE_UNITS * scale);
+            let radius = gpui_component::zoom::window_px(CONTEXT_RING_RADIUS_UNITS * scale);
+            let stroke = gpui_component::zoom::window_px(CONTEXT_RING_STROKE_UNITS * scale);
             let center = bounds.center();
             let at = |turn: f32| {
                 let angle = (turn - 0.25) * std::f32::consts::TAU;

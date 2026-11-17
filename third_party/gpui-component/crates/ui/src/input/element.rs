@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use gpui::Corners;
 use gpui::Half;
 use gpui::{
@@ -8,7 +9,7 @@ use gpui::{
     HighlightStyle, Hitbox, HitboxBehavior, Hsla, InteractiveElement, IntoElement, LayoutId,
     MouseButton, MouseMoveEvent, MouseUpEvent, Path, Pixels, Point, Position, ShapedLine,
     SharedString, Size, Style, Styled as _, TextAlign, TextRun, TextStyle, UnderlineStyle, Window,
-    fill, point, px, relative, size,
+    fill, point, relative, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -24,10 +25,10 @@ use crate::{
 use super::{InputState, LastLayout, WhitespaceIndicators, mode::InputMode};
 
 const BOTTOM_MARGIN_ROWS: usize = 3;
-pub(super) const RIGHT_MARGIN: Pixels = px(10.);
-pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = px(10.);
-const FOLD_ICON_WIDTH: Pixels = px(14.);
-const FOLD_ICON_HITBOX_WIDTH: Pixels = px(18.);
+pub(super) const RIGHT_MARGIN: Pixels = gpui::px(10.);
+pub(super) const LINE_NUMBER_RIGHT_MARGIN: Pixels = gpui::px(10.);
+const FOLD_ICON_WIDTH: Pixels = gpui::px(14.);
+const FOLD_ICON_HITBOX_WIDTH: Pixels = gpui::px(18.);
 const MAX_HIGHLIGHT_LINE_LENGTH: usize = 10_000;
 
 #[derive(Clone, Copy, Debug, PartialEq)]

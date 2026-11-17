@@ -3,6 +3,7 @@
 
 use gpui::prelude::*;
 use gpui::*;
+use gpui_component::zoom::px;
 
 use super::meetings_hub::{format_elapsed, MeetingsHub};
 use super::web_button::{

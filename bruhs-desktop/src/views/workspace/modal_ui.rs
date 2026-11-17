@@ -3,6 +3,7 @@
 //! modal shell.
 
 use super::*;
+use gpui_component::zoom::px;
 pub(super) const DESKTOP_MODAL_FOCUS_TRAP_KEY: &str = "tab";
 pub(super) const DESKTOP_MODAL_FOCUS_START_TAB_INDEX: isize = 0;
 pub(super) const DESKTOP_MODAL_FOCUS_END_TAB_INDEX: isize = 999;
@@ -22,10 +23,11 @@ pub(super) fn picker_max_height(window: &Window) -> Pixels {
 /// Height a form dialog takes: its preferred height, or what the window
 /// allows around a centered dialog.
 pub(super) fn form_dialog_height(window: &Window) -> f32 {
-    (f32::from(window.viewport_size().height) - DESKTOP_DIALOG_EDGE_GAP_PX * 2.0).clamp(
-        DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX,
-        FORM_DIALOG_PREFERRED_HEIGHT_PX,
-    )
+    (gpui_component::zoom::css_px(window.viewport_size().height) - DESKTOP_DIALOG_EDGE_GAP_PX * 2.0)
+        .clamp(
+            DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX,
+            FORM_DIALOG_PREFERRED_HEIGHT_PX,
+        )
 }
 
 impl Overlay {

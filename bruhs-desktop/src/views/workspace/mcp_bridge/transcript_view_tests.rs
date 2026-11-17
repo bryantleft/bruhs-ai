@@ -1,6 +1,7 @@
 use super::test_fixture::fixture;
 use bruhs_models::{AppView, Meeting, MeetingEvent, Speaker, TranscriptSegment};
-use gpui::{px, size, Focusable, ListOffset, TestAppContext};
+use gpui::{size, Focusable, ListOffset, TestAppContext};
+use gpui_component::zoom::px;
 
 fn install(
     w: &mut super::super::Workspace,

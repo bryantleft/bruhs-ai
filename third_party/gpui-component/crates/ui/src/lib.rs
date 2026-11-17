@@ -79,6 +79,7 @@ pub mod text;
 pub mod theme;
 pub mod tooltip;
 pub mod tree;
+pub mod zoom;
 
 pub use crate::Disableable;
 pub use element_ext::*;

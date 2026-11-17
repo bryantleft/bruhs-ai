@@ -1,10 +1,10 @@
+use crate::zoom::px;
 use std::{ops::Range, rc::Rc};
 
 use gpui::{
     AnyElement, App, AppContext as _, AvailableSpace, Bounds, Element, ElementId, Entity,
     InteractiveElement, IntoElement, MouseDownEvent, MouseMoveEvent, ParentElement as _, Pixels,
     Render, StatefulInteractiveElement as _, StyleRefinement, Styled, Window, deferred, div, point,
-    px,
 };
 
 use crate::{
@@ -202,7 +202,7 @@ impl Element for Popover {
         .into_any_element();
 
         let popover_size = popover.layout_as_root(AvailableSpace::min_size(), window, cx);
-        const SNAP_TO_EDGE: Pixels = px(8.);
+        const SNAP_TO_EDGE: Pixels = gpui::px(8.);
         let top_space = trigger_bounds.top() - SNAP_TO_EDGE;
         let right_space = window.bounds().size.width - trigger_bounds.left() - SNAP_TO_EDGE;
 

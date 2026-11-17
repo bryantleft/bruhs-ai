@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::{rc::Rc, time::Duration};
 
 use crate::{
@@ -7,7 +8,7 @@ use crate::{
 use gpui::{
     Animation, AnimationExt, AnyElement, App, Div, ElementId, InteractiveElement, IntoElement,
     ParentElement, RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, Toggled, Window, div, prelude::FluentBuilder as _, px, relative, rems, svg,
+    Styled, Toggled, Window, div, prelude::FluentBuilder as _, relative, rems, svg,
 };
 
 /// A Checkbox element.

@@ -1,5 +1,6 @@
 use super::*;
 use bruhs_models::logic::rich_response::standalone_widget_document;
+use gpui_component::zoom::px;
 use gpui_component::FocusTrapElement as _;
 
 fn standalone_document(entry: &Entry, app: &App) -> Option<String> {

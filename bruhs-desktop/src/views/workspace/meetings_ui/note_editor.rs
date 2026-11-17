@@ -2,6 +2,7 @@ use super::*;
 use crate::views::workspace::{form_textarea, InputEvent, InputState};
 use bruhs_models::EpochMs;
 use bruhs_models::{MeetingNote, MeetingNoteDraft};
+use gpui_component::zoom::px;
 
 pub(in crate::views::workspace) struct NoteEditor {
     draft: MeetingNoteDraft,

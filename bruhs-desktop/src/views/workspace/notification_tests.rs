@@ -1,7 +1,8 @@
 use super::Workspace;
 use crate::{app_state::DesktopState, theme, views::meetings_hub::HubNotice};
 use bruhs_models::AppView;
-use gpui::{px, AppContext, Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui::{AppContext, Entity, Modifiers, TestAppContext, VisualTestContext};
+use gpui_component::zoom::px;
 use std::{cell::RefCell, rc::Rc};
 
 fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {

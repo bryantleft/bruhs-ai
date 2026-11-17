@@ -7,7 +7,8 @@ use bruhs_models::{
     mail::*,
     AppView, InboxConversation, InboxMessage, InboxSource,
 };
-use gpui::{px, size, Modifiers, TestAppContext};
+use gpui::{size, Modifiers, TestAppContext};
+use gpui_component::zoom::px;
 use serde_json::json;
 use std::sync::{
     atomic::{AtomicU8, Ordering as AtomicOrdering},

@@ -1,8 +1,9 @@
+use crate::zoom::px;
 use gpui::Half;
 use std::ops::Range;
 
 use gpui::{
-    App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, px, size,
+    App, Font, LineFragment, Pixels, Point, ShapedLine, Size, TextAlign, Window, point, size,
 };
 use ropey::Rope;
 use smallvec::SmallVec;
@@ -689,7 +690,7 @@ mod tests {
     use super::*;
     use std::rc::Rc;
 
-    use gpui::{Boundary, FontFeatures, FontStyle, FontWeight, px};
+    use gpui::{Boundary, FontFeatures, FontStyle, FontWeight};
 
     #[test]
     fn test_update() {

@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::{ops::Range, rc::Rc, time::Duration};
 
 use crate::{
@@ -16,7 +17,7 @@ use gpui::{
     Focusable, InteractiveElement, IntoElement, ListSizingBehavior, MouseButton, MouseDownEvent,
     ParentElement, Pixels, Point, Render, ScrollStrategy, SharedString, Stateful,
     StatefulInteractiveElement as _, Styled, Task, UniformListScrollHandle, Window, div,
-    prelude::FluentBuilder, px, uniform_list,
+    prelude::FluentBuilder, uniform_list,
 };
 
 use super::*;
@@ -1227,7 +1228,7 @@ where
         _: &mut Window,
         cx: &mut Context<Self>,
     ) -> impl IntoElement {
-        const HANDLE_SIZE: Pixels = px(2.);
+        const HANDLE_SIZE: Pixels = gpui::px(2.);
 
         let resizable = self.col_resizable
             && self

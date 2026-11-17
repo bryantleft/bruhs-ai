@@ -6,6 +6,7 @@ use bruhs_models::{
     health_provider_adapters, life_agent_prompt, FinanceField, HealthField, LifeInsightDomain,
     ProviderStatus,
 };
+use gpui_component::zoom::px;
 
 /// Which finance card's Add was pressed.
 #[derive(Clone, Copy)]
@@ -1395,7 +1396,7 @@ impl Workspace {
     pub(super) fn render_life_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
         // Web's forms take their columns from `sm`.
         let narrow = Self::narrower_than(window, SM_BREAKPOINT_PX);
-        let width = f32::from(window.viewport_size().width);
+        let width = gpui_component::zoom::css_px(window.viewport_size().width);
         let two_columns = width >= RECORD_GRID_TWO_COLUMNS_PX;
         let finance = self.life_tab == DesktopLifeTab::Finance;
         let summary = if finance {

@@ -4,8 +4,9 @@ use super::{key, Action, Job, MailComposer, Phase};
 use crate::{app_state::DesktopState, server_client::ServerClient};
 use bruhs_core::mail::device::{DeviceDraft, DeviceDraftFile, DeviceDraftScope, MailDeviceStore};
 use bruhs_models::{connections::ServiceProvider, mail::*, AppView};
-use gpui::{px, size, Modifiers, TestAppContext};
+use gpui::{size, Modifiers, TestAppContext};
 use gpui::{Entity, VisualTestContext};
+use gpui_component::zoom::px;
 use std::sync::{Arc, Mutex};
 use tokio::io::{AsyncReadExt as _, AsyncWriteExt as _};
 

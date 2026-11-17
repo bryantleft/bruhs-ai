@@ -23,6 +23,7 @@ mod whiteboard_performance;
 mod zoom;
 
 use gpui::*;
+use gpui_component::zoom::px;
 use gpui_component::{Root, TitleBar};
 use std::cell::RefCell;
 use std::env;

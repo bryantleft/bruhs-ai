@@ -3,6 +3,7 @@
 //! wording come from `bruhs_models::logic::record_picker`, shared with web.
 
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::zoom::px;
 
 use super::*;
 use bruhs_models::logic::record_picker::{

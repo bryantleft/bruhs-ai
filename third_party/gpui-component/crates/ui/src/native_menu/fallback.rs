@@ -4,9 +4,10 @@
 //! [`Root`]. Unlike a real native menu it is clipped to the window, but it keeps
 //! the [`super::NativeMenu`] API working on every platform.
 
+use crate::zoom::px;
 use gpui::{
     App, Context, DismissEvent, Entity, FocusHandle, Focusable, IntoElement, ParentElement, Pixels,
-    Point, Render, Subscription, Window, anchored, deferred, div, px,
+    Point, Render, Subscription, Window, anchored, deferred, div,
 };
 
 use crate::menu::{PopupMenu, PopupMenuItem};

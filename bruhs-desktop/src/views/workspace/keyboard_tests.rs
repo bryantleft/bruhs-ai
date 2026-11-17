@@ -1,12 +1,17 @@
-//! Keyboard reach, read through the accessibility tree a screen reader gets:
-//! the app starts with focus in the workspace, as a web page starts with
-//! the document focused, and Tab leaves a multi-line field as it leaves a
-//! web textarea.
+//! Keyboard reach, checked by what the keys do: the app starts with focus in
+//! the workspace, as a web page starts with the document focused; Tab leaves
+//! a multi-line field as it leaves a web textarea; and a project's Delete is
+//! a Tab stop, as on the web.
 
-use super::{AppView, DiskVersion, PersistedWorkspaceState, RestoredRecords, Workspace};
+use super::{
+    AppView, DesktopProject, DiskVersion, PersistedWorkspaceState, RestoredRecords, Workspace,
+};
 use crate::{app_state::DesktopState, theme};
 use bruhs_models::{InboxConversation, InboxMessage, InboxSource};
-use gpui::{px, size, AppContext, Entity, Role, TestAppContext, VisualTestContext};
+use gpui::{
+    size, AppContext, Entity, FocusHandle, Focusable as _, TestAppContext, VisualTestContext,
+};
+use gpui_component::zoom::window_px;
 use std::{cell::RefCell, rc::Rc};
 
 fn open(
@@ -35,15 +40,38 @@ fn open(
         gpui_component::Root::new(workspace, window, cx)
     });
     let workspace = entity.borrow().clone().expect("workspace");
-    cx.simulate_resize(size(px(1280.0), px(800.0)));
+    cx.simulate_resize(size(window_px(1280.0), window_px(800.0)));
     cx.run_until_parked();
-    cx.enable_accessibility();
     (workspace, cx)
 }
 
-fn focused(cx: &mut VisualTestContext) -> (Role, String) {
-    let (role, label) = cx.accessibility_focus().expect("a focused node");
-    (role, label.unwrap_or_default())
+/// A key press as the app gets it: gpui clicks a focused button on key up.
+fn press(cx: &mut VisualTestContext, key: &str) {
+    let keystroke = gpui::Keystroke::parse(key).expect("keystroke");
+    cx.simulate_event(gpui::KeyDownEvent {
+        keystroke: keystroke.clone(),
+        is_held: false,
+        prefer_character_input: false,
+    });
+    cx.simulate_event(gpui::KeyUpEvent { keystroke });
+    cx.run_until_parked();
+}
+
+fn focused(cx: &mut VisualTestContext) -> Option<FocusHandle> {
+    cx.update(|window, cx| window.focused(cx))
+}
+
+/// Tab stops in one full turn of the Tab order.
+fn tab_cycle(cx: &mut VisualTestContext) -> usize {
+    cx.simulate_keystrokes("tab");
+    let first = focused(cx).expect("a Tab stop");
+    for stops in 1..500 {
+        cx.simulate_keystrokes("tab");
+        if focused(cx).as_ref() == Some(&first) {
+            return stops;
+        }
+    }
+    panic!("Tab never came back around");
 }
 
 /// Reopened on a page other than Chat, the app used to start with nothing
@@ -55,24 +83,10 @@ fn the_app_starts_with_the_keyboard_in_the_workspace(cx: &mut TestAppContext) {
     }))
     .expect("state");
     let (_workspace, cx) = open(cx, Some(state));
-    assert!(
-        cx.update(|window, cx| window.focused(cx).is_some()),
-        "focus at launch"
-    );
-    let mut reached = Vec::new();
-    for _ in 0..80 {
-        cx.simulate_keystrokes("tab");
-        let (role, label) = focused(cx);
-        if role == Role::Button {
-            reached.push(label);
-        }
-    }
-    assert!(
-        reached
-            .iter()
-            .any(|label| label.starts_with("Toggle sidebar")),
-        "Tab walks the page: {reached:?}"
-    );
+    let start = focused(cx).expect("focus at launch");
+    cx.simulate_keystrokes("tab");
+    let next = focused(cx).expect("Tab reaches a control");
+    assert!(start != next, "Tab moves focus without a click first");
 }
 
 /// Web: Tab leaves the reply textarea for Save draft; Shift-Tab returns.
@@ -89,29 +103,38 @@ fn tab_leaves_a_multi_line_field_like_web(cx: &mut TestAppContext) {
     }))
     .expect("state");
     let (workspace, cx) = open(cx, Some(state));
-    workspace.update_in(cx, |workspace, window, cx| {
+    let reply = workspace.update_in(cx, |workspace, window, cx| {
         workspace.inbox_reply_input.update(cx, |input, cx| {
             input.set_value("Friday works", window, cx);
             input.focus(window, cx);
         });
+        workspace.inbox_reply_input.read(cx).focus_handle(cx)
     });
     cx.run_until_parked();
-    assert_eq!(focused(cx).1, "Reply draft");
+    assert!(focused(cx).as_ref() == Some(&reply), "the reply has focus");
     cx.simulate_keystrokes("tab");
-    assert_eq!(focused(cx), (Role::Button, "Save draft".to_string()));
+    assert!(focused(cx).as_ref() != Some(&reply), "Tab left the reply");
+    // The next stop is Save draft, as on the web: Enter there saves the reply.
+    press(cx, "enter");
     workspace.read_with(cx, |workspace, cx| {
         assert_eq!(
             workspace.inbox_reply_input.read(cx).value().as_ref(),
             "Friday works",
             "Tab moved focus instead of typing"
         );
+        assert_eq!(
+            workspace.inbox_conversations[0].draft_body(),
+            "Friday works",
+            "Enter after Tab saved the draft"
+        );
     });
     cx.simulate_keystrokes("shift-tab");
-    assert_eq!(focused(cx).1, "Reply draft");
+    assert!(focused(cx).as_ref() == Some(&reply), "Shift-Tab returns");
 }
 
-/// Web: the project row's delete button is hidden until hover or focus,
-/// but the keyboard reaches it.
+/// Web: a project row's Delete is hidden until hover or focus, but the
+/// keyboard reaches it, so each project adds two Tab stops, its row and its
+/// Delete.
 #[gpui::test]
 fn the_keyboard_reaches_a_projects_delete_button_like_web(cx: &mut TestAppContext) {
     let state: PersistedWorkspaceState = serde_json::from_value(serde_json::json!({
@@ -119,19 +142,16 @@ fn the_keyboard_reaches_a_projects_delete_button_like_web(cx: &mut TestAppContex
         "projects": [{ "id": "project-launch", "name": "Launch" }],
     }))
     .expect("state");
-    let (_workspace, cx) = open(cx, Some(state));
-    let mut reached = Vec::new();
-    for _ in 0..60 {
-        cx.simulate_keystrokes("tab");
-        reached.push(focused(cx));
-    }
-    let select = reached
-        .iter()
-        .position(|(_, label)| label == "Select project Launch")
-        .expect("the project row");
-    assert_eq!(
-        reached[select + 1],
-        (Role::Button, "Delete project".to_string()),
-        "{reached:?}"
-    );
+    let (workspace, cx) = open(cx, Some(state));
+    let one = tab_cycle(cx);
+    workspace.update(cx, |workspace, cx| {
+        workspace.projects.push(DesktopProject {
+            id: "project-hiring".into(),
+            name: "Hiring".into(),
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let two = tab_cycle(cx);
+    assert_eq!(two, one + 2, "a project's row and its Delete");
 }

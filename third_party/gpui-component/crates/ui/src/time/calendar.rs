@@ -1,10 +1,11 @@
+use crate::zoom::px;
 use std::{borrow::Cow, rc::Rc};
 
 use chrono::{Datelike, Local, NaiveDate};
 use gpui::{
     App, ClickEvent, Context, Div, ElementId, Empty, Entity, EventEmitter, FocusHandle,
     InteractiveElement, IntoElement, ParentElement, Render, RenderOnce, SharedString, Stateful,
-    StatefulInteractiveElement, StyleRefinement, Styled, Window, prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement, StyleRefinement, Styled, Window, prelude::FluentBuilder as _,
     relative,
 };
 use rust_i18n::t;

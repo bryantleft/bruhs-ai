@@ -1,6 +1,7 @@
+use crate::zoom::px;
 use std::{rc::Rc, sync::Arc};
 
-use gpui::{Background, Hsla, SharedString, px};
+use gpui::{Background, Hsla, SharedString};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 

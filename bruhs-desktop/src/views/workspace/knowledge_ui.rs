@@ -2,6 +2,7 @@
 //! hierarchy. Document and source mutations share the desktop's one atomic
 //! state snapshot; attachment payloads are copied beside that snapshot.
 
+use gpui_component::zoom::px;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 

@@ -8,6 +8,7 @@ use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement;
+use gpui_component::zoom::px;
 use gpui_component::ActiveTheme;
 use std::rc::Rc;
 
@@ -313,7 +314,7 @@ impl Workspace {
             .id("sidebar-header")
             .debug_selector(|| "desktop-sidebar-header".to_string())
             .h(px(SIDEBAR_HEADER_HEIGHT_PX))
-            .pl(px(self.traffic_light_inset_px()))
+            .pl(self.traffic_light_inset())
             .pr_4()
             .flex()
             .items_center()

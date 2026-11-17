@@ -3,6 +3,7 @@ mod completion_menu;
 mod diagnostic_popover;
 mod hover_popover;
 
+use crate::zoom::px;
 pub(crate) use code_action_menu::*;
 pub(crate) use completion_menu::*;
 pub(crate) use diagnostic_popover::*;
@@ -10,7 +11,7 @@ pub(crate) use hover_popover::*;
 
 use gpui::{
     App, Div, ElementId, Entity, InteractiveElement as _, IntoElement, SharedString, Stateful,
-    StyleRefinement, Styled as _, Window, div, px, rems,
+    StyleRefinement, Styled as _, Window, div, rems,
 };
 
 use crate::{

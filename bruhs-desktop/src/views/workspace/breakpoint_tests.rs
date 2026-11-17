@@ -9,7 +9,8 @@ use super::{
 };
 use crate::{app_state::DesktopState, theme};
 use bruhs_models::KnowledgeDocument;
-use gpui::{px, size, AppContext, Bounds, Entity, Pixels, TestAppContext, VisualTestContext};
+use gpui::{size, AppContext, Bounds, Entity, Pixels, TestAppContext, VisualTestContext};
+use gpui_component::zoom::px;
 use std::{cell::RefCell, rc::Rc};
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {

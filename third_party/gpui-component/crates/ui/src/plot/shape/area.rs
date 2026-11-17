@@ -1,6 +1,8 @@
 // @reference: https://d3js.org/d3-shape/area
 
-use gpui::{Background, Bounds, Path, PathBuilder, Pixels, Point, Window, px};
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
+use gpui::{Background, Bounds, Path, PathBuilder, Pixels, Point, Window};
 
 use crate::plot::{StrokeStyle, origin_point};
 

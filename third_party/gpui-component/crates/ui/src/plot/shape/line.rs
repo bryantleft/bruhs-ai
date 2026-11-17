@@ -1,7 +1,9 @@
 // @reference: https://d3js.org/d3-shape/line
 
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
 use gpui::{
-    Background, BorderStyle, Bounds, Hsla, PaintQuad, Path, PathBuilder, Pixels, Point, Window, px,
+    Background, BorderStyle, Bounds, Hsla, PaintQuad, Path, PathBuilder, Pixels, Point, Window,
     quad, size,
 };
 
@@ -210,7 +212,7 @@ impl<T> Line<T> {
 mod tests {
     use super::*;
 
-    use gpui::{Bounds, point, px};
+    use gpui::{Bounds, point};
 
     #[test]
     fn test_line_path() {

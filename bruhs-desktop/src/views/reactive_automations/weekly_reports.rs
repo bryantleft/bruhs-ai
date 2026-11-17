@@ -1,6 +1,7 @@
 //! Native controls for the same host-owned reports used by the web client.
 use super::*;
 use bruhs_models::{weekly_reports::*, EpochMs};
+use gpui_component::zoom::px;
 
 #[derive(Default)]
 pub(super) struct WeeklyReportsState {

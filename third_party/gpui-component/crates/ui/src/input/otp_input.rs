@@ -1,8 +1,9 @@
+use crate::zoom::px;
 use gpui::{
     AnyElement, App, AppContext as _, Context, Empty, Entity, EventEmitter, FocusHandle, Focusable,
     InteractiveElement, IntoElement, KeyDownEvent, MouseButton, MouseDownEvent, ParentElement as _,
     Render, RenderOnce, SharedString, Styled as _, Subscription, Window, div,
-    prelude::FluentBuilder, px,
+    prelude::FluentBuilder,
 };
 
 use super::{InputEvent, blink_cursor::BlinkCursor, input::input_style, state::InputState};

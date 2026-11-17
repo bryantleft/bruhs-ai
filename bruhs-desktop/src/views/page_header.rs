@@ -5,6 +5,7 @@
 use crate::theme;
 use gpui::prelude::*;
 use gpui::*;
+use gpui_component::zoom::px;
 
 /// The header bar. Add the page's actions with `.child(…)`; they sit on the
 /// right, and like the web's they wrap under the title when the page is too

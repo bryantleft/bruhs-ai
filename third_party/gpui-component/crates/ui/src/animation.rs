@@ -2,7 +2,7 @@ use std::{rc::Rc, time::Duration};
 
 use gpui::{
     Animation, AnimationExt, ElementId, Hsla, IntoElement, Pixels, Point, Styled, point,
-    prelude::FluentBuilder, px,
+    prelude::FluentBuilder,
 };
 use smallvec::SmallVec;
 
@@ -67,7 +67,8 @@ impl Lerp for Pixels {
     fn lerp(&self, target: &Self, t: f32) -> Self {
         let a: f32 = (*self).into();
         let b: f32 = (*target).into();
-        px(a + (b - a) * t)
+        // Between two lengths already in window points.
+        crate::zoom::window_px(a + (b - a) * t)
     }
 }
 

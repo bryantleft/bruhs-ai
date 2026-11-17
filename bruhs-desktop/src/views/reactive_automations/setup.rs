@@ -1,5 +1,6 @@
 //! One review and one atomic command activate a complete automation.
 use super::*;
+use gpui_component::zoom::px;
 
 pub(super) struct AutomationEditor {
     agent: AgentEditor,

@@ -1,10 +1,11 @@
+use crate::zoom::px;
 use std::{cell::Cell, rc::Rc, time::Duration};
 
 use gpui::{
     Action, AnyElement, AnyView, App, AppContext, Bounds, Context, Display, Element, ElementId,
     GlobalElementId, Half, InspectorElementId, IntoElement, LayoutId, MouseButton, ParentElement,
     Pixels, Point, Position, Render, SharedString, Size, StatefulInteractiveElement, Style,
-    StyleRefinement, Styled, Task, Window, deferred, div, point, prelude::FluentBuilder, px,
+    StyleRefinement, Styled, Task, Window, deferred, div, point, prelude::FluentBuilder,
 };
 
 use crate::{
@@ -150,7 +151,7 @@ const SHOW_DELAY: Duration = Duration::from_millis(500);
 const ENTER_DURATION: Duration = Duration::from_millis(150);
 /// Duration of the position-slide animation when switching tooltips.
 const SLIDE_DURATION: Duration = Duration::from_millis(200);
-const TOOLTIP_WINDOW_MARGIN: Pixels = px(4.);
+const TOOLTIP_WINDOW_MARGIN: Pixels = gpui::px(4.);
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 enum TooltipPlacement {

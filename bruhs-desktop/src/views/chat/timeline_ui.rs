@@ -9,6 +9,7 @@ use crate::views::copy_feedback::CopyFeedback;
 use bruhs_models::logic::context_meter::format_tokens;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use chrono::{Local, TimeZone};
+use gpui_component::zoom::px;
 use std::time::Duration;
 
 use gpui::prelude::*;

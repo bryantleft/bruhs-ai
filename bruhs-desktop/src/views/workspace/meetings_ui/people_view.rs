@@ -3,6 +3,7 @@
 //! reminders, merge and delete confirmations, and the undo bar. Copy comes
 //! from `bruhs_models::people_copy` so both surfaces match word for word.
 
+use gpui_component::zoom::px;
 use std::cell::{Cell, RefCell};
 
 use gpui_component::scroll::ScrollableElement;

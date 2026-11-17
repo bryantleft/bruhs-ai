@@ -3,7 +3,8 @@
 //! `bruhs_models::logic::dither`, so both apps place the same ones.
 
 use bruhs_models::logic::dither::bruh_dots;
-use gpui::{canvas, fill, point, px, rgb, size, Bounds, Hsla, IntoElement, Styled};
+use gpui::{canvas, fill, point, rgb, size, Bounds, Hsla, IntoElement, Styled};
+use gpui_component::zoom::px;
 
 /// A static, dithered Bruh `size_px` square. Decorative, and it never moves.
 pub fn braille_bruh(size_px: f32) -> impl IntoElement {

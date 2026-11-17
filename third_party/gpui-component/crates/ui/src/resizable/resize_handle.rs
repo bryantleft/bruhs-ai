@@ -3,7 +3,7 @@ use std::{cell::Cell, rc::Rc};
 use gpui::{
     AnyElement, App, Axis, Element, ElementId, Entity, GlobalElementId, InteractiveElement,
     IntoElement, MouseDownEvent, MouseUpEvent, ParentElement as _, Pixels, Point, Render,
-    StatefulInteractiveElement, Styled as _, Window, div, prelude::FluentBuilder as _, px,
+    StatefulInteractiveElement, Styled as _, Window, div, prelude::FluentBuilder as _,
 };
 
 use crate::{ActiveTheme as _, AxisExt as _, dock::DockPlacement};
@@ -11,7 +11,7 @@ use crate::{ActiveTheme as _, AxisExt as _, dock::DockPlacement};
 /// bruhs: the handle is the web's 4px strip inside the panel's leading
 /// edge — transparent until hovered or dragged, when it tints with the
 /// theme's `drag_border` at 40% (`hover:bg-persimmon-400/40`).
-pub(crate) const HANDLE_SIZE: Pixels = px(4.);
+pub(crate) const HANDLE_SIZE: Pixels = gpui::px(4.);
 const HANDLE_ACTIVE_OPACITY: f32 = 0.4;
 
 /// Create a resize handle for a resizable panel.

@@ -1,6 +1,8 @@
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
 use std::rc::Rc;
 
-use gpui::{App, Bounds, Hsla, PathBuilder, Pixels, SharedString, Window, fill, px};
+use gpui::{App, Bounds, Hsla, PathBuilder, Pixels, SharedString, Window, fill};
 use gpui_component_macros::IntoPlot;
 use num_traits::{Num, ToPrimitive};
 

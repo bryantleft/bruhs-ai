@@ -1,10 +1,11 @@
+use crate::zoom::px;
 use futures::Stream as _;
 use std::{pin::Pin, sync::Arc, task::Poll};
 
 use gpui::{
     App, AppContext as _, Bounds, Context, FocusHandle, IntoElement, KeyBinding, ListState,
     ParentElement as _, Pixels, Point, Render, SharedString, Styled as _, Task, Window,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _,
 };
 
 use crate::{

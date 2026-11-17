@@ -12,6 +12,7 @@ use bruhs_models::updates::{
     ProviderUpdate, ProviderUpdateState, ReleaseUpdate, UpdatesReport, POLL_INTERVAL_MS,
     RUN_POLL_INTERVAL_MS, SUCCESS_VISIBLE_MS,
 };
+use gpui_component::zoom::px;
 use std::collections::HashSet;
 
 const RESTART_CONFIRM_LABEL: &str = "Restart to update";

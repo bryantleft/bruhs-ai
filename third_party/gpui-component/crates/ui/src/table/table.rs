@@ -1,12 +1,12 @@
 use gpui::{
     AnyElement, App, InteractiveElement as _, IntoElement, ParentElement, Pixels, RenderOnce, Role,
     StatefulInteractiveElement as _, StyleRefinement, Styled, TextAlign, Window, div,
-    prelude::FluentBuilder as _, px, relative,
+    prelude::FluentBuilder as _, relative,
 };
 
 use crate::{ActiveTheme as _, AnyChildElement, ChildElement, Sizable, Size, StyledExt as _};
 
-const MIN_CELL_WIDTH: Pixels = px(100.);
+const MIN_CELL_WIDTH: Pixels = gpui::px(100.);
 
 /// A basic table component for directly rendering tabular data.
 ///

@@ -1,9 +1,10 @@
+use crate::zoom::px;
 use std::cell::RefCell;
 use std::collections::HashMap;
 use std::ops::Range;
 use std::rc::Rc;
 
-use gpui::{DefiniteLength, Hsla, SharedString, px, relative};
+use gpui::{DefiniteLength, Hsla, SharedString, relative};
 use html5ever::tendril::TendrilSink;
 use html5ever::{LocalName, ParseOpts, local_name, parse_document};
 use markup5ever_rcdom::{Node, NodeData, RcDom};

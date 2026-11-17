@@ -178,7 +178,7 @@ impl NativeEmbed {
             #[cfg(not(target_os = "windows"))]
             {
                 // The page zooms with the window.
-                view.zoom(f64::from(context.window.zoom()))
+                view.zoom(f64::from(gpui_component::zoom::zoom()))
                     .map_err(|error| error.to_string())?;
                 self.view = Some(view);
             }
@@ -197,7 +197,7 @@ impl NativeEmbed {
                         context.window.scale_factor(),
                     )?;
                 }
-                view.zoom(f64::from(context.window.zoom()))
+                view.zoom(f64::from(gpui_component::zoom::zoom()))
                     .map_err(|error| error.to_string())?;
                 view.evaluate_script(&update)
                     .map_err(|error| error.to_string())?;
@@ -278,13 +278,9 @@ fn native_rect(bounds: Bounds<Pixels>, window: &Window) -> wry::Rect {
                 .into(),
         }
     }
-    // Elsewhere the frame is in window points: the content's zoom times its
-    // bounds. (Linux converts with the scale factor, which carries the zoom.)
     #[cfg(not(target_os = "linux"))]
     {
-        let zoom = f64::from(window.zoom());
-        let position = wry::dpi::LogicalPosition::new(position.x * zoom, position.y * zoom);
-        let size = wry::dpi::LogicalSize::new(size.width * zoom, size.height * zoom);
+        let _ = window;
         wry::Rect {
             position: position.into(),
             size: size.into(),

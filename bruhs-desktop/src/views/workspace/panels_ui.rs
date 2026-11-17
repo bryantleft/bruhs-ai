@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_state::spawn_tokio;
 use bruhs_models::{logic::layout, num::ToFloatLossy as _};
+use gpui_component::zoom::px;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum ProjectTool {
@@ -1779,7 +1780,7 @@ impl Workspace {
                 ResizablePanelEvent::Resized => {
                     if let Some(height) = state.read(cx).sizes().get(1).copied() {
                         this.terminal_drawer_height =
-                            clamp_terminal_drawer_height(f32::from(height));
+                            clamp_terminal_drawer_height(gpui_component::zoom::css_px(height));
                         this.persist_and_notify(cx);
                     }
                 }
@@ -1795,7 +1796,8 @@ impl Workspace {
             |this: &mut Self, state, event: &ResizablePanelEvent, cx| match event {
                 ResizablePanelEvent::Resized => {
                     if let Some(width) = state.read(cx).sizes().get(1).copied() {
-                        this.right_panel_width = f32::from(width).max(RIGHT_PANEL_MIN_WIDTH_PX);
+                        this.right_panel_width =
+                            gpui_component::zoom::css_px(width).max(RIGHT_PANEL_MIN_WIDTH_PX);
                         this.persist_and_notify(cx);
                     }
                 }

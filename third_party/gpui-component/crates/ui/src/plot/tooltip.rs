@@ -1,6 +1,8 @@
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
 use gpui::{
     AnyElement, App, Div, Hsla, IntoElement, ParentElement, Pixels, Point, RenderOnce,
-    SharedString, Size, StyleRefinement, Styled, Window, deferred, div, prelude::FluentBuilder, px,
+    SharedString, Size, StyleRefinement, Styled, Window, deferred, div, prelude::FluentBuilder,
 };
 
 use crate::{ActiveTheme, Colorize, StyledExt, h_flex, v_flex};

@@ -1,10 +1,11 @@
+use crate::zoom::px;
 use std::{
     cmp::Ordering,
     ops::{Deref, Range},
     usize,
 };
 
-use gpui::{App, HighlightStyle, Hsla, SharedString, UnderlineStyle, px};
+use gpui::{App, HighlightStyle, Hsla, SharedString, UnderlineStyle};
 use ropey::Rope;
 use sum_tree::{Bias, SeekTarget, SumTree};
 
