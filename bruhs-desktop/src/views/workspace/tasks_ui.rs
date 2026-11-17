@@ -1160,7 +1160,10 @@ impl Workspace {
                 div()
                     .id(("tasks-project-delete", key))
                     .debug_selector(move || format!("desktop-project-delete-{key}"))
-                    .invisible()
+                    // Web `opacity-0 group-hover:opacity-100
+                    // group-focus-within:opacity-100`: hidden, not removed,
+                    // so the keyboard still reaches it.
+                    .opacity(0.0)
                     .flex_shrink_0()
                     .rounded(px(PROJECT_SIDEBAR_ROW_ACTION_RADIUS_PX))
                     .size(px(theme::CONTROL_XS_PX))
@@ -1170,13 +1173,13 @@ impl Workspace {
                     .p(px(PROJECT_SIDEBAR_ROW_ACTION_PADDING_PX))
                     .text_color(theme::rambutan_500())
                     .tab_index(0)
-                    .role(Role::ListBoxOption)
+                    .role(Role::Button)
                     .aria_label(PROJECT_DELETE_LABEL)
                     .border_1()
                     .border_color(gpui::transparent_black())
-                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()).opacity(1.0))
                     .cursor_pointer()
-                    .group_hover(hover_group, |el| el.visible())
+                    .group_hover(hover_group, |el| el.opacity(1.0))
                     .hover(|el| {
                         el.bg(theme::longan_700()
                             .opacity(PROJECT_SIDEBAR_ROW_ACTION_HOVER_BG_OPACITY))

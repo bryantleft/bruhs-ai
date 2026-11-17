@@ -77,6 +77,8 @@ mod event_dialog_ui;
 #[cfg(test)]
 mod import_tests;
 mod import_ui;
+#[cfg(test)]
+mod keyboard_tests;
 mod mail_compose;
 #[cfg(test)]
 mod zoom_tests;
@@ -2155,6 +2157,15 @@ impl Workspace {
         }
         workspace.sync_keybindings(cx);
         workspace.apply_zoom(window, cx);
+        // With nothing focused, gpui dispatches keys from the window root,
+        // past every workspace action: Tab and the shortcuts would do
+        // nothing until a click. Start in the workspace, as a web page
+        // starts with the document focused.
+        cx.defer_in(window, |this, window, cx| {
+            if window.focused(cx).is_none() {
+                this.workspace_focus_handle.focus(window, cx);
+            }
+        });
         workspace.start_meeting_suggestions(cx);
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
@@ -3039,29 +3050,33 @@ impl Render for Workspace {
             .key_context("Workspace")
             .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
             .track_focus(&self.workspace_focus_handle)
+            // Tab in a multi-line field moves focus, as it leaves a web
+            // textarea: nothing traps the keyboard. The composer indents its
+            // list items and code first (`composer_edit`), and accepts a
+            // suggestion, before this runs.
             .capture_action(cx.listener(
                 |this, _: &gpui_component::input::IndentInline, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
                     if this.overlay_open()
                         && this.modal_start_focus_handle.contains_focused(window, cx)
                     {
-                        window.prevent_default();
-                        cx.stop_propagation();
                         this.step_modal_focus(false, window, cx);
                     } else {
-                        cx.propagate();
+                        window.focus_next(cx);
                     }
                 },
             ))
             .capture_action(cx.listener(
                 |this, _: &gpui_component::input::OutdentInline, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
                     if this.overlay_open()
                         && this.modal_start_focus_handle.contains_focused(window, cx)
                     {
-                        window.prevent_default();
-                        cx.stop_propagation();
                         this.step_modal_focus(true, window, cx);
                     } else {
-                        cx.propagate();
+                        window.focus_prev(cx);
                     }
                 },
             ))
