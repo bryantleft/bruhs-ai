@@ -64,7 +64,7 @@ then move it to the matching list below.
 | PM-32 | Project title instructions pick a project from a list | Chat and code | implemented | implemented | — | `settings_page.rs:389-433`; `settings_page_ui.rs` `render_title_project_control` | Desktop test `project_title_instructions_pick_a_project_from_a_list_like_web` | Closed in 2cc61540 |
 | PM-33 | Send a dictation draft from Workbench Verification into the composer | Workbench | implemented | missing | desktop | `components/workbench.rs:21-56`; `views/workbench.rs:10-31` | open | Open |
 | PM-34 | App-event topic picker in the advanced source editor | Workflows and automations | implemented | implemented | — | `reactive_automations/setup.rs:231`; `views/reactive_automations.rs` `render_topic_picker`; shared `reactive.rs` `APP_EVENT_TOPICS` | Desktop test `an_app_event_source_picks_its_topic_from_the_web_list` | Closed in f1960ac5 |
-| PM-35 | Local app context during a meeting | Meetings | missing | implemented | web | `meeting_live.rs:237`; `meetings_hub/local_focus.rs` | open | Open: OS-bound; needs an authorized equivalent or a recorded constraint |
+| PM-35 | Local app context during a meeting | Meetings | n/a (by design) | implemented | — | `bruhs-server/src/routes/local_focus.rs` `authorize`; `meetings_hub/local_focus.rs` | Recorded constraint: the server serves this timeline only to the native loopback client | Closed: platform difference |
 | PM-36 | `thread.continueInWorkbench` shortcut | Workbench | implemented | implemented | — | shared `logic/keybindings.rs:75`; `command_bar.rs:544`; `keybindings_ui.rs:158,736`, `import_ui.rs:659` | Desktop tests `every_default_command_is_bound_or_is_sidebar_undo`, `binding_names_match_the_action_types`; web test `nav_and_shortcut_tables_are_well_formed` | Closed in 43542e27 |
 
 ## Product gaps on both surfaces
@@ -86,7 +86,10 @@ window (desktop) versus the in-page dock (web); Settings as a page (web) versus
 a dialog (desktop); the embedded preview browser (desktop on macOS, opens the
 system browser elsewhere); attachments opened in the system app (desktop)
 versus downloaded (web); phone pairing (desktop; native mobile keeps its own
-scope).
+scope); local app context during a meeting (desktop only: bruhs-server serves
+the local focus timeline only to the native loopback client, refusing any
+request with an Origin or Sec-Fetch-Site header, so a browser page cannot read
+which apps were in focus; PM-35).
 
 ## Implemented on both
 
