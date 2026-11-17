@@ -1,7 +1,7 @@
-//! The task detail's dependency picker, shared by web (`task_detail.rs`)
-//! and desktop (`task_forms_ui.rs`). Moved from the web task detail, which
-//! held the only picker; desktop used to cycle through candidates and clear
-//! them all.
+//! The task detail's dependency picker and delete confirmation, shared by
+//! web (`task_detail.rs`) and desktop (`task_forms_ui.rs`). Moved from the
+//! web task detail, which held the only picker and confirmation; desktop
+//! used to cycle through candidates, clear them all, and delete at once.
 
 use crate::WorkItemPlanning;
 
@@ -13,6 +13,16 @@ pub const ADD_DEPENDENCY_PICKER_LABEL: &str = "Add dependency";
 pub const MISSING_DEPENDENCY_LABEL: &str = "Missing task";
 /// The tooltip and action of a dependency chip.
 pub const REMOVE_DEPENDENCY_LABEL: &str = "Remove dependency";
+/// The delete confirmation's second line.
+pub const DELETE_TASK_NOTE: &str = "This can't be undone.";
+/// The delete confirmation's accessible name.
+pub const DELETE_TASK_DIALOG_LABEL: &str = "Confirm task deletion";
+
+/// The delete confirmation's question.
+pub fn delete_task_prompt(title: &str) -> String {
+    format!("Delete task \"{title}\"?")
+}
+
 /// The tasks `current_id` can depend on: every other task, in list order.
 /// `tasks` are each task's id and title.
 pub fn dependency_candidates<'a>(
@@ -59,7 +69,9 @@ impl WorkItemPlanning {
 
 #[cfg(test)]
 mod tests {
-    use super::{dependency_candidates, dependency_title, MISSING_DEPENDENCY_LABEL};
+    use super::{
+        delete_task_prompt, dependency_candidates, dependency_title, MISSING_DEPENDENCY_LABEL,
+    };
     use crate::WorkItemPlanning;
 
     const TASKS: [(&str, &str); 3] = [("a", "Write"), ("b", "Review"), ("c", "Ship")];
@@ -98,5 +110,10 @@ mod tests {
         assert!(planning.remove_dependency("b"));
         assert_eq!(planning.dependency_ids, ["a", "c"]);
         assert!(!planning.remove_dependency("b"));
+    }
+
+    #[test]
+    fn the_delete_question_quotes_the_title() {
+        assert_eq!(delete_task_prompt("Ship v2"), "Delete task \"Ship v2\"?");
     }
 }

@@ -11,7 +11,8 @@ use crate::ui::{
     Textarea,
 };
 use bruhs_models::logic::task_detail::{
-    dependency_candidates, dependency_title, ADD_DEPENDENCY_LABEL, ADD_DEPENDENCY_PICKER_LABEL,
+    delete_task_prompt, dependency_candidates, dependency_title, ADD_DEPENDENCY_LABEL,
+    ADD_DEPENDENCY_PICKER_LABEL, DELETE_TASK_DIALOG_LABEL, DELETE_TASK_NOTE,
     REMOVE_DEPENDENCY_LABEL,
 };
 
@@ -75,6 +76,24 @@ fn dependency_picker_options(current_id: &str, items: &[WorkItem]) -> Vec<Dropdo
             .map(|(id, title)| DropdownOption::new(id, title)),
         )
         .collect()
+}
+
+/// The delete confirmation's question for the open task, worded as on
+/// desktop (`bruhs_models::logic::task_detail`).
+fn delete_question(item: Option<&WorkItem>) -> String {
+    delete_task_prompt(item.map_or("", |item| item.title.as_str()))
+}
+
+#[cfg(test)]
+mod delete_tests {
+    use super::{delete_question, WorkItem};
+
+    #[test]
+    fn the_confirmation_names_the_open_task_like_desktop() {
+        let task = WorkItem::new_at("Ship v2", 1);
+        assert_eq!(delete_question(Some(&task)), "Delete task \"Ship v2\"?");
+        assert_eq!(delete_question(None), "Delete task \"\"?");
+    }
 }
 
 #[cfg(test)]
@@ -523,17 +542,14 @@ pub fn TaskDetail() -> impl IntoView {
             open=Signal::derive(move || pending_delete.get())
             on_close=Callback::new(move |_| pending_delete.set(false))
             max_width="max-w-sm"
-            label="Confirm task deletion"
+            label=DELETE_TASK_DIALOG_LABEL
         >
             <div class="p-4 space-y-4">
                 <div class="text-body text-rambutan-100">
-                    {move || format!(
-                        "Delete task \"{}\"?",
-                        current_item.get().map(|i| i.title).unwrap_or_default()
-                    )}
+                    {move || delete_question(current_item.get().as_ref())}
                 </div>
                 <div class="text-label-sm text-rambutan-300">
-                    "This can't be undone."
+                    {DELETE_TASK_NOTE}
                 </div>
                 <div class="flex justify-end gap-2">
                     <Button

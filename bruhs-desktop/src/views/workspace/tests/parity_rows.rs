@@ -612,3 +612,45 @@ fn task_detail_picks_and_removes_one_dependency(cx: &mut gpui::TestAppContext) {
     cx.run_until_parked();
     assert!(dependencies(&workspace, cx).is_empty());
 }
+
+/// PM-29: Delete task asks first, as the web does. Cancel keeps the task
+/// open; Delete removes it and leaves focus on the workspace.
+#[gpui::test]
+fn task_delete_asks_before_deleting(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = parity_workspace(cx);
+    cx.simulate_resize(gpui::size(px(1400.0), px(1000.0)));
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.active_view = AppView::Tasks;
+        workspace.work_items = vec![task("ship", "Ship v2"), task("write", "Write")];
+        workspace.select_work_item_by_id("ship", window, cx);
+    });
+    cx.run_until_parked();
+
+    click_debug_selector(cx, "desktop-task-detail-delete");
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-task-delete-dialog");
+    assert_rendered_bounds(cx, "desktop-task-delete-prompt");
+    click_debug_selector(cx, "desktop-task-delete-cancel");
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-task-delete-dialog");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.work_items.len(), 2);
+        assert_eq!(workspace.selected_work_item_id.as_deref(), Some("ship"));
+    });
+
+    click_debug_selector(cx, "desktop-task-detail-delete");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-task-delete-confirm");
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-task-delete-dialog");
+    workspace.update_in(cx, |workspace, window, _cx| {
+        let ids = workspace
+            .work_items
+            .iter()
+            .map(|task| task.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["write"], "only the confirmed task is deleted");
+        assert_eq!(workspace.selected_work_item_id, None);
+        assert!(workspace.workspace_focus_handle.is_focused(window));
+    });
+}

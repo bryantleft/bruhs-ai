@@ -4425,12 +4425,20 @@ fn desktop_task_detail_edit_select_close_and_delete_should_match_web_flow(
     assert_rendered_bounds(cx, "desktop-task-detail-delete");
     click_debug_selector(cx, "desktop-task-detail-delete");
     cx.run_until_parked();
+    // Web: Delete task asks first (PM-29).
+    assert_rendered_bounds(cx, "desktop-task-delete-dialog");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.work_items.len(), 1);
+    });
+    click_debug_selector(cx, "desktop-task-delete-confirm");
+    cx.run_until_parked();
 
     workspace.update_in(cx, |workspace, _window, _cx| {
         assert!(workspace.work_items.is_empty());
         assert_eq!(workspace.selected_work_item_id, None);
         assert_eq!(workspace.task_detail_menu_open, None);
     });
+    assert_no_rendered_bounds(cx, "desktop-task-delete-dialog");
 }
 
 #[gpui::test]

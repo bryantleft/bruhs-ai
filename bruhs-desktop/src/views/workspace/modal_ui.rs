@@ -41,6 +41,7 @@ pub(super) const PROJECT_DELETE_BODY_PADDING_PX: f32 = 16.0;
 pub(super) const PROJECT_DELETE_BODY_GAP_PX: f32 = 16.0;
 pub(super) const PROJECT_DELETE_ACTION_GAP_PX: f32 = 8.0;
 pub(super) const PROJECT_DELETE_PROMPT_TEXT_SIZE_PX: f32 = 14.0;
+pub(super) const TASK_DELETE_LABEL: &str = "Delete task";
 
 impl Workspace {
     fn cancel_picker_tasks(&mut self) {
@@ -475,6 +476,87 @@ impl Workspace {
                                         cx.stop_propagation();
                                         this.confirm_project_delete(cx);
                                     }
+                                },
+                            )),
+                        ),
+                ),
+            None,
+            window,
+            cx,
+        )
+    }
+
+    /// Web task detail's confirmation: the question, "This can't be
+    /// undone." and Cancel or Delete (`bruhs_models::logic::task_detail`).
+    pub(super) fn render_task_delete_confirm(
+        &self,
+        item_id: &str,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let title = self
+            .work_items
+            .iter()
+            .find(|item| item.id == item_id)
+            .map_or("", |item| item.title.as_str());
+        self.render_modal_shell(
+            TASK_DELETE_LABEL,
+            div()
+                .debug_selector(|| "desktop-task-delete-dialog".to_string())
+                .p(px(PROJECT_DELETE_BODY_PADDING_PX))
+                .flex()
+                .flex_col()
+                .gap(px(PROJECT_DELETE_BODY_GAP_PX))
+                .child(
+                    div()
+                        .debug_selector(|| "desktop-task-delete-prompt".to_string())
+                        .text_size(px(PROJECT_DELETE_PROMPT_TEXT_SIZE_PX))
+                        .text_color(theme::rambutan_100())
+                        .child(bruhs_models::logic::task_detail::delete_task_prompt(title)),
+                )
+                .child(
+                    div()
+                        .font_family(theme::UI_SMALL_FONT_FAMILY)
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_size(px(12.0))
+                        .text_color(theme::rambutan_300())
+                        .child(bruhs_models::logic::task_detail::DELETE_TASK_NOTE),
+                )
+                .child(
+                    div()
+                        .flex()
+                        .items_center()
+                        .justify_end()
+                        .gap(px(PROJECT_DELETE_ACTION_GAP_PX))
+                        .child(
+                            web_button(
+                                "task-delete-cancel",
+                                WebButtonVariant::Ghost,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .aria_label("Cancel")
+                            .debug_selector(|| "desktop-task-delete-cancel".to_string())
+                            .child("Cancel")
+                            .on_click(cx.listener(
+                                |this, _ev, window, cx| {
+                                    this.cancel_task_delete(window, cx);
+                                },
+                            )),
+                        )
+                        .child(
+                            web_button(
+                                "task-delete-confirm",
+                                WebButtonVariant::Destructive,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .aria_label("Delete")
+                            .debug_selector(|| "desktop-task-delete-confirm".to_string())
+                            .child("Delete")
+                            .on_click(cx.listener(
+                                |this, _ev, window, cx| {
+                                    this.confirm_task_delete(window, cx);
                                 },
                             )),
                         ),
