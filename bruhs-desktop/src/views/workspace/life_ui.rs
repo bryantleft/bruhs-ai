@@ -503,29 +503,33 @@ impl Workspace {
             .privacy
             .reveal_exact_amounts_to_agent;
         // Web: `rounded-seed px-2.5 py-1.5 text-label-sm` with an inset ring.
-        let toggle = |id: &'static str, label: &'static str, color: Hsla, ring: Hsla| {
-            div()
-                .id(id)
-                .debug_selector(move || format!("desktop-{id}"))
-                .role(Role::Button)
-                .aria_label(label)
-                .flex_shrink_0()
-                .min_h(px(theme::CONTROL_XS_PX))
-                .px(px(10.0))
-                .py(px(6.0))
-                .flex()
-                .items_center()
-                .rounded(px(4.0))
-                .border_1()
-                .border_color(ring)
-                .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .font_weight(FontWeight::MEDIUM)
-                .text_size(px(LABEL_SM_PX))
-                .text_color(color)
-                .whitespace_nowrap()
-                .child(label)
-        };
+        // `focusable`: a disabled toggle leaves the Tab order, like a
+        // disabled web button.
+        let toggle =
+            |id: &'static str, label: &'static str, color: Hsla, ring: Hsla, focusable: bool| {
+                div()
+                    .id(id)
+                    .when(focusable, |el| el.tab_index(0).cursor_pointer())
+                    .debug_selector(move || format!("desktop-{id}"))
+                    .role(Role::Button)
+                    .aria_label(label)
+                    .flex_shrink_0()
+                    .min_h(px(theme::CONTROL_XS_PX))
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .flex()
+                    .items_center()
+                    .rounded(px(4.0))
+                    .border_1()
+                    .border_color(ring)
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(px(LABEL_SM_PX))
+                    .text_color(color)
+                    .whitespace_nowrap()
+                    .child(label)
+            };
         div()
             .debug_selector(|| "desktop-life-privacy".into())
             .rounded(px(6.0))
@@ -576,9 +580,8 @@ impl Workspace {
                             },
                             theme::blueberry_300(),
                             theme::blueberry_500().opacity(0.25),
+                            true,
                         )
-                        .tab_index(0)
-                        .cursor_pointer()
                         .aria_toggled(enabled.into())
                         .aria_label(if enabled {
                             "Disable agent access"
@@ -618,6 +621,7 @@ impl Workspace {
                                 },
                                 theme::rambutan_400(),
                                 theme::longan_700(),
+                                enabled,
                             )
                             .aria_toggled(exact.into())
                             .aria_label(if exact {
@@ -627,7 +631,6 @@ impl Workspace {
                             })
                             // Web `disabled:opacity-40` while agent access is off.
                             .when(!enabled, |button| button.opacity(0.4).cursor_not_allowed())
-                            .when(enabled, |button| button.tab_index(0).cursor_pointer())
                             .on_click(cx.listener(
                                 |this, _event, _window, cx| {
                                     if this.life_context.finance.privacy.allow_agent_context {
