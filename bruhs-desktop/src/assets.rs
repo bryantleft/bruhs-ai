@@ -38,6 +38,8 @@ pub const CALENDAR_ICON_PATH: &str = "icons/calendar.svg";
 pub const PLUS_ICON_PATH: &str = "icons/plus.svg";
 // The capture dialog's destinations (`CaptureKind::icon`).
 pub const FILE_TEXT_ICON_PATH: &str = "icons/file-text.svg";
+/// The web's `bookmark` icon: a saved source in the Knowledge library.
+pub const BOOKMARK_ICON_PATH: &str = "icons/bookmark.svg";
 pub const USER_PLUS_ICON_PATH: &str = "icons/user-plus.svg";
 pub const SEND_ICON_PATH: &str = "icons/send.svg";
 /// The update pill's spinner (web `loader`).
@@ -165,6 +167,7 @@ const TOOL_FILE_PLUS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 
 const TOOL_FOLDER_SEARCH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M11 20H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h3.93a2 2 0 0 1 1.66.9l.82 1.2a2 2 0 0 0 1.66.9H20a2 2 0 0 1 2 2v3.5"/><circle cx="17" cy="17" r="3"/><path d="m21 21-1.5-1.5"/></svg>"#;
 const TOOL_SEARCH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="11" cy="11" r="8"/><path d="m21 21-4.3-4.3"/></svg>"#;
 const FILE_TEXT_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8Z"/><path d="M14 2v6h6M8 13h8M8 17h6"/></svg>"#;
+const BOOKMARK_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M19 21l-7-4-7 4V5a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2Z"/></svg>"#;
 const USER_PLUS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/></svg>"#;
 const SEND_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M14.536 21.686a.5.5 0 0 0 .937-.024l6.5-19a.496.496 0 0 0-.635-.635l-19 6.5a.5.5 0 0 0-.024.937l7.93 3.18a2 2 0 0 1 1.112 1.11z"/><path d="m21.854 2.147-10.94 10.939"/></svg>"#;
 const LOADER_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 2v4"/><path d="m16.2 7.8 2.9-2.9"/><path d="M18 12h4"/><path d="m16.2 16.2 2.9 2.9"/><path d="M12 18v4"/><path d="m4.9 19.1 2.9-2.9"/><path d="M2 12h4"/><path d="m4.9 4.9 2.9 2.9"/></svg>"#;
@@ -210,6 +213,7 @@ impl AssetSource for DesktopAssets {
             TOOL_SEARCH_ICON_PATH => Ok(Some(Cow::Borrowed(TOOL_SEARCH_ICON))),
             TOOL_GLOBE_ICON_PATH => Ok(Some(Cow::Borrowed(TOOL_GLOBE_ICON))),
             FILE_TEXT_ICON_PATH => Ok(Some(Cow::Borrowed(FILE_TEXT_ICON))),
+            BOOKMARK_ICON_PATH => Ok(Some(Cow::Borrowed(BOOKMARK_ICON))),
             USER_PLUS_ICON_PATH => Ok(Some(Cow::Borrowed(USER_PLUS_ICON))),
             SEND_ICON_PATH => Ok(Some(Cow::Borrowed(SEND_ICON))),
             LOADER_ICON_PATH => Ok(Some(Cow::Borrowed(LOADER_ICON))),
@@ -300,6 +304,8 @@ impl AssetSource for DesktopAssets {
                 "download.svg".into(),
                 "clipboard-list.svg".into(),
                 "hand-metal.svg".into(),
+                "file-text.svg".into(),
+                "bookmark.svg".into(),
             ]),
             _ => Ok(Vec::new()),
         }

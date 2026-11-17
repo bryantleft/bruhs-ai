@@ -1,9 +1,10 @@
-//! Web parity for the Knowledge library: search and the document preview.
+//! Web parity for the Knowledge library: search, the document preview, and
+//! the library's layout (PM-42).
 
 use super::super::performance_tests::fixture;
 use super::super::{element_key, AppView, Workspace};
 use bruhs_models::{KnowledgeDocument, SourceClip};
-use gpui::{Entity, VisualTestContext};
+use gpui::{px, size, Entity, VisualTestContext};
 
 fn document_card(id: &str) -> &'static str {
     Box::leak(format!("desktop-knowledge-document-{}", element_key(id)).into_boxed_str())
@@ -303,4 +304,72 @@ fn document_page_shows_its_body_and_save_state_like_web(cx: &mut gpui::TestAppCo
         assert!(!workspace.current_document_dirty(cx));
     });
     assert_eq!(line(&workspace, cx), document_copy::SAVED);
+}
+
+/// PM-42: like the web's library, documents sit two to a row, each with the
+/// file mark beside its text; each source has the bookmark mark; an empty
+/// section shows its icon beside the line.
+#[gpui::test]
+fn knowledge_library_lays_out_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    cx.simulate_resize(size(px(1280.0), px(800.0)));
+    workspace.update(cx, |workspace, cx| {
+        let mut launch = KnowledgeDocument::new("Launch plan", "Launch plan", 2);
+        launch.id = "launch".into();
+        launch.tags = vec!["launch".into(), "beta".into()];
+        let mut notes = KnowledgeDocument::new("Interview notes", "People want faster search.", 1);
+        notes.id = "notes".into();
+        let mut rust = SourceClip::new(
+            "The Rust 2024 edition",
+            "https://example.invalid/rust",
+            "What changed in the 2024 edition.",
+            1,
+        );
+        rust.id = "rust".into();
+        workspace.knowledge_documents = vec![notes, launch];
+        workspace.source_clips = vec![rust];
+        workspace.active_view = AppView::Knowledge;
+        cx.notify();
+    });
+    cx.run_until_parked();
+
+    let search = cx.debug_bounds("desktop-knowledge-search").unwrap();
+    assert_eq!(search.size.width, px(976.0), "web max-w-5xl less sm:px-6");
+    let launch = cx.debug_bounds(document_card("launch")).unwrap();
+    let notes = cx.debug_bounds(document_card("notes")).unwrap();
+    assert_eq!(launch.top(), notes.top(), "two documents share a row");
+    assert!(launch.right() < notes.left());
+    assert_eq!(launch.size.width, notes.size.width);
+    assert_eq!(launch.left(), search.left());
+    assert_eq!(notes.right(), search.right());
+    for (card, id) in [(launch, "launch"), (notes, "notes")] {
+        let mark: &'static str = Box::leak(
+            format!("desktop-knowledge-document-mark-{}", element_key(id)).into_boxed_str(),
+        );
+        let mark = cx.debug_bounds(mark).unwrap();
+        assert!(card.contains(&mark.center()), "{id} shows its file mark");
+        assert_eq!(mark.size, size(px(32.0), px(32.0)));
+    }
+    let source = cx.debug_bounds(source_card("rust")).unwrap();
+    let mark: &'static str = Box::leak(
+        format!("desktop-knowledge-source-mark-{}", element_key("rust")).into_boxed_str(),
+    );
+    let mark = cx.debug_bounds(mark).unwrap();
+    assert!(
+        source.contains(&mark.center()),
+        "the source shows its bookmark"
+    );
+    assert_eq!(mark.size, size(px(28.0), px(28.0)));
+    assert_eq!(
+        source.size.width, search.size.width,
+        "sources take the full row"
+    );
+
+    workspace.update(cx, |workspace, cx| {
+        workspace.source_clips.clear();
+        workspace.persist_and_notify(cx);
+    });
+    cx.run_until_parked();
+    assert!(shown(cx, "desktop-knowledge-empty-Sources"));
+    assert!(!shown(cx, "desktop-knowledge-empty-Documents"));
 }

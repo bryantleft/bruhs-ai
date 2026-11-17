@@ -23,6 +23,11 @@ use super::*;
 // The web knowledge library's 24-card budget. The native action fixture
 // measures libraries through 10,000 records; paging never truncates stored text.
 pub(super) const KNOWLEDGE_PAGE_SIZE: usize = library::PAGE_SIZE;
+/// Web `max-w-5xl` less its `sm:px-6`: the library's content width.
+const LIBRARY_CONTENT_PX: f32 = 976.0;
+/// Web `size-8` and `size-7`: a document's and a source's mark.
+const DOCUMENT_MARK_PX: f32 = 32.0;
+const SOURCE_MARK_PX: f32 = 28.0;
 
 /// The library's search box and the shared index it reads (web
 /// `KnowledgeLibrary`'s query and memos), and the open document's preview.
@@ -835,17 +840,19 @@ impl Workspace {
                     .min_h_0()
                     .track_scroll(&self.library_pages.knowledge_scroll)
                     .overflow_y_scroll()
-                    .p_5()
+                    // Web `px-6 py-5 space-y-6` in a `max-w-5xl` column.
+                    .px_6()
+                    .py_5()
                     .flex()
                     .flex_col()
-                    .gap_5()
+                    .gap_6()
                     .items_center()
                     // Web: the search box opens the scrolling content.
                     .child(
                         div()
                             .debug_selector(|| "desktop-knowledge-search".to_string())
                             .w_full()
-                            .max_w(px(980.0))
+                            .max_w(px(LIBRARY_CONTENT_PX))
                             .flex_shrink_0()
                             .child(
                                 Input::new(&self.knowledge.search_input)
@@ -857,10 +864,13 @@ impl Workspace {
                             "Documents",
                             document_count,
                             document_cards,
-                            "No documents match yet.",
+                            ("No documents match yet.", assets::FILE_TEXT_ICON_PATH),
+                            // Web `grid sm:grid-cols-2`: the window is never
+                            // narrower than `sm`.
+                            div().grid().grid_cols(2).gap_2(),
                         )
                         .w_full()
-                        .max_w(px(980.0))
+                        .max_w(px(LIBRARY_CONTENT_PX))
                         .flex_shrink_0()
                         .children(self.render_library_pages(
                             LibraryPage::Documents,
@@ -875,10 +885,15 @@ impl Workspace {
                             "Sources",
                             source_count,
                             source_cards,
-                            "Save a web source to cite it later.",
+                            (
+                                "Save a web source to cite it later.",
+                                assets::BOOKMARK_ICON_PATH,
+                            ),
+                            // Web `space-y-1`.
+                            div().flex().flex_col().gap_1(),
                         )
                         .w_full()
-                        .max_w(px(980.0))
+                        .max_w(px(LIBRARY_CONTENT_PX))
                         .flex_shrink_0()
                         .children(self.render_library_pages(
                             LibraryPage::Sources,
@@ -892,6 +907,8 @@ impl Workspace {
             )
     }
 
+    /// Web's document card: the file mark beside the title, a line of the
+    /// body and its tags.
     fn render_document_card(&self, card: &Card, cx: &Context<'_, Self>) -> AnyElement {
         let id = card.id.clone();
         let keyboard_id = id.clone();
@@ -906,17 +923,22 @@ impl Workspace {
         div()
             .id(("knowledge-document", id_key))
             .debug_selector(move || format!("desktop-knowledge-document-{id_key}"))
+            .min_w_0()
             .rounded(px(8.0))
             .border_1()
             .border_color(theme::longan_800())
             .bg(theme::longan_900().opacity(0.6))
-            .px_3()
-            .py_3()
+            .p_3()
             .cursor_pointer()
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Open document {}", card.title))
-            .hover(|element| element.border_color(theme::longan_700()))
+            .hover(|element| {
+                element
+                    .bg(theme::longan_900())
+                    .border_color(theme::longan_700())
+            })
+            .focus_visible(|element| element.border_color(theme::persimmon_400()))
             .on_click(cx.listener(move |this, _event, window, cx| {
                 this.select_knowledge_document(&id, window, cx);
             }))
@@ -927,36 +949,54 @@ impl Workspace {
             }))
             .child(
                 div()
-                    .text_size(px(13.0))
-                    .font_weight(FontWeight::MEDIUM)
-                    .text_color(theme::rambutan_100())
-                    .child(card.title.clone()),
+                    .flex()
+                    .items_start()
+                    .gap_3()
+                    .child(library_mark(
+                        move || format!("desktop-knowledge-document-mark-{id_key}"),
+                        DOCUMENT_MARK_PX,
+                        theme::blueberry_500(),
+                        assets::FILE_TEXT_ICON_PATH,
+                        theme::ICON_PX,
+                        theme::blueberry_300(),
+                    ))
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(library_line(
+                                card.title.clone(),
+                                theme::UI_FONT_FAMILY,
+                                13.0,
+                                theme::rambutan_100(),
+                            ))
+                            .child(
+                                library_line(
+                                    card.preview.clone(),
+                                    theme::CODE_FONT_FAMILY,
+                                    13.0,
+                                    theme::rambutan_500(),
+                                )
+                                .mt(px(2.0)),
+                            )
+                            .when(!tags.is_empty(), |text| {
+                                text.child(
+                                    library_line(
+                                        tags,
+                                        theme::UI_SMALL_FONT_FAMILY,
+                                        12.0,
+                                        theme::blueberry_300().opacity(0.8),
+                                    )
+                                    .mt_1(),
+                                )
+                            }),
+                    ),
             )
-            .child(
-                div()
-                    .mt_1()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_500())
-                    .overflow_hidden()
-                    .whitespace_nowrap()
-                    .text_ellipsis()
-                    .child(card.preview.clone()),
-            )
-            .when(!tags.is_empty(), |card| {
-                card.child(
-                    div()
-                        .mt_1()
-                        .text_size(px(12.0))
-                        .text_color(theme::blueberry_300().opacity(0.8))
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(tags),
-                )
-            })
             .into_any_element()
     }
 
+    /// Web's source row: the bookmark mark beside the title, the source's
+    /// host and the start of its excerpt.
     fn render_source_card(&self, card: &Card, cx: &Context<'_, Self>) -> AnyElement {
         let id = card.id.clone();
         let keyboard_id = id.clone();
@@ -964,14 +1004,22 @@ impl Workspace {
         div()
             .id(("knowledge-source", key))
             .debug_selector(move || format!("desktop-knowledge-source-{key}"))
-            .rounded(px(6.0))
+            .w_full()
+            .min_w_0()
+            .flex()
+            .items_start()
+            .gap_3()
+            .rounded(px(8.0))
+            .border_1()
+            .border_color(gpui::transparent_black())
             .px_3()
-            .py_2()
+            .py(px(10.0))
             .cursor_pointer()
             .tab_index(0)
             .role(Role::Button)
             .aria_label(format!("Open source {}", card.title))
             .hover(|element| element.bg(theme::longan_900().opacity(0.7)))
+            .focus_visible(|element| element.border_color(theme::persimmon_400()))
             .on_click(cx.listener(move |this, _event, window, cx| {
                 this.select_source_clip(&id, window, cx);
             }))
@@ -981,30 +1029,45 @@ impl Workspace {
                 }
             }))
             .child(
-                div()
-                    .text_size(px(13.0))
-                    .text_color(theme::rambutan_200())
-                    .child(card.title.clone()),
+                library_mark(
+                    move || format!("desktop-knowledge-source-mark-{key}"),
+                    SOURCE_MARK_PX,
+                    theme::persimmon_500(),
+                    assets::BOOKMARK_ICON_PATH,
+                    theme::ICON_INLINE_PX,
+                    theme::persimmon_300(),
+                )
+                .mt(px(2.0)),
             )
             .child(
                 div()
-                    .text_size(px(11.0))
-                    .text_color(theme::blueberry_400())
-                    .child(card.detail.clone()),
+                    .flex_1()
+                    .min_w_0()
+                    .child(library_line(
+                        card.title.clone(),
+                        theme::UI_FONT_FAMILY,
+                        13.0,
+                        theme::rambutan_100(),
+                    ))
+                    .child(library_line(
+                        card.detail.clone(),
+                        theme::UI_SMALL_FONT_FAMILY,
+                        12.0,
+                        theme::blueberry_300().opacity(0.8),
+                    ))
+                    // Web shows the excerpt's start, which the search also reads.
+                    .when(!card.preview.trim().is_empty(), |row| {
+                        row.child(
+                            library_line(
+                                card.preview.clone(),
+                                theme::CODE_FONT_FAMILY,
+                                13.0,
+                                theme::rambutan_500(),
+                            )
+                            .mt(px(2.0)),
+                        )
+                    }),
             )
-            // Web shows the excerpt's start, which the search also reads.
-            .when(!card.preview.trim().is_empty(), |row| {
-                row.child(
-                    div()
-                        .mt_0p5()
-                        .text_size(px(12.0))
-                        .text_color(theme::rambutan_500())
-                        .overflow_hidden()
-                        .whitespace_nowrap()
-                        .text_ellipsis()
-                        .child(card.preview.clone()),
-                )
-            })
             .into_any_element()
     }
 
@@ -1696,12 +1759,14 @@ impl Workspace {
 }
 
 /// A library section: its title and how many records match the search
-/// (web's count beside each heading), then its cards.
+/// (web's count beside each heading), then its cards laid out in `list`, or
+/// the empty line with its icon.
 fn knowledge_section(
     title: &'static str,
     count: usize,
     rows: Vec<AnyElement>,
-    empty: &'static str,
+    (empty, empty_icon): (&'static str, &'static str),
+    list: Div,
 ) -> Div {
     div()
         .flex()
@@ -1715,34 +1780,93 @@ fn knowledge_section(
                 .gap_3()
                 .child(
                     div()
+                        .font_family(theme::UI_FONT_FAMILY)
                         .text_size(px(13.0))
                         .font_weight(FontWeight::MEDIUM)
-                        .text_color(theme::rambutan_100())
+                        .text_color(theme::rambutan_200())
                         .child(title),
                 )
                 .child(
                     div()
                         .debug_selector(move || format!("desktop-knowledge-count-{title}"))
                         .font_features(theme::tabular_nums())
+                        .font_family(theme::UI_SMALL_FONT_FAMILY)
+                        .font_weight(FontWeight::MEDIUM)
                         .text_size(px(12.0))
                         .text_color(theme::rambutan_500())
                         .child(count.to_string()),
                 ),
         )
         .when(rows.is_empty(), |element| {
+            // Web `EmptyKnowledge`: the section's icon beside a quiet line.
             element.child(
                 div()
-                    .rounded(px(6.0))
+                    .debug_selector(move || format!("desktop-knowledge-empty-{title}"))
+                    .flex()
+                    .items_center()
+                    .gap_3()
+                    .rounded(px(8.0))
                     .border_1()
                     .border_color(theme::longan_800())
+                    .bg(theme::longan_900().opacity(0.3))
                     .px_3()
                     .py_3()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_500())
-                    .child(empty),
+                    .child(
+                        svg()
+                            .path(empty_icon)
+                            .flex_shrink_0()
+                            .size(px(theme::ICON_PX))
+                            .text_color(theme::rambutan_500()),
+                    )
+                    .child(
+                        div()
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .text_color(theme::rambutan_500())
+                            .child(empty),
+                    ),
             )
         })
-        .children(rows)
+        .when(!rows.is_empty(), |element| {
+            element.child(list.children(rows))
+        })
+}
+
+/// A library card's mark: the record's icon on a tinted square (web
+/// `rounded-seed bg-*-500/10`).
+fn library_mark(
+    selector: impl Fn() -> String + 'static,
+    size: f32,
+    tint: Hsla,
+    icon: &'static str,
+    icon_size: f32,
+    color: Hsla,
+) -> Div {
+    div()
+        .debug_selector(selector)
+        .flex_shrink_0()
+        .size(px(size))
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .bg(tint.opacity(0.1))
+        .child(svg().path(icon).size(px(icon_size)).text_color(color))
+}
+
+/// One truncated line of a library card (web `block truncate`).
+fn library_line(text: String, family: &'static str, size: f32, color: Hsla) -> Div {
+    div()
+        .font_family(family)
+        .when(family != theme::CODE_FONT_FAMILY, |line| {
+            line.font_weight(FontWeight::MEDIUM)
+        })
+        .text_size(px(size))
+        .text_color(color)
+        .overflow_hidden()
+        .whitespace_nowrap()
+        .text_ellipsis()
+        .child(text)
 }
 
 fn knowledge_meta_panel(
