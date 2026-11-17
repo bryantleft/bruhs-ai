@@ -890,11 +890,11 @@ pub(super) fn command(
                 access,
                 effort,
             } => crew::set_bruh(connection, &agent_id, look, access, effort)?,
-            ReactiveCommand::StopAll
-            | ReactiveCommand::StopBruh { .. }
-            | ReactiveCommand::ResumeBruh { .. }
-            | ReactiveCommand::ResumeAll
-            | ReactiveCommand::DecideApproval { .. } => {
+            ReactiveCommand::StopAll => crew::stop(connection, None)?,
+            ReactiveCommand::StopBruh { agent_id } => crew::stop(connection, Some(&agent_id))?,
+            ReactiveCommand::ResumeBruh { agent_id } => crew::resume(connection, Some(&agent_id))?,
+            ReactiveCommand::ResumeAll => crew::resume(connection, None)?,
+            ReactiveCommand::DecideApproval { .. } => {
                 return Err(ReactiveError::Conflict("Not available yet.".into()));
             }
             ReactiveCommand::ApproveRun { id } => {
@@ -956,6 +956,12 @@ fn enabled_agent(connection: &Connection, id: &str) -> Result<ReactiveAgent, Rea
     let agent: ReactiveAgent = required(connection, "reactive_agents", id, "agent")?;
     if !agent.enabled {
         return Err(ReactiveError::Conflict("This agent is disabled.".into()));
+    }
+    if crew::is_paused(connection, id)? {
+        return Err(ReactiveError::Conflict(format!(
+            "{} is paused. Resume it to send work.",
+            agent.name
+        )));
     }
     Ok(agent)
 }
@@ -1117,7 +1123,7 @@ pub(super) fn publish(
             &subscription.agent_id,
             "agent",
         )?;
-        if !agent.enabled {
+        if !agent.enabled || crew::is_paused(connection, &agent.id)? {
             continue;
         }
         let last = runs_where(connection, "subscription_id=?1", Some(&subscription.id))?.pop();

@@ -2,15 +2,16 @@
 //! beside `reactive_agents` so a cosmetic edit never touches the agent row,
 //! its runs or its provider session.
 
-use super::{cancel_runs, decode, encode, records, required, ReactiveError};
+use super::{always_on, cancel_runs, decode, encode, records, required, ReactiveError};
 use crate::reactive::clock;
 use bruhs_models::{
     agent::AgentProvider,
     crew::{
-        level_unavailable, rail_order, status_for, BruhAccess, BruhLook, BruhProfile, BruhState,
+        level_unavailable, rail_order, status_for, ApprovalState, BruhAccess, BruhLook,
+        BruhProfile, BruhState,
     },
     logic::run_place::claude_effort,
-    reactive::{EventSource, ReactiveAgent, SourceKind, Subscription},
+    reactive::{EventSource, OutboxItem, ReactiveAgent, SourceKind, Subscription},
     weekly_reports::managed_preset_id,
     EpochMs,
 };
@@ -85,6 +86,83 @@ pub(in crate::reactive) fn set_bruh(
             ..old
         },
     )
+}
+
+const STOPPED: &str = "Stopped by the owner.";
+
+fn agent_ids(connection: &Connection) -> Result<Vec<String>, ReactiveError> {
+    Ok(records::<ReactiveAgent>(connection, "reactive_agents")?
+        .into_iter()
+        .map(|agent| agent.id)
+        .collect())
+}
+
+/// Cancel pending and running runs and deny open approvals, for one agent or
+/// every agent (report agents included), then pause the bruhs. Report agents
+/// are never paused: their schedule is not the crew's.
+pub(in crate::reactive) fn stop(
+    connection: &Connection,
+    agent_id: Option<&str>,
+) -> Result<(), ReactiveError> {
+    let targets = match agent_id {
+        Some(id) => {
+            required::<ReactiveAgent>(connection, "reactive_agents", id, "agent")?;
+            vec![id.to_owned()]
+        }
+        None => agent_ids(connection)?,
+    };
+    let now = EpochMs::now();
+    for id in &targets {
+        cancel_runs(connection, "agent_id", id, STOPPED)?;
+        let mut statement = connection.prepare(
+            "SELECT payload FROM reactive_outbox WHERE agent_id=?1 AND json_extract(payload,'$.approval') IS NOT NULL AND json_extract(payload,'$.resolved_at') IS NULL",
+        )?;
+        let rows = statement.query_map([id], |row| row.get::<_, String>(0))?;
+        let items = rows
+            .map(|row| decode::<OutboxItem>(row?))
+            .collect::<Result<Vec<_>, _>>()?;
+        for mut item in items {
+            if let Some(approval) = item.approval.as_mut() {
+                approval.state = ApprovalState::Denied;
+            }
+            item.resolved_at = Some(now);
+            always_on::save_item(connection, &item)?;
+        }
+        if agent_id.is_some() || managed_preset_id(id).is_none() {
+            let mut saved = profile(connection, id)?;
+            saved.paused_at = Some(now);
+            save(connection, id, &saved)?;
+        }
+    }
+    Ok(())
+}
+
+/// Clear the pause on one bruh, or on every bruh.
+pub(in crate::reactive) fn resume(
+    connection: &Connection,
+    agent_id: Option<&str>,
+) -> Result<(), ReactiveError> {
+    let targets = match agent_id {
+        Some(id) => {
+            required::<ReactiveAgent>(connection, "reactive_agents", id, "agent")?;
+            vec![id.to_owned()]
+        }
+        None => agent_ids(connection)?,
+    };
+    for id in targets {
+        let mut saved = profile(connection, &id)?;
+        if saved.paused_at.take().is_some() {
+            save(connection, &id, &saved)?;
+        }
+    }
+    Ok(())
+}
+
+pub(in crate::reactive) fn is_paused(
+    connection: &Connection,
+    agent_id: &str,
+) -> Result<bool, ReactiveError> {
+    Ok(profile(connection, agent_id)?.paused_at.is_some())
 }
 
 pub(in crate::reactive) fn delete(

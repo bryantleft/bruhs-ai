@@ -589,3 +589,214 @@ async fn agent_runs_pages_reach_every_run_created_in_the_same_millisecond() {
     let newest_first: Vec<String> = ids.iter().rev().map(|id| format!("a-{id}")).collect();
     assert_eq!(seen, newest_first);
 }
+
+async fn bruh_status(runtime: &ReactiveRuntime, id: &str) -> BruhStatus {
+    runtime
+        .snapshot()
+        .await
+        .unwrap()
+        .bruhs
+        .into_iter()
+        .find(|bruh| bruh.agent_id == id)
+        .unwrap()
+        .status
+}
+
+async fn watch_inbox(runtime: &ReactiveRuntime, agent_id: &str) {
+    for change in [
+        ReactiveChange::SaveSource {
+            source: EventSource {
+                id: "inbox".into(),
+                name: "Inbox".into(),
+                enabled: true,
+                kind: SourceKind::Custom,
+            },
+        },
+        ReactiveChange::SaveSubscription {
+            subscription: Subscription {
+                id: format!("sub-{agent_id}"),
+                source_id: "inbox".into(),
+                agent_id: agent_id.into(),
+                instructions: "Summarize the event.".into(),
+                enabled: true,
+                auto_run: true,
+                debounce_ms: 0,
+                throttle_ms: 0,
+                on_busy: BusyPolicy::Queue,
+            },
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+}
+
+async fn run_count(runtime: &ReactiveRuntime, agent_id: &str) -> usize {
+    runtime
+        .snapshot()
+        .await
+        .unwrap()
+        .runs
+        .iter()
+        .filter(|run| run.agent_id == agent_id)
+        .count()
+}
+
+#[tokio::test]
+async fn stop_all_cancels_every_run_and_pauses_every_bruh() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
+    let (running, queued) = running_and_queued(&runtime).await;
+    let other = chat(&runtime, "b", "Other").await;
+    let approval = OutboxItem {
+        id: "ask-1".into(),
+        agent_id: "a".into(),
+        run_id: running.clone(),
+        kind: OutboxKind::Ask,
+        title: "Run a command".into(),
+        message: "Allow it?".into(),
+        created_at: EpochMs::now(),
+        read_at: None,
+        resolved_at: None,
+        answer: None,
+        system: SystemDelivery::NotRequested,
+        approval: Some(ApprovalRequest {
+            tool: "Bash".into(),
+            summary: "ls".into(),
+            fingerprint: "f1".into(),
+            state: ApprovalState::Waiting,
+        }),
+    };
+    runtime
+        .call(move |connection| {
+            connection.execute(
+                "INSERT INTO reactive_outbox(id,agent_id,run_id,created,payload) VALUES(?1,?2,?3,?4,?5)",
+                rusqlite::params![
+                    approval.id,
+                    approval.agent_id,
+                    approval.run_id,
+                    approval.created_at.as_millis(),
+                    serde_json::to_string(&approval).unwrap()
+                ],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let snapshot = runtime.command(ReactiveCommand::StopAll).await.unwrap();
+    for id in [&running, &queued, &other.id] {
+        let stopped = run(&runtime, id).await;
+        assert_eq!(stopped.status, RunStatus::Cancelled, "{id}");
+        assert_eq!(stopped.error.as_deref(), Some("Stopped by the owner."));
+    }
+    assert!(claim_one(&runtime).await.is_none());
+    assert_eq!(snapshot.bruhs.len(), 2);
+    assert!(snapshot
+        .bruhs
+        .iter()
+        .all(|bruh| bruh.status == BruhStatus::Paused));
+    let item = snapshot
+        .outbox
+        .iter()
+        .find(|item| item.id == "ask-1")
+        .unwrap();
+    assert!(item.resolved_at.is_some());
+    assert_eq!(item.approval.as_ref().unwrap().state, ApprovalState::Denied);
+}
+
+#[tokio::test]
+async fn stop_all_cancels_report_agent_runs_but_pauses_only_bruhs() {
+    let report_id = format!("weekly-report-{}", uuid::Uuid::nil());
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent(&report_id)]).await;
+    let report_run = chat(&runtime, &report_id, "Report").await;
+    runtime.command(ReactiveCommand::StopAll).await.unwrap();
+    let stopped = run(&runtime, &report_run.id).await;
+    assert_eq!(stopped.status, RunStatus::Cancelled);
+    assert_eq!(stopped.error.as_deref(), Some("Stopped by the owner."));
+    let paused =
+        |id: String| runtime.call(move |connection| store::crew::is_paused(connection, &id));
+    assert!(paused("a".into()).await.unwrap());
+    assert!(!paused(report_id).await.unwrap());
+}
+
+#[tokio::test]
+async fn a_paused_bruh_takes_no_events_chats_or_follow_ups_until_resumed() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    watch_inbox(&runtime, "a").await;
+    let follow_up = FollowUp {
+        id: "f1".into(),
+        agent_id: "a".into(),
+        key: "later".into(),
+        note: "Check back".into(),
+        due_at: EpochMs::new(1).unwrap(),
+        status: FollowUpStatus::Pending,
+        created_at: EpochMs::new(1).unwrap(),
+        run_id: None,
+        auto_run: true,
+        fired_run_id: None,
+    };
+    runtime
+        .call(move |connection| {
+            connection.execute(
+                "INSERT INTO reactive_follow_ups(id,agent_id,key,status,due,created,payload) VALUES(?1,?2,?3,'pending',1,1,?4)",
+                rusqlite::params![follow_up.id, follow_up.agent_id, follow_up.key, serde_json::to_string(&follow_up).unwrap()],
+            )?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::StopBruh {
+            agent_id: "a".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(bruh_status(&runtime, "a").await, BruhStatus::Paused);
+
+    runtime.publish("inbox", "one", json!({})).await.unwrap();
+    assert_eq!(run_count(&runtime, "a").await, 0);
+    let error = runtime
+        .command(ReactiveCommand::Chat {
+            agent_id: "a".into(),
+            message: "Hello".into(),
+        })
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&error, ReactiveError::Conflict(message) if message == "Agent a is paused. Resume it to send work."),
+        "{error:?}"
+    );
+    assert_eq!(runtime.fire_follow_ups().await.unwrap(), 0);
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert_eq!(snapshot.follow_ups[0].status, FollowUpStatus::Pending);
+
+    runtime
+        .command(ReactiveCommand::ResumeBruh {
+            agent_id: "a".into(),
+        })
+        .await
+        .unwrap();
+    assert_ne!(bruh_status(&runtime, "a").await, BruhStatus::Paused);
+    assert_eq!(runtime.fire_follow_ups().await.unwrap(), 1);
+    runtime.publish("inbox", "two", json!({})).await.unwrap();
+    assert_eq!(run_count(&runtime, "a").await, 2);
+}
+
+#[tokio::test]
+async fn stop_bruh_only_pauses_that_bruh() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
+    let a = chat(&runtime, "a", "One").await;
+    let b = chat(&runtime, "b", "Two").await;
+    runtime
+        .command(ReactiveCommand::StopBruh {
+            agent_id: "a".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(run(&runtime, &a.id).await.status, RunStatus::Cancelled);
+    assert_eq!(run(&runtime, &b.id).await.status, RunStatus::Queued);
+    assert_ne!(bruh_status(&runtime, "b").await, BruhStatus::Paused);
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.id, b.id);
+}
