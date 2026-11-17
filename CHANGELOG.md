@@ -11,6 +11,17 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- The web command palette can open a local server, as the desktop app's
+  does. Choose Open a local server… to list what is listening on
+  localhost, type to filter the list, and press Enter to open one in a new
+  tab. Open in system Terminal now works on the web too: it opens Terminal at
+  the thread's project, or at your home folder.
+- The desktop command palette gains the web's New terminal and Open project
+  in editor. New terminal opens another shell in the thread's project, in the
+  chat's terminal drawer or on the Terminal page.
+- You can give Continue in workbench a key on the web and in the desktop
+  app: `thread.continueInWorkbench` is now listed, unbound, under Settings →
+  Keybindings.
 - The desktop app has the web's booking page for a scheduling link. The
   link in the scheduling panel opens it: pick one of the next free times
   inside the link's availability and buffers, add a name, and the booking is
@@ -117,6 +128,15 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   Custom…, which snoozes a thread until a date and time you pick or for a
   number of minutes, hours or days. The web's Snooze until dialog now uses
   the app's own date picker and unit list instead of the browser's.
+- `/model` in the desktop composer opens the model picker, as on the web,
+  instead of Settings.
+- Importing a conversation into the web Inbox links its sender to the People
+  profile with that name or alias, as the desktop app does. A name that two
+  profiles share stays unlinked. Deleting a conversation on the web now asks
+  first, as on desktop.
+- The desktop app now says which editor opened a project or file, and says
+  No project to open when there is none, as the web does. Both apps say when
+  the system terminal could not open.
 
 ### Fixed
 
