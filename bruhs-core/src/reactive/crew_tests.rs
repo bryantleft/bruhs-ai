@@ -950,7 +950,8 @@ fn each_run_names_the_bruh_and_its_access() {
     assert!(full.prompt.contains("Access: full."));
     assert!(full.prompt.contains("\n\nctx\n\n---\n\n"));
     assert!(full.prompt.ends_with("Do the thing."));
-    assert_eq!(full.permission_mode, PermissionMode::AcceptEdits);
+    // Default, not Accept Edits: every edit reaches the permission gate.
+    assert_eq!(full.permission_mode, PermissionMode::Default);
     assert_eq!(full.unattended_access.level, AccessLevel::Full);
     assert_eq!(full.session_id.as_deref(), Some("s1"));
     assert!(!full.fresh_session);
