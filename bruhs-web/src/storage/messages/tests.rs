@@ -207,7 +207,9 @@ fn missing_and_empty_tool_outputs_remain_distinct() {
 #[test]
 fn stopped_turns_survive_storage_and_older_rows_read_as_finished() {
     let mut stopped = AgentMessage::assistant_placeholder("model".into(), 1.0);
-    stopped.parts.push(crate::state::MessagePart::Text("partial".into()));
+    stopped
+        .parts
+        .push(crate::state::MessagePart::Text("partial".into()));
     stopped.finish(2.0, true, None);
     let mut finished = AgentMessage::assistant_placeholder("model".into(), 3.0);
     finished.finish(4.0, false, None);
