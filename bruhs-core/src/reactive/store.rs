@@ -1304,10 +1304,6 @@ const MAX_BATCH_PROMPT_BYTES: usize = 256 * 1024;
 /// One claimed run, plus the memory and history the agent sees before its request.
 pub(super) struct Claim {
     pub agent: ReactiveAgent,
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the worker reads it once runs honour access")
-    )]
     pub bruh: bruhs_models::crew::BruhProfile,
     pub run: ReactiveRun,
     pub context: String,

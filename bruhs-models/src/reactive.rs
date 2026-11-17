@@ -97,7 +97,7 @@ pub struct Subscription {
     pub instructions: String,
     #[serde(default)]
     pub enabled: bool,
-    /// An explicit opt-in to unattended read-only turns. Never grants write access.
+    /// An explicit opt-in to unattended runs. Runs keep the bruh's access level; they never exceed it.
     #[serde(default)]
     pub auto_run: bool,
     #[serde(default)]

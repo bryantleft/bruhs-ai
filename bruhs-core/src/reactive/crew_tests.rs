@@ -1,6 +1,6 @@
 //! Bruh profiles: looks, access and effort beside agents, bruh states and run pages.
 
-use super::{store, ReactiveError, ReactiveRuntime};
+use super::{store, worker, ReactiveError, ReactiveRuntime};
 use bruhs_models::crew::*;
 use bruhs_models::reactive::*;
 use bruhs_models::EpochMs;
@@ -799,4 +799,152 @@ async fn stop_bruh_only_pauses_that_bruh() {
     assert_ne!(bruh_status(&runtime, "b").await, BruhStatus::Paused);
     let claim = claim_one(&runtime).await.unwrap();
     assert_eq!(claim.run.id, b.id);
+}
+
+#[test]
+fn instructions_stamp_ignores_name_and_access() {
+    let a = agent("a");
+    let renamed = ReactiveAgent {
+        name: "New".into(),
+        ..a.clone()
+    };
+    assert_eq!(
+        worker::instructions_stamp(&a),
+        worker::instructions_stamp(&renamed)
+    );
+    let instructions = worker::system_instructions(&a);
+    assert!(!instructions.contains(&a.name));
+    assert!(!instructions.contains("read-only"));
+    assert!(instructions.starts_with("You are a persistent Bruhs agent."));
+    assert!(instructions.contains("Prepare drafts for review."));
+}
+
+/// A finished run that left provider session "s1" on agent "a".
+async fn finished_with_session(runtime: &ReactiveRuntime) {
+    let first = chat(runtime, "a", "First").await;
+    let claim = claim_one(runtime).await.unwrap();
+    assert_eq!(claim.run.id, first.id);
+    record_session(runtime, &first.id).await;
+    finish(runtime, &first.id, "Done").await;
+}
+
+#[tokio::test]
+async fn renaming_or_restyling_keeps_the_provider_session() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    finished_with_session(&runtime).await;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveAgent {
+                agent: ReactiveAgent {
+                    name: "Renamed".into(),
+                    ..agent("a")
+                },
+            },
+        })
+        .await
+        .unwrap();
+    runtime
+        .command(set_bruh("a", pandan(), AccessLevel::ReadOnly))
+        .await
+        .unwrap();
+    let next = chat(&runtime, "a", "Next").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.id, next.id);
+    assert_eq!(claim.agent.name, "Renamed");
+    assert_eq!(claim.bruh.look.face, BruhColor::Pandan);
+    assert_eq!(claim.run.session_id.as_deref(), Some("s1"));
+    assert!(!claim.run.fresh_session);
+}
+
+#[tokio::test]
+async fn access_edits_cancel_pending_runs_but_keep_the_session() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    finished_with_session(&runtime).await;
+    let pending = chat(&runtime, "a", "Pending").await;
+    runtime
+        .command(set_bruh("a", BruhLook::default(), AccessLevel::Full))
+        .await
+        .unwrap();
+    let pending = run(&runtime, &pending.id).await;
+    assert_eq!(pending.status, RunStatus::Cancelled);
+    assert_eq!(pending.error.as_deref(), Some(ACCESS_CHANGED));
+    let next = chat(&runtime, "a", "Next").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.id, next.id);
+    assert_eq!(claim.bruh.access.level, AccessLevel::Full);
+    assert_eq!(claim.run.session_id.as_deref(), Some("s1"));
+    assert!(!claim.run.fresh_session);
+}
+
+fn queued_run(prompt: &str) -> ReactiveRun {
+    let now = EpochMs::now();
+    ReactiveRun {
+        id: "r".into(),
+        agent_id: "a".into(),
+        source_id: None,
+        subscription_id: None,
+        event_id: None,
+        status: RunStatus::Running,
+        prompt: prompt.into(),
+        thread_id: bruhs_models::ids::ThreadId::new_v4(),
+        session_id: Some("s1".into()),
+        created_at: now,
+        updated_at: now,
+        not_before: now,
+        result: None,
+        error: None,
+        trigger: None,
+        merged_runs: Vec::new(),
+        merged_into: None,
+        report: None,
+        report_warning: None,
+        fresh_session: false,
+        context_tokens: None,
+        owner_message: None,
+    }
+}
+
+fn profile(level: AccessLevel, effort: Option<&str>) -> BruhProfile {
+    BruhProfile {
+        access: BruhAccess {
+            level,
+            ..BruhAccess::default()
+        },
+        effort: effort.map(str::to_owned),
+        ..BruhProfile::default()
+    }
+}
+
+#[test]
+fn each_run_names_the_bruh_and_its_access() {
+    use bruhs_models::agent::PermissionMode;
+    let (claude, run) = (agent("a"), queued_run("Do the thing."));
+    let full = worker::turn(&claude, &profile(AccessLevel::Full, None), &run, "ctx");
+    assert!(full.prompt.starts_with("Your name is Agent a.\n"));
+    assert!(full.prompt.contains("Access: full."));
+    assert!(full.prompt.contains("\n\nctx\n\n---\n\n"));
+    assert!(full.prompt.ends_with("Do the thing."));
+    assert_eq!(full.permission_mode, PermissionMode::AcceptEdits);
+    assert_eq!(full.unattended_access.level, AccessLevel::Full);
+    assert_eq!(full.session_id.as_deref(), Some("s1"));
+    assert!(!full.fresh_session);
+    assert_eq!(full.effort, None);
+
+    let no_context = worker::turn(&claude, &profile(AccessLevel::Full, None), &run, "");
+    assert!(no_context.prompt.ends_with("without asking.\nNever push, merge or open pull requests.\nNever send messages in the owner's name.\n\nDo the thing."));
+    assert!(!no_context.prompt.contains("---"));
+
+    let ask = worker::turn(&claude, &profile(AccessLevel::Ask, Some("high")), &run, "");
+    assert_eq!(ask.permission_mode, PermissionMode::Default);
+    assert!(ask.prompt.contains("Access: ask first."));
+    assert_eq!(ask.effort.as_deref(), Some("high"));
+
+    let codex = ReactiveAgent {
+        model: "gpt-5.3-codex".into(),
+        ..agent("a")
+    };
+    let codex_ask = worker::turn(&codex, &profile(AccessLevel::Ask, None), &run, "");
+    assert_eq!(codex_ask.permission_mode, PermissionMode::Plan);
+    assert!(codex_ask.prompt.contains("Access: read only."));
+    assert_eq!(codex_ask.unattended_access.level, AccessLevel::ReadOnly);
 }
