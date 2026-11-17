@@ -9,6 +9,12 @@ fn git(dir: &Path, args: &[&str]) -> String {
             "user.email=t@example.com",
             "-c",
             "commit.gpgsign=false",
+            // A background `git maintenance` started by a commit would
+            // count as a program working in the folder.
+            "-c",
+            "maintenance.auto=false",
+            "-c",
+            "gc.auto=0",
         ])
         .args(args)
         .current_dir(dir)

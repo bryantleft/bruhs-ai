@@ -86,7 +86,7 @@ jobs:
   # This also verifies the desktop's WKWebView path; native-platforms.yml
   # covers the Windows and Linux desktop builds. Capture docs stay here.
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
