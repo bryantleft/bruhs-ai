@@ -529,14 +529,15 @@ async fn agent_runs_page_one_agents_runs_newest_first() {
     for message in ["one", "two", "three"] {
         ids.push(chat(&runtime, "a", message).await.id);
         chat(&runtime, "b", message).await;
-        tokio::time::sleep(std::time::Duration::from_millis(3)).await;
     }
     let page = runtime.agent_runs("a".into(), None).await.unwrap();
     let got: Vec<&str> = page.iter().map(|run| run.id.as_str()).collect();
     let newest_first: Vec<&str> = ids.iter().rev().map(String::as_str).collect();
     assert_eq!(got, newest_first);
-    let before = page[0].created_at;
-    let older = runtime.agent_runs("a".into(), Some(before)).await.unwrap();
+    let older = runtime
+        .agent_runs("a".into(), Some(page[0].id.clone()))
+        .await
+        .unwrap();
     let got: Vec<&str> = older.iter().map(|run| run.id.as_str()).collect();
     assert_eq!(got, newest_first[1..]);
     assert!(runtime
@@ -544,4 +545,47 @@ async fn agent_runs_page_one_agents_runs_newest_first() {
         .await
         .unwrap()
         .is_empty());
+}
+
+#[tokio::test]
+async fn agent_runs_pages_reach_every_run_created_in_the_same_millisecond() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
+    let template = chat(&runtime, "a", "Template").await;
+    let total = HISTORY_LIMIT * 2 + 7;
+    let ids: Vec<String> = (0..total).map(|n| format!("run-{n:03}")).collect();
+    let saved = ids.clone();
+    runtime
+        .call(move |connection| {
+            store::transaction(connection, |connection| {
+                for id in &saved {
+                    for agent_id in ["a", "b"] {
+                        let run = ReactiveRun {
+                            id: format!("{agent_id}-{id}"),
+                            agent_id: agent_id.into(),
+                            status: RunStatus::Completed,
+                            ..template.clone()
+                        };
+                        store::save_run(connection, &run)?;
+                    }
+                }
+                connection.execute("DELETE FROM reactive_runs WHERE id=?1", [&template.id])?;
+                Ok(())
+            })
+        })
+        .await
+        .unwrap();
+    let mut seen = Vec::new();
+    let mut before = None;
+    loop {
+        let page = runtime
+            .agent_runs("a".into(), before.clone())
+            .await
+            .unwrap();
+        assert!(page.len() <= HISTORY_LIMIT);
+        let Some(last) = page.last() else { break };
+        before = Some(last.id.clone());
+        seen.extend(page.into_iter().map(|run| run.id));
+    }
+    let newest_first: Vec<String> = ids.iter().rev().map(|id| format!("a-{id}")).collect();
+    assert_eq!(seen, newest_first);
 }

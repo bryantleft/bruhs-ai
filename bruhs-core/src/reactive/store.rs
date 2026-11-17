@@ -613,19 +613,19 @@ fn cancel_where(connection: &Connection, field: &str, id: &str) -> Result<(), Re
     )
 }
 
-/// One agent's runs, newest first, a page at a time; `before` pages back by creation time.
+/// One agent's runs, newest first, a page at a time. `before` is the id of the
+/// last run on the previous page; runs made in the same millisecond still page apart.
 pub(super) fn agent_runs(
     connection: &Connection,
     agent_id: &str,
-    before: Option<EpochMs>,
+    before: Option<&str>,
 ) -> Result<Vec<ReactiveRun>, ReactiveError> {
     let limit = i64::try_from(HISTORY_LIMIT)
         .map_err(|_| ReactiveError::Invalid("History page size is invalid.".into()))?;
-    let mut statement = connection.prepare("SELECT payload FROM reactive_runs WHERE agent_id=?1 AND (?2 IS NULL OR created<?2) ORDER BY created DESC,rowid DESC LIMIT ?3")?;
-    let rows = statement.query_map(
-        params![agent_id, before.map(EpochMs::as_millis), limit],
-        |row| row.get::<_, String>(0),
-    )?;
+    let mut statement = connection.prepare("SELECT payload FROM reactive_runs WHERE agent_id=?1 AND (?2 IS NULL OR rowid<(SELECT rowid FROM reactive_runs WHERE id=?2)) ORDER BY rowid DESC LIMIT ?3")?;
+    let rows = statement.query_map(params![agent_id, before, limit], |row| {
+        row.get::<_, String>(0)
+    })?;
     rows.map(|row| decode(row?)).collect()
 }
 

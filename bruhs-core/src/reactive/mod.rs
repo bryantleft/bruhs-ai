@@ -327,13 +327,14 @@ impl ReactiveRuntime {
         Ok(snapshot)
     }
 
-    /// One agent's runs, newest first, a page at a time.
+    /// One agent's runs, newest first, a page of `HISTORY_LIMIT` at a time.
+    /// `before` is the id of the last run on the previous page.
     pub async fn agent_runs(
         &self,
         agent_id: String,
-        before: Option<bruhs_models::EpochMs>,
+        before: Option<String>,
     ) -> Result<Vec<bruhs_models::reactive::ReactiveRun>, ReactiveError> {
-        self.call(move |connection| store::agent_runs(connection, &agent_id, before))
+        self.call(move |connection| store::agent_runs(connection, &agent_id, before.as_deref()))
             .await
     }
 
