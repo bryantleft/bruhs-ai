@@ -1,6 +1,7 @@
 //! Claude CLI sign-in: status checks, the login flow with polling, and the banner.
 
 use super::*;
+use gpui_component::zoom::px;
 use std::borrow::Cow;
 pub(super) const AUTH_BANNER_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const AUTH_BANNER_TEXT_SIZE_PX: f32 = 14.0;

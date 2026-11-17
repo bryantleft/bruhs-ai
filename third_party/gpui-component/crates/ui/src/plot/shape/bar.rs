@@ -1,6 +1,6 @@
-use gpui::{
-    App, Background, Bounds, Corners, PaintQuad, Pixels, Point, Size, Window, fill, point, px,
-};
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
+use gpui::{App, Background, Bounds, Corners, PaintQuad, Pixels, Point, Size, Window, fill, point};
 
 use crate::plot::{
     label::{PlotLabel, TEXT_GAP, TEXT_HEIGHT, TEXT_SIZE, Text},

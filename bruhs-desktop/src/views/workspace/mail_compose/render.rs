@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::zoom::px;
 fn file_bytes(bytes: u64) -> String {
     format!("{bytes} {}", if bytes == 1 { "byte" } else { "bytes" })
 }

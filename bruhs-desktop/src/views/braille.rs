@@ -9,9 +9,10 @@ use std::rc::Rc;
 use bruhs_models::crew::{Eyes, FaceStyle, FaceView, RING_RADIUS, RING_STROKE_PX};
 use bruhs_models::logic::dither::{bruh_dots_styled, Dot};
 use gpui::{
-    canvas, fill, point, px, quad, rgb, size, transparent_black, BorderStyle, Bounds, Hsla,
+    canvas, fill, point, quad, rgb, size, transparent_black, BorderStyle, Bounds, Hsla,
     IntoElement, Styled,
 };
+use gpui_component::zoom::px;
 
 /// What decides where a face's dots sit: its size, gaze and eyes. Colours
 /// are applied when the dots are painted.

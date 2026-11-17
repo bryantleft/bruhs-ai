@@ -1,5 +1,6 @@
 //! Bounded library pages share keyboard controls and retain their full records.
 use super::*;
+use gpui_component::zoom::px;
 
 #[derive(Clone, Copy)]
 pub(super) enum LibraryPage {

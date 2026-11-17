@@ -5,7 +5,8 @@
 use super::super::performance_tests::fixture;
 use super::super::{AppView, DesktopWorkItem, EpochMs};
 use bruhs_models::{AutomationState, Priority, WorkItemPlanning, WorkItemStatus};
-use gpui::{px, size, Bounds, Pixels, VisualTestContext};
+use gpui::{size, Bounds, Pixels, VisualTestContext};
+use gpui_component::zoom::px;
 
 fn task(id: &str, priority: Priority, status: WorkItemStatus) -> DesktopWorkItem {
     DesktopWorkItem {

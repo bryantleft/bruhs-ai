@@ -11,6 +11,7 @@ use bruhs_models::crew::{
     saved_agent_level, service_is_current, service_notice, AccessLevel, BruhState, ServiceNotice,
 };
 use bruhs_models::reactive::*;
+use gpui_component::zoom::px;
 mod bruh_page;
 mod create_bruh;
 mod editor_fields;
@@ -1689,12 +1690,13 @@ impl Render for ReactiveAutomations {
         self.ensure_weekly_inputs(_window, cx);
         self.ensure_notification_form(_window, cx);
         // Web `lg:grid-cols-2`: Notifications beside Background service.
-        let settings_columns =
-            if f32::from(_window.viewport_size().width) >= SETTINGS_TWO_COLUMNS_PX {
-                2
-            } else {
-                1
-            };
+        let settings_columns = if gpui_component::zoom::css_px(_window.viewport_size().width)
+            >= SETTINGS_TWO_COLUMNS_PX
+        {
+            2
+        } else {
+            1
+        };
         // Web order: the introduction with Refresh under it, Updates, Weekly
         // engineering reports, then New automation and its automations, then
         // Notifications and Background service.

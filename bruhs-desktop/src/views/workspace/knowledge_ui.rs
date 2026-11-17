@@ -2,6 +2,7 @@
 //! hierarchy. Document and source mutations share the desktop's one atomic
 //! state snapshot; attachment payloads are copied beside that snapshot.
 
+use gpui_component::zoom::px;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
@@ -1393,7 +1394,7 @@ impl Workspace {
                                             .h(px(DOCUMENT_BODY_HEIGHT_PX))
                                             .child(
                                                 Input::new(&self.knowledge_body_input)
-                                                    .aria_label("Document Markdown body")
+                                                    .aria_label("Document body")
                                                     .w_full()
                                                     // A multi-line field sizes to the
                                                     // Input, not its box.
@@ -1409,7 +1410,7 @@ impl Workspace {
                                     )
                                     .child(
                                         Input::new(&self.knowledge_tags_input)
-                                            .aria_label("Document tags, comma separated")
+                                            .aria_label("Document tags")
                                             .w_full(),
                                     )
                                     .child(

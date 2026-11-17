@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use instant::Duration;
 use std::ops::Range;
 
@@ -15,7 +16,7 @@ use crate::{VirtualListScrollHandle, list::ListDelegate, v_virtual_list};
 use gpui::{
     App, AvailableSpace, ClickEvent, Context, DefiniteLength, EdgesRefinement, EventEmitter,
     ListSizingBehavior, RenderOnce, Role, ScrollStrategy, SharedString, StatefulInteractiveElement,
-    StyleRefinement, Subscription, px, size,
+    StyleRefinement, Subscription, size,
 };
 use gpui::{
     AppContext, Entity, FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding,

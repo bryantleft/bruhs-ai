@@ -2,6 +2,7 @@
 //! it as the drawer under the chat (⌘J) or as the full Terminal view, so the
 //! sessions are the same wherever you look at them.
 
+use gpui_component::zoom::px;
 use std::sync::Arc;
 
 use bruhs_core::terminal::{TerminalInfo, TerminalManager, TerminalSpec};

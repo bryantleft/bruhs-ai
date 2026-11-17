@@ -4,6 +4,7 @@
 //! async-channel bridge the local-server scan uses.
 
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
+use gpui_component::zoom::px;
 use std::cell::RefCell;
 use std::rc::Rc;
 use std::sync::Arc;
@@ -914,7 +915,9 @@ impl TerminalView {
     ) {
         let lines = match event.delta {
             ScrollDelta::Lines(delta) => delta.y,
-            ScrollDelta::Pixels(delta) => f32::from(delta.y) / TERMINAL_LINE_HEIGHT_PX,
+            ScrollDelta::Pixels(delta) => {
+                gpui_component::zoom::css_px(delta.y) / TERMINAL_LINE_HEIGHT_PX
+            }
         };
         self.scroll_remainder += lines;
         let whole = self.scroll_remainder.trunc();

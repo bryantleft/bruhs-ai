@@ -9,10 +9,11 @@
 
 use gpui::prelude::*;
 use gpui::{
-    div, px, Action, AnyElement, App, Context, Entity, Focusable, KeyBinding, Keystroke,
+    div, Action, AnyElement, App, Context, Entity, Focusable, KeyBinding, Keystroke,
     KeystrokeEvent, Role, SharedString, Subscription, Unbind, WeakEntity, Window,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::zoom::px;
 use gpui_component::WindowExt;
 
 use bruhs_models::logic::keybindings::{

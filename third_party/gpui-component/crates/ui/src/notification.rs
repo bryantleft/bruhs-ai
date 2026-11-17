@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::{
     any::TypeId,
     borrow::Cow,
@@ -10,7 +11,7 @@ use gpui::{
     Anchor, Animation, AnimationExt, AnyElement, App, AppContext, ClickEvent, Context,
     DismissEvent, ElementId, Entity, EventEmitter, InteractiveElement as _, IntoElement,
     ParentElement as _, Pixels, Render, SharedString, StatefulInteractiveElement, StyleRefinement,
-    Styled, Subscription, Window, div, prelude::FluentBuilder, px,
+    Styled, Subscription, Window, div, prelude::FluentBuilder,
 };
 
 use crate::{

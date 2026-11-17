@@ -16,17 +16,13 @@ gpui-component = { path = "crates/ui", version = "0.5.2" }
 gpui-component-macros = { path = "crates/macros", version = "0.5.1" }
 gpui-component-assets = { path = "crates/assets", version = "0.5.1" }
 
-# gpui comes from a fork, one commit ahead of upstream: it wraps prose the
-# way a browser does (no break at `/`, break after `-`) so the desktop app and
-# the web app break the same lines. Upstream deliberately does the opposite for
-# `/`, so this is not something to send back. To move gpui forward, rebase
-# `bruhs-prose-line-breaking` on bnleft/zed and bump the rev here and in
-# third_party/gpui-component/Cargo.toml. See docs/desktop-web-parity-2026-09-06.md.
-gpui = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
-gpui_platform = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
-gpui_web = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
-gpui_macros = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
-reqwest_client = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
+# gpui comes from upstream zed at the rev the root Cargo.toml pins; bump both
+# together (see VENDORED.md, "gpui pins").
+gpui = { git = "https://github.com/zed-industries/zed", rev = "2b9b3c7ea21293c9f271d993503e6d8dba2c6891" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "2b9b3c7ea21293c9f271d993503e6d8dba2c6891", features = ["font-kit", "x11", "wayland", "runtime_shaders"] }
+gpui_web = { git = "https://github.com/zed-industries/zed", rev = "2b9b3c7ea21293c9f271d993503e6d8dba2c6891" }
+gpui_macros = { git = "https://github.com/zed-industries/zed", rev = "2b9b3c7ea21293c9f271d993503e6d8dba2c6891" }
+reqwest_client = { git = "https://github.com/zed-industries/zed", rev = "2b9b3c7ea21293c9f271d993503e6d8dba2c6891" }
 sum-tree = { version = "0.2.0", package = "zed-sum-tree" }
 # reqwest = { version = "0.12.15-zed", package = "zed-reqwest" }
 reqwest = { git = "https://github.com/zed-industries/reqwest.git", rev = "c15662463bda39148ba154100dd44d3fba5873a4", default-features = false, features = [

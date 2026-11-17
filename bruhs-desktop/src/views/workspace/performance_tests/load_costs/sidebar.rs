@@ -1,7 +1,8 @@
 //! Native sidebar input and complete headless frame settling; no provider or save activity.
 use super::super::super::{element_key, MessageRole};
 use super::*;
-use gpui::{px, size};
+use gpui::size;
+use gpui_component::zoom::px;
 
 #[derive(Clone, Copy)]
 struct Case {

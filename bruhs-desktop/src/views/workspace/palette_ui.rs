@@ -2,6 +2,7 @@
 
 use super::*;
 use bruhs_models::logic::preview;
+use gpui_component::zoom::px;
 
 pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
     CommandAction {

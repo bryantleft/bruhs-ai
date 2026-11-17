@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::{
     ops::Range,
     sync::{Arc, Mutex},
@@ -8,7 +9,7 @@ use gpui::{
     GlobalElementId, HighlightStyle, InspectorElementId, InteractiveElement as _, IntoElement,
     LayoutId, LineFragment as WrapLineFragment, ObjectFit, Pixels, ShapedLine, SharedString,
     SharedUri, Size, StatefulInteractiveElement as _, Styled, StyledImage as _, TextRun, TextStyle,
-    WhiteSpace, Window, img, point, prelude::FluentBuilder as _, px, relative, size,
+    WhiteSpace, Window, img, point, prelude::FluentBuilder as _, relative, size,
 };
 
 use crate::{WindowExt as _, tooltip::Tooltip};

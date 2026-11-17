@@ -1,8 +1,10 @@
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
 use std::fmt::Debug;
 
 use gpui::{
     App, Bounds, FontWeight, Hsla, Pixels, Point, ShapedLine, SharedString, TextAlign, TextRun,
-    Window, point, px,
+    Window, point,
 };
 
 use super::origin_point;

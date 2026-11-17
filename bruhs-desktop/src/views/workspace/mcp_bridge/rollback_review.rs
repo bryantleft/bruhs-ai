@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::zoom::px;
 
 #[cfg(test)]
 pub(in crate::views::workspace) use bruhs_models::workspace_bridge::RollbackReview;

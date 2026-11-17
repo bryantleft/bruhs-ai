@@ -1,8 +1,9 @@
+use crate::zoom::px;
 use std::f32;
 
 use gpui::{
     Bounds, Context, Edges, Empty, EntityId, IntoElement, ParentElement as _, Pixels, Render,
-    SharedString, Styled as _, TextAlign, Window, div, prelude::FluentBuilder, px,
+    SharedString, Styled as _, TextAlign, Window, div, prelude::FluentBuilder,
 };
 
 use crate::ActiveTheme as _;
@@ -80,7 +81,7 @@ impl Default for Column {
             movable: true,
             selectable: true,
             min_width: px(20.0),
-            max_width: px(f32::MAX),
+            max_width: crate::zoom::window_px(f32::MAX),
         }
     }
 }

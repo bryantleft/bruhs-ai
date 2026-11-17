@@ -1,6 +1,7 @@
+use crate::zoom::px;
 use gpui::{
     App, Axis, IntoElement, ParentElement, Pixels, Rems, RenderOnce, StyleRefinement, Styled,
-    Window, div, px,
+    Window, div,
 };
 
 use crate::{

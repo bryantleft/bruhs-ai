@@ -41,7 +41,7 @@ chrono = { workspace = true, features = ["serde"] }
 cpal = { workspace = true }
 directories = { workspace = true }
 futures-util = { workspace = true, features = ["std"] }
-# gpui comes from the bnleft/zed fork pinned once in the root Cargo.toml
+# gpui comes from upstream zed, pinned once in the root Cargo.toml
 # ([workspace.dependencies]); see the note there before bumping the rev.
 gpui = { workspace = true }
 gpui-component = { path = "../third_party/gpui-component/crates/ui" }

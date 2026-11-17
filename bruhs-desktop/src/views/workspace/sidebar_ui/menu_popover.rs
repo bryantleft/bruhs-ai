@@ -27,7 +27,11 @@ pub(super) fn menu_origin(
         (length(menu.width), length(menu.height)),
         (length(viewport.width), length(viewport.height)),
     );
-    point(px(left.to_f32_lossy()), px(top.to_f32_lossy()))
+    // Placed from measured window geometry, so already in window points.
+    point(
+        gpui_component::zoom::window_px(left.to_f32_lossy()),
+        gpui_component::zoom::window_px(top.to_f32_lossy()),
+    )
 }
 
 /// `content` placed for a trigger of `trigger_size` whose top-left corner is

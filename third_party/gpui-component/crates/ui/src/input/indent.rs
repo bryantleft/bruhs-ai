@@ -1,6 +1,7 @@
+use crate::zoom::px;
 use gpui::{
     Bounds, Context, EntityInputHandler as _, Hsla, Path, PathBuilder, Pixels, SharedString,
-    TextRun, TextStyle, Window, point, px,
+    TextRun, TextStyle, Window, point,
 };
 use ropey::RopeSlice;
 

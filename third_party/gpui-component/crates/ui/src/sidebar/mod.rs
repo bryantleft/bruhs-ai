@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use crate::{
     ActiveTheme, Collapsible, Icon, IconName, Side, Sizable, StyledExt,
     button::{Button, ButtonVariants},
@@ -9,7 +10,6 @@ use gpui::{
     AbsoluteLength, AnyElement, App, ClickEvent, DefiniteLength, EdgesRefinement, ElementId,
     InteractiveElement as _, IntoElement, Length, ListAlignment, ListState, ParentElement, Pixels,
     RenderOnce, SharedString, StyleRefinement, Styled, Window, div, list, prelude::FluentBuilder,
-    px,
 };
 use std::{rc::Rc, time::Duration};
 
@@ -24,8 +24,8 @@ pub use group::*;
 pub use header::*;
 pub use menu::*;
 
-const DEFAULT_WIDTH: Pixels = px(255.);
-const COLLAPSED_WIDTH: Pixels = px(48.);
+const DEFAULT_WIDTH: Pixels = gpui::px(255.);
+const COLLAPSED_WIDTH: Pixels = gpui::px(48.);
 const SIDEBAR_TRANSITION_DURATION: Duration = Duration::from_millis(200);
 
 /// The way a [`Sidebar`] behaves when it is collapsed.
@@ -382,7 +382,7 @@ impl<E: SidebarItem> RenderOnce for Sidebar<E> {
 
         let id = self.id;
         let content_len = self.content.len();
-        let overdraw = px(window.viewport_size().height.as_f32() * 0.3);
+        let overdraw = crate::zoom::window_px(window.viewport_size().height.as_f32() * 0.3);
         let list_state = window
             .use_keyed_state(
                 SharedString::from(format!("{}-list-state", id)),

@@ -7,6 +7,7 @@ use crate::views::{meeting_dock, meetings_hub::MeetingsHub};
 use crate::{assets, theme};
 use gpui::prelude::*;
 use gpui::*;
+use gpui_component::zoom::px;
 use std::sync::Arc;
 
 pub fn run() {

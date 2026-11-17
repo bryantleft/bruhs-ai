@@ -3,6 +3,7 @@ use super::*;
 use bruhs_core::mail::device::{DeviceDraftRecord, DeviceFileBytes};
 use bruhs_models::connections::{ConnectionState, ServiceConnection};
 use gpui::AppContext as _;
+use gpui_component::zoom::px;
 use serde_json::{json, Value};
 use tokio::io::AsyncBufReadExt as _;
 

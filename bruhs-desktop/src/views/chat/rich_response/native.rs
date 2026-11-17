@@ -177,6 +177,9 @@ impl NativeEmbed {
             }
             #[cfg(not(target_os = "windows"))]
             {
+                // The page zooms with the window.
+                view.zoom(f64::from(gpui_component::zoom::zoom()))
+                    .map_err(|error| error.to_string())?;
                 self.view = Some(view);
             }
         } else if self.geometry != Some(geometry)
@@ -194,6 +197,8 @@ impl NativeEmbed {
                         context.window.scale_factor(),
                     )?;
                 }
+                view.zoom(f64::from(gpui_component::zoom::zoom()))
+                    .map_err(|error| error.to_string())?;
                 view.evaluate_script(&update)
                     .map_err(|error| error.to_string())?;
             }

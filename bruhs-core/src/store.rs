@@ -365,6 +365,10 @@ impl AppState {
         &self,
         turn: AgentTurn,
     ) -> Result<OrchestratorEventStream, SendMessageError> {
+        // A worktree removed to free disk comes back for its next turn.
+        crate::worktrees::restore_for_turn(std::path::Path::new(&turn.project_path))
+            .await
+            .map_err(SendMessageError::WorktreeUnavailable)?;
         let system_prompt = self
             .threads
             .read()

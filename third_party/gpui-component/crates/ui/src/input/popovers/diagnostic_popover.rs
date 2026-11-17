@@ -1,8 +1,9 @@
+use crate::zoom::px;
 use std::rc::Rc;
 
 use gpui::{
     App, AppContext as _, Bounds, Context, Empty, Entity, IntoElement, Pixels, Point, Render,
-    Styled, Window, prelude::FluentBuilder as _, px,
+    Styled, Window, prelude::FluentBuilder as _,
 };
 
 use crate::{

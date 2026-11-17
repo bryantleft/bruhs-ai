@@ -3,6 +3,7 @@ use bruhs_models::logic::workflow_history::{
     self, NEXT_WORKFLOW, NEXT_WORKFLOW_LABEL, NO_WORKFLOW_YET, PREVIOUS_WORKFLOW,
     PREVIOUS_WORKFLOW_LABEL,
 };
+use gpui_component::zoom::px;
 
 impl Workspace {
     pub(super) fn reviewed_automation(&self) -> Option<&bruhs_models::Workflow> {

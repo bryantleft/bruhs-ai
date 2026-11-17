@@ -7,6 +7,7 @@ use gpui_component::resizable::{
 };
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::tooltip::Tooltip;
+use gpui_component::zoom::px;
 use gpui_component::{ActiveTheme, Icon, IconName, WindowExt};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
@@ -78,7 +79,11 @@ mod event_dialog_ui;
 #[cfg(test)]
 mod import_tests;
 mod import_ui;
+#[cfg(test)]
+mod keyboard_tests;
 mod mail_compose;
+#[cfg(test)]
+mod zoom_tests;
 pub(crate) use import_ui::portable_messages;
 mod inbox_ui;
 mod keybindings_ui;
@@ -205,7 +210,10 @@ actions!(
         CopyResumeCommand,
         CopyThreadMarkdown,
         ContinueInT3,
-        ContinueInWorkbench
+        ContinueInWorkbench,
+        ZoomIn,
+        ZoomOut,
+        ResetZoom
     ]
 );
 
@@ -819,6 +827,10 @@ struct PersistedWorkspaceState {
     terminal_drawer_height: Option<f32>,
     /// Web `bruhs.rightPanelWidth`.
     right_panel_width: Option<f32>,
+    /// Page zoom (⌘+ / ⌘− / ⌘0), the browser zoom of the web app. Absent
+    /// means 100%.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    zoom: Option<f32>,
     /// Web `bruhs.whisper_model` / `bruhs.diarize` / `bruhs.auto_record` /
     /// `bruhs.personality` preferences.
     meeting_prefs: Option<MeetingPrefs>,
@@ -1417,11 +1429,11 @@ pub struct Workspace {
     scheduling_link_duration_input: Entity<InputState>,
     scheduling_selected_task_id: Option<String>,
     life_tab: DesktopLifeTab,
-    life_error: Option<String>,
-    /// Web's Life notice: what the last CSV import did, until dismissed.
+    /// Web's Life notice: what the last CSV import did, or why a card's
+    /// entry was refused, until dismissed.
     life_notice: Option<String>,
-    life_name_input: Entity<InputState>,
-    life_value_input: Entity<InputState>,
+    /// Each health card's form (web `health_tab`).
+    life_health: life_ui::HealthForms,
     /// Each finance card's form (web `finance_tab`).
     life_finance: life_ui::FinanceForms,
     life_csv_input: Entity<InputState>,
@@ -1483,6 +1495,8 @@ pub struct Workspace {
     /// Right panel width in px, dragged at its left edge (web `RightPanelWidth`).
     right_panel_width: f32,
     right_panel_split_state: Entity<ResizableState>,
+    /// Page zoom; see [`crate::zoom`].
+    zoom: f32,
     /// Split between the transcript and the drawer; persists the drag.
     terminal_split_state: Entity<ResizableState>,
     /// Keeps the input, panel and hub subscriptions alive.
@@ -1575,8 +1589,7 @@ impl Workspace {
             scheduling_link_duration_input,
         } = Self::new_scheduling_inputs(window, cx, &mut subscriptions);
         let life_ui::LifeInputs {
-            life_name_input,
-            life_value_input,
+            life_health,
             life_finance,
             life_csv_input,
         } = Self::new_life_inputs(window, cx, &mut subscriptions);
@@ -2123,10 +2136,8 @@ impl Workspace {
             scheduling_link_duration_input,
             scheduling_selected_task_id: None,
             life_tab: DesktopLifeTab::Finance,
-            life_error: None,
             life_notice: None,
-            life_name_input,
-            life_value_input,
+            life_health,
             life_finance,
             life_csv_input,
             task_create_title_input,
@@ -2173,6 +2184,7 @@ impl Workspace {
             right_panel_width,
             right_panel_split_state,
             terminal_split_state,
+            zoom: crate::zoom::restore(persisted.as_ref().and_then(|state| state.zoom)),
             _subscriptions: subscriptions,
         };
         workspace.reveal_selected_task_page();
@@ -2184,6 +2196,16 @@ impl Workspace {
             });
         }
         workspace.sync_keybindings(cx);
+        workspace.apply_zoom(window, cx);
+        // With nothing focused, gpui dispatches keys from the window root,
+        // past every workspace action: Tab and the shortcuts would do
+        // nothing until a click. Start in the workspace, as a web page
+        // starts with the document focused.
+        cx.defer_in(window, |this, window, cx| {
+            if window.focused(cx).is_none() {
+                this.workspace_focus_handle.focus(window, cx);
+            }
+        });
         workspace.start_meeting_suggestions(cx);
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
@@ -2270,7 +2292,9 @@ impl Workspace {
     /// `breakpoint_px`: the web shows its layout without that `sm:`, `md:`
     /// or `lg:` variant.
     fn narrower_than(window: &Window, breakpoint_px: f32) -> bool {
-        f32::from(window.viewport_size().width) < breakpoint_px
+        // In CSS pixels, so a zoomed window switches layouts at the widths a
+        // zoomed browser page does.
+        gpui_component::zoom::css_px(window.viewport_size().width) < breakpoint_px
     }
 
     /// Web: below `sm` the sidebar is a drawer over a scrim; from `sm` it
@@ -2283,6 +2307,43 @@ impl Workspace {
     /// it docks beside the chat.
     fn right_panel_drawer_layout(window: &Window) -> bool {
         Self::narrower_than(window, MD_BREAKPOINT_PX)
+    }
+
+    /// ⌘+ / ⌘− / ⌘0: zoom the window's content like a browser zooms the web
+    /// app, and remember the level.
+    pub(crate) fn set_zoom(&mut self, zoom: f32, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.zoom = zoom;
+        self.apply_zoom(window, cx);
+        self.persist_and_notify(cx);
+    }
+
+    /// Draw the window's design lengths at the saved zoom (see
+    /// [`gpui_component::zoom`]), and keep the macOS traffic lights centred in
+    /// the zoomed header.
+    fn apply_zoom(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        gpui_component::zoom::set_zoom(self.zoom, cx);
+        #[cfg(target_os = "macos")]
+        window.set_traffic_light_position(point(
+            gpui_component::zoom::window_px(12.0),
+            gpui_component::zoom::window_px(crate::zoom::traffic_light_top(
+                theme::APP_HEADER_HEIGHT_PX,
+                self.zoom,
+            )),
+        ));
+        window.refresh();
+    }
+
+    /// Room for the macOS traffic lights, which stay in window points while
+    /// the page zooms; elsewhere a padding that zooms with the page.
+    fn traffic_light_inset(&self) -> Pixels {
+        #[cfg(target_os = "macos")]
+        {
+            gpui_component::zoom::window_px(SIDEBAR_HEADER_LEFT_INSET_PX)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            px(SIDEBAR_HEADER_LEFT_INSET_PX)
+        }
     }
 
     fn toggle_sidebar_for_window(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
@@ -2878,7 +2939,7 @@ impl Render for Workspace {
         let sidebar_docked = !sidebar_drawer && self.sidebar_visible && !booking;
         let sidebar_drawer_open = sidebar_drawer && self.compact_sidebar_open && !booking;
         let chat_panel_open = self.right_panel_open() && self.active_view == AppView::Chat;
-        let right_drawer_width = (f32::from(window.viewport_size().width)
+        let right_drawer_width = (gpui_component::zoom::css_px(window.viewport_size().width)
             * RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE)
             .min(RIGHT_PANEL_DRAWER_WIDTH_PX);
         let body = div()
@@ -2931,7 +2992,7 @@ impl Render for Workspace {
                     // remembered, clamped, and gives way to the chat's 360px
                     // minimum. A window resize never changes the remembered
                     // width, so the panel holds it unless its edge is dragged.
-                    let viewport_width = f32::from(window.viewport_size().width);
+                    let viewport_width = gpui_component::zoom::css_px(window.viewport_size().width);
                     let sidebar_width = if sidebar_docked {
                         WORKSPACE_SIDE_PANEL_WIDTH_PX
                     } else {
@@ -3036,29 +3097,33 @@ impl Render for Workspace {
             .key_context("Workspace")
             .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
             .track_focus(&self.workspace_focus_handle)
+            // Tab in a multi-line field moves focus, as it leaves a web
+            // textarea: nothing traps the keyboard. The composer indents its
+            // list items and code first (`composer_edit`), and accepts a
+            // suggestion, before this runs.
             .capture_action(cx.listener(
                 |this, _: &gpui_component::input::IndentInline, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
                     if this.overlay_open()
                         && this.modal_start_focus_handle.contains_focused(window, cx)
                     {
-                        window.prevent_default();
-                        cx.stop_propagation();
                         this.step_modal_focus(false, window, cx);
                     } else {
-                        cx.propagate();
+                        window.focus_next(cx);
                     }
                 },
             ))
             .capture_action(cx.listener(
                 |this, _: &gpui_component::input::OutdentInline, window, cx| {
+                    window.prevent_default();
+                    cx.stop_propagation();
                     if this.overlay_open()
                         && this.modal_start_focus_handle.contains_focused(window, cx)
                     {
-                        window.prevent_default();
-                        cx.stop_propagation();
                         this.step_modal_focus(true, window, cx);
                     } else {
-                        cx.propagate();
+                        window.focus_prev(cx);
                     }
                 },
             ))
@@ -3067,6 +3132,15 @@ impl Render for Workspace {
             .line_height(relative(WORKSPACE_LINE_HEIGHT))
             .on_action(cx.listener(Self::new_thread))
             .on_action(cx.listener(Self::toggle_sidebar))
+            .on_action(cx.listener(|this, _: &ZoomIn, window, cx| {
+                this.set_zoom(crate::zoom::zoom_in(this.zoom), window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ZoomOut, window, cx| {
+                this.set_zoom(crate::zoom::zoom_out(this.zoom), window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ResetZoom, window, cx| {
+                this.set_zoom(crate::zoom::DEFAULT, window, cx);
+            }))
             .on_action(cx.listener(Self::toggle_tasks))
             .on_action(cx.listener(Self::focus_command_bar))
             .on_action(cx.listener(Self::focus_chat_input))

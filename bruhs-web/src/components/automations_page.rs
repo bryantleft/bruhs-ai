@@ -80,22 +80,21 @@ pub fn AutomationsPage() -> impl IntoView {
         preview.set(next.flatten());
     };
 
+    // A started workflow goes on show in the history, which carries its
+    // Run, Pause and Undo controls, as desktop starts the workflow on show.
     let start_job = move |_| {
         let Some(id) = active_workflow.get_untracked() else {
             return;
         };
-        automation.update(|state| {
-            let _ = state.start_job(&id, crate::clock::now_ms());
-        });
+        let started = automation
+            .try_update(|state| state.start_job(&id, crate::clock::now_ms()))
+            .flatten();
+        if started.is_some() {
+            reviewed.set(Some(id));
+        }
     };
 
     let executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
-    let run_next_step = move |job_id: String| {
-        execution_error.set(None);
-        if let Err(error) = executor.run(job_id) {
-            execution_error.set(Some(error.to_string()));
-        }
-    };
     // Controls that change records wait for the store, the executor and any
     // pending save.
     let locked = move || {
@@ -105,12 +104,6 @@ pub fn AutomationsPage() -> impl IntoView {
                 crate::durable_metadata::SaveState::Saving
             )
             || !executor.ready.get()
-    };
-    let rollback = move |workflow_id: String| {
-        execution_error.set(None);
-        if let Err(error) = executor.rollback(workflow_id) {
-            execution_error.set(Some(error.to_string()));
-        }
     };
 
     view! {
@@ -141,11 +134,11 @@ pub fn AutomationsPage() -> impl IntoView {
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="suggestions-title">
                             <div class="flex items-center justify-between gap-3">
                                 <div>
-                                    <h2 id="suggestions-title" class="text-h4 text-rambutan-100">"Local suggestions"</h2>
-                                    <p class="text-body-sm text-rambutan-500">"Evidence is shown before any proposal. Suggestions appear at most three times, no more than daily."</p>
+                                    <h2 id="suggestions-title" class="text-h4 text-rambutan-100">{bruhs_models::suggestion_copy::TITLE}</h2>
+                                    <p class="text-body-sm text-rambutan-500">{bruhs_models::suggestion_copy::DESCRIPTION}</p>
                                 </div>
                                 <Button class="whitespace-nowrap" variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| make_preview(focus_operations(crate::clock::now_ms()), "Protect focus", None))>
-                                    "New dry run"
+                                    {bruhs_models::suggestion_copy::NEW_DRY_RUN}
                                 </Button>
                             </div>
                             <div class="mt-3 space-y-2">
@@ -155,16 +148,16 @@ pub fn AutomationsPage() -> impl IntoView {
                                     let title = suggestion.title.clone();
                                     let workflow_title = title.clone();
                                     let operations = suggestion.operations.clone();
-                                    let preview_label = format!("Preview {} changes", operations.len());
+                                    let preview_label = bruhs_models::suggestion_copy::preview(operations.len());
                                     view! {
                                         <article class="rounded-grape bg-longan-950/70 p-3 inset-ring inset-ring-longan-700/40">
                                             <div class="flex items-start justify-between gap-3">
                                                 <div class="min-w-0">
                                                     <h3 class="text-label text-rambutan-200">{title}</h3>
                                                     <p class="mt-1 text-body-sm text-rambutan-400">{suggestion.explanation.clone()}</p>
-                                                    <p class="mt-2 text-label-sm text-blueberry-300">{format!("Evidence: {}", suggestion.evidence)}</p>
+                                                    <p class="mt-2 text-label-sm text-blueberry-300">{bruhs_models::suggestion_copy::evidence(&suggestion.evidence)}</p>
                                                 </div>
-                                                <button type="button" class="shrink-0 text-label-sm text-rambutan-500 hover:text-rambutan-200 cursor-pointer" aria-label="Dismiss suggestion" on:click=move |_| automation.update(|state| { let _ = state.dismiss_suggestion(&id, crate::clock::now_ms()); })>"Dismiss"</button>
+                                                <button type="button" class="shrink-0 text-label-sm text-rambutan-500 hover:text-rambutan-200 cursor-pointer" aria-label=bruhs_models::suggestion_copy::DISMISS_LABEL on:click=move |_| automation.update(|state| { let _ = state.dismiss_suggestion(&id, crate::clock::now_ms()); })>{bruhs_models::suggestion_copy::DISMISS}</button>
                                             </div>
                                             <button type="button" class="mt-3 rounded-grape bg-persimmon-500 px-3 py-1.5 text-label-sm text-longan-950 hover:bg-persimmon-400 cursor-pointer" on:click=move |_| {
                                                 automation.update(|state| { let _ = state.mark_suggestion_surfaced(&id_for_preview, crate::clock::now_ms()); });
@@ -202,41 +195,24 @@ pub fn AutomationsPage() -> impl IntoView {
 
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="jobs-title">
                             <h2 id="jobs-title" class="text-h4 text-rambutan-100">"Background jobs"</h2>
-                            <p class="text-body-sm text-rambutan-500">"Each record and checkpoint commit together. Background runs continue across pages while the app is open and resume after reload."</p>
+                            <p class="text-body-sm text-rambutan-500">"Each record and checkpoint commit together. Background runs continue across pages while the app is open and resume after reload. Run, pause, resume or undo a workflow from Workflow history."</p>
                             <div class="mt-3 space-y-2">
+                                // A record of the newest jobs. Their controls are on the
+                                // workflow on show in Workflow history, as on desktop.
                                 {move || automation.with(|state| state.jobs.iter().rev().take(8).map(|job| {
-                                    let run_id = job.id.clone();
-                                    let background_id = job.id.clone();
-                                    let auto_run = job.auto_run;
-                                    let pause_id = job.id.clone();
-                                    let resume_id = job.id.clone();
                                     let status = job.status;
                                     let next_step = job.next_step;
                                     let workflow = state.workflows.iter().find(|workflow| workflow.id == job.workflow_id);
                                     let total = workflow.map_or(0, |workflow| workflow.steps.len());
                                     let review_id = job.workflow_id.clone();
-                                    let actions = if status == BackgroundJobStatus::Running && next_step < total {
-                                        view! {
-                                            <button type="button" class="bruhs-control min-h-control min-w-control text-button text-persimmon-300 hover:text-persimmon-200 cursor-pointer" on:click=move |_| run_next_step(run_id.clone())>"Run next step"</button>
-                                            <button type="button" disabled=auto_run class="bruhs-control min-h-control min-w-control text-button text-persimmon-300 disabled:opacity-40 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.enable_background(&background_id); })>"Run in background"</button>
-                                            <button type="button" class="bruhs-control min-h-control min-w-control text-button text-rambutan-400 hover:text-rambutan-200 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.pause_job(&pause_id, crate::clock::now_ms()); })>"Pause"</button>
-                                        }.into_any()
-                                    } else if status == BackgroundJobStatus::Paused {
-                                        view! {
-                                            <button type="button" class="bruhs-control min-h-control min-w-control text-button text-persimmon-300 hover:text-persimmon-200 cursor-pointer" on:click=move |_| automation.update(|state| { let _ = state.resume_job(&resume_id, crate::clock::now_ms()); })>"Resume"</button>
-                                        }.into_any()
-                                    } else {
-                                        view! { <span class="text-label-sm text-pandan-300">"Checkpointed"</span> }.into_any()
-                                    };
+                                    let active = matches!(status, BackgroundJobStatus::Running | BackgroundJobStatus::Paused);
                                     view! {
                                         <div class="flex flex-wrap items-center justify-between gap-3 rounded-grape bg-longan-950/60 px-3 py-2">
                                             <div>
                                                 <p class="text-label text-rambutan-200">{format!("{} of {} steps", next_step, total)}</p>
                                                 <p class="text-label-sm text-rambutan-500">{format!("{:?}", status)}</p>
                                             </div>
-                                            <div class="flex items-center gap-2">
-                                                {actions}
-                                            </div>
+                                            {(!active).then(|| view! { <span class="text-label-sm text-pandan-300">"Checkpointed"</span> })}
                                             <super::workflow_payload::WorkflowReview workflow_id=review_id />
                                         </div>
                                     }
@@ -254,11 +230,6 @@ pub fn AutomationsPage() -> impl IntoView {
                                     </div>
                                 }).collect_view())}
                             </div>
-                            {move || automation.with(|state| state.workflows.iter().rev().filter(|workflow| workflow.can_rollback()).take(3).map(|workflow| {
-                                let id = workflow.id.clone();
-                                let title = workflow.title.clone();
-                                view! { <button type="button" class="mt-3 mr-2 text-button text-lychee-300 hover:text-lychee-200 cursor-pointer" on:click=move |_| rollback(id.clone())>{format!("Undo {title}")}</button> }
-                            }).collect_view())}
                         </section>
                     </fieldset>
 
@@ -301,8 +272,9 @@ pub fn AutomationsPage() -> impl IntoView {
                             }}</p>
                         </section>
 
-                        // Browsing changes no record, so it never waits on a save.
-                        <super::workflow_history::WorkflowHistory />
+                        // Browsing changes no record, so it never waits on a save;
+                        // the controls of the workflow on show do.
+                        <super::workflow_history::WorkflowHistory locked=Signal::derive(locked) error=execution_error />
                     </aside>
                 </div>
             </div>

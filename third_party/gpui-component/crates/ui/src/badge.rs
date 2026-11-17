@@ -1,6 +1,7 @@
+use crate::zoom::px;
 use gpui::{
     AnyElement, App, Hsla, IntoElement, ParentElement, RenderOnce, StyleRefinement, Styled, Window,
-    div, prelude::FluentBuilder, px, relative,
+    div, prelude::FluentBuilder, relative,
 };
 
 use crate::{ActiveTheme, Icon, Sizable, Size, StyledExt, h_flex, white};

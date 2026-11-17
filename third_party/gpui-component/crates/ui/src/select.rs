@@ -1,8 +1,9 @@
+use crate::zoom::px;
 use gpui::{
     AnyElement, App, ClickEvent, Context, DismissEvent, Edges, ElementId, Entity, EventEmitter,
     FocusHandle, Focusable, InteractiveElement, IntoElement, KeyBinding, Length, ParentElement,
     Render, RenderOnce, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
-    anchored, deferred, div, prelude::FluentBuilder, px, rems,
+    anchored, deferred, div, prelude::FluentBuilder, rems,
 };
 use rust_i18n::t;
 

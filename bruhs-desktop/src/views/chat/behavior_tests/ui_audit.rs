@@ -1,8 +1,9 @@
 use super::chat_window;
 use crate::views::chat::{DesktopMentionItem, DesktopPermissionRequest};
 use gpui::{
-    point, px, size, ScrollDelta, ScrollHandle, ScrollWheelEvent, TestAppContext, VisualTestContext,
+    point, size, ScrollDelta, ScrollHandle, ScrollWheelEvent, TestAppContext, VisualTestContext,
 };
+use gpui_component::zoom::px;
 use serde_json::json;
 
 fn assert_row_is_visible(scroll: &ScrollHandle, index: usize) {

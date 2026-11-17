@@ -191,6 +191,7 @@ pub fn remote_router(runtime: CoordinationRuntime, links: BoardLinks) -> Router 
         .route("/api/commands", post(remote_command))
         .route("/api/proposals", post(remote_proposal))
         .route("/api/changes", get(remote_changes))
+        .route("/api/tasks/{id}/worktree", get(remote_worktree))
         .layer(axum::extract::DefaultBodyLimit::max(bruhs_models::logic::composer_text::MESSAGE_CHAR_LIMIT * 4))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::CACHE_CONTROL, axum::http::HeaderValue::from_static("no-store")))
         .layer(tower_http::set_header::SetResponseHeaderLayer::overriding(header::REFERRER_POLICY, axum::http::HeaderValue::from_static("no-referrer")))
@@ -282,6 +283,21 @@ async fn remote_command(
         return Err(CoordinationError::Unauthorized.into());
     }
     Ok(Json(checked_command(&state.runtime, command).await?))
+}
+
+/// The owner's task panel on a paired device: the same worktree view as
+/// the local one, sizes included. Guests have no worktree.
+async fn remote_worktree(
+    State(state): State<Arc<RemoteState>>,
+    headers: HeaderMap,
+    Path(id): Path<bruhs_models::ids::ThreadId>,
+    axum::extract::Query(query): axum::extract::Query<std::collections::HashMap<String, String>>,
+) -> Result<impl IntoResponse, AppError> {
+    if state.runtime.authorize(&token(&headers)?).await? != AccessScope::Owner {
+        return Err(CoordinationError::Unauthorized.into());
+    }
+    let measure = query.get("measure").is_some_and(|value| value == "true");
+    Ok(Json(state.runtime.task_worktree(&id, measure).await?))
 }
 
 #[derive(Deserialize)]

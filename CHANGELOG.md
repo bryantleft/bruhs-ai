@@ -21,6 +21,17 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   Resume work per bruh or for all, and ⌘. stops everything. ⌘⇧B opens the
   crew rail. An older background service shows a notice with Update service;
   see `docs/crew.md`.
+- The desktop app zooms like a browser: ⌘+ and ⌘− (or View → Zoom In and
+  Zoom Out) step from 67% to 300%, ⌘0 returns to 100%, and the level is
+  remembered. Pages reflow for the larger text at the web's widths.
+- Workbench has a Worktrees tab listing every worktree bruhs made, chat
+  ones included, with what removing each frees. Remove keeps the branch,
+  and the chat's or task's next message checks it out again, on the web and
+  in the desktop app. Removal also waits for any program working in the
+  folder and for pull-request watches. A worktree whose branch was deleted
+  can start again from another branch. Linux measures with allocated
+  blocks by default, and a timed-out custom meter is stopped with
+  everything it started.
 - Finished Workbench tasks can remove their worktree to free disk. The
   task panel shows what removing it frees now and what stays shared with
   your checkout, measured by Pith's scanner on macOS. Removal keeps the
@@ -149,6 +160,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Changed
 
+- The desktop app runs on its UI framework, gpui, without patches. Long
+  lines may now break at a `/` and no longer break after a `-`, so a line can
+  wrap at a different word than on the web.
 - Today in the desktop app now looks like the web's. Agent workflows and
   Life are quiet links in the header, the focus queue numbers its tasks,
   shows each priority in its color and says how many are ready, and
@@ -249,6 +263,33 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- The desktop app's keyboard works from the start: reopened on a page
+  other than Chat, it used to ignore Tab and the shortcuts until a click.
+- In the desktop app, Tab leaves a reply, note or other multi-line field,
+  as it does on the web, instead of indenting the text; the composer still
+  indents list items and code.
+- A project's Delete button in the desktop Tasks list can be reached with
+  Tab, as on the web.
+- Desktop Agent workflows shows Local suggestions as the web does: its own
+  New dry run, then each suggestion with its evidence, Dismiss and Preview.
+- Screen readers hear the same names for Today's task rows and a
+  document's fields in both apps.
+- On a touch screen, a tap on a month calendar day opens that day's list,
+  with full-size rows and New event, instead of hitting tiny dates and
+  event pills.
+- On the web's Agent workflows page, any workflow in Workflow history can be
+  run, paused, resumed or undone, as in the desktop app: the workflow on show
+  carries Run next step, Run in background, Pause, Resume and Undo
+  transaction, whichever apply. Before, only the eight newest jobs and the
+  three newest undoable workflows had them. A workflow you start now shows in
+  the history.
+- Health in the desktop app now has the web's form in each card: Activity,
+  Minutes and Log in Workout; a Sleep row and a Recovery row in Sleep &
+  recovery; and a title and Add in Habits, in place of one Quick add form.
+  Both apps check these entries the same way and use the same words. A
+  value a log would quietly change, such as 0 workout minutes or a 101%
+  score, is refused, and the page notice says what to enter; the web used
+  to do nothing or save the changed value.
 - In a narrow desktop window the sidebar stays docked, as on the web,
   instead of hiding below 960px. The right panel docks from 768px; in a
   narrower window it opens over the chat, and a click beside it closes it.

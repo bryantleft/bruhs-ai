@@ -1,7 +1,8 @@
+use crate::zoom::px;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use gpui::{AsyncApp, Bounds, Context, Pixels, Point, Task, WeakEntity, px};
+use gpui::{AsyncApp, Bounds, Context, Pixels, Point, Task, WeakEntity};
 
 /// Manages timer-based auto-scrolling during drag-selection.
 ///

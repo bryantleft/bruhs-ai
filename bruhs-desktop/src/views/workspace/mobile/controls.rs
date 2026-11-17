@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::zoom::px;
 fn note(text: impl Into<SharedString>) -> Div {
     div()
         .min_w_0()

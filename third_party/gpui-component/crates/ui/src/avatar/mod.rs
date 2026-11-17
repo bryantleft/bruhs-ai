@@ -1,11 +1,12 @@
 mod avatar;
 mod avatar_group;
 
+use crate::zoom::px;
 pub use avatar::*;
 pub use avatar_group::*;
 
 use crate::{Icon, Size, StyledExt as _};
-use gpui::{Div, Img, IntoElement, Pixels, Styled, px, rems};
+use gpui::{Div, Img, IntoElement, Pixels, Styled, rems};
 
 /// Returns the size of the avatar based on the given [`Size`].
 pub(super) fn avatar_size(size: Size) -> Pixels {

@@ -1,9 +1,9 @@
+use crate::zoom::px;
 use gpui::{
     App, Axis, BorderStyle, Bounds, ContentMask, Edges, Element, ElementId, GlobalElementId,
     Hitbox, Hsla, InteractiveElement as _, IntoElement, IsZero as _, LayoutId, PaintQuad,
     ParentElement as _, Point, Position, ScrollHandle, ScrollWheelEvent,
-    StatefulInteractiveElement as _, Style, StyleRefinement, Styled as _, Window, div, px,
-    relative,
+    StatefulInteractiveElement as _, Style, StyleRefinement, Styled as _, Window, div, relative,
 };
 use gpui::{Corners, Pixels};
 
@@ -191,7 +191,7 @@ mod tests {
     use super::*;
     use gpui::{
         Context, IntoElement, Render, ScrollDelta, ScrollWheelEvent, TestAppContext,
-        VisualTestContext, Window, div, point, px,
+        VisualTestContext, Window, div, point,
     };
 
     struct HorizontalScrollAreaTest {

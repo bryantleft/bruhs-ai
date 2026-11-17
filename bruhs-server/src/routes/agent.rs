@@ -187,6 +187,13 @@ async fn turn_dir(
     project_path: Option<&str>,
     home: Option<&std::path::Path>,
 ) -> Result<HomePath, HomePathError> {
+    // A worktree removed to free disk is checked out again before its path
+    // is resolved, so the chat continues where it left off.
+    if let Some(path) = project_path.filter(|path| !path.is_empty()) {
+        bruhs_core::worktrees::restore_for_turn(std::path::Path::new(path))
+            .await
+            .map_err(HomePathError::WorktreeUnavailable)?;
+    }
     HomePath::or_home_in(project_path, home).await
 }
 

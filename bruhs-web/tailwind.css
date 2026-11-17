@@ -60,6 +60,9 @@
 /* Dense desktop controls retain comfortable touch targets and avoid iOS input zoom. */
 @media (pointer: coarse) {
   .bruhs-control, [data-composer-chips] button { min-height: 44px; min-width: 44px; }
+  /* A month day is one tap target on touch: its date and record pills are
+     too small to tap, so the tap opens the day's list (month_view.rs). */
+  [data-calendar-cell] button { pointer-events: none; }
   input:not([type="checkbox"]):not([type="radio"]), textarea[class],
   [data-composer-surface] [data-composer-overlay] { font-size: 16px; }
   [role="menuitem"], [role="option"] { min-height: 44px; }

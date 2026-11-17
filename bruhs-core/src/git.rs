@@ -720,14 +720,43 @@ fn resolve(path: &Path) -> PathBuf {
     let mut existing = path;
     loop {
         if let Ok(resolved) = std::fs::canonicalize(existing) {
-            let rest = path.strip_prefix(existing).unwrap_or(Path::new(""));
-            return resolved.join(rest);
+            // `join("")` would add a trailing separator.
+            return match path.strip_prefix(existing) {
+                Ok(rest) if !rest.as_os_str().is_empty() => resolved.join(rest),
+                _ => resolved,
+            };
         }
         match existing.parent() {
             Some(parent) => existing = parent,
             None => return path.to_path_buf(),
         }
     }
+}
+
+/// Whether `repo` has the local branch `branch`.
+pub async fn branch_exists(repo: &Path, branch: &str) -> Result<bool, GitError> {
+    let reference = format!("refs/heads/{branch}");
+    Ok(git(repo, &["rev-parse", "--verify", "--quiet", &reference])
+        .await?
+        .success())
+}
+
+/// The main checkout a linked worktree at `worktree` belongs to: the parent
+/// of the common Git directory. `None` for a bare repository or no repository.
+pub async fn main_checkout(worktree: &Path) -> Option<PathBuf> {
+    let out = git(
+        worktree,
+        &["rev-parse", "--path-format=absolute", "--git-common-dir"],
+    )
+    .await
+    .ok()?;
+    if !out.success() {
+        return None;
+    }
+    let common = PathBuf::from(out.stdout_lossy().trim());
+    (common.file_name()? == ".git")
+        .then(|| common.parent().map(Path::to_path_buf))
+        .flatten()
 }
 
 /// Every worktree of `repo`, the main one included.

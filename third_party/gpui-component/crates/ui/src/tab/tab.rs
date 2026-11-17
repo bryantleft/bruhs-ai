@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::{rc::Rc, time::Duration};
 
 use crate::animation::{Lerp, ease_in_out_cubic};
@@ -6,7 +7,7 @@ use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, Background, ClickEvent, Div, Edges, ElementId,
     Hsla, InteractiveElement, IntoElement, MouseButton, ParentElement, Pixels, RenderOnce, Role,
-    SharedString, StatefulInteractiveElement, Styled, Window, div, px, relative,
+    SharedString, StatefulInteractiveElement, Styled, Window, div, relative,
 };
 
 /// Tab variants.

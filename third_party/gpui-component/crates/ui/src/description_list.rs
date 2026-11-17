@@ -1,6 +1,7 @@
+use crate::zoom::px;
 use gpui::{
     AnyElement, App, Axis, DefiniteLength, IntoElement, ParentElement, RenderOnce, SharedString,
-    Styled, Window, div, prelude::FluentBuilder as _, px, relative,
+    Styled, Window, div, prelude::FluentBuilder as _, relative,
 };
 
 use crate::{ActiveTheme as _, AxisExt, Sizable, Size, h_flex, text::Text, v_flex};

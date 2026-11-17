@@ -1,9 +1,10 @@
+use crate::zoom::px;
 use crate::{ActiveTheme, Sizable, Size, StyledExt};
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, ElementId, Hsla, InteractiveElement as _,
     IntoElement, ParentElement, Pixels, RenderOnce, StyleRefinement, Styled, Window, canvas,
-    ease_in_out, px, relative,
+    ease_in_out, relative,
 };
 use gpui::{Bounds, div};
 use instant::Duration;

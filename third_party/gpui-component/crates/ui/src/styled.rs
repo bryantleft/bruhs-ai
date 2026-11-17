@@ -1,7 +1,8 @@
 use crate::ActiveTheme;
+use crate::zoom::px;
 use gpui::{
     App, BoxShadow, Corners, DefiniteLength, Div, Edges, FocusHandle, Hsla, ParentElement, Pixels,
-    Refineable, StyleRefinement, Styled, Window, div, point, px,
+    Refineable, StyleRefinement, Styled, Window, div, point,
 };
 use serde::{Deserialize, Serialize};
 
@@ -316,7 +317,9 @@ impl Size {
     /// e.g. `Size::XSmall.max(Size::Small)` will return `Size::XSmall`.
     pub fn max(&self, other: Self) -> Self {
         match (self, other) {
-            (Size::Size(a), Size::Size(b)) => Size::Size(px(a.as_f32().min(b.as_f32()))),
+            (Size::Size(a), Size::Size(b)) => {
+                Size::Size(crate::zoom::window_px(a.as_f32().min(b.as_f32())))
+            }
             (Size::Size(a), _) => Size::Size(*a),
             (_, Size::Size(b)) => Size::Size(b),
             (a, b) if a.as_f32() < b.as_f32() => *a,
@@ -329,7 +332,9 @@ impl Size {
     /// e.g. `Size::XSmall.min(Size::Small)` will return `Size::Small`.
     pub fn min(&self, other: Self) -> Self {
         match (self, other) {
-            (Size::Size(a), Size::Size(b)) => Size::Size(px(a.as_f32().max(b.as_f32()))),
+            (Size::Size(a), Size::Size(b)) => {
+                Size::Size(crate::zoom::window_px(a.as_f32().max(b.as_f32())))
+            }
             (Size::Size(a), _) => Size::Size(*a),
             (_, Size::Size(b)) => Size::Size(b),
             (a, b) if a.as_f32() > b.as_f32() => *a,
@@ -552,7 +557,7 @@ impl<T: ParentElement + Styled + Sized> FocusableExt<T> for T {
             return self;
         }
 
-        const RING_BORDER_WIDTH: Pixels = px(1.5);
+        const RING_BORDER_WIDTH: Pixels = gpui::px(1.5);
         let rem_size = window.rem_size();
         let style = self.style();
 

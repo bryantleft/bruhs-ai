@@ -1,6 +1,7 @@
 //! Today page: the day plan (draft, apply, undo) and its task and agenda sections.
 
 use super::*;
+use gpui_component::zoom::px;
 
 use bruhs_models::today_copy;
 
@@ -849,7 +850,7 @@ impl Workspace {
             .cursor_pointer()
             .tab_index(0)
             .role(Role::Button)
-            .aria_label(format!("Open task {}", item.title))
+            .aria_label(bruhs_models::today_copy::task_row_label(&item.title))
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -891,10 +892,7 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let item_id = item.id.clone();
-        let estimate = item
-            .planning
-            .estimate_minutes
-            .map_or_else(|| "45m".to_string(), |minutes| format!("{minutes}m"));
+        let estimate = bruhs_models::today_copy::estimate(item.planning.estimate_minutes);
         let first = index == 0;
         let group = SharedString::from(format!("desktop-today-focus-row-{index}"));
         div()
@@ -912,10 +910,10 @@ impl Workspace {
             .cursor_pointer()
             .tab_index(0)
             .role(Role::Button)
-            .aria_label(format!(
-                "Open task {}, {} priority, {estimate}",
-                item.title,
-                item.priority.label()
+            .aria_label(bruhs_models::today_copy::focus_row_label(
+                &item.title,
+                item.priority.label(),
+                &estimate,
             ))
             .border_1()
             .border_color(gpui::transparent_black())
@@ -1077,7 +1075,7 @@ impl Workspace {
         let date = self.planning_now().format("%A, %B %-d").to_string();
         let unread_updates = self.reactive_automations.read(cx).unread_count();
         // Web's breakpoints read the window's width.
-        let width = f32::from(window.viewport_size().width);
+        let width = gpui_component::zoom::css_px(window.viewport_size().width);
         let two_columns = width >= TODAY_TWO_COLUMNS_PX;
         let status_columns = if width >= TODAY_STATUS_FOUR_COLUMNS_PX {
             4

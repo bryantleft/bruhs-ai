@@ -1,13 +1,15 @@
 //! Workflow review on Agent workflows: an MCP client's undo request, and
 //! every workflow still waiting in preview (an MCP proposal or one left from
 //! an earlier session), each with its full payload. Start, Decline, Keep
-//! changes and Undo are the user's; the client can only ask.
+//! changes and Undo are the user's; the client can only ask. A started
+//! workflow goes on show in the workflow history, which carries its controls.
 
+use bruhs_models::logic::workflow_history::UNDO;
 use bruhs_models::workspace_bridge::ROLLBACK_REVIEW_NOTE;
 use bruhs_models::{AgentAccess, AgentDomain, AutomationState, WorkflowStatus};
 use leptos::prelude::*;
 
-use crate::state::AutomationStateSignal;
+use crate::state::{AutomationStateSignal, ReviewedWorkflowSignal};
 use crate::ui::{Button, ButtonSize, ButtonVariant};
 use crate::workflow_executor::WorkflowExecutor;
 use crate::workspace_bridge::WorkspaceBridge;
@@ -94,7 +96,7 @@ fn UndoRequest(id: String, error: RwSignal<Option<String>>) -> impl IntoView {
                             error.set(Some(refusal.to_string()));
                         }
                     })>
-                        "Undo transaction"
+                        {UNDO}
                     </Button>
                 </div>
             </section>
@@ -106,6 +108,7 @@ fn UndoRequest(id: String, error: RwSignal<Option<String>>) -> impl IntoView {
 fn AwaitingReview(id: String) -> impl IntoView {
     let bridge = expect_context::<WorkspaceBridge>();
     let AutomationStateSignal(automation) = expect_context();
+    let ReviewedWorkflowSignal(reviewed) = expect_context();
     let id = StoredValue::new(id);
     let title = move || {
         automation.with(|state| {
@@ -168,9 +171,16 @@ fn AwaitingReview(id: String) -> impl IntoView {
                 })
             }}
             <div class="mt-3 flex flex-wrap gap-2">
-                <Button variant=ButtonVariant::Primary size=ButtonSize::Small disabled=Signal::derive(move || !blocked().is_empty()) on_click=Callback::new(move |_| automation.update(|state| {
-                    let _ = id.with_value(|id| state.start_job(id, now()));
-                }))>"Start transaction"</Button>
+                // Once started, it goes on show in the history, where its Run,
+                // Pause and Undo controls are (desktop starts the workflow on show).
+                <Button variant=ButtonVariant::Primary size=ButtonSize::Small disabled=Signal::derive(move || !blocked().is_empty()) on_click=Callback::new(move |_| {
+                    let started = automation
+                        .try_update(|state| id.with_value(|id| state.start_job(id, now())))
+                        .flatten();
+                    if started.is_some() {
+                        reviewed.set(Some(id.get_value()));
+                    }
+                })>"Start transaction"</Button>
                 <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| automation.update(|state| {
                     let _ = id.with_value(|id| state.decline_workflow(id, now()));
                 }))>"Decline proposal"</Button>

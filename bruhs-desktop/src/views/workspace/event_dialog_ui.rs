@@ -1,6 +1,7 @@
 //! The new / edit event dialog: its form state, color select, all-day toggle and save.
 
 use super::*;
+use gpui_component::zoom::px;
 pub(super) const EVENT_COLOR_OPTIONS: &[(&str, &str)] = &[
     ("persimmon", "Persimmon"),
     ("blueberry", "Blueberry"),

@@ -4,6 +4,7 @@
 use super::date_picker_ui::{parse_iso_datetime, DatePickerTarget};
 use super::*;
 use bruhs_models::logic::sidebar::{custom_snooze_until, SnoozeUnit, SNOOZE_CUSTOM_TITLE};
+use gpui_component::zoom::px;
 
 /// Debug selector prefix of the unit dropdown.
 pub(super) const SNOOZE_UNIT_DROPDOWN_ID: &str = "desktop-snooze-unit";

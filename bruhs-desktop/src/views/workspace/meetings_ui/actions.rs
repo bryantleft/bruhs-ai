@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::zoom::px;
 
 #[derive(Clone, Copy)]
 pub(super) enum MeetingButtonAction {

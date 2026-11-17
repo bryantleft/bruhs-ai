@@ -1,9 +1,10 @@
+use crate::zoom::px;
 use std::rc::Rc;
 
 use gpui::{
     App, ClickEvent, ElementId, Empty, Hsla, InteractiveElement, IntoElement, ParentElement as _,
     RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
-    div, prelude::FluentBuilder as _, px, rems, transparent_white,
+    div, prelude::FluentBuilder as _, rems, transparent_white,
 };
 
 use crate::{

@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::ops::Range;
 
 use crate::{ActiveTheme, AxisExt, ElementExt, StyledExt, h_flex};
@@ -6,7 +7,7 @@ use gpui::{
     DefiniteLength, DragMoveEvent, Empty, Entity, EntityId, EventEmitter, InteractiveElement,
     IntoElement, IsZero, MouseButton, MouseDownEvent, Orientation, ParentElement as _, Pixels,
     Point, Render, RenderOnce, Role, StatefulInteractiveElement as _, StyleRefinement, Styled,
-    Window, div, prelude::FluentBuilder as _, px, relative,
+    Window, div, prelude::FluentBuilder as _, relative,
 };
 
 #[derive(Clone)]

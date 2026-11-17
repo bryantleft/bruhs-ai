@@ -9,6 +9,7 @@ use crate::{
 };
 use bruhs_models::{api_client::*, num::ToFloatLossy};
 use gpui::{prelude::*, *};
+use gpui_component::zoom::px;
 use gpui_component::{
     input::{Input, InputState},
     scroll::ScrollableElement,

@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::{cell::Cell, ops::Deref, panic::Location, rc::Rc};
 
 use instant::{Duration, Instant};
@@ -8,22 +9,22 @@ use gpui::{
     ElementId, GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement,
     IsZero, LayoutId, ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent,
     PaintQuad, Pixels, Point, Position, ScrollHandle, ScrollWheelEvent, Size, Style,
-    UniformListScrollHandle, Window, fill, point, px, relative, size,
+    UniformListScrollHandle, Window, fill, point, relative, size,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 
 /// The width of the scrollbar (THUMB_ACTIVE_INSET * 2 + THUMB_ACTIVE_WIDTH)
-const WIDTH: Pixels = px(4. * 2. + 8.);
+const WIDTH: Pixels = gpui::px(4. * 2. + 8.);
 const MIN_THUMB_SIZE: f32 = 48.;
 
-const THUMB_WIDTH: Pixels = px(6.);
-const THUMB_RADIUS: Pixels = px(6. / 2.);
-const THUMB_INSET: Pixels = px(4.);
+const THUMB_WIDTH: Pixels = gpui::px(6.);
+const THUMB_RADIUS: Pixels = gpui::px(6. / 2.);
+const THUMB_INSET: Pixels = gpui::px(4.);
 
-const THUMB_ACTIVE_WIDTH: Pixels = px(8.);
-const THUMB_ACTIVE_RADIUS: Pixels = px(8. / 2.);
-const THUMB_ACTIVE_INSET: Pixels = px(4.);
+const THUMB_ACTIVE_WIDTH: Pixels = gpui::px(8.);
+const THUMB_ACTIVE_RADIUS: Pixels = gpui::px(8. / 2.);
+const THUMB_ACTIVE_INSET: Pixels = gpui::px(4.);
 
 const FADE_OUT_DURATION: f32 = 3.0;
 const FADE_OUT_DELAY: f32 = 2.0;

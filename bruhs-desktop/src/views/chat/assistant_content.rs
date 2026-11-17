@@ -2,6 +2,7 @@
 
 use super::*;
 use bruhs_models::logic::rich_response::{response_blocks, ResponseBlock};
+use gpui_component::zoom::px;
 pub(super) const CHAT_DIAGRAM_ERROR_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const CHAT_DIAGRAM_ERROR_TEXT_SIZE_PX: f32 = 10.5;
 pub(super) const CHAT_DIAGRAM_ERROR_RADIUS_PX: f32 = 8.0;

@@ -17,6 +17,8 @@ fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContex
         gpui_component::Root::new(workspace, window, cx)
     });
     let workspace = cell.borrow().clone().unwrap();
+    // Tall enough for the controls under the Local suggestions card.
+    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(2000.0)));
     workspace.update_in(cx, |w, _, cx| {
         w.automation_state = AutomationState::default();
         w.work_items.clear();

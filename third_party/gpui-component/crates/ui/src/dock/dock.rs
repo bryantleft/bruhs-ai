@@ -1,11 +1,12 @@
 //! Dock is a fixed container that places at left, bottom, right of the Windows.
 
+use crate::zoom::px;
 use std::{ops::Deref, sync::Arc};
 
 use gpui::{
     App, AppContext, Axis, Context, Element, Empty, Entity, IntoElement, MouseMoveEvent,
     MouseUpEvent, ParentElement as _, Pixels, Point, Render, Style, StyleRefinement, Styled as _,
-    WeakEntity, Window, div, prelude::FluentBuilder as _, px,
+    WeakEntity, Window, div, prelude::FluentBuilder as _,
 };
 use serde::{Deserialize, Serialize};
 

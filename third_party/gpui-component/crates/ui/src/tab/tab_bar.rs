@@ -1,10 +1,11 @@
+use crate::zoom::px;
 use std::{cell::RefCell, rc::Rc, time::Duration};
 
 use gpui::{
     Anchor, Animation, AnimationExt as _, AnyElement, App, Background, Bounds, Div, Edges,
     ElementId, InteractiveElement, IntoElement, ParentElement, Pixels, RenderOnce, Role,
     ScrollHandle, SharedString, Stateful, StatefulInteractiveElement as _, StyleRefinement, Styled,
-    Window, div, prelude::FluentBuilder as _, px,
+    Window, div, prelude::FluentBuilder as _,
 };
 use rust_i18n::t;
 use smallvec::SmallVec;

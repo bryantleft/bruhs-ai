@@ -1,6 +1,7 @@
 //! An agent's own memory and the follow-ups it scheduled, editable by the owner.
 use super::updates::{local_time, selectable_text};
 use super::*;
+use gpui_component::zoom::px;
 
 pub(super) struct MemoryEdit {
     pub(super) agent_id: String,

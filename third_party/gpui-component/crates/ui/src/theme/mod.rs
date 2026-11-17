@@ -1,8 +1,9 @@
+use crate::zoom::px;
 use crate::{
     highlighter::HighlightTheme, list::ListSettings, notification::NotificationSettings,
     scroll::ScrollbarShow, sheet::SheetSettings,
 };
-use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance, px};
+use gpui::{App, Global, Hsla, Pixels, SharedString, Window, WindowAppearance};
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};
 use std::{

@@ -3,6 +3,7 @@
 use super::*;
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::reactive::NOTIFICATIONS_NOTE;
+use gpui_component::zoom::px;
 
 pub(super) struct NotificationForm {
     /// The settings this form was opened from.

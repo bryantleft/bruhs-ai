@@ -3,6 +3,7 @@ use super::*;
 use bruhs_models::crew::{
     access_summary, BruhLook, BruhStatus, COMMAND_SOURCE_ACCESS, RAIL_FACE_PX,
 };
+use gpui_component::zoom::px;
 
 pub(super) struct AutomationEditor {
     agent: AgentEditor,

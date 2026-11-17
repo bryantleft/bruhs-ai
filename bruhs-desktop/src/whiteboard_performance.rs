@@ -2,6 +2,7 @@
 use crate::{assets, views::whiteboard::WhiteboardView};
 use bruhs_models::{num::ToFloatLossy as _, whiteboard::*};
 use gpui::*;
+use gpui_component::zoom::px;
 use gpui_component::Root;
 use serde_json::json;
 use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Instant};

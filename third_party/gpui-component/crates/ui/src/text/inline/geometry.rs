@@ -1,5 +1,6 @@
 //! Visit visible characters without searching every preceding line per caret.
-use gpui::{Bounds, Half as _, Pixels, Point, TextLayout, WrappedLineLayout, point, px};
+use crate::zoom::px;
+use gpui::{Bounds, Half as _, Pixels, Point, TextLayout, WrappedLineLayout, point};
 use std::sync::Arc;
 
 type CharacterVisitor<'a> = dyn FnMut(usize, usize, Point<Pixels>, Pixels) + 'a;

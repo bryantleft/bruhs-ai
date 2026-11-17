@@ -1,6 +1,7 @@
 //! Smart scheduling side panel on the calendar: availability, scheduling links, conflicts and placing a task.
 
 use super::*;
+use gpui_component::zoom::px;
 
 impl Workspace {
     pub(super) fn toggle_scheduling_panel(

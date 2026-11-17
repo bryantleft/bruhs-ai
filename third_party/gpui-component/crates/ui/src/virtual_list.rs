@@ -10,6 +10,7 @@
 //! Unlike the `uniform_list`, the each item can have different size.
 //!
 //! This is useful for more complex layout, for example, a table with different row height.
+use crate::zoom::px;
 use std::{
     cell::RefCell,
     cmp,
@@ -22,7 +23,7 @@ use gpui::{
     DeferredScrollToItem, Div, Element, ElementId, Entity, GlobalElementId, Half, Hitbox,
     InteractiveElement, IntoElement, IsZero as _, ListSizingBehavior, Pixels, Point, Render,
     ScrollHandle, ScrollStrategy, Size, Stateful, StatefulInteractiveElement, StyleRefinement,
-    Styled, Window, div, point, px, size,
+    Styled, Window, div, point, size,
 };
 use smallvec::SmallVec;
 
@@ -418,21 +419,17 @@ impl Element for VirtualList {
 
                             state.content_size = if self.axis.is_horizontal() {
                                 Size {
-                                    width: px(state
-                                        .sizes
-                                        .iter()
-                                        .map(|size| size.as_f32())
-                                        .sum::<f32>()),
+                                    width: crate::zoom::window_px(
+                                        state.sizes.iter().map(|size| size.as_f32()).sum::<f32>(),
+                                    ),
                                     height: longest_item_size.height,
                                 }
                             } else {
                                 Size {
                                     width: longest_item_size.width,
-                                    height: px(state
-                                        .sizes
-                                        .iter()
-                                        .map(|size| size.as_f32())
-                                        .sum::<f32>()),
+                                    height: crate::zoom::window_px(
+                                        state.sizes.iter().map(|size| size.as_f32()).sum::<f32>(),
+                                    ),
                                 }
                             };
                         }

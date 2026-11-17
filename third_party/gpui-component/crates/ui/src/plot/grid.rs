@@ -1,4 +1,6 @@
-use gpui::{Bounds, Hsla, PathBuilder, Pixels, Point, Window, px};
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
+use gpui::{Bounds, Hsla, PathBuilder, Pixels, Point, Window};
 
 use super::origin_point;
 

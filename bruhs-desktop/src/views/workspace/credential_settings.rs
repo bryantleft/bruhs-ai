@@ -3,6 +3,7 @@ use super::*;
 use crate::app_state::spawn_tokio;
 use bruhs_models::secrets::{review_text, SavedCredential, SavedCredentialState};
 use gpui_component::input::{Input, InputContentType};
+use gpui_component::zoom::px;
 
 enum Load {
     Idle,

@@ -45,3 +45,4 @@ pub mod updates;
 pub mod uploads;
 pub mod validate_path;
 pub mod whiteboard;
+pub mod worktrees;

@@ -1,21 +1,22 @@
 // From:
 // https://github.com/zed-industries/zed/blob/56daba28d40301ee4c05546fadb691d070b7b2b6/crates/gpui/examples/window_shadow.rs
+use crate::zoom::px;
 use gpui::{
     AnyElement, App, CursorStyle, Decorations, Edges, Hsla, InteractiveElement as _, IntoElement,
     MouseButton, ParentElement, Pixels, Point, RenderOnce, ResizeEdge, Size, Styled as _, Tiling,
-    Window, div, point, prelude::FluentBuilder as _, px,
+    Window, div, point, prelude::FluentBuilder as _,
 };
 
 use crate::ActiveTheme;
 
 #[cfg(not(target_os = "linux"))]
-pub(crate) const SHADOW_SIZE: Pixels = px(0.0);
+pub(crate) const SHADOW_SIZE: Pixels = gpui::px(0.0);
 #[cfg(target_os = "linux")]
-pub(crate) const SHADOW_SIZE: Pixels = px(12.0);
-const BORDER_SIZE: Pixels = px(1.0);
+pub(crate) const SHADOW_SIZE: Pixels = gpui::px(12.0);
+const BORDER_SIZE: Pixels = gpui::px(1.0);
 /// Half-width of the resize hit band on each side of the visible frame (inner border).
-const RESIZE_HIT_SIZE: Pixels = px(4.0);
-pub(crate) const BORDER_RADIUS: Pixels = px(0.0);
+const RESIZE_HIT_SIZE: Pixels = gpui::px(4.0);
+pub(crate) const BORDER_RADIUS: Pixels = gpui::px(0.0);
 
 /// Create a new window border.
 pub fn window_border() -> WindowBorder {

@@ -6,6 +6,7 @@ use bruhs_models::logic::rich_response::{
     ResponseBlock, WidgetAction, WidgetEvent, WidgetMessage, WidgetState, MAX_WIDGET_HEIGHT,
     MAX_WIDGET_STATE_BYTES, MIN_WIDGET_HEIGHT, WIDGET_PROTOCOL,
 };
+use gpui_component::zoom::px;
 use std::cell::RefCell;
 use std::rc::Rc;
 

@@ -4,6 +4,7 @@ use super::*;
 use bruhs_models::logic::task_detail::{
     dependency_candidates, dependency_title, ADD_DEPENDENCY_LABEL, REMOVE_DEPENDENCY_LABEL,
 };
+use gpui_component::zoom::px;
 pub(super) const TASK_DIALOG_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const TASK_DIALOG_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const TASK_DIALOG_TITLE_TEXT_SIZE_PX: f32 = 13.0;

@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::rc::Rc;
 
 use crate::{
@@ -7,15 +8,15 @@ use gpui::{
     AnyElement, App, ClickEvent, Context, Decorations, Hsla, InteractiveElement, IntoElement,
     MouseButton, ParentElement, Pixels, Render, RenderOnce, StatefulInteractiveElement as _,
     StyleRefinement, Styled, TitlebarOptions, Window, WindowControlArea, div,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _,
 };
 use smallvec::SmallVec;
 
-pub const TITLE_BAR_HEIGHT: Pixels = px(44.);
+pub const TITLE_BAR_HEIGHT: Pixels = gpui::px(44.);
 #[cfg(target_os = "macos")]
-const TITLE_BAR_LEFT_PADDING: Pixels = px(88.);
+const TITLE_BAR_LEFT_PADDING: Pixels = gpui::px(88.);
 #[cfg(not(target_os = "macos"))]
-const TITLE_BAR_LEFT_PADDING: Pixels = px(12.);
+const TITLE_BAR_LEFT_PADDING: Pixels = gpui::px(12.);
 
 /// TitleBar used to customize the appearance of the title bar.
 ///

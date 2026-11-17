@@ -1,7 +1,8 @@
+use crate::zoom::px;
 use gpui::{
     App, Entity, InteractiveElement as _, IntoElement, ListAlignment, ListState,
     ParentElement as _, SharedString, StyleRefinement, Styled, Window, div, list,
-    prelude::FluentBuilder as _, px,
+    prelude::FluentBuilder as _,
 };
 use rust_i18n::t;
 

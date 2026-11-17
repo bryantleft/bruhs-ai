@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::rc::Rc;
 
 use chrono::NaiveDate;
@@ -5,7 +6,7 @@ use gpui::{
     App, AppContext, ClickEvent, Context, ElementId, Empty, Entity, EventEmitter, FocusHandle,
     Focusable, InteractiveElement as _, IntoElement, KeyBinding, MouseButton, ParentElement as _,
     Render, RenderOnce, SharedString, StatefulInteractiveElement as _, StyleRefinement, Styled,
-    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder as _, px,
+    Subscription, Window, anchored, deferred, div, prelude::FluentBuilder as _,
 };
 use rust_i18n::t;
 

@@ -1,12 +1,12 @@
 //! Native Life context surface: manual finance, health, privacy, and evidence.
 
 use super::*;
-use bruhs_models::num::ToIntSaturating;
 use bruhs_models::{
-    finance_copy, finance_entry, finance_provider_adapters, health_provider_adapters,
-    life_agent_prompt, FinanceField, Habit, LifeInsightDomain, ProviderStatus, RecoveryLog,
-    SleepLog, WorkoutLog,
+    finance_copy, finance_entry, finance_provider_adapters, health_copy, health_entry,
+    health_provider_adapters, life_agent_prompt, FinanceField, HealthField, LifeInsightDomain,
+    ProviderStatus,
 };
+use gpui_component::zoom::px;
 
 /// Which finance card's Add was pressed.
 #[derive(Clone, Copy)]
@@ -59,12 +59,39 @@ impl FinanceForms {
     }
 }
 
+/// Which health form's Log or Add was pressed.
 #[derive(Clone, Copy)]
 enum HealthEntryKind {
     Workout,
     Sleep,
     Recovery,
     Habit,
+}
+
+/// Web `health_tab`'s card forms: Workout, the Sleep and Recovery rows of
+/// Sleep & recovery, and Habits, kept with the workspace so a half-typed
+/// entry survives switching to Finance and back.
+pub(super) struct HealthForms {
+    pub(super) workout_activity: Entity<InputState>,
+    pub(super) workout_minutes: Entity<InputState>,
+    pub(super) sleep_hours: Entity<InputState>,
+    pub(super) sleep_quality: Entity<InputState>,
+    pub(super) recovery_score: Entity<InputState>,
+    pub(super) habit_title: Entity<InputState>,
+}
+
+impl HealthForms {
+    /// The fields one form's button reads, in the order its rule takes them.
+    fn fields(&self, kind: HealthEntryKind) -> Vec<Entity<InputState>> {
+        match kind {
+            HealthEntryKind::Workout => {
+                vec![self.workout_activity.clone(), self.workout_minutes.clone()]
+            }
+            HealthEntryKind::Sleep => vec![self.sleep_hours.clone(), self.sleep_quality.clone()],
+            HealthEntryKind::Recovery => vec![self.recovery_score.clone()],
+            HealthEntryKind::Habit => vec![self.habit_title.clone()],
+        }
+    }
 }
 
 fn money(minor: i64, currency: &str) -> String {
@@ -110,6 +137,8 @@ const FINANCE_FIELD_PX: f32 = 36.0;
 const FINANCE_AMOUNT_FIELD_PX: f32 = 128.0;
 /// Workouts a card lists, newest first (web `take(6)`).
 const WORKOUT_ROWS: usize = 6;
+/// Web `7rem`: Workout's minutes field beside its activity.
+const WORKOUT_MINUTES_FIELD_PX: f32 = 112.0;
 
 /// Web `CARD_CLASS` with its `h2` title.
 fn life_card(id: &'static str, title: &'static str) -> Stateful<Div> {
@@ -258,13 +287,78 @@ fn finance_row(name: Div, amount: Div, button: Stateful<Div>) -> Div {
         .child(button)
 }
 
-impl Workspace {
-    fn clear_life_inputs(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        for input in [&self.life_name_input, &self.life_value_input] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
-        }
-    }
+/// Web `INPUT_CLASS` in a health form: the 36px Life field, without a
+/// caption, with the words both apps share.
+fn health_field(input: &Entity<InputState>, words: HealthField) -> Div {
+    finance_field(
+        input,
+        FinanceField {
+            caption: None,
+            label: words.label,
+            placeholder: words.placeholder,
+        },
+    )
+}
 
+/// Web Workout's Log: a pandan-tinted button as tall as the fields
+/// (`rounded-seed bg-pandan-500/10 px-2 text-label-sm text-pandan-300`).
+fn workout_log_button(id: &'static str, label: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .debug_selector(move || format!("desktop-{id}"))
+        .role(Role::Button)
+        .tab_index(0)
+        .aria_label(label)
+        .flex_shrink_0()
+        .h(px(FINANCE_FIELD_PX))
+        .min_w(px(theme::CONTROL_XS_PX))
+        .px_2()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        .bg(theme::pandan_500().opacity(0.1))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
+        .text_size(px(LABEL_SM_PX))
+        .text_color(theme::pandan_300())
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .child(label)
+}
+
+/// A cell of a grid's `auto` column holding `button`: as wide as the
+/// longest of the column's `labels`, the button stretched to it, as the web
+/// sizes Sleep & recovery's buttons. gpui grids have only equal columns, so
+/// each label is laid out invisibly here, with no height and padded like
+/// the button, to set the width in every row.
+fn auto_column(button: Stateful<Div>, labels: [&'static str; 2]) -> Div {
+    div()
+        .flex_shrink_0()
+        .flex()
+        .flex_col()
+        .child(button)
+        .children(labels.map(|label| {
+            // Only the side borders: a top or bottom one would give this
+            // zero-height copy a height and make the row taller.
+            div()
+                .h_0()
+                .invisible()
+                .px_3()
+                .border_l_1()
+                .border_r_1()
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_size(px(LABEL_SM_PX))
+                .whitespace_nowrap()
+                .child(label)
+        }))
+}
+
+impl Workspace {
     /// Web `import_csv`: pasted rows become transactions, newest first, and
     /// the notice says how many; nothing is uploaded. Without a valid row the
     /// paste stays for correction.
@@ -340,96 +434,44 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
+    /// Web's health card Log or Add: the form's fields become a record,
+    /// newest first, and clear; otherwise the notice says what is wrong and
+    /// the fields keep what was typed. The rules are shared with the web.
     fn add_health_entry(
         &mut self,
         kind: HealthEntryKind,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let name = self.life_name_input.read(cx).value().trim().to_string();
-        let value = self.life_value_input.read(cx).value().trim().to_string();
+        let fields = self.life_health.fields(kind);
+        let values = fields
+            .iter()
+            .map(|input| input.read(cx).value().to_string())
+            .collect::<Vec<_>>();
+        let value = |index: usize| values.get(index).map_or("", String::as_str);
         let now = EpochMs::now().as_millis();
-        match kind {
-            HealthEntryKind::Workout => {
-                let Ok(minutes) = value.parse::<u16>() else {
-                    self.life_error = Some("Enter workout minutes from 1 to 1440.".into());
-                    cx.notify();
-                    return;
-                };
-                if !(1..=1440).contains(&minutes) {
-                    self.life_error = Some("Enter workout minutes from 1 to 1440.".into());
-                    cx.notify();
-                    return;
-                }
-                if name.is_empty() {
-                    self.life_error = Some("Name the workout first.".to_string());
-                    cx.notify();
-                    return;
-                }
-                self.life_context
-                    .health
-                    .workouts
-                    .insert(0, WorkoutLog::manual(name, minutes, now));
-            }
-            HealthEntryKind::Sleep => {
-                let Ok(hours) = value.parse::<f64>() else {
-                    self.life_error = Some("Enter sleep hours.".to_string());
-                    cx.notify();
-                    return;
-                };
-                if !hours.is_finite() || !(1.0 / 60.0..=24.0).contains(&hours) {
-                    self.life_error = Some("Enter sleep hours from one minute to 24 hours.".into());
-                    cx.notify();
-                    return;
-                }
-                let Ok(quality) = name.parse::<u8>() else {
-                    self.life_error =
-                        Some("Enter sleep quality from 0 to 100 in the name field.".into());
-                    cx.notify();
-                    return;
-                };
-                if quality > 100 {
-                    self.life_error =
-                        Some("Enter sleep quality from 0 to 100 in the name field.".into());
-                    cx.notify();
-                    return;
-                }
-                self.life_context.health.sleep.insert(
-                    0,
-                    SleepLog::manual((hours * 60.0).round().to_u16_saturating(), quality, now),
-                );
-            }
-            HealthEntryKind::Recovery => {
-                let Ok(score) = value.parse::<u8>() else {
-                    self.life_error = Some("Enter a recovery score from 0 to 100.".into());
-                    cx.notify();
-                    return;
-                };
-                if score > 100 {
-                    self.life_error = Some("Enter a recovery score from 0 to 100.".into());
-                    cx.notify();
-                    return;
-                }
-                self.life_context
-                    .health
-                    .recovery
-                    .insert(0, RecoveryLog::manual(score, now));
-            }
+        let health = &mut self.life_context.health;
+        let added = match kind {
+            HealthEntryKind::Workout => health_entry::workout(value(0), value(1), now)
+                .map(|workout| health.workouts.insert(0, workout)),
+            HealthEntryKind::Sleep => health_entry::sleep(value(0), value(1), now)
+                .map(|night| health.sleep.insert(0, night)),
+            HealthEntryKind::Recovery => health_entry::recovery(value(0), now)
+                .map(|recovery| health.recovery.insert(0, recovery)),
             HealthEntryKind::Habit => {
-                if name.is_empty() {
-                    self.life_error = Some("Name the habit first.".to_string());
-                    cx.notify();
-                    return;
-                }
-                self.life_context
-                    .health
-                    .habits
-                    .insert(0, Habit::weekly(name, 5));
+                health_entry::habit(value(0)).map(|habit| health.habits.insert(0, habit))
             }
+        };
+        if let Err(error) = added {
+            self.life_notice = Some(error.to_string());
+            cx.notify();
+            return;
         }
         self.life_context.health.updated_at_ms = now;
-        self.life_error = None;
-        self.clear_life_inputs(window, cx);
+        self.life_notice = None;
+        for input in fields {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
         self.persist_and_notify(cx);
     }
 
@@ -560,7 +602,7 @@ impl Workspace {
                             .child(if finance {
                                 finance_copy::PRIVACY_NOTE
                             } else {
-                                "Local logs stay out of agent context; bruhs never diagnoses."
+                                health_copy::PRIVACY_NOTE
                             }),
                     ),
             )
@@ -651,71 +693,6 @@ impl Workspace {
                         )
                     }),
             )
-            .into_any_element()
-    }
-
-    /// The Health tab's entry form: one name and value pair for a workout,
-    /// sleep, recovery or habit. The Finance tab has a form in each card.
-    fn render_health_quick_add(&self, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
-        let health_buttons =
-            [
-                ("Workout", HealthEntryKind::Workout),
-                ("Sleep", HealthEntryKind::Sleep),
-                ("Recovery", HealthEntryKind::Recovery),
-                ("Habit", HealthEntryKind::Habit),
-            ]
-            .into_iter()
-            .enumerate()
-            .map(|(index, (label, kind))| {
-                web_button(
-                    ("health-quick-add", index),
-                    WebButtonVariant::Outline,
-                    WebButtonSize::Small,
-                    ButtonState::Enabled,
-                )
-                .aria_label(label)
-                .child(label)
-                .on_click(cx.listener(move |this, _event, window, cx| {
-                    this.add_health_entry(kind, window, cx)
-                }))
-                .into_any_element()
-            })
-            .collect::<Vec<_>>();
-        div()
-            .debug_selector(|| "desktop-life-quick-add".into())
-            .rounded(px(6.0))
-            .bg(theme::longan_900().opacity(0.65))
-            .border_1()
-            .border_color(theme::longan_800())
-            .p_3()
-            .child(card_title("Quick add health"))
-            .child(
-                div()
-                    .mt_2()
-                    .grid()
-                    .grid_cols(if narrow { 1 } else { 2 })
-                    .gap_2()
-                    .child(Input::new(&self.life_name_input).aria_label("Workout or habit name, or sleep quality percent"))
-                    .child(Input::new(&self.life_value_input).aria_label("Workout minutes, sleep hours, or recovery percent")),
-            )
-            .child(
-                div()
-                    .mt_2()
-                    .flex()
-                    .flex_wrap()
-                    .gap_1()
-                    .children(health_buttons),
-            )
-            .child(
-                div()
-                    .mt_2()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_400())
-                    .child("Workout: name + minutes. Sleep: quality % + hours. Recovery: score. Habit: name."),
-            )
-            .when_some(self.life_error.clone(), |panel, error| panel.child(
-                div().id("life-entry-error").role(Role::Alert).text_size(px(11.0)).text_color(theme::lychee_300()).child(error)
-            ))
             .into_any_element()
     }
 
@@ -1042,8 +1019,14 @@ impl Workspace {
     }
 
     /// Web `health_tab`'s grid: Workout, Sleep & recovery, Habits and the
-    /// health sources.
-    fn render_health_cards(&self, two_columns: bool, cx: &Context<'_, Self>) -> AnyElement {
+    /// health sources, each form in its card. `narrow`: below the web's
+    /// `sm`, where Sleep & recovery's form is one column.
+    fn render_health_cards(
+        &self,
+        two_columns: bool,
+        narrow: bool,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let health = &self.life_context.health;
         let today = EpochMs::now().as_millis().div_euclid(86_400_000);
         let workouts = health
@@ -1054,6 +1037,7 @@ impl Workspace {
             .map(|(index, workout)| {
                 div()
                     .id(("life-workout", index))
+                    .debug_selector(move || format!("desktop-life-workout-{index}"))
                     .rounded(px(4.0))
                     .bg(theme::longan_950().opacity(0.45))
                     .px(px(10.0))
@@ -1081,6 +1065,7 @@ impl Workspace {
                     WebButtonSize::Small,
                     ButtonState::Enabled,
                 )
+                .debug_selector(move || format!("desktop-life-habit-{index}"))
                 .w_full()
                 .justify_between()
                 .px(px(10.0))
@@ -1120,24 +1105,122 @@ impl Workspace {
                 .into_any_element()
             })
             .collect::<Vec<_>>();
+        let forms = &self.life_health;
+        let log = |button: Stateful<Div>, kind: HealthEntryKind| {
+            button.on_click(cx.listener(move |this, _event, window, cx| {
+                this.add_health_entry(kind, window, cx);
+            }))
+        };
+        let sleep = log(
+            finance_add_button("life-log-sleep", health_copy::LOG_SLEEP),
+            HealthEntryKind::Sleep,
+        );
+        let recovery = log(
+            finance_add_button("life-log-recovery", health_copy::LOG_RECOVERY),
+            HealthEntryKind::Recovery,
+        );
+        let hours = health_field(&forms.sleep_hours, health_copy::SLEEP_HOURS);
+        let quality = health_field(&forms.sleep_quality, health_copy::SLEEP_QUALITY);
+        let score = health_field(&forms.recovery_score, health_copy::RECOVERY_SCORE);
+        // Web `grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]
+        // gap-2`, whose fields and buttons sit 4px down (`mt-1`): 12px
+        // between rows here, as there.
+        let sleep_form = if narrow {
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(hours)
+                .child(quality)
+                .child(sleep)
+                .child(score)
+                .child(recovery)
+        } else {
+            let buttons = [health_copy::LOG_SLEEP, health_copy::LOG_RECOVERY];
+            div()
+                .flex()
+                .flex_col()
+                .gap_3()
+                .child(
+                    div()
+                        .debug_selector(|| "desktop-life-sleep-row".into())
+                        .flex()
+                        .gap_2()
+                        .child(hours.flex_1())
+                        .child(quality.flex_1())
+                        .child(auto_column(sleep, buttons)),
+                )
+                .child(
+                    div()
+                        .debug_selector(|| "desktop-life-recovery-row".into())
+                        .flex()
+                        .gap_2()
+                        .child(score.flex_1())
+                        .child(div().flex_1())
+                        .child(auto_column(recovery, buttons)),
+                )
+        };
         record_grid(
             two_columns,
             vec![
+                // Web `workouts`: Activity, Minutes and Log over the newest
+                // six (`grid-cols-[1fr_7rem_auto]`, at every width).
                 life_card("life-workouts", "Workout")
-                    .child(div().mt_2().flex().flex_col().gap_1().children(workouts))
+                    .child(
+                        div()
+                            .debug_selector(|| "desktop-life-workout-form".into())
+                            .mt_3()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                health_field(
+                                    &forms.workout_activity,
+                                    health_copy::WORKOUT_ACTIVITY,
+                                )
+                                .flex_1(),
+                            )
+                            .child(
+                                health_field(&forms.workout_minutes, health_copy::WORKOUT_MINUTES)
+                                    .w(px(WORKOUT_MINUTES_FIELD_PX))
+                                    .flex_shrink_0(),
+                            )
+                            .child(log(
+                                workout_log_button("life-log-workout", health_copy::LOG_WORKOUT),
+                                HealthEntryKind::Workout,
+                            )),
+                    )
+                    .child(div().mt_3().flex().flex_col().gap_1().children(workouts))
                     .into_any_element(),
+                // Web `sleep_and_recovery`: a Sleep row and a Recovery row
+                // over the log counts.
                 life_card("life-sleep", "Sleep & recovery")
+                    .child(sleep_form.mt_3())
                     .child(
                         div()
                             .debug_selector(|| "desktop-life-sleep-summary".into())
-                            .mt_2()
+                            .mt_3()
                             .text_size(px(BODY_SM_PX))
                             .text_color(theme::rambutan_500())
                             .child(health.sleep_and_recovery_summary()),
                     )
                     .into_any_element(),
+                // Web `habits`: a title and Add over today's checklist.
                 life_card("life-habits", "Habits")
-                    .child(div().mt_2().flex().flex_col().gap_1().children(habits))
+                    .child(
+                        div()
+                            .debug_selector(|| "desktop-life-habit-form".into())
+                            .mt_3()
+                            .flex()
+                            .gap_2()
+                            .child(
+                                health_field(&forms.habit_title, health_copy::HABIT_TITLE).flex_1(),
+                            )
+                            .child(log(
+                                finance_add_button("life-add-habit", health_copy::ADD_HABIT),
+                                HealthEntryKind::Habit,
+                            )),
+                    )
+                    .child(div().mt_3().flex().flex_col().gap_1().children(habits))
                     .into_any_element(),
                 self.render_life_providers(false),
             ],
@@ -1313,7 +1396,7 @@ impl Workspace {
     pub(super) fn render_life_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
         // Web's forms take their columns from `sm`.
         let narrow = Self::narrower_than(window, SM_BREAKPOINT_PX);
-        let width = f32::from(window.viewport_size().width);
+        let width = gpui_component::zoom::css_px(window.viewport_size().width);
         let two_columns = width >= RECORD_GRID_TWO_COLUMNS_PX;
         let finance = self.life_tab == DesktopLifeTab::Finance;
         let summary = if finance {
@@ -1489,17 +1572,13 @@ impl Workspace {
                             .children(summary),
                     )
                     .child(self.render_life_privacy(cx))
-                    // Web: finance entry sits in each card; Health keeps
-                    // its one form.
-                    .when(!finance, |page| {
-                        page.child(self.render_health_quick_add(narrow, cx))
-                    })
-                    // Web order: the record cards, then CSV import and the
-                    // finance sources; the health sources share its grid.
+                    // Web order: the record cards, each with its form, then
+                    // CSV import and the finance sources; the health sources
+                    // share the health grid.
                     .child(if finance {
                         self.render_finance_cards(two_columns, cx)
                     } else {
-                        self.render_health_cards(two_columns, cx)
+                        self.render_health_cards(two_columns, narrow, cx)
                     })
                     .when(finance, |page| {
                         page.child(self.render_life_csv_import(cx))
@@ -1510,27 +1589,20 @@ impl Workspace {
     }
 }
 
-/// The Health entry fields, each finance card's form and the CSV paste.
+/// Each health and finance card's form and the CSV paste.
 pub(super) struct LifeInputs {
-    pub(super) life_name_input: Entity<InputState>,
-    pub(super) life_value_input: Entity<InputState>,
+    pub(super) life_health: HealthForms,
     pub(super) life_finance: FinanceForms,
     pub(super) life_csv_input: Entity<InputState>,
 }
 
 impl Workspace {
-    /// The Health entry fields, the finance forms and the CSV paste; edits
-    /// redraw.
+    /// The health and finance forms and the CSV paste; edits redraw.
     pub(super) fn new_life_inputs(
         window: &mut Window,
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
     ) -> LifeInputs {
-        let life_name_input = cx.new(|cx| InputState::new(window, cx).placeholder("Name"));
-        subscriptions.push(redraw_on_edit(&life_name_input, window, cx));
-        let life_value_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Amount or score"));
-        subscriptions.push(redraw_on_edit(&life_value_input, window, cx));
         let mut field = |words: FinanceField| {
             let input = cx.new(|cx| InputState::new(window, cx).placeholder(words.placeholder));
             subscriptions.push(redraw_on_edit(&input, window, cx));
@@ -1549,6 +1621,19 @@ impl Workspace {
             holding_symbol: field(finance_copy::HOLDING_SYMBOL),
             holding_value: field(finance_copy::HOLDING_VALUE),
         };
+        let mut health_field = |words: HealthField| {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(words.placeholder));
+            subscriptions.push(redraw_on_edit(&input, window, cx));
+            input
+        };
+        let life_health = HealthForms {
+            workout_activity: health_field(health_copy::WORKOUT_ACTIVITY),
+            workout_minutes: health_field(health_copy::WORKOUT_MINUTES),
+            sleep_hours: health_field(health_copy::SLEEP_HOURS),
+            sleep_quality: health_field(health_copy::SLEEP_QUALITY),
+            recovery_score: health_field(health_copy::RECOVERY_SCORE),
+            habit_title: health_field(health_copy::HABIT_TITLE),
+        };
         let life_csv_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Coffee, Food, -5.25, client meeting")
@@ -1557,8 +1642,7 @@ impl Workspace {
         });
         subscriptions.push(redraw_on_edit(&life_csv_input, window, cx));
         LifeInputs {
-            life_name_input,
-            life_value_input,
+            life_health,
             life_finance,
             life_csv_input,
         }
@@ -1678,8 +1762,12 @@ mod money_tests {
 #[cfg(test)]
 mod health_audit_tests {
     use super::{theme, DesktopState, HealthEntryKind, Workspace};
+    use bruhs_models::HealthEntryError;
     use gpui::TestAppContext;
 
+    /// Each health form refuses a value its record would quietly change (or
+    /// a blank name), says why in the page notice, keeps what was typed and
+    /// saves nothing; in range, the same forms save and clear.
     #[gpui::test]
     fn health_forms_reject_normalized_values_and_preserve_invalid_drafts(cx: &mut TestAppContext) {
         cx.update(|cx| {
@@ -1692,78 +1780,139 @@ mod health_audit_tests {
             workspace.life_context = bruhs_models::LifeContext::default();
             workspace.persistence_error = Some("Existing disk failure".into());
             let before_saves = workspace.persist_requests;
-            for (kind, name, value) in [
-                (HealthEntryKind::Workout, "Walk", "0"),
-                (HealthEntryKind::Workout, "Walk", "1441"),
-                (HealthEntryKind::Workout, "Walk", "abc"),
-                (HealthEntryKind::Sleep, "Quality", "8"),
-                (HealthEntryKind::Sleep, "101", "8"),
-                (HealthEntryKind::Sleep, "75", "0"),
-                (HealthEntryKind::Sleep, "75", "0.001"),
-                (HealthEntryKind::Sleep, "75", "24.1"),
-                (HealthEntryKind::Sleep, "75", "NaN"),
-                (HealthEntryKind::Recovery, "", "101"),
-                (HealthEntryKind::Recovery, "", "abc"),
+            // Each form's fields in order: Workout activity and minutes,
+            // Sleep hours and quality, Recovery score, Habit title.
+            for (kind, typed, error) in [
+                (
+                    HealthEntryKind::Workout,
+                    &["Walk", "0"][..],
+                    HealthEntryError::WorkoutMinutes,
+                ),
+                (
+                    HealthEntryKind::Workout,
+                    &["Walk", "1441"][..],
+                    HealthEntryError::WorkoutMinutes,
+                ),
+                (
+                    HealthEntryKind::Workout,
+                    &["Walk", "abc"][..],
+                    HealthEntryError::WorkoutMinutes,
+                ),
+                (
+                    HealthEntryKind::Workout,
+                    &[" ", "30"][..],
+                    HealthEntryError::UnnamedWorkout,
+                ),
+                (
+                    HealthEntryKind::Sleep,
+                    &["8", "Quality"][..],
+                    HealthEntryError::SleepQuality,
+                ),
+                (
+                    HealthEntryKind::Sleep,
+                    &["8", "101"][..],
+                    HealthEntryError::SleepQuality,
+                ),
+                (
+                    HealthEntryKind::Sleep,
+                    &["0", "75"][..],
+                    HealthEntryError::SleepHours,
+                ),
+                (
+                    HealthEntryKind::Sleep,
+                    &["0.001", "75"][..],
+                    HealthEntryError::SleepHours,
+                ),
+                (
+                    HealthEntryKind::Sleep,
+                    &["24.1", "75"][..],
+                    HealthEntryError::SleepHours,
+                ),
+                (
+                    HealthEntryKind::Sleep,
+                    &["NaN", "75"][..],
+                    HealthEntryError::SleepHours,
+                ),
+                (
+                    HealthEntryKind::Recovery,
+                    &["101"][..],
+                    HealthEntryError::RecoveryScore,
+                ),
+                (
+                    HealthEntryKind::Recovery,
+                    &["abc"][..],
+                    HealthEntryError::RecoveryScore,
+                ),
+                (
+                    HealthEntryKind::Habit,
+                    &["  "][..],
+                    HealthEntryError::UnnamedHabit,
+                ),
             ] {
-                workspace
-                    .life_name_input
-                    .update(cx, |input, cx| input.set_value(name, window, cx));
-                workspace
-                    .life_value_input
-                    .update(cx, |input, cx| input.set_value(value, window, cx));
+                let fields = workspace.life_health.fields(kind);
+                for (input, value) in fields.iter().zip(typed) {
+                    input.update(cx, |input, cx| input.set_value(*value, window, cx));
+                }
                 workspace.add_health_entry(kind, window, cx);
-                assert!(workspace.life_error.is_some(), "{name} / {value}");
+                assert_eq!(
+                    workspace.life_notice.as_deref(),
+                    Some(error.to_string().as_str()),
+                    "{typed:?}"
+                );
                 assert_eq!(
                     workspace.persistence_error.as_deref(),
                     Some("Existing disk failure")
                 );
-                assert_eq!(workspace.life_name_input.read(cx).value().as_str(), name);
-                assert_eq!(workspace.life_value_input.read(cx).value().as_str(), value);
-                assert!(workspace.life_context.health.workouts.is_empty());
-                assert!(workspace.life_context.health.sleep.is_empty());
-                assert!(workspace.life_context.health.recovery.is_empty());
+                for (input, value) in fields.iter().zip(typed) {
+                    assert_eq!(input.read(cx).value().as_str(), *value, "the draft stays");
+                }
+                let health = &workspace.life_context.health;
+                assert!(health.workouts.is_empty() && health.sleep.is_empty());
+                assert!(health.recovery.is_empty() && health.habits.is_empty());
                 assert_eq!(workspace.persist_requests, before_saves);
             }
-            for (kind, name, value) in [
-                (HealthEntryKind::Workout, "Walk", "1"),
-                (HealthEntryKind::Workout, "Walk", "1440"),
-                (HealthEntryKind::Sleep, "75", "8.5"),
-                (HealthEntryKind::Sleep, "100", "24"),
-                (HealthEntryKind::Recovery, "", "0"),
-                (HealthEntryKind::Recovery, "", "100"),
+            for (kind, typed) in [
+                (HealthEntryKind::Workout, &["Walk", "1"][..]),
+                (HealthEntryKind::Workout, &["Walk", "1440"][..]),
+                (HealthEntryKind::Sleep, &["8.5", "75"][..]),
+                (HealthEntryKind::Sleep, &["24", "100"][..]),
+                (HealthEntryKind::Recovery, &["0"][..]),
+                (HealthEntryKind::Recovery, &["100"][..]),
+                (HealthEntryKind::Habit, &["Stretch"][..]),
             ] {
-                workspace
-                    .life_name_input
-                    .update(cx, |input, cx| input.set_value(name, window, cx));
-                workspace
-                    .life_value_input
-                    .update(cx, |input, cx| input.set_value(value, window, cx));
+                let fields = workspace.life_health.fields(kind);
+                for (input, value) in fields.iter().zip(typed) {
+                    input.update(cx, |input, cx| input.set_value(*value, window, cx));
+                }
                 workspace.add_health_entry(kind, window, cx);
-                assert!(workspace.life_error.is_none());
+                assert!(workspace.life_notice.is_none(), "{typed:?}");
                 assert_eq!(
                     workspace.persistence_error.as_deref(),
                     Some("Existing disk failure")
                 );
-                assert!(workspace.life_value_input.read(cx).value().is_empty());
+                for input in &fields {
+                    assert!(input.read(cx).value().is_empty(), "a saved entry clears");
+                }
             }
+            let health = &workspace.life_context.health;
             assert_eq!(
-                workspace
-                    .life_context
-                    .health
+                health
                     .workouts
                     .iter()
                     .map(|log| log.duration_minutes)
                     .collect::<Vec<_>>(),
                 [1440, 1]
             );
-            assert_eq!(
-                workspace.life_context.health.sleep[0].duration_minutes,
-                1440
+            assert_eq!(health.sleep[0].duration_minutes, 1440);
+            assert_eq!(health.sleep[1].duration_minutes, 510);
+            assert_eq!(health.sleep[1].quality_percent, 75);
+            assert_eq!(health.recovery[0].score_percent, 100);
+            assert_eq!(health.recovery[1].score_percent, 0);
+            assert_eq!(health.habits[0].title, "Stretch");
+            assert!(
+                workspace.persist_requests > before_saves,
+                "saved entries are saved"
             );
-            assert_eq!(workspace.life_context.health.sleep[1].duration_minutes, 510);
-            assert_eq!(workspace.life_context.health.sleep[1].quality_percent, 75);
-            assert_eq!(workspace.life_context.health.recovery[0].score_percent, 100);
-            assert_eq!(workspace.life_context.health.recovery[1].score_percent, 0);
         });
     }
 }

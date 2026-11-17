@@ -1,5 +1,6 @@
 use super::*;
 use bruhs_models::{life_record_detail, RecordDetail, SelectedLifeRecord};
+use gpui_component::zoom::px;
 
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(super) enum SelectedSearchRecord {

@@ -64,11 +64,29 @@ jobs:
           cargo doc -p bruhs-models -p bruhs-core -p bruhs-server -p bruhs-mcp
           -p claude-sdk-rs -p codex-sdk-rs --no-deps --locked
 
+      # Copy-on-write clones (FICLONE) need a reflink filesystem; the
+      # runner's ext4 cannot clone, so those tests skip there. Run them
+      # again on small Btrfs and XFS volumes, where skipping is a failure.
+      - name: Worktree clones on Btrfs and XFS
+        run: |
+          sudo apt-get install -y --no-install-recommends btrfs-progs xfsprogs
+          for fs in btrfs xfs; do
+            image="$RUNNER_TEMP/$fs.img"
+            mount="$RUNNER_TEMP/$fs"
+            truncate -s 2G "$image"
+            if [ "$fs" = btrfs ]; then mkfs.btrfs -q "$image"; else mkfs.xfs -q -m reflink=1 "$image"; fi
+            mkdir -p "$mount"
+            sudo mount -o loop "$image" "$mount"
+            sudo chown "$(id -u):$(id -g)" "$mount"
+            TMPDIR="$mount" BRUHS_REQUIRE_CLONES=1 cargo test -p bruhs-core --lib --locked -- \
+              git::clone_fs git::tests::add_worktree worktree_meter worktrees
+          done
+
   # Capture uses macOS frameworks (ScreenCaptureKit, Metal whisper, sherpa).
   # This also verifies the desktop's WKWebView path; native-platforms.yml
   # covers the Windows and Linux desktop builds. Capture docs stay here.
   macos:
-    runs-on: macos-14
+    runs-on: macos-15
     timeout-minutes: 60
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1

@@ -1,4 +1,5 @@
-use gpui::{App, AppContext, Axis, Bounds, Entity, Pixels, WeakEntity, Window, point, px, size};
+use crate::zoom::px;
+use gpui::{App, AppContext, Axis, Bounds, Entity, Pixels, WeakEntity, Window, point, size};
 use itertools::Itertools as _;
 use serde::{Deserialize, Serialize};
 
@@ -239,7 +240,6 @@ impl PanelState {
 
 #[cfg(test)]
 mod tests {
-    use gpui::px;
 
     use super::*;
     #[test]

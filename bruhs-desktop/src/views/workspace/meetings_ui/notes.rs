@@ -1,4 +1,5 @@
 use super::*;
+use gpui_component::zoom::px;
 
 const PAGE_SIZE: usize = 50;
 

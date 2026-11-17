@@ -1,8 +1,9 @@
+use crate::zoom::px;
 use std::{ops::Range, rc::Rc};
 
 use gpui::{
     App, ElementId, InteractiveElement, IntoElement, ParentElement, RenderOnce, SharedString,
-    StyleRefinement, Styled, Window, prelude::FluentBuilder, px,
+    StyleRefinement, Styled, Window, prelude::FluentBuilder,
 };
 use rust_i18n::t;
 

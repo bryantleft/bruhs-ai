@@ -68,3 +68,40 @@ impl TaskWorktree {
             && self.blocked.is_none()
     }
 }
+
+/// A worktree bruhs removed, kept so it can be checked out again: by the
+/// next turn in that folder, or explicitly from another base.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct RemovedRecord {
+    /// The main checkout the worktree belonged to.
+    pub project: String,
+    pub branch: String,
+    pub removed_at: EpochMs,
+}
+
+/// The Workbench task working in a worktree, if any.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct WorktreeTask {
+    pub id: crate::ids::ThreadId,
+    pub title: String,
+}
+
+/// One worktree in bruhs's worktrees folder: chat, task or issue work.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ManagedWorktree {
+    pub path: String,
+    /// The main checkout it belongs to, when Git can tell.
+    pub project: Option<String>,
+    pub state: WorktreeState,
+    pub branch: Option<String>,
+    pub changed_files: u32,
+    pub task: Option<WorktreeTask>,
+    /// When the folder last changed, or when it was removed.
+    pub updated_at: Option<EpochMs>,
+    /// Removed with a branch that no longer exists, so it cannot come back
+    /// on its own; it can start again from another base or be forgotten.
+    #[serde(default)]
+    pub branch_missing: bool,
+    /// Why Remove is refused right now.
+    pub blocked: Option<String>,
+}

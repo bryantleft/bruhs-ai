@@ -1,10 +1,11 @@
+use crate::zoom::px;
 use std::{rc::Rc, time::Duration};
 
 use gpui::{
     Animation, AnimationExt as _, AnyElement, App, ClickEvent, DefiniteLength, DismissEvent, Edges,
     EventEmitter, FocusHandle, InteractiveElement as _, IntoElement, KeyBinding, MouseButton,
     ParentElement, Pixels, RenderOnce, StyleRefinement, Styled, Window, WindowControlArea,
-    anchored, div, point, prelude::FluentBuilder as _, px,
+    anchored, div, point, prelude::FluentBuilder as _,
 };
 use schemars::JsonSchema;
 use serde::{Deserialize, Serialize};

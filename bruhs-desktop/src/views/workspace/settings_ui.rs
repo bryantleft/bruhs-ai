@@ -11,6 +11,7 @@ use gpui::prelude::*;
 use gpui::*;
 use gpui_component::checkbox::Checkbox;
 use gpui_component::input::Input;
+use gpui_component::zoom::px;
 
 use super::{is_web_button_activation_key, Workspace, SETTINGS_ROW_CONTROL_WIDTH_PX};
 use crate::views::dropdown::{dropdown, DropdownGroup, DropdownOption};

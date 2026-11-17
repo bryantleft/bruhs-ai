@@ -145,3 +145,142 @@ fn every_status_has_one_label() {
         ]
     );
 }
+
+/// The job of `workflow_id`, which `start_job` made.
+fn job_of<'a>(state: &'a AutomationState, workflow_id: &str) -> &'a crate::BackgroundJob {
+    state
+        .jobs
+        .iter()
+        .find(|job| job.workflow_id == workflow_id)
+        .unwrap()
+}
+
+#[test]
+fn each_workflow_in_the_history_carries_only_what_it_can_do() {
+    let (state, ids) = five();
+    let at = |index: usize| controls(&state, reviewed(&state, Some(&ids[index])).unwrap());
+    // Declined, rolled back and previewed: nothing to run or undo.
+    for index in [0, 2, 4] {
+        assert_eq!(at(index), Controls::default(), "workflow {}", index + 1);
+        assert!(!at(index).any());
+        assert_eq!(at(index).job_status(), None);
+    }
+    // Completed: Undo only, though it is not the newest.
+    let done = at(1);
+    assert!(done.undo && done.any());
+    assert_eq!((done.running, done.paused), (None, None));
+    // Running with no step done yet: its own job, nothing to undo.
+    let running = at(3);
+    assert_eq!(running.running, Some(job_of(&state, &ids[3])));
+    assert_eq!((running.paused, running.undo), (None, false));
+    assert_eq!(
+        running.job_status().as_deref(),
+        Some("Running, next checkpoint 1")
+    );
+}
+
+#[test]
+fn an_older_workflow_keeps_its_own_job_while_a_newer_one_runs() {
+    let mut state = AutomationState::default();
+    state
+        .permissions
+        .set(AgentDomain::Tasks, AgentAccess::Write, true);
+    let mut start = |title: &str, at: i64| {
+        let id = state.create_workflow(title, vec![task("a"), task("b")], at);
+        state.preview(&id, at).unwrap();
+        let job = state.start_job(&id, at).unwrap();
+        (id, job)
+    };
+    let (older, older_job) = start("Older plan", 1);
+    let (newer, newer_job) = start("Newer plan", 2);
+    let older_controls = |state: &AutomationState| {
+        let workflow = reviewed(state, Some(&older)).unwrap();
+        let shown = controls(state, workflow);
+        (
+            shown.running.map(|job| job.id.clone()),
+            shown.paused.map(|job| job.id.clone()),
+            shown.undo,
+            shown.job_status(),
+        )
+    };
+    assert_eq!(
+        older_controls(&state),
+        (
+            Some(older_job.clone()),
+            None,
+            false,
+            Some("Running, next checkpoint 1".into())
+        )
+    );
+
+    // One step done: the older workflow can now be undone as well.
+    assert!(state.complete_step(&older_job, "task-1", 3));
+    assert_eq!(
+        older_controls(&state),
+        (
+            Some(older_job.clone()),
+            None,
+            true,
+            Some("Running, next checkpoint 2".into())
+        )
+    );
+
+    // Pausing it leaves the newer job running and offers Resume.
+    assert!(state.pause_job(&older_job, 4));
+    assert_eq!(
+        older_controls(&state),
+        (
+            None,
+            Some(older_job.clone()),
+            true,
+            Some("Paused, resumes at checkpoint 2".into())
+        )
+    );
+    let newest = controls(&state, reviewed(&state, None).unwrap());
+    assert_eq!(
+        newest.running.map(|job| job.id.as_str()),
+        Some(newer_job.as_str())
+    );
+    assert_eq!(newest.paused, None);
+    assert_eq!(reviewed(&state, None).unwrap().id, newer);
+
+    // Resumed and finished, it keeps only Undo.
+    assert!(state.resume_job(&older_job, 5));
+    assert!(state.complete_step(&older_job, "task-2", 6));
+    assert_eq!(older_controls(&state), (None, None, true, None));
+}
+
+#[test]
+fn run_in_background_reads_as_on_once_enabled() {
+    let (mut state, ids) = five();
+    let job = job_of(&state, &ids[3]).id.clone();
+    let shown = |state: &AutomationState| {
+        controls(state, reviewed(state, Some(&ids[3])).unwrap()).in_background()
+    };
+    assert!(!shown(&state));
+    assert!(state.enable_background(&job));
+    assert!(shown(&state));
+}
+
+#[test]
+fn a_failed_workflow_with_a_completed_step_offers_undo() {
+    let mut state = AutomationState::default();
+    state
+        .permissions
+        .set(AgentDomain::Tasks, AgentAccess::Write, true);
+    let id = state.create_workflow("Failed plan", vec![task("a"), task("b")], 1);
+    state.preview(&id, 1).unwrap();
+    let job = state.start_job(&id, 1).unwrap();
+    assert!(state.complete_step(&job, "task-1", 2));
+    // As a failing executor leaves it: the second step failed, so did the job.
+    let workflow = state.workflows.iter_mut().find(|w| w.id == id).unwrap();
+    workflow.status = WorkflowStatus::Failed;
+    workflow.steps[1].status = crate::WorkflowStepStatus::Failed;
+    state.jobs[0].status = crate::BackgroundJobStatus::Failed;
+    let shown = controls(&state, reviewed(&state, Some(&id)).unwrap());
+    assert_eq!(
+        (shown.running, shown.paused, shown.undo),
+        (None, None, true)
+    );
+    assert_eq!(shown.job_status(), None);
+}

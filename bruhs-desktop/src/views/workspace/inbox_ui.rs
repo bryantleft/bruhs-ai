@@ -5,6 +5,7 @@ use bruhs_models::{InboxCard, InboxDirectory, InboxFilter, INBOX_PAGE_SIZE};
 use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent};
+use gpui_component::zoom::px;
 
 use super::*;
 

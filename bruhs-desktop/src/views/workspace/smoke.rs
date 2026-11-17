@@ -3,6 +3,7 @@
 //! way to auto-drive the window.
 
 use super::*;
+use gpui_component::zoom::px;
 
 impl Workspace {
     /// `BRUHS_DESKTOP_COMMANDS_SMOKE`: a fresh project-less chat, made
@@ -143,6 +144,13 @@ impl Workspace {
                 }
             }
             "people" => self.activate_sidebar_view(AppView::People, window, cx),
+            // Life opens on Finance; this is its Health tab, to compare with
+            // the web's.
+            "life-health" => {
+                self.activate_sidebar_view(AppView::Life, window, cx);
+                self.life_tab = DesktopLifeTab::Health;
+                cx.notify();
+            }
             "meeting-suggestions" => {
                 self.open_meetings_list(cx);
                 self.smoke_meeting_suggestions(cx);

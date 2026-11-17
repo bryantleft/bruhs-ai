@@ -1,7 +1,8 @@
 use super::{set, value, ApiAttachment, ApiClientPanel};
 use crate::{server_client::ServerClient, theme};
 use bruhs_models::api_client::*;
-use gpui::{point, px, size, AppContext, Modifiers, TestAppContext, VisualTestContext};
+use gpui::{point, size, AppContext, Modifiers, TestAppContext, VisualTestContext};
+use gpui_component::zoom::px;
 use std::{cell::RefCell, rc::Rc};
 use uuid::Uuid;
 

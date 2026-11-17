@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::rc::Rc;
 
 use crate::{
@@ -7,7 +8,7 @@ use crate::{
 use gpui::{
     AnyElement, App, Axis, Div, ElementId, InteractiveElement, IntoElement, ParentElement,
     RenderOnce, Role, SharedString, StatefulInteractiveElement, StyleRefinement, Styled, Window,
-    div, prelude::FluentBuilder, px, relative, rems,
+    div, prelude::FluentBuilder, relative, rems,
 };
 
 /// A Radio element.

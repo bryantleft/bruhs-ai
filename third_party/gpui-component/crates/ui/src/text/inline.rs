@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use gpui::Corners;
 use std::{
     ops::Range,
@@ -9,7 +10,7 @@ use gpui::{
     App, BorderStyle, Bounds, CursorStyle, Edges, Element, ElementId, GlobalElementId, Half,
     HighlightStyle, Hitbox, HitboxBehavior, InspectorElementId, IntoElement, LayoutId, MouseButton,
     MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, SharedString, StyledText,
-    TextLayout, Window, point, px, quad,
+    TextLayout, Window, point, quad,
 };
 
 use crate::{

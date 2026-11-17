@@ -1,7 +1,6 @@
+use crate::zoom::px;
 use anyhow::Result;
-use gpui::{
-    App, Context, HighlightStyle, Hitbox, MouseDownEvent, Task, UnderlineStyle, Window, px,
-};
+use gpui::{App, Context, HighlightStyle, Hitbox, MouseDownEvent, Task, UnderlineStyle, Window};
 use ropey::Rope;
 use std::{ops::Range, rc::Rc};
 

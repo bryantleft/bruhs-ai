@@ -3,6 +3,7 @@
 use super::*;
 use crate::server_client::ServerError;
 use bruhs_models::{connections::ServiceProvider, mail::*, InboxFilter};
+use gpui_component::zoom::px;
 use std::future::Future;
 use std::sync::atomic::AtomicBool;
 

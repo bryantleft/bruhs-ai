@@ -1,17 +1,12 @@
-//! A finished task's own worktree: what it costs, removing it to free disk,
-//! and checking its branch out again when the task next runs. Removing never
-//! loses committed work: the branch stays, and a worktree with uncommitted
-//! changes is refused. See `docs/worktree-disk.md`.
+//! A Workbench task's own worktree: what it costs, removing it to free disk,
+//! and checking its branch out again when the task next runs. The folder
+//! checks and the removal itself are shared with chat worktrees in
+//! [`crate::worktrees`]; this adds what only tasks have: running or queued
+//! work, pull-request wakes, and markers on every task sharing the folder.
 
 use super::*;
+use crate::worktrees as host;
 use bruhs_models::coordination::worktree::{RemovedWorktree, TaskWorktree, WorktreeState};
-
-/// Removal and restore never interleave: a run that starts while its
-/// worktree is being removed waits, then checks the branch out again.
-static WORKTREE_OPS: Mutex<()> = Mutex::const_new(());
-/// A removed folder is renamed to this prefix beside it, then deleted in the
-/// background, so a large build folder never holds up the request or Git.
-const STAGING_PREFIX: &str = ".bruhs-removing-";
 
 /// Tasks using the folder `path` (forks can share their parent's).
 fn sharing<'a>(data: &'a Data, path: &'a str) -> impl Iterator<Item = &'a CoordinatedTask> {
@@ -24,39 +19,6 @@ fn running(task: &CoordinatedTask) -> bool {
     task.state.active() || task.state == TaskState::Ready
 }
 
-/// `path` lies inside `root`, both as written and after resolving
-/// symlinks of whatever part exists, so only worktrees bruhs created are
-/// ever deleted or recreated.
-fn inside(root: &Path, path: &Path) -> bool {
-    use std::path::Component;
-    if !path.is_absolute()
-        || path
-            .components()
-            .any(|part| matches!(part, Component::ParentDir | Component::CurDir))
-    {
-        return false;
-    }
-    let Ok(root) = std::fs::canonicalize(root) else {
-        return false;
-    };
-    let mut existing = path;
-    while !existing.exists() {
-        match existing.parent() {
-            Some(parent) => existing = parent,
-            None => return false,
-        }
-    }
-    let Ok(resolved) = std::fs::canonicalize(existing) else {
-        return false;
-    };
-    let rest = path.strip_prefix(existing).unwrap_or(Path::new(""));
-    resolved.join(rest).starts_with(&root) && resolved.join(rest) != root
-}
-
-fn plural(count: u32, one: &str, many: &str) -> String {
-    format!("{count} {}", if count == 1 { one } else { many })
-}
-
 impl CoordinationRuntime {
     /// Where `id`'s worktree stands and whether it can be removed. With
     /// `measure`, the configured meter (see `worktree_meter`) reports what
@@ -66,7 +28,7 @@ impl CoordinationRuntime {
         id: &ThreadId,
         measure: bool,
     ) -> Result<TaskWorktree, CoordinationError> {
-        let root = crate::git::worktrees_root().map_err(|error| invalid(&error.to_string()))?;
+        let root = host::root().map_err(|error| invalid(&error))?;
         self.task_worktree_in(id, measure, &root).await
     }
 
@@ -76,7 +38,7 @@ impl CoordinationRuntime {
         measure: bool,
         root: &Path,
     ) -> Result<TaskWorktree, CoordinationError> {
-        let task = self.task(id).await?;
+        let task = self.healed_task(id, root).await?;
         let mut view = TaskWorktree {
             state: WorktreeState::Present,
             path: task.working_path.clone(),
@@ -100,10 +62,6 @@ impl CoordinationRuntime {
         }
         let path = Path::new(&task.working_path);
         let project = Path::new(&task.project_path);
-        let listed = crate::git::worktree_branch(project, path)
-            .await
-            .ok()
-            .flatten();
         if path.exists() {
             match crate::git::status(path).await {
                 Ok(status) => {
@@ -116,15 +74,17 @@ impl CoordinationRuntime {
             }
         } else {
             view.state = WorktreeState::Missing;
-            view.branch = listed.clone().flatten();
+            view.branch = crate::git::worktree_branch(project, path)
+                .await
+                .ok()
+                .flatten()
+                .flatten();
         }
         if view.blocked.is_none() {
-            view.blocked = self
-                .refusal(&task, root, listed.as_ref(), view.changed_files)
-                .await;
-        }
-        if view.blocked.is_none() {
-            view.blocked = nested_checkout(project, path).await;
+            view.blocked = match self.task_refusal(&task).await {
+                Some(reason) => Some(reason),
+                None => host::check(root, project, path).await.err(),
+            };
         }
         if measure && view.state == WorktreeState::Present {
             match crate::worktree_meter::load(crate::worktree_meter::config_path().as_deref()).await
@@ -139,18 +99,9 @@ impl CoordinationRuntime {
         Ok(view)
     }
 
-    /// Why `task`'s worktree cannot be removed right now, apart from nested
-    /// checkouts. `listed` is Git's entry for it (`Some(branch)` when listed).
-    async fn refusal(
-        &self,
-        task: &CoordinatedTask,
-        root: &Path,
-        listed: Option<&Option<String>>,
-        changed: u32,
-    ) -> Option<String> {
-        if !inside(root, Path::new(&task.working_path)) {
-            return Some("Only worktrees bruhs created can be removed here.".into());
-        }
+    /// Why a task's worktree must stay for task reasons: it or a task
+    /// sharing it is running, queued or still stopping, or has a wake.
+    pub async fn task_refusal(&self, task: &CoordinatedTask) -> Option<String> {
         let (sharers, queued, waking) = {
             let data = self.0.data.lock().await;
             let sharers: Vec<ThreadId> = sharing(&data, &task.working_path)
@@ -175,31 +126,82 @@ impl CoordinationRuntime {
                     .into(),
             );
         }
-        if waking {
-            return Some("This task waits for pull request events, which read its worktree. Turn its wake off first.".into());
-        }
-        match listed {
-            None => Some(
-                "Git no longer lists this worktree, so its branch is unknown. Nothing can be removed."
-                    .into(),
-            ),
-            Some(None) => Some(
-                "No branch is checked out here, so commits could be lost. Check out a branch first."
-                    .into(),
-            ),
-            Some(Some(_)) if changed > 0 => Some(format!(
-                "{} not committed. Commit or discard them first.",
-                plural(changed, "change is", "changes are")
-            )),
-            Some(Some(_)) => None,
-        }
+        waking.then(|| {
+            "This task waits for pull request events, which read its worktree. Turn its wake off first."
+                .into()
+        })
+    }
+
+    /// Tasks by their own worktree folder (resolved), for listing every
+    /// worktree without resolving each task's path per row.
+    pub async fn worktree_owners(&self) -> std::collections::HashMap<PathBuf, CoordinatedTask> {
+        let tasks: Vec<CoordinatedTask> = {
+            let data = self.0.data.lock().await;
+            let tasks = data
+                .tasks
+                .values()
+                .filter(|task| task.working_path != task.project_path)
+                .cloned()
+                .collect();
+            drop(data);
+            tasks
+        };
+        tasks
+            .into_iter()
+            .map(|task| (host::resolve(Path::new(&task.working_path)), task))
+            .collect()
+    }
+
+    /// The task whose own worktree is `path`, if any.
+    pub async fn task_in_worktree(&self, path: &Path) -> Option<CoordinatedTask> {
+        let wanted = host::resolve(path);
+        let data = self.0.data.lock().await;
+        let task = data
+            .tasks
+            .values()
+            .find(|task| {
+                task.working_path != task.project_path
+                    && host::resolve(Path::new(&task.working_path)) == wanted
+            })
+            .cloned();
+        drop(data);
+        task
     }
 
     /// `RemoveWorktree`: delete `id`'s own worktree folder under bruhs's
     /// worktrees folder and keep its branch.
     pub(super) async fn remove_worktree(&self, id: &ThreadId) -> Result<(), CoordinationError> {
-        let root = crate::git::worktrees_root().map_err(|error| invalid(&error.to_string()))?;
-        self.remove_worktree_in(id, &root).await
+        let root = host::root().map_err(|error| invalid(&error))?;
+        // A spawned task finishes even if the request that asked is dropped
+        // midway, so a removal never stops between its steps.
+        let (runtime, id) = (self.clone(), id.clone());
+        tokio::spawn(async move { runtime.remove_worktree_in(&id, &root).await })
+            .await
+            .map_err(storage)?
+    }
+
+    /// `id`'s task, with a stale removal marker cleared: something else (a
+    /// chat turn in the same folder) already checked the worktree out again
+    /// and dropped its record.
+    async fn healed_task(
+        &self,
+        id: &ThreadId,
+        root: &Path,
+    ) -> Result<CoordinatedTask, CoordinationError> {
+        let task = self.task(id).await?;
+        let path = Path::new(&task.working_path);
+        if task.removed_worktree.is_none() || !path.exists() {
+            return Ok(task);
+        }
+        if host::record(root, path)
+            .await
+            .map_err(|error| conflict(&error))?
+            .is_some()
+        {
+            return Ok(task);
+        }
+        self.mark_removed(&task.working_path, None, false).await?;
+        self.task(id).await
     }
 
     pub(super) async fn remove_worktree_in(
@@ -207,8 +209,8 @@ impl CoordinationRuntime {
         id: &ThreadId,
         root: &Path,
     ) -> Result<(), CoordinationError> {
-        let _ops = WORKTREE_OPS.lock().await;
-        let task = self.task(id).await?;
+        let _lock = host::lock(root).await.map_err(|error| conflict(&error))?;
+        let task = self.healed_task(id, root).await?;
         if task.working_path == task.project_path {
             return Err(invalid(
                 "This task works in the project folder; it has no worktree to remove.",
@@ -217,53 +219,32 @@ impl CoordinationRuntime {
         if task.removed_worktree.is_some() {
             return Ok(());
         }
+        if let Some(reason) = self.task_refusal(&task).await {
+            return Err(conflict(&reason));
+        }
         let path = PathBuf::from(&task.working_path);
         let project = PathBuf::from(&task.project_path);
-        let listed = crate::git::worktree_branch(&project, &path)
+        let branch = host::check(root, &project, &path)
             .await
-            .map_err(|error| conflict(&format!("Git cannot list worktrees: {error}")))?;
-        let changed = if path.exists() {
-            if path.join(".gitmodules").exists() {
-                return Err(conflict(
-                    "This worktree has submodules. Check them, then remove it with git worktree remove.",
-                ));
-            }
-            let status = crate::git::status(&path)
-                .await
-                .map_err(|error| conflict(&format!("Git cannot read this worktree: {error}")))?;
-            u32::try_from(status.dirty.len()).unwrap_or(u32::MAX)
-        } else {
-            0
-        };
-        if let Some(reason) = self.refusal(&task, root, listed.as_ref(), changed).await {
-            return Err(conflict(&reason));
-        }
-        if let Some(reason) = nested_checkout(&project, &path).await {
-            return Err(conflict(&reason));
-        }
-        let Some(Some(branch)) = listed else {
-            return Err(conflict(
-                "Git no longer lists this worktree. Nothing was removed.",
-            ));
-        };
-
-        // Record the removal before touching anything, under the same lock
-        // that admits runs, so a crash or a failed save never strands a task
+            .map_err(|error| conflict(&error))?;
+        // Mark the tasks before touching anything, under the same lock that
+        // admits runs, so a crash or a failed save never strands a task
         // without the branch it needs to come back.
         let working = task.working_path.clone();
-        self.mark_removed(&working, Some(branch), true).await?;
-        if let Err(error) = self.unregister(&project, &path).await {
+        self.mark_removed(&working, Some(branch.clone()), true)
+            .await?;
+        if let Err(error) = host::unregister(root, &project, &path, &branch).await {
             if let Err(undo) = self.mark_removed(&working, None, false).await {
                 tracing::error!(%undo, "removal marker for {working} could not be cleared");
             }
-            return Err(error);
+            return Err(conflict(&error));
         }
         Ok(())
     }
 
     /// Set (`Some(branch)`) or clear the removal marker on every task in
     /// `working`. With `recheck`, refuse when one of them has started.
-    async fn mark_removed(
+    pub(crate) async fn mark_removed(
         &self,
         working: &str,
         branch: Option<String>,
@@ -291,41 +272,13 @@ impl CoordinationRuntime {
         Ok(())
     }
 
-    /// Move the folder aside, let Git drop its record, then delete it in the
-    /// background. A Git refusal moves the folder back.
-    async fn unregister(&self, project: &Path, path: &Path) -> Result<(), CoordinationError> {
-        if let Some(parent) = path.parent() {
-            sweep_staging(parent);
-        }
-        if !path.exists() {
-            return crate::git::remove_worktree(project, path)
-                .await
-                .map_err(|error| conflict(&format!("Git kept the worktree: {error}")));
-        }
-        let staging = staging_path(path)?;
-        std::fs::rename(path, &staging)
-            .map_err(|error| conflict(&format!("Cannot move the worktree aside: {error}")))?;
-        if let Err(error) = crate::git::remove_worktree(project, path).await {
-            if let Err(undo) = std::fs::rename(&staging, path) {
-                tracing::error!(
-                    "worktree {} stayed at {} after Git refused removal: {undo}",
-                    path.display(),
-                    staging.display()
-                );
-            }
-            return Err(conflict(&format!("Git kept the worktree: {error}")));
-        }
-        delete_in_background(staging);
-        Ok(())
-    }
-
     /// Before a run: check out the branch of a removed worktree again at the
     /// task's working path. Nothing to do for a worktree that is in place.
     pub(super) async fn restore_worktree(&self, id: &ThreadId) -> Result<(), CoordinationError> {
         if self.removal_of(id).await?.is_none() {
             return Ok(());
         }
-        let root = crate::git::worktrees_root().map_err(|error| invalid(&error.to_string()))?;
+        let root = host::root().map_err(|error| invalid(&error))?;
         self.restore_worktree_in(id, &root).await
     }
 
@@ -347,135 +300,29 @@ impl CoordinationRuntime {
         id: &ThreadId,
         root: &Path,
     ) -> Result<(), CoordinationError> {
-        let _ops = WORKTREE_OPS.lock().await;
+        let _lock = host::lock(root).await.map_err(|error| conflict(&error))?;
         let Some((task, removed)) = self.removal_of(id).await? else {
             return Ok(());
         };
-        let path = PathBuf::from(&task.working_path);
-        let project = PathBuf::from(&task.project_path);
-        if !inside(root, &path) {
-            return Err(invalid(
-                "This task's worktree is outside bruhs's worktrees folder; it was not checked out again.",
-            ));
-        }
-        // A removal interrupted after the folder moved aside leaves Git's
-        // record of a folder that is gone; drop it before checking out again.
-        if !path.exists()
-            && crate::git::worktree_branch(&project, &path)
-                .await
-                .ok()
-                .flatten()
-                .is_some()
-        {
-            crate::git::remove_worktree(&project, &path)
-                .await
-                .map_err(|error| conflict(&format!("Git kept a stale worktree record: {error}")))?;
-        }
-        crate::git::add_worktree(&project, &removed.branch, &path, &removed.branch)
-            .await
-            .map_err(|error| {
-                conflict(&format!(
-                    "This task's worktree was removed, and checking out {} again failed: {error}",
-                    removed.branch
-                ))
-            })?;
+        host::restore_branch(
+            root,
+            Path::new(&task.project_path),
+            Path::new(&task.working_path),
+            &removed.branch,
+            None,
+        )
+        .await
+        .map_err(|error| conflict(&error))?;
         self.mark_removed(&task.working_path, None, false).await
     }
-}
 
-/// Work `git status` in the worktree cannot see: another linked worktree
-/// Git lists inside it (agents make these under ignored folders such as
-/// `.claude/`), or a `.git` a few folders down inside ignored files.
-async fn nested_checkout(project: &Path, path: &Path) -> Option<String> {
-    let inner = std::fs::canonicalize(path).ok()?;
-    let listed = crate::git::worktree_paths(project)
-        .await
-        .unwrap_or_default();
-    if let Some(found) = listed.iter().find(|listed| {
-        std::fs::canonicalize(listed)
-            .is_ok_and(|listed| listed != inner && listed.starts_with(&inner))
-    }) {
-        return Some(format!(
-            "Another worktree is inside this one, at {}. Remove it first so its work is not lost.",
-            found.display()
-        ));
-    }
-    let root = inner.clone();
-    let found = tokio::task::spawn_blocking(move || find_git_below(&root))
-        .await
-        .ok()
-        .flatten()?;
-    Some(format!(
-        "A separate Git checkout is inside this worktree, at {}. Move or remove it first so its work is not lost.",
-        found.display()
-    ))
-}
-
-/// Folders skipped when looking for nested checkouts: dependency and build
-/// output, which hold no checkouts of their own and can be huge.
-const SKIPPED_FOR_NESTED: [&str; 2] = ["node_modules", "target"];
-
-/// The first `.git` below `root` (not root's own), at most four folders
-/// down and after at most 50,000 entries.
-fn find_git_below(root: &Path) -> Option<PathBuf> {
-    let mut queue = std::collections::VecDeque::from([(root.to_path_buf(), 0u8)]);
-    let mut seen = 0u32;
-    while let Some((dir, depth)) = queue.pop_front() {
-        let Ok(entries) = std::fs::read_dir(&dir) else {
-            continue;
-        };
-        for entry in entries.flatten() {
-            seen += 1;
-            if seen > 50_000 {
-                return None;
-            }
-            let name = entry.file_name();
-            if name == ".git" {
-                if depth > 0 {
-                    return Some(entry.path());
-                }
-                continue;
-            }
-            let is_dir = entry.file_type().is_ok_and(|kind| kind.is_dir());
-            if is_dir && depth < 4 && !SKIPPED_FOR_NESTED.iter().any(|skip| name == *skip) {
-                queue.push_back((entry.path(), depth + 1));
-            }
+    /// Clear the markers on tasks in `path` after something else checked the
+    /// worktree out again (Workbench, Worktrees: Start again).
+    pub async fn worktree_restored(&self, path: &Path) -> Result<(), CoordinationError> {
+        if let Some(task) = self.task_in_worktree(path).await {
+            self.mark_removed(&task.working_path, None, false).await?;
         }
-    }
-    None
-}
-
-/// A fresh name beside `path` to move it to before deletion.
-fn staging_path(path: &Path) -> Result<PathBuf, CoordinationError> {
-    let (Some(parent), Some(name)) = (path.parent(), path.file_name()) else {
-        return Err(invalid("The worktree path has no parent folder."));
-    };
-    let stamp = EpochMs::now().as_millis();
-    Ok(parent.join(format!(
-        "{STAGING_PREFIX}{}-{stamp}",
-        name.to_string_lossy()
-    )))
-}
-
-fn delete_in_background(staging: PathBuf) {
-    tokio::task::spawn_blocking(move || {
-        if let Err(error) = crate::git::remove_tree(&staging) {
-            tracing::warn!("could not finish deleting {}: {error}", staging.display());
-        }
-    });
-}
-
-/// Finish deleting folders a stopped server left half-deleted.
-fn sweep_staging(parent: &Path) {
-    let Ok(entries) = std::fs::read_dir(parent) else {
-        return;
-    };
-    for entry in entries.flatten() {
-        let name = entry.file_name();
-        let is_staging = name.to_string_lossy().starts_with(STAGING_PREFIX);
-        if is_staging && entry.file_type().is_ok_and(|kind| kind.is_dir()) {
-            delete_in_background(entry.path());
-        }
+        Ok(())
     }
 }
 
@@ -486,6 +333,7 @@ fn sweep_staging(parent: &Path) {
 )]
 mod tests {
     use super::*;
+    use crate::worktrees::STAGING_PREFIX;
 
     struct Fixture {
         _dir: tempfile::TempDir,
@@ -503,6 +351,12 @@ mod tests {
                 "user.email=t@example.com",
                 "-c",
                 "commit.gpgsign=false",
+                // A background `git maintenance` started by a commit would
+                // count as a program working in the folder.
+                "-c",
+                "maintenance.auto=false",
+                "-c",
+                "gc.auto=0",
             ])
             .args(args)
             .current_dir(dir)
@@ -876,6 +730,41 @@ mod tests {
             git(&path, &["branch", "--show-current"]).trim(),
             "bruhs/cut"
         );
+        assert!(f
+            .runtime
+            .task(&id)
+            .await
+            .unwrap()
+            .removed_worktree
+            .is_none());
+    }
+
+    /// A chat turn that checked a task's worktree out again leaves the task
+    /// marked removed; the next look at the task clears it.
+    #[tokio::test]
+    async fn a_worktree_restored_elsewhere_clears_the_task_marker() {
+        let mut ids = Vec::new();
+        let f = fixture(|project, root| {
+            let task = task(project, &root.join("p/heal"), TaskState::Completed);
+            ids.push(task.id.clone());
+            vec![task]
+        })
+        .await;
+        let id = ids.remove(0);
+        let path = f.root.join("p/heal");
+        std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+        add_worktree(&f.project, &path, "bruhs/heal");
+        f.runtime.remove_worktree_in(&id, &f.root).await.unwrap();
+        crate::worktrees::restore_for_turn_in(&f.root, &path)
+            .await
+            .unwrap();
+        assert!(path.join("README.md").is_file());
+        let view = f
+            .runtime
+            .task_worktree_in(&id, false, &f.root)
+            .await
+            .unwrap();
+        assert_eq!(view.state, WorktreeState::Present, "{view:?}");
         assert!(f
             .runtime
             .task(&id)

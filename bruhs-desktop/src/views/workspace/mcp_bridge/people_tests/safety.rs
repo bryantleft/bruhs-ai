@@ -77,7 +77,7 @@ async fn person_reminder_save_failure_retry_never_duplicates_reminder(cx: &mut T
 async fn person_reminder_background_progress_and_edited_profile_block_whole_undo(
     cx: &mut TestAppContext,
 ) {
-    let (workspace, cx) = fixture(cx);
+    let (workspace, cx) = workflow_fixture(cx);
     let files = Files::new();
     let id = started(&workspace, cx, &files).await;
     cx.run_until_parked();

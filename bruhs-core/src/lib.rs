@@ -48,6 +48,7 @@ pub mod workbench_tools;
 #[cfg(unix)]
 pub mod workspace_bridge;
 pub mod worktree_meter;
+pub mod worktrees;
 
 pub use agent::{
     claude_uses_api_key, AgentOrchestrator, AgentTurn, McpServerInfo, OrchestratorEvent,

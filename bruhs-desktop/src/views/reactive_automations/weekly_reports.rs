@@ -1,6 +1,7 @@
 //! Native controls for the same host-owned reports used by the web client.
 use super::*;
 use bruhs_models::{weekly_reports::*, EpochMs};
+use gpui_component::zoom::px;
 
 #[derive(Default)]
 pub(super) struct WeeklyReportsState {
@@ -269,7 +270,8 @@ impl ReactiveAutomations {
     }
 
     pub(super) fn render_weekly_reports(&self, cx: &Context<'_, Self>) -> Div {
-        let disabled = self.weekly.busy;
+        // Web: the panel sits in the fieldset that waits for the first snapshot.
+        let disabled = self.weekly.busy || self.busy || self.snapshot.is_none();
         let mut panel=div().min_w_0().w_full().flex().flex_col().gap_3().pb_4().border_b_1().border_color(theme::longan_700().opacity(0.6))
             .child(div().flex().flex_wrap().justify_between().gap_2().child(heading("Weekly engineering reports")).child(control("weekly-new","New report preset",disabled).on_activate(cx,|this,window,cx|this.open_weekly_preset(None,window,cx))))
             .child(muted("Review seven days of repository activity. Completed reports are saved locally for editing. Choose GitHub feeds when available. Incidents and reliability stay marked unavailable until a feed is connected."));
@@ -401,7 +403,8 @@ impl ReactiveAutomations {
     }
 
     fn render_weekly_editor(&self, editor: &WeeklyEditor, cx: &Context<'_, Self>) -> Div {
-        let disabled = self.weekly.busy;
+        // Web: the panel sits in the fieldset that waits for the first snapshot.
+        let disabled = self.weekly.busy || self.busy || self.snapshot.is_none();
         let mut panel = div().min_w_0().flex().flex_col().gap_3().pt_3();
         match editor {
             WeeklyEditor::Preset {
@@ -588,7 +591,8 @@ impl ReactiveAutomations {
 
 impl ReactiveAutomations {
     fn render_weekly_schedule(&self, schedule: &ScheduleEditor, cx: &Context<'_, Self>) -> Div {
-        let disabled = self.weekly.busy;
+        // Web: the panel sits in the fieldset that waits for the first snapshot.
+        let disabled = self.weekly.busy || self.busy || self.snapshot.is_none();
         let mut panel = div()
             .min_w_0()
             .flex()

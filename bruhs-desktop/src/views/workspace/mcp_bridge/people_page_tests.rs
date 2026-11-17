@@ -14,9 +14,10 @@ use bruhs_models::{
     RelationshipItemKind, RelationshipProfile,
 };
 use gpui::{
-    point, px, Bounds, Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext,
+    point, Bounds, Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext,
     VisualTestContext,
 };
+use gpui_component::zoom::px;
 use std::sync::Arc;
 
 fn offline(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) {

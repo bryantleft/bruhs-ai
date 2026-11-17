@@ -5,13 +5,15 @@ pub mod scale;
 pub mod shape;
 pub mod tooltip;
 
+// Plots are drawn from measured bounds, in window points.
+use crate::zoom::window_px as px;
 pub use gpui_component_macros::IntoPlot;
 
 use std::{fmt::Debug, ops::Add};
 
 use gpui::{
     AnyElement, App, Bounds, ElementId, IntoElement, Path, PathBuilder, Pixels, Point, Window,
-    point, px,
+    point,
 };
 
 pub use axis::{AXIS_GAP, AxisLabelSide, AxisText, PlotAxis};

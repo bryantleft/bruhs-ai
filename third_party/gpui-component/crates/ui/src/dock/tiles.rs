@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::{
     any::Any,
     fmt::{Debug, Formatter},
@@ -19,14 +20,14 @@ use gpui::{
     EntityId, EventEmitter, FocusHandle, Focusable, InteractiveElement, IntoElement, MouseButton,
     MouseDownEvent, MouseUpEvent, ParentElement, Pixels, Point, Render, ScrollHandle, Size,
     StatefulInteractiveElement, Styled, WeakEntity, Window, actions, div, prelude::FluentBuilder,
-    px, size,
+    size,
 };
 
 actions!(tiles, [Undo, Redo]);
 
-const MINIMUM_SIZE: Size<Pixels> = size(px(100.), px(100.));
-const DRAG_BAR_HEIGHT: Pixels = px(30.);
-const HANDLE_SIZE: Pixels = px(5.0);
+const MINIMUM_SIZE: Size<Pixels> = size(gpui::px(100.), gpui::px(100.));
+const DRAG_BAR_HEIGHT: Pixels = gpui::px(30.);
+const HANDLE_SIZE: Pixels = gpui::px(5.0);
 
 #[derive(Clone, PartialEq, Debug)]
 struct TileChange {
@@ -1325,7 +1326,7 @@ impl Render for Tiles {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use gpui::{Bounds, Pixels, Point, Size, px};
+    use gpui::{Bounds, Pixels, Point, Size};
 
     fn b(x: f32, y: f32, w: f32, h: f32) -> Bounds<Pixels> {
         Bounds {

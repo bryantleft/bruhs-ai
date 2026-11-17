@@ -403,9 +403,10 @@ pub fn TodayPage() -> impl IntoView {
                                     } else {
                                         queue.into_iter().enumerate().map(|(index, task)| {
                                             let task_id = task.id.clone();
-                                            let estimate = task.planning.estimate_minutes.map_or("45m".to_string(), |minutes| format!("{minutes}m"));
+                                            let estimate = today_copy::estimate(task.planning.estimate_minutes);
+                                            let label = today_copy::focus_row_label(&task.title, task.priority.label(), &estimate);
                                             view! {
-                                                <button type="button" class="group flex w-full items-center gap-3 rounded-grape px-2.5 py-2 text-left hover:bg-longan-800/60 cursor-pointer" on:click=move |_| open_task(task_id.clone())>
+                                                <button type="button" aria-label=label class="group flex w-full items-center gap-3 rounded-grape px-2.5 py-2 text-left hover:bg-longan-800/60 cursor-pointer" on:click=move |_| open_task(task_id.clone())>
                                                     <span class=if index == 0 { "flex size-6 shrink-0 items-center justify-center rounded-full bg-persimmon-500/15 text-label-sm text-persimmon-300" } else { "flex size-6 shrink-0 items-center justify-center rounded-full bg-longan-800 text-label-sm text-rambutan-500" }>{index + 1}</span>
                                                     <span class="min-w-0 flex-1 truncate text-body text-rambutan-200 group-hover:text-rambutan-100">{task.title}</span>
                                                     <span class=format!("text-label-sm {}", task.priority.color_class())>{task.priority.label()}</span>
@@ -527,13 +528,14 @@ fn TodayTaskSection(
                     if tasks.is_empty() { empty_row(empty).into_any() } else {
                         tasks.into_iter().take(4).map(|task| {
                             let id = task.id.clone();
+                            let row_label = today_copy::task_row_label(&task.title);
                             let detail = if title == "Waiting on" {
                                 task.planning.waiting_on.unwrap_or_default()
                             } else {
                                 task.due_date.unwrap_or_default()
                             };
                             view! {
-                                <button type="button" class="w-full rounded-grape px-2 py-2 text-left hover:bg-longan-800/60 cursor-pointer" on:click=move |_| on_open.run(id.clone())>
+                                <button type="button" aria-label=row_label class="w-full rounded-grape px-2 py-2 text-left hover:bg-longan-800/60 cursor-pointer" on:click=move |_| on_open.run(id.clone())>
                                     <div class="truncate text-label text-rambutan-200">{task.title}</div>
                                     <div class="mt-0.5 truncate text-label-sm text-rambutan-400">{detail}</div>
                                 </button>

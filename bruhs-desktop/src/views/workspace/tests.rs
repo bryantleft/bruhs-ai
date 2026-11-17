@@ -191,8 +191,8 @@ use bruhs_core::registry::TaskUpdate;
 use bruhs_core::TaskKind;
 use bruhs_models::EpochMs;
 use chrono::{NaiveDate, NaiveDateTime};
-use gpui::px;
 use gpui::{AppContext as _, Entity, Focusable};
+use gpui_component::zoom::px;
 use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;

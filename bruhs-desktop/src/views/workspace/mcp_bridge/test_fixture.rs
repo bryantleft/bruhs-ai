@@ -35,12 +35,13 @@ pub(super) fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut Visua
 
 /// [`fixture`] in a window tall enough for the workflow controls under the
 /// Automations card. That card runs past 1080px since it took the web's
-/// order (PM-48), and a control must be on screen to be clicked.
+/// order (PM-48), the Local suggestions card adds its own height (PM-64),
+/// and a control must be on screen to be clicked.
 pub(super) fn workflow_fixture(
     cx: &mut TestAppContext,
 ) -> (Entity<Workspace>, &mut VisualTestContext) {
     let (workspace, cx) = fixture(cx);
-    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(1600.0)));
+    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(2000.0)));
     cx.run_until_parked();
     (workspace, cx)
 }

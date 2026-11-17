@@ -209,6 +209,10 @@ impl AgentTurn {
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 #[non_exhaustive]
 pub enum SendMessageError {
+    /// The turn's folder is a worktree bruhs removed, and checking its
+    /// branch out again failed.
+    #[error("{0}")]
+    WorktreeUnavailable(String),
     /// The thread already has a turn in flight.
     #[error("thread {0} is already running a turn")]
     ThreadBusy(ThreadId),
@@ -2790,6 +2794,7 @@ mod tests {
         assert_eq!(orch.thread_status(&thread), ThreadStatus::Streaming);
         match orch.send_message(unstartable_turn(&thread), None) {
             Err(SendMessageError::ThreadBusy(id)) => assert_eq!(id, thread),
+            Err(error) => panic!("unexpected concurrent-send refusal: {error}"),
             Ok(_) => panic!("a concurrent send must be refused"),
         }
 

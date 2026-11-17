@@ -6,6 +6,7 @@ use bruhs_models::runtime_models::{
     highlighted_id, listed_models, listing_error_line, reanchor_highlight, replace_listing,
     ModelChoice, RuntimeModels,
 };
+use gpui_component::zoom::px;
 
 /// A runtime's model listing as a future the desktop's tokio runtime drives.
 type ListingFuture = std::pin::Pin<Box<dyn std::future::Future<Output = RuntimeModels> + Send>>;
@@ -565,7 +566,7 @@ impl ChatView {
             .role(Role::Dialog)
             .aria_label(STATUS_CHANGE_MODEL_LABEL)
             .w(px(MODEL_PICKER_WIDTH_PX))
-            .max_w(px(f32::from(window.viewport_size().width) - 18.0))
+            .max_w(window.viewport_size().width - px(18.0))
             .max_h(super::composer_ui::composer_popover_max_height(
                 window,
                 self.composer_options_trigger_bounds.get(),

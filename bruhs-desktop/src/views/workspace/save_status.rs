@@ -45,6 +45,7 @@ impl SaveStatus {
 }
 
 use super::*;
+use gpui_component::zoom::px;
 
 impl Workspace {
     /// The strip appears only when a save failed; routine saves show nothing.

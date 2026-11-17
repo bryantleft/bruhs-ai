@@ -20,13 +20,13 @@ mod voice_capture;
 mod webview_platform;
 #[cfg(feature = "whiteboard-benchmark")]
 mod whiteboard_performance;
+mod zoom;
 
 use gpui::*;
+use gpui_component::zoom::px;
 use gpui_component::{Root, TitleBar};
-#[cfg(debug_assertions)]
 use std::cell::RefCell;
 use std::env;
-#[cfg(debug_assertions)]
 use std::rc::Rc;
 use views::chat::FindInThread;
 use views::diff_panel::FindInDiff;
@@ -34,9 +34,9 @@ use views::workspace::{
     CloseOverlays, ClosePanel, CopyThreadLink, FocusChatInput, FocusCommandBar, JumpThread,
     MentionFile, NavigateBack, NavigateForward, NewThread, NextThread, OpenCapture, OpenInboxView,
     OpenKnowledgeView, OpenSettings, OpenTaskCreateShortcut, OpenTodayView, PinThread, PrevThread,
-    SaveKnowledgeDocument, SearchThreads, SettleThread, ToggleBranchMenu, ToggleDiff,
+    ResetZoom, SaveKnowledgeDocument, SearchThreads, SettleThread, ToggleBranchMenu, ToggleDiff,
     ToggleEffortMenu, ToggleModelPicker, TogglePanel, TogglePreview, ToggleSidebar, ToggleTasks,
-    ToggleTerminal, ToggleWorkspaceMenu, UsePreviousWorktree,
+    ToggleTerminal, ToggleWorkspaceMenu, UsePreviousWorktree, ZoomIn, ZoomOut,
 };
 
 const DESKTOP_GLOBAL_SHORTCUTS: &[&str] = &[
@@ -206,7 +206,15 @@ fn main() {
         .run(move |cx: &mut App| {
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
-            cx.set_menus([Menu::new("bruhs.ai").items([MenuItem::action("Quit bruhs.ai", Quit)])]);
+            cx.set_menus([
+                Menu::new("bruhs.ai").items([MenuItem::action("Quit bruhs.ai", Quit)]),
+                // The web app's browser zoom, as a browser's View menu offers it.
+                Menu::new("View").items([
+                    MenuItem::action("Zoom In", ZoomIn),
+                    MenuItem::action("Zoom Out", ZoomOut),
+                    MenuItem::action("Actual Size", ResetZoom),
+                ]),
+            ]);
             // ---- gpui-component setup ----
             // Initializes Theme, Root, dialog/sheet/notification machinery, input system, etc.
             gpui_component::init(cx);
@@ -290,6 +298,12 @@ fn main() {
             // so the jump-thread index does not move.
             bindings.push(KeyBinding::new("cmd-[", NavigateBack, None));
             bindings.push(KeyBinding::new("cmd-]", NavigateForward, None));
+            // Zoom, as a browser zooms the web app: ⌘+ (or ⌘=) in, ⌘− out,
+            // ⌘0 back to 100%. Also out of DESKTOP_GLOBAL_SHORTCUTS.
+            bindings.push(KeyBinding::new("cmd-=", ZoomIn, None));
+            bindings.push(KeyBinding::new("cmd-+", ZoomIn, None));
+            bindings.push(KeyBinding::new("cmd--", ZoomOut, None));
+            bindings.push(KeyBinding::new("cmd-0", ResetZoom, None));
             for (offset, key) in DESKTOP_GLOBAL_SHORTCUTS[JUMP_THREAD_FIRST_INDEX..]
                 .iter()
                 .enumerate()

@@ -1,3 +1,4 @@
+use crate::zoom::px;
 use std::ops::Range;
 
 use crate::{
@@ -10,7 +11,7 @@ use crate::{
 };
 use gpui::{
     App, AppContext as _, Axis, ElementId, Entity, IntoElement, ParentElement as _, Pixels,
-    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, px, relative,
+    RenderOnce, StyleRefinement, Styled, Window, div, prelude::FluentBuilder as _, relative,
 };
 use rust_i18n::t;
 

@@ -12,6 +12,7 @@ use bruhs_models::logic::preview::normalize_preview_url;
 use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::zoom::px;
 
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{assets, theme};
@@ -59,13 +60,15 @@ mod host {
         webview: Option<WebView>,
         url: Option<String>,
         visible: bool,
-        bounds: Option<(f32, f32, f32, f32)>,
+        /// Placed content bounds and the zoom they were placed at.
+        bounds: Option<(f32, f32, f32, f32, f32)>,
         /// A hide failed and was logged; quiet until one succeeds.
         hide_failing: bool,
         /// Where `window.ipc` messages go; set before the page view exists.
         messages: Option<async_channel::Sender<super::PageMessage>>,
     }
 
+    /// The page's frame, in window points like the layout's bounds.
     fn rect(bounds: gpui::Bounds<gpui::Pixels>) -> Rect {
         Rect {
             position: LogicalPosition::new(
@@ -108,11 +111,15 @@ mod host {
             url: &str,
             bounds: gpui::Bounds<gpui::Pixels>,
         ) -> Result<(), String> {
+            // The page's content zooms with the window's (see
+            // `gpui_component::zoom`); its frame is already in window points.
+            let zoom = gpui_component::zoom::zoom();
             let key = (
                 f32::from(bounds.origin.x),
                 f32::from(bounds.origin.y),
                 f32::from(bounds.size.width),
                 f32::from(bounds.size.height),
+                zoom,
             );
             match &self.webview {
                 None => {
@@ -128,6 +135,7 @@ mod host {
                             });
                     }
                     let webview = builder.build_as_child(window).map_err(|e| e.to_string())?;
+                    webview.zoom(f64::from(zoom)).map_err(|e| e.to_string())?;
                     self.webview = Some(webview);
                     self.url = Some(url.to_string());
                     self.visible = true;
@@ -143,6 +151,9 @@ mod host {
                         self.visible = true;
                     }
                     if self.bounds != Some(key) {
+                        if self.bounds.map(|old| old.4) != Some(zoom) {
+                            webview.zoom(f64::from(zoom)).map_err(|e| e.to_string())?;
+                        }
                         webview
                             .set_bounds(rect(bounds))
                             .map_err(|e| e.to_string())?;

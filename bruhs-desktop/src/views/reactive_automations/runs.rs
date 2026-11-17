@@ -1,5 +1,6 @@
 //! What a run card says about why it ran and how it ended.
 use super::*;
+use gpui_component::zoom::px;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(super) enum Tone {

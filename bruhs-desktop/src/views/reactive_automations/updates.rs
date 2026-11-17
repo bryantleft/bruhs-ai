@@ -2,6 +2,7 @@
 use super::*;
 use bruhs_models::EpochMs;
 use gpui_component::text::TextView;
+use gpui_component::zoom::px;
 
 /// The newest unread item not seen before. The first snapshot only records a
 /// baseline, so updates already waiting at launch never raise a notice.

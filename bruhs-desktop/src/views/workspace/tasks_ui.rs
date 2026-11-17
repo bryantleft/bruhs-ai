@@ -2,6 +2,7 @@
 
 use super::library_pages_ui::LibraryPage;
 use super::*;
+use gpui_component::zoom::px;
 
 // Match the web task list/board budgets. The native library action fixture
 // measures 100/1,000/10,000 tasks; complete records remain in work_items.
@@ -870,12 +871,12 @@ impl Workspace {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let height = f32::from(window.viewport_size().height) * 0.6;
+        let height = window.viewport_size().height * 0.6;
         self.render_modal_shell(
             TASKS_PROJECTS_LABEL,
             div()
                 .debug_selector(|| "desktop-task-projects-dialog".to_string())
-                .h(px(height))
+                .h(height)
                 .flex()
                 .child(self.project_list(true, cx)),
             None,
@@ -1160,7 +1161,10 @@ impl Workspace {
                 div()
                     .id(("tasks-project-delete", key))
                     .debug_selector(move || format!("desktop-project-delete-{key}"))
-                    .invisible()
+                    // Web `opacity-0 group-hover:opacity-100
+                    // group-focus-within:opacity-100`: hidden, not removed,
+                    // so the keyboard still reaches it.
+                    .opacity(0.0)
                     .flex_shrink_0()
                     .rounded(px(PROJECT_SIDEBAR_ROW_ACTION_RADIUS_PX))
                     .size(px(theme::CONTROL_XS_PX))
@@ -1170,13 +1174,13 @@ impl Workspace {
                     .p(px(PROJECT_SIDEBAR_ROW_ACTION_PADDING_PX))
                     .text_color(theme::rambutan_500())
                     .tab_index(0)
-                    .role(Role::ListBoxOption)
+                    .role(Role::Button)
                     .aria_label(PROJECT_DELETE_LABEL)
                     .border_1()
                     .border_color(gpui::transparent_black())
-                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()).opacity(1.0))
                     .cursor_pointer()
-                    .group_hover(hover_group, |el| el.visible())
+                    .group_hover(hover_group, |el| el.opacity(1.0))
                     .hover(|el| {
                         el.bg(theme::longan_700()
                             .opacity(PROJECT_SIDEBAR_ROW_ACTION_HOVER_BG_OPACITY))

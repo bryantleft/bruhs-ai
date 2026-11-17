@@ -14,6 +14,7 @@ use bruhs_models::logic::portable::{
     ImportedThread, PortableMessage, PortablePart, PortableToolCall, IMPORT_CONTEXT_MAX_CHARS,
 };
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
+use gpui_component::zoom::px;
 use gpui_component::Sizable as _;
 use std::time::Duration;
 
