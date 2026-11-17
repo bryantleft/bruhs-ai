@@ -46,6 +46,13 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   dependencies are picked from a list and removed one at a time, deleting a
   task asks first, and a compact window switches projects from a Projects
   dialog.
+- The desktop app does more of what the web does. Search the Knowledge
+  library, which now lists the latest change first, and preview a document's
+  Markdown. On Finance, import transactions from pasted CSV rows, delete a
+  transaction and see your holdings; on Health, see how many sleep and
+  recovery logs you have, in the web's cards. Link or unlink a person on an
+  imported conversation. On People, view the originals kept after a contact
+  merge recovery, and see when contacts are refreshing.
 - The desktop app has the web's booking page for a scheduling link. The
   link in the scheduling panel opens it: pick one of the next free times
   inside the link's availability and buffers, add a name, and the booking is
