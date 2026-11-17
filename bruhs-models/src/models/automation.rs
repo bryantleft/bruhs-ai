@@ -472,6 +472,20 @@ pub struct DraftOutcomeReport {
 }
 
 impl WorkflowStatus {
+    /// The status as both apps show it, such as "Rolled back".
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Draft => "Draft",
+            Self::Previewed => "Previewed",
+            Self::Declined => "Declined",
+            Self::Running => "Running",
+            Self::Paused => "Paused",
+            Self::Completed => "Completed",
+            Self::Failed => "Failed",
+            Self::RolledBack => "Rolled back",
+        }
+    }
+
     /// A decision the owner or the executor reached; later changes are new reports.
     pub fn is_settled(self) -> bool {
         matches!(

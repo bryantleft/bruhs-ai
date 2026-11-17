@@ -1,16 +1,12 @@
 use super::*;
+use bruhs_models::logic::workflow_history::{
+    self, NEXT_WORKFLOW, NEXT_WORKFLOW_LABEL, NO_WORKFLOW_YET, PREVIOUS_WORKFLOW,
+    PREVIOUS_WORKFLOW_LABEL,
+};
 
 impl Workspace {
     pub(super) fn reviewed_automation(&self) -> Option<&bruhs_models::Workflow> {
-        self.reviewed_workflow_id
-            .as_ref()
-            .and_then(|id| {
-                self.automation_state
-                    .workflows
-                    .iter()
-                    .find(|workflow| workflow.id == *id)
-            })
-            .or_else(|| self.automation_state.workflows.last())
+        workflow_history::reviewed(&self.automation_state, self.reviewed_workflow_id.as_deref())
     }
 
     fn review_automation(&mut self, id: &str, cx: &mut Context<'_, Self>) {
@@ -26,28 +22,14 @@ impl Workspace {
     }
 
     pub(super) fn render_automation_history(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let Some(workflow) = self.reviewed_automation() else {
-            return div()
-                .child("No workflow yet. Preview a suggestion or submit an MCP proposal.")
-                .into_any_element();
+        let Some(page) =
+            workflow_history::page(&self.automation_state, self.reviewed_workflow_id.as_deref())
+        else {
+            return div().child(NO_WORKFLOW_YET).into_any_element();
         };
-        let workflows = &self.automation_state.workflows;
-        let index = workflows
-            .iter()
-            .position(|item| item.id == workflow.id)
-            .unwrap_or(0);
-        let previous = index
-            .checked_sub(1)
-            .and_then(|i| workflows.get(i))
-            .map(|item| item.id.clone());
-        let next = workflows.get(index + 1).map(|item| item.id.clone());
-        let label = format!(
-            "{}, {:?}, workflow {} of {}",
-            workflow.title,
-            workflow.status,
-            index + 1,
-            workflows.len()
-        );
+        let previous = page.previous.map(str::to_owned);
+        let next = page.next.map(str::to_owned);
+        let label = page.label();
         div()
             .id("automation-history")
             .debug_selector(|| "desktop-workflow-review".into())
@@ -72,8 +54,8 @@ impl Workspace {
                             ButtonState::disabled_if(previous.is_none()),
                         )
                         .debug_selector(|| "desktop-previous-workflow".into())
-                        .aria_label("Review previous workflow")
-                        .child("Previous workflow")
+                        .aria_label(PREVIOUS_WORKFLOW_LABEL)
+                        .child(PREVIOUS_WORKFLOW)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(id) = &previous {
                                 this.review_automation(id, cx);
@@ -88,8 +70,8 @@ impl Workspace {
                             ButtonState::disabled_if(next.is_none()),
                         )
                         .debug_selector(|| "desktop-next-workflow".into())
-                        .aria_label("Review next workflow")
-                        .child("Next workflow")
+                        .aria_label(NEXT_WORKFLOW_LABEL)
+                        .child(NEXT_WORKFLOW)
                         .on_click(cx.listener(move |this, _, _, cx| {
                             if let Some(id) = &next {
                                 this.review_automation(id, cx);

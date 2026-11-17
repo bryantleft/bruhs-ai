@@ -26,6 +26,10 @@ pub struct SetSourceClipsSignal(pub WriteSignal<Vec<SourceClip>>);
 
 #[derive(Copy, Clone)]
 pub struct AutomationStateSignal(pub DurableMetadata<AutomationState>);
+/// The workflow Agent workflows' history shows; `None` follows the newest.
+/// Kept while the tab is open, like desktop's reviewed workflow.
+#[derive(Copy, Clone)]
+pub struct ReviewedWorkflowSignal(pub RwSignal<Option<String>>);
 #[derive(Copy, Clone)]
 pub struct LifeSectionSignal(pub RwSignal<LifeSection>);
 
@@ -62,4 +66,5 @@ pub(super) fn provide() {
     provide_context(AutomationStateSignal(
         DurableMetadata::<AutomationState>::new("bruhs.automationState"),
     ));
+    provide_context(ReviewedWorkflowSignal(RwSignal::new(None)));
 }
