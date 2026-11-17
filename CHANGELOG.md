@@ -150,6 +150,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   messages sit in a centered column, and the reply box is three lines tall
   with the "⌘↵ log reply, drafts stay local" hint. Command Enter logs the
   reply, as on the web.
+- The desktop Knowledge library lays out its records like the web's:
+  documents sit two to a row, each with its document icon, and each saved
+  source shows a bookmark.
 - A follow-up on Today opens that person's profile, on the web and in the
   desktop app, instead of only the People page.
 - Removed the workflow overview and What's new sections from the landing
