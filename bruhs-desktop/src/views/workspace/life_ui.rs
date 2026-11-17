@@ -52,6 +52,95 @@ fn provider_color(status: ProviderStatus) -> Hsla {
     }
 }
 
+/// Web `text-label`, each card's title.
+const CARD_TITLE_PX: f32 = 13.0;
+/// Web `text-body-sm`.
+const BODY_SM_PX: f32 = 13.0;
+/// Web `text-label-sm`.
+const LABEL_SM_PX: f32 = 12.0;
+/// Web's `lg` breakpoint: from here the record cards sit two to a row.
+const RECORD_GRID_TWO_COLUMNS_PX: f32 = 1024.0;
+/// Web's `md` breakpoint: from here the finance sources sit three to a row.
+const SOURCES_THREE_COLUMNS_PX: f32 = 768.0;
+/// Transactions a card lists, newest first (web `take(8)`).
+const TRANSACTION_ROWS: usize = 8;
+/// Workouts a card lists, newest first (web `take(6)`).
+const WORKOUT_ROWS: usize = 6;
+
+/// Web `CARD_CLASS` with its `h2` title.
+fn life_card(id: &'static str, title: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .debug_selector(move || format!("desktop-{id}"))
+        .min_w_0()
+        .rounded(px(6.0))
+        .bg(theme::longan_900().opacity(0.65))
+        .border_1()
+        .border_color(theme::longan_800())
+        .p_3()
+        .child(card_title(title))
+}
+
+fn card_title(title: impl Into<SharedString>) -> Div {
+    div()
+        .text_size(px(CARD_TITLE_PX))
+        .font_weight(FontWeight::MEDIUM)
+        .text_color(theme::rambutan_200())
+        .child(title.into())
+}
+
+/// Web `ROW`: one record on the tone below its card.
+fn life_row(id: impl Into<ElementId>) -> Stateful<Div> {
+    div()
+        .id(id)
+        .min_w_0()
+        .flex()
+        .flex_wrap()
+        .items_center()
+        .justify_between()
+        .gap_2()
+        .rounded(px(4.0))
+        .bg(theme::longan_950().opacity(0.45))
+        .px(px(10.0))
+        .py_2()
+}
+
+/// A row's name over its secondary label.
+fn row_label(name: String, detail: String) -> Div {
+    div()
+        .min_w_0()
+        .child(
+            div()
+                .text_size(px(BODY_SM_PX))
+                .text_color(theme::rambutan_300())
+                .child(name),
+        )
+        .child(
+            div()
+                .text_size(px(LABEL_SM_PX))
+                .text_color(theme::rambutan_400())
+                .child(detail),
+        )
+}
+
+fn row_amount(amount: String) -> Div {
+    div()
+        .min_w_0()
+        .font_family(theme::CODE_FONT_FAMILY)
+        .text_size(px(BODY_SM_PX))
+        .text_color(theme::rambutan_200())
+        .child(amount)
+}
+
+/// The record cards' grid: two to a row on wide windows, else one.
+fn record_grid(two_columns: bool, cards: Vec<AnyElement>) -> Div {
+    div()
+        .grid()
+        .grid_cols(if two_columns { 2 } else { 1 })
+        .gap_3()
+        .children(cards)
+}
+
 impl Workspace {
     fn clear_life_inputs(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         for input in [
@@ -60,6 +149,17 @@ impl Workspace {
             &self.life_category_input,
         ] {
             input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
+    }
+
+    /// Web: a transaction row's ×.
+    pub(super) fn delete_life_transaction(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+        let transactions = &mut self.life_context.finance.transactions;
+        let before = transactions.len();
+        transactions.retain(|transaction| transaction.id != id);
+        if transactions.len() != before {
+            self.life_context.finance.updated_at_ms = EpochMs::now().as_millis();
+            self.persist_and_notify(cx);
         }
     }
 
@@ -290,16 +390,11 @@ impl Workspace {
             .justify_between()
             .child(
                 div()
-                    .child(
-                        div()
-                            .text_size(px(12.0))
-                            .text_color(theme::rambutan_200())
-                            .child(if finance {
-                                "Finance privacy"
-                            } else {
-                                "Health privacy"
-                            }),
-                    )
+                    .child(card_title(if finance {
+                        "Finance privacy"
+                    } else {
+                        "Health privacy"
+                    }))
                     .child(
                         div()
                             .mt_1()
@@ -459,16 +554,11 @@ impl Workspace {
             .border_1()
             .border_color(theme::longan_800())
             .p_3()
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_200())
-                    .child(if finance {
-                        "Quick add finance"
-                    } else {
-                        "Quick add health"
-                    }),
-            )
+            .child(card_title(if finance {
+                "Quick add finance"
+            } else {
+                "Quick add health"
+            }))
             .child(
                 div()
                     .mt_2()
@@ -508,143 +598,188 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_finance_records(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let mut rows = Vec::new();
-        rows.extend(
-            self.life_context
-                .finance
-                .accounts
-                .iter()
-                .take(8)
-                .enumerate()
-                .map(|(index, account)| {
-                    let id = account.id.clone();
-                    div()
-                        .id(("life-account", index))
-                        .rounded(px(4.0))
-                        .bg(theme::longan_950().opacity(0.45))
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .justify_between()
-                        .child(
-                            div()
-                                .text_size(px(11.0))
-                                .text_color(theme::rambutan_300())
-                                .child(account.name.clone()),
-                        )
-                        .child(
-                            div()
-                                .flex()
-                                .gap_2()
-                                .child(
-                                    div()
-                                        .font_family(theme::CODE_FONT_FAMILY)
-                                        .text_size(px(11.0))
-                                        .text_color(theme::rambutan_200())
-                                        .child(money(account.balance_minor, &account.currency)),
+    /// Web `finance_tab`'s grid: Accounts, Transactions, Budgets & income
+    /// and Holdings.
+    fn render_finance_cards(&self, two_columns: bool, cx: &Context<'_, Self>) -> AnyElement {
+        let finance = &self.life_context.finance;
+        let accounts = finance
+            .accounts
+            .iter()
+            .enumerate()
+            .map(|(index, account)| {
+                let id = account.id.clone();
+                life_row(("life-account", index))
+                    .child(row_label(
+                        account.name.clone(),
+                        account.kind.label().to_string(),
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(row_amount(money(account.balance_minor, &account.currency)))
+                            .child(
+                                web_button(
+                                    ("delete-life-account", index),
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
                                 )
+                                .aria_label("Delete account")
                                 .child(
-                                    web_button(
-                                        ("delete-life-account", index),
-                                        WebButtonVariant::Ghost,
-                                        WebButtonSize::Small,
-                                        ButtonState::Enabled,
-                                    )
-                                    .aria_label("Delete account")
-                                    .child(
-                                        svg()
-                                            .path(assets::CLOSE_ICON_PATH)
-                                            .size(px(14.0))
-                                            .text_color(theme::rambutan_400()),
-                                    )
-                                    .on_click(cx.listener(
-                                        move |this, _event, _window, cx| {
-                                            this.life_context
-                                                .finance
-                                                .accounts
-                                                .retain(|item| item.id != id);
-                                            this.life_context.finance.updated_at_ms =
-                                                EpochMs::now().as_millis();
-                                            this.persist_and_notify(cx);
-                                        },
-                                    )),
-                                ),
-                        )
-                        .into_any_element()
-                }),
-        );
-        rows.extend(
-            self.life_context
-                .finance
-                .transactions
-                .iter()
-                .take(8)
-                .enumerate()
-                .map(|(index, transaction)| {
-                    div()
-                        .id(("life-transaction", index))
-                        .rounded(px(4.0))
-                        .bg(theme::longan_950().opacity(0.45))
-                        .px_3()
-                        .py_2()
-                        .flex()
-                        .justify_between()
-                        .child(
-                            div()
-                                .child(
-                                    div()
-                                        .text_size(px(11.0))
-                                        .text_color(theme::rambutan_300())
-                                        .child(transaction.merchant.clone()),
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(14.0))
+                                        .text_color(theme::rambutan_400()),
                                 )
-                                .child(
-                                    div()
-                                        .text_size(px(12.0))
-                                        .text_color(theme::rambutan_400())
-                                        .child(transaction.category.clone()),
-                                ),
-                        )
-                        .child(
-                            div()
-                                .font_family(theme::CODE_FONT_FAMILY)
-                                .text_size(px(11.0))
-                                .text_color(theme::rambutan_200())
-                                .child(money(transaction.amount_minor, &transaction.currency)),
-                        )
-                        .into_any_element()
-                }),
-        );
-        div()
-            .rounded(px(6.0))
-            .bg(theme::longan_900().opacity(0.65))
-            .border_1()
-            .border_color(theme::longan_800())
-            .p_3()
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_200())
-                    .child("Accounts & recent transactions"),
-            )
-            .when(rows.is_empty(), |panel| {
-                panel.child(
-                    div()
-                        .mt_2()
-                        .text_size(px(11.0))
-                        .text_color(theme::rambutan_400())
-                        .child("No finance records yet."),
-                )
+                                .on_click(cx.listener(
+                                    move |this, _event, _window, cx| {
+                                        this.life_context
+                                            .finance
+                                            .accounts
+                                            .retain(|item| item.id != id);
+                                        this.life_context.finance.updated_at_ms =
+                                            EpochMs::now().as_millis();
+                                        this.persist_and_notify(cx);
+                                    },
+                                )),
+                            ),
+                    )
+                    .into_any_element()
             })
-            .children(rows)
-            .into_any_element()
+            .collect::<Vec<_>>();
+        let transactions = finance
+            .transactions
+            .iter()
+            .take(TRANSACTION_ROWS)
+            .enumerate()
+            .map(|(index, transaction)| {
+                let id = transaction.id.clone();
+                life_row(("life-transaction", index))
+                    .debug_selector(move || format!("desktop-life-transaction-{index}"))
+                    .child(row_label(
+                        transaction.merchant.clone(),
+                        transaction.category.clone(),
+                    ))
+                    .child(
+                        div()
+                            .flex()
+                            .flex_wrap()
+                            .items_center()
+                            .gap_2()
+                            .child(row_amount(money(
+                                transaction.amount_minor,
+                                &transaction.currency,
+                            )))
+                            .child(
+                                web_button(
+                                    ("delete-life-transaction", index),
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(move || {
+                                    format!("desktop-life-delete-transaction-{index}")
+                                })
+                                .aria_label("Delete transaction")
+                                .child(
+                                    svg()
+                                        .path(assets::CLOSE_ICON_PATH)
+                                        .size(px(14.0))
+                                        .text_color(theme::rambutan_400()),
+                                )
+                                .on_click(cx.listener(
+                                    move |this, _event, _window, cx| {
+                                        this.delete_life_transaction(&id, cx);
+                                    },
+                                )),
+                            ),
+                    )
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        let holdings = finance
+            .holdings
+            .iter()
+            .enumerate()
+            .map(|(index, holding)| {
+                div()
+                    .id(("life-holding", index))
+                    .debug_selector(move || format!("desktop-life-holding-{index}"))
+                    .max_w_full()
+                    .rounded(px(4.0))
+                    .bg(theme::longan_950().opacity(0.45))
+                    .px(px(10.0))
+                    .py(px(6.0))
+                    .font_family(theme::CODE_FONT_FAMILY)
+                    .text_size(px(BODY_SM_PX))
+                    .text_color(theme::rambutan_300())
+                    .child(holding.label())
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        record_grid(
+            two_columns,
+            vec![
+                life_card("life-accounts", "Accounts")
+                    .child(div().mt_2().flex().flex_col().gap_1().children(accounts))
+                    .into_any_element(),
+                life_card("life-transactions", "Transactions")
+                    .child(
+                        div()
+                            .mt_2()
+                            .flex()
+                            .flex_col()
+                            .gap_1()
+                            .children(transactions),
+                    )
+                    .into_any_element(),
+                life_card("life-budgets", "Budgets & income")
+                    .child(
+                        div()
+                            .mt_2()
+                            .text_size(px(BODY_SM_PX))
+                            .text_color(theme::rambutan_500())
+                            .child(finance.budgets_and_income_summary()),
+                    )
+                    .into_any_element(),
+                life_card("life-holdings", "Holdings")
+                    .child(div().mt_2().flex().flex_wrap().gap_2().children(holdings))
+                    .into_any_element(),
+            ],
+        )
+        .into_any_element()
     }
 
-    fn render_health_records(&self, cx: &Context<'_, Self>) -> AnyElement {
+    /// Web `health_tab`'s grid: Workout, Sleep & recovery, Habits and the
+    /// health sources.
+    fn render_health_cards(&self, two_columns: bool, cx: &Context<'_, Self>) -> AnyElement {
+        let health = &self.life_context.health;
         let today = EpochMs::now().as_millis().div_euclid(86_400_000);
-        let habits = self
-            .life_context
-            .health
+        let workouts = health
+            .workouts
+            .iter()
+            .take(WORKOUT_ROWS)
+            .enumerate()
+            .map(|(index, workout)| {
+                div()
+                    .id(("life-workout", index))
+                    .rounded(px(4.0))
+                    .bg(theme::longan_950().opacity(0.45))
+                    .px(px(10.0))
+                    .py_2()
+                    .text_size(px(BODY_SM_PX))
+                    .text_color(theme::rambutan_300())
+                    .child(format!(
+                        "{}, {} min, effort {}/10",
+                        workout.activity, workout.duration_minutes, workout.perceived_exertion
+                    ))
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        let habits = health
             .habits
             .iter()
             .filter(|habit| !habit.archived)
@@ -654,20 +789,33 @@ impl Workspace {
                 let done = habit.completion_days.contains(&today);
                 web_button(
                     ("life-habit", index),
-                    WebButtonVariant::Outline,
+                    WebButtonVariant::Ghost,
                     WebButtonSize::Small,
                     ButtonState::Enabled,
                 )
+                .w_full()
+                .justify_between()
+                .px(px(10.0))
+                .rounded(px(4.0))
+                .bg(if done {
+                    theme::pandan_500().opacity(0.1)
+                } else {
+                    theme::longan_950().opacity(0.45)
+                })
+                .text_size(px(BODY_SM_PX))
+                .text_color(if done {
+                    theme::pandan_300()
+                } else {
+                    theme::rambutan_300()
+                })
                 .aria_label(format!(
                     "{} {}",
                     if done { "Unmark" } else { "Complete" },
                     habit.title
                 ))
-                .child(format!(
-                    "{}, {}",
-                    habit.title,
-                    if done { "Done today" } else { "Mark done" }
-                ))
+                .aria_toggled(if done { Toggled::True } else { Toggled::False })
+                .child(div().min_w_0().child(habit.title.clone()))
+                .child(if done { "Done today" } else { "Mark done" })
                 .on_click(cx.listener(move |this, _event, _window, cx| {
                     if let Some(habit) = this
                         .life_context
@@ -684,44 +832,29 @@ impl Workspace {
                 .into_any_element()
             })
             .collect::<Vec<_>>();
-        let workouts = self
-            .life_context
-            .health
-            .workouts
-            .iter()
-            .take(8)
-            .enumerate()
-            .map(|(index, workout)| {
-                div()
-                    .id(("life-workout", index))
-                    .rounded(px(4.0))
-                    .bg(theme::longan_950().opacity(0.45))
-                    .px_3()
-                    .py_2()
-                    .text_size(px(11.0))
-                    .text_color(theme::rambutan_300())
-                    .child(format!(
-                        "{}, {} min, effort {}/10",
-                        workout.activity, workout.duration_minutes, workout.perceived_exertion
-                    ))
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
-        div()
-            .rounded(px(6.0))
-            .bg(theme::longan_900().opacity(0.65))
-            .border_1()
-            .border_color(theme::longan_800())
-            .p_3()
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_200())
-                    .child("Habits & workouts"),
-            )
-            .child(div().mt_2().flex().flex_wrap().gap_1().children(habits))
-            .children(workouts)
-            .into_any_element()
+        record_grid(
+            two_columns,
+            vec![
+                life_card("life-workouts", "Workout")
+                    .child(div().mt_2().flex().flex_col().gap_1().children(workouts))
+                    .into_any_element(),
+                life_card("life-sleep", "Sleep & recovery")
+                    .child(
+                        div()
+                            .debug_selector(|| "desktop-life-sleep-summary".into())
+                            .mt_2()
+                            .text_size(px(BODY_SM_PX))
+                            .text_color(theme::rambutan_500())
+                            .child(health.sleep_and_recovery_summary()),
+                    )
+                    .into_any_element(),
+                life_card("life-habits", "Habits")
+                    .child(div().mt_2().flex().flex_col().gap_1().children(habits))
+                    .into_any_element(),
+                self.render_life_providers(false),
+            ],
+        )
+        .into_any_element()
     }
 
     fn render_life_insights(&self, cx: &Context<'_, Self>) -> AnyElement {
@@ -804,12 +937,7 @@ impl Workspace {
             .border_1()
             .border_color(theme::longan_800())
             .p_3()
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_200())
-                    .child("Observations with evidence"),
-            )
+            .child(card_title("Observations with evidence"))
             .child(
                 div()
                     .mt_1()
@@ -830,8 +958,11 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn render_life_providers(&self) -> AnyElement {
-        let providers = if self.life_tab == DesktopLifeTab::Finance {
+    /// Web "Finance sources" (three to a row from `md`) and "Health
+    /// sources" (one column, in the health grid).
+    fn render_life_providers(&self, three_columns: bool) -> AnyElement {
+        let finance = self.life_tab == DesktopLifeTab::Finance;
+        let providers = if finance {
             finance_provider_adapters()
         } else {
             health_provider_adapters()
@@ -872,24 +1003,29 @@ impl Workspace {
                     .into_any_element()
             })
             .collect::<Vec<_>>();
-        div()
-            .rounded(px(6.0))
-            .bg(theme::longan_900().opacity(0.65))
-            .border_1()
-            .border_color(theme::longan_800())
-            .p_3()
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_200())
-                    .child("Sources"),
-            )
-            .children(rows)
-            .into_any_element()
+        life_card(
+            "life-sources",
+            if finance {
+                "Finance sources"
+            } else {
+                "Health sources"
+            },
+        )
+        .child(
+            div()
+                .mt_2()
+                .grid()
+                .grid_cols(if three_columns { 3 } else { 1 })
+                .gap_2()
+                .children(rows),
+        )
+        .into_any_element()
     }
 
     pub(super) fn render_life_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
         let compact = Self::compact_layout(window);
+        let width = f32::from(window.viewport_size().width);
+        let two_columns = width >= RECORD_GRID_TWO_COLUMNS_PX;
         let finance = self.life_tab == DesktopLifeTab::Finance;
         let summary = if finance {
             vec![
@@ -1046,13 +1182,17 @@ impl Workspace {
                     .child(div().flex().flex_wrap().gap_2().children(summary))
                     .child(self.render_life_privacy(cx))
                     .child(self.render_life_quick_add(compact, cx))
+                    // Web order: the record cards, then the finance sources;
+                    // the health sources share its grid.
                     .child(if finance {
-                        self.render_finance_records(cx)
+                        self.render_finance_cards(two_columns, cx)
                     } else {
-                        self.render_health_records(cx)
+                        self.render_health_cards(two_columns, cx)
                     })
-                    .child(self.render_life_insights(cx))
-                    .child(self.render_life_providers()),
+                    .when(finance, |page| {
+                        page.child(self.render_life_providers(width >= SOURCES_THREE_COLUMNS_PX))
+                    })
+                    .child(self.render_life_insights(cx)),
             )
     }
 }
@@ -1086,6 +1226,9 @@ impl Workspace {
         }
     }
 }
+
+#[cfg(test)]
+mod parity_tests;
 
 #[cfg(test)]
 mod money_tests {

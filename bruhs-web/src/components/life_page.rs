@@ -653,13 +653,7 @@ fn transactions(page: Page) -> impl IntoView {
 
 fn budgets_and_income(page: Page) -> impl IntoView {
     let (life, i) = (page.life, page.inputs);
-    let summary = move || {
-        format!(
-            "{} budgets, {} income streams",
-            life.with(|context| context.finance.budgets.len()),
-            life.with(|context| context.finance.income_streams.len())
-        )
-    };
+    let summary = move || life.with(|context| context.finance.budgets_and_income_summary());
     view! {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Budgets & income"</h2>
@@ -684,7 +678,7 @@ fn holdings(page: Page) -> impl IntoView {
             .map(|holding| {
                 view! {
                     <span class="max-w-full [overflow-wrap:anywhere] rounded-seed bg-longan-950/45 px-2.5 py-1.5 font-mono text-body-sm text-rambutan-300">
-                        {format!("{}, {}", holding.symbol, money(holding.current_value_minor, &holding.currency))}
+                        {holding.label()}
                     </span>
                 }
             })
@@ -822,13 +816,7 @@ fn workouts(page: Page) -> impl IntoView {
 
 fn sleep_and_recovery(page: Page) -> impl IntoView {
     let (life, i) = (page.life, page.inputs);
-    let summary = move || {
-        format!(
-            "{} sleep logs, {} recovery logs",
-            life.with(|context| context.health.sleep.len()),
-            life.with(|context| context.health.recovery.len())
-        )
-    };
+    let summary = move || life.with(|context| context.health.sleep_and_recovery_summary());
     view! {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Sleep & recovery"</h2>

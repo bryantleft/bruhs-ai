@@ -9,6 +9,8 @@ use uuid::Uuid;
 
 use super::{format_money_totals, normalized_currency, MoneyError, MoneyTotals, WorkItem};
 
+mod summaries;
+
 const DAY_MS: i64 = 86_400_000;
 
 fn default_currency() -> String {
