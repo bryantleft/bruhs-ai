@@ -34,11 +34,11 @@ then move it to the matching list below.
 | PM-02 | Workspace agent tools over the local MCP connection, with session enable/revoke, grants, proposals, review, decline and undo review | Workflows and automations | missing | implemented (Unix) | web | none; `workspace/mcp_bridge/` | PEOPLE-12 verified on desktop | In progress (PARITY-03) |
 | PM-03 | Decline a workflow proposal; browse older workflows; a previewed workflow survives reload | Workflows and automations | partial | implemented | web | `components/automations_page.rs:17,89-125,228-262`; `automations_ui.rs:889-895`, `automations_ui/history_ui.rs:28-92` | open | Open; part of PARITY-03 review |
 | PM-04 | Rename a thread | Chat and code | implemented | missing | desktop | `components/chat_header.rs:57-83`; `chat/composer_ui.rs` (title is text) | open | Open |
-| PM-05 | `/model` opens the model picker | Chat and code | implemented | partial (opens Settings) | desktop | `mention_editor.rs:563-565`; `chat/hints_ui.rs:296-299` | open | Open |
+| PM-05 | `/model` opens the model picker | Chat and code | implemented | implemented | — | `mention_editor.rs:563-565`; `chat/hints_ui.rs:301-308` | Desktop test `model_slash_command_opens_the_model_picker_like_web` | Closed in a97381d8 |
 | PM-06 | Codex sign-in banner and sign-in status in the model picker | Chat and code | implemented | missing | desktop | `components/auth_banner.rs:30,168`, `model_picker.rs:65-75`; `chat/auth.rs:67`, `model_picker_ui.rs:681` | open | Open |
-| PM-07 | Palette: New terminal; Open project in editor | Chat and code | implemented | partial (other controls) | desktop | `command_bar.rs:326,350`; `terminal_panel.rs:510`, `keybindings_ui.rs:735` | open | Open |
-| PM-08 | Palette: Open a local server… | Chat and code | partial (preview panel only) | implemented | web | `components/preview_panel.rs:129`; `palette_ui.rs:253,628-668` | open | Open |
-| PM-09 | Open in system Terminal | Chat and code | missing | implemented | web | none; `palette_ui.rs:247,523` | open | Open: needs a local server route |
+| PM-07 | Palette: New terminal; Open project in editor | Chat and code | implemented | implemented | — | `command_bar.rs:331,367`; `palette_ui.rs:248,284`, `panels_ui.rs:468` | Desktop tests `native_palette_terminal_and_editor_entries_should_act_like_web`, `command_actions_should_match_web_reference` | Closed in 3d0b65f0 |
+| PM-08 | Palette: Open a local server… | Chat and code | implemented | implemented | — | `command_bar.rs:343,791,1188`; `palette_ui.rs:260,645,753`; shared copy `logic/preview.rs` | Web: headless Chrome against a stand-in server (scan states, filter, new tab, reopen in commands) | Closed in 97fb98ba |
+| PM-09 | Open in system Terminal | Chat and code | implemented | implemented | — | `command_bar.rs:337,882`, server `routes/editor.rs:60`; `palette_ui.rs:254`, `panels_ui.rs:529`; launcher `bruhs_core::editor` | Server test `a_terminal_outside_home_is_refused_before_launch`; web request checked in headless Chrome; no real Terminal launched | Closed in 97fb98ba |
 | PM-10 | Return to the last view after restart (Workbench, Whiteboards, detail views) | Shared shell | implemented | partial | desktop | `app.rs:113-121`; `workspace/persisted_enum.rs:60-79` | open | Open |
 | PM-11 | Addressable links to views and records | Shared shell | implemented (hash routes) | partial (`bruhs://thread/` in ⌘K only) | desktop | `app.rs:12-83,142-176`; `palette_ui.rs:334-341` | open | Open: needs an OS URL handler |
 | PM-12 | Knowledge library search | Knowledge and capture | implemented | missing | desktop | `knowledge_page.rs:140`; `knowledge_ui.rs` | open | Open |
@@ -48,8 +48,8 @@ then move it to the matching list below.
 | PM-16 | Holdings list | Finance | implemented | partial (net worth only) | desktop | `life_page.rs:679`; `life_ui.rs:896` | open | Open |
 | PM-17 | Sleep and recovery history | Health | implemented | partial (latest card) | desktop | `life_page.rs:823`; `life_ui.rs:921` | open | Open |
 | PM-18 | Link or unlink a person on an imported conversation | Inbox | implemented | missing | desktop | `inbox_page.rs:316-324`; `inbox_ui.rs:566-835` | INBOX-08 open | Open |
-| PM-19 | Auto-link an imported sender to the one matching profile | Inbox | missing | implemented | web | `inbox_page.rs:97`; `inbox_ui.rs:62` | People record, desktop test | Open |
-| PM-20 | Confirm before deleting an imported conversation | Inbox | missing | implemented | web | `inbox_page.rs:303-312`; `modal_ui.rs:294-344` | INBOX-09 open | Open |
+| PM-19 | Auto-link an imported sender to the one matching profile | Inbox | implemented | implemented | — | `inbox_page.rs:101`; `inbox_ui.rs:62` | Web: headless Chrome with seeded profiles (case folded match links, an ambiguous name stays unlinked); desktop test | Closed in 5fd7105c |
+| PM-20 | Confirm before deleting an imported conversation | Inbox | implemented | implemented | — | `inbox_page.rs:261,358`; `modal_ui.rs:342`; shared copy `models/inbox.rs` | Web: headless Chrome (Cancel keeps, Delete removes); INBOX-09 stays open for reload and provider guarantees | Closed in 5fd7105c |
 | PM-21 | Open a recent decision's source meeting from Today | Today | implemented | missing | desktop | `today_page.rs:475`; `today_ui.rs:815-830` | TODAY-09 open | Open |
 | PM-22 | Open a follow-up's source person from Today | Today | partial (People page) | missing | both | `today_page.rs:456`; `today_ui.rs:792-810` | TODAY-09 open | Open |
 | PM-23 | Recover from a day-plan save failure (Dismiss, Refresh, Retry) | Today | implemented | partial (text only) | desktop | `today_page.rs:318-335`; `today_ui.rs:706-714` | TODAY-07 verified on web | Open |
@@ -65,7 +65,7 @@ then move it to the matching list below.
 | PM-33 | Send a dictation draft from Workbench Verification into the composer | Workbench | implemented | missing | desktop | `components/workbench.rs:21-56`; `views/workbench.rs:10-31` | open | Open |
 | PM-34 | App-event topic picker in the advanced source editor | Workflows and automations | implemented | partial (free text) | desktop | `reactive_automations/setup.rs:231`; `views/reactive_automations.rs:978` | open | Open |
 | PM-35 | Local app context during a meeting | Meetings | missing | implemented | web | `meeting_live.rs:237`; `meetings_hub/local_focus.rs` | open | Open: OS-bound; needs an authorized equivalent or a recorded constraint |
-| PM-36 | `thread.continueInWorkbench` shortcut | Workbench | partial (saved rule only) | missing | both | `command_bar.rs:523`; `keybindings_ui.rs` | open | Open: add to the shared shortcut list |
+| PM-36 | `thread.continueInWorkbench` shortcut | Workbench | implemented | implemented | — | shared `logic/keybindings.rs:75`; `command_bar.rs:544`; `keybindings_ui.rs:158,736`, `import_ui.rs:659` | Desktop tests `every_default_command_is_bound_or_is_sidebar_undo`, `binding_names_match_the_action_types`; web test `nav_and_shortcut_tables_are_well_formed` | Closed in 43542e27 |
 
 ## Product gaps on both surfaces
 
