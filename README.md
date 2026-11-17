@@ -58,7 +58,9 @@ See [agent runtimes and models](docs/agent-providers.md) for setup and access mo
   changes, webhooks, schedules and meeting events while the local server runs.
   One reviewed setup enables each automation, with a single Pause/Resume control.
   Setup can also be proposed through chat; drafts enter workflow review before
-  writes. See [reactive agents](docs/reactive-agents.md).
+  writes. Each agent is a bruh with its own face and an access level, from
+  Read only to Full. See [reactive agents](docs/reactive-agents.md) and the
+  [crew](docs/crew.md).
 - **Private credentials.** When an agent needs a secret, it asks through a
   separate form; the value goes to the OS keychain and never into the chat.
   See [credential requests](docs/secure-credential-requests.md).
