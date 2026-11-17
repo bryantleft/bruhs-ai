@@ -1,3 +1,8 @@
+use bruhs_models::logic::preview::{
+    local_server_label, local_server_matches, local_server_url, LOCAL_SERVERS_GROUP,
+    LOCAL_SERVERS_NONE, LOCAL_SERVERS_OPEN_HINT, LOCAL_SERVERS_SCANNING,
+    LOCAL_SERVERS_SCANNING_HINT,
+};
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 use web_sys::KeyboardEvent;
@@ -59,6 +64,8 @@ enum ActionId {
     ToggleTasks,
     ToggleTerminal,
     NewTerminal,
+    OpenSystemTerminal,
+    LocalServers,
     TogglePreview,
     ToggleFiles,
     StashPrompt,
@@ -327,6 +334,18 @@ const ACTIONS: &[Action] = &[
         hint: "project or home",
     },
     Action {
+        id: ActionId::OpenSystemTerminal,
+        group: "View",
+        label: "Open in system Terminal",
+        hint: "app",
+    },
+    Action {
+        id: ActionId::LocalServers,
+        group: "View",
+        label: "Open a local server…",
+        hint: "servers",
+    },
+    Action {
         id: ActionId::TogglePreview,
         group: "View",
         label: "Toggle preview",
@@ -457,6 +476,8 @@ mod tests {
                 "Toggle tasks panel",
                 "Toggle terminal",
                 "New terminal",
+                "Open in system Terminal",
+                "Open a local server…",
                 "Toggle preview",
                 "Toggle files panel",
                 "Stash prompt",
@@ -741,12 +762,19 @@ pub fn CommandBar() -> impl IntoView {
     // clamped to the current results.
     let (picked_index, set_selected_index) = signal(0usize);
     let input_ref: NodeRef<leptos::html::Input> = NodeRef::new();
+    // "Open a local server…" turns the bar into a list of localhost
+    // listeners, as on desktop; picking one opens it in a new tab.
+    let servers_mode = RwSignal::new(false);
+    let servers = RwSignal::new(Vec::<crate::api::LocalServer>::new());
+    let servers_loading = RwSignal::new(false);
+    let servers_scan = RwSignal::new(0u32);
 
     // Reset state and refocus the input every time the dialog opens, so typing
     // from an arbitrary prior state can't produce stale filter results.
     Effect::new(move |_| {
         if command_bar_open.get() {
             local_search.load_history.run(());
+            servers_mode.set(false);
             set_query.set(String::new());
             set_selected_index.set(0);
             if let Some(el) = input_ref.get() {
@@ -757,16 +785,36 @@ pub fn CommandBar() -> impl IntoView {
 
     // Filter actions case-insensitively against label + group + hint.
     let filtered = Memo::new(move |_| {
+        if servers_mode.get() {
+            return Vec::new();
+        }
         let query = query.get();
         grouped_actions_for_query(&query)
     });
     let records = Memo::new(move |_| {
-        if !command_bar_open.get() || query.with(|value| value.trim().is_empty()) {
+        if !command_bar_open.get()
+            || servers_mode.get()
+            || query.with(|value| value.trim().is_empty())
+        {
             return Vec::new();
         }
         query.with(|query| local_search.index.with(|index| index.search(query, 20)))
     });
-    let result_count = move || filtered.with(Vec::len) + records.with(Vec::len);
+    let server_items = Memo::new(move |_| {
+        if !servers_mode.get() {
+            return Vec::new();
+        }
+        query.with(|query| {
+            servers.with(|list| {
+                list.iter()
+                    .filter(|server| local_server_matches(server.port, &server.command, query))
+                    .cloned()
+                    .collect::<Vec<_>>()
+            })
+        })
+    });
+    let result_count =
+        move || filtered.with(Vec::len) + records.with(Vec::len) + server_items.with(Vec::len);
     let selected_index =
         Memo::new(move |_| clamp_selected_index(picked_index.get(), result_count()));
 
@@ -777,6 +825,31 @@ pub fn CommandBar() -> impl IntoView {
     };
 
     let on_close_cb = Callback::new(move |_: ()| close());
+
+    // A later scan replaces an earlier one that answers late.
+    let scan_servers = move || {
+        let scan = servers_scan.get_untracked().wrapping_add(1);
+        servers_scan.set(scan);
+        servers_loading.set(true);
+        wasm_bindgen_futures::spawn_local(async move {
+            let list = crate::api::list_local_servers()
+                .await
+                .unwrap_or_else(|error| {
+                    log::warn!("palette: local server scan failed: {error}");
+                    Vec::new()
+                });
+            if servers_scan.try_get_untracked() == Some(scan) {
+                let _ = servers.try_set(list);
+                let _ = servers_loading.try_set(false);
+            }
+        });
+    };
+    let open_server = move |port: u16| {
+        if let Some(window) = web_sys::window() {
+            let _ = window.open_with_url_and_target(&local_server_url(port), "_blank");
+        }
+        close();
+    };
 
     let catalog = expect_context::<crate::thread_catalog::ThreadCatalog>();
     let execute_action = move |id: ActionId| {
@@ -803,6 +876,32 @@ pub fn CommandBar() -> impl IntoView {
             ActionId::NavPeople => set_active_view.set(AppView::People),
             ActionId::NavSearch => set_active_view.set(AppView::Search),
             ActionId::NavTerminal => set_active_view.set(AppView::Terminal),
+            ActionId::OpenSystemTerminal => {
+                // Like desktop: the thread's project, else home.
+                let path = active_thread_id.get_untracked().and_then(|id| {
+                    threads.with_untracked(|ts| {
+                        ts.iter()
+                            .find(|t| t.id == id)
+                            .and_then(|t| t.project_path.clone())
+                    })
+                });
+                wasm_bindgen_futures::spawn_local(async move {
+                    if let Err(error) = crate::api::open_in_terminal(path.as_deref()).await {
+                        thread_notice.flash(format!("Could not open Terminal: {error}"));
+                    }
+                });
+            }
+            ActionId::LocalServers => {
+                servers_mode.set(true);
+                set_query.set(String::new());
+                set_selected_index.set(0);
+                scan_servers();
+                if let Some(el) = input_ref.get() {
+                    let _ = el.focus();
+                }
+                // The bar stays open on the server list.
+                return;
+            }
             ActionId::NewTerminal => {
                 let ctx = active_thread_id
                     .get_untracked()
@@ -1010,6 +1109,15 @@ pub fn CommandBar() -> impl IntoView {
 
         if key == "Enter" {
             let selected = selected_index.get_untracked();
+            if servers_mode.get_untracked() {
+                if let Some(server) =
+                    server_items.with_untracked(|items| items.get(selected).cloned())
+                {
+                    ev.prevent_default();
+                    open_server(server.port);
+                }
+                return;
+            }
             if let Some(action) = actions.get(selected) {
                 ev.prevent_default();
                 execute_action(action.id);
@@ -1066,8 +1174,60 @@ pub fn CommandBar() -> impl IntoView {
             // Grouped action list. Each group renders its uppercase heading
             // followed by its filtered items (TS Command.Group pattern).
             // Keep the selected row visible within the viewport-bound scroller.
+            <Show when=move || servers_mode.get()>
+                <div data-command-mode="" class="flex items-center gap-2 px-5 pt-2 text-label-sm text-rambutan-500">
+                    <span class="rounded-grape bg-longan-700 px-2 py-0.5 text-rambutan-200">{LOCAL_SERVERS_GROUP}</span>
+                    {move || if servers_loading.get() { LOCAL_SERVERS_SCANNING_HINT } else { LOCAL_SERVERS_OPEN_HINT }}
+                </div>
+            </Show>
             <div id="command-results" role="listbox" aria-label="Commands and records" class="max-h-[min(36rem,calc(100dvh-16rem))] overflow-y-auto px-2 py-2">
                 {move || {
+                    if servers_mode.get() {
+                        let items = server_items.get();
+                        if items.is_empty() {
+                            let label = if servers_loading.get() { LOCAL_SERVERS_SCANNING } else { LOCAL_SERVERS_NONE };
+                            return view! {
+                                <div class="px-4 py-8 text-center text-label-sm text-rambutan-300">{label}</div>
+                            }.into_any();
+                        }
+                        let rows = items.into_iter().enumerate().map(|(idx, server)| {
+                            let port = server.port;
+                            let row_class = move || {
+                                let base = "flex w-full items-center justify-between gap-3 rounded-grape px-3 py-2 text-label-sm transition-colors cursor-pointer";
+                                if selected_index.get() == idx {
+                                    format!("{base} bg-longan-700/70 text-rambutan-100")
+                                } else {
+                                    format!("{base} text-rambutan-200 hover:bg-longan-700/70 hover:text-rambutan-100")
+                                }
+                            };
+                            view! {
+                                <button
+                                    type="button"
+                                    role="option"
+                                    id=format!("command-result-{idx}")
+                                    on:click=move |_| open_server(port)
+                                    on:mousemove=move |event: web_sys::MouseEvent| {
+                                        if event.movement_x() != 0 || event.movement_y() != 0 {
+                                            set_selected_index.set(idx);
+                                        }
+                                    }
+                                    aria-selected=move || (selected_index.get() == idx).to_string()
+                                    class=row_class
+                                >
+                                    <span class="shrink-0">{local_server_label(port)}</span>
+                                    <span class="min-w-0 truncate text-label-sm text-rambutan-300">{server.command}</span>
+                                </button>
+                            }
+                        }).collect_view();
+                        return view! {
+                            <div class="mb-1">
+                                <div class="px-3 pb-1 text-label-sm uppercase tracking-widest text-rambutan-400">
+                                    {LOCAL_SERVERS_GROUP}
+                                </div>
+                                {rows}
+                            </div>
+                        }.into_any();
+                    }
                     let actions = filtered.get();
                     if actions.is_empty() && records.with(Vec::is_empty) {
                         return view! {

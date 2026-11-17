@@ -1,6 +1,6 @@
 //! "Open in editor": resolves an editor from the shared table in
 //! `bruhs_models::logic::editor` and spawns it detached. Shared by the server
-//! route and the desktop.
+//! route and the desktop, as is opening the system terminal at a folder.
 
 use std::path::Path;
 
@@ -66,6 +66,34 @@ pub fn open_in_editor(
     Ok(editor)
 }
 
+/// The command that opens the system terminal at `path`: Terminal on macOS,
+/// the `x-terminal-emulator` alternative elsewhere.
+pub fn system_terminal_command(path: &str) -> (String, Vec<String>) {
+    if cfg!(target_os = "macos") {
+        (
+            "open".to_string(),
+            vec!["-a".to_string(), "Terminal".to_string(), path.to_string()],
+        )
+    } else {
+        (
+            "x-terminal-emulator".to_string(),
+            vec!["--working-directory".to_string(), path.to_string()],
+        )
+    }
+}
+
+/// Open the system terminal at `path`, detached.
+pub fn open_system_terminal(path: &Path) -> std::io::Result<()> {
+    let (program, args) = system_terminal_command(&path.to_string_lossy());
+    let mut command = std::process::Command::new(program);
+    command
+        .args(args)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null());
+    spawn_reaped(command).map(|_| ())
+}
+
 /// Spawn `command` detached and wait for it on a small thread so it is
 /// reaped when it exits instead of lingering as a zombie. The handle yields
 /// the exit status; callers may drop it. `None` when the editor started but
@@ -99,6 +127,18 @@ mod tests {
         let waiter = spawn_reaped(command).unwrap().unwrap();
         let status = waiter.join().unwrap().unwrap();
         assert_eq!(status.code(), Some(7));
+    }
+
+    #[test]
+    fn the_system_terminal_opens_at_the_folder() {
+        let (program, args) = system_terminal_command("/tmp/proj");
+        if cfg!(target_os = "macos") {
+            assert_eq!(program, "open");
+            assert_eq!(args, vec!["-a", "Terminal", "/tmp/proj"]);
+        } else {
+            assert_eq!(program, "x-terminal-emulator");
+            assert_eq!(args.last().map(String::as_str), Some("/tmp/proj"));
+        }
     }
 
     #[test]

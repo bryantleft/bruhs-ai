@@ -232,6 +232,15 @@ pub async fn open_in_editor(
     Ok(opened.editor)
 }
 
+/// Open the system terminal at `path`, or at home without one, on the
+/// machine bruhs-server runs on.
+pub async fn open_in_terminal(path: Option<&str>) -> Result<(), ApiError> {
+    let body = serde_json::json!({ "path": path });
+    send(Method::POST, "/api/open-in-terminal", Some(&body))
+        .await
+        .map(drop)
+}
+
 /// Local TCP listeners the Preview surface can offer.
 pub async fn list_local_servers() -> Result<Vec<LocalServer>, ApiError> {
     let reply: LocalServersResponse = get_json("/api/preview/servers").await?;
