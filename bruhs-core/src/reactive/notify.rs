@@ -153,6 +153,7 @@ mod tests {
             resolved_at: None,
             answer: None,
             system: SystemDelivery::Pending,
+            approval: None,
         }
     }
 

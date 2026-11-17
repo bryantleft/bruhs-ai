@@ -5,23 +5,109 @@ use crate::{
     server_client::{ReactiveHookToken, ServerClient, ServerError},
     theme,
 };
+use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
+use bruhs_models::crew::{
+    agent_run_level, auto_run_note, event_policy, event_policy_line, run_reviewed_label,
+    saved_agent_level, service_is_current, service_notice, AccessLevel, BruhState, ServiceNotice,
+};
 use bruhs_models::reactive::*;
 use gpui_component::zoom::px;
+mod bruh_page;
+mod create_bruh;
 mod editor_fields;
+mod face_editor;
 mod memory;
 mod notifications;
 mod runs;
 mod setup;
 mod updates;
 mod weekly_reports;
+pub(crate) use bruh_page::ReactiveOpenAutomations;
+pub(crate) use create_bruh::ReactiveBruhCreated;
 use gpui::{prelude::*, *};
 use gpui_component::input::{Input, InputEvent, InputState};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
     time::{Duration, Instant},
 };
 pub(crate) use updates::{unread_badge, unread_label};
+
+/// The service's live crew frames: bruh states and its protocol.
+const CREW_STREAM_PATH: &str = "/api/reactive/stream";
+/// An older service is updated automatically at most once per launch.
+static AUTO_UPDATE_TRIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A local date and time for an instant, as the automation cards write it.
+pub(crate) fn local_time(at: bruhs_models::EpochMs) -> String {
+    updates::local_time(at)
+}
+
+/// Why ⌘. stopped nothing before the service ever answered.
+const SERVICE_UNREACHABLE: &str = "the background service hasn't answered yet";
+
+/// The auto run switch's label: the policy, and that it is on.
+fn auto_run_control(auto_run: bool, level: AccessLevel) -> String {
+    if auto_run {
+        format!("{}: On", event_policy(true, level))
+    } else {
+        event_policy(false, level)
+    }
+}
+
+/// The installed service's crew protocol. An installed service whose release
+/// can't say counts as the oldest.
+fn installed_protocol(service: &BackgroundService) -> Option<u32> {
+    service
+        .installed
+        .then(|| service.reactive_protocol.unwrap_or(0))
+}
+
+/// How the app can bring an older service up to date.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ServiceUpdate {
+    /// The current server installs itself as the login service.
+    InstallFromServer,
+    /// The bundle's own `bruhs-server service install`: the answering server
+    /// is the old one, and installing through it would copy itself again.
+    Bundled,
+}
+
+/// Whether `update` may run without a click: only a release build installs
+/// itself. A debug server (a worktree's `cargo run`) or a debug app waits
+/// for Update service.
+fn auto_update_allowed(update: ServiceUpdate, serving_debug: bool, app_debug: bool) -> bool {
+    match update {
+        ServiceUpdate::InstallFromServer => !serving_debug,
+        ServiceUpdate::Bundled => !app_debug,
+    }
+}
+
+/// The update for `notice`, when this launch has one.
+fn service_update(notice: ServiceNotice, bundled: bool) -> Option<ServiceUpdate> {
+    match notice {
+        ServiceNotice::InstalledOld => Some(ServiceUpdate::InstallFromServer),
+        ServiceNotice::ServingOld => bundled.then_some(ServiceUpdate::Bundled),
+    }
+}
+
+/// The crew as the rail shows it, kept current by the live stream.
+#[derive(Default)]
+struct CrewState {
+    bruhs: Vec<BruhState>,
+    /// The serving service's crew protocol, once a frame or snapshot says.
+    protocol: Option<u32>,
+    /// The installed login service's protocol; `None` when none is installed.
+    installed_protocol: Option<u32>,
+    /// The serving protocol the installed service was last read for.
+    installed_read_for: Option<u32>,
+    /// The answering server is a debug build.
+    serving_debug: bool,
+    stream: Option<Task<()>>,
+    service_request: Option<Task<()>>,
+    updating: bool,
+    update_error: Option<String>,
+}
 
 // Match the web panel and existing connection status polling.
 const REFRESH: Duration = Duration::from_secs(2);
@@ -96,6 +182,10 @@ enum Scope {
     Updates,
     Agent(String),
     Notifications,
+    /// The crew rail.
+    Crew,
+    /// The create bruh dialog.
+    CreateBruh,
 }
 
 #[derive(Clone)]
@@ -135,6 +225,21 @@ pub(crate) struct ReactiveAutomations {
     /// A draft-decision report is in flight (owned by the workspace reconciler).
     draft_reporting: bool,
     awareness: Option<gpui::Subscription>,
+    crew: CrewState,
+    create: Option<create_bruh::CreateBruh>,
+    /// The bruh page on screen, while the workspace shows one.
+    bruh: Option<bruh_page::BruhPage>,
+    /// Commands waiting for the one in flight, sent in order; a failure
+    /// drops them, since they assumed it would apply.
+    queued: VecDeque<(ReactiveCommand, Scope)>,
+    /// Bumped whenever the snapshot changes.
+    snapshot_rev: u64,
+    /// Every command sent, in order; tests never reach a server.
+    #[cfg(test)]
+    sent: Vec<ReactiveCommand>,
+    /// What each stop command of ⌘. fails with in a test.
+    #[cfg(test)]
+    stop_failure: Option<String>,
 }
 
 trait ReactiveButton {
@@ -304,13 +409,19 @@ fn reactive_error(error: ServerError) -> String {
 enum Effect {
     CloseAutomation,
     CloseReply(String),
-    CloseMemory { agent_id: String, key: String },
+    CloseMemory {
+        agent_id: String,
+        key: String,
+    },
     ResetNotifications,
+    /// Open the bruh this dialog made.
+    OpenBruh(String),
     None,
 }
 impl Effect {
     fn of(command: &ReactiveCommand) -> Self {
         match command {
+            ReactiveCommand::CreateBruh { agent, .. } => Self::OpenBruh(agent.id.clone()),
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAutomation { .. },
             } => Self::CloseAutomation,
@@ -415,8 +526,18 @@ impl ReactiveAutomations {
             scoped_error: None,
             draft_reporting: false,
             awareness: None,
+            crew: CrewState::default(),
+            create: None,
+            bruh: None,
+            queued: VecDeque::new(),
+            snapshot_rev: 0,
+            #[cfg(test)]
+            sent: Vec::new(),
+            #[cfg(test)]
+            stop_failure: None,
         };
         if cfg!(not(test)) {
+            panel.start_crew_stream(cx);
             panel.poll = Some(cx.spawn(async move |this, cx| loop {
                 cx.background_executor().timer(REFRESH).await;
                 if this
@@ -485,6 +606,8 @@ impl ReactiveAutomations {
     }
     /// Every snapshot passes through here so arrivals are detected exactly once.
     fn set_snapshot(&mut self, snapshot: ReactiveSnapshot, cx: &mut Context<'_, Self>) {
+        self.crew.bruhs.clone_from(&snapshot.bruhs);
+        self.note_crew_protocol(snapshot.protocol, cx);
         self.agent_names = snapshot
             .agents
             .iter()
@@ -495,9 +618,16 @@ impl ReactiveAutomations {
                 message: format!("{}: {}", self.agent_name(&item.agent_id), item.title),
             });
         }
-        self.snapshot = Some(bruhs_models::weekly_reports::editable_automation_snapshot(
-            snapshot,
-        ));
+        let snapshot = bruhs_models::weekly_reports::editable_automation_snapshot(snapshot);
+        let changed = self.snapshot.as_ref() != Some(&snapshot);
+        self.snapshot = Some(snapshot);
+        if changed {
+            self.snapshot_rev = self.snapshot_rev.wrapping_add(1);
+        }
+        // A bruh page reads its newest runs again whenever anything changed.
+        if changed {
+            self.reload_bruh_runs(cx);
+        }
         let settings = self.snapshot.as_ref().map(|s| &s.notification_settings);
         if self
             .notify_form
@@ -551,6 +681,16 @@ impl ReactiveAutomations {
         if self.busy {
             return;
         }
+        #[cfg(test)]
+        self.sent.push(command.clone());
+        // Tests record the command, and any queued after it, and never reach
+        // a real server.
+        if cfg!(test) {
+            if let Some((next, scope)) = self.queued.pop_front() {
+                self.send_in(next, scope, cx);
+            }
+            return;
+        }
         self.busy = true;
         self.reading = false;
         self.error = None;
@@ -570,11 +710,18 @@ impl ReactiveAutomations {
                 this.busy = false;
                 match result {
                     Ok(snapshot) => {
-                        this.apply_effect(effect);
                         this.set_snapshot(snapshot, cx);
+                        this.apply_effect(effect, cx);
+                        if let Some((next, scope)) = this.queued.pop_front() {
+                            this.send_in(next, scope, cx);
+                        }
                     }
                     Err(error) => {
+                        this.queued.clear();
                         let message = reactive_error(error);
+                        if scope == Scope::CreateBruh {
+                            this.create_failed();
+                        }
                         if scope == Scope::General {
                             this.error = Some(message);
                         } else {
@@ -587,8 +734,24 @@ impl ReactiveAutomations {
         }));
         cx.notify();
     }
-    fn apply_effect(&mut self, effect: Effect) {
+    /// Send `commands` in order, after any command already on its way.
+    fn send_all(
+        &mut self,
+        commands: Vec<ReactiveCommand>,
+        scope: Scope,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.queued
+            .extend(commands.into_iter().map(|command| (command, scope.clone())));
+        if !self.busy {
+            if let Some((next, scope)) = self.queued.pop_front() {
+                self.send_in(next, scope, cx);
+            }
+        }
+    }
+    fn apply_effect(&mut self, effect: Effect, cx: &mut Context<'_, Self>) {
         match effect {
+            Effect::OpenBruh(agent_id) => self.created_bruh(agent_id, cx),
             Effect::CloseAutomation => self.editor = None,
             Effect::CloseReply(id) => {
                 if self.reply.as_ref().is_some_and(|(open, _)| *open == id) {
@@ -1098,11 +1261,66 @@ impl ReactiveAutomations {
                             }),
                         ));
                 }
-                body=body.child(field("What to do when this source reports an event", &editor.instructions, true, self.busy)).child(field("Debounce in seconds", &editor.debounce, false, self.busy)).child(field("Minimum gap between runs in seconds", &editor.throttle, false, self.busy))
+                body = body
+                    .child(field(
+                        "What to do when this source reports an event",
+                        &editor.instructions,
+                        true,
+                        self.busy,
+                    ))
+                    .child(field(
+                        "Debounce in seconds",
+                        &editor.debounce,
+                        false,
+                        self.busy,
+                    ))
+                    .child(field(
+                        "Minimum gap between runs in seconds",
+                        &editor.throttle,
+                        false,
+                        self.busy,
+                    ))
                     .child(self.render_busy_choice(editor.subscription.on_busy, cx))
-                    .child(control("reactive-sub-enabled",if editor.subscription.enabled{"Subscription enabled"}else{"Subscription paused"},self.busy).on_activate(cx, |this,_,cx|{if let Some(Editor::Subscription(editor))=&mut this.editor{editor.subscription.enabled= !editor.subscription.enabled;}cx.notify();}))
-                    .child(control("reactive-sub-auto",if editor.subscription.auto_run{"Automatic read-only drafts: On"}else{"Review each event before running"},self.busy).on_activate(cx, |this,_,cx|{if let Some(Editor::Subscription(editor))=&mut this.editor{editor.subscription.auto_run= !editor.subscription.auto_run;}cx.notify();}))
-                    .child(muted("Automatic drafts never grant write access. Leave them off to review each event first."));
+                    .child(
+                        control(
+                            "reactive-sub-enabled",
+                            if editor.subscription.enabled {
+                                "Subscription enabled"
+                            } else {
+                                "Subscription paused"
+                            },
+                            self.busy,
+                        )
+                        .on_activate(cx, |this, _, cx| {
+                            if let Some(Editor::Subscription(editor)) = &mut this.editor {
+                                editor.subscription.enabled = !editor.subscription.enabled;
+                            }
+                            cx.notify();
+                        }),
+                    )
+                    .child(
+                        control(
+                            "reactive-sub-auto",
+                            &auto_run_control(
+                                editor.subscription.auto_run,
+                                saved_agent_level(
+                                    self.snapshot.as_ref(),
+                                    &editor.subscription.agent_id,
+                                ),
+                            ),
+                            self.busy,
+                        )
+                        .on_activate(cx, |this, _, cx| {
+                            if let Some(Editor::Subscription(editor)) = &mut this.editor {
+                                editor.subscription.auto_run = !editor.subscription.auto_run;
+                            }
+                            cx.notify();
+                        }),
+                    )
+                    .child(muted(auto_run_note(saved_agent_level(
+                        self.snapshot.as_ref(),
+                        &editor.subscription.agent_id,
+                    ))));
             }
             Editor::Chat { agent_id, message } => {
                 let name = self
@@ -1163,9 +1381,295 @@ impl ReactiveAutomations {
     }
 }
 
+/// The crew: live bruh states, the service's protocol, and updating an
+/// older service.
+impl ReactiveAutomations {
+    /// Every bruh, as the service last reported them.
+    pub(crate) fn crew(&self) -> &[BruhState] {
+        &self.crew.bruhs
+    }
+    /// The serving service's crew protocol, once known.
+    pub(crate) fn crew_protocol(&self) -> Option<u32> {
+        self.crew.protocol
+    }
+    /// Whether the service understands the crew commands. Unknown counts as
+    /// not yet.
+    pub(crate) fn crew_ready(&self) -> bool {
+        self.crew.protocol.is_some_and(service_is_current)
+    }
+    /// Which older service to update, once the serving protocol is known.
+    pub(crate) fn crew_notice(&self) -> Option<ServiceNotice> {
+        service_notice(self.crew.protocol?, self.crew.installed_protocol)
+    }
+    /// The snapshot could not be read and no crew is known yet.
+    pub(crate) fn crew_load_error(&self) -> Option<&str> {
+        self.crew
+            .protocol
+            .is_none()
+            .then_some(self.load_error.as_deref())
+            .flatten()
+    }
+    /// Why the last crew command failed.
+    pub(crate) fn crew_error(&self) -> Option<&str> {
+        self.scoped_error
+            .as_ref()
+            .filter(|(scope, _)| *scope == Scope::Crew)
+            .map(|(_, message)| message.as_str())
+    }
+    pub(crate) fn crew_busy(&self) -> bool {
+        self.busy
+    }
+    /// The service update is running.
+    pub(crate) fn service_updating(&self) -> bool {
+        self.crew.updating
+    }
+    pub(crate) fn service_update_error(&self) -> Option<&str> {
+        self.crew.update_error.as_deref()
+    }
+    /// Whether this launch can update the older service itself.
+    pub(crate) fn can_update_service(&self) -> bool {
+        self.crew_notice()
+            .and_then(|notice| service_update(notice, crate::helpers::bundled()))
+            .is_some()
+    }
+    /// Send a command from the crew rail; a failure shows in the rail.
+    pub(crate) fn send_crew(&mut self, command: ReactiveCommand, cx: &mut Context<'_, Self>) {
+        self.send_in(command, Scope::Crew, cx);
+    }
+    /// Stop every bruh: one command to a current service, a cancel per live
+    /// run to an older one, going on past a cancel that fails. Sent at once,
+    /// beside any command in flight: Stop never waits in the queue, where a
+    /// failure ahead of it would drop it. The task ends with what ⌘. says.
+    pub(crate) fn stop_all_crew(
+        &mut self,
+        cx: &mut Context<'_, Self>,
+    ) -> Task<Result<&'static str, String>> {
+        let Some(protocol) = self
+            .crew
+            .protocol
+            .or_else(|| self.snapshot.as_ref().map(|snapshot| snapshot.protocol))
+        else {
+            // Nothing has answered yet, so nothing can be stopped: say so
+            // rather than claim a stop that never went out.
+            return Task::ready(bruhs_models::crew::stop_all_result(&[
+                SERVICE_UNREACHABLE.to_string()
+            ]));
+        };
+        let runs = self
+            .snapshot
+            .as_ref()
+            .map_or(&[][..], |snapshot| snapshot.runs.as_slice());
+        let commands = bruhs_models::crew::stop_commands(protocol, runs);
+        #[cfg(test)]
+        {
+            let _ = cx;
+            self.sent.extend(commands.iter().cloned());
+            let failed: Vec<String> = self
+                .stop_failure
+                .iter()
+                .cloned()
+                .cycle()
+                .take(commands.len())
+                .collect();
+            Task::ready(bruhs_models::crew::stop_all_result(&failed))
+        }
+        #[cfg(not(test))]
+        {
+            let client = self.client.clone();
+            let sending = spawn_tokio(cx, async move {
+                bruhs_models::crew::send_stop_commands(commands, |command| {
+                    let client = client.clone();
+                    async move {
+                        client
+                            .reactive_command(&command)
+                            .await
+                            .map(|_| ())
+                            .map_err(reactive_error)
+                    }
+                })
+                .await
+            });
+            cx.spawn(async move |this, cx| {
+                let failed = sending.await;
+                let _ = this.update(cx, |this, cx| this.refresh_snapshot(cx));
+                bruhs_models::crew::stop_all_result(&failed)
+            })
+        }
+    }
+    /// Hold the panel as if a command were in flight.
+    #[cfg(test)]
+    pub(crate) fn set_busy_for_test(&mut self, busy: bool) {
+        self.busy = busy;
+    }
+    /// Make every stop command of ⌘. fail with `error`.
+    #[cfg(test)]
+    pub(crate) fn fail_stops_for_test(&mut self, error: &str) {
+        self.stop_failure = Some(error.to_string());
+    }
+    /// Read the crew again, such as after a failed load.
+    pub(crate) fn reload_crew(&mut self, cx: &mut Context<'_, Self>) {
+        self.refresh_snapshot(cx);
+    }
+    /// Show `states` as if the service had sent them.
+    #[cfg(test)]
+    pub(crate) fn show_crew_for_test(
+        &mut self,
+        states: Vec<BruhState>,
+        protocol: u32,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.crew.bruhs = states;
+        self.crew.protocol = Some(protocol);
+        cx.notify();
+    }
+    #[cfg(test)]
+    pub(crate) fn sent_for_test(&self) -> &[ReactiveCommand] {
+        &self.sent
+    }
+
+    /// Follow the service's live crew frames for as long as the panel lives.
+    fn start_crew_stream(&mut self, cx: &mut Context<'_, Self>) {
+        let Some(runtime) = cx
+            .try_global::<crate::app_state::DesktopState>()
+            .map(|state| std::sync::Arc::clone(&state.runtime))
+        else {
+            return;
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<
+            crate::server_client::SseMessage<OutboxSignal>,
+        >();
+        runtime.spawn(
+            std::sync::Arc::new(self.client.clone())
+                .run_sse::<OutboxSignal>(CREW_STREAM_PATH.to_string(), tx),
+        );
+        self.crew.stream = Some(cx.spawn(async move |this, cx| {
+            while let Some(message) = rx.recv().await {
+                let crate::server_client::SseMessage::Event(signal) = message else {
+                    continue;
+                };
+                if this
+                    .update(cx, |this, cx| this.apply_crew_signal(signal, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+    fn apply_crew_signal(&mut self, signal: OutboxSignal, cx: &mut Context<'_, Self>) {
+        if self.crew.bruhs != signal.bruhs {
+            self.crew.bruhs = signal.bruhs;
+            cx.notify();
+        }
+        // A bruh page reads the crew again on every change, like the web's.
+        if self.bruh.is_some() {
+            self.refresh_snapshot(cx);
+        }
+        self.note_crew_protocol(signal.protocol, cx);
+    }
+    /// Record the serving protocol; a new one reads the installed service
+    /// again.
+    fn note_crew_protocol(&mut self, protocol: u32, cx: &mut Context<'_, Self>) {
+        if self.crew.protocol != Some(protocol) {
+            self.crew.protocol = Some(protocol);
+            cx.notify();
+        }
+        if self.crew.installed_read_for != Some(protocol) && cfg!(not(test)) {
+            self.crew.installed_read_for = Some(protocol);
+            self.read_installed_service(cx);
+        }
+    }
+    fn read_installed_service(&mut self, cx: &mut Context<'_, Self>) {
+        if self.crew.updating {
+            return;
+        }
+        let client = self.client.clone();
+        let operation = spawn_tokio(cx, async move { client.background_service().await });
+        self.crew.service_request = Some(cx.spawn(async move |this, cx| {
+            let status = operation.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.crew.updating {
+                    return;
+                }
+                if let Ok(status) = status {
+                    this.crew.installed_protocol = installed_protocol(&status);
+                    this.crew.serving_debug = status.debug_build;
+                    this.auto_update_service(cx);
+                }
+                cx.notify();
+            });
+        }));
+    }
+    /// An older service is updated once per launch; the notice and its
+    /// button stay for when that fails.
+    fn auto_update_service(&mut self, cx: &mut Context<'_, Self>) {
+        let allowed = self
+            .crew_notice()
+            .and_then(|notice| service_update(notice, crate::helpers::bundled()))
+            .is_some_and(|update| {
+                auto_update_allowed(update, self.crew.serving_debug, cfg!(debug_assertions))
+            });
+        if allowed && !AUTO_UPDATE_TRIED.swap(true, std::sync::atomic::Ordering::AcqRel) {
+            self.update_service(cx);
+        }
+    }
+    /// Bring the older service up to date: the bundle's own server reinstalls
+    /// the service when the answering one is old; otherwise the current
+    /// server installs itself.
+    pub(crate) fn update_service(&mut self, cx: &mut Context<'_, Self>) {
+        let Some(notice) = self.crew_notice() else {
+            return;
+        };
+        if self.crew.updating {
+            return;
+        }
+        let Some(update) = service_update(notice, crate::helpers::bundled()) else {
+            self.crew.update_error = Some(crate::helpers::SERVICE_INSTALL_HINT.to_string());
+            cx.notify();
+            return;
+        };
+        self.crew.updating = true;
+        self.crew.update_error = None;
+        let client = self.client.clone();
+        let operation: Task<Result<Option<BackgroundService>, String>> = match update {
+            ServiceUpdate::InstallFromServer => spawn_tokio(cx, async move {
+                client
+                    .set_background_service(BackgroundServiceAction::Install)
+                    .await
+                    .map(Some)
+                    .map_err(reactive_error)
+            }),
+            ServiceUpdate::Bundled => cx.background_spawn(async move {
+                crate::helpers::update_bundled_service().map(|()| None)
+            }),
+        };
+        self.crew.service_request = Some(cx.spawn(async move |this, cx| {
+            let result = operation.await;
+            let _ = this.update(cx, |this, cx| {
+                this.crew.updating = false;
+                match result {
+                    Ok(Some(status)) => {
+                        this.crew.installed_protocol = installed_protocol(&status);
+                    }
+                    // The service restarted on the new release: read it again.
+                    Ok(None) => {
+                        this.crew.installed_read_for = None;
+                        this.refresh_snapshot(cx);
+                    }
+                    Err(error) => this.crew.update_error = Some(error),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+}
+
 impl EventEmitter<ReactivePreview> for ReactiveAutomations {}
 impl EventEmitter<ReactiveProjectOpened> for ReactiveAutomations {}
 impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
+impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
+impl EventEmitter<ReactiveOpenAutomations> for ReactiveAutomations {}
 
 impl Render for ReactiveAutomations {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
@@ -1175,6 +1679,12 @@ impl Render for ReactiveAutomations {
         }
         if !self.service.loaded && cfg!(not(test)) {
             self.load_service(cx);
+        }
+        if let Some(agent_id) = self.bruh_page_agent().map(str::to_string) {
+            self.ensure_bruh_page(_window, cx);
+            return self
+                .render_bruh_page(&agent_id, _window, cx)
+                .into_any_element();
         }
         let disabled = self.busy || self.snapshot.is_none();
         self.ensure_weekly_inputs(_window, cx);
@@ -1215,7 +1725,7 @@ impl Render for ReactiveAutomations {
                 panel = panel.child(editor);
             }
         }
-        panel = panel.child(self.render_automation_cards(cx));
+        panel = panel.child(self.render_automation_cards_for(None, cx));
         // Both wait for the server: no settings or service state exists before it answers.
         let notifications = self
             .notify_form
@@ -1490,11 +2000,13 @@ impl Render for ReactiveAutomations {
                                     } else {
                                         "Paused"
                                     },
-                                    if subscription.auto_run {
-                                        "Automatic read-only drafts"
-                                    } else {
-                                        "Review each event before running"
-                                    }
+                                    event_policy(
+                                        subscription.auto_run,
+                                        saved_agent_level(
+                                            self.snapshot.as_ref(),
+                                            &subscription.agent_id
+                                        )
+                                    )
                                 )))
                                 .when(subscription.on_busy == BusyPolicy::Restart, |card| {
                                     card.child(muted(format!(
@@ -1561,14 +2073,22 @@ impl Render for ReactiveAutomations {
                     ReactiveChange::SaveAutomation { .. } => "Save automation",
                     _ => "Approve setup change",
                 };
-                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {} Writes still use workflow review.",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,if automation.subscription.auto_run{"Configured for automatic read-only drafts."}else{"Each event waits for review before a read-only draft runs."}),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic-draft setting below.".into(),ReactiveChange::DeleteAgent{id}=>format!("Delete agent {id} and its subscriptions."),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
+                let level = match &proposal.change {
+                    ReactiveChange::SaveAutomation { automation } => agent_run_level(
+                        self.snapshot.as_ref(),
+                        &automation.agent.id,
+                        &automation.agent.model,
+                    ),
+                    _ => AccessLevel::ReadOnly,
+                };
+                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,event_policy_line(automation.subscription.auto_run,level)),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic run setting below.".into(),ReactiveChange::DeleteAgent{id}=>format!("Delete agent {id} and its subscriptions."),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
                 let payload = serde_json::to_string_pretty(&proposal.change)
                     .unwrap_or_else(|error| format!("Cannot display proposal: {error}"));
                 let mut proposal_card = card()
                     .child(heading("Setup proposal awaiting review"))
                     .child(muted(label));
                 if let ReactiveChange::SaveAutomation { automation } = &proposal.change {
-                    for (label, text) in setup::review_fields(automation) {
+                    for (label, text) in setup::review_fields(automation, level) {
                         proposal_card = proposal_card.child(
                             div().flex().flex_col().gap_1().child(muted(label)).child(
                                 div()
@@ -1749,9 +2269,13 @@ impl Render for ReactiveAutomations {
                 }
                 let mut actions = div().flex().flex_wrap().gap_2();
                 if run.status == RunStatus::AwaitingReview {
+                    let label = run_reviewed_label(saved_agent_level(
+                        self.snapshot.as_ref(),
+                        &run.agent_id,
+                    ));
                     actions = actions.child(self.command(
                         format!("reactive-approve-run-{}", run.id),
-                        "Run read-only draft",
+                        &label,
                         ReactiveCommand::ApproveRun { id: run.id.clone() },
                         cx,
                     ));
@@ -1781,7 +2305,7 @@ impl Render for ReactiveAutomations {
                 panel = panel.child(row.child(actions));
             }
         }
-        panel
+        panel.into_any_element()
     }
 }
 
@@ -1891,6 +2415,105 @@ mod tests {
                 panic!("source editor");
             };
             assert_eq!(value(&editor.value, cx), "meeting.summary");
+        });
+    }
+}
+
+#[cfg(test)]
+mod crew_tests {
+    use super::{
+        auto_update_allowed, installed_protocol, service_update, ReactiveAutomations, ServiceUpdate,
+    };
+    use crate::theme;
+    use bruhs_models::api::BackgroundService;
+    use bruhs_models::crew::{BruhAccess, BruhLook, BruhState, BruhStatus, ServiceNotice};
+    use bruhs_models::reactive::{OutboxSignal, ReactiveSnapshot};
+
+    fn service(installed: bool, protocol: Option<u32>) -> BackgroundService {
+        BackgroundService {
+            supported: true,
+            installed,
+            loaded: installed,
+            binary: None,
+            detail: String::new(),
+            serving: false,
+            service_pid: None,
+            responder_pid: None,
+            log_path: None,
+            reactive_protocol: protocol,
+            debug_build: false,
+        }
+    }
+
+    #[test]
+    fn an_installed_service_that_cannot_say_counts_as_old() {
+        assert_eq!(installed_protocol(&service(false, None)), None);
+        assert_eq!(installed_protocol(&service(true, None)), Some(0));
+        assert_eq!(installed_protocol(&service(true, Some(1))), Some(1));
+    }
+
+    /// An old installed service is reinstalled by the current server; an old
+    /// answering server only by this bundle's own binary.
+    #[test]
+    fn each_older_service_has_its_own_update() {
+        assert_eq!(
+            service_update(ServiceNotice::InstalledOld, false),
+            Some(ServiceUpdate::InstallFromServer)
+        );
+        assert_eq!(
+            service_update(ServiceNotice::ServingOld, true),
+            Some(ServiceUpdate::Bundled)
+        );
+        assert_eq!(service_update(ServiceNotice::ServingOld, false), None);
+    }
+
+    /// A debug server or app never installs itself as the service unasked.
+    #[test]
+    fn only_a_release_build_updates_the_service_without_a_click() {
+        let from_server = ServiceUpdate::InstallFromServer;
+        assert!(auto_update_allowed(from_server, false, true));
+        assert!(!auto_update_allowed(from_server, true, false));
+        assert!(auto_update_allowed(ServiceUpdate::Bundled, true, false));
+        assert!(!auto_update_allowed(ServiceUpdate::Bundled, false, true));
+    }
+
+    #[gpui::test]
+    fn live_frames_and_snapshots_keep_the_crew_current(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let (panel, cx) = cx.add_window_view(|_, cx| ReactiveAutomations::new(cx));
+        let ann = BruhState {
+            agent_id: "ann".into(),
+            name: "Ann".into(),
+            look: BruhLook::default(),
+            access: BruhAccess::default(),
+            effort: None,
+            status: BruhStatus::Working,
+            next_wake_ms: None,
+            unread: 2,
+        };
+        panel.update(cx, |panel, cx| {
+            assert_eq!(panel.crew_protocol(), None);
+            assert!(!panel.crew_ready(), "unknown is not ready");
+            assert_eq!(panel.crew_notice(), None, "no notice before the protocol");
+            panel.apply_crew_signal(
+                OutboxSignal {
+                    bruhs: vec![ann.clone()],
+                    protocol: 1,
+                    ..OutboxSignal::default()
+                },
+                cx,
+            );
+            assert_eq!(panel.crew(), std::slice::from_ref(&ann));
+            assert!(panel.crew_ready());
+            // An older service's snapshot has no crew and protocol 0.
+            panel.set_snapshot(ReactiveSnapshot::default(), cx);
+            assert!(panel.crew().is_empty());
+            assert_eq!(panel.crew_protocol(), Some(0));
+            assert_eq!(panel.crew_notice(), Some(ServiceNotice::ServingOld));
+            assert!(!panel.crew_ready());
         });
     }
 }

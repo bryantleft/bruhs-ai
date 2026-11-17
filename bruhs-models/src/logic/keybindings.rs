@@ -93,6 +93,8 @@ pub fn default_keybindings() -> Vec<Keybinding> {
         ("mod+d", "diff.toggle", None),
         ("mod+shift+t", "tasks.toggle", None),
         ("mod+shift+m", "model.picker", None),
+        ("mod+shift+b", "crew.focus", None),
+        ("mod+.", "agents.stopAll", None),
         ("mod+shift+x", "workspace.menu", None),
         ("mod+shift+g", "branch.menu", None),
         ("mod+shift+e", "effort.menu", None),
@@ -538,6 +540,24 @@ mod tests {
 
     fn press(raw: &str, mod_is_command: bool) -> Chord {
         parse_chord(raw, mod_is_command).expect("chord")
+    }
+
+    #[test]
+    fn crew_shortcuts_ship_bound() {
+        let rows = default_keybindings();
+        assert!(rows
+            .iter()
+            .any(|b| b.key == "mod+shift+b" && b.command == "crew.focus"));
+        assert!(rows
+            .iter()
+            .any(|b| b.key == "mod+." && b.command == "agents.stopAll"));
+        let stop = resolve(
+            &rows,
+            &chord_from_event("Period", ".", true, false, false, false),
+            &KeyContext::default(),
+            true,
+        );
+        assert_eq!(stop, Some("agents.stopAll"));
     }
 
     #[test]

@@ -88,7 +88,7 @@ fn events(state: Arc<AppState>, resume: bool) -> impl Stream<Item = Result<Event
 }
 
 /// Agent update counts: one frame on open, then one per change (coalesced).
-fn reactive_signals(
+pub(crate) fn reactive_signals(
     runtime: Option<bruhs_core::reactive::ReactiveRuntime>,
 ) -> impl Stream<Item = Result<Event, Infallible>> {
     async_stream::stream! {

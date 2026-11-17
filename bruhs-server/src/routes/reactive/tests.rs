@@ -203,6 +203,98 @@ async fn foreign_pages_cannot_read_or_configure_local_automations() {
     assert!(fixture.runtime.snapshot().await.unwrap().events.is_empty());
 }
 
+fn bruh(id: &str, name: &str, dir: &std::path::Path) -> Value {
+    json!({"action":"create_bruh","agent":{"id":id,"name":name,"instructions":"Help.","model":"sonnet","project_path":dir,"enabled":true}})
+}
+
+#[tokio::test]
+async fn the_reactive_stream_sends_bruh_states() {
+    let fixture = Fixture::new().await;
+    fixture
+        .command(bruh("pip", "Pip", fixture.directory.path()))
+        .await;
+    let mut response = fixture
+        .client
+        .get(format!("{}/api/reactive/stream", fixture.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut text = String::new();
+    let frame = loop {
+        let chunk = response.chunk().await.unwrap().expect("stream ended");
+        text.push_str(&String::from_utf8_lossy(&chunk));
+        if let Some(data) = text.lines().find_map(|line| line.strip_prefix("data:")) {
+            break data.trim().to_string();
+        }
+    };
+    assert!(
+        !text.contains("event:"),
+        "frames are unnamed on this stream: {text}"
+    );
+    let signal: bruhs_models::reactive::OutboxSignal = serde_json::from_str(&frame).unwrap();
+    assert_eq!(signal.protocol, bruhs_models::crew::CREW_PROTOCOL);
+    assert_eq!(signal.bruhs.len(), 1);
+    assert_eq!(signal.bruhs[0].agent_id, "pip");
+    assert_eq!(signal.bruhs[0].name, "Pip");
+}
+
+#[tokio::test]
+async fn agent_runs_route_pages_one_agents_runs() {
+    let fixture = Fixture::new().await;
+    for (id, name) in [("a", "A"), ("b", "B")] {
+        fixture
+            .command(bruh(id, name, fixture.directory.path()))
+            .await;
+    }
+    for (agent, message) in [("a", "one"), ("b", "other"), ("a", "two")] {
+        fixture
+            .command(json!({"action":"chat","agent_id":agent,"message":message}))
+            .await;
+    }
+    let get = |query: String| {
+        let url = format!("{}/api/reactive/agents/a/runs{query}", fixture.base);
+        let client = fixture.client.clone();
+        async move {
+            let response = client.get(url).send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers()[axum::http::header::CACHE_CONTROL],
+                "no-store"
+            );
+            response
+                .json::<Vec<bruhs_models::reactive::ReactiveRun>>()
+                .await
+                .unwrap()
+        }
+    };
+    let page = get(String::new()).await;
+    assert_eq!(page.len(), 2);
+    assert!(page.iter().all(|run| run.agent_id == "a"));
+    assert_eq!(page[0].owner_message.as_deref(), Some("two"));
+    let older = get(format!("?before={}", page[0].id)).await;
+    assert_eq!(older.len(), 1);
+    assert_eq!(older[0].owner_message.as_deref(), Some("one"));
+}
+
+#[tokio::test]
+async fn foreign_pages_cannot_read_bruh_runs() {
+    let fixture = Fixture::new().await;
+    fixture
+        .command(bruh("a", "A", fixture.directory.path()))
+        .await;
+    for path in ["agents/a/runs", "stream"] {
+        let response = fixture
+            .client
+            .get(format!("{}/api/reactive/{path}", fixture.base))
+            .header("origin", "https://untrusted.example")
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(response.status(), StatusCode::FORBIDDEN, "{path}");
+    }
+}
+
 #[tokio::test]
 async fn oversized_hook_does_not_advance_an_event_receipt() {
     let fixture = Fixture::new().await;

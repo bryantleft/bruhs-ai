@@ -302,6 +302,7 @@ impl Workspace {
             .flex_col()
             .child(self.render_sidebar_header())
             .child(self.render_sidebar_controls(cx))
+            .children(self.render_crew_rail(cx))
             .child(self.render_sidebar_list(cx))
             .child(self.render_sidebar_undo(cx))
             .children(self.render_sidebar_update_button(cx))

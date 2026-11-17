@@ -73,6 +73,7 @@ mod capture_ui;
 mod chat_events_tests;
 mod connected_inbox;
 mod credential_settings;
+mod crew_ui;
 mod date_picker_ui;
 mod event_dialog_ui;
 #[cfg(test)]
@@ -165,6 +166,8 @@ actions!(
         ToggleTasks,
         FocusCommandBar,
         FocusChatInput,
+        FocusCrew,
+        StopAll,
         OpenTaskCreateShortcut,
         OpenCapture,
         CloseOverlays,
@@ -453,6 +456,8 @@ enum Overlay {
         /// The unit dropdown's listbox.
         unit_open: bool,
     },
+    /// The crew rail's "New bruh" (web `CreateBruhDialog`).
+    CreateBruh,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -809,6 +814,8 @@ struct PersistedWorkspaceState {
     /// Missing means closed, matching the web default.
     sidebar_working_open: Option<bool>,
     sidebar_snoozed_open: Option<bool>,
+    /// Missing means open, matching the web default.
+    crew_rail_open: Option<bool>,
     /// Missing means the Working section is on.
     sidebar_working_section: Option<bool>,
     /// Missing means update checks are on (web `bruhs.updateChecks`).
@@ -1042,6 +1049,8 @@ const DESKTOP_DATE_FORMAT: &str = "%Y-%m-%d";
 const DESKTOP_DATETIME_FORMAT: &str = "%Y-%m-%dT%H:%M:%S";
 const DESKTOP_DIALOG_MD_WIDTH_PX: f32 = 448.0;
 const DESKTOP_DIALOG_LG_WIDTH_PX: f32 = 576.0;
+/// Web `max-w-2xl` (New bruh).
+const DESKTOP_DIALOG_2XL_WIDTH_PX: f32 = 672.0;
 const DESKTOP_DIALOG_MAX_WIDTH_RATIO: f32 = 0.9;
 const DESKTOP_DIALOG_RADIUS_PX: f32 = 14.0;
 const DESKTOP_MODAL_TITLE_TEXT_SIZE_PX: f32 = 16.0;
@@ -1259,6 +1268,11 @@ pub struct Workspace {
     sidebar_settled_open: bool,
     sidebar_working_open: bool,
     sidebar_snoozed_open: bool,
+    /// The crew rail above the threads; open unless closed.
+    crew_rail_open: bool,
+    /// The crew rail's first row and its New bruh button, so ⌘⇧B can focus them.
+    crew_row_focus: FocusHandle,
+    crew_new_focus: FocusHandle,
     /// On unless this device saved it off.
     sidebar_working_section: bool,
     title_instructions: String,
@@ -1847,6 +1861,28 @@ impl Workspace {
                         this.persist_and_notify(cx);
                     },
                 ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
+                     event: &crate::views::reactive_automations::ReactiveBruhCreated,
+                     window,
+                     cx| {
+                        this.open_created_bruh(event.agent_id.clone(), window, cx)
+                    },
+                ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
+                     _: &crate::views::reactive_automations::ReactiveOpenAutomations,
+                     window,
+                     cx| {
+                        this.activate_sidebar_view(AppView::Automations, window, cx)
+                    },
+                ));
                 subscriptions.push(cx.subscribe(
                     &panel,
                     |this, _, event: &crate::views::reactive_automations::ReactivePreview, cx| {
@@ -1943,6 +1979,10 @@ impl Workspace {
                 .as_ref()
                 .and_then(|state| state.sidebar_snoozed_open)
                 .unwrap_or(false),
+            crew_rail_open: persisted
+                .as_ref()
+                .and_then(|state| state.crew_rail_open)
+                .unwrap_or(true),
             sidebar_working_section: persisted
                 .as_ref()
                 .and_then(|state| state.sidebar_working_section)
@@ -1963,6 +2003,8 @@ impl Workspace {
             keybinding_key_input,
             keybinding_when_input,
             keybinding_installed: keybindings_ui::startup_bindings(),
+            crew_row_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            crew_new_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             thread_menu_id: None,
             thread_menu_items: (0..sidebar_ui::THREAD_MENU_MAX_ITEMS)
                 .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
@@ -2681,6 +2723,7 @@ impl Workspace {
             AppView::Calendar => self.render_calendar_page(cx),
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
+            AppView::Bruh { .. } => self.render_bruh_page(),
             AppView::Workbench => div()
                 .flex_1()
                 .h_full()
@@ -2797,6 +2840,8 @@ impl Render for Workspace {
         }
         self.page_history.visit(&page_key(&self.active_view));
         self.sync_thread_catalog(cx);
+        self.sync_create_bruh(cx);
+        self.sync_bruh_page(cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
         if !self.overlay_open() {
@@ -3099,6 +3144,8 @@ impl Render for Workspace {
             .on_action(cx.listener(Self::toggle_tasks))
             .on_action(cx.listener(Self::focus_command_bar))
             .on_action(cx.listener(Self::focus_chat_input))
+            .on_action(cx.listener(Self::focus_crew))
+            .on_action(cx.listener(Self::stop_all))
             .on_action(cx.listener(Self::open_task_create_shortcut))
             .on_action(cx.listener(Self::open_capture_dialog))
             .on_action(cx.listener(Self::close_overlays))
@@ -3180,6 +3227,7 @@ impl Render for Workspace {
                     Overlay::UpdateConfirm => self.render_update_confirm(window, cx),
                     Overlay::RestartConfirm => self.render_restart_confirm(window, cx),
                     Overlay::SnoozeCustom { .. } => self.render_snooze_custom(window, cx),
+                    Overlay::CreateBruh => self.render_create_bruh(window, cx),
                 })
             })
             // Drawn after the form dialog so it sits on top of it.

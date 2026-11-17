@@ -578,6 +578,26 @@ impl Workspace {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
+        self.render_modal_shell_sized(
+            title,
+            content,
+            footer,
+            DESKTOP_DIALOG_MD_WIDTH_PX,
+            window,
+            cx,
+        )
+    }
+
+    /// `render_modal_shell` at another width (web `Dialog`'s `max_width`).
+    pub(super) fn render_modal_shell_sized(
+        &self,
+        title: impl Into<SharedString>,
+        content: Div,
+        footer: Option<Div>,
+        width_px: f32,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         // The header carries the dialog's one title; the content does not
         // repeat it (web: the visible heading is the only title).
         let title: SharedString = title.into();
@@ -605,7 +625,7 @@ impl Workspace {
                     .role(Role::Dialog)
                     .aria_label(title.clone())
                     .child(self.blur_scrim.backdrop())
-                    .w(px(DESKTOP_DIALOG_MD_WIDTH_PX))
+                    .w(px(width_px))
                     .max_w(relative(DESKTOP_DIALOG_MAX_WIDTH_RATIO))
                     .max_h(dialog_max_height(window))
                     .rounded(px(DESKTOP_DIALOG_RADIUS_PX))

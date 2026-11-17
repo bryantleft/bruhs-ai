@@ -58,6 +58,11 @@ pub fn Shell() -> impl IntoView {
     let find_diff = RwSignal::new(0u32);
     let find_thread_open = RwSignal::new(false);
     let find_diff_open = RwSignal::new(false);
+    let crew_focus = RwSignal::new(0u32);
+    let agent_updates = use_context::<crate::agent_updates::AgentUpdates>();
+    provide_context(crate::components::crew::shortcuts::CrewFocusRequest(
+        crew_focus,
+    ));
     provide_context(FindCommands {
         thread: find_thread,
         diff: find_diff,
@@ -101,6 +106,9 @@ pub fn Shell() -> impl IntoView {
     let RunChoiceSignal(run_choice) = expect_context::<RunChoiceSignal>();
     let PreviousWorktreeSignal(previous_worktree) = expect_context::<PreviousWorktreeSignal>();
     let thread_notice = expect_context::<ThreadNotice>();
+    let queue_holds = expect_context::<crate::state::QueueHolds>();
+    let crate::state::PendingSecretsSignal(pending_secrets) =
+        expect_context::<crate::state::PendingSecretsSignal>();
     let crate::state::ImportThreadOpen(import_open) =
         expect_context::<crate::state::ImportThreadOpen>();
     let thread_export = ActiveThreadExport::from_context();
@@ -451,6 +459,31 @@ pub fn Shell() -> impl IntoView {
                         find_thread.update(|n| *n = n.saturating_add(1));
                     }
                 }
+                "agents.stopAll" => {
+                    ev.prevent_default();
+                    // Stop the thread on screen as its Interrupt does.
+                    if let Some(id) = active_thread_id.get_untracked() {
+                        queue_holds.hold(&id);
+                        pending_secrets
+                            .update(|items| items.retain(|item| item.thread_id.as_str() != id));
+                        turns.abort(&id);
+                    }
+                    let protocol =
+                        agent_updates.and_then(|updates| updates.protocol.get_untracked());
+                    // The notice waits for the sends: it never claims a stop
+                    // that failed.
+                    crate::components::crew::shortcuts::stop_all(protocol, move |outcome| {
+                        thread_notice.flash(match outcome {
+                            Ok(message) => message.to_string(),
+                            Err(error) => error,
+                        });
+                    });
+                }
+                "crew.focus" => {
+                    ev.prevent_default();
+                    set_sidebar_open.set(true);
+                    crew_focus.update(|n| *n = n.wrapping_add(1));
+                }
                 "capture.open" => {
                     ev.prevent_default();
                     set_capture_edit_id.set(None);
@@ -794,6 +827,7 @@ pub fn Shell() -> impl IntoView {
                     AppView::Booking { slug } => view! { <BookingPage slug=slug /> }.into_any(),
                     AppView::Search => view! { <SearchPage /> }.into_any(),
                     AppView::Terminal => view! { <TerminalPage /> }.into_any(),
+                    AppView::Bruh { agent_id } => view! { <crate::components::crew::page::BruhPage agent_id=agent_id /> }.into_any(),
                 }}
                 // Notifications float over the view below its header row, so
                 // the page and the composer stay put as they come and go.

@@ -12,6 +12,7 @@
 //! retried on the next change and never blocks the UI.
 
 use bruhs_models::api::live_events::REACTIVE;
+use bruhs_models::crew::BruhState;
 use bruhs_models::reactive::{DraftOutcomeKind, OutboxItem, OutboxSignal, ReactiveCommand};
 use bruhs_models::{DraftOutcomeReport, EpochMs, WorkflowStatus};
 use leptos::prelude::*;
@@ -23,10 +24,15 @@ use crate::state::{AppView, AutomationStateSignal, SetActiveView};
 /// How long a new-update banner stays before it dismisses itself.
 const BANNER_TTL_MS: u32 = 15_000;
 
-/// Unread agent updates, for badges outside the automations view.
+/// Unread agent updates, for badges outside the automations view, and the
+/// crew as the service last reported it.
 #[derive(Clone, Copy)]
 pub struct AgentUpdates {
     pub unread: RwSignal<usize>,
+    /// Every bruh's state from the latest `reactive` frame.
+    pub bruhs: RwSignal<Vec<BruhState>>,
+    /// The service's crew protocol; `None` until the first frame arrives.
+    pub protocol: RwSignal<Option<u32>>,
 }
 
 impl AgentUpdates {
@@ -34,6 +40,8 @@ impl AgentUpdates {
     pub fn install() {
         provide_context(Self {
             unread: RwSignal::new(0),
+            bruhs: RwSignal::new(Vec::new()),
+            protocol: RwSignal::new(None),
         });
         if let Some(AutomationStateSignal(automation)) = use_context::<AutomationStateSignal>() {
             reconcile_draft_outcomes(automation);
@@ -101,6 +109,12 @@ pub fn subscribe(live: &mut LiveEvents) {
             }
         };
         updates.unread.set(signal.unread);
+        if updates.bruhs.with_untracked(|bruhs| *bruhs != signal.bruhs) {
+            updates.bruhs.set(signal.bruhs.clone());
+        }
+        if updates.protocol.get_untracked() != Some(signal.protocol) {
+            updates.protocol.set(Some(signal.protocol));
+        }
         let Some(item) = announcer
             .try_update_value(|announcer| announcer.observe(&signal))
             .flatten()
@@ -219,6 +233,7 @@ mod tests {
             resolved_at: None,
             answer: None,
             system: SystemDelivery::NotRequested,
+            approval: None,
         }
     }
 
@@ -227,6 +242,8 @@ mod tests {
             unread: usize::from(latest.is_some()),
             open_questions: 0,
             latest_unread: latest,
+            bruhs: Vec::new(),
+            protocol: 0,
         }
     }
 

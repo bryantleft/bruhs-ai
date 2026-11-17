@@ -83,6 +83,12 @@ pub struct QueryOptions {
     pub append_system_prompt: Option<String>,
     /// Additional MCP server configuration as JSON (`--mcp-config`). Ignored with [`Tools::None`].
     pub mcp_config: Option<String>,
+    /// Start only the MCP servers in [`mcp_config`](Self::mcp_config), and
+    /// none when it is `None` (`--strict-mcp-config`): servers from the
+    /// user's and project's settings, a project `.mcp.json` and claude.ai
+    /// connectors are all skipped. [`Tools::ReadOnly`] and [`Tools::None`]
+    /// always run this way, with no servers. Defaults to `false`.
+    pub strict_mcp_config: bool,
     /// Stream text and thinking deltas as they arrive
     /// (`--include-partial-messages`). Defaults to `true`.
     pub include_partial_messages: bool,
@@ -132,6 +138,7 @@ impl Default for QueryOptions {
             system_prompt: None,
             append_system_prompt: None,
             mcp_config: None,
+            strict_mcp_config: false,
             include_partial_messages: true,
             permission_prompts: false,
             accept_input: false,
@@ -244,6 +251,12 @@ impl QueryOptions {
         sources: impl IntoIterator<Item = S>,
     ) -> Self {
         self.setting_sources = Some(sources.into_iter().map(Into::into).collect());
+        self
+    }
+
+    /// Set [`strict_mcp_config`](Self::strict_mcp_config).
+    pub fn strict_mcp_config(mut self, strict: bool) -> Self {
+        self.strict_mcp_config = strict;
         self
     }
 

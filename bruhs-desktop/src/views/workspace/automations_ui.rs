@@ -751,6 +751,32 @@ impl Workspace {
             .child(body)
     }
 
+    /// A bruh's own page. The reactive panel draws it: `sync_bruh_page` has
+    /// already told the panel which bruh is open.
+    pub(super) fn render_bruh_page(&self) -> Div {
+        div()
+            .flex_1()
+            .h_full()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .child(self.reactive_automations.clone())
+    }
+
+    /// Tell the reactive panel which bruh page is open, before it draws, so
+    /// it draws that page for `AppView::Bruh` and its automations otherwise.
+    pub(super) fn sync_bruh_page(&mut self, cx: &mut Context<'_, Self>) {
+        let open = match &self.active_view {
+            AppView::Bruh { agent_id } => Some(agent_id.clone()),
+            _ => None,
+        };
+        if self.reactive_automations.read(cx).bruh_page_agent() != open.as_deref() {
+            self.reactive_automations
+                .update(cx, |panel, cx| panel.show_bruh(open, cx));
+        }
+    }
+
     pub(super) fn render_automations_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
         // Web `lg:grid-cols-[minmax(0,1fr)_22rem]`: the grants column sits
         // beside the workflows from `lg`, under them below.

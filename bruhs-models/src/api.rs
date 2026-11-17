@@ -74,6 +74,13 @@ pub struct BackgroundService {
     /// Where the service writes its output, when it writes to a file.
     #[serde(default)]
     pub log_path: Option<String>,
+    /// The crew protocol of the installed release (0 for an older one); None when not installed.
+    #[serde(default)]
+    pub reactive_protocol: Option<u32>,
+    /// The server answering is a debug build, such as a worktree's `cargo
+    /// run`. The apps never install it as the service without a click.
+    #[serde(default)]
+    pub debug_build: bool,
 }
 
 /// `POST /api/service`.

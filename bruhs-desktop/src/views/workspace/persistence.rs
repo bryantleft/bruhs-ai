@@ -479,6 +479,7 @@ impl Workspace {
             sidebar_settled_open: Some(self.sidebar_settled_open),
             sidebar_working_open: Some(self.sidebar_working_open),
             sidebar_snoozed_open: Some(self.sidebar_snoozed_open),
+            crew_rail_open: Some(self.crew_rail_open),
             sidebar_working_section: Some(self.sidebar_working_section),
             update_checks: Some(self.updates.read(cx).enabled),
             title_instructions: Some(self.title_instructions.clone()),

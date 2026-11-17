@@ -56,10 +56,17 @@ pub(super) fn set_notification_settings(
 
 // ── Outbox ─────────────────────────────────────────────────────────────────
 
-fn save_item(connection: &Connection, item: &OutboxItem) -> Result<(), ReactiveError> {
+/// Save an outbox item. The `run_id` column holds one update per run, so an
+/// approval (a run can open several) is keyed by its own id there instead.
+pub(super) fn save_item(connection: &Connection, item: &OutboxItem) -> Result<(), ReactiveError> {
+    let run_key = if item.approval.is_some() {
+        format!("approval:{}", item.id)
+    } else {
+        item.run_id.clone()
+    };
     connection.execute(
         "INSERT INTO reactive_outbox(id,agent_id,run_id,created,payload) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
-        params![item.id, item.agent_id, item.run_id, item.created_at.as_millis(), encode(item)?],
+        params![item.id, item.agent_id, run_key, item.created_at.as_millis(), encode(item)?],
     )?;
     Ok(())
 }
@@ -109,6 +116,7 @@ fn create_item(
         } else {
             SystemDelivery::NotRequested
         },
+        approval: None,
     };
     // A retried run reuses its receipt; its earlier update stays the record.
     let exists: bool = connection.query_row(
@@ -160,6 +168,10 @@ pub(super) fn dismiss(connection: &Connection, id: &str) -> Result<(), ReactiveE
     let now = EpochMs::now();
     read(&mut item, now);
     item.resolved_at = Some(now);
+    // Dismissing an approval says no, so a waiting run stops waiting.
+    if let Some(request) = item.approval.as_mut() {
+        request.state = bruhs_models::crew::ApprovalState::Denied;
+    }
     save_item(connection, &item)
 }
 
@@ -175,21 +187,30 @@ pub(super) fn answer(
             "This update was already answered or dismissed.".into(),
         ));
     }
-    let agent = enabled_agent(connection, &item.agent_id)?;
-    queue_capacity(connection)?;
-    let what = match item.kind {
-        OutboxKind::Ask => "question",
-        OutboxKind::Notify => "update",
-    };
-    let prompt = format!(
-        "The owner replied to your {what} “{}”.\n\nYou wrote:\n{}\n\nTheir reply:\n{message}",
-        item.title, item.message
-    );
-    let mut run = new_run(connection, &agent, prompt, None, None, RunStatus::Queued, 0)?;
-    run.trigger = Some(RunTrigger::Answer {
-        outbox_id: item.id.clone(),
-    });
-    save_run(connection, &run)?;
+    // A reply to an approval is a no with reasons. A run still waiting on it
+    // relays the reply itself; any other run is resumed as for a question.
+    let waiting = super::crew::run_waits_on(connection, &item)?;
+    if let Some(request) = item.approval.as_mut() {
+        request.state = bruhs_models::crew::ApprovalState::Denied;
+    }
+    if !waiting {
+        let agent = enabled_agent(connection, &item.agent_id)?;
+        queue_capacity(connection)?;
+        let what = match item.kind {
+            OutboxKind::Ask if item.approval.is_some() => "approval request",
+            OutboxKind::Ask => "question",
+            OutboxKind::Notify => "update",
+        };
+        let prompt = format!(
+            "The owner replied to your {what} “{}”.\n\nYou wrote:\n{}\n\nTheir reply:\n{message}",
+            item.title, item.message
+        );
+        let mut run = new_run(connection, &agent, prompt, None, None, RunStatus::Queued, 0)?;
+        run.trigger = Some(RunTrigger::Answer {
+            outbox_id: item.id.clone(),
+        });
+        save_run(connection, &run)?;
+    }
     let now = EpochMs::now();
     read(&mut item, now);
     item.resolved_at = Some(now);
@@ -217,6 +238,8 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
         unread: usize::try_from(unread).unwrap_or_default(),
         open_questions: usize::try_from(open_questions).unwrap_or_default(),
         latest_unread: latest.map(decode).transpose()?,
+        bruhs: super::crew::bruh_states(connection, EpochMs::now())?,
+        protocol: bruhs_models::crew::CREW_PROTOCOL,
     })
 }
 
@@ -249,7 +272,7 @@ pub(in crate::reactive) fn record_delivery(
 
 fn recent_told(connection: &Connection, agent_id: &str) -> Result<Vec<OutboxItem>, ReactiveError> {
     let mut statement = connection.prepare(
-        "SELECT payload FROM reactive_outbox WHERE agent_id=?1 ORDER BY created DESC,rowid DESC LIMIT ?2",
+        "SELECT payload FROM reactive_outbox WHERE agent_id=?1 AND json_extract(payload,'$.approval') IS NULL ORDER BY created DESC,rowid DESC LIMIT ?2",
     )?;
     let limit = i64::try_from(RECENT_TOLD).unwrap_or(5);
     let rows = statement.query_map(params![agent_id, limit], |row| row.get::<_, String>(0))?;

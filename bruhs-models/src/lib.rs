@@ -23,6 +23,7 @@ pub mod capture_auth;
 pub mod capture_recovery;
 pub mod connections;
 pub mod coordination;
+pub mod crew;
 pub mod database;
 pub mod delivery;
 pub mod ids;

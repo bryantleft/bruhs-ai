@@ -152,21 +152,12 @@ fn command(options: &QueryOptions) -> Command {
             cmd.arg(format!("--allowedTools={}", tools.join(",")));
         }
         Tools::ReadOnly => {
-            cmd.args([
-                "--tools=Read,Glob,Grep",
-                "--strict-mcp-config",
-                "--mcp-config={\"mcpServers\":{}}",
-            ]);
+            cmd.arg("--tools=Read,Glob,Grep");
         }
         Tools::None => {
             // An empty approval allowlist is not an empty tool inventory. Also
             // exclude inherited MCP/config hooks from transcript-only generation.
-            cmd.args([
-                "--tools=",
-                "--restricted",
-                "--strict-mcp-config",
-                "--mcp-config={\"mcpServers\":{}}",
-            ]);
+            cmd.args(["--tools=", "--restricted"]);
         }
     }
 
@@ -217,12 +208,20 @@ fn command(options: &QueryOptions) -> Command {
         cmd.arg(format!("--append-system-prompt={asp}"));
     }
 
-    if let Some(config) = options
-        .mcp_config
-        .as_ref()
-        .filter(|_| !matches!(options.tools, Tools::None | Tools::ReadOnly))
-    {
-        cmd.arg(format!("--mcp-config={config}"));
+    // Read-only and tool-free runs never start MCP servers, whatever
+    // `mcp_config` says; a strict run starts only `mcp_config`'s.
+    let no_servers = matches!(options.tools, Tools::None | Tools::ReadOnly);
+    if no_servers || options.strict_mcp_config {
+        cmd.arg("--strict-mcp-config");
+    }
+    match options.mcp_config.as_ref().filter(|_| !no_servers) {
+        Some(config) => {
+            cmd.arg(format!("--mcp-config={config}"));
+        }
+        None if no_servers || options.strict_mcp_config => {
+            cmd.arg("--mcp-config={\"mcpServers\":{}}");
+        }
+        None => {}
     }
 
     apply_env(
@@ -766,6 +765,41 @@ mod tests {
                 .count(),
             1
         );
+    }
+
+    #[test]
+    fn strict_mcp_config_starts_only_the_given_servers_once() {
+        let mcp = |args: &[String]| -> Vec<String> {
+            args.iter()
+                .filter(|arg| arg.contains("mcp-config"))
+                .cloned()
+                .collect()
+        };
+        let empty = "--mcp-config={\"mcpServers\":{}}".to_string();
+        let strict = "--strict-mcp-config".to_string();
+        assert!(mcp(&argv_of(&QueryOptions::new("hello"))).is_empty());
+        for tools in [Tools::CliDefault, Tools::Allow(vec!["Read".into()])] {
+            let options = QueryOptions::new("hello")
+                .tools(tools)
+                .strict_mcp_config(true);
+            assert_eq!(mcp(&argv_of(&options)), [strict.clone(), empty.clone()]);
+        }
+        let config = r#"{"mcpServers":{"private":{"command":"x"}}}"#;
+        let mut given = QueryOptions::new("hello").strict_mcp_config(true);
+        given.mcp_config = Some(config.into());
+        assert_eq!(
+            mcp(&argv_of(&given)),
+            [strict.clone(), format!("--mcp-config={config}")]
+        );
+        for tools in [Tools::ReadOnly, Tools::None] {
+            for flag in [false, true] {
+                let mut options = QueryOptions::new("hello")
+                    .tools(tools.clone())
+                    .strict_mcp_config(flag);
+                options.mcp_config = Some(config.into());
+                assert_eq!(mcp(&argv_of(&options)), [strict.clone(), empty.clone()]);
+            }
+        }
     }
 
     #[test]

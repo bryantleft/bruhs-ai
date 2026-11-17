@@ -48,6 +48,9 @@ const DESKTOP_SMOKE_SKIP_TERMINAL_ENV: &str = "BRUHS_DESKTOP_SMOKE_SKIP_TERMINAL
 /// Named window state for a web-vs-desktop comparison screenshot (`Workspace::smoke_scene`).
 const DESKTOP_SMOKE_SCENE_ENV: &str = "BRUHS_DESKTOP_SMOKE_SCENE";
 
+/// Pause between the scenes of a `;`-separated `BRUHS_DESKTOP_SMOKE_SCENE`.
+const DESKTOP_SMOKE_SCENE_STEP_MS: u64 = 1500;
+
 /// `1280x800`: open the main window at that size in points, so a
 /// screenshot matches a web capture at the same viewport.
 const DESKTOP_WINDOW_SIZE_ENV: &str = "BRUHS_DESKTOP_WINDOW_SIZE";
@@ -157,14 +160,31 @@ pub(crate) fn schedule_desktop_terminal_smoke(
                 });
             });
         }
-        if let Ok(scene) = env::var(DESKTOP_SMOKE_SCENE_ENV) {
-            let scene_workspace = workspace.clone();
-            let known = window.update(cx, move |_, window, cx| {
-                scene_workspace.update(cx, |workspace, cx| {
-                    workspace.smoke_scene(&scene, window, cx)
-                })
-            });
-            eprintln!("{DESKTOP_TERMINAL_SMOKE_ENV} scene known={known:?}");
+        if let Ok(scenes) = env::var(DESKTOP_SMOKE_SCENE_ENV) {
+            // `a;b`: each scene in turn, a beat apart, so a later one can
+            // act on what an earlier one drew (switching bruh pages).
+            for (index, scene) in scenes.split(';').enumerate() {
+                if index > 0 {
+                    timer(DESKTOP_SMOKE_SCENE_STEP_MS, cx).await;
+                }
+                let scene = scene.to_string();
+                let scene_workspace = workspace.clone();
+                let known = window.update(cx, move |_, window, cx| {
+                    scene_workspace.update(cx, |workspace, cx| {
+                        workspace.smoke_scene(&scene, window, cx)
+                    })
+                });
+                eprintln!("{DESKTOP_TERMINAL_SMOKE_ENV} scene known={known:?}");
+            }
+            if scenes.starts_with("bruh") {
+                timer(DESKTOP_SMOKE_SCENE_STEP_MS, cx).await;
+                cx.update(|cx| {
+                    eprintln!(
+                        "{DESKTOP_TERMINAL_SMOKE_ENV} crew {}",
+                        workspace.read(cx).smoke_crew_report(cx)
+                    );
+                });
+            }
         }
         let hold_ms = env::var(DESKTOP_SMOKE_HOLD_ENV)
             .ok()

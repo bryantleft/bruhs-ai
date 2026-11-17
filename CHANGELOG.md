@@ -11,6 +11,16 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- Always-on agents are now a crew of bruhs. Each has a face you can turn
+  and recolour that shows when it is asleep, working, paused, off or needs
+  you, a page with Chat, Memory, Routines and Settings, and an access level:
+  Read only (the default), Ask first or Full. Ask first and Full pauses
+  a run on a risky step and asks you, and an answer after the 15 minute wait
+  still resumes it. Full keeps shell commands in the bruh's own folder.
+  Can deliver and Send as me are separate switches, off by default. Stop and
+  Resume work per bruh or for all, and ⌘. stops everything. ⌘⇧B opens the
+  crew rail. An older background service shows a notice with Update service;
+  see `docs/crew.md`.
 - The desktop app zooms like a browser: ⌘+ and ⌘− (or View → Zoom In and
   Zoom Out) step from 67% to 300%, ⌘0 returns to 100%, and the level is
   remembered. Pages reflow for the larger text at the web's widths.

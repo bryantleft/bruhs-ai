@@ -6,6 +6,7 @@ use serde_json::Value;
 use std::path::Path;
 
 mod always_on;
+pub(in crate::reactive) mod crew;
 #[cfg(all(test, unix))]
 mod ownership_tests;
 pub(super) mod reports;
@@ -98,12 +99,15 @@ pub(super) fn open(path: &Path) -> Result<(Connection, RuntimeLock), ReactiveErr
         CREATE TABLE IF NOT EXISTS reactive_source_status(id TEXT PRIMARY KEY,payload TEXT NOT NULL);")?;
     reports::initialize(&mut connection)?;
     always_on::initialize(&connection)?;
+    crew::initialize(&connection)?;
     transaction(&mut connection, |connection| {
         for mut run in runs_where(connection, "status='running'", None)? {
             run.status = RunStatus::Interrupted;
             run.error = Some("The server stopped during this run. Review its output before explicitly retrying; work was not replayed.".into());
             run.updated_at = EpochMs::now();
             save_run(connection, &run)?;
+            // Nothing waits on its approvals any more; a late answer resumes it.
+            crew::expire_run_approvals(connection, &run.id)?;
         }
         Ok(())
     })?;
@@ -224,6 +228,8 @@ pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, 
         memories: always_on::memories(connection)?,
         follow_ups: always_on::follow_ups(connection)?,
         notification_settings: always_on::notification_settings(connection)?,
+        bruhs: crew::bruh_states(connection, EpochMs::now())?,
+        protocol: bruhs_models::crew::CREW_PROTOCOL,
     })
 }
 
@@ -583,15 +589,46 @@ fn runs_where(
     rows.map(|row| decode(row?)).collect()
 }
 
-fn cancel_where(connection: &Connection, field: &str, id: &str) -> Result<(), ReactiveError> {
+/// Cancel the running and pending runs whose `field` is `id`, saying why.
+pub(in crate::reactive) fn cancel_runs(
+    connection: &Connection,
+    field: &str,
+    id: &str,
+    reason: &str,
+) -> Result<(), ReactiveError> {
     let predicate = format!("{field}=?1 AND status IN ('awaiting_review','queued','running')");
     for mut run in runs_where(connection, &predicate, Some(id))? {
         run.status = RunStatus::Cancelled;
         run.updated_at = EpochMs::now();
-        run.error = Some("Configuration changed or was disabled. Review the new setup before starting another run.".into());
+        run.error = Some(reason.into());
         save_run(connection, &run)?;
     }
     Ok(())
+}
+
+fn cancel_where(connection: &Connection, field: &str, id: &str) -> Result<(), ReactiveError> {
+    cancel_runs(
+        connection,
+        field,
+        id,
+        "Configuration changed or was disabled. Review the new setup before starting another run.",
+    )
+}
+
+/// One agent's runs, newest first, a page at a time. `before` is the id of the
+/// last run on the previous page; runs made in the same millisecond still page apart.
+pub(super) fn agent_runs(
+    connection: &Connection,
+    agent_id: &str,
+    before: Option<&str>,
+) -> Result<Vec<ReactiveRun>, ReactiveError> {
+    let limit = i64::try_from(HISTORY_LIMIT)
+        .map_err(|_| ReactiveError::Invalid("History page size is invalid.".into()))?;
+    let mut statement = connection.prepare("SELECT payload FROM reactive_runs WHERE agent_id=?1 AND (?2 IS NULL OR rowid<(SELECT rowid FROM reactive_runs WHERE id=?2)) ORDER BY rowid DESC LIMIT ?3")?;
+    let rows = statement.query_map(params![agent_id, before, limit], |row| {
+        row.get::<_, String>(0)
+    })?;
+    rows.map(|row| decode(row?)).collect()
 }
 
 fn apply(connection: &Connection, change: &ReactiveChange) -> Result<(), ReactiveError> {
@@ -625,7 +662,13 @@ fn apply(connection: &Connection, change: &ReactiveChange) -> Result<(), Reactiv
                     || old.instructions != agent.instructions
                     || old.memory != agent.memory
             });
-            if old.as_ref().is_some_and(|old| old != agent) {
+            // A rename is cosmetic: it never stops work.
+            if old.as_ref().is_some_and(|old| {
+                ReactiveAgent {
+                    name: agent.name.clone(),
+                    ..old.clone()
+                } != *agent
+            }) {
                 cancel_where(connection, "agent_id", &agent.id)?;
             }
             connection.execute("INSERT INTO reactive_agents(id,payload,thread_id,session_id) VALUES(?1,?2,?3,NULL) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload,session_id=CASE WHEN ?4 THEN NULL ELSE session_id END", params![agent.id, encode(agent)?, ThreadId::new_v4().as_str(), reset])?;
@@ -676,6 +719,7 @@ fn apply(connection: &Connection, change: &ReactiveChange) -> Result<(), Reactiv
             }
             connection.execute("DELETE FROM reactive_agents WHERE id=?1", [id])?;
             always_on::delete_agent(connection, id)?;
+            crew::delete(connection, id)?;
         }
         ReactiveChange::DeleteSource { id } => {
             for subscription in records::<Subscription>(connection, "reactive_subscriptions")?
@@ -778,13 +822,14 @@ pub(super) fn command(
                 let mut run = new_run(
                     connection,
                     &agent,
-                    message,
+                    message.clone(),
                     None,
                     None,
                     RunStatus::Queued,
                     0,
                 )?;
                 run.trigger = Some(RunTrigger::Chat);
+                run.owner_message = Some(message);
                 save_run(connection, &run)?;
             }
             ReactiveCommand::MarkOutboxRead { ids } => always_on::mark_read(connection, &ids)?,
@@ -826,6 +871,34 @@ pub(super) fn command(
                 applied_steps,
                 total_steps,
             )?,
+            ReactiveCommand::CreateBruh {
+                agent,
+                look,
+                access,
+                effort,
+            } => {
+                if get::<ReactiveAgent>(connection, "reactive_agents", &agent.id)?.is_some() {
+                    return Err(ReactiveError::Conflict(
+                        "A bruh with this ID already exists.".into(),
+                    ));
+                }
+                let id = agent.id.clone();
+                apply(connection, &ReactiveChange::SaveAgent { agent })?;
+                crew::set_bruh(connection, &id, look, access, effort)?;
+            }
+            ReactiveCommand::SetBruh {
+                agent_id,
+                look,
+                access,
+                effort,
+            } => crew::set_bruh(connection, &agent_id, look, access, effort)?,
+            ReactiveCommand::StopAll => crew::stop(connection, None)?,
+            ReactiveCommand::StopBruh { agent_id } => crew::stop(connection, Some(&agent_id))?,
+            ReactiveCommand::ResumeBruh { agent_id } => crew::resume(connection, Some(&agent_id))?,
+            ReactiveCommand::ResumeAll => crew::resume(connection, None)?,
+            ReactiveCommand::DecideApproval { id, approve } => {
+                crew::decide_approval(connection, &id, approve)?;
+            }
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
                 if run.status == RunStatus::Queued {
@@ -868,6 +941,9 @@ pub(super) fn command(
                 }
                 check_run_enabled(connection, &run)?;
                 queue_capacity(connection)?;
+                // The retry reuses the run id, so its old approvals must not
+                // look like a live wait.
+                crew::expire_run_approvals(connection, &run.id)?;
                 run.status = RunStatus::Queued;
                 run.updated_at = EpochMs::now();
                 run.not_before = run.updated_at;
@@ -885,6 +961,12 @@ fn enabled_agent(connection: &Connection, id: &str) -> Result<ReactiveAgent, Rea
     let agent: ReactiveAgent = required(connection, "reactive_agents", id, "agent")?;
     if !agent.enabled {
         return Err(ReactiveError::Conflict("This agent is disabled.".into()));
+    }
+    if crew::is_paused(connection, id)? {
+        return Err(ReactiveError::Conflict(format!(
+            "{} is paused. Resume it to send work.",
+            agent.name
+        )));
     }
     Ok(agent)
 }
@@ -958,6 +1040,7 @@ fn new_run(
         report_warning: None,
         fresh_session: false,
         context_tokens: None,
+        owner_message: None,
     })
 }
 
@@ -1045,7 +1128,7 @@ pub(super) fn publish(
             &subscription.agent_id,
             "agent",
         )?;
-        if !agent.enabled {
+        if !agent.enabled || crew::is_paused(connection, &agent.id)? {
             continue;
         }
         let last = runs_where(connection, "subscription_id=?1", Some(&subscription.id))?.pop();
@@ -1226,6 +1309,7 @@ const MAX_BATCH_PROMPT_BYTES: usize = 256 * 1024;
 /// One claimed run, plus the memory and history the agent sees before its request.
 pub(super) struct Claim {
     pub agent: ReactiveAgent,
+    pub bruh: bruhs_models::crew::BruhProfile,
     pub run: ReactiveRun,
     pub context: String,
 }
@@ -1377,11 +1461,13 @@ pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, R
         }
         run.fresh_session = run.session_id.is_none();
         let context = always_on::run_context(connection, &run)?;
+        let bruh = crew::profile(connection, &agent.id)?;
         run.status = RunStatus::Running;
         run.updated_at = EpochMs::now();
         save_run(connection, &run)?;
         Ok(Some(Claim {
             agent,
+            bruh,
             run,
             context,
         }))

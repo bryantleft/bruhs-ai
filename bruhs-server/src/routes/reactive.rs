@@ -84,6 +84,42 @@ pub async fn report_command(
     Ok(Json(runtime(value)?.weekly_report_command(command).await?))
 }
 
+#[derive(serde::Deserialize)]
+pub struct RunPage {
+    /// The id of the last run on the previous page.
+    before: Option<String>,
+}
+
+/// `GET /api/reactive/agents/{id}/runs?before=<run id>`: one agent's runs, newest first.
+pub async fn agent_runs(
+    value: Option<Extension<ReactiveRuntime>>,
+    Path(id): Path<String>,
+    Query(page): Query<RunPage>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let runs = runtime(value)?.agent_runs(id, page.before).await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(runs),
+    ))
+}
+
+/// `GET /api/reactive/stream`: unnamed frames of `OutboxSignal`, the same
+/// producer as the combined stream's `reactive` frame.
+pub async fn stream(
+    value: Option<Extension<ReactiveRuntime>>,
+) -> Result<
+    axum::response::sse::Sse<
+        impl futures_core::Stream<Item = Result<axum::response::sse::Event, std::convert::Infallible>>,
+    >,
+    AppError,
+> {
+    let runtime = runtime(value)?;
+    Ok(
+        axum::response::sse::Sse::new(super::events_stream::reactive_signals(Some(runtime)))
+            .keep_alive(axum::response::sse::KeepAlive::default()),
+    )
+}
+
 pub async fn token(
     value: Option<Extension<ReactiveRuntime>>,
     Path(id): Path<String>,

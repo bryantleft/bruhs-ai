@@ -1,7 +1,7 @@
 //! Server-owned event agents; these records never enter browser metadata storage.
 use super::{get_json, segment, send_json, ApiError};
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
-use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
+use bruhs_models::reactive::{ReactiveCommand, ReactiveRun, ReactiveSnapshot};
 use bruhs_models::weekly_reports::{EngineeringReport, WeeklyReportCommand, WeeklyReportsSnapshot};
 use gloo_net::http::Method;
 use serde::Deserialize;
@@ -36,6 +36,18 @@ pub async fn reactive_snapshot() -> Result<ReactiveSnapshot, ApiError> {
 
 pub async fn reactive_command(command: &ReactiveCommand) -> Result<ReactiveSnapshot, ApiError> {
     send_json(Method::POST, "/api/reactive/commands", Some(command)).await
+}
+
+/// One agent's runs, newest first; `before` is the id of the last run already shown.
+pub async fn agent_runs(
+    agent_id: &str,
+    before: Option<&str>,
+) -> Result<Vec<ReactiveRun>, ApiError> {
+    let base = format!("/api/reactive/agents/{}/runs", segment(agent_id));
+    get_json(&before.map_or(base.clone(), |before| {
+        format!("{base}?before={}", segment(before))
+    }))
+    .await
 }
 
 pub async fn reactive_hook_token(source_id: &str) -> Result<ReactiveHookToken, ApiError> {

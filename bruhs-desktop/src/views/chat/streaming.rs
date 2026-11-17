@@ -1827,7 +1827,7 @@ impl ChatView {
         }
     }
 
-    pub(super) fn stop_streaming(&mut self, cx: &mut Context<'_, Self>) {
+    pub(crate) fn stop_streaming(&mut self, cx: &mut Context<'_, Self>) {
         if !self.is_streaming {
             return;
         }
