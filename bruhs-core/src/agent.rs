@@ -1131,7 +1131,11 @@ fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess) 
             options.setting_sources = Some(Vec::new());
             options.settings =
                 Some(unattended_claude_settings(access, &user_claude_settings()).to_string());
+            // Start no MCP servers: not the user's, claude.ai connectors, or a
+            // `.mcp.json` a Full bruh wrote into its folder, whose command
+            // would run outside the shell sandbox.
             options.mcp_config = None;
+            options.strict_mcp_config = true;
         }
         ProviderQueryOptions::Codex(options) => {
             options.inherit_env = false;
@@ -2095,6 +2099,9 @@ mod tests {
             assert!(!options.inherit_env);
             assert_eq!(options.setting_sources, Some(Vec::new()));
             assert!(options.mcp_config.is_none());
+            // No MCP servers at any level: not the user's, a `.mcp.json` the
+            // bruh wrote, or claude.ai connectors.
+            assert!(options.strict_mcp_config, "{level:?} starts MCP servers");
             assert!(settings.get("hooks").is_none());
             assert!(settings["permissions"].get("allow").is_none());
             let deny: Vec<&str> = settings["permissions"]["deny"]
