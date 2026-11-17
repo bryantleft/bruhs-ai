@@ -1411,7 +1411,8 @@ pub struct Workspace {
     life_notice: Option<String>,
     life_name_input: Entity<InputState>,
     life_value_input: Entity<InputState>,
-    life_category_input: Entity<InputState>,
+    /// Each finance card's form (web `finance_tab`).
+    life_finance: life_ui::FinanceForms,
     life_csv_input: Entity<InputState>,
     task_create_title_input: Entity<InputState>,
     task_create_description_input: Entity<InputState>,
@@ -1565,7 +1566,7 @@ impl Workspace {
         let life_ui::LifeInputs {
             life_name_input,
             life_value_input,
-            life_category_input,
+            life_finance,
             life_csv_input,
         } = Self::new_life_inputs(window, cx, &mut subscriptions);
         let TaskFormInputs {
@@ -2087,7 +2088,7 @@ impl Workspace {
             life_notice: None,
             life_name_input,
             life_value_input,
-            life_category_input,
+            life_finance,
             life_csv_input,
             task_create_title_input,
             task_create_description_input,

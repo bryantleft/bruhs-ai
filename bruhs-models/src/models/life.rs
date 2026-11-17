@@ -10,8 +10,10 @@ use uuid::Uuid;
 use super::{format_money_totals, normalized_currency, MoneyError, MoneyTotals, WorkItem};
 
 mod finance_csv;
+pub mod finance_entry;
 mod summaries;
 pub use finance_csv::{csv_import_notice, csv_transactions, CSV_IMPORT_ROW_LIMIT};
+pub use finance_entry::{finance_copy, FinanceEntryError, FinanceField};
 
 const DAY_MS: i64 = 86_400_000;
 

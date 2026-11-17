@@ -3,11 +3,12 @@
 use super::*;
 use bruhs_models::num::ToIntSaturating;
 use bruhs_models::{
-    finance_provider_adapters, health_provider_adapters, life_agent_prompt, FinanceAccount,
-    FinanceBudget, FinanceTransaction, Habit, Holding, IncomeStream, LifeInsightDomain,
-    ProviderStatus, RecoveryLog, SleepLog, WorkoutLog,
+    finance_copy, finance_entry, finance_provider_adapters, health_provider_adapters,
+    life_agent_prompt, FinanceField, Habit, LifeInsightDomain, ProviderStatus, RecoveryLog,
+    SleepLog, WorkoutLog,
 };
 
+/// Which finance card's Add was pressed.
 #[derive(Clone, Copy)]
 enum FinanceEntryKind {
     Account,
@@ -17,16 +18,53 @@ enum FinanceEntryKind {
     Holding,
 }
 
+/// Web `finance_tab`'s card forms: each card's fields, kept with the
+/// workspace so a half-typed entry survives switching to Health and back.
+pub(super) struct FinanceForms {
+    pub(super) account_name: Entity<InputState>,
+    pub(super) account_balance: Entity<InputState>,
+    pub(super) merchant: Entity<InputState>,
+    pub(super) spend_amount: Entity<InputState>,
+    pub(super) spend_category: Entity<InputState>,
+    pub(super) budget_category: Entity<InputState>,
+    pub(super) budget_limit: Entity<InputState>,
+    pub(super) income_name: Entity<InputState>,
+    pub(super) income_amount: Entity<InputState>,
+    pub(super) holding_symbol: Entity<InputState>,
+    pub(super) holding_value: Entity<InputState>,
+}
+
+impl FinanceForms {
+    /// The fields one card's Add reads, in the order its rule takes them.
+    fn fields(&self, kind: FinanceEntryKind) -> Vec<Entity<InputState>> {
+        match kind {
+            FinanceEntryKind::Account => {
+                vec![self.account_name.clone(), self.account_balance.clone()]
+            }
+            FinanceEntryKind::Spend => vec![
+                self.merchant.clone(),
+                self.spend_amount.clone(),
+                self.spend_category.clone(),
+            ],
+            FinanceEntryKind::Budget => {
+                vec![self.budget_category.clone(), self.budget_limit.clone()]
+            }
+            FinanceEntryKind::Income => {
+                vec![self.income_name.clone(), self.income_amount.clone()]
+            }
+            FinanceEntryKind::Holding => {
+                vec![self.holding_symbol.clone(), self.holding_value.clone()]
+            }
+        }
+    }
+}
+
 #[derive(Clone, Copy)]
 enum HealthEntryKind {
     Workout,
     Sleep,
     Recovery,
     Habit,
-}
-
-fn parse_amount_minor(value: &str) -> Option<i64> {
-    bruhs_models::parse_amount_minor(value).ok()
 }
 
 fn money(minor: i64, currency: &str) -> String {
@@ -64,6 +102,10 @@ const RECORD_GRID_TWO_COLUMNS_PX: f32 = 1024.0;
 const SOURCES_THREE_COLUMNS_PX: f32 = 768.0;
 /// Transactions a card lists, newest first (web `take(8)`).
 const TRANSACTION_ROWS: usize = 8;
+/// Web `INPUT_CLASS` and `SMALL_ACTION` on a mouse: `h-9`.
+const FINANCE_FIELD_PX: f32 = 36.0;
+/// Web `8rem`: an amount field beside its name.
+const FINANCE_AMOUNT_FIELD_PX: f32 = 128.0;
 /// Workouts a card lists, newest first (web `take(6)`).
 const WORKOUT_ROWS: usize = 6;
 
@@ -89,13 +131,14 @@ fn card_title(title: impl Into<SharedString>) -> Div {
         .child(title.into())
 }
 
-/// Web `ROW`: one record on the tone below its card.
+/// Web `ROW`: one record on the tone below its card. Not `flex_wrap`: gpui
+/// then placed the amount and its × about 85px below the row, where the ×
+/// was drawn and clicked (over the next card's controls).
 fn life_row(id: impl Into<ElementId>) -> Stateful<Div> {
     div()
         .id(id)
         .min_w_0()
         .flex()
-        .flex_wrap()
         .items_center()
         .justify_between()
         .gap_2()
@@ -141,13 +184,81 @@ fn record_grid(two_columns: bool, cards: Vec<AnyElement>) -> Div {
         .children(cards)
 }
 
+/// Web `INPUT_CLASS` under its caption, if it has one: a 36px finance field
+/// with the words both apps share.
+fn finance_field(input: &Entity<InputState>, words: FinanceField) -> Div {
+    let key = words.label;
+    div()
+        .debug_selector(move || format!("desktop-life-field-{key}"))
+        .min_w_0()
+        .flex()
+        .flex_col()
+        .gap_1()
+        .when_some(words.caption, |field, caption| {
+            field.child(
+                div()
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(px(LABEL_SM_PX))
+                    .text_color(theme::rambutan_500())
+                    .child(caption),
+            )
+        })
+        .child(
+            // `Input::h` (inherent) only sizes multi-line inputs; the
+            // `Styled` height is refined last, so it sizes this field.
+            Styled::h(Input::new(input), px(FINANCE_FIELD_PX))
+                .px(px(10.0))
+                .text_size(px(BODY_SM_PX))
+                .aria_label(words.label),
+        )
+}
+
+/// Web `SMALL_ACTION` and `ADD_BUTTON`: a 36px tinted button.
+fn finance_add_button(id: &'static str, label: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .debug_selector(move || format!("desktop-{id}"))
+        .role(Role::Button)
+        .tab_index(0)
+        .aria_label(label)
+        .flex_shrink_0()
+        .h(px(FINANCE_FIELD_PX))
+        .min_w(px(FINANCE_FIELD_PX))
+        .px_3()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(8.0))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        .bg(theme::longan_800())
+        .hover(|el| el.bg(theme::longan_700()))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
+        .text_size(px(LABEL_SM_PX))
+        .text_color(theme::rambutan_200())
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .child(label)
+}
+
+/// Web's name, amount and button row (`grid-cols-[minmax(0,1fr)_8rem_auto]`),
+/// aligned on the fields' bottoms as the web's `mt-5` button is.
+fn finance_row(name: Div, amount: Div, button: Stateful<Div>) -> Div {
+    div()
+        .flex()
+        .items_end()
+        .gap_2()
+        .child(name.flex_1())
+        .child(amount.w(px(FINANCE_AMOUNT_FIELD_PX)).flex_shrink_0())
+        .child(button)
+}
+
 impl Workspace {
     fn clear_life_inputs(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        for input in [
-            &self.life_name_input,
-            &self.life_value_input,
-            &self.life_category_input,
-        ] {
+        for input in [&self.life_name_input, &self.life_value_input] {
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
     }
@@ -185,64 +296,45 @@ impl Workspace {
         }
     }
 
+    /// Web's finance card Add: the card's fields become a record, newest
+    /// first, and clear; otherwise the notice says what is missing and the
+    /// fields keep what was typed. The rules are shared with the web.
     fn add_finance_entry(
         &mut self,
         kind: FinanceEntryKind,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let name = self.life_name_input.read(cx).value().trim().to_string();
-        let category = self.life_category_input.read(cx).value().trim().to_string();
-        let value = self.life_value_input.read(cx).value().to_string();
-        if name.is_empty() {
-            self.life_error = Some("Name the finance record first.".to_string());
-            cx.notify();
-            return;
-        }
-        let Some(amount) = parse_amount_minor(&value) else {
-            self.life_error = Some(bruhs_models::MoneyError::InvalidAmount.to_string());
-            cx.notify();
-            return;
-        };
+        let fields = self.life_finance.fields(kind);
+        let values = fields
+            .iter()
+            .map(|input| input.read(cx).value().to_string())
+            .collect::<Vec<_>>();
+        let value = |index: usize| values.get(index).map_or("", String::as_str);
         let now = EpochMs::now().as_millis();
-        match kind {
-            FinanceEntryKind::Account => self
-                .life_context
-                .finance
-                .accounts
-                .insert(0, FinanceAccount::manual(name, amount, now)),
-            FinanceEntryKind::Spend => self.life_context.finance.transactions.insert(
-                0,
-                FinanceTransaction::manual(
-                    name,
-                    if category.is_empty() {
-                        "Other"
-                    } else {
-                        &category
-                    },
-                    if amount < 0 { amount } else { -amount },
-                    now,
-                )
-                .into(),
-            ),
-            FinanceEntryKind::Budget => self.life_context.finance.budgets.insert(
-                0,
-                FinanceBudget::monthly(if category.is_empty() { name } else { category }, amount),
-            ),
-            FinanceEntryKind::Income => self
-                .life_context
-                .finance
-                .income_streams
-                .insert(0, IncomeStream::monthly(name, amount)),
-            FinanceEntryKind::Holding => self
-                .life_context
-                .finance
-                .holdings
-                .insert(0, Holding::manual(name, amount, now)),
+        let finance = &mut self.life_context.finance;
+        let added = match kind {
+            FinanceEntryKind::Account => finance_entry::account(value(0), value(1), now)
+                .map(|account| finance.accounts.insert(0, account)),
+            FinanceEntryKind::Spend => finance_entry::spend(value(0), value(1), value(2), now)
+                .map(|spend| finance.transactions.insert(0, spend.into())),
+            FinanceEntryKind::Budget => finance_entry::budget(value(0), value(1))
+                .map(|budget| finance.budgets.insert(0, budget)),
+            FinanceEntryKind::Income => finance_entry::income(value(0), value(1))
+                .map(|income| finance.income_streams.insert(0, income)),
+            FinanceEntryKind::Holding => finance_entry::holding(value(0), value(1), now)
+                .map(|holding| finance.holdings.insert(0, holding)),
+        };
+        if let Err(error) = added {
+            self.life_notice = Some(error.to_string());
+            cx.notify();
+            return;
         }
         self.life_context.finance.updated_at_ms = now;
-        self.life_error = None;
-        self.clear_life_inputs(window, cx);
+        self.life_notice = None;
+        for input in fields {
+            input.update(cx, |input, cx| input.set_value("", window, cx));
+        }
         self.persist_and_notify(cx);
     }
 
@@ -347,13 +439,14 @@ impl Workspace {
         ) {
             Ok(prompt) => prompt,
             Err(message) => {
-                self.life_error = Some(message.to_string());
+                // Web: the page's notice, which both tabs show.
+                self.life_notice = Some(message.to_string());
                 cx.notify();
                 return;
             }
         };
         let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) else {
-            self.life_error = Some("Start a chat before sharing life context.".to_string());
+            self.life_notice = Some("Start a chat before sharing life context.".to_string());
             cx.notify();
             return;
         };
@@ -391,12 +484,44 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// Web `finance_privacy` (and the Health tab's): its title and line,
+    /// then its toggles together at the right. Amounts redacted is disabled
+    /// while agent access is off.
     fn render_life_privacy(&self, cx: &Context<'_, Self>) -> AnyElement {
         let finance = self.life_tab == DesktopLifeTab::Finance;
         let enabled = if finance {
             self.life_context.finance.privacy.allow_agent_context
         } else {
             self.life_context.health.privacy.allow_agent_context
+        };
+        let exact = self
+            .life_context
+            .finance
+            .privacy
+            .reveal_exact_amounts_to_agent;
+        // Web: `rounded-seed px-2.5 py-1.5 text-label-sm` with an inset ring.
+        let toggle = |id: &'static str, label: &'static str, color: Hsla, ring: Hsla| {
+            div()
+                .id(id)
+                .debug_selector(move || format!("desktop-{id}"))
+                .role(Role::Button)
+                .aria_label(label)
+                .flex_shrink_0()
+                .min_h(px(theme::CONTROL_XS_PX))
+                .px(px(10.0))
+                .py(px(6.0))
+                .flex()
+                .items_center()
+                .rounded(px(4.0))
+                .border_1()
+                .border_color(ring)
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .text_size(px(LABEL_SM_PX))
+                .text_color(color)
+                .whitespace_nowrap()
+                .child(label)
         };
         div()
             .debug_selector(|| "desktop-life-privacy".into())
@@ -421,133 +546,111 @@ impl Workspace {
                     }))
                     .child(
                         div()
-                            .mt_1()
-                            .text_size(px(11.0))
+                            .mt(px(2.0))
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(BODY_SM_PX))
                             .text_color(theme::rambutan_500())
                             .child(if finance {
-                                "Local records stay out of agent context until enabled."
+                                finance_copy::PRIVACY_NOTE
                             } else {
                                 "Local logs stay out of agent context; bruhs never diagnoses."
                             }),
                     ),
             )
             .child(
-                web_button(
-                    "life-agent-access",
-                    WebButtonVariant::Outline,
-                    WebButtonSize::Small,
-                    ButtonState::Enabled,
-                )
-                .debug_selector(|| "desktop-life-agent-access".into())
-                .aria_label(if enabled {
-                    "Disable agent access"
-                } else {
-                    "Enable agent access"
-                })
-                .child(if enabled {
-                    "Agent access on"
-                } else {
-                    "Agent access off"
-                })
-                .on_click(cx.listener(move |this, _event, _window, cx| {
-                    let now = EpochMs::now().as_millis();
-                    if finance {
-                        this.life_context.finance.privacy.allow_agent_context =
-                            !this.life_context.finance.privacy.allow_agent_context;
-                        if !this.life_context.finance.privacy.allow_agent_context {
-                            this.life_context
-                                .finance
-                                .privacy
-                                .reveal_exact_amounts_to_agent = false;
-                        }
-                        this.life_context.finance.updated_at_ms = now;
-                    } else {
-                        this.life_context.health.privacy.allow_agent_context =
-                            !this.life_context.health.privacy.allow_agent_context;
-                        this.life_context.health.updated_at_ms = now;
-                    }
-                    this.persist_and_notify(cx);
-                })),
-            )
-            .when(finance, |panel| {
-                panel.child(
-                    web_button(
-                        "life-exact-amounts",
-                        WebButtonVariant::Outline,
-                        WebButtonSize::Small,
-                        ButtonState::disabled_if(!enabled),
-                    )
-                    .debug_selector(|| "desktop-life-exact-amounts".into())
-                    .aria_label(
-                        if self
-                            .life_context
-                            .finance
-                            .privacy
-                            .reveal_exact_amounts_to_agent
-                        {
-                            "Hide exact amounts from agents"
-                        } else {
-                            "Share exact amounts with agents"
-                        },
-                    )
+                div()
+                    .debug_selector(|| "desktop-life-privacy-toggles".into())
+                    .flex()
+                    .flex_wrap()
+                    .gap_2()
                     .child(
-                        if self
-                            .life_context
-                            .finance
-                            .privacy
-                            .reveal_exact_amounts_to_agent
-                        {
-                            "Exact amounts shared"
+                        toggle(
+                            "life-agent-access",
+                            if enabled {
+                                "Agent access on"
+                            } else {
+                                "Agent access off"
+                            },
+                            theme::blueberry_300(),
+                            theme::blueberry_500().opacity(0.25),
+                        )
+                        .tab_index(0)
+                        .cursor_pointer()
+                        .aria_toggled(enabled.into())
+                        .aria_label(if enabled {
+                            "Disable agent access"
                         } else {
-                            "Amounts redacted"
-                        },
+                            "Enable agent access"
+                        })
+                        .on_click(cx.listener(
+                            move |this, _event, _window, cx| {
+                                let now = EpochMs::now().as_millis();
+                                if finance {
+                                    this.life_context.finance.privacy.allow_agent_context =
+                                        !this.life_context.finance.privacy.allow_agent_context;
+                                    if !this.life_context.finance.privacy.allow_agent_context {
+                                        this.life_context
+                                            .finance
+                                            .privacy
+                                            .reveal_exact_amounts_to_agent = false;
+                                    }
+                                    this.life_context.finance.updated_at_ms = now;
+                                } else {
+                                    this.life_context.health.privacy.allow_agent_context =
+                                        !this.life_context.health.privacy.allow_agent_context;
+                                    this.life_context.health.updated_at_ms = now;
+                                }
+                                this.persist_and_notify(cx);
+                            },
+                        )),
                     )
-                    .on_click(cx.listener(|this, _event, _window, cx| {
-                        if this.life_context.finance.privacy.allow_agent_context {
-                            this.life_context
-                                .finance
-                                .privacy
-                                .reveal_exact_amounts_to_agent = !this
-                                .life_context
-                                .finance
-                                .privacy
-                                .reveal_exact_amounts_to_agent;
-                            this.life_context.finance.updated_at_ms = EpochMs::now().as_millis();
-                            this.persist_and_notify(cx);
-                        }
-                    })),
-                )
-            })
+                    .when(finance, |toggles| {
+                        toggles.child(
+                            toggle(
+                                "life-exact-amounts",
+                                if exact {
+                                    "Exact amounts shared"
+                                } else {
+                                    "Amounts redacted"
+                                },
+                                theme::rambutan_400(),
+                                theme::longan_700(),
+                            )
+                            .aria_toggled(exact.into())
+                            .aria_label(if exact {
+                                "Hide exact amounts from agents"
+                            } else {
+                                "Share exact amounts with agents"
+                            })
+                            // Web `disabled:opacity-40` while agent access is off.
+                            .when(!enabled, |button| button.opacity(0.4).cursor_not_allowed())
+                            .when(enabled, |button| button.tab_index(0).cursor_pointer())
+                            .on_click(cx.listener(
+                                |this, _event, _window, cx| {
+                                    if this.life_context.finance.privacy.allow_agent_context {
+                                        this.life_context
+                                            .finance
+                                            .privacy
+                                            .reveal_exact_amounts_to_agent = !this
+                                            .life_context
+                                            .finance
+                                            .privacy
+                                            .reveal_exact_amounts_to_agent;
+                                        this.life_context.finance.updated_at_ms =
+                                            EpochMs::now().as_millis();
+                                        this.persist_and_notify(cx);
+                                    }
+                                },
+                            )),
+                        )
+                    }),
+            )
             .into_any_element()
     }
 
-    fn render_life_quick_add(&self, compact: bool, cx: &Context<'_, Self>) -> AnyElement {
-        let finance = self.life_tab == DesktopLifeTab::Finance;
-        let finance_buttons =
-            [
-                ("Account", FinanceEntryKind::Account),
-                ("Spend", FinanceEntryKind::Spend),
-                ("Budget", FinanceEntryKind::Budget),
-                ("Income", FinanceEntryKind::Income),
-                ("Holding", FinanceEntryKind::Holding),
-            ]
-            .into_iter()
-            .enumerate()
-            .map(|(index, (label, kind))| {
-                web_button(
-                    ("finance-quick-add", index),
-                    WebButtonVariant::Outline,
-                    WebButtonSize::Small,
-                    ButtonState::Enabled,
-                )
-                .aria_label(label)
-                .child(label)
-                .on_click(cx.listener(move |this, _event, window, cx| {
-                    this.add_finance_entry(kind, window, cx)
-                }))
-                .into_any_element()
-            })
-            .collect::<Vec<_>>();
+    /// The Health tab's entry form: one name and value pair for a workout,
+    /// sleep, recovery or habit. The Finance tab has a form in each card.
+    fn render_health_quick_add(&self, compact: bool, cx: &Context<'_, Self>) -> AnyElement {
         let health_buttons =
             [
                 ("Workout", HealthEntryKind::Workout),
@@ -573,25 +676,21 @@ impl Workspace {
             })
             .collect::<Vec<_>>();
         div()
+            .debug_selector(|| "desktop-life-quick-add".into())
             .rounded(px(6.0))
             .bg(theme::longan_900().opacity(0.65))
             .border_1()
             .border_color(theme::longan_800())
             .p_3()
-            .child(card_title(if finance {
-                "Quick add finance"
-            } else {
-                "Quick add health"
-            }))
+            .child(card_title("Quick add health"))
             .child(
                 div()
                     .mt_2()
                     .grid()
-                    .grid_cols(if compact { 1 } else if finance { 3 } else { 2 })
+                    .grid_cols(if compact { 1 } else { 2 })
                     .gap_2()
-                    .child(Input::new(&self.life_name_input).aria_label(if finance { "Finance record name" } else { "Workout or habit name, or sleep quality percent" }))
-                    .child(Input::new(&self.life_value_input).aria_label(if finance { "Amount in USD" } else { "Workout minutes, sleep hours, or recovery percent" }))
-                    .when(finance, |form| form.child(Input::new(&self.life_category_input).aria_label("Category, optional"))),
+                    .child(Input::new(&self.life_name_input).aria_label("Workout or habit name, or sleep quality percent"))
+                    .child(Input::new(&self.life_value_input).aria_label("Workout minutes, sleep hours, or recovery percent")),
             )
             .child(
                 div()
@@ -599,22 +698,14 @@ impl Workspace {
                     .flex()
                     .flex_wrap()
                     .gap_1()
-                    .children(if finance {
-                        finance_buttons
-                    } else {
-                        health_buttons
-                    }),
+                    .children(health_buttons),
             )
             .child(
                 div()
                     .mt_2()
                     .text_size(px(12.0))
                     .text_color(theme::rambutan_400())
-                    .child(if finance {
-                        "Name, amount, optional category. Spend is recorded as an outflow."
-                    } else {
-                        "Workout: name + minutes. Sleep: quality % + hours. Recovery: score. Habit: name."
-                    }),
+                    .child("Workout: name + minutes. Sleep: quality % + hours. Recovery: score. Habit: name."),
             )
             .when_some(self.life_error.clone(), |panel, error| panel.child(
                 div().id("life-entry-error").role(Role::Alert).text_size(px(11.0)).text_color(theme::lychee_300()).child(error)
@@ -677,6 +768,7 @@ impl Workspace {
             .map(|(index, account)| {
                 let id = account.id.clone();
                 life_row(("life-account", index))
+                    .debug_selector(move || format!("desktop-life-account-{index}"))
                     .child(row_label(
                         account.name.clone(),
                         account.kind.label().to_string(),
@@ -684,7 +776,6 @@ impl Workspace {
                     .child(
                         div()
                             .flex()
-                            .flex_wrap()
                             .items_center()
                             .gap_2()
                             .child(row_amount(money(account.balance_minor, &account.currency)))
@@ -695,6 +786,9 @@ impl Workspace {
                                     WebButtonSize::Small,
                                     ButtonState::Enabled,
                                 )
+                                .debug_selector(move || {
+                                    format!("desktop-life-delete-account-{index}")
+                                })
                                 .aria_label("Delete account")
                                 .child(
                                     svg()
@@ -734,7 +828,6 @@ impl Workspace {
                     .child(
                         div()
                             .flex()
-                            .flex_wrap()
                             .items_center()
                             .gap_2()
                             .child(row_amount(money(
@@ -788,33 +881,113 @@ impl Workspace {
                     .into_any_element()
             })
             .collect::<Vec<_>>();
+        let forms = &self.life_finance;
+        let add = |id: &'static str, label: &'static str, kind: FinanceEntryKind| {
+            finance_add_button(id, label).on_click(cx.listener(move |this, _event, window, cx| {
+                this.add_finance_entry(kind, window, cx);
+            }))
+        };
         record_grid(
             two_columns,
             vec![
+                // Web `accounts`: Name, Balance and Add over the accounts.
                 life_card("life-accounts", "Accounts")
-                    .child(div().mt_2().flex().flex_col().gap_1().children(accounts))
+                    .child(div().mt_2().child(finance_row(
+                        finance_field(&forms.account_name, finance_copy::ACCOUNT_NAME),
+                        finance_field(&forms.account_balance, finance_copy::ACCOUNT_BALANCE),
+                        add(
+                            "life-add-account",
+                            finance_copy::ADD_ACCOUNT,
+                            FinanceEntryKind::Account,
+                        ),
+                    )))
+                    .child(div().mt_3().flex().flex_col().gap_1().children(accounts))
                     .into_any_element(),
+                // Web `transactions`: Merchant and Spend amount, Category
+                // under them, then Add spend.
                 life_card("life-transactions", "Transactions")
                     .child(
                         div()
                             .mt_2()
+                            .grid()
+                            .grid_cols(2)
+                            .gap_2()
+                            .child(finance_field(&forms.merchant, finance_copy::MERCHANT))
+                            .child(finance_field(
+                                &forms.spend_amount,
+                                finance_copy::SPEND_AMOUNT,
+                            ))
+                            .child(
+                                finance_field(&forms.spend_category, finance_copy::SPEND_CATEGORY)
+                                    .col_span(2),
+                            ),
+                    )
+                    .child(div().mt_2().flex().child(add(
+                        "life-add-spend",
+                        finance_copy::ADD_SPEND,
+                        FinanceEntryKind::Spend,
+                    )))
+                    .child(
+                        div()
+                            .mt_3()
                             .flex()
                             .flex_col()
                             .gap_1()
                             .children(transactions),
                     )
                     .into_any_element(),
+                // Web `budgets_and_income`: a Budget row and an Income row
+                // over the summary.
                 life_card("life-budgets", "Budgets & income")
                     .child(
                         div()
-                            .mt_2()
+                            .mt_3()
+                            .flex()
+                            .flex_col()
+                            .gap_2()
+                            .child(finance_row(
+                                finance_field(
+                                    &forms.budget_category,
+                                    finance_copy::BUDGET_CATEGORY,
+                                ),
+                                finance_field(&forms.budget_limit, finance_copy::BUDGET_LIMIT),
+                                add(
+                                    "life-add-budget",
+                                    finance_copy::ADD_BUDGET,
+                                    FinanceEntryKind::Budget,
+                                ),
+                            ))
+                            .child(finance_row(
+                                finance_field(&forms.income_name, finance_copy::INCOME_NAME),
+                                finance_field(&forms.income_amount, finance_copy::INCOME_AMOUNT),
+                                add(
+                                    "life-add-income",
+                                    finance_copy::ADD_INCOME,
+                                    FinanceEntryKind::Income,
+                                ),
+                            )),
+                    )
+                    .child(
+                        div()
+                            .mt_3()
+                            .font_family(theme::CODE_FONT_FAMILY)
                             .text_size(px(BODY_SM_PX))
                             .text_color(theme::rambutan_500())
                             .child(finance.budgets_and_income_summary()),
                     )
                     .into_any_element(),
+                // Web `holdings`: Symbol, Value and Add over the chips.
                 life_card("life-holdings", "Holdings")
-                    .child(div().mt_2().flex().flex_wrap().gap_2().children(holdings))
+                    .child(div().mt_3().child(finance_row(
+                        finance_field(&forms.holding_symbol, finance_copy::HOLDING_SYMBOL),
+                        finance_field(&forms.holding_value, finance_copy::HOLDING_VALUE),
+                        add(
+                            "life-add-holding",
+                            finance_copy::ADD_HOLDING,
+                            FinanceEntryKind::Holding,
+                        ),
+                    )))
+                    .child(div().mt_3().flex().flex_wrap().gap_2().children(holdings))
                     .into_any_element(),
             ],
         )
@@ -1283,11 +1456,23 @@ impl Workspace {
                     .gap_3()
                     .when_some(self.render_search_record_detail(cx), |page, detail| page.child(detail))
                     .children(self.render_life_notice(cx))
-                    .when(finance, |el| el.child(div().text_size(px(11.0)).text_color(theme::rambutan_500())
-                        .child("Manual amounts are USD. Other currencies stay separate in minor units; no exchange rate is applied.")))
+                    .when(finance, |el| {
+                        el.child(
+                            div()
+                                .debug_selector(|| "desktop-life-usd-note".into())
+                                .font_family(theme::CODE_FONT_FAMILY)
+                                .text_size(px(BODY_SM_PX))
+                                .text_color(theme::rambutan_500())
+                                .child(finance_copy::USD_NOTE),
+                        )
+                    })
                     .child(div().flex().flex_wrap().gap_2().children(summary))
                     .child(self.render_life_privacy(cx))
-                    .child(self.render_life_quick_add(compact, cx))
+                    // Web: finance entry sits in each card; Health keeps
+                    // its one form.
+                    .when(!finance, |page| {
+                        page.child(self.render_health_quick_add(compact, cx))
+                    })
                     // Web order: the record cards, then CSV import and the
                     // finance sources; the health sources share its grid.
                     .child(if finance {
@@ -1304,16 +1489,17 @@ impl Workspace {
     }
 }
 
-/// The manual Finance / Health entry fields and the CSV paste.
+/// The Health entry fields, each finance card's form and the CSV paste.
 pub(super) struct LifeInputs {
     pub(super) life_name_input: Entity<InputState>,
     pub(super) life_value_input: Entity<InputState>,
-    pub(super) life_category_input: Entity<InputState>,
+    pub(super) life_finance: FinanceForms,
     pub(super) life_csv_input: Entity<InputState>,
 }
 
 impl Workspace {
-    /// The manual Finance / Health entry fields; edits redraw.
+    /// The Health entry fields, the finance forms and the CSV paste; edits
+    /// redraw.
     pub(super) fn new_life_inputs(
         window: &mut Window,
         cx: &mut Context<'_, Self>,
@@ -1324,9 +1510,24 @@ impl Workspace {
         let life_value_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Amount or score"));
         subscriptions.push(redraw_on_edit(&life_value_input, window, cx));
-        let life_category_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Category (optional)"));
-        subscriptions.push(redraw_on_edit(&life_category_input, window, cx));
+        let mut field = |words: FinanceField| {
+            let input = cx.new(|cx| InputState::new(window, cx).placeholder(words.placeholder));
+            subscriptions.push(redraw_on_edit(&input, window, cx));
+            input
+        };
+        let life_finance = FinanceForms {
+            account_name: field(finance_copy::ACCOUNT_NAME),
+            account_balance: field(finance_copy::ACCOUNT_BALANCE),
+            merchant: field(finance_copy::MERCHANT),
+            spend_amount: field(finance_copy::SPEND_AMOUNT),
+            spend_category: field(finance_copy::SPEND_CATEGORY),
+            budget_category: field(finance_copy::BUDGET_CATEGORY),
+            budget_limit: field(finance_copy::BUDGET_LIMIT),
+            income_name: field(finance_copy::INCOME_NAME),
+            income_amount: field(finance_copy::INCOME_AMOUNT),
+            holding_symbol: field(finance_copy::HOLDING_SYMBOL),
+            holding_value: field(finance_copy::HOLDING_VALUE),
+        };
         let life_csv_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .placeholder("Coffee, Food, -5.25, client meeting")
@@ -1337,7 +1538,7 @@ impl Workspace {
         LifeInputs {
             life_name_input,
             life_value_input,
-            life_category_input,
+            life_finance,
             life_csv_input,
         }
     }
@@ -1384,13 +1585,18 @@ mod money_tests {
             FinanceEntryKind::Holding,
         ] {
             workspace.update_in(cx, |w, window, cx| {
-                w.life_name_input
-                    .update(cx, |input, cx| input.set_value("Exact", window, cx));
-                w.life_value_input.update(cx, |input, cx| {
+                // Each card's form: its name field, then its amount.
+                let fields = w.life_finance.fields(kind);
+                fields[0].update(cx, |input, cx| input.set_value("Exact", window, cx));
+                fields[1].update(cx, |input, cx| {
                     input.set_value("90071992547409.93", window, cx)
                 });
                 w.add_finance_entry(kind, window, cx);
-                assert!(w.life_error.is_none());
+                assert!(w.life_notice.is_none());
+                assert!(
+                    fields[1].read(cx).value().is_empty(),
+                    "an added entry clears"
+                );
             });
             cx.condition(&workspace, |w, _| w.save_status.is_saved())
                 .await;
@@ -1416,18 +1622,30 @@ mod money_tests {
         );
         let before = fs::read(&path).unwrap();
         workspace.update_in(cx, |w, window, cx| {
-            w.life_name_input
+            w.life_finance
+                .account_name
                 .update(cx, |input, cx| input.set_value("Retain", window, cx));
-            w.life_value_input
+            w.life_finance
+                .account_balance
                 .update(cx, |input, cx| input.set_value("1e30", window, cx));
             w.persistence_error = Some("Existing disk failure".into());
             w.add_finance_entry(FinanceEntryKind::Account, window, cx);
-            assert!(w.life_error.is_some());
+            assert_eq!(
+                w.life_notice.as_deref(),
+                Some(bruhs_models::MoneyError::InvalidAmount.to_string().as_str())
+            );
             assert_eq!(
                 w.persistence_error.as_deref(),
                 Some("Existing disk failure")
             );
-            assert_eq!(w.life_value_input.read(cx).value().as_str(), "1e30");
+            assert_eq!(
+                w.life_finance.account_balance.read(cx).value().as_str(),
+                "1e30"
+            );
+            assert_eq!(
+                w.life_finance.account_name.read(cx).value().as_str(),
+                "Retain"
+            );
             assert_eq!(w.life_context.finance.accounts.len(), 1);
         });
         cx.run_until_parked();
