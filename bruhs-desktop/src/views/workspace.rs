@@ -2620,6 +2620,8 @@ impl Workspace {
             AppView::Calendar => self.render_calendar_page(cx),
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
+            // Until the desktop bruh page lands, a bruh opens Automations.
+            AppView::Bruh { .. } => self.render_automations_page(window, cx),
             AppView::Workbench => div()
                 .flex_1()
                 .h_full()

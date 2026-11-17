@@ -187,13 +187,6 @@ pub fn BruhFace(
     }
 }
 
-// Nothing renders a face until the crew rail lands; naming the component here
-// keeps it (and what it uses) from being dead code until then. The rail task
-// deletes this line.
-const _: fn() = || {
-    let _ = BruhFace;
-};
-
 #[cfg(test)]
 mod tests {
     use super::*;

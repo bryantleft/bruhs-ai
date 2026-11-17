@@ -50,7 +50,7 @@ impl MemoryEditor {
 }
 
 #[component]
-pub(super) fn AgentMemoryPanel(
+pub(crate) fn AgentMemoryPanel(
     agent_id: String,
     snapshot: RwSignal<Option<ReactiveSnapshot>>,
     send: Callback<ReactiveCommand>,

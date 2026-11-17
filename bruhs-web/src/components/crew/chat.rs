@@ -1,0 +1,419 @@
+//! Chat with one bruh: its runs as a conversation, with its questions and
+//! approvals inline, older runs a page at a time, and a composer.
+
+use bruhs_models::crew::{
+    transcript, ApprovalState, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
+};
+use bruhs_models::reactive::{OutboxItem, ReactiveCommand, ReactiveRun, HISTORY_LIMIT};
+use leptos::html;
+use leptos::prelude::*;
+
+use super::data::{use_crew_snapshot, CrewData};
+use super::face_editor::still_view;
+use crate::ui::{BrailleBruh, Button, ButtonSize, ButtonVariant, Textarea};
+
+const CARD: &str =
+    "min-w-0 max-w-[80%] space-y-2 rounded-grape bg-longan-900 p-3 inset-ring inset-ring-longan-700";
+
+/// Puts a page of runs into those already shown, replacing runs it updates.
+fn merge_runs(shown: &mut Vec<ReactiveRun>, page: Vec<ReactiveRun>) {
+    for run in page {
+        match shown.iter_mut().find(|known| known.id == run.id) {
+            Some(known) => *known = run,
+            None => shown.push(run),
+        }
+    }
+}
+
+/// Whether a page this long may have older runs behind it.
+fn may_have_more(page_len: usize) -> bool {
+    page_len >= HISTORY_LIMIT
+}
+
+/// Why the composer is off for a bruh in this state.
+fn composer_block(status: Option<BruhStatus>) -> Option<&'static str> {
+    match status? {
+        BruhStatus::Paused => Some("This bruh is paused. Resume it to chat."),
+        BruhStatus::Off => Some("This bruh is off. Turn it on in Agent workflows to chat."),
+        _ => None,
+    }
+}
+
+fn approval_outcome(item: &OutboxItem) -> Option<&'static str> {
+    item.resolved_at?;
+    Some(
+        match item.approval.as_ref().map(|approval| approval.state) {
+            Some(ApprovalState::Approved) => "Approved",
+            Some(ApprovalState::Denied) => "Denied",
+            Some(ApprovalState::Expired) => "Expired",
+            Some(ApprovalState::Waiting) | None => "Withdrawn",
+        },
+    )
+}
+
+/// What identifies a line as drawn: a line is redrawn only when this changes,
+/// so a reply typed into a card survives unrelated updates.
+fn line_key(item: &TranscriptItem) -> String {
+    match item {
+        TranscriptItem::Owner {
+            run_id, pending, ..
+        } => format!("owner:{run_id}:{pending}"),
+        TranscriptItem::Bruh {
+            run_id,
+            text,
+            failed,
+            ..
+        } => format!("bruh:{run_id}:{failed}:{text}"),
+        TranscriptItem::Card { item } => format!(
+            "card:{}:{}:{:?}",
+            item.id,
+            item.resolved_at.is_some(),
+            item.approval.as_ref().map(|approval| approval.state)
+        ),
+    }
+}
+
+#[component]
+pub fn BruhChat(agent_id: String) -> impl IntoView {
+    let data = use_crew_snapshot();
+    let id = StoredValue::new(agent_id);
+    let runs = RwSignal::new(Vec::<ReactiveRun>::new());
+    let oldest = RwSignal::new(None::<String>);
+    let more = RwSignal::new(false);
+    let loading_earlier = RwSignal::new(false);
+    let load_error = RwSignal::new(None::<String>);
+    let revision = StoredValue::new(0u64);
+    let alive = RwSignal::new(true);
+    on_cleanup(move || alive.set(false));
+
+    // The newest page, again whenever the crew changes.
+    Effect::new(move |_| {
+        data.snapshot.track();
+        revision.update_value(|value| *value = value.wrapping_add(1));
+        let requested = revision.get_value();
+        let agent = id.get_value();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = crate::api::agent_runs(&agent, None).await;
+            if alive.try_get_untracked() != Some(true)
+                || revision.try_get_value() != Some(requested)
+            {
+                return;
+            }
+            match result {
+                Ok(page) => {
+                    if oldest.get_untracked().is_none() {
+                        more.set(may_have_more(page.len()));
+                        oldest.set(page.last().map(|run| run.id.clone()));
+                    }
+                    runs.update(|runs| merge_runs(runs, page));
+                    load_error.set(None);
+                }
+                Err(error) => load_error.set(Some(error.to_string())),
+            }
+        });
+    });
+    let load_earlier = move |_| {
+        let Some(before) = oldest.get_untracked() else {
+            return;
+        };
+        loading_earlier.set(true);
+        let agent = id.get_value();
+        wasm_bindgen_futures::spawn_local(async move {
+            let result = crate::api::agent_runs(&agent, Some(&before)).await;
+            if alive.try_get_untracked() != Some(true) {
+                return;
+            }
+            loading_earlier.set(false);
+            match result {
+                Ok(page) => {
+                    more.set(may_have_more(page.len()));
+                    if let Some(last) = page.last() {
+                        oldest.set(Some(last.id.clone()));
+                    }
+                    runs.update(|runs| merge_runs(runs, page));
+                }
+                Err(error) => load_error.set(Some(error.to_string())),
+            }
+        });
+    };
+
+    let state = Memo::new(move |_| {
+        data.snapshot.with(|snapshot| {
+            snapshot.as_ref().and_then(|snapshot| {
+                id.with_value(|id| {
+                    snapshot
+                        .bruhs
+                        .iter()
+                        .find(|bruh| bruh.agent_id == *id)
+                        .cloned()
+                })
+            })
+        })
+    });
+    let look = Memo::new(move |_| state.get().map(|state| state.look).unwrap_or_default());
+    let lines = Memo::new(move |_| {
+        let outbox = data.snapshot.with(|snapshot| {
+            snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.outbox.clone())
+                .unwrap_or_default()
+        });
+        runs.with(|runs| id.with_value(|id| transcript(id, runs, &outbox)))
+    });
+
+    // Follow the conversation: a new last line scrolls it into view.
+    let scroller = NodeRef::<html::Div>::new();
+    Effect::new(move |previous: Option<Option<String>>| {
+        let last = lines.with(|lines| lines.last().map(line_key));
+        if previous.as_ref() != Some(&last) {
+            if let Some(element) = scroller.get_untracked() {
+                element.set_scroll_top(element.scroll_height());
+            }
+        }
+        last
+    });
+
+    let blocked = Memo::new(move |_| composer_block(state.get().map(|state| state.status)));
+    let message = RwSignal::new(String::new());
+    let send = move || {
+        let text = message.get_untracked();
+        if text.trim().is_empty() || blocked.get_untracked().is_some() {
+            return;
+        }
+        data.send.run(ReactiveCommand::Chat {
+            agent_id: id.get_value(),
+            message: text,
+        });
+        message.set(String::new());
+    };
+
+    view! {
+        <div class="flex min-h-0 flex-1 flex-col">
+            <div node_ref=scroller class="min-h-0 flex-1 overflow-y-auto">
+                <div class="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 p-4 sm:px-6" role="log" aria-label="Conversation">
+                    <Show when=move || more.get()>
+                        <div class="flex justify-center">
+                            <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move || loading_earlier.get()) on_click=Callback::new(load_earlier)>"Load earlier"</Button>
+                        </div>
+                    </Show>
+                    {move || load_error.get().map(|message| view! { <p role="alert" class="rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200">{message}</p> })}
+                    <Show when=move || lines.with(Vec::is_empty) && load_error.get().is_none()>
+                        <p class="text-body-sm text-rambutan-500">"Nothing here yet. Say hi."</p>
+                    </Show>
+                    <For
+                        each=move || lines.get()
+                        key=line_key
+                        children=move |item| line(item, look, data)
+                    />
+                </div>
+            </div>
+            <div class="shrink-0 border-t border-longan-800/50">
+                <div class="mx-auto w-full max-w-3xl min-w-0 space-y-2 p-4 sm:px-6">
+                    {move || blocked.get().map(|reason| view! { <p class="text-label-sm text-rambutan-400">{reason}</p> })}
+                    <div class="flex min-w-0 items-end gap-2">
+                        <Textarea
+                            aria_label="Message"
+                            placeholder="Message"
+                            rows=2
+                            class="min-w-0 flex-1"
+                            value=Signal::derive(move || message.get())
+                            on_input=Callback::new(move |text| message.set(text))
+                            disabled=Signal::derive(move || blocked.get().is_some())
+                            on_keydown=Callback::new(move |event: web_sys::KeyboardEvent| {
+                                if event.key() == "Enter" && !event.shift_key() && !event.is_composing() {
+                                    event.prevent_default();
+                                    send();
+                                }
+                            })
+                        />
+                        <Button
+                            size=ButtonSize::Small
+                            disabled=Signal::derive(move || blocked.get().is_some() || message.with(|text| text.trim().is_empty()))
+                            on_click=Callback::new(move |_| send())
+                        >"Send"</Button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    }
+}
+
+fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
+    match item {
+        TranscriptItem::Owner { text, pending, .. } => view! {
+            <div class="flex min-w-0 flex-col items-end gap-1">
+                <p class="min-w-0 max-w-[80%] whitespace-pre-wrap break-words rounded-grape bg-longan-800 px-3 py-2 text-body text-rambutan-100">{text}</p>
+                {pending.then(|| view! { <span class="text-label-sm text-rambutan-500">"Waiting for a reply"</span> })}
+            </div>
+        }
+        .into_any(),
+        TranscriptItem::Bruh {
+            text,
+            trigger,
+            failed,
+            ..
+        } => view! {
+            <div class="flex min-w-0 items-start gap-2">
+                <BrailleBruh size=f64::from(RAIL_FACE_PX) view=Signal::derive(move || look.with(|look| still_view(look, BruhStatus::Working))) />
+                <div class="flex min-w-0 max-w-[80%] flex-col gap-1">
+                    {trigger.map(|trigger| view! { <span class="text-label-sm text-rambutan-500">{trigger}</span> })}
+                    <p class=if failed {
+                        "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-lychee-500/10 px-3 py-2 text-body text-lychee-200"
+                    } else {
+                        "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-longan-900 px-3 py-2 text-body text-rambutan-200 inset-ring inset-ring-longan-700/50"
+                    }>{text}</p>
+                </div>
+            </div>
+        }
+        .into_any(),
+        TranscriptItem::Card { item } if item.approval.is_some() => approval_card(item, data),
+        TranscriptItem::Card { item } => question_card(item, data),
+    }
+}
+
+fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
+    let summary = item
+        .approval
+        .as_ref()
+        .map(|approval| approval.summary.clone())
+        .unwrap_or_default();
+    let outcome = approval_outcome(&item);
+    let id = StoredValue::new(item.id.clone());
+    let decide = move |approve: bool| {
+        data.send.run(ReactiveCommand::DecideApproval {
+            id: id.get_value(),
+            approve,
+        });
+    };
+    let disabled = Signal::derive(move || data.busy.get() || !data.crew_ready());
+    view! {
+        <article class=CARD aria-label="Approval">
+            <p class="text-label-sm text-rambutan-400">"Wants to"</p>
+            <p class="whitespace-pre-wrap break-words text-body text-rambutan-100">{summary}</p>
+            {match outcome {
+                Some(outcome) => view! { <p class="text-label-sm text-rambutan-400">{outcome}</p> }.into_any(),
+                None => view! {
+                    <div class="flex flex-wrap items-center gap-2">
+                        <Button size=ButtonSize::Small disabled=disabled on_click=Callback::new(move |_| decide(true))>"Approve"</Button>
+                        <Button variant=ButtonVariant::Outline size=ButtonSize::Small disabled=disabled on_click=Callback::new(move |_| decide(false))>"Deny"</Button>
+                        {move || data.service_reason().map(|reason| view! { <p class="min-w-0 text-label-sm text-rambutan-400">{reason}</p> })}
+                    </div>
+                }
+                .into_any(),
+            }}
+        </article>
+    }
+    .into_any()
+}
+
+fn question_card(item: OutboxItem, data: CrewData) -> AnyView {
+    let reply = RwSignal::new(String::new());
+    let id = StoredValue::new(item.id.clone());
+    let answer = move || {
+        let text = reply.get_untracked();
+        if text.trim().is_empty() {
+            return;
+        }
+        data.send.run(ReactiveCommand::AnswerOutbox {
+            id: id.get_value(),
+            message: text,
+        });
+    };
+    let resolved = item.resolved_at.is_some();
+    let label = format!("Reply to {}", item.title);
+    view! {
+        <article class=CARD aria-label="Question">
+            <p class="break-words text-label text-rambutan-100">{item.title.clone()}</p>
+            {(!item.message.trim().is_empty()).then(|| view! { <p class="whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{item.message.clone()}</p> })}
+            {if resolved {
+                match item.answer.clone() {
+                    Some(answer) => view! { <p class="whitespace-pre-wrap break-words text-body-sm text-rambutan-400">{format!("You answered: {answer}")}</p> }.into_any(),
+                    None => view! { <p class="text-label-sm text-rambutan-400">"Dismissed"</p> }.into_any(),
+                }
+            } else {
+                view! {
+                    <div class="space-y-2">
+                        <Textarea aria_label=label rows=2 value=Signal::derive(move || reply.get()) on_input=Callback::new(move |text| reply.set(text)) />
+                        <Button size=ButtonSize::Small disabled=Signal::derive(move || data.busy.get() || reply.with(|text| text.trim().is_empty())) on_click=Callback::new(move |_| answer())>"Reply"</Button>
+                    </div>
+                }
+                .into_any()
+            }}
+        </article>
+    }
+    .into_any()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bruhs_models::EpochMs;
+
+    fn run(id: &str, status: &str) -> ReactiveRun {
+        serde_json::from_value(serde_json::json!({
+            "id": id, "agent_id": "a", "source_id": null, "subscription_id": null,
+            "event_id": null, "status": status, "prompt": id, "thread_id": "t",
+            "session_id": null, "created_at": 1, "updated_at": 1,
+            "not_before": 1, "result": null, "error": null,
+        }))
+        .unwrap()
+    }
+
+    #[test]
+    fn a_newer_page_updates_runs_in_place_and_adds_the_rest() {
+        let mut shown = vec![run("r2", "running"), run("r1", "completed")];
+        merge_runs(
+            &mut shown,
+            vec![run("r3", "queued"), run("r2", "completed")],
+        );
+        let got: Vec<(&str, _)> = shown
+            .iter()
+            .map(|run| (run.id.as_str(), run.status))
+            .collect();
+        assert_eq!(
+            got,
+            vec![
+                ("r2", bruhs_models::reactive::RunStatus::Completed),
+                ("r1", bruhs_models::reactive::RunStatus::Completed),
+                ("r3", bruhs_models::reactive::RunStatus::Queued),
+            ]
+        );
+        assert!(may_have_more(HISTORY_LIMIT) && !may_have_more(HISTORY_LIMIT - 1));
+    }
+
+    #[test]
+    fn the_composer_says_why_a_paused_or_off_bruh_cannot_chat() {
+        assert!(composer_block(Some(BruhStatus::Paused))
+            .is_some_and(|reason| reason.contains("paused")));
+        assert!(composer_block(Some(BruhStatus::Off)).is_some_and(|reason| reason.contains("off")));
+        for status in [
+            BruhStatus::Asleep,
+            BruhStatus::Working,
+            BruhStatus::NeedsYou,
+        ] {
+            assert_eq!(composer_block(Some(status)), None);
+        }
+        assert_eq!(composer_block(None), None);
+    }
+
+    #[test]
+    fn a_decided_approval_says_how_and_an_open_one_waits() {
+        let mut item: OutboxItem = serde_json::from_value(serde_json::json!({
+            "id": "i", "agent_id": "a", "run_id": "r", "kind": "ask", "title": "t",
+            "message": "m", "created_at": 1,
+            "approval": {"tool": "SandboxNetworkAccess", "summary": "Reach example.com", "fingerprint": "f", "state": "expired"},
+        }))
+        .unwrap();
+        // Expired stays open: a late approval still counts.
+        assert_eq!(approval_outcome(&item), None);
+        item.resolved_at = Some(EpochMs::saturating_from_i64(2));
+        assert_eq!(approval_outcome(&item), Some("Expired"));
+        if let Some(approval) = item.approval.as_mut() {
+            approval.state = ApprovalState::Approved;
+        }
+        assert_eq!(approval_outcome(&item), Some("Approved"));
+        let open = line_key(&TranscriptItem::Card { item: item.clone() });
+        item.resolved_at = None;
+        assert_ne!(open, line_key(&TranscriptItem::Card { item }));
+    }
+}

@@ -56,6 +56,9 @@ impl TranscriptItem {
     }
 }
 
+/// What a bruh says for a run that ended without a result or an error.
+pub const STOPPED_LINE: &str = "Stopped.";
+
 fn is_owner_line(run: &ReactiveRun) -> bool {
     match &run.trigger {
         Some(RunTrigger::Chat) => true,
@@ -95,6 +98,9 @@ pub fn transcript(
                 if matches!(run.status, RunStatus::Failed | RunStatus::Interrupted) =>
             {
                 (error.clone(), true)
+            }
+            (None, None) if matches!(run.status, RunStatus::Failed | RunStatus::Interrupted) => {
+                (STOPPED_LINE.to_string(), run.status == RunStatus::Failed)
             }
             _ => continue,
         };
@@ -332,6 +338,31 @@ mod tests {
                 trigger: None,
                 failed: true
             }
+        );
+    }
+
+    #[test]
+    fn a_run_stopped_without_a_word_still_reads_as_stopped() {
+        let stopped = chat("c1", "interrupted", 1, 2, "go");
+        let mut failed = run("e1", "a", "failed", 3, 4);
+        failed.trigger = Some(RunTrigger::Event);
+        let cancelled = chat("c2", "cancelled", 5, 6, "never mind");
+        let got = transcript("a", &[stopped, failed, cancelled], &[]);
+        let lines: Vec<_> = got
+            .iter()
+            .filter_map(|item| match item {
+                TranscriptItem::Bruh {
+                    run_id,
+                    text,
+                    failed,
+                    ..
+                } => Some((run_id.as_str(), text.as_str(), *failed)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            lines,
+            vec![("c1", STOPPED_LINE, false), ("e1", STOPPED_LINE, true)]
         );
     }
 

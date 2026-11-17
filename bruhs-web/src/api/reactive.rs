@@ -38,10 +38,6 @@ pub async fn reactive_command(command: &ReactiveCommand) -> Result<ReactiveSnaps
     send_json(Method::POST, "/api/reactive/commands", Some(command)).await
 }
 
-#[expect(
-    dead_code,
-    reason = "the crew run page (a later task) is the first caller"
-)]
 /// One agent's runs, newest first; `before` is the id of the last run already shown.
 pub async fn agent_runs(
     agent_id: &str,

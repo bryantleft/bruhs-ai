@@ -65,6 +65,10 @@ pub enum AppView {
     Search,
     /// Standalone terminals, independent of any chat thread.
     Terminal,
+    /// One bruh's page: its chat, memory, routines and settings.
+    Bruh {
+        agent_id: String,
+    },
 }
 
 impl AppView {
@@ -88,13 +92,17 @@ impl AppView {
             Self::ClipDetail { clip_id } => format!("/knowledge/clips/{clip_id}"),
             Self::ConversationDetail { conversation_id } => format!("/inbox/{conversation_id}"),
             Self::Booking { slug } => format!("/book/{slug}"),
+            Self::Bruh { agent_id } => {
+                format!("/bruhs/{}", utf8_percent_encode(agent_id, ROUTE_COMPONENT))
+            }
             other => format!("/{}", other.as_str()),
         }
     }
 
     /// The view a route names, with or without its `#`, or `None` for one
     /// this build does not know. `thread/<id>` names Chat. A whiteboard id
-    /// must be a UUID and a meeting note id 1 to 128 bytes, as the web checks.
+    /// must be a UUID and a meeting note or bruh id 1 to 128 bytes, as the
+    /// web checks.
     pub fn from_route(route: &str) -> Option<Self> {
         let route = route.trim_start_matches('#');
         if route
@@ -114,6 +122,12 @@ impl AppView {
                 Self::MeetingNoteDetail {
                     note_id: note_id.into_owned(),
                 }
+            });
+        }
+        if let Some(rest) = route.strip_prefix("/bruhs/") {
+            let agent_id = percent_decode_str(rest).decode_utf8().ok()?;
+            return (!agent_id.trim().is_empty() && agent_id.len() <= 128).then(|| Self::Bruh {
+                agent_id: agent_id.into_owned(),
             });
         }
         let with_id = |prefix: &str| route.strip_prefix(prefix).filter(|id| !id.is_empty());
@@ -185,6 +199,7 @@ impl AppView {
             Self::ClipDetail { .. } => "clip_detail",
             Self::Search => "search",
             Self::Terminal => "terminal",
+            Self::Bruh { .. } => "bruh",
         }
     }
 }
@@ -376,6 +391,9 @@ mod tests {
             },
             AppView::Search,
             AppView::Terminal,
+            AppView::Bruh {
+                agent_id: "bruh 1/ä".into(),
+            },
         ];
         for view in views {
             assert_eq!(AppView::from_route(&view.route()), Some(view.clone()));
@@ -391,6 +409,14 @@ mod tests {
             .route(),
             "/meeting-notes/note%201%2F%C3%A4"
         );
+        assert_eq!(
+            AppView::Bruh {
+                agent_id: "b1".into()
+            }
+            .route(),
+            "/bruhs/b1"
+        );
+        assert_eq!(AppView::from_route("/bruhs/"), None);
     }
 
     #[test]

@@ -10,13 +10,20 @@ mod runs;
 mod setup;
 mod updates;
 mod weekly_reports;
+pub(crate) use memory::AgentMemoryPanel;
 use runs::run_label;
+pub(crate) use setup::AutomationSetupPanel;
 
 const SELECT: &str = "bruhs-control min-h-[32px] w-full rounded-grape bg-longan-950 px-3 py-1.5 text-body text-rambutan-100 inset-ring inset-ring-longan-700 focus-visible:outline-2 focus-visible:outline-persimmon-400";
 const CARD: &str = "min-w-0 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50";
 // Status refresh follows the existing account connection status cadence.
 #[cfg(target_arch = "wasm32")]
 const REFRESH_MS: u32 = 2_000;
+
+/// A local date and time for an instant, as the automation cards write it.
+pub(crate) fn local_time(time: bruhs_models::EpochMs) -> String {
+    calendar::local_time(time)
+}
 
 fn id() -> String {
     uuid::Uuid::new_v4().to_string()

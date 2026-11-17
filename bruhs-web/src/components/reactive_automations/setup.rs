@@ -17,14 +17,46 @@ fn new_setup() -> AutomationSetup {
     }
 }
 
+/// A new automation; for one agent's routines, it starts from that agent.
+fn new_setup_for(
+    snapshot: Option<&ReactiveSnapshot>,
+    agent_filter: Option<&str>,
+) -> AutomationSetup {
+    let mut setup = new_setup();
+    if let Some(agent) = agent_filter.and_then(|id| {
+        snapshot.and_then(|snapshot| snapshot.agents.iter().find(|agent| agent.id == id))
+    }) {
+        setup.agent = agent.clone();
+        setup.subscription.agent_id = agent.id.clone();
+    }
+    setup
+}
+
+/// The automations to list: every one, or only one agent's.
+fn shown_setups(snapshot: &ReactiveSnapshot, agent_filter: Option<&str>) -> Vec<AutomationSetup> {
+    snapshot
+        .subscriptions
+        .iter()
+        .filter(|sub| {
+            agent_filter.is_none_or(|id| sub.agent_id == id)
+                && bruhs_models::weekly_reports::managed_preset_id(&sub.id).is_none()
+        })
+        .filter_map(|sub| AutomationSetup::from_subscription(snapshot, sub))
+        .collect()
+}
+
 #[component]
-pub(super) fn AutomationSetupPanel(
+pub(crate) fn AutomationSetupPanel(
     snapshot: RwSignal<Option<ReactiveSnapshot>>,
     busy: RwSignal<bool>,
     error: RwSignal<Option<String>>,
     send: Callback<ReactiveCommand>,
     on_chat: Callback<String>,
+    /// Show only this agent's automations, and start new ones from it.
+    #[prop(optional)]
+    agent_filter: Option<String>,
 ) -> impl IntoView {
+    let agent_filter = StoredValue::new(agent_filter);
     let base = RwSignal::new(None::<AutomationSetup>);
     let review = RwSignal::new(None::<AutomationSetup>);
     let saving = RwSignal::new(false);
@@ -212,7 +244,7 @@ pub(super) fn AutomationSetupPanel(
     };
     view! {
         <div class="space-y-3">
-            <Button size=ButtonSize::Small on_click=Callback::new(move |_|open.run(new_setup()))>"New automation"</Button>
+            <Button size=ButtonSize::Small on_click=Callback::new(move |_|open.run(snapshot.with_untracked(|s|agent_filter.with_value(|filter|new_setup_for(s.as_ref(),filter.as_deref())))))>"New automation"</Button>
             <Show when=move || base.get().is_some() && review.get().is_none()>
                 <div class=CARD>
                     <h3 class="text-label text-rambutan-100">"Set up an automation"</h3>
@@ -246,12 +278,14 @@ pub(super) fn AutomationSetupPanel(
                 let review_rows=review_fields(&setup);
                 view!{<article class=CARD><h3 class="text-label text-rambutan-100">"Review automation"</h3><dl class="mt-3 space-y-3">{review_rows.into_iter().map(|(label,value)|view!{<div><dt class="text-label-sm text-rambutan-400">{label}</dt><dd class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-200">{value}</dd></div>}).collect_view()}</dl><p class="mt-3 text-body-sm text-blueberry-200">{if setup.subscription.auto_run{"Runs read-only drafts automatically. Writes still use workflow review."}else{"Each event waits for review before a read-only draft runs. Writes still use workflow review."}}</p><p class="mt-1 text-label-sm text-rambutan-500">"The local server must be running. This enables the complete automation in one saved change."</p><div class="mt-3 flex flex-wrap gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_|{saving.set(true);send.run(apply(ReactiveChange::SaveAutomation{automation:Box::new(setup.clone())}));})>"Enable automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|review.set(None))>"Back to edit"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|{base.set(None);review.set(None);})>"Cancel setup"</Button></div></article>}
             })}
-            <Show when=move ||snapshot.with(|s|s.as_ref().is_some_and(|s|s.subscriptions.is_empty()))><p class="text-body-sm text-rambutan-400">"No automations yet. Start with a scan folder, a meeting event, or a repeating check."</p></Show>
-            {move ||snapshot.with(|s|s.as_ref().map(|s|s.subscriptions.iter().filter_map(|sub|AutomationSetup::from_subscription(s,sub)).collect::<Vec<_>>()).unwrap_or_default()).into_iter().map(|setup|{
+            <Show when=move ||snapshot.with(|s|s.as_ref().is_some_and(|s|agent_filter.with_value(|filter|shown_setups(s,filter.as_deref()).is_empty())))><p class="text-body-sm text-rambutan-400">"No automations yet. Start with a scan folder, a meeting event, or a repeating check."</p></Show>
+            {move ||snapshot.with(|s|s.as_ref().map(|s|agent_filter.with_value(|filter|shown_setups(s,filter.as_deref()))).unwrap_or_default()).into_iter().map(|setup|{
+                // One agent's routines sit beside its own memory tab.
+                let with_memory=agent_filter.with_value(Option::is_none);
                 let edit=setup.clone();let agent_id=setup.agent.id.clone();let memory_agent=setup.agent.id.clone();let subscription_id=setup.subscription.id.clone();let active=setup.enabled();let status=automation_status(&setup);
                 let latest=snapshot.with(|s|s.as_ref().and_then(|s|s.runs.iter().find(|run|run.subscription_id.as_deref()==Some(subscription_id.as_str()))).cloned());
                 let source_error=snapshot.with(|s|s.as_ref().and_then(|s|s.source_statuses.iter().find(|status|status.source_id==setup.source.id)).and_then(|status|status.error.clone()));
-                view!{<article class=CARD><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><h3 class="break-words text-label text-rambutan-100">{setup.agent.name}</h3><p class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{setup.agent.instructions}</p><p class="mt-2 break-all text-label-sm text-rambutan-400">{source_summary(&setup.source.kind)}</p><p class="mt-1 text-label-sm text-blueberry-200">{status}</p>{latest.map(|run|view!{<p class="mt-1 text-label-sm text-rambutan-400">{format!("Latest activity: {}",super::run_label(run.status))}</p>})}{source_error.map(|message|view!{<p role="status" class="mt-1 break-words text-body-sm text-lychee-200">{message}</p>})}</div><div class="flex flex-wrap gap-2">{command_button(if active{"Pause automation"}else{"Resume automation"},ReactiveCommand::SetAutomationEnabled{id:subscription_id,enabled:!active},send)}<Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|open.run(edit.clone()))>"Edit automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|on_chat.run(agent_id.clone()))>"Chat"</Button></div></div><super::memory::AgentMemoryPanel agent_id=memory_agent snapshot=snapshot send=send /></article>}
+                view!{<article class=CARD><div class="flex flex-wrap items-start justify-between gap-2"><div class="min-w-0"><h3 class="break-words text-label text-rambutan-100">{setup.agent.name}</h3><p class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-300">{setup.agent.instructions}</p><p class="mt-2 break-all text-label-sm text-rambutan-400">{source_summary(&setup.source.kind)}</p><p class="mt-1 text-label-sm text-blueberry-200">{status}</p>{latest.map(|run|view!{<p class="mt-1 text-label-sm text-rambutan-400">{format!("Latest activity: {}",super::run_label(run.status))}</p>})}{source_error.map(|message|view!{<p role="status" class="mt-1 break-words text-body-sm text-lychee-200">{message}</p>})}</div><div class="flex flex-wrap gap-2">{command_button(if active{"Pause automation"}else{"Resume automation"},ReactiveCommand::SetAutomationEnabled{id:subscription_id,enabled:!active},send)}<Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|open.run(edit.clone()))>"Edit automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|on_chat.run(agent_id.clone()))>"Chat"</Button></div></div>{with_memory.then(||view!{<super::memory::AgentMemoryPanel agent_id=memory_agent snapshot=snapshot send=send />})}</article>}
             }).collect_view()}
         </div>
     }
@@ -415,6 +449,28 @@ mod tests {
         assert_eq!(wire["id"], setup.subscription.id);
         assert!(wire.get("auto_run").is_none());
     }
+    #[test]
+    fn one_agents_routines_list_only_its_automations_and_start_from_it() {
+        let mine = new_setup();
+        let other = new_setup();
+        let snapshot = ReactiveSnapshot {
+            agents: vec![mine.agent.clone(), other.agent.clone()],
+            sources: vec![mine.source.clone(), other.source.clone()],
+            subscriptions: vec![mine.subscription.clone(), other.subscription],
+            ..ReactiveSnapshot::default()
+        };
+        assert_eq!(shown_setups(&snapshot, None).len(), 2);
+        let shown = shown_setups(&snapshot, Some(&mine.agent.id));
+        assert_eq!(shown.len(), 1);
+        assert_eq!(shown[0].agent.id, mine.agent.id);
+
+        let fresh = new_setup_for(Some(&snapshot), Some(&mine.agent.id));
+        assert_eq!(fresh.agent, mine.agent);
+        assert_eq!(fresh.subscription.agent_id, mine.agent.id);
+        assert_ne!(fresh.subscription.id, mine.subscription.id);
+        assert_ne!(new_setup_for(Some(&snapshot), None).agent.id, mine.agent.id);
+    }
+
     #[test]
     fn enabling_a_reviewed_setup_serializes_one_complete_change() {
         let setup = new_setup();
