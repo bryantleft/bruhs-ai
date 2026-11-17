@@ -8,6 +8,7 @@
 pub mod attachments;
 pub mod booking;
 pub mod branch_pull;
+pub mod cli_login;
 pub mod commands;
 pub mod compact;
 pub mod composer_text;

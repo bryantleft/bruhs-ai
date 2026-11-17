@@ -3,6 +3,9 @@ use std::time::Duration;
 use axum::extract::{rejection::PathRejection, Path};
 use axum::Json;
 use bruhs_models::agent::AgentProvider;
+use bruhs_models::logic::cli_login::{
+    codex_login_status, says_logged_out, unrecognized_status, CliLogin,
+};
 use bruhs_models::runtime_models::RuntimeModels;
 use serde::Serialize;
 use serde_json::Value;
@@ -102,24 +105,9 @@ async fn auth_status(provider: AgentProvider) -> AuthStatus {
 // Claude
 // ---------------------------------------------------------------------------
 
-/// Text that means "logged out" in either CLI's output.
-fn says_logged_out(lower: &str) -> bool {
-    lower.contains("not logged in")
-        || lower.contains("not authenticated")
-        || lower.contains("unauthenticated")
-        || lower.contains("login required")
-}
-
 /// Why the status is unknown, from whatever the CLI printed.
 fn unrecognized(name: &str, exit_ok: bool, stdout: &str, stderr: &str) -> AuthStatus {
-    let detail = [stderr.trim(), stdout.trim()]
-        .into_iter()
-        .find(|text| !text.is_empty());
-    AuthStatus::unknown(match (detail, exit_ok) {
-        (Some(detail), _) => format!("{name} reported: {detail}"),
-        (None, true) => format!("{name} printed no login status"),
-        (None, false) => format!("{name} failed without output"),
-    })
+    AuthStatus::unknown(unrecognized_status(name, exit_ok, stdout, stderr))
 }
 
 /// Parse `claude auth status` output (JSON preferred, text fallback). Only
@@ -180,27 +168,17 @@ fn parse_claude_json(exit_ok: bool, value: &Value, stderr: &str) -> AuthStatus {
 // Codex
 // ---------------------------------------------------------------------------
 
-/// Parse `codex login status` output. Codex prints plain text like
-/// `Logged in using ChatGPT` (exit 0) when authenticated, or a "not logged in"
-/// message otherwise. Pure so it can be unit-tested without spawning the CLI.
+/// Parse `codex login status` output with the parser the desktop app also
+/// uses (`bruhs_models::logic::cli_login`).
 fn parse_codex_status(exit_ok: bool, stdout: &str, stderr: &str) -> AuthStatus {
-    let lower = format!("{stdout}\n{stderr}").to_lowercase();
-    if says_logged_out(&lower) {
-        return AuthStatus::default();
-    }
-    if !(exit_ok && lower.contains("logged in")) {
-        return unrecognized("Codex", exit_ok, stdout, stderr);
-    }
-    // "Logged in using ChatGPT" → auth_method = "ChatGPT".
-    let auth_method = stdout
-        .lines()
-        .find_map(|l| l.trim().strip_prefix("Logged in using "))
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
-    AuthStatus {
-        authenticated: true,
-        auth_method,
-        ..Default::default()
+    match codex_login_status(exit_ok, stdout, stderr) {
+        CliLogin::SignedIn { method } => AuthStatus {
+            authenticated: true,
+            auth_method: method,
+            ..Default::default()
+        },
+        CliLogin::SignedOut => AuthStatus::default(),
+        CliLogin::Unknown(error) => AuthStatus::unknown(error),
     }
 }
 

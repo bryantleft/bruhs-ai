@@ -1,6 +1,7 @@
 //! The model picker popover: filtering, grouping by provider, keyboard picking, and the provider mark.
 
 use super::*;
+use bruhs_models::logic::cli_login::{CODEX_SIGNED_IN_LINE, CODEX_SIGNED_OUT_LINE};
 use bruhs_models::runtime_models::{
     highlighted_id, listed_models, listing_error_line, reanchor_highlight, replace_listing,
     ModelChoice, RuntimeModels,
@@ -149,6 +150,10 @@ impl ChatView {
         self.effort_menu_open = false;
         let selected_index = self.model_picker_current_index();
         self.refresh_runtime_models(cx);
+        // Codex rows show its sign-in, so learn it if no thread has yet.
+        if self.codex_auth.is_none() {
+            self.start_codex_auth_check(cx);
+        }
         self.model_picker_scroll.set_offset(Point::default());
         self.model_picker_query.update(cx, |input, cx| {
             input.set_value("", window, cx);
@@ -678,7 +683,12 @@ impl ChatView {
                 self.auth_status.is_authenticated(),
                 self.auth_status.user(),
             ),
-            AgentProvider::Codex => "Codex uses your CLI login.".into(),
+            // Web `auth_line`; before the first check, the general line.
+            AgentProvider::Codex => match &self.codex_auth {
+                Some(status) if status.is_authenticated() => CODEX_SIGNED_IN_LINE.into(),
+                Some(_) => CODEX_SIGNED_OUT_LINE.into(),
+                None => "Codex uses your CLI login.".into(),
+            },
             AgentProvider::Cursor => "Uses `cursor-agent login`. App tools are unavailable.".into(),
             AgentProvider::Antigravity => {
                 "Requires Full access and Antigravity CLI sign-in. App tools are unavailable."
