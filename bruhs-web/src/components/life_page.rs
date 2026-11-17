@@ -4,8 +4,9 @@ mod entries;
 mod record_detail;
 
 use bruhs_models::{
-    finance_provider_adapters, health_provider_adapters, life_agent_prompt, LifeContext,
-    LifeInsightDomain, LifeProviderAdapter, LifeSection, ProviderStatus,
+    finance_copy, finance_entry, finance_provider_adapters, health_provider_adapters,
+    life_agent_prompt, FinanceEntryError, FinanceField, LifeContext, LifeInsightDomain,
+    LifeProviderAdapter, LifeSection, ProviderStatus,
 };
 use leptos::prelude::*;
 
@@ -122,7 +123,7 @@ impl Page {
     /// show why not.
     fn finance<T>(
         self,
-        entry: Result<T, entries::EntryError>,
+        entry: Result<T, FinanceEntryError>,
         fields: &[RwSignal<String>],
         add: impl FnOnce(&mut bruhs_models::FinanceLedger, T),
     ) {
@@ -159,8 +160,8 @@ impl Page {
 
     fn add_account(self) {
         let i = self.inputs;
-        let entry = entries::account(
-            i.account_name.get_untracked(),
+        let entry = finance_entry::account(
+            &i.account_name.get_untracked(),
             &i.account_balance.get_untracked(),
             now_ms(),
         );
@@ -171,10 +172,10 @@ impl Page {
 
     fn add_spend(self) {
         let i = self.inputs;
-        let entry = entries::spend(
-            i.merchant.get_untracked(),
+        let entry = finance_entry::spend(
+            &i.merchant.get_untracked(),
             &i.spend_amount.get_untracked(),
-            i.spend_category.get_untracked(),
+            &i.spend_category.get_untracked(),
             now_ms(),
         );
         self.finance(
@@ -186,8 +187,8 @@ impl Page {
 
     fn add_budget(self) {
         let i = self.inputs;
-        let entry = entries::budget(
-            i.budget_category.get_untracked(),
+        let entry = finance_entry::budget(
+            &i.budget_category.get_untracked(),
             &i.budget_limit.get_untracked(),
         );
         self.finance(entry, &[i.budget_category, i.budget_limit], |f, b| {
@@ -197,8 +198,8 @@ impl Page {
 
     fn add_income(self) {
         let i = self.inputs;
-        let entry = entries::income(
-            i.income_name.get_untracked(),
+        let entry = finance_entry::income(
+            &i.income_name.get_untracked(),
             &i.income_amount.get_untracked(),
         );
         self.finance(entry, &[i.income_name, i.income_amount], |f, s| {
@@ -208,8 +209,8 @@ impl Page {
 
     fn add_holding(self) {
         let i = self.inputs;
-        let entry = entries::holding(
-            i.holding_symbol.get_untracked(),
+        let entry = finance_entry::holding(
+            &i.holding_symbol.get_untracked(),
             &i.holding_value.get_untracked(),
             now_ms(),
         );
@@ -323,17 +324,24 @@ fn field(
     }
 }
 
-/// [`field`] under a visible caption.
+/// A finance form's field, with the words both apps share.
+fn finance_field(
+    words: FinanceField,
+    value: RwSignal<String>,
+    inputmode: Option<&'static str>,
+) -> impl IntoView {
+    field(words.label, words.placeholder, value, inputmode)
+}
+
+/// [`finance_field`] under its visible caption.
 fn labelled_field(
-    caption: &'static str,
-    label: &'static str,
-    placeholder: &'static str,
+    words: FinanceField,
     value: RwSignal<String>,
     inputmode: Option<&'static str>,
     class: &'static str,
 ) -> impl IntoView {
     view! {
-        <label class=class>{caption}{field(label, placeholder, value, inputmode)}</label>
+        <label class=class>{words.caption}{finance_field(words, value, inputmode)}</label>
     }
 }
 
@@ -474,7 +482,7 @@ fn finance_tab(page: Page) -> impl IntoView {
     };
     view! {
         <p class="text-body-sm text-rambutan-500">
-            "Manual amounts are USD. Other currencies are listed separately in minor units; no exchange rate is applied."
+            {finance_copy::USD_NOTE}
         </p>
         <div class="grid gap-3 md:grid-cols-3">
             {stat_card(
@@ -517,7 +525,7 @@ fn finance_privacy(page: Page) -> impl IntoView {
                 <div>
                     <h2 id="finance-privacy-title" class="text-label text-rambutan-200">"Finance privacy"</h2>
                     <p class="mt-0.5 text-body-sm text-rambutan-500">
-                        "Records remain local. Agent access is off until you enable it."
+                        {finance_copy::PRIVACY_NOTE}
                     </p>
                 </div>
                 <div class="flex flex-wrap gap-2">
@@ -584,14 +592,14 @@ fn accounts(page: Page) -> impl IntoView {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Accounts"</h2>
             <div class="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_8rem_auto] gap-2">
-                {labelled_field("Name", "Account name", "Checking", i.account_name, None, caption)}
-                {labelled_field("Balance", "Account balance", "2500.00", i.account_balance, Some("decimal"), caption)}
+                {labelled_field(finance_copy::ACCOUNT_NAME, i.account_name, None, caption)}
+                {labelled_field(finance_copy::ACCOUNT_BALANCE, i.account_balance, Some("decimal"), caption)}
                 <button
                     type="button"
                     class="mt-5 inline-flex min-h-[44px] min-w-[44px] shrink-0 items-center justify-center rounded-grape bg-longan-800 px-3 text-label-sm text-rambutan-200 transition-colors hover:bg-longan-700 cursor-pointer sm:h-9 sm:min-h-[36px]"
                     on:click=move |_| page.add_account()
                 >
-                    "Add"
+                    {finance_copy::ADD_ACCOUNT}
                 </button>
             </div>
             <div class="mt-3 space-y-1">{rows}</div>
@@ -639,12 +647,12 @@ fn transactions(page: Page) -> impl IntoView {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Transactions"</h2>
             <div class="mt-2 grid grid-cols-2 gap-2">
-                {labelled_field("Merchant", "Transaction merchant", "Groceries", i.merchant, None, caption)}
-                {labelled_field("Spend amount", "Transaction spend amount", "42.00", i.spend_amount, Some("decimal"), caption)}
-                {labelled_field("Category", "Transaction category", "Food", i.spend_category, None, "col-span-2 text-label-sm text-rambutan-500")}
+                {labelled_field(finance_copy::MERCHANT, i.merchant, None, caption)}
+                {labelled_field(finance_copy::SPEND_AMOUNT, i.spend_amount, Some("decimal"), caption)}
+                {labelled_field(finance_copy::SPEND_CATEGORY, i.spend_category, None, "col-span-2 text-label-sm text-rambutan-500")}
             </div>
             <button type="button" class=ADD_BUTTON on:click=move |_| page.add_spend()>
-                "Add spend"
+                {finance_copy::ADD_SPEND}
             </button>
             <div class="mt-3 space-y-1">{rows}</div>
         </section>
@@ -658,12 +666,12 @@ fn budgets_and_income(page: Page) -> impl IntoView {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Budgets & income"</h2>
             <div class="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_8rem_auto] gap-2">
-                {field("Budget category", "Food", i.budget_category, None)}
-                {field("Monthly budget limit", "500", i.budget_limit, None)}
-                <button type="button" class=SMALL_ACTION on:click=move |_| page.add_budget()>"Budget"</button>
-                {field("Income stream name", "Salary", i.income_name, None)}
-                {field("Expected monthly income", "5000", i.income_amount, None)}
-                <button type="button" class=SMALL_ACTION on:click=move |_| page.add_income()>"Income"</button>
+                {finance_field(finance_copy::BUDGET_CATEGORY, i.budget_category, None)}
+                {finance_field(finance_copy::BUDGET_LIMIT, i.budget_limit, None)}
+                <button type="button" class=SMALL_ACTION on:click=move |_| page.add_budget()>{finance_copy::ADD_BUDGET}</button>
+                {finance_field(finance_copy::INCOME_NAME, i.income_name, None)}
+                {finance_field(finance_copy::INCOME_AMOUNT, i.income_amount, None)}
+                <button type="button" class=SMALL_ACTION on:click=move |_| page.add_income()>{finance_copy::ADD_INCOME}</button>
             </div>
             <div class="mt-3 text-body-sm text-rambutan-500">{summary}</div>
         </section>
@@ -688,9 +696,9 @@ fn holdings(page: Page) -> impl IntoView {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Holdings"</h2>
             <div class="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_8rem_auto] gap-2">
-                {field("Holding symbol", "Symbol", i.holding_symbol, None)}
-                {field("Holding current value", "Value", i.holding_value, None)}
-                <button type="button" class=SMALL_ACTION on:click=move |_| page.add_holding()>"Add"</button>
+                {finance_field(finance_copy::HOLDING_SYMBOL, i.holding_symbol, None)}
+                {finance_field(finance_copy::HOLDING_VALUE, i.holding_value, None)}
+                <button type="button" class=SMALL_ACTION on:click=move |_| page.add_holding()>{finance_copy::ADD_HOLDING}</button>
             </div>
             <div class="mt-3 flex flex-wrap gap-2">{chips}</div>
         </section>

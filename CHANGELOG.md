@@ -153,7 +153,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - The desktop Knowledge library lays out its records like the web's:
   documents sit two to a row, each with its document icon, and each saved
   source shows a bookmark.
-- A follow-up on Today opens that person's profile, on the web and in the
+- Finance in the desktop app now has the web's form in each card: Name,
+  Balance and Add in Accounts; Merchant, Spend amount, Category and Add
+  spend in Transactions; a Budget row and an Income row in Budgets &
+  income; and Symbol, Value and Add in Holdings, in place of one Quick add
+  form. Both apps check these entries the same way and use the same words,
+  and Amounts redacted stays disabled until agent access is on.
   desktop app, instead of only the People page.
 - Removed the workflow overview and What's new sections from the landing
   page. The Changelog remains available in the navigation and command menu.
@@ -262,6 +267,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   that chat through the local MCP connection sees `stopped: true` for it, as
   it does from the desktop app, instead of `stopped: false`. Replies saved
   before this change still load and read as not stopped.
+- In the desktop app, each account's and transaction's × on the Life page
+  sits in its row again. It was drawn, and clicked, below the row.
 - In the desktop app, Ask agent is on a Knowledge document's page, as on
   the web, and puts the document in the composer. It was in the library,
   where it did nothing.
