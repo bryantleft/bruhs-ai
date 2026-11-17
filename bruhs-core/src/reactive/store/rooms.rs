@@ -93,8 +93,7 @@ pub(in crate::reactive) fn delete_room(
     Ok(())
 }
 
-/// Cancel the live runs in a room, for one member or all of them, and
-/// withdraw their approvals so a late answer can't resume them.
+/// Cancel the live runs in a room, for one member or all of them.
 fn cancel(
     connection: &Connection,
     room_id: &str,
@@ -113,7 +112,6 @@ fn cancel(
         run.updated_at = EpochMs::now();
         run.error = Some(reason.into());
         save_run(connection, &run)?;
-        crew::withdraw_run_approvals(connection, &run.id)?;
     }
     Ok(())
 }
@@ -197,6 +195,24 @@ pub(in crate::reactive) fn resume_trigger(original: &ReactiveRun) -> Option<RunT
         }),
         _ => None,
     }
+}
+
+/// [`resume_trigger`] while the room still has the bruh as a member. A bruh
+/// that left the room, or a room that is gone, hears the answer in its own
+/// chat instead.
+pub(in crate::reactive) fn resume_trigger_for(
+    connection: &Connection,
+    original: &ReactiveRun,
+) -> Result<Option<RunTrigger>, ReactiveError> {
+    let Some(trigger) = resume_trigger(original) else {
+        return Ok(None);
+    };
+    let Some(room_id) = trigger.room_id() else {
+        return Ok(None);
+    };
+    let member = get::<Room>(connection, "reactive_rooms", room_id)?
+        .is_some_and(|room| room.members.contains(&original.agent_id));
+    Ok(member.then_some(trigger))
 }
 
 /// The owner posts in a room: the message is kept, and the bruhs it reaches
@@ -390,6 +406,8 @@ pub(in crate::reactive) fn on_run_saved(
         RunStatus::Completed => (me(), reply_text(run), false),
         RunStatus::Failed | RunStatus::Interrupted => (me(), failure_text(run), true),
         RunStatus::Cancelled => {
+            // However it was cancelled, a late answer must not resume it.
+            crew::withdraw_run_approvals(connection, &run.id)?;
             let name = get::<ReactiveAgent>(connection, "reactive_agents", &run.agent_id)?
                 .map_or_else(|| FORMER_BRUH.to_owned(), |agent| agent.name);
             (
@@ -400,6 +418,9 @@ pub(in crate::reactive) fn on_run_saved(
         }
         _ => return Ok(()),
     };
+    if run.status == RunStatus::Completed && question_only(connection, run)? {
+        return Ok(());
+    }
     let extra = Extra {
         run_id: Some(run.id.clone()),
         failed,
@@ -469,6 +490,25 @@ fn reply_text(run: &ReactiveRun) -> String {
                 .and_then(|report| said(&report.message).or_else(|| said(&report.title)))
         })
         .unwrap_or_else(|| STOPPED_LINE.to_owned())
+}
+
+/// The run wrote no reply, only a question, and the room already shows that
+/// question as its card: saying it again would repeat it.
+fn question_only(connection: &Connection, run: &ReactiveRun) -> Result<bool, ReactiveError> {
+    if run.result.as_deref().and_then(said).is_some()
+        || run
+            .report
+            .as_ref()
+            .is_none_or(|report| report.outcome != RunOutcome::Ask)
+    {
+        return Ok(false);
+    }
+    // The run's question is keyed by the run's id; its approvals are not.
+    Ok(connection.query_row(
+        "SELECT EXISTS(SELECT 1 FROM reactive_room_messages m JOIN reactive_outbox o ON json_extract(m.payload,'$.outbox_id')=o.id WHERE o.run_id=?1)",
+        [&run.id],
+        |row| row.get(0),
+    )?)
 }
 
 /// What a failed room run says. A room run can't be retried (the owner

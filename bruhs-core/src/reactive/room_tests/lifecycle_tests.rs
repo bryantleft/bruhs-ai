@@ -188,33 +188,181 @@ async fn an_approval_then_a_question_from_one_room_run_both_reach_the_room() {
 async fn an_empty_reply_with_a_report_says_what_the_report_says() {
     let (_dir, runtime) = runtime_with(&[agent("a")]).await;
     create(&runtime, room("r", &["a"], None)).await;
+    // Each round's lines after the owner's post, with the run's question.
     let reply = |report: String| {
         let runtime = &runtime;
         async move {
             post(runtime, "r", "@Agent a go").await;
+            let before = messages(runtime, "r").await.len();
             let claim = claim_one(runtime).await.unwrap();
             finish(runtime, &claim.run.id, &report).await;
-            lines(runtime, "r").await.pop().unwrap()
+            let snapshot = runtime.snapshot().await.unwrap();
+            let asked = snapshot
+                .outbox
+                .iter()
+                .find(|item| item.run_id == claim.run.id)
+                .map(|item| item.id.clone());
+            let added: Vec<_> = messages(runtime, "r")
+                .await
+                .into_iter()
+                .skip(before)
+                .map(|line| (line.author, line.text, line.outbox_id))
+                .collect();
+            (added, asked)
         }
     };
 
-    assert_eq!(
-        reply(report("ask", "Which card?", "Work or personal?")).await,
-        (bruh("a"), "Work or personal?".to_string(), false)
-    );
-    assert_eq!(
-        reply(report("ask", "Which card?", "")).await,
-        (bruh("a"), "Which card?".to_string(), false)
-    );
+    // A question is said once, as its card.
+    let (added, asked) = reply(report("ask", "Which card?", "Work or personal?")).await;
+    assert!(asked.is_some());
+    assert_eq!(added, [(bruh("a"), "Work or personal?".to_string(), asked)]);
+    let (added, asked) = reply(report("ask", "Which card?", "")).await;
+    assert!(asked.is_some());
+    assert_eq!(added, [(bruh("a"), "Which card?".to_string(), asked)]);
     // A room run's update gets no card, so its words go in the room.
+    let (added, asked) = reply(report("notify", "Shipped", "It is live.")).await;
+    assert_eq!(asked, None);
+    assert_eq!(added, [(bruh("a"), "It is live.".to_string(), None)]);
+    let (added, _) = reply(report("silent", "", "")).await;
+    assert_eq!(added, [(bruh("a"), STOPPED_LINE.to_string(), None)]);
+}
+
+#[tokio::test]
+async fn a_late_answer_after_the_bruh_left_the_room_goes_to_its_chat() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
+    create(&runtime, room("r", &["a", "b"], None)).await;
+    post(&runtime, "r", "@Agent a one").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    let approval = open(&runtime, &claim.run, "Bash", json!({"command": "ls"})).await;
+    expire(&runtime, &approval).await;
+    finish(
+        &runtime,
+        &claim.run.id,
+        &format!(
+            "@Agent b look\n\n{}",
+            report("ask", "Which card?", "Work or personal?")
+        ),
+    )
+    .await;
+    let asked = question(&runtime.snapshot().await.unwrap(), &claim.run.id).clone();
+    // b's hand-off run is not part of this.
+    let handed = queued_in(&runtime.snapshot().await.unwrap(), "r")[0]
+        .id
+        .clone();
+    runtime
+        .command(ReactiveCommand::CancelRun { id: handed })
+        .await
+        .unwrap();
+    update(&runtime, room("r", &["b"], None)).await;
+    let kept = messages(&runtime, "r").await;
+
+    let snapshot = runtime
+        .command(ReactiveCommand::AnswerOutbox {
+            id: asked.id.clone(),
+            message: "Work".into(),
+        })
+        .await
+        .unwrap();
+    let answered = snapshot
+        .runs
+        .iter()
+        .find(|run| run.status == RunStatus::Queued)
+        .unwrap()
+        .clone();
     assert_eq!(
-        reply(report("notify", "Shipped", "It is live.")).await,
-        (bruh("a"), "It is live.".to_string(), false)
+        answered.trigger,
+        Some(RunTrigger::Answer {
+            outbox_id: asked.id.clone()
+        })
     );
+    let snapshot = decide(&runtime, &approval, true).await.unwrap();
+    let approved = snapshot
+        .runs
+        .iter()
+        .find(|run| run.status == RunStatus::Queued && run.id != answered.id)
+        .unwrap()
+        .clone();
     assert_eq!(
-        reply(report("silent", "", "")).await,
-        (bruh("a"), STOPPED_LINE.to_string(), false)
+        approved.trigger,
+        Some(RunTrigger::Answer {
+            outbox_id: approval.clone()
+        })
     );
+
+    // The two answers may run as one batch.
+    while let Some(claim) = claim_one(&runtime).await {
+        finish(&runtime, &claim.run.id, "@Agent b noted").await;
+    }
+    for id in [&answered.id, &approved.id] {
+        assert!(!run(&runtime, id).await.status.is_pending());
+    }
+    assert_eq!(
+        messages(&runtime, "r").await,
+        kept,
+        "the room hears nothing"
+    );
+    assert!(queued_in(&runtime.snapshot().await.unwrap(), "r").is_empty());
+
+    // A deleted room resumes in the chat too.
+    create(&runtime, room("r2", &["b"], None)).await;
+    post(&runtime, "r2", "@Agent b two").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    finish(&runtime, &claim.run.id, &report("ask", "When?", "Today?")).await;
+    let asked = question(&runtime.snapshot().await.unwrap(), &claim.run.id).clone();
+    runtime
+        .command(ReactiveCommand::DeleteRoom { id: "r2".into() })
+        .await
+        .unwrap();
+    let snapshot = runtime
+        .command(ReactiveCommand::AnswerOutbox {
+            id: asked.id.clone(),
+            message: "Yes".into(),
+        })
+        .await
+        .unwrap();
+    assert!(snapshot
+        .runs
+        .iter()
+        .any(|run| run.status == RunStatus::Queued
+            && run.trigger
+                == Some(RunTrigger::Answer {
+                    outbox_id: asked.id.clone()
+                })));
+}
+
+#[tokio::test]
+async fn a_config_change_withdraws_a_room_runs_approvals() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    post(&runtime, "r", "@Agent a one").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    let waiting = open(&runtime, &claim.run, "Bash", json!({"command": "ls"})).await;
+    let expired = open(&runtime, &claim.run, "Bash", json!({"command": "pwd"})).await;
+    expire(&runtime, &expired).await;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveAgent {
+                agent: ReactiveAgent {
+                    instructions: "Something else.".into(),
+                    ..agent("a")
+                },
+            },
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        run(&runtime, &claim.run.id).await.status,
+        RunStatus::Cancelled
+    );
+    for id in [&waiting, &expired] {
+        let withdrawn = item(&runtime, id).await;
+        assert_eq!(withdrawn.approval.unwrap().state, ApprovalState::Denied);
+        assert!(withdrawn.resolved_at.is_some());
+    }
+    assert!(matches!(
+        decide(&runtime, &expired, true).await,
+        Err(ReactiveError::Conflict(_))
+    ));
 }
 
 #[tokio::test]

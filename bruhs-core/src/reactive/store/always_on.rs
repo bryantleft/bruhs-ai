@@ -211,13 +211,15 @@ pub(super) fn answer(
             item.title, item.message
         );
         let mut run = new_run(connection, &agent, prompt, None, None, RunStatus::Queued, 0)?;
-        // A room run resumes in its room.
-        run.trigger = get::<ReactiveRun>(connection, "reactive_runs", &item.run_id)?
-            .as_ref()
-            .and_then(super::rooms::resume_trigger)
-            .or(Some(RunTrigger::Answer {
-                outbox_id: item.id.clone(),
-            }));
+        // A room run resumes in its room while the bruh is still in it.
+        let original = get::<ReactiveRun>(connection, "reactive_runs", &item.run_id)?;
+        run.trigger = match original {
+            Some(original) => super::rooms::resume_trigger_for(connection, &original)?,
+            None => None,
+        }
+        .or(Some(RunTrigger::Answer {
+            outbox_id: item.id.clone(),
+        }));
         save_run(connection, &run)?;
     }
     let now = EpochMs::now();
