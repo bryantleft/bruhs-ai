@@ -33,6 +33,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   does after a reload: Workbench, Whiteboards, a document, a source, a
   conversation (with its draft), a meeting or a meeting note. A record you
   deleted opens its list instead.
+- The desktop app opens `bruhs://` links from other apps: a thread link
+  (⌘⇧C copies one) selects that thread, and `bruhs://open/` followed by a
+  page's web route opens that page, such as `bruhs://open/inbox/<id>` for a
+  conversation.
 - The desktop app has the web's booking page for a scheduling link. The
   link in the scheduling panel opens it: pick one of the next free times
   inside the link's availability and buffers, add a name, and the booking is
