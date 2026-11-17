@@ -21,6 +21,8 @@ pub struct CrewData {
     pub error: RwSignal<Option<String>>,
     /// A command is on its way.
     pub busy: RwSignal<bool>,
+    /// Loads the snapshot again, such as after a failed load.
+    pub reload: Callback<()>,
     /// The protocol the live stream reports, when the app has the stream.
     live_protocol: Option<RwSignal<Option<u32>>>,
 }
@@ -66,6 +68,7 @@ fn new_crew_data() -> CrewData {
     let revision = RwSignal::new(0u64);
     let queue = StoredValue::new(VecDeque::<ReactiveCommand>::new());
 
+    let load_failed = StoredValue::new(false);
     let reload = Callback::new(move |()| {
         if busy.get_untracked() {
             return;
@@ -81,11 +84,20 @@ fn new_crew_data() -> CrewData {
             }
             match result {
                 Ok(next) => {
+                    // A load that works again clears the load's own error,
+                    // never a command's.
+                    if load_failed.get_value() {
+                        load_failed.set_value(false);
+                        error.set(None);
+                    }
                     if snapshot.with_untracked(|current| current.as_ref() != Some(&next)) {
                         snapshot.set(Some(next));
                     }
                 }
-                Err(err) => error.set(Some(err.to_string())),
+                Err(err) => {
+                    load_failed.set_value(true);
+                    error.set(Some(err.to_string()));
+                }
             }
         });
     });
@@ -146,6 +158,7 @@ fn new_crew_data() -> CrewData {
         send,
         error,
         busy,
+        reload,
         live_protocol: updates.map(|updates| updates.protocol),
     }
 }

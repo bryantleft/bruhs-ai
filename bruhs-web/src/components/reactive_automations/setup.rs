@@ -32,6 +32,46 @@ fn new_setup_for(
     setup
 }
 
+/// What the setup form says about the agent.
+struct AgentFields {
+    name: String,
+    purpose: String,
+    folder: String,
+    model: String,
+    memory: String,
+}
+
+/// The setup with the form's agent fields applied. A routine made on a bruh's
+/// page runs as that bruh: its agent stays exactly as saved, so a routine
+/// never renames it, rewrites its job, moves its folder, switches its model
+/// past the access check or turns it on.
+fn with_agent_fields(
+    mut setup: AutomationSetup,
+    fields: AgentFields,
+    agent_locked: bool,
+) -> Result<AutomationSetup, String> {
+    if agent_locked {
+        return Ok(setup);
+    }
+    if fields.name.trim().is_empty()
+        || fields.purpose.trim().is_empty()
+        || fields.folder.trim().is_empty()
+    {
+        return Err(
+            "Enter an automation name, purpose, and working folder before reviewing.".into(),
+        );
+    }
+    bruhs_models::agent::ModelId::try_from(fields.model.clone())
+        .map_err(|error| error.to_string())?;
+    setup.agent.name = fields.name;
+    setup.agent.instructions = fields.purpose;
+    setup.agent.project_path = fields.folder;
+    setup.agent.model = fields.model;
+    setup.agent.memory = fields.memory;
+    setup.agent.enabled = true;
+    Ok(setup)
+}
+
 /// The automations to list: every one, or only one agent's.
 fn shown_setups(snapshot: &ReactiveSnapshot, agent_filter: Option<&str>) -> Vec<AutomationSetup> {
     snapshot
@@ -183,28 +223,19 @@ pub(crate) fn AutomationSetupPanel(
             return;
         };
         let build = (|| -> Result<AutomationSetup, String> {
-            if name.get_untracked().trim().is_empty()
-                || purpose.get_untracked().trim().is_empty()
-                || folder.get_untracked().trim().is_empty()
-            {
-                return Err(
-                    "Enter an automation name, purpose, and working folder before reviewing."
-                        .into(),
-                );
-            }
-            bruhs_models::agent::ModelId::try_from(model.get_untracked())
-                .map_err(|error| error.to_string())?;
-            setup.agent.name = name.get_untracked();
-            setup.agent.instructions = purpose.get_untracked();
-            setup.agent.project_path = folder.get_untracked();
-            setup.agent.model = model.get_untracked();
-            setup.agent.memory = memory.get_untracked();
-            setup.agent.enabled = true;
+            let fields = AgentFields {
+                name: name.get_untracked(),
+                purpose: purpose.get_untracked(),
+                folder: folder.get_untracked(),
+                model: model.get_untracked(),
+                memory: memory.get_untracked(),
+            };
+            setup = with_agent_fields(setup, fields, agent_filter.with_value(Option::is_some))?;
             if setup.source.name.trim().is_empty() {
                 setup.source.name = format!("{} source", setup.agent.name);
             }
             let cwd = if command_folder.get_untracked().trim().is_empty() {
-                folder.get_untracked()
+                setup.agent.project_path.clone()
             } else {
                 command_folder.get_untracked()
             };
@@ -249,7 +280,8 @@ pub(crate) fn AutomationSetupPanel(
                 <div class=CARD>
                     <h3 class="text-label text-rambutan-100">"Set up an automation"</h3>
                     <p class="text-body-sm text-rambutan-400">"Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."</p>
-                    <div class="mt-3 grid gap-3 sm:grid-cols-2"><Field label="Automation name" value=name /><Field label="Model" value=model /><div class="sm:col-span-2"><Field label="What should this automation do?" value=purpose multiline=true /></div><div class="sm:col-span-2"><Field label="Automation working folder" value=folder /></div>
+                    <Show when=move ||agent_filter.with_value(Option::is_some)><p class="mt-2 text-label-sm text-rambutan-400">"This routine runs as this bruh. Change its job and model in Settings."</p></Show>
+                    <div class="mt-3 grid gap-3 sm:grid-cols-2"><Show when=move ||agent_filter.with_value(Option::is_none)><Field label="Automation name" value=name /><Field label="Model" value=model /><div class="sm:col-span-2"><Field label="What should this automation do?" value=purpose multiline=true /></div><div class="sm:col-span-2"><Field label="Automation working folder" value=folder /></div></Show>
                         <label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Starts when"</span><select aria-label="Automation source type" class=SELECT prop:value=move ||kind.get() on:change=move |event| {let value=event_target_value(&event);if value=="app_event"{source_value.set("meeting.completed".into());}
                         if value=="schedule"{interval.set("3600".into());}kind.set(value);}>
                             {[("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("calendar","At set times of day"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(value,label)|view!{<option value=value>{label}</option>}).collect_view()}
@@ -265,7 +297,7 @@ pub(crate) fn AutomationSetupPanel(
                             _=>view!{<p class="text-body-sm text-rambutan-400 sm:col-span-2">"Device bridges can publish events through the local API. Use a watched folder for FTP uploads."</p>}.into_any(),
                         }}
                     </div>
-                    <details class="mt-3 rounded-grape bg-longan-900 p-3"><summary class="cursor-pointer text-label text-rambutan-300">"Advanced options"</summary><div class="mt-3 space-y-3"><Field label="Automation memory" value=memory multiline=true /><Field label="Event-specific instructions" value=note multiline=true /><Check label="Run read-only drafts automatically" value=auto_run />
+                    <details class="mt-3 rounded-grape bg-longan-900 p-3"><summary class="cursor-pointer text-label text-rambutan-300">"Advanced options"</summary><div class="mt-3 space-y-3"><Show when=move ||agent_filter.with_value(Option::is_none)><Field label="Automation memory" value=memory multiline=true /></Show><Field label="Event-specific instructions" value=note multiline=true /><Check label="Run read-only drafts automatically" value=auto_run />
                         <Show when=move ||kind.get()!="schedule" && matches!(kind.get().as_str(),"folder"|"http"|"command")><Field label="Check interval in seconds" value=interval /></Show>
                         <Show when=move ||kind.get()=="folder"><Field label="File settle time in seconds" value=settle /><Check label="Include subfolders" value=recursive /></Show>
                         <Show when=move ||kind.get()=="command"><Field label="Command working folder, if different" value=command_folder /><Field label="Command timeout in seconds" value=timeout /></Show>
@@ -469,6 +501,54 @@ mod tests {
         assert_eq!(fresh.subscription.agent_id, mine.agent.id);
         assert_ne!(fresh.subscription.id, mine.subscription.id);
         assert_ne!(new_setup_for(Some(&snapshot), None).agent.id, mine.agent.id);
+    }
+
+    #[test]
+    fn a_routine_saved_from_a_bruh_page_sends_the_bruh_unchanged() {
+        let mut bruh = new_setup().agent;
+        bruh.enabled = false;
+        bruh.model = "gpt-5.1-codex".into();
+        bruh.project_path = "/home/bruhs/b1/work".into();
+        let snapshot = ReactiveSnapshot {
+            agents: vec![bruh.clone()],
+            ..ReactiveSnapshot::default()
+        };
+        let edited = || AgentFields {
+            name: "Renamed".into(),
+            purpose: "A new job".into(),
+            folder: "/elsewhere".into(),
+            model: "claude-sonnet-4-6".into(),
+            memory: "new memory".into(),
+        };
+        let setup = new_setup_for(Some(&snapshot), Some(&bruh.id));
+        let saved = with_agent_fields(setup, edited(), true).unwrap();
+        let command = apply(ReactiveChange::SaveAutomation {
+            automation: Box::new(saved),
+        });
+        let ReactiveCommand::Apply {
+            change: ReactiveChange::SaveAutomation { automation },
+        } = command
+        else {
+            panic!("expected a saved automation");
+        };
+        assert_eq!(automation.agent, bruh);
+        assert_eq!(automation.subscription.agent_id, bruh.id);
+
+        // The Automations page still edits the agent and enables it.
+        let free = with_agent_fields(new_setup(), edited(), false).unwrap();
+        assert_eq!(
+            (
+                free.agent.name.as_str(),
+                free.agent.project_path.as_str(),
+                free.agent.enabled
+            ),
+            ("Renamed", "/elsewhere", true)
+        );
+        let blank = AgentFields {
+            name: String::new(),
+            ..edited()
+        };
+        assert!(with_agent_fields(new_setup(), blank, false).is_err());
     }
 
     #[test]

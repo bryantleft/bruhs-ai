@@ -85,9 +85,17 @@ pub fn BruhPage(agent_id: String) -> impl IntoView {
     view! {
         <section class="flex min-h-0 flex-1 flex-col bg-longan-950 text-rambutan-300" aria-labelledby="bruh-title">
             {move || match state.get() {
-                None => view! {
-                    <p role="status" class="p-6 text-body-sm text-rambutan-400">"Loading this bruh…"</p>
-                }.into_any(),
+                None => match data.error.get() {
+                    Some(message) => view! {
+                        <div class="space-y-3 p-6">
+                            <p role="alert" class="rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200">{message}</p>
+                            <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| data.reload.run(()))>"Retry"</Button>
+                        </div>
+                    }.into_any(),
+                    None => view! {
+                        <p role="status" class="p-6 text-body-sm text-rambutan-400">"Loading this bruh…"</p>
+                    }.into_any(),
+                },
                 Some(None) => view! {
                     <div class="space-y-2 p-6">
                         <h1 id="bruh-title" class="text-h3 text-rambutan-100">"This bruh no longer exists."</h1>
