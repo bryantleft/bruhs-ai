@@ -1,6 +1,7 @@
 //! The ⌘K command bar: actions, thread and record search, local servers, and running a pick.
 
 use super::*;
+use bruhs_models::logic::preview;
 
 pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
     CommandAction {
@@ -304,7 +305,7 @@ impl PaletteItem {
         match self {
             Self::Action(action) => action.group,
             Self::Thread { .. } => "Threads",
-            Self::Server { .. } => "Local servers",
+            Self::Server { .. } => preview::LOCAL_SERVERS_GROUP,
             Self::Record(_) => "Records",
         }
     }
@@ -313,7 +314,7 @@ impl PaletteItem {
         match self {
             Self::Action(action) => action.label.to_string(),
             Self::Thread { title, .. } => title.clone(),
-            Self::Server { port, .. } => format!("localhost:{port}"),
+            Self::Server { port, .. } => preview::local_server_label(*port),
             Self::Record(hit) => format!("{}: {}", hit.document.kind.label(), hit.document.title),
         }
     }
@@ -752,12 +753,7 @@ impl Workspace {
     pub(super) fn matching_server_items(&self, query: &str) -> Vec<PaletteItem> {
         self.local_servers
             .iter()
-            .filter(|server| {
-                text_matches_query(
-                    &format!("localhost:{} {}", server.port, server.command),
-                    query,
-                )
-            })
+            .filter(|server| preview::local_server_matches(server.port, &server.command, query))
             .map(|server| PaletteItem::Server {
                 port: server.port,
                 command: server.command.clone(),
@@ -824,7 +820,7 @@ impl Workspace {
                 self.select_thread_by_id(&id, cx);
             }
             PaletteItem::Server { port, .. } => {
-                spawn_detached(browser_open_command(&format!("http://localhost:{port}")));
+                spawn_detached(browser_open_command(&preview::local_server_url(port)));
                 self.close_transient_surfaces();
                 cx.notify();
             }
@@ -839,11 +835,11 @@ impl Workspace {
         let (label, hint) = match self.palette_mode {
             PaletteMode::Commands => return None,
             PaletteMode::Servers => (
-                "Local servers",
+                preview::LOCAL_SERVERS_GROUP,
                 if self.local_servers_loading {
-                    "scanning…"
+                    preview::LOCAL_SERVERS_SCANNING_HINT
                 } else {
-                    "↵ opens in your browser"
+                    preview::LOCAL_SERVERS_OPEN_HINT
                 },
             ),
         };
@@ -879,8 +875,10 @@ impl Workspace {
         if items.is_empty() {
             let label = match self.palette_mode {
                 PaletteMode::Commands => "nothing found",
-                PaletteMode::Servers if self.local_servers_loading => "scanning localhost…",
-                PaletteMode::Servers => "nothing is listening on localhost",
+                PaletteMode::Servers if self.local_servers_loading => {
+                    preview::LOCAL_SERVERS_SCANNING
+                }
+                PaletteMode::Servers => preview::LOCAL_SERVERS_NONE,
             };
             return div()
                 .debug_selector(|| "desktop-command-empty".to_string())

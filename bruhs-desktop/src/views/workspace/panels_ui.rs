@@ -538,7 +538,21 @@ impl Workspace {
             .map(|thread| thread.project_path.clone())
             .or_else(|| home_dir_path().map(|p| path_to_string(&p)))
             .unwrap_or_else(|| ".".to_string());
-        spawn_detached(system_terminal_command(&path));
+        // Like web, a launch that fails says so instead of only logging.
+        let opened = cx.background_spawn(async move {
+            bruhs_core::editor::open_system_terminal(Path::new(&path))
+        });
+        cx.spawn(async move |this, cx| {
+            if let Err(error) = opened.await {
+                tracing::warn!("open system terminal failed: {error}");
+                let _ = this.update(cx, |this, cx| {
+                    this.meetings_hub.update(cx, |hub, cx| {
+                        hub.show_notice(format!("Could not open Terminal: {error}"), true, cx)
+                    });
+                });
+            }
+        })
+        .detach();
         cx.notify();
     }
 

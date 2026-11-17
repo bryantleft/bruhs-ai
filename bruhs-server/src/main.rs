@@ -549,6 +549,10 @@ fn router_with_capture_daemon(
             "/api/open-in-editor",
             post(routes::editor::post_open_in_editor),
         )
+        .route(
+            "/api/open-in-terminal",
+            post(routes::editor::post_open_in_terminal),
+        )
         .route("/api/terminal/ws", get(routes::terminal::ws_terminal))
         .route(
             "/api/terminal/sessions",

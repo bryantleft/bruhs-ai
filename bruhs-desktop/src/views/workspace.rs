@@ -517,21 +517,6 @@ enum PaletteItem {
     Record(bruhs_models::SearchHit),
 }
 
-/// Command that opens the system terminal at `path`.
-fn system_terminal_command(path: &str) -> (String, Vec<String>) {
-    if cfg!(target_os = "macos") {
-        (
-            "open".to_string(),
-            vec!["-a".to_string(), "Terminal".to_string(), path.to_string()],
-        )
-    } else {
-        (
-            "x-terminal-emulator".to_string(),
-            vec!["--working-directory".to_string(), path.to_string()],
-        )
-    }
-}
-
 /// Command that opens `url` in the default browser.
 fn browser_open_command(url: &str) -> (String, Vec<String>) {
     if cfg!(target_os = "macos") {

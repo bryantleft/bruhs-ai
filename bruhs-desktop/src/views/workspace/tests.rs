@@ -526,7 +526,7 @@ fn active_settings_section_is_last_above_fold_like_web() {
 }
 
 #[test]
-fn palette_helpers_match_thread_links_queries_and_terminal_command() {
+fn palette_helpers_match_thread_links_queries_and_browser_command() {
     assert_eq!(super::thread_link_id("bruhs://thread/abc-1"), Some("abc-1"));
     assert_eq!(super::thread_link_id("  bruhs://thread/abc/ "), Some("abc"));
     assert_eq!(super::thread_link_id("bruhs://thread/"), None);
@@ -537,13 +537,6 @@ fn palette_helpers_match_thread_links_queries_and_terminal_command() {
     ));
     assert!(!super::text_matches_query("Fix the parser", "lexer"));
     assert!(super::text_matches_query("anything", ""));
-    let (program, args) = super::system_terminal_command("/tmp/proj");
-    if cfg!(target_os = "macos") {
-        assert_eq!(program, "open");
-        assert_eq!(args, vec!["-a", "Terminal", "/tmp/proj"]);
-    } else {
-        assert_eq!(args.last().map(String::as_str), Some("/tmp/proj"));
-    }
     assert_eq!(
         super::browser_open_command("http://localhost:3000").1,
         vec!["http://localhost:3000"]
