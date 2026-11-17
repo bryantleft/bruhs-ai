@@ -1,5 +1,5 @@
 use super::super::{load_desktop_state_from_path, DesktopState, SaveStatus, Workspace};
-pub(super) use super::test_fixture::fixture;
+pub(super) use super::test_fixture::{fixture, workflow_fixture};
 use super::{ConnectionState, WorkspaceBridge};
 use bruhs_core::workspace_bridge::{BridgeClient, BridgeRequest, BridgeResponse};
 use bruhs_models::{AgentAccess, AgentDomain, WorkflowOperation};

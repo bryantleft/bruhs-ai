@@ -1,5 +1,5 @@
 use super::super::{desktop_state_backup_path, load_desktop_state_from_path, SaveStatus};
-use super::tests::{call, connect, fixture};
+use super::tests::{call, connect, fixture, workflow_fixture};
 use super::WorkspaceBridge;
 use bruhs_core::workspace_bridge::{BridgeRequest, BridgeResponse, WorkflowProposal};
 use bruhs_models::{AgentAccess, AgentDomain, FinanceTransaction, LifeContext, WorkflowOperation};
@@ -93,7 +93,7 @@ async fn life_proposal_needs_independent_write_grants_without_enabling_reads(
 async fn reviewed_life_records_and_receipts_save_together_and_undo_preserves_other_context(
     cx: &mut TestAppContext,
 ) {
-    let (workspace, cx) = fixture(cx);
+    let (workspace, cx) = workflow_fixture(cx);
     let directory =
         std::env::temp_dir().join(format!("bruhs-life-workflow-{}", uuid::Uuid::new_v4()));
     let path = directory.join("state.json");
