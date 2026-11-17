@@ -213,6 +213,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   window, and keeps the width you gave it when the window is resized.
 - In a short desktop window the month calendar shows all six weeks, as on
   the web, instead of scrolling them; each day shows the records that fit.
+- The desktop sidebar's Working dot pulses as it does on the web, and stays
+  still when the system asks for reduced motion.
+- On touch screens, Today's Dismiss and Calendar → and the names on People
+  are full-size tap targets.
 - In the desktop app, a Knowledge document's body field is tall again, as on
   the web, instead of one line. The line under the tags says whether the
   document is saved, and Save waits until something changed.
