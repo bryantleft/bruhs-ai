@@ -1370,6 +1370,8 @@ pub struct Workspace {
     inbox_filter: bruhs_models::InboxFilter,
     inbox_search_input: Entity<InputState>,
     inbox_directory: RefCell<Option<(usize, bruhs_models::InboxDirectory)>>,
+    /// The conversation's Linked person list is open.
+    inbox_person_menu_open: bool,
     inbox_import_source: InboxSource,
     inbox_sender_input: Entity<InputState>,
     inbox_subject_input: Entity<InputState>,
@@ -2044,6 +2046,7 @@ impl Workspace {
             inbox_filter: bruhs_models::InboxFilter::Inbox,
             inbox_search_input,
             inbox_directory: RefCell::new(None),
+            inbox_person_menu_open: false,
             inbox_import_source: InboxSource::Email,
             inbox_sender_input,
             inbox_subject_input,

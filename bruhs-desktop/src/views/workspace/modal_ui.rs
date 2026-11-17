@@ -64,6 +64,7 @@ impl Workspace {
         self.palette_mode = PaletteMode::Commands;
         self.task_create_error = None;
         self.task_detail_menu_open = None;
+        self.inbox_person_menu_open = false;
         self.close_sidebar_menus();
     }
 

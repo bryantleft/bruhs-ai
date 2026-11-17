@@ -8,6 +8,24 @@ use gpui_component::input::{Input, InputEvent};
 
 use super::*;
 
+/// The Linked person dropdown's trigger and options.
+const LINKED_PERSON_DROPDOWN_ID: &str = "desktop-inbox-linked-person";
+
+/// A dropdown value is `'static` and a person's id is not, so each distinct
+/// id is kept once for the life of the app (like Settings' project names).
+fn person_value(id: &str) -> &'static str {
+    use std::collections::BTreeSet;
+    use std::sync::{Mutex, PoisonError};
+    static VALUES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
+    let mut values = VALUES.lock().unwrap_or_else(PoisonError::into_inner);
+    if let Some(known) = values.get(id) {
+        return known;
+    }
+    let kept: &'static str = Box::leak(id.to_string().into_boxed_str());
+    values.insert(kept);
+    kept
+}
+
 impl Workspace {
     pub(super) fn open_inbox_view(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.active_view = AppView::Inbox;
@@ -97,6 +115,7 @@ impl Workspace {
         };
         conversation.mark_read(true);
         let draft = conversation.draft_body().to_string();
+        self.inbox_person_menu_open = false;
         self.inbox_reply_input
             .update(cx, |input, cx| input.set_value(draft, window, cx));
         self.active_view = AppView::ConversationDetail {
@@ -123,6 +142,109 @@ impl Workspace {
             update(conversation);
             self.persist_and_notify(cx);
         }
+    }
+
+    /// Web's Linked person: link the conversation's first participant to
+    /// `person_id`, or unlink it with an empty id, and save.
+    pub(super) fn link_current_conversation_person(
+        &mut self,
+        person_id: &str,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.inbox_person_menu_open = false;
+        let AppView::ConversationDetail { conversation_id } = &self.active_view else {
+            return;
+        };
+        let changed = self
+            .inbox_conversations
+            .iter_mut()
+            .find(|conversation| conversation.id == *conversation_id)
+            .is_some_and(|conversation| conversation.link_person(Some(person_id.to_string())));
+        if changed {
+            self.persist_and_notify(cx);
+        } else {
+            cx.notify();
+        }
+    }
+
+    /// Web `ConversationDetail`'s Linked person row: Unlinked, then every
+    /// person in the directory.
+    fn render_linked_person(
+        &self,
+        conversation: &InboxConversation,
+        compact: bool,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let options = std::iter::once(DropdownOption {
+            value: "",
+            label: "Unlinked".to_string(),
+            description: None,
+        })
+        .chain(
+            self.meetings_hub
+                .read(cx)
+                .people
+                .iter()
+                .map(|person| DropdownOption {
+                    value: person_value(&person.id),
+                    label: person.display_name.clone(),
+                    description: None,
+                }),
+        )
+        .collect();
+        let entity = cx.entity().downgrade();
+        let toggle_entity = entity.clone();
+        let on_toggle: ToggleHandler = Rc::new(move |_window, cx| {
+            let _ = toggle_entity.update(cx, |this, cx| {
+                this.inbox_person_menu_open = !this.inbox_person_menu_open;
+                cx.notify();
+            });
+        });
+        let on_select: SelectHandler = Rc::new(move |value, _window, cx| {
+            let _ = entity.update(cx, |this, cx| {
+                this.link_current_conversation_person(value, cx);
+            });
+        });
+        div()
+            .id("desktop-inbox-linked-person-row")
+            .flex_shrink_0()
+            .flex()
+            .flex_wrap()
+            .items_center()
+            .justify_between()
+            .gap_3()
+            .border_b_1()
+            .border_color(theme::longan_800().opacity(0.7))
+            .px_4()
+            .py_2()
+            .child(
+                div()
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .text_size(px(12.0))
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_color(theme::rambutan_500())
+                    .child("Linked person"),
+            )
+            .child(
+                div()
+                    // Web `w-full sm:w-48`.
+                    .when(compact, |slot| slot.w_full())
+                    .when(!compact, |slot| slot.w(px(192.0)))
+                    .child(dropdown(
+                        LINKED_PERSON_DROPDOWN_ID,
+                        "Linked person",
+                        conversation.linked_person_id().unwrap_or_default(),
+                        vec![DropdownGroup {
+                            label: None,
+                            mark: None,
+                            options,
+                        }],
+                        Listbox::open_if(self.inbox_person_menu_open),
+                        on_toggle,
+                        on_select,
+                    )),
+            )
+            .into_any_element()
     }
 
     fn save_inbox_draft(&mut self, cx: &mut Context<'_, Self>) {
@@ -777,6 +899,7 @@ impl Workspace {
                         )),
                     ),
             )
+            .child(self.render_linked_person(conversation, compact, cx))
             .child(
                 div()
                     .flex_1()
@@ -908,6 +1031,9 @@ impl Workspace {
         }
     }
 }
+
+#[cfg(test)]
+mod parity_tests;
 
 #[cfg(test)]
 mod tests {

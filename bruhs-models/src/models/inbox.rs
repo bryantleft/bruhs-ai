@@ -280,6 +280,26 @@ impl InboxConversation {
         self.last_message()
             .is_some_and(|message| message.direction == MessageDirection::Incoming)
     }
+
+    /// The person the conversation is linked to: its first participant's,
+    /// as both apps' "Linked person" shows it.
+    pub fn linked_person_id(&self) -> Option<&str> {
+        self.participants.first()?.person_id.as_deref()
+    }
+
+    /// Link the first participant to `person_id`, or unlink it with `None`
+    /// or a blank id. Returns whether the link changed; a conversation with
+    /// no participant has nobody to link.
+    pub fn link_person(&mut self, person_id: Option<String>) -> bool {
+        let person_id = person_id.filter(|id| !id.trim().is_empty());
+        match self.participants.first_mut() {
+            Some(participant) if participant.person_id != person_id => {
+                participant.person_id = person_id;
+                true
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -351,6 +371,36 @@ fn normalized_subject(subject: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_first_participant_carries_the_linked_person() {
+        let participant = |name: &str| InboxParticipant {
+            id: name.into(),
+            display_name: name.into(),
+            address: String::new(),
+            person_id: None,
+        };
+        let mut conversation = InboxConversation::new(
+            InboxSource::Email,
+            "Plan",
+            vec![participant("Ada"), participant("Grace")],
+            1,
+        );
+        assert_eq!(conversation.linked_person_id(), None);
+        assert!(conversation.link_person(Some("person-ada".into())));
+        assert_eq!(conversation.linked_person_id(), Some("person-ada"));
+        assert_eq!(conversation.participants[1].person_id, None);
+        assert!(
+            !conversation.link_person(Some("person-ada".into())),
+            "unchanged"
+        );
+        assert!(conversation.link_person(Some("  ".into())), "blank unlinks");
+        assert_eq!(conversation.linked_person_id(), None);
+        assert!(!conversation.link_person(None));
+        let mut empty = InboxConversation::new(InboxSource::Email, "", vec![], 1);
+        assert!(!empty.link_person(Some("person-ada".into())));
+        assert_eq!(empty.linked_person_id(), None);
+    }
 
     #[test]
     fn local_draft_preserves_payload_without_sending_or_guessing_a_provider() {
