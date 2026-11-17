@@ -61,6 +61,7 @@ use bruhs_models::{
     TodaySnapshot, WorkItem, WorkItemPlanning,
 };
 
+mod app_links;
 mod automations_ui;
 mod booking_ui;
 mod calendar_ui;

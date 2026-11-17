@@ -11,10 +11,25 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        // Somewhere else was opened first, such as a smoke scene.
+        // Somewhere else was opened first, such as a smoke scene or a link.
         if self.active_view != AppView::Chat {
             return;
         }
+        // Settings is a dialog on desktop, and Chat is where it starts.
+        if matches!(view, AppView::Settings | AppView::Chat) {
+            return;
+        }
+        self.open_routed_view(view, window, cx);
+    }
+
+    /// Open `view` the way its own control does, for a `bruhs://` link or
+    /// the view the app closed on.
+    pub(super) fn open_routed_view(
+        &mut self,
+        view: AppView,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         match view {
             AppView::DocumentDetail { document_id } => {
                 if self
@@ -50,8 +65,7 @@ impl Workspace {
             }
             AppView::MeetingDetail { meeting_id } => self.open_meeting_detail(meeting_id, cx),
             AppView::Booking { slug } => self.open_booking_page(slug, window, cx),
-            // Settings is a dialog on desktop, and Chat is where it starts.
-            AppView::Settings | AppView::Chat => {}
+            AppView::Settings => self.open_settings(&OpenSettings, window, cx),
             view => self.activate_sidebar_view(view, window, cx),
         }
     }
