@@ -178,12 +178,11 @@ function worktreeSection(task){
  const box=element('div',undefined,'section');box.setAttribute('aria-label','Worktree');box.append(element('h3','Worktree'));
  if(worktreeView.shown!==task.id){worktreeView.shown=task.id;worktreeView.confirming=null}
  const removed=task.removed_worktree,running=active(task),key=task.id+'|'+(running?'active':'idle');
- if(local&&!removed&&!running&&worktreeView.key!==key){worktreeView.key=key;loadWorktree(task.id)}
+ if(!removed&&!running&&worktreeView.key!==key){worktreeView.key=key;loadWorktree(task.id)}
  if(running)worktreeView.key=key;
  const view=worktreeView.id===task.id?worktreeView.data:null,f=view&&view.frees;let line;
  if(removed)line='Removed '+ago(removed.removed_at)+'. Branch '+removed.branch+' stays, and the next message checks it out again.';
  else if(running)line='Its size and removal are available once the task stops.';
- else if(!local)line='Removing deletes this folder and keeps its branch.';
  else if(!view)line=worktreeView.error?'Could not read the worktree: '+worktreeView.error:'Reading the worktree…';
  else if(view.state==='missing')line='The folder is gone. Removing clears Git\'s record of it; the branch stays.';
  else if(f)line='Removing frees '+bytes(f.bytes)+' now.'+(f.shared?' '+bytes(f.shared)+' stays, shared with other folders such as your checkout’s build output.':'')+(f.snapshots?' '+bytes(f.snapshots)+' stays in local snapshots until they expire.':'')+(f.unreadable?' '+f.unreadable+' folders could not be read.':'');
@@ -191,7 +190,7 @@ function worktreeSection(task){
  box.append(element('p',line,'muted'));
  if(removed)return box;
  if(view&&view.blocked&&!running)box.append(element('p',view.blocked,'faint'));
- const can=!running&&(!local||Boolean(view&&!view.blocked&&(view.state==='present'||view.state==='missing'))),row=element('div',undefined,'row');
+ const can=!running&&Boolean(view&&!view.blocked&&(view.state==='present'||view.state==='missing')),row=element('div',undefined,'row');
  const focusOnce=(node,name)=>{node.dataset.worktreeAction=name;if(worktreeView.focus===name){worktreeView.focus=null;requestAnimationFrame(()=>document.querySelector('[data-worktree-action="'+name+'"]')?.focus())}};
  if(worktreeView.confirming===task.id){box.append(element('p','This deletes the folder, including ignored files such as build output and local .env files. Commits stay on the branch.','muted'));
   const confirm=button('Remove worktree',()=>{worktreeView.confirming=null;return command({action:'remove_worktree',id:task.id})},!can);focusOnce(confirm,'confirm');

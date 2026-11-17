@@ -167,6 +167,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     )
     .await?;
     let _delivery_watcher = delivery.start_watcher(state.clone(), Some(coordination.clone()))?;
+    // Removing a worktree refuses one a pull-request watch still reads.
+    bruhs_core::worktrees::register_watch_source(std::sync::Arc::new(delivery.clone()));
     let board_links = bruhs_core::coordination::BoardLinks::new(delivery.clone());
     let databases = bruhs_core::database::DatabaseHost::open(
         bruhs_core::database::DatabaseHost::default_path()?,
@@ -373,6 +375,15 @@ fn router_with_capture_daemon(
             "/api/coordination/commands",
             post(routes::coordination::command),
         )
+        .route("/api/worktrees", get(routes::worktrees::list))
+        .route("/api/worktrees/ui", get(routes::worktrees::ui))
+        .route("/api/worktrees/measure", get(routes::worktrees::measure))
+        .route("/api/worktrees/remove", post(routes::worktrees::remove))
+        .route(
+            "/api/worktrees/start-again",
+            post(routes::worktrees::start_again),
+        )
+        .route("/api/worktrees/forget", post(routes::worktrees::forget))
         .route(
             "/api/coordination/tasks/{id}/worktree",
             get(routes::task_worktree::get),

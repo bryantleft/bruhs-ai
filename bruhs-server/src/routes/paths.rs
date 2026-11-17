@@ -35,6 +35,10 @@ pub enum HomePathError {
     /// The home directory is set but does not resolve.
     #[error("the home directory cannot be resolved")]
     HomeUnresolvable(#[source] std::io::Error),
+    /// The path is a worktree bruhs removed, and checking its branch out
+    /// again failed.
+    #[error("{0}")]
+    WorktreeUnavailable(String),
 }
 
 impl From<HomePathError> for AppError {
@@ -44,6 +48,7 @@ impl From<HomePathError> for AppError {
                 AppError::BadRequest(error.to_string())
             }
             HomePathError::OutsideHome => AppError::Forbidden(error.to_string()),
+            HomePathError::WorktreeUnavailable(message) => AppError::Conflict(message),
             HomePathError::HomeUnknown | HomePathError::HomeUnresolvable(_) => {
                 AppError::internal(error)
             }

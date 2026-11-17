@@ -11,6 +11,14 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- Workbench has a Worktrees tab listing every worktree bruhs made, chat
+  ones included, with what removing each frees. Remove keeps the branch,
+  and the chat's or task's next message checks it out again, on the web and
+  in the desktop app. Removal also waits for any program working in the
+  folder and for pull-request watches. A worktree whose branch was deleted
+  can start again from another branch. Linux measures with allocated
+  blocks by default, and a timed-out custom meter is stopped with
+  everything it started.
 - Finished Workbench tasks can remove their worktree to free disk. The
   task panel shows what removing it frees now and what stays shared with
   your checkout, measured by Pith's scanner on macOS. Removal keeps the

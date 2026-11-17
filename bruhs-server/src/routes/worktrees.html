@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Worktrees · Bruhs</title>
+<style>
+@font-face{font-family:'MonaspaceNeonVariable';font-weight:200 800;font-style:normal;font-display:swap;src:url(/fonts/MonaspaceNeonVariable.woff2) format("woff2")}
+:root{color-scheme:dark;
+--bg:oklch(18% .01 65);--card:oklch(22% .011 65);--raised:oklch(26.5% .012 65);--ring:oklch(29.5% .013 65);--ring-strong:oklch(37% .016 63);
+--text:oklch(91.8% .015 76.32);--muted:oklch(75.7% .032 70.12);--faint:oklch(67.7% .028 67.23);
+--blueberry:oklch(76.2% .125 257.45);--durian:oklch(87.6% .11 92.85);--pandan:oklch(74.1% .152 131.89);--lychee:oklch(78.6% .094 25.3);
+--persimmon:oklch(74.1% .13 61.34);--ease:cubic-bezier(.2,0,0,1);
+font-family:'MonaspaceNeonVariable','Monaspace Neon',ui-monospace,monospace;color:var(--text);background:var(--bg);font-size:13px;line-height:1.5}
+*{box-sizing:border-box}body{margin:0;background:var(--bg)}
+h1,h2,p{margin:0}h1{font-size:15px;font-weight:600}h2{font-size:13px;font-weight:600}
+button,input{font:inherit;color:inherit}
+button{cursor:pointer;background:var(--raised);border:1px solid var(--ring-strong);border-radius:.375rem;padding:0 10px;min-height:32px;transition:background-color .15s var(--ease),border-color .15s var(--ease)}
+button:hover{background:oklch(30% .013 64)}button:disabled{opacity:.5;cursor:default}
+button.quiet{background:transparent;border-color:transparent;color:var(--muted)}button.quiet:hover{background:var(--raised);color:var(--text)}
+input{background:var(--card);border:1px solid var(--ring-strong);border-radius:.375rem;padding:0 8px;min-height:32px;width:12ch}
+:focus-visible{outline:2px solid var(--persimmon);outline-offset:2px}
+main{max-width:980px;margin:0 auto;padding:16px;display:grid;gap:14px}
+.head{display:flex;align-items:baseline;gap:12px;flex-wrap:wrap}.grow{flex:1}
+.muted{color:var(--muted)}.faint{color:var(--faint)}.error{color:var(--lychee)}
+.list{display:grid;gap:8px}
+.row{background:var(--card);border-radius:.5rem;box-shadow:inset 0 0 0 1px var(--ring);padding:10px 12px;display:grid;gap:6px}
+.top{display:flex;align-items:center;gap:10px;flex-wrap:wrap}.top h2{min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.state{font-size:12px}.state-present{color:var(--pandan)}.state-removed{color:var(--faint)}.state-missing{color:var(--durian)}
+.path{color:var(--faint);font-size:12px;overflow-wrap:anywhere}
+.actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+.empty{color:var(--muted);padding:24px 0}
+.sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%);white-space:nowrap}
+@media(pointer:coarse){button,input{min-height:44px}}
+</style></head><body>
+<main>
+ <div class="head"><h1>Worktrees</h1><p class="muted grow" id="summary">Reading worktrees…</p><button type="button" id="measure-all">Measure all</button><button type="button" class="quiet" id="refresh">Refresh</button></div>
+ <p class="muted">Every worktree bruhs made for chats, Workbench tasks and issue work. Removing one deletes its folder and keeps its branch; the next message there checks the branch out again.</p>
+ <p class="error" id="error" role="alert"></p>
+ <p class="sr-only" id="status" role="status"></p>
+ <div class="list" id="list"></div>
+</main>
+<script>
+const $=id=>document.getElementById(id);
+let rows=[],sizes=new Map(),bases=new Map(),busy=false,confirming=null,focusAfter=null;
+function element(tag,text,cls){const n=document.createElement(tag);if(text!==undefined&&text!==null)n.textContent=text;if(cls)n.className=cls;return n}
+function button(label,action,disabled=false,cls){const b=element('button',label,cls);b.type='button';b.disabled=busy||disabled;b.onclick=()=>Promise.resolve(action()).catch(fail);return b}
+function fail(e){$('error').textContent=e.message||String(e)}
+function bytes(n){const units=['bytes','KB','MB','GB','TB'];let i=0;while(n>=1000&&i<units.length-1){n/=1000;i++}return (i?n.toFixed(n<10?1:0):String(n))+' '+units[i]}
+function ago(ms){if(!ms)return '';const s=Math.max(0,(Date.now()-ms)/1000);if(s<45)return 'now';const m=s/60;if(m<60)return Math.round(m)+'m ago';const h=m/60;if(h<24)return Math.round(h)+'h ago';const d=h/24;if(d<30)return Math.round(d)+'d ago';return new Date(ms).toLocaleDateString()}
+function base(path){const parts=String(path||'').split('/').filter(Boolean);return parts.at(-1)||path||''}
+async function request(path,body){const res=await fetch(path,{method:body===undefined?'GET':'POST',headers:body===undefined?{}:{'Content-Type':'application/json'},body:body===undefined?undefined:JSON.stringify(body),cache:'no-store'});if(!res.ok){let message='Request failed: '+res.status;try{message=(await res.json()).error||message}catch{}throw new Error(message)}return res.json()}
+async function load(){try{rows=await request('/api/worktrees');$('error').textContent=''}catch(e){fail(e)}render()}
+const DONE={'/api/worktrees/remove':'Worktree removed. Its branch stays.','/api/worktrees/start-again':'Worktree checked out again.','/api/worktrees/forget':'Record forgotten.'};
+async function act(path,body){if(busy)return;busy=true;render();let failed=false;try{rows=await request(path,body);$('error').textContent='';$('status').textContent=DONE[path]||'';sizes.delete(body.path)}catch(e){failed=true;fail(e)}finally{busy=false;confirming=null;if(failed)await load();else render()}}
+async function measure(path){sizes.set(path,{loading:true});render();try{const m=await request('/api/worktrees/measure?path='+encodeURIComponent(path));sizes.set(path,m)}catch(e){sizes.set(path,{error:e.message})}render()}
+async function measureAll(){for(const path of rows.filter(r=>r.state==='present').map(r=>r.path)){if(rows.some(r=>r.path===path&&r.state==='present'))await measure(path)}$('status').textContent='Measured every worktree on disk.'}
+function sizeLine(row){const s=sizes.get(row.path);if(!s)return null;if(s.loading)return 'Measuring…';if(s.error)return 'Could not measure: '+s.error;if(!s.frees)return 'No disk meter is set up, so the size is not shown.';const f=s.frees;return 'Removing frees '+bytes(f.bytes)+' now.'+(f.shared?' '+bytes(f.shared)+' stays shared with other folders.':'')+(f.snapshots?' '+bytes(f.snapshots)+' stays in local snapshots.':'')}
+function rowNode(row){
+ const box=element('section',undefined,'row');box.setAttribute('aria-label',(row.branch||base(row.path))+' worktree');
+ const top=element('div',undefined,'top');top.append(element('h2',row.branch||base(row.path)),element('span',{present:'On disk',removed:'Removed',missing:'Folder gone'}[row.state]||row.state,'state state-'+row.state));
+ top.append(element('span',row.project?base(row.project):'Unknown project','muted'),element('span',row.task?'Task: '+row.task.title:'Chat or issue work','faint'),element('span',ago(row.updated_at),'faint grow'));
+ box.append(top,element('p',row.path,'path'));
+ if(row.state!=='removed'&&row.changed_files)box.append(element('p',row.changed_files+(row.changed_files===1?' uncommitted change':' uncommitted changes'),'muted'));
+ const size=sizeLine(row);if(size)box.append(element('p',size,'muted'));
+ if(row.blocked&&row.state!=='removed')box.append(element('p',row.blocked,'faint'));
+ const actions=element('div',undefined,'actions');
+ const focusOnce=(node,name)=>{node.dataset.action=name+'|'+row.path;if(focusAfter===name+'|'+row.path){focusAfter=null;requestAnimationFrame(()=>document.querySelector('[data-action="'+CSS.escape(name+'|'+row.path)+'"]')?.focus())}};
+ if(row.state==='removed'){
+  if(row.branch_missing){box.append(element('p','Its branch '+row.branch+' no longer exists, so it cannot come back on its own. Start it again from another branch, keeping the name.','muted'));
+   const input=element('input');input.value=bases.get(row.path)??'main';input.oninput=()=>bases.set(row.path,input.value);input.dataset.action='base|'+row.path;input.setAttribute('aria-label','Base branch for '+row.branch);
+   actions.append(input,button('Start again',()=>act('/api/worktrees/start-again',{path:row.path,base:input.value.trim()}),false))}
+  else{box.append(element('p','Removed. Its branch '+row.branch+' stays, and the next message there checks it out again.','muted'));actions.append(button('Check out now',()=>act('/api/worktrees/start-again',{path:row.path,base:row.branch})))}
+  if(!row.task)actions.append(button('Forget',()=>act('/api/worktrees/forget',{path:row.path}),false,'quiet'));
+ }else{
+  if(row.state==='present'&&!sizes.has(row.path)){const m=button('Measure',()=>measure(row.path),false,'quiet');m.dataset.action='measure|'+row.path;actions.append(m)}
+  const can=!row.blocked;
+  if(confirming===row.path){box.append(element('p','This deletes the folder, including ignored files such as build output and local .env files. Commits stay on the branch.','muted'));
+   const go=button('Remove worktree',()=>act('/api/worktrees/remove',{path:row.path}),!can);focusOnce(go,'confirm');
+   actions.append(go,button('Keep it',()=>{confirming=null;focusAfter='open|'+row.path;render()},false,'quiet'))}
+  else{const open=button('Remove worktree…',()=>{confirming=row.path;focusAfter='confirm|'+row.path;render()},!can);focusOnce(open,'open');actions.append(open)}
+ }
+ box.append(actions);return box}
+function render(){
+ // Keep keyboard focus on the same control across a re-render.
+ const focused=document.activeElement?.dataset?.action,caret=document.activeElement?.selectionStart;
+ renderRows();
+ if(focused&&!focusAfter){const again=document.querySelector('[data-action="'+CSS.escape(focused)+'"]');if(again){again.focus();if(caret!=null&&again.setSelectionRange)again.setSelectionRange(caret,caret)}}}
+function renderRows(){
+ const present=rows.filter(r=>r.state!=='removed').length,removed=rows.length-present;
+ $('summary').textContent=rows.length?present+(present===1?' worktree':' worktrees')+' on disk'+(removed?', '+removed+' removed':''):'';
+ $('list').replaceChildren(...(rows.length?rows.map(rowNode):[element('p','No worktrees yet. Choose New worktree when starting a chat or task to work on its own branch.','empty')]));
+ $('measure-all').disabled=busy||!rows.some(r=>r.state==='present');$('refresh').disabled=busy}
+$('refresh').onclick=()=>load();$('measure-all').onclick=()=>measureAll().catch(fail);
+load();
+</script>
+</body></html>

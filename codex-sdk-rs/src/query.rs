@@ -122,6 +122,11 @@ fn command(options: &QueryOptions) -> Command {
     let mut cd = OsString::from("--cd=");
     cd.push(&options.cwd);
     cmd.arg(cd);
+    // Also run in that folder, so the process's working directory shows
+    // which folder it uses (hosts check it before deleting a folder).
+    if options.cwd.is_absolute() {
+        cmd.current_dir(&options.cwd);
+    }
 
     if options.session == Session::Ephemeral {
         cmd.arg("--ephemeral");
