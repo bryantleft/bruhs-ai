@@ -5,6 +5,9 @@
 
 use std::cell::{Cell, RefCell};
 
+use gpui_component::scroll::ScrollableElement;
+use gpui_component::text::TextView;
+
 use super::*;
 use bruhs_models::{
     normalize_aliases, people_copy as copy, people_page_count, people_page_of,
@@ -12,6 +15,9 @@ use bruhs_models::{
     restore_person_links, review_alias, unlink_person, PeopleUndo, PeopleUndoError,
     RelationshipDue, RelationshipItem, RelationshipItemEdit, RELATIONSHIP_ITEM_KINDS,
 };
+
+#[cfg(test)]
+mod parity_tests;
 
 /// One relationship item being edited in place.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -46,6 +52,10 @@ pub(in crate::views::workspace) struct PeoplePageState {
     pub(in crate::views::workspace) undo_in_flight: Option<PeopleUndo>,
     /// The merge this client confirmed, so its local commit offers undo.
     pub(in crate::views::workspace) pending_merge: Option<(String, String)>,
+    /// The kept merge originals the person asked to see, as JSON, with how
+    /// many there were then. Hidden once they change, so an update never
+    /// serializes private data unasked (web `ContactMergeStatus`).
+    pub(in crate::views::workspace) merge_recovery: Option<(usize, String)>,
     /// The person a meeting or conversation was opened from, and that view.
     pub(in crate::views::workspace) return_to: Option<(String, AppView)>,
 }
@@ -130,9 +140,37 @@ impl PeoplePageState {
             undo: None,
             undo_in_flight: None,
             pending_merge: None,
+            merge_recovery: None,
             return_to: None,
         }
     }
+}
+
+/// Web's read-only "Contact merge recovery data" field: the JSON in a
+/// scrolling, selectable code block, so it can be copied.
+fn render_merge_recovery_data(json: &str, cx: &App) -> AnyElement {
+    let longest = json.split(|c| c != '`').map(str::len).max().unwrap_or(0);
+    let fence = "`".repeat(longest.max(2) + 1);
+    div()
+        .id("desktop-people-merge-recovery-data")
+        .debug_selector(|| "desktop-people-merge-recovery-data".into())
+        .role(Role::Region)
+        .aria_label("Contact merge recovery data")
+        .h(px(128.0))
+        .w_full()
+        .overflow_y_scrollbar()
+        .rounded(px(8.0))
+        .bg(theme::longan_950())
+        .p_2()
+        .child(
+            TextView::markdown(
+                "desktop-people-merge-recovery-json",
+                format!("{fence}json\n{json}\n{fence}"),
+            )
+            .style(crate::views::chat::desktop_markdown_style(cx))
+            .selectable(true),
+        )
+        .into_any_element()
 }
 
 /// A people page item kind button: pressed state is visible and announced.
@@ -916,6 +954,20 @@ impl Workspace {
         if let Some(recovery) = self.render_people_merge_status(cx) {
             page_el = page_el.child(recovery);
         }
+        if hub.people_refreshing() {
+            page_el = page_el.child(
+                div()
+                    .id("desktop-people-refreshing")
+                    .debug_selector(|| "desktop-people-refreshing".into())
+                    .role(Role::Status)
+                    .aria_label("Contact directory sync")
+                    .child(label(
+                        "Refreshing contacts… Cached contacts remain available.",
+                        LABEL_SM_PX,
+                        theme::rambutan_400(),
+                    )),
+            );
+        }
         if hub.needs_people_retry() {
             page_el = page_el.child(
                 div()
@@ -1254,13 +1306,50 @@ impl Workspace {
                 );
         }
         if kept > 0 {
-            section = section.child(label(
-                "Both originals are retained privately on this device. Recovery data may contain sensitive notes and voice information.",
-                LABEL_SM_PX,
-                theme::rambutan_400(),
-            ));
+            section = section
+                .child(label(
+                    "Both originals are retained privately on this device. Recovery data may contain sensitive notes and voice information.",
+                    LABEL_SM_PX,
+                    theme::rambutan_400(),
+                ))
+                .child(
+                    div().flex().child(
+                        web_button(
+                            "desktop-people-view-merge-recovery",
+                            WebButtonVariant::Outline,
+                            WebButtonSize::Small,
+                            ButtonState::Enabled,
+                        )
+                        .debug_selector(|| "desktop-people-view-merge-recovery".into())
+                        .aria_label("View contact merge recovery (private)")
+                        .child("View contact merge recovery (private)")
+                        .on_click(cx.listener(move |this, _, _, cx| {
+                            this.show_people_merge_recovery(kept, cx);
+                        })),
+                    ),
+                );
+            if let Some((_, json)) = self
+                .people_page
+                .merge_recovery
+                .as_ref()
+                .filter(|(shown, _)| *shown == kept)
+            {
+                section = section.child(render_merge_recovery_data(json, cx));
+            }
         }
         Some(section.into_any_element())
+    }
+
+    /// Web "View contact merge recovery (private)": show the kept originals.
+    fn show_people_merge_recovery(&mut self, kept: usize, cx: &mut Context<'_, Self>) {
+        match self.meetings_hub.read(cx).person_merge_recovery_json() {
+            Ok(json) => self.people_page.merge_recovery = Some((kept, json)),
+            Err(_) => {
+                self.people_page.notice =
+                    Some("Private merge recovery data could not be encoded.".into());
+            }
+        }
+        cx.notify();
     }
 
     fn render_person_card(
