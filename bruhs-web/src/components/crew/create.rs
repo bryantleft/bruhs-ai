@@ -11,7 +11,8 @@ use super::data::use_crew_snapshot;
 use super::face_editor::FaceEditor;
 use crate::state::{AppView, RolesSignal, SetActiveView};
 use crate::ui::{
-    Button, ButtonSize, ButtonVariant, Dialog, Dropdown, DropdownOption, Input, Textarea,
+    button_class, Button, ButtonSize, ButtonVariant, Dialog, Dropdown, DropdownOption, Input,
+    Textarea,
 };
 
 const LABEL: &str = "block min-w-0 space-y-1 text-label-sm text-rambutan-300";
@@ -127,7 +128,9 @@ pub fn CreateBruhDialog(
         }
     });
 
+    // Closing forgets the bruh on its way, so its reply can't open it later.
     let close = Callback::new(move |()| {
+        pending.set(None);
         open.set(false);
         data.error.set(None);
     });
@@ -215,7 +218,8 @@ pub fn CreateBruhDialog(
                 </div>
                 <div class="flex items-center justify-end gap-2 border-t border-longan-800 bg-longan-900/40 px-4 py-3">
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| close.run(()))>"Cancel"</Button>
-                    <Button size=ButtonSize::Small disabled=create_disabled on_click=Callback::new(move |_| create())>"Create"</Button>
+                    // The form's submit button, so Enter in a field creates.
+                    <button type="submit" class=button_class(ButtonVariant::Primary, ButtonSize::Small, "") disabled=move || create_disabled.get()>"Create"</button>
                 </div>
             </form>
         </Dialog>

@@ -49,10 +49,17 @@ impl CrewData {
     }
 }
 
+/// Context data a caller may share. When a view is rebuilt in place, such
+/// as one bruh's page replacing another's, its owner is cleaned up and run
+/// again: the old page's data stays in context, but its signals are gone.
+fn reusable(data: Option<CrewData>) -> Option<CrewData> {
+    data.filter(|data| !data.snapshot.is_disposed())
+}
+
 /// The page's crew data: made by the first caller under a page and shared
 /// with every tab below it.
 pub fn use_crew_snapshot() -> CrewData {
-    if let Some(data) = use_context::<CrewData>() {
+    if let Some(data) = reusable(use_context::<CrewData>()) {
         return data;
     }
     let data = new_crew_data();
@@ -160,5 +167,32 @@ fn new_crew_data() -> CrewData {
         busy,
         reload,
         live_protocol: updates.map(|updates| updates.protocol),
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn data() -> CrewData {
+        CrewData {
+            snapshot: RwSignal::new(None),
+            send: Callback::new(|_| {}),
+            error: RwSignal::new(None),
+            busy: RwSignal::new(false),
+            reload: Callback::new(|()| {}),
+            live_protocol: None,
+        }
+    }
+
+    #[test]
+    fn data_from_a_page_rebuilt_in_place_is_made_again() {
+        let owner = Owner::new();
+        let shared = owner.with(data);
+        assert!(reusable(Some(shared)).is_some());
+        assert!(reusable(None).is_none());
+        // Opening another bruh cleans up the owner and runs the page again.
+        owner.cleanup();
+        assert!(reusable(Some(shared)).is_none());
     }
 }
