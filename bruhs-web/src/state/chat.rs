@@ -240,6 +240,10 @@ pub enum MessageStatus {
     /// Nothing more will arrive. `at_ms` is when it finished; `None` for
     /// records that never said (older rows, an answer cut off by a reload).
     Finished { at_ms: Option<f64> },
+    /// The user stopped the turn before it finished, at `at_ms`. A turn
+    /// that failed reads as failed instead, as on desktop. Rows saved before
+    /// stops were recorded read as finished.
+    Stopped { at_ms: Option<f64> },
 }
 
 impl MessageStatus {
@@ -247,11 +251,16 @@ impl MessageStatus {
         matches!(self, Self::Streaming)
     }
 
-    /// When the message finished, if it has and the time is known.
+    pub fn is_stopped(self) -> bool {
+        matches!(self, Self::Stopped { .. })
+    }
+
+    /// When the message finished or was stopped, if it has and the time is
+    /// known.
     pub fn finished_at_ms(self) -> Option<f64> {
         match self {
             Self::Streaming => None,
-            Self::Finished { at_ms } => at_ms,
+            Self::Finished { at_ms } | Self::Stopped { at_ms } => at_ms,
         }
     }
 }
@@ -320,6 +329,10 @@ struct MessageRecord {
     parts: Vec<MessagePart>,
     #[serde(default)]
     error: Option<String>,
+    /// The user stopped this turn. Absent on rows saved before stops were
+    /// recorded, which read as finished.
+    #[serde(default, skip_serializing_if = "is_false")]
+    stopped: bool,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     files: Vec<UploadedFile>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -344,9 +357,14 @@ impl From<MessageRecord> for AgentMessage {
         Self {
             id: record.id,
             role: Role::parse_lossy(&record.role),
-            // A record saved mid-stream says so even if it also has a time.
+            // A record saved mid-stream says so even if it also has a time,
+            // and an error outranks a stop (never written together).
             status: if record.is_streaming {
                 MessageStatus::Streaming
+            } else if record.stopped && record.error.is_none() {
+                MessageStatus::Stopped {
+                    at_ms: record.completed_at_ms,
+                }
             } else {
                 MessageStatus::Finished {
                     at_ms: record.completed_at_ms,
@@ -380,6 +398,7 @@ impl From<AgentMessage> for MessageRecord {
             completed_at_ms: message.status.finished_at_ms(),
             model: message.model,
             parts: message.parts,
+            stopped: message.status.is_stopped(),
             error: message.error,
             files: message.files,
             checkpoint: message.checkpoint.filter(|tree| !tree.is_empty()),
@@ -447,6 +466,26 @@ impl AgentMessage {
 
     pub fn is_streaming(&self) -> bool {
         self.status.is_streaming()
+    }
+
+    /// End this reply's turn at `now_ms`: `stopped` when the user stopped it,
+    /// `error` when it failed. An error the reply already holds stays, and a
+    /// failed turn reads as failed, not stopped, as on desktop.
+    pub fn finish(&mut self, now_ms: f64, stopped: bool, error: Option<String>) {
+        if self.error.is_none() {
+            self.error = error;
+        }
+        let at_ms = Some(now_ms);
+        self.status = if stopped && self.error.is_none() {
+            MessageStatus::Stopped { at_ms }
+        } else {
+            MessageStatus::Finished { at_ms }
+        };
+    }
+
+    /// The user stopped this turn, and it did not fail.
+    pub fn was_stopped(&self) -> bool {
+        self.status.is_stopped() && self.error.is_none()
     }
 
     /// All text parts concatenated.
@@ -1148,6 +1187,66 @@ mod tests {
         assert_eq!(done.text(), "hi");
         let odd = load(serde_json::json!({"id": "c", "role": "system"}));
         assert_eq!(odd.role, Role::Assistant);
+    }
+
+    /// Stopping records the stop with its time; a failure outranks it, and
+    /// an error the reply already holds stays.
+    #[test]
+    fn finishing_a_turn_records_a_stop_unless_it_failed() {
+        let reply = || AgentMessage::assistant_placeholder("model".into(), 1.0);
+        let mut stopped = reply();
+        stopped.finish(5.0, true, None);
+        assert_eq!(stopped.status, MessageStatus::Stopped { at_ms: Some(5.0) });
+        assert!(stopped.was_stopped() && !stopped.is_streaming());
+        assert_eq!(stopped.status.finished_at_ms(), Some(5.0));
+
+        let mut done = reply();
+        done.finish(5.0, false, None);
+        assert_eq!(done.status, MessageStatus::Finished { at_ms: Some(5.0) });
+        assert!(!done.was_stopped());
+
+        let mut failed = reply();
+        failed.finish(5.0, false, Some("boom".into()));
+        assert_eq!(failed.error.as_deref(), Some("boom"));
+        assert!(!failed.was_stopped());
+
+        // The provider failed the turn before the user stopped it.
+        let mut errored = reply();
+        errored.error = Some("provider error".into());
+        errored.finish(5.0, true, Some("ignored".into()));
+        assert_eq!(errored.error.as_deref(), Some("provider error"));
+        assert_eq!(errored.status, MessageStatus::Finished { at_ms: Some(5.0) });
+        assert!(!errored.was_stopped());
+    }
+
+    /// The record shape writes `stopped` only for a stopped turn, reads it
+    /// back, and reads rows without it (or with an error too) as finished.
+    #[test]
+    fn stopped_turns_keep_their_stop_in_the_record_shape() {
+        let mut m = AgentMessage::assistant_placeholder("model".into(), 1.0);
+        m.parts.push(MessagePart::Text("partial".into()));
+        m.finish(3.0, true, None);
+        let json = serde_json::to_value(&m).unwrap();
+        assert_eq!(json["stopped"], true);
+        assert_eq!(json["is_streaming"], false);
+        assert_eq!(json["completed_at_ms"], 3.0);
+        assert_eq!(serde_json::from_value::<AgentMessage>(json).unwrap(), m);
+
+        let mut done = AgentMessage::assistant_placeholder("model".into(), 1.0);
+        done.finish(3.0, false, None);
+        assert!(serde_json::to_value(&done).unwrap().get("stopped").is_none());
+
+        let load = |v: serde_json::Value| serde_json::from_value::<AgentMessage>(v).unwrap();
+        let both = load(serde_json::json!({
+            "id": "a", "role": "assistant", "stopped": true, "error": "boom",
+            "completed_at_ms": 2.0
+        }));
+        assert_eq!(both.status, MessageStatus::Finished { at_ms: Some(2.0) });
+        assert_eq!(both.error.as_deref(), Some("boom"));
+        let still_streaming = load(serde_json::json!({
+            "id": "b", "role": "assistant", "stopped": true, "is_streaming": true
+        }));
+        assert_eq!(still_streaming.status, MessageStatus::Streaming);
     }
 
     /// Saving still writes the flat fields and the streaming flag older
