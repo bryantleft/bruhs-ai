@@ -31,6 +31,11 @@ pub const READ_ONLY_DENIAL: &str = "This bruh is read only. Return a reviewable 
 pub const APP_TOOL_DENIAL: &str = "App tools aren't available to bruh runs.";
 pub const DELIVERY_DENIAL: &str =
     "Pushing, merging and opening pull requests need Full access with Can deliver on.";
+pub const LOCAL_HOST_DENIAL: &str = "Bruhs can't reach services on this computer.";
+
+/// Forge hosts a shell command can act on as the owner: `gh`, `glab` and
+/// any command naming one of these ask first, even at Full.
+pub const FORGE_COMMAND_HOSTS: [&str; 2] = ["github.com", "gitlab.com"];
 
 /// Claude `--disallowedTools` rules that keep a run from delivering code.
 pub const DELIVERY_DENY_RULES: [&str; 5] = [
@@ -131,11 +136,19 @@ pub fn permission_gate(
                 // An allowed delivery still runs the whole line, so the rest
                 // of it follows the normal shell rule below.
                 denied
+            } else if is_forge_command(command) {
+                // Commenting, filing issues or calling a forge API acts in
+                // the owner's name: Can deliver only opens delivery.
+                gate(access, level, GatedAction::SendAsOwner)
+                    .min_approve(level == AccessLevel::Full && shell_confined)
             } else if level == AccessLevel::Full && shell_confined {
                 Gate::Allow
             } else {
                 Gate::Approve
             }
+        }
+        "SandboxNetworkAccess" if input["host"].as_str().is_some_and(is_local_host) => {
+            Gate::Deny(LOCAL_HOST_DENIAL)
         }
         "Edit" | "Write" | "MultiEdit" | "NotebookEdit" => {
             let path = input["file_path"]
@@ -152,25 +165,126 @@ pub fn permission_gate(
     }
 }
 
+impl Gate {
+    /// An Allow that only holds when `allowed` is true; otherwise Approve.
+    fn min_approve(self, allowed: bool) -> Gate {
+        match self {
+            Gate::Allow if allowed => Gate::Allow,
+            Gate::Allow => Gate::Approve,
+            other => other,
+        }
+    }
+}
+
+/// The words of each command in a shell line, after leading `NAME=value`
+/// assignments.
+fn shell_commands(command: &str) -> impl Iterator<Item = Vec<&str>> {
+    command
+        .split(['&', '|', ';', '\n', '\r', '(', ')', '`'])
+        .map(|segment| {
+            segment
+                .split_whitespace()
+                .skip_while(|word| is_env_assignment(word))
+                .collect()
+        })
+}
+
+fn is_delivery_words(words: &[&str]) -> bool {
+    match words {
+        ["git", rest @ ..] => git_subcommand(rest) == Some("push"),
+        ["gh", "pr", "create" | "merge", ..] | ["glab", "mr", "create" | "merge", ..] => true,
+        _ => false,
+    }
+}
+
 /// Whether any command in a shell line pushes, merges or opens a pull
 /// request. A lexical check: the sandbox and deny rules back it up.
 #[must_use]
 pub fn is_delivery_command(command: &str) -> bool {
-    command
-        .split(['&', '|', ';', '\n', '\r', '(', ')', '`'])
-        .any(|segment| {
-            let words: Vec<&str> = segment
-                .split_whitespace()
-                .skip_while(|word| is_env_assignment(word))
-                .collect();
-            match words.as_slice() {
-                ["git", rest @ ..] => git_subcommand(rest) == Some("push"),
-                ["gh", "pr", "create" | "merge", ..] | ["glab", "mr", "create" | "merge", ..] => {
-                    true
-                }
-                _ => false,
-            }
-        })
+    shell_commands(command).any(|words| is_delivery_words(&words))
+}
+
+/// Whether a shell line acts on a forge other than by delivering: a `gh` or
+/// `glab` command (also behind `sudo`, `env` or `sh -c`), or any command but
+/// `git` that names a forge host, such as `curl` to its API. Lexical, so it
+/// errs toward asking.
+#[must_use]
+pub fn is_forge_command(command: &str) -> bool {
+    shell_commands(command).any(|words| {
+        if is_delivery_words(&words) {
+            return false;
+        }
+        let program = |word: &str| {
+            let word = word.trim_matches(['"', '\'']);
+            word.rsplit('/').next().unwrap_or(word).to_owned()
+        };
+        if words
+            .iter()
+            .any(|word| matches!(program(word).as_str(), "gh" | "glab"))
+        {
+            return true;
+        }
+        words.first().is_some_and(|first| program(first) != "git")
+            && words.iter().any(|word| {
+                let word = word.to_ascii_lowercase();
+                FORGE_COMMAND_HOSTS.iter().any(|host| word.contains(host))
+            })
+    })
+}
+
+/// Whether a host a bruh asks to reach is this computer: loopback, the
+/// unspecified address, `localhost` or a `.localhost` name, in any form a
+/// resolver accepts (`127.1`, `0x7f000001`, `[::1]:3001`). A bruh that
+/// reached the local Bruhs API could approve its own requests.
+#[must_use]
+pub fn is_local_host(host: &str) -> bool {
+    let host = host.trim().to_ascii_lowercase();
+    let bare = if let Some(rest) = host.strip_prefix('[') {
+        rest.split(']').next().unwrap_or_default()
+    } else if host.matches(':').count() == 1 {
+        host.split(':').next().unwrap_or_default()
+    } else {
+        host.as_str()
+    };
+    let bare = bare.trim_end_matches('.');
+    if bare == "localhost" || bare.ends_with(".localhost") {
+        return true;
+    }
+    let local_v4 = |ip: std::net::Ipv4Addr| ip.is_loopback() || ip.octets()[0] == 0;
+    if let Ok(ip) = bare.parse::<std::net::Ipv6Addr>() {
+        return ip.is_loopback()
+            || ip.is_unspecified()
+            || ip.to_ipv4_mapped().is_some_and(local_v4);
+    }
+    loose_ipv4(bare).is_some_and(local_v4)
+}
+
+/// An IPv4 address in the forms `inet_aton` accepts: one to four parts,
+/// each decimal, octal (leading 0) or hex (0x), the last filling the rest.
+fn loose_ipv4(host: &str) -> Option<std::net::Ipv4Addr> {
+    let number = |part: &str| -> Option<u64> {
+        if let Some(hex) = part.strip_prefix("0x") {
+            u64::from_str_radix(hex, 16).ok()
+        } else if part.len() > 1 && part.starts_with('0') {
+            u64::from_str_radix(&part[1..], 8).ok()
+        } else if !part.is_empty() && part.bytes().all(|b| b.is_ascii_digit()) {
+            part.parse().ok()
+        } else {
+            None
+        }
+    };
+    let parts = host.split('.').map(number).collect::<Option<Vec<u64>>>()?;
+    let (last, head) = parts.split_last()?;
+    if head.len() > 3 || head.iter().any(|part| *part > 255) {
+        return None;
+    }
+    if *last >= 1u64 << (8 * (4 - head.len())) {
+        return None;
+    }
+    let value = head.iter().enumerate().fold(*last, |value, (index, part)| {
+        value | part << (24 - 8 * index)
+    });
+    u32::try_from(value).ok().map(std::net::Ipv4Addr::from)
 }
 
 fn is_env_assignment(word: &str) -> bool {
@@ -676,6 +790,117 @@ mod tests {
                 true
             ),
             Gate::Deny(READ_ONLY_DENIAL)
+        );
+    }
+
+    #[test]
+    fn forge_commands_ask_even_at_full_with_can_deliver() {
+        let gate = |access: &BruhAccess, command: &str| {
+            permission_gate(
+                access,
+                AgentProvider::Claude,
+                "Bash",
+                &serde_json::json!({"command": command}),
+                "/w",
+                true,
+            )
+        };
+        for command in [
+            "gh issue comment 3 --body hi",
+            "gh api -X POST repos/a/b/issues",
+            "cargo test && gh pr comment 4 -b ok",
+            "sudo /usr/bin/gh release create v1",
+            "sh -c 'gh issue create'",
+            "glab issue note 2 -m hi",
+            "curl -X POST https://api.github.com/repos/a/b/issues",
+            "wget --post-data=x https://GitLab.com/api/v4/projects",
+        ] {
+            assert!(is_forge_command(command), "{command}");
+            assert_eq!(gate(&full(true), command), Gate::Approve, "{command}");
+            assert_eq!(gate(&full(false), command), Gate::Approve, "{command}");
+        }
+        let send_as_me = BruhAccess {
+            send_as_me: true,
+            ..full(true)
+        };
+        assert_eq!(gate(&send_as_me, "gh issue comment 3 -b hi"), Gate::Allow);
+        // Delivery itself follows Can deliver; git over a forge URL is not a forge command.
+        for command in [
+            "git push",
+            "gh pr create --fill",
+            "git clone https://github.com/a/b",
+            "cargo test",
+            "echo github",
+        ] {
+            assert!(!is_forge_command(command), "{command}");
+            assert_eq!(gate(&full(true), command), Gate::Allow, "{command}");
+        }
+        assert_eq!(
+            gate(&BruhAccess::default(), "gh issue list"),
+            Gate::Deny(READ_ONLY_DENIAL)
+        );
+    }
+
+    #[test]
+    fn this_computer_is_never_reachable() {
+        for host in [
+            "localhost",
+            "LOCALHOST.",
+            "bruhs.localhost",
+            "localhost:3001",
+            "127.0.0.1",
+            "127.8.9.10",
+            "127.1",
+            "2130706433",
+            "0x7f000001",
+            "0177.0.0.1",
+            "0.0.0.0",
+            "0",
+            "::1",
+            "[::1]",
+            "[::1]:3001",
+            "::",
+            "::ffff:127.0.0.1",
+            "127.0.0.1:3001",
+        ] {
+            assert!(is_local_host(host), "{host}");
+            for access in [full(true), full(false)] {
+                assert_eq!(
+                    permission_gate(
+                        &access,
+                        AgentProvider::Claude,
+                        "SandboxNetworkAccess",
+                        &serde_json::json!({"host": host}),
+                        "/w",
+                        true,
+                    ),
+                    Gate::Deny(LOCAL_HOST_DENIAL),
+                    "{host}"
+                );
+            }
+        }
+        for host in [
+            "example.com",
+            "localhost.example.com",
+            "128.0.0.1",
+            "10.0.0.1",
+            "1.2.3.4",
+            "::2",
+            "github.com",
+            "0x7f.example",
+        ] {
+            assert!(!is_local_host(host), "{host}");
+        }
+        assert_eq!(
+            permission_gate(
+                &full(false),
+                AgentProvider::Claude,
+                "SandboxNetworkAccess",
+                &serde_json::json!({"host": "example.com"}),
+                "/w",
+                true,
+            ),
+            Gate::Approve
         );
     }
 

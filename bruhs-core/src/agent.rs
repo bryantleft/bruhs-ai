@@ -137,12 +137,16 @@ impl AgentTurn {
     /// interactive settings: no thread or app tools, a lean context, and the
     /// effective level for this turn's provider (Codex can't ask, so Ask
     /// runs read only there). Read only plans, Ask asks before every change,
-    /// Full accepts edits in its working folder.
+    /// Full edits its working folder without asking: Codex through its
+    /// workspace-write sandbox, Claude in Default mode, so every edit still
+    /// reaches the bruh's permission gate (which allows it inside the
+    /// folder, symlinks resolved) instead of the CLI accepting it.
     pub fn unattended_with(mut self, access: BruhAccess) -> Self {
         let level = effective_level(access.level, self.provider);
         self.permission_mode = match level {
             AccessLevel::ReadOnly => PermissionMode::Plan,
             AccessLevel::Ask => PermissionMode::Default,
+            AccessLevel::Full if self.provider == AgentProvider::Claude => PermissionMode::Default,
             AccessLevel::Full => PermissionMode::AcceptEdits,
         };
         self.unattended_access = BruhAccess { level, ..access };
@@ -1121,7 +1125,9 @@ fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess) 
                     claude_sdk_rs::PermissionMode::Plan,
                 ),
                 AccessLevel::Ask => (read_tools(), claude_sdk_rs::PermissionMode::Default),
-                AccessLevel::Full => (read_tools(), claude_sdk_rs::PermissionMode::AcceptEdits),
+                // Not Accept Edits: the CLI would accept in-folder edits
+                // itself, and the gate's symlink check would never run.
+                AccessLevel::Full => (read_tools(), claude_sdk_rs::PermissionMode::Default),
             };
             // Every ask reaches the run's permission handler, never a
             // silent denial (a turn built for bypass would have them off).
@@ -2058,17 +2064,18 @@ mod tests {
                 reads.clone(),
                 true,
             ),
+            // Full runs in Default mode too: every edit reaches the gate.
             (
                 AccessLevel::Full,
                 false,
-                PermissionMode::AcceptEdits,
+                PermissionMode::Default,
                 reads.clone(),
                 true,
             ),
             (
                 AccessLevel::Full,
                 true,
-                PermissionMode::AcceptEdits,
+                PermissionMode::Default,
                 reads,
                 false,
             ),
