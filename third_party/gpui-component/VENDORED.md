@@ -40,6 +40,9 @@ adaptations.
   `TITLE_BAR_LEFT_PADDING` 80 -> 88, traffic-light position (9, 9) -> (12, 15).
 - `crates/ui/src/resizable/resize_handle.rs`: a 4px hover strip, matching
   the web app.
+- `crates/ui/src/resizable/mod.rs`: adds `ResizableState::is_resizing`, so
+  the desktop's docked right panel can hold its remembered width (as the web
+  does) except while its handle is dragged.
 - `scroll/scrollbar.rs`: during an active primary-button drag, applies the
   release position before clearing drag state so frame throttling cannot
   discard the final movement. Desktop tests

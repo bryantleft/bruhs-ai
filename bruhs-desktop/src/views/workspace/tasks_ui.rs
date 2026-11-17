@@ -894,7 +894,11 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    pub(super) fn render_tasks_page(&self, compact: bool, cx: &Context<'_, Self>) -> Div {
+    pub(super) fn render_tasks_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
+        // Web: the project list docks from `md` ("Projects" opens it below),
+        // the task detail from `sm` (a drawer below).
+        let projects_docked = !Self::narrower_than(window, MD_BREAKPOINT_PX);
+        let detail_drawer = Self::narrower_than(window, SM_BREAKPOINT_PX);
         div()
             .flex_1()
             .h_full()
@@ -903,7 +907,7 @@ impl Workspace {
             .bg(cx.theme().background)
             .flex()
             .flex_row()
-            .when(self.sidebar_visible && !compact, |el| {
+            .when(self.sidebar_visible && projects_docked, |el| {
                 el.child(self.render_project_sidebar(cx))
             })
             .child(
@@ -914,11 +918,11 @@ impl Workspace {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
-                    .child(self.render_tasks_header(compact, cx))
+                    .child(self.render_tasks_header(!projects_docked, cx))
                     .child(self.render_tasks_body(cx)),
             )
             .when_some(self.selected_work_item(), |el, item| {
-                if compact {
+                if detail_drawer {
                     el.child(
                         div()
                             .debug_selector(|| "desktop-compact-task-detail".to_string())

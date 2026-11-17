@@ -1982,7 +1982,8 @@ impl Workspace {
             }
             _ => {
                 let count = self.universal_search(&query, cx).1.len();
-                let Some(next) = Self::move_command_selected_index(self.search_selected, count, key)
+                let Some(next) =
+                    Self::move_command_selected_index(self.search_selected, count, key)
                 else {
                     return false;
                 };
@@ -2942,8 +2943,7 @@ impl Workspace {
         });
         subscriptions.push(redraw_on_edit(&relationship_item_input, window, cx));
         let search_query_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .placeholder(bruhs_models::search_copy::PLACEHOLDER)
+            InputState::new(window, cx).placeholder(bruhs_models::search_copy::PLACEHOLDER)
         });
         subscriptions.push(cx.subscribe_in(
             &search_query_input,

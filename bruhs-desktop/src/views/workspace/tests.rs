@@ -3844,7 +3844,9 @@ fn desktop_compact_layout_should_use_drawers_without_collapsing_main_content(
         .borrow()
         .clone()
         .expect("workspace entity should be captured");
-    cx.simulate_resize(gpui::size(gpui::px(760.0), gpui::px(700.0)));
+    // Below web's `sm` (640px) the sidebar, right panel and task detail are
+    // all drawers; `breakpoint_tests` covers where each one docks.
+    cx.simulate_resize(gpui::size(gpui::px(600.0), gpui::px(700.0)));
 
     workspace.update_in(cx, |workspace, _window, cx| {
         workspace.active_view = AppView::Chat;
@@ -5471,9 +5473,6 @@ fn active_thread_delete_should_clear_selection_like_web_reference() {
     );
     assert_eq!(thread_selection_after_delete(None, "thread-1"), None);
 }
-
-#[test]
-fn clamp_right_panel_width_should_match_web_reference() {}
 
 #[test]
 fn desktop_workspace_sidebar_typography_should_match_web_reference() {
