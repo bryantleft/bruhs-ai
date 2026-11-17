@@ -1,6 +1,8 @@
 //! One review and one atomic command activate a complete automation.
 use super::*;
-use bruhs_models::crew::{BruhLook, BruhStatus, RAIL_FACE_PX};
+use bruhs_models::crew::{
+    access_summary, BruhLook, BruhStatus, COMMAND_SOURCE_ACCESS, RAIL_FACE_PX,
+};
 
 pub(super) struct AutomationEditor {
     agent: AgentEditor,
@@ -166,7 +168,9 @@ impl ReactiveAutomations {
     ) -> Div {
         if let Some(setup) = &editor.review {
             let mut body = card().child(heading("Review automation"));
-            for (label, text) in review_fields(setup) {
+            let level =
+                agent_run_level(self.snapshot.as_ref(), &setup.agent.id, &setup.agent.model);
+            for (label, text) in review_fields(setup, level) {
                 body = body.child(
                     div().flex().flex_col().gap_1().child(muted(label)).child(
                         div()
@@ -177,7 +181,7 @@ impl ReactiveAutomations {
                     ),
                 );
             }
-            body=body.child(muted(if setup.subscription.auto_run{"Runs read-only drafts automatically. Writes still use workflow review."}else{"Each event waits for review before a read-only draft runs. Writes still use workflow review."})).child(muted("The local server must be running. This enables the complete automation in one saved change."));
+            body=body.child(muted(event_policy_line(setup.subscription.auto_run, level))).child(muted("The local server must be running. This enables the complete automation in one saved change."));
             return body.child(
                 div()
                     .flex()
@@ -256,11 +260,14 @@ impl ReactiveAutomations {
                 .child(
                     control(
                         "automation-auto-run",
-                        if editor.subscription.subscription.auto_run {
-                            "Automatic read-only drafts: On"
-                        } else {
-                            "Review each event before running"
-                        },
+                        &super::auto_run_control(
+                            editor.subscription.subscription.auto_run,
+                            agent_run_level(
+                                self.snapshot.as_ref(),
+                                &editor.subscription.subscription.agent_id,
+                                &value(&editor.agent.model, cx),
+                            ),
+                        ),
                         self.busy,
                     )
                     .on_activate(cx, |this, _, cx| {
@@ -408,7 +415,10 @@ impl ReactiveAutomations {
                 )
                 .child(muted(setup.agent.instructions.clone()))
                 .child(muted(source_summary(&setup.source.kind)))
-                .child(muted(automation_status(&setup)))
+                .child(muted(automation_status(
+                    &setup,
+                    agent_run_level(self.snapshot.as_ref(), &setup.agent.id, &setup.agent.model),
+                )))
                 .when(setup.subscription.on_busy == BusyPolicy::Restart, |row| {
                     row.child(muted(format!(
                         "While the agent is busy: {}",
@@ -599,24 +609,25 @@ fn source_summary(kind: &SourceKind) -> String {
         SourceKind::Custom => "Custom events from your integrations".into(),
     }
 }
-fn automation_status(setup: &AutomationSetup) -> &'static str {
+/// `level` is the level the automation's agent runs at.
+fn automation_status(setup: &AutomationSetup, level: AccessLevel) -> String {
     if !setup.subscription.enabled {
-        "Paused"
+        "Paused".into()
     } else if !setup.agent.enabled {
-        "Paused: agent disabled"
+        "Paused: agent disabled".into()
     } else if !setup.source.enabled {
-        "Paused: source disabled"
+        "Paused: source disabled".into()
     } else if setup.subscription.auto_run {
-        "Enabled: automatic read-only drafts"
+        format!("Enabled: {}", event_policy(true, level))
     } else {
-        "Enabled: review each event"
+        "Enabled: review each event".into()
     }
 }
 fn source_details(kind: &SourceKind) -> String {
     match kind {
         SourceKind::Folder{path,pattern,recursive,settle_ms,poll_ms}=>format!("Folder: {path}\nFiles: {pattern}\nSubfolders: {}\nFile settle time: {} seconds\nCheck interval: {} seconds",if *recursive{"Included"}else{"Excluded"},seconds(*settle_ms),seconds(*poll_ms)),
         SourceKind::Http{url,poll_ms}=>format!("URL: {url}\nCheck interval: {} seconds",seconds(*poll_ms)),
-        SourceKind::Command{command,cwd,poll_ms,timeout_ms}=>format!("Command: {command}\nWorking folder: {cwd}\nCheck interval: {} seconds\nTimeout: {} seconds\nSource command access: Runs with the local server account's permissions. The agent's read-only tool policy does not restrict this command.",seconds(*poll_ms),seconds(*timeout_ms)),
+        SourceKind::Command{command,cwd,poll_ms,timeout_ms}=>format!("Command: {command}\nWorking folder: {cwd}\nCheck interval: {} seconds\nTimeout: {} seconds\n{COMMAND_SOURCE_ACCESS}",seconds(*poll_ms),seconds(*timeout_ms)),
         SourceKind::Schedule{every_ms}=>format!("Repeat every {} seconds",seconds(*every_ms)),
         SourceKind::Calendar{times,weekdays,time_zone}=>describe_calendar(times,weekdays,time_zone),
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
@@ -625,7 +636,11 @@ fn source_details(kind: &SourceKind) -> String {
     }
 }
 
-pub(super) fn review_fields(setup: &AutomationSetup) -> Vec<(&'static str, String)> {
+/// `level` is the level the automation's agent runs at.
+pub(super) fn review_fields(
+    setup: &AutomationSetup,
+    level: AccessLevel,
+) -> Vec<(&'static str, String)> {
     vec![
         ("Name", setup.agent.name.clone()),
         ("Purpose", setup.agent.instructions.clone()),
@@ -659,12 +674,7 @@ pub(super) fn review_fields(setup: &AutomationSetup) -> Vec<(&'static str, Strin
         ),
         (
             "Event policy",
-            if setup.subscription.auto_run {
-                "Automatic read-only drafts"
-            } else {
-                "Review each event before running a read-only draft"
-            }
-            .into(),
+            event_policy_line(setup.subscription.auto_run, level),
         ),
         ("Starts when", source_summary(&setup.source.kind)),
         (
@@ -679,7 +689,7 @@ pub(super) fn review_fields(setup: &AutomationSetup) -> Vec<(&'static str, Strin
             } else {
                 "Access"
             },
-            "Read-only drafts. No direct writes or payments.".into(),
+            access_summary(level).into(),
         ),
         (
             "Persistent memory",
@@ -706,7 +716,9 @@ pub(super) fn review_fields(setup: &AutomationSetup) -> Vec<(&'static str, Strin
 
 #[cfg(test)]
 mod tests {
-    use super::{review_fields, AutomationSetup, Editor, ReactiveAutomations, ReactiveSnapshot};
+    use super::{
+        review_fields, AccessLevel, AutomationSetup, Editor, ReactiveAutomations, ReactiveSnapshot,
+    };
     use crate::theme;
     use gpui::AppContext as _;
     #[gpui::test]
@@ -759,9 +771,14 @@ mod tests {
             assert!(setup.subscription.auto_run);
             assert_eq!(setup.agent.id, setup.subscription.agent_id);
             assert_eq!(setup.source.id, setup.subscription.source_id);
-            assert!(review_fields(setup)
+            assert!(review_fields(setup, AccessLevel::ReadOnly)
                 .iter()
-                .any(|(label, value)| *label == "Access" && value.contains("Read-only")));
+                .any(|(label, value)| *label == "Access" && value.starts_with("Read only.")));
+            let full = review_fields(setup, AccessLevel::Full);
+            assert!(full
+                .iter()
+                .any(|(label, value)| *label == "Access" && value.starts_with("Full access.")));
+            assert!(!full.iter().any(|(_, value)| value.contains("ead-only")));
             assert!(panel.snapshot.as_ref().unwrap().agents.is_empty());
             assert!(!panel.busy);
             let mut legacy = setup.clone();

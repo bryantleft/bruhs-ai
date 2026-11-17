@@ -5,7 +5,10 @@ use super::{
 };
 use crate::components::crew::face::BruhFace;
 use crate::ui::{Button, ButtonSize, ButtonVariant};
-use bruhs_models::crew::{BruhLook, BruhStatus, RAIL_FACE_PX};
+use bruhs_models::crew::{
+    access_summary, agent_run_level, event_policy, event_policy_line, AccessLevel, BruhLook,
+    BruhStatus, AUTO_RUN_LABEL, COMMAND_SOURCE_ACCESS, RAIL_FACE_PX,
+};
 use bruhs_models::reactive::*;
 use leptos::prelude::*;
 
@@ -299,7 +302,7 @@ pub(crate) fn AutomationSetupPanel(
                             _=>view!{<p class="text-body-sm text-rambutan-400 sm:col-span-2">"Device bridges can publish events through the local API. Use a watched folder for FTP uploads."</p>}.into_any(),
                         }}
                     </div>
-                    <details class="mt-3 rounded-grape bg-longan-900 p-3"><summary class="cursor-pointer text-label text-rambutan-300">"Advanced options"</summary><div class="mt-3 space-y-3"><Show when=move ||agent_filter.with_value(Option::is_none)><Field label="Automation memory" value=memory multiline=true /></Show><Field label="Event-specific instructions" value=note multiline=true /><Check label="Run read-only drafts automatically" value=auto_run />
+                    <details class="mt-3 rounded-grape bg-longan-900 p-3"><summary class="cursor-pointer text-label text-rambutan-300">"Advanced options"</summary><div class="mt-3 space-y-3"><Show when=move ||agent_filter.with_value(Option::is_none)><Field label="Automation memory" value=memory multiline=true /></Show><Field label="Event-specific instructions" value=note multiline=true /><Check label=AUTO_RUN_LABEL value=auto_run />
                         <Show when=move ||kind.get()!="schedule" && matches!(kind.get().as_str(),"folder"|"http"|"command")><Field label="Check interval in seconds" value=interval /></Show>
                         <Show when=move ||kind.get()=="folder"><Field label="File settle time in seconds" value=settle /><Check label="Include subfolders" value=recursive /></Show>
                         <Show when=move ||kind.get()=="command"><Field label="Command working folder, if different" value=command_folder /><Field label="Command timeout in seconds" value=timeout /></Show>
@@ -309,14 +312,15 @@ pub(crate) fn AutomationSetupPanel(
                 </div>
             </Show>
             {move ||review.get().map(|setup| {
-                let review_rows=review_fields(&setup);
-                view!{<article class=CARD><h3 class="text-label text-rambutan-100">"Review automation"</h3><dl class="mt-3 space-y-3">{review_rows.into_iter().map(|(label,value)|view!{<div><dt class="text-label-sm text-rambutan-400">{label}</dt><dd class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-200">{value}</dd></div>}).collect_view()}</dl><p class="mt-3 text-body-sm text-blueberry-200">{if setup.subscription.auto_run{"Runs read-only drafts automatically. Writes still use workflow review."}else{"Each event waits for review before a read-only draft runs. Writes still use workflow review."}}</p><p class="mt-1 text-label-sm text-rambutan-500">"The local server must be running. This enables the complete automation in one saved change."</p><div class="mt-3 flex flex-wrap gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_|{saving.set(true);send.run(apply(ReactiveChange::SaveAutomation{automation:Box::new(setup.clone())}));})>"Enable automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|review.set(None))>"Back to edit"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|{base.set(None);review.set(None);})>"Cancel setup"</Button></div></article>}
+                let level=snapshot.with_untracked(|s|agent_run_level(s.as_ref(),&setup.agent.id,&setup.agent.model));
+                let review_rows=review_fields(&setup,level);
+                view!{<article class=CARD><h3 class="text-label text-rambutan-100">"Review automation"</h3><dl class="mt-3 space-y-3">{review_rows.into_iter().map(|(label,value)|view!{<div><dt class="text-label-sm text-rambutan-400">{label}</dt><dd class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-200">{value}</dd></div>}).collect_view()}</dl><p class="mt-3 text-body-sm text-blueberry-200">{event_policy_line(setup.subscription.auto_run,level)}</p><p class="mt-1 text-label-sm text-rambutan-500">"The local server must be running. This enables the complete automation in one saved change."</p><div class="mt-3 flex flex-wrap gap-2"><Button size=ButtonSize::Small on_click=Callback::new(move |_|{saving.set(true);send.run(apply(ReactiveChange::SaveAutomation{automation:Box::new(setup.clone())}));})>"Enable automation"</Button><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_|review.set(None))>"Back to edit"</Button><Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_|{base.set(None);review.set(None);})>"Cancel setup"</Button></div></article>}
             })}
             <Show when=move ||snapshot.with(|s|s.as_ref().is_some_and(|s|agent_filter.with_value(|filter|shown_setups(s,filter.as_deref()).is_empty())))><p class="text-body-sm text-rambutan-400">"No automations yet. Start with a scan folder, a meeting event, or a repeating check."</p></Show>
             {move ||snapshot.with(|s|s.as_ref().map(|s|agent_filter.with_value(|filter|shown_setups(s,filter.as_deref()))).unwrap_or_default()).into_iter().map(|setup|{
                 // One agent's routines sit beside its own memory tab.
                 let with_memory=agent_filter.with_value(Option::is_none);
-                let edit=setup.clone();let agent_id=setup.agent.id.clone();let memory_agent=setup.agent.id.clone();let subscription_id=setup.subscription.id.clone();let active=setup.enabled();let status=automation_status(&setup);
+                let edit=setup.clone();let agent_id=setup.agent.id.clone();let memory_agent=setup.agent.id.clone();let subscription_id=setup.subscription.id.clone();let active=setup.enabled();let status=automation_status(&setup,snapshot.with(|s|agent_run_level(s.as_ref(),&setup.agent.id,&setup.agent.model)));
                 let latest=snapshot.with(|s|s.as_ref().and_then(|s|s.runs.iter().find(|run|run.subscription_id.as_deref()==Some(subscription_id.as_str()))).cloned());
                 let source_error=snapshot.with(|s|s.as_ref().and_then(|s|s.source_statuses.iter().find(|status|status.source_id==setup.source.id)).and_then(|status|status.error.clone()));
                 // The agent shows its face, as its bruh, in its live state.
@@ -343,24 +347,25 @@ pub(super) fn source_summary(kind: &SourceKind) -> String {
         SourceKind::Custom => "Custom events from your integrations".into(),
     }
 }
-fn automation_status(setup: &AutomationSetup) -> &'static str {
+/// `level` is the level the automation's agent runs at.
+fn automation_status(setup: &AutomationSetup, level: AccessLevel) -> String {
     if !setup.subscription.enabled {
-        "Paused"
+        "Paused".into()
     } else if !setup.agent.enabled {
-        "Paused: agent disabled"
+        "Paused: agent disabled".into()
     } else if !setup.source.enabled {
-        "Paused: source disabled"
+        "Paused: source disabled".into()
     } else if setup.subscription.auto_run {
-        "Enabled: automatic read-only drafts"
+        format!("Enabled: {}", event_policy(true, level))
     } else {
-        "Enabled: review each event"
+        "Enabled: review each event".into()
     }
 }
 fn source_details(kind: &SourceKind) -> String {
     match kind {
         SourceKind::Folder{path,pattern,recursive,settle_ms,poll_ms}=>format!("Folder: {path}\nFiles: {pattern}\nSubfolders: {}\nFile settle time: {} seconds\nCheck interval: {} seconds",if *recursive{"Included"}else{"Excluded"},seconds(*settle_ms),seconds(*poll_ms)),
         SourceKind::Http{url,poll_ms}=>format!("URL: {url}\nCheck interval: {} seconds",seconds(*poll_ms)),
-        SourceKind::Command{command,cwd,poll_ms,timeout_ms}=>format!("Command: {command}\nWorking folder: {cwd}\nCheck interval: {} seconds\nTimeout: {} seconds\nSource command access: Runs with the local server account's permissions. The agent's read-only tool policy does not restrict this command.",seconds(*poll_ms),seconds(*timeout_ms)),
+        SourceKind::Command{command,cwd,poll_ms,timeout_ms}=>format!("Command: {command}\nWorking folder: {cwd}\nCheck interval: {} seconds\nTimeout: {} seconds\n{COMMAND_SOURCE_ACCESS}",seconds(*poll_ms),seconds(*timeout_ms)),
         SourceKind::Schedule{every_ms}=>format!("Repeat every {} seconds",seconds(*every_ms)),
         SourceKind::Calendar{times,weekdays,time_zone}=>describe_calendar(times,weekdays,time_zone),
         SourceKind::Webhook=>"Authenticated incoming webhook. The private token is available after enabling.".into(),
@@ -369,7 +374,11 @@ fn source_details(kind: &SourceKind) -> String {
     }
 }
 
-pub(super) fn review_fields(setup: &AutomationSetup) -> Vec<(&'static str, String)> {
+/// `level` is the level the automation's agent runs at.
+pub(super) fn review_fields(
+    setup: &AutomationSetup,
+    level: AccessLevel,
+) -> Vec<(&'static str, String)> {
     vec![
         ("Name", setup.agent.name.clone()),
         ("Purpose", setup.agent.instructions.clone()),
@@ -403,12 +412,7 @@ pub(super) fn review_fields(setup: &AutomationSetup) -> Vec<(&'static str, Strin
         ),
         (
             "Event policy",
-            if setup.subscription.auto_run {
-                "Automatic read-only drafts"
-            } else {
-                "Review each event before running a read-only draft"
-            }
-            .into(),
+            event_policy_line(setup.subscription.auto_run, level),
         ),
         ("Starts when", source_summary(&setup.source.kind)),
         (
@@ -423,7 +427,7 @@ pub(super) fn review_fields(setup: &AutomationSetup) -> Vec<(&'static str, Strin
             } else {
                 "Access"
             },
-            "Read-only drafts. No direct writes or payments.".into(),
+            access_summary(level).into(),
         ),
         (
             "Persistent memory",
@@ -458,23 +462,44 @@ mod tests {
         assert_eq!(setup.subscription.source_id, setup.source.id);
         assert!(setup.enabled());
         assert!(setup.subscription.auto_run);
-        assert!(review_fields(&setup)
+        assert!(review_fields(&setup, AccessLevel::ReadOnly)
             .iter()
-            .any(|(label, value)| *label == "Access" && value.contains("Read-only")));
+            .any(|(label, value)| *label == "Access" && value.starts_with("Read only.")));
+        // A Full agent's automation says so instead of promising drafts.
+        let full = review_fields(&setup, AccessLevel::Full);
+        assert!(full
+            .iter()
+            .any(|(label, value)| *label == "Access" && value.starts_with("Full access.")));
+        assert!(full.iter().any(|(label, value)| *label == "Event policy"
+            && value == "Runs each event automatically at Full access."));
+        assert!(!full.iter().any(|(_, value)| value.contains("ead-only")));
+        assert_eq!(
+            automation_status(&setup, AccessLevel::Full),
+            "Enabled: Automatic runs at Full access"
+        );
     }
     #[test]
     fn automation_cards_preserve_manual_policy_and_explain_disabled_dependencies() {
         let mut setup = new_setup();
         setup.subscription.auto_run = false;
-        assert_eq!(automation_status(&setup), "Enabled: review each event");
+        assert_eq!(
+            automation_status(&setup, AccessLevel::ReadOnly),
+            "Enabled: review each event"
+        );
         setup.agent.enabled = false;
-        assert_eq!(automation_status(&setup), "Paused: agent disabled");
+        assert_eq!(
+            automation_status(&setup, AccessLevel::ReadOnly),
+            "Paused: agent disabled"
+        );
         setup.agent.enabled = true;
         setup.source.enabled = false;
-        assert_eq!(automation_status(&setup), "Paused: source disabled");
+        assert_eq!(
+            automation_status(&setup, AccessLevel::ReadOnly),
+            "Paused: source disabled"
+        );
         setup.source.enabled = true;
         setup.subscription.enabled = false;
-        assert_eq!(automation_status(&setup), "Paused");
+        assert_eq!(automation_status(&setup, AccessLevel::ReadOnly), "Paused");
         assert!(!setup.subscription.auto_run);
         let command = ReactiveCommand::SetAutomationEnabled {
             id: setup.subscription.id.clone(),

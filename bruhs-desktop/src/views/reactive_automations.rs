@@ -6,7 +6,10 @@ use crate::{
     theme,
 };
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
-use bruhs_models::crew::{service_is_current, service_notice, BruhState, ServiceNotice};
+use bruhs_models::crew::{
+    agent_run_level, auto_run_note, event_policy, event_policy_line, run_reviewed_label,
+    saved_agent_level, service_is_current, service_notice, AccessLevel, BruhState, ServiceNotice,
+};
 use bruhs_models::reactive::*;
 mod bruh_page;
 mod create_bruh;
@@ -37,6 +40,15 @@ static AUTO_UPDATE_TRIED: std::sync::atomic::AtomicBool = std::sync::atomic::Ato
 /// A local date and time for an instant, as the automation cards write it.
 pub(crate) fn local_time(at: bruhs_models::EpochMs) -> String {
     updates::local_time(at)
+}
+
+/// The auto run switch's label: the policy, and that it is on.
+fn auto_run_control(auto_run: bool, level: AccessLevel) -> String {
+    if auto_run {
+        format!("{}: On", event_policy(true, level))
+    } else {
+        event_policy(false, level)
+    }
 }
 
 /// The installed service's crew protocol. An installed service whose release
@@ -1239,11 +1251,66 @@ impl ReactiveAutomations {
                             }),
                         ));
                 }
-                body=body.child(field("What to do when this source reports an event", &editor.instructions, true, self.busy)).child(field("Debounce in seconds", &editor.debounce, false, self.busy)).child(field("Minimum gap between runs in seconds", &editor.throttle, false, self.busy))
+                body = body
+                    .child(field(
+                        "What to do when this source reports an event",
+                        &editor.instructions,
+                        true,
+                        self.busy,
+                    ))
+                    .child(field(
+                        "Debounce in seconds",
+                        &editor.debounce,
+                        false,
+                        self.busy,
+                    ))
+                    .child(field(
+                        "Minimum gap between runs in seconds",
+                        &editor.throttle,
+                        false,
+                        self.busy,
+                    ))
                     .child(self.render_busy_choice(editor.subscription.on_busy, cx))
-                    .child(control("reactive-sub-enabled",if editor.subscription.enabled{"Subscription enabled"}else{"Subscription paused"},self.busy).on_activate(cx, |this,_,cx|{if let Some(Editor::Subscription(editor))=&mut this.editor{editor.subscription.enabled= !editor.subscription.enabled;}cx.notify();}))
-                    .child(control("reactive-sub-auto",if editor.subscription.auto_run{"Automatic read-only drafts: On"}else{"Review each event before running"},self.busy).on_activate(cx, |this,_,cx|{if let Some(Editor::Subscription(editor))=&mut this.editor{editor.subscription.auto_run= !editor.subscription.auto_run;}cx.notify();}))
-                    .child(muted("Automatic drafts never grant write access. Leave them off to review each event first."));
+                    .child(
+                        control(
+                            "reactive-sub-enabled",
+                            if editor.subscription.enabled {
+                                "Subscription enabled"
+                            } else {
+                                "Subscription paused"
+                            },
+                            self.busy,
+                        )
+                        .on_activate(cx, |this, _, cx| {
+                            if let Some(Editor::Subscription(editor)) = &mut this.editor {
+                                editor.subscription.enabled = !editor.subscription.enabled;
+                            }
+                            cx.notify();
+                        }),
+                    )
+                    .child(
+                        control(
+                            "reactive-sub-auto",
+                            &auto_run_control(
+                                editor.subscription.auto_run,
+                                saved_agent_level(
+                                    self.snapshot.as_ref(),
+                                    &editor.subscription.agent_id,
+                                ),
+                            ),
+                            self.busy,
+                        )
+                        .on_activate(cx, |this, _, cx| {
+                            if let Some(Editor::Subscription(editor)) = &mut this.editor {
+                                editor.subscription.auto_run = !editor.subscription.auto_run;
+                            }
+                            cx.notify();
+                        }),
+                    )
+                    .child(muted(auto_run_note(saved_agent_level(
+                        self.snapshot.as_ref(),
+                        &editor.subscription.agent_id,
+                    ))));
             }
             Editor::Chat { agent_id, message } => {
                 let name = self
@@ -1911,11 +1978,13 @@ impl Render for ReactiveAutomations {
                                     } else {
                                         "Paused"
                                     },
-                                    if subscription.auto_run {
-                                        "Automatic read-only drafts"
-                                    } else {
-                                        "Review each event before running"
-                                    }
+                                    event_policy(
+                                        subscription.auto_run,
+                                        saved_agent_level(
+                                            self.snapshot.as_ref(),
+                                            &subscription.agent_id
+                                        )
+                                    )
                                 )))
                                 .when(subscription.on_busy == BusyPolicy::Restart, |card| {
                                     card.child(muted(format!(
@@ -1982,14 +2051,22 @@ impl Render for ReactiveAutomations {
                     ReactiveChange::SaveAutomation { .. } => "Save automation",
                     _ => "Approve setup change",
                 };
-                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {} Writes still use workflow review.",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,if automation.subscription.auto_run{"Configured for automatic read-only drafts."}else{"Each event waits for review before a read-only draft runs."}),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic-draft setting below.".into(),ReactiveChange::DeleteAgent{id}=>format!("Delete agent {id} and its subscriptions."),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
+                let level = match &proposal.change {
+                    ReactiveChange::SaveAutomation { automation } => agent_run_level(
+                        self.snapshot.as_ref(),
+                        &automation.agent.id,
+                        &automation.agent.model,
+                    ),
+                    _ => AccessLevel::ReadOnly,
+                };
+                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,event_policy_line(automation.subscription.auto_run,level)),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic run setting below.".into(),ReactiveChange::DeleteAgent{id}=>format!("Delete agent {id} and its subscriptions."),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
                 let payload = serde_json::to_string_pretty(&proposal.change)
                     .unwrap_or_else(|error| format!("Cannot display proposal: {error}"));
                 let mut proposal_card = card()
                     .child(heading("Setup proposal awaiting review"))
                     .child(muted(label));
                 if let ReactiveChange::SaveAutomation { automation } = &proposal.change {
-                    for (label, text) in setup::review_fields(automation) {
+                    for (label, text) in setup::review_fields(automation, level) {
                         proposal_card = proposal_card.child(
                             div().flex().flex_col().gap_1().child(muted(label)).child(
                                 div()
@@ -2170,9 +2247,13 @@ impl Render for ReactiveAutomations {
                 }
                 let mut actions = div().flex().flex_wrap().gap_2();
                 if run.status == RunStatus::AwaitingReview {
+                    let label = run_reviewed_label(saved_agent_level(
+                        self.snapshot.as_ref(),
+                        &run.agent_id,
+                    ));
                     actions = actions.child(self.command(
                         format!("reactive-approve-run-{}", run.id),
-                        "Run read-only draft",
+                        &label,
                         ReactiveCommand::ApproveRun { id: run.id.clone() },
                         cx,
                     ));

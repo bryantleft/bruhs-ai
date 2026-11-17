@@ -10,6 +10,8 @@ use crate::EpochMs;
 
 mod access;
 pub use access::*;
+mod automation;
+pub use automation::*;
 mod face;
 pub use face::*;
 mod page;
