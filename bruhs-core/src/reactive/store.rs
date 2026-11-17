@@ -10,6 +10,7 @@ pub(in crate::reactive) mod crew;
 #[cfg(all(test, unix))]
 mod ownership_tests;
 pub(super) mod reports;
+pub(in crate::reactive) mod rooms;
 pub(in crate::reactive) use always_on::{
     notification_settings as snapshot_settings, pending_deliveries, record_delivery, signal,
 };
@@ -100,6 +101,7 @@ pub(super) fn open(path: &Path) -> Result<(Connection, RuntimeLock), ReactiveErr
     reports::initialize(&mut connection)?;
     always_on::initialize(&connection)?;
     crew::initialize(&connection)?;
+    rooms::initialize(&connection)?;
     transaction(&mut connection, |connection| {
         for mut run in runs_where(connection, "status='running'", None)? {
             run.status = RunStatus::Interrupted;
@@ -229,7 +231,7 @@ pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, 
         follow_ups: always_on::follow_ups(connection)?,
         notification_settings: always_on::notification_settings(connection)?,
         bruhs: crew::bruh_states(connection, EpochMs::now())?,
-        rooms: Vec::new(),
+        rooms: rooms::room_states(connection)?,
         protocol: bruhs_models::crew::CREW_PROTOCOL,
     })
 }
@@ -816,13 +818,11 @@ pub(super) fn command(
             } => {
                 publish(connection, &source_id, &key, payload)?;
             }
-            ReactiveCommand::CreateRoom { .. }
-            | ReactiveCommand::UpdateRoom { .. }
-            | ReactiveCommand::DeleteRoom { .. }
-            | ReactiveCommand::PostRoom { .. } => {
-                return Err(ReactiveError::Invalid(
-                    "Rooms are not available yet.".into(),
-                ));
+            ReactiveCommand::CreateRoom { room } => rooms::save_room(connection, &room, true)?,
+            ReactiveCommand::UpdateRoom { room } => rooms::save_room(connection, &room, false)?,
+            ReactiveCommand::DeleteRoom { id } => rooms::delete_room(connection, &id)?,
+            ReactiveCommand::PostRoom { room_id, text } => {
+                rooms::post_owner(connection, &room_id, &text)?;
             }
             ReactiveCommand::Chat {
                 agent_id,

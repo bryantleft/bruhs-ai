@@ -8,7 +8,7 @@ use serde_json::json;
 
 const ACCESS_CHANGED: &str = "Access changed. Review the new access before starting another run.";
 
-fn agent(id: &str) -> ReactiveAgent {
+pub(super) fn agent(id: &str) -> ReactiveAgent {
     ReactiveAgent {
         id: id.into(),
         name: format!("Agent {id}"),
@@ -20,7 +20,7 @@ fn agent(id: &str) -> ReactiveAgent {
     }
 }
 
-async fn runtime_with(agents: &[ReactiveAgent]) -> (tempfile::TempDir, ReactiveRuntime) {
+pub(super) async fn runtime_with(agents: &[ReactiveAgent]) -> (tempfile::TempDir, ReactiveRuntime) {
     let dir = tempfile::tempdir().unwrap();
     let runtime = ReactiveRuntime::open(dir.path().join("reactive.sqlite3"))
         .await
@@ -38,11 +38,11 @@ async fn runtime_with(agents: &[ReactiveAgent]) -> (tempfile::TempDir, ReactiveR
     (dir, runtime)
 }
 
-async fn claim_one(runtime: &ReactiveRuntime) -> Option<store::Claim> {
+pub(super) async fn claim_one(runtime: &ReactiveRuntime) -> Option<store::Claim> {
     runtime.call(store::claim_next).await.unwrap()
 }
 
-async fn finish(runtime: &ReactiveRuntime, id: &str, answer: &str) {
+pub(super) async fn finish(runtime: &ReactiveRuntime, id: &str, answer: &str) {
     let (id, answer) = (id.to_owned(), answer.to_owned());
     runtime
         .call(move |connection| {
@@ -59,7 +59,7 @@ async fn finish(runtime: &ReactiveRuntime, id: &str, answer: &str) {
         .unwrap();
 }
 
-async fn record_session(runtime: &ReactiveRuntime, id: &str) {
+pub(super) async fn record_session(runtime: &ReactiveRuntime, id: &str) {
     let id = id.to_owned();
     runtime
         .call(move |connection| store::record_session(connection, &id, "s1", "claude-sonnet-4-6"))
@@ -67,7 +67,7 @@ async fn record_session(runtime: &ReactiveRuntime, id: &str) {
         .unwrap();
 }
 
-async fn run(runtime: &ReactiveRuntime, id: &str) -> ReactiveRun {
+pub(super) async fn run(runtime: &ReactiveRuntime, id: &str) -> ReactiveRun {
     let id = id.to_owned();
     runtime
         .call(move |connection| store::run_record(connection, &id))
