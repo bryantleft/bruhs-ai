@@ -150,6 +150,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Changed
 
+- The desktop app runs on its UI framework, gpui, without patches. Long
+  lines may now break at a `/` and no longer break after a `-`, so a line can
+  wrap at a different word than on the web.
 - Today in the desktop app now looks like the web's. Agent workflows and
   Life are quiet links in the header, the focus queue numbers its tasks,
   shows each priority in its color and says how many are ready, and
