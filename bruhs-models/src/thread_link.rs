@@ -640,16 +640,56 @@ pub fn delivery_prompt(
     awaited: bool,
     message: &str,
 ) -> String {
+    delivery_header(
+        from_title,
+        from_id,
+        hops,
+        max_hops,
+        awaited,
+        "Answer it with message_thread to that id only if it asks for an answer.",
+        message,
+    )
+}
+
+/// [`delivery_prompt`] for a bruh. A bruh has no thread tools, so when
+/// nobody waits it is told its reply stays in its own chat.
+pub(crate) fn bruh_delivery_prompt(
+    from_title: &str,
+    from_id: &str,
+    hops: u32,
+    max_hops: u32,
+    awaited: bool,
+    message: &str,
+) -> String {
+    delivery_header(
+        from_title,
+        from_id,
+        hops,
+        max_hops,
+        awaited,
+        "Its agent does not see your reply; it stays in this chat.",
+        message,
+    )
+}
+
+/// The header both deliveries share. `unawaited_hint` closes it when the
+/// sender does not wait; [`parse_delivery`] never reads it.
+fn delivery_header(
+    from_title: &str,
+    from_id: &str,
+    hops: u32,
+    max_hops: u32,
+    awaited: bool,
+    unawaited_hint: &str,
+    message: &str,
+) -> String {
     let (mark, how) = if awaited {
         (
             HEADER_AWAITED,
             "and that agent is waiting: your final reply to this message is returned to it, so do not message it back.",
         )
     } else {
-        (
-            "",
-            "Answer it with message_thread to that id only if it asks for an answer.",
-        )
+        ("", unawaited_hint)
     };
     format!(
         "{HEADER_OPEN}{}{HEADER_ID}{from_id}{HEADER_HOP}{hops}/{max_hops}{mark}. It was sent by that thread's agent, not typed by the user. {how}]\n\n{}",

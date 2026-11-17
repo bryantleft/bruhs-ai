@@ -9,8 +9,8 @@
 //! never goes on from one.
 
 use super::{
-    clip, delivery_prompt, header_title, hop_limit_reply, next_hop, prompt_hops, short_id, Answer,
-    ThreadReply, ANSWER_CHARS, MIN_PREFIX_CHARS, READ_MESSAGE_CHARS,
+    bruh_delivery_prompt, clip, header_title, hop_limit_reply, next_hop, prompt_hops, short_id,
+    Answer, ThreadReply, ANSWER_CHARS, MIN_PREFIX_CHARS, READ_MESSAGE_CHARS,
 };
 use crate::crew::{BruhState, BruhStatus, STOPPED_LINE};
 use crate::reactive::{ReactiveRun, RunStatus};
@@ -121,7 +121,7 @@ pub fn plan_bruh_message(
     Ok(BruhDelivery {
         agent_id: bruh.agent_id.clone(),
         name,
-        prompt: delivery_prompt(
+        prompt: bruh_delivery_prompt(
             outgoing.caller_title,
             short_id(outgoing.caller_id, outgoing.ids),
             hops,
@@ -292,12 +292,25 @@ mod tests {
         assert_eq!(view.from_id, "11111111");
         assert_eq!(view.body, "check the notes");
         assert!(!view.awaited);
+        // A bruh has no thread tools: nothing tells it to message back.
+        assert!(!plan.prompt.contains("message_thread"));
+        assert!(plan
+            .prompt
+            .contains("Its agent does not see your reply; it stays in this chat."));
 
         let waited =
             plan_bruh_message(&outgoing("Bo", "sum it", true, &plan.prompt), &bruhs).unwrap();
         let view = parse_delivery(&waited.prompt).unwrap();
         assert_eq!(view.hops, 2);
         assert!(view.awaited);
+        assert_eq!(
+            (view.from_title, view.from_id, view.body),
+            ("Sender", "11111111", "sum it")
+        );
+        assert!(waited
+            .prompt
+            .contains("your final reply to this message is returned to it"));
+        assert!(!waited.prompt.contains("message_thread"));
 
         let at_limit = delivery_prompt("Sender", "11111111", MAX_HOPS, MAX_HOPS, false, "x");
         let refused =

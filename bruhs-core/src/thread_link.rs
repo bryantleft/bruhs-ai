@@ -577,12 +577,12 @@ fn tools(connection: &Connection) -> Value {
             bruh_properties["wait"] = json!({"type": "boolean", "description": "Hold this call until the bruh has replied and return its reply. Use it when you need the answer to continue. Default false."});
             (
                 "Returns at once unless wait is true; without wait, any answer arrives later as a new message in this thread, so never poll for it.",
-                "Returns at once unless wait is true; without wait, its answer stays in the bruh's chat and does not come back here.",
+                "Returns at once unless wait is true; without wait, its answer stays in the bruh's chat and never comes back here, so use wait when you need the answer.",
             )
         } else {
             (
                 "Returns at once; any answer arrives later as a new message in this thread, so never wait or poll for it.",
-                "Returns at once; its answer stays in the bruh's chat and does not come back here.",
+                "Returns at once; its answer stays in the bruh's chat and never comes back here, so never wait or poll for it.",
             )
         };
         tools.push(json!({
@@ -1126,6 +1126,12 @@ mod tests {
                 "Hand work to a bruh, an always-on agent from list_threads, by name."
             ));
             assert!(send.get("annotations").is_none());
+            let ending = if can_wait {
+                "never comes back here, so use wait when you need the answer."
+            } else {
+                "never comes back here, so never wait or poll for it."
+            };
+            assert!(send["description"].as_str().unwrap().ends_with(ending));
 
             // The helper relays it, with wait only where the app can wait.
             let connection = broker.connection.clone();
