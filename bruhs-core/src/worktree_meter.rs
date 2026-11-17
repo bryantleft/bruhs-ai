@@ -419,6 +419,8 @@ mod tests {
             MeterConfig::default().name(),
             if cfg!(target_os = "macos") {
                 "pith"
+            } else if cfg!(target_os = "linux") {
+                "allocated"
             } else {
                 "off"
             }

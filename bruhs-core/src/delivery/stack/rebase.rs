@@ -57,22 +57,88 @@ impl DeliveryService {
         Ok(count.trim() == "0")
     }
 
-    async fn rebase_configuration_safe(&self, path: &Path) -> DeliveryResult<()> {
+    /// The isolated rebase cannot run external filters or merge drivers, so
+    /// a stack whose attributes use one must be rebased in a terminal. Only
+    /// drivers that an attributes file references count: Git LFS, for one,
+    /// installs a global filter for every repository, which a repository
+    /// that never uses it should not be refused over. `revisions` are the
+    /// commits being replayed and the base they move onto.
+    async fn rebase_configuration_safe(
+        &self,
+        path: &Path,
+        revisions: &[&str],
+    ) -> DeliveryResult<()> {
         let config = self
             .read(path, "git", &["config", "--null", "--list"])
             .await?;
+        let mut external = std::collections::BTreeSet::new();
+        let mut attribute_files = Vec::new();
         for entry in config.split('\0') {
-            let key = entry.split('\n').next().unwrap_or_default();
-            if (key.starts_with("merge.") && key.ends_with(".driver"))
-                || (key.starts_with("filter.")
-                    && [".clean", ".smudge", ".process"]
-                        .iter()
-                        .any(|suffix| key.ends_with(suffix)))
+            let (key, value) = entry.split_once('\n').unwrap_or((entry, ""));
+            if let Some(name) = key
+                .strip_prefix("merge.")
+                .and_then(|rest| rest.strip_suffix(".driver"))
             {
-                return Err(conflict(
-                    "This repository configures an external Git filter or merge driver. Use a terminal for this rebase so its side effects can be reviewed; the isolated rebase does not execute custom drivers.",
-                ));
+                external.insert(format!("merge={name}"));
+            } else if let Some(rest) = key.strip_prefix("filter.") {
+                for suffix in [".clean", ".smudge", ".process"] {
+                    if let Some(name) = rest.strip_suffix(suffix) {
+                        external.insert(format!("filter={name}"));
+                    }
+                }
+            } else if key == "core.attributesfile" && !value.is_empty() {
+                attribute_files.push(std::path::PathBuf::from(value));
             }
+        }
+        if external.is_empty() {
+            return Ok(());
+        }
+        let info = self
+            .read(path, "git", &["rev-parse", "--git-path", "info/attributes"])
+            .await?;
+        attribute_files.push(path.join(info.trim()));
+        let mut used = std::collections::BTreeSet::new();
+        for file in attribute_files {
+            let file = match file.strip_prefix("~") {
+                Ok(rest) => directories::BaseDirs::new()
+                    .map_or(file.clone(), |dirs| dirs.home_dir().join(rest)),
+                Err(_) => file,
+            };
+            if let Ok(text) = tokio::fs::read_to_string(&file).await {
+                used.extend(attribute_references(&text));
+            }
+        }
+        let empty = self
+            .read(path, "git", &["hash-object", "-t", "tree", "--stdin"])
+            .await?;
+        for revision in revisions {
+            let files = self
+                .read(
+                    path,
+                    "git",
+                    &[
+                        "diff",
+                        "--name-only",
+                        "-z",
+                        empty.trim(),
+                        revision,
+                        "--",
+                        ":(glob)**/.gitattributes",
+                    ],
+                )
+                .await?;
+            for file in files.split('\0').filter(|file| !file.is_empty()) {
+                let blob = format!("{revision}:{file}");
+                let text = self.read(path, "git", &["show", &blob]).await?;
+                used.extend(attribute_references(&text));
+            }
+        }
+        if let Some(driver) = used.iter().find(|reference| external.contains(*reference)) {
+            return Err(conflict(format!(
+                "This repository's attributes use the external Git {} `{}`. Use a terminal for this rebase so its side effects can be reviewed; the isolated rebase does not execute custom drivers.",
+                if driver.starts_with("merge=") { "merge driver" } else { "filter" },
+                driver.split_once('=').map_or(driver.as_str(), |(_, name)| name)
+            )));
         }
         Ok(())
     }
@@ -83,7 +149,9 @@ impl DeliveryService {
         plan: &mut StackPlan,
         id: &str,
     ) -> DeliveryResult<()> {
-        self.rebase_configuration_safe(path).await?;
+        let mut revisions = vec![plan.base_oid.as_str()];
+        revisions.extend(plan.layers.iter().map(|layer| layer.head_oid.as_str()));
+        self.rebase_configuration_safe(path, &revisions).await?;
         let root = self.local_ref(path, &plan.base).await?;
         // A rewritten trunk needs the owner's explicit repair decision. A normal
         // local trunk advance is safe and is included in the reviewed target SHA.
@@ -177,7 +245,9 @@ impl DeliveryService {
     ) -> DeliveryResult<()> {
         let source = Path::new(&prepared.path);
         self.rebase_leases(source, plan).await?;
-        self.rebase_configuration_safe(source).await?;
+        let mut revisions = vec![plan.base_oid.as_str()];
+        revisions.extend(plan.layers.iter().map(|layer| layer.head_oid.as_str()));
+        self.rebase_configuration_safe(source, &revisions).await?;
         let scratch = plan
             .temporary_worktree
             .as_deref()
@@ -317,4 +387,14 @@ impl DeliveryService {
         self.stack_log(prepared, Some(plan.layers.len()), &format!("{output}\nEvery reviewed local branch was published atomically. The source checkout and remote branches were left at their existing commits; push these local branches separately after inspecting them.")).await?;
         Ok(())
     }
+}
+
+/// `filter=NAME` and `merge=NAME` references in an attributes file, macro
+/// definitions included. Unsetting (`-filter`, `!merge`) is not a use.
+fn attribute_references(text: &str) -> impl Iterator<Item = String> + '_ {
+    text.lines()
+        .filter(|line| !line.trim_start().starts_with('#'))
+        .flat_map(str::split_whitespace)
+        .filter(|token| token.starts_with("filter=") || token.starts_with("merge="))
+        .map(str::to_owned)
 }

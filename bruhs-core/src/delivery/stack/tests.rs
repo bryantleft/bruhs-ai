@@ -401,6 +401,43 @@ async fn an_existing_scratch_path_is_never_cleaned_up_as_our_own() {
     assert_eq!(receipt.completed_commands, 0);
 }
 
+/// Git LFS installs a global filter for every repository. Only a filter the
+/// repository's attributes use keeps the isolated rebase from running.
+#[cfg(unix)]
+#[tokio::test]
+async fn only_filters_the_attributes_use_refuse_an_isolated_rebase() {
+    let fixture = Fixture::new(false).await;
+    let source = fixture.repository.path();
+    git(
+        source,
+        &["config", "filter.lfs.clean", "git-lfs clean -- %f"],
+    );
+    git(
+        source,
+        &["config", "filter.lfs.process", "git-lfs filter-process"],
+    );
+    fixture
+        .prepare(DeliveryAction::RebaseStack { number: 1 })
+        .await;
+
+    let info = git(source, &["rev-parse", "--git-path", "info/attributes"]);
+    let info = source.join(info.trim());
+    std::fs::create_dir_all(info.parent().unwrap()).unwrap();
+    std::fs::write(&info, "*.bin filter=lfs diff=lfs merge=lfs -text\n").unwrap();
+    let error = fixture
+        .service
+        .prepare(PrepareRequest {
+            forge: Forge::GitHub,
+            path: source.to_string_lossy().into_owned(),
+            action: DeliveryAction::RebaseStack { number: 1 },
+            timeout_seconds: 30,
+        })
+        .await
+        .unwrap_err();
+    assert!(error.to_string().contains("filter `lfs`"), "{error}");
+    assert!(fixture.mutations().is_empty());
+}
+
 #[cfg(unix)]
 #[tokio::test]
 async fn symbolic_branch_refs_are_refused_instead_of_rewriting_an_unreviewed_target() {
