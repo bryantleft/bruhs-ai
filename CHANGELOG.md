@@ -243,14 +243,17 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   instead of hiding below 960px. The right panel docks from 768px; in a
   narrower window it opens over the chat, and a click beside it closes it.
   Tasks, a task's details, a document's details and booking times also
-  change layout at the web's widths, and page headers move their buttons
-  under the title when there is no room beside it. As on the web, a docked
+  change layout at the web's widths, as do a conversation, Agent workflows
+  and Life's summary cards, and page headers move their buttons under the
+  title when there is no room beside it. As on the web, a docked
   right panel leaves the chat at least 360px, is at most 70% of the
   window, and keeps the width you gave it when the window is resized.
 - In a short desktop window the month calendar shows all six weeks, as on
   the web, instead of scrolling them; each day shows the records that fit.
 - The desktop sidebar's Working dot pulses as it does on the web, and stays
   still when the system asks for reduced motion.
+- The desktop finance CSV import box is several rows tall, as on the web,
+  instead of one line.
 - On touch screens, Today's Dismiss and Calendar → and the names on People
   are full-size tap targets.
 - In the desktop app, a Knowledge document's body field is tall again, as on
