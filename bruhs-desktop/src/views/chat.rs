@@ -1163,6 +1163,9 @@ impl ChatView {
             _tasks_count_task,
         };
         view.start_initial_claude_auth_check(cx);
+        if AgentProvider::for_model(&view.model_id) == AgentProvider::Codex {
+            view.start_initial_codex_auth_check(cx);
+        }
         view
     }
 

@@ -140,7 +140,61 @@ pub(crate) struct CodexProbe(pub(crate) Option<String>);
 #[cfg(test)]
 impl Global for CodexProbe {}
 
+/// Chats restored with a Codex model at launch share one status check (web
+/// checks Codex once at launch), so many Codex threads start one process.
+#[derive(Default)]
+struct InitialCodexChecks {
+    pending: Option<Vec<WeakEntity<ChatView>>>,
+}
+
+impl Global for InitialCodexChecks {}
+
 impl ChatView {
+    /// A chat made with a Codex model learns the sign-in like the web does
+    /// at launch, sharing the check with every other such chat.
+    pub(super) fn start_initial_codex_auth_check(&mut self, cx: &mut Context<'_, Self>) {
+        let Some(program) = codex_program(cx) else {
+            return;
+        };
+        let entity = cx.weak_entity();
+        let pending = &mut cx.default_global::<InitialCodexChecks>().pending;
+        if let Some(waiters) = pending {
+            waiters.push(entity);
+            return;
+        }
+        *pending = Some(vec![entity]);
+        let runtime = Arc::clone(&cx.global::<DesktopState>().runtime);
+        let (tx, mut rx) = unbounded_channel();
+        runtime.spawn(async move {
+            let _ = tx.send(fetch_codex_status_with(&program).await);
+        });
+        cx.spawn(async move |_, cx| {
+            let status = rx.recv().await;
+            cx.update(|cx| {
+                let waiters = cx
+                    .global_mut::<InitialCodexChecks>()
+                    .pending
+                    .take()
+                    .unwrap_or_default();
+                let Some(status) = status else {
+                    return;
+                };
+                for entity in waiters {
+                    entity
+                        .update(cx, |view, cx| {
+                            // A check the chat started since then is newer.
+                            if view.codex_auth.is_none() {
+                                view.codex_auth = Some(status.clone());
+                                cx.notify();
+                            }
+                        })
+                        .ok();
+                }
+            });
+        })
+        .detach();
+    }
+
     pub(super) fn start_codex_auth_check(&mut self, cx: &mut Context<'_, Self>) {
         let Some(program) = codex_program(cx) else {
             return;
@@ -208,19 +262,22 @@ mod tests {
     use super::{desktop_codex_status, CodexProbe, CODEX_LOGIN_WAITING_MESSAGE};
     use bruhs_models::agent::AgentProvider;
     use bruhs_models::logic::cli_login::CliLogin;
-    use gpui::{Entity, TestAppContext};
+    use gpui::{AppContext as _, Entity, TestAppContext};
     use std::os::unix::fs::PermissionsExt;
     use std::time::Duration;
 
-    /// A `codex` stand-in: signed out until `codex login` runs.
+    /// A `codex` stand-in: signed out until `codex login` runs. Each status
+    /// check adds a line to `calls`.
     fn fixture(dir: &std::path::Path) -> String {
         let state = dir.join("signed-in");
+        let calls = dir.join("calls");
         let script = dir.join("codex");
         std::fs::write(
             &script,
             format!(
-                "#!/bin/sh\ncase \"$1 $2\" in\n'login status') if [ -f '{state}' ]; then echo 'Logged in using ChatGPT'; else echo 'Not logged in'; exit 1; fi ;;\n'login ') /usr/bin/touch '{state}' ;;\n*) exit 99 ;;\nesac\n",
-                state = state.display()
+                "#!/bin/sh\ncase \"$1 $2\" in\n'login status') echo . >> '{calls}'; if [ -f '{state}' ]; then echo 'Logged in using ChatGPT'; else echo 'Not logged in'; exit 1; fi ;;\n'login ') /usr/bin/touch '{state}' ;;\n*) exit 99 ;;\nesac\n",
+                state = state.display(),
+                calls = calls.display()
             ),
         )
         .expect("write the codex fixture");
@@ -290,6 +347,51 @@ mod tests {
         visual.update(|window, _| window.refresh());
         visual.run_until_parked();
         assert!(visual.debug_bounds("desktop-auth-banner").is_none());
+    }
+
+    /// Like the web's launch check, chats made with a Codex model, as at a
+    /// restore, learn the sign-in, and they share one `codex login status`.
+    #[gpui::test]
+    fn restored_codex_chats_share_one_sign_in_check(cx: &mut TestAppContext) {
+        cx.executor().allow_parking();
+        let dir = tempfile::tempdir().expect("fixture dir");
+        let program = fixture(dir.path());
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            crate::theme::apply_bruhs_theme(cx);
+            cx.set_global(crate::app_state::DesktopState::new().expect("desktop state"));
+            cx.set_global(CodexProbe(Some(program)));
+        });
+        let project = dir.path().to_string_lossy().into_owned();
+        let made = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
+        let capture = made.clone();
+        let (_root, visual) = cx.add_window_view(|window, cx| {
+            let chats: Vec<Entity<ChatView>> = (0..2)
+                .map(|_| {
+                    cx.new(|cx| {
+                        ChatView::new_with_model_and_project_path(
+                            "gpt-5.5".into(),
+                            project.clone(),
+                            window,
+                            cx,
+                        )
+                    })
+                })
+                .collect();
+            let first = chats[0].clone();
+            *capture.borrow_mut() = chats;
+            gpui_component::Root::new(first, window, cx)
+        });
+        let chats = made.borrow().clone();
+        for chat in &chats {
+            wait_for(visual, chat, |chat| chat.codex_auth.is_some());
+            chat.read_with(visual, |chat, _| {
+                assert!(!chat.codex_auth.as_ref().unwrap().is_authenticated());
+            });
+        }
+        let calls = std::fs::read_to_string(dir.path().join("calls")).unwrap_or_default();
+        assert_eq!(calls.lines().count(), 1, "both chats share one check");
     }
 
     #[test]
