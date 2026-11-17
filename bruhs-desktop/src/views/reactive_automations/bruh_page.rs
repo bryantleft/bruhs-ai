@@ -585,6 +585,9 @@ impl ReactiveAutomations {
 
     /// Why crew commands are off, once the service is known to be older.
     fn crew_reason(&self) -> Option<&'static str> {
+        if self.crew_ready() {
+            return None;
+        }
         self.crew
             .protocol
             .and_then(|protocol| service_notice(protocol, None))
@@ -777,6 +780,7 @@ impl ReactiveAutomations {
             vec![ReactiveCommand::Chat {
                 agent_id,
                 message: text,
+                run_id: None,
             }],
             Scope::General,
             cx,
@@ -2299,6 +2303,7 @@ mod tests {
             vec![ReactiveCommand::Chat {
                 agent_id: "a".into(),
                 message: "Pay the water bill".into(),
+                run_id: None,
             }]
         );
         panel.update(cx, |_, cx| {

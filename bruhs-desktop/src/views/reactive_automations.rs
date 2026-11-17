@@ -7,8 +7,9 @@ use crate::{
 };
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::crew::{
-    agent_run_level, auto_run_note, event_policy, event_policy_line, run_reviewed_label,
-    saved_agent_level, service_is_current, service_notice, AccessLevel, BruhState, ServiceNotice,
+    agent_run_level, auto_run_note, crew_commands_ready, event_policy, event_policy_line,
+    rooms_ready, run_reviewed_label, saved_agent_level, service_notice, AccessLevel, BruhState,
+    ServiceNotice,
 };
 use bruhs_models::reactive::*;
 use gpui_component::zoom::px;
@@ -1041,6 +1042,7 @@ impl ReactiveAutomations {
                 Some(Editor::Chat { agent_id, message }) => ReactiveCommand::Chat {
                     agent_id: agent_id.clone(),
                     message: value(message, cx),
+                    run_id: None,
                 },
                 Some(Editor::Publish {
                     source_id,
@@ -1395,7 +1397,25 @@ impl ReactiveAutomations {
     /// Whether the service understands the crew commands. Unknown counts as
     /// not yet.
     pub(crate) fn crew_ready(&self) -> bool {
-        self.crew.protocol.is_some_and(service_is_current)
+        self.crew.protocol.is_some_and(crew_commands_ready)
+    }
+    /// Whether the service has rooms. Unknown counts as not yet.
+    pub(crate) fn rooms_ready(&self) -> bool {
+        self.crew.protocol.is_some_and(rooms_ready)
+    }
+    /// Why rooms are off, once the service is known to be older.
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "the room pages use it in a later change")
+    )]
+    pub(crate) fn rooms_reason(&self) -> Option<&'static str> {
+        if self.rooms_ready() {
+            return None;
+        }
+        self.crew
+            .protocol
+            .and_then(|protocol| service_notice(protocol, None))
+            .map(ServiceNotice::message)
     }
     /// Which older service to update, once the serving protocol is known.
     pub(crate) fn crew_notice(&self) -> Option<ServiceNotice> {
@@ -2508,6 +2528,12 @@ mod crew_tests {
             );
             assert_eq!(panel.crew(), std::slice::from_ref(&ann));
             assert!(panel.crew_ready());
+            // Protocol 1 keeps the crew commands but has no rooms.
+            assert!(!panel.rooms_ready());
+            assert_eq!(
+                panel.rooms_reason(),
+                Some(ServiceNotice::ServingOld.message())
+            );
             // An older service's snapshot has no crew and protocol 0.
             panel.set_snapshot(ReactiveSnapshot::default(), cx);
             assert!(panel.crew().is_empty());

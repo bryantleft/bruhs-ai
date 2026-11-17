@@ -257,6 +257,7 @@ async fn all_unresolved_runs_stay_visible_even_after_recent_terminal_history_fil
             .command(ReactiveCommand::Chat {
                 agent_id: "clerk".into(),
                 message: "Draft".into(),
+                run_id: None,
             })
             .await
             .unwrap();
@@ -320,7 +321,8 @@ async fn queue_budget_is_global_and_ingestion_capacity_accounts_for_subscription
         runtime
             .command(ReactiveCommand::Chat {
                 agent_id: "other".into(),
-                message: "One more".into()
+                message: "One more".into(),
+                run_id: None,
             })
             .await,
         Err(ReactiveError::Conflict(_))
@@ -666,6 +668,7 @@ async fn memory_changes_drop_the_provider_session_and_fence_older_approved_turns
         .command(ReactiveCommand::Chat {
             agent_id: "clerk".into(),
             message: "Remember these preferences.".into(),
+            run_id: None,
         })
         .await
         .unwrap();
@@ -690,6 +693,7 @@ async fn memory_changes_drop_the_provider_session_and_fence_older_approved_turns
         .command(ReactiveCommand::Chat {
             agent_id: "clerk".into(),
             message: "Prepare a draft.".into(),
+            run_id: None,
         })
         .await
         .unwrap();

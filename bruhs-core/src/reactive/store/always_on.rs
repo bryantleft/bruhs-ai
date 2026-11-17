@@ -239,6 +239,7 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
         open_questions: usize::try_from(open_questions).unwrap_or_default(),
         latest_unread: latest.map(decode).transpose()?,
         bruhs: super::crew::bruh_states(connection, EpochMs::now())?,
+        rooms: Vec::new(),
         protocol: bruhs_models::crew::CREW_PROTOCOL,
     })
 }

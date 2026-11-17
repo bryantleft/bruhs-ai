@@ -94,3 +94,75 @@ fn a_run_without_owner_message_still_reads() {
     let parsed: ReactiveRun = serde_json::from_str(&with).unwrap();
     assert_eq!(parsed.owner_message.as_deref(), Some("hi"));
 }
+
+#[test]
+fn room_commands_and_triggers_have_stable_wire_names() {
+    use crate::reactive::RunTrigger;
+    let create: ReactiveCommand = serde_json::from_str(
+        r#"{"action":"create_room","room":{"id":"r","name":"Launch","members":["a"]}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        create,
+        ReactiveCommand::CreateRoom {
+            room: room::Room {
+                id: "r".into(),
+                name: "Launch".into(),
+                members: vec!["a".into()],
+                lead: None
+            }
+        }
+    );
+    assert_eq!(
+        serde_json::from_str::<ReactiveCommand>(
+            r#"{"action":"post_room","room_id":"r","text":"@Ada hi"}"#
+        )
+        .unwrap(),
+        ReactiveCommand::PostRoom {
+            room_id: "r".into(),
+            text: "@Ada hi".into()
+        }
+    );
+    assert_eq!(
+        serde_json::from_str::<ReactiveCommand>(r#"{"action":"delete_room","id":"r"}"#).unwrap(),
+        ReactiveCommand::DeleteRoom { id: "r".into() }
+    );
+    let trigger: RunTrigger =
+        serde_json::from_str(r#"{"type":"room","room_id":"r","message_id":"m","hop":2}"#).unwrap();
+    assert_eq!(trigger.room_id(), Some("r"));
+    assert_eq!(trigger.label(), "Room");
+    assert!(matches!(trigger, RunTrigger::Room { resumed: false, .. }));
+    let chat = ReactiveCommand::Chat {
+        agent_id: "a".into(),
+        message: "hi".into(),
+        run_id: None,
+    };
+    assert!(!serde_json::to_string(&chat).unwrap().contains("run_id"));
+    assert_eq!(
+        serde_json::from_str::<ReactiveCommand>(
+            r#"{"action":"chat","agent_id":"a","message":"hi"}"#
+        )
+        .unwrap(),
+        chat
+    );
+}
+
+#[test]
+fn snapshots_and_signals_from_an_older_service_have_no_rooms() {
+    let signal: OutboxSignal = serde_json::from_str(r#"{"unread":0,"open_questions":0}"#).unwrap();
+    assert!(signal.rooms.is_empty());
+    let snapshot: ReactiveSnapshot = serde_json::from_str(
+        r#"{"agents":[],"sources":[],"subscriptions":[],"events":[],"runs":[],"proposals":[]}"#,
+    )
+    .unwrap();
+    assert!(snapshot.rooms.is_empty());
+}
+
+#[test]
+fn a_protocol_one_service_keeps_crew_commands_but_not_rooms() {
+    assert!(crew_commands_ready(1) && !rooms_ready(1));
+    assert!(rooms_ready(CREW_PROTOCOL) && crew_commands_ready(CREW_PROTOCOL));
+    assert!(!crew_commands_ready(0));
+    assert_eq!(service_notice(1, None), Some(ServiceNotice::ServingOld));
+    assert_eq!(stop_commands(1, &[]), vec![ReactiveCommand::StopAll]);
+}

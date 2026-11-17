@@ -126,6 +126,7 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
         data.send.run(ReactiveCommand::Chat {
             agent_id: id.get_value(),
             message: text,
+            run_id: None,
         });
         message.set(String::new());
     };

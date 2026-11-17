@@ -94,6 +94,7 @@ async fn chat(runtime: &ReactiveRuntime, agent_id: &str, message: &str) -> React
         .command(ReactiveCommand::Chat {
             agent_id: agent_id.into(),
             message: message.into(),
+            run_id: None,
         })
         .await
         .unwrap();
@@ -786,6 +787,7 @@ async fn a_paused_bruh_takes_no_events_chats_or_follow_ups_until_resumed() {
         .command(ReactiveCommand::Chat {
             agent_id: "a".into(),
             message: "Hello".into(),
+            run_id: None,
         })
         .await
         .unwrap_err();

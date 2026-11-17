@@ -387,6 +387,7 @@ impl ReactiveAutomations {
         let reason = self
             .crew
             .protocol
+            .filter(|_| !self.crew_ready())
             .and_then(|protocol| service_notice(protocol, None))
             .map(ServiceNotice::message);
         Some(

@@ -229,6 +229,7 @@ pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, 
         follow_ups: always_on::follow_ups(connection)?,
         notification_settings: always_on::notification_settings(connection)?,
         bruhs: crew::bruh_states(connection, EpochMs::now())?,
+        rooms: Vec::new(),
         protocol: bruhs_models::crew::CREW_PROTOCOL,
     })
 }
@@ -815,7 +816,19 @@ pub(super) fn command(
             } => {
                 publish(connection, &source_id, &key, payload)?;
             }
-            ReactiveCommand::Chat { agent_id, message } => {
+            ReactiveCommand::CreateRoom { .. }
+            | ReactiveCommand::UpdateRoom { .. }
+            | ReactiveCommand::DeleteRoom { .. }
+            | ReactiveCommand::PostRoom { .. } => {
+                return Err(ReactiveError::Invalid(
+                    "Rooms are not available yet.".into(),
+                ));
+            }
+            ReactiveCommand::Chat {
+                agent_id,
+                message,
+                run_id: _,
+            } => {
                 text(&message, "Agent message", true)?;
                 let agent = enabled_agent(connection, &agent_id)?;
                 queue_capacity(connection)?;

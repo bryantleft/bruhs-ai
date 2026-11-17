@@ -243,6 +243,7 @@ mod tests {
             open_questions: 0,
             latest_unread: latest,
             bruhs: Vec::new(),
+            rooms: Vec::new(),
             protocol: 0,
         }
     }

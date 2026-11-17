@@ -206,7 +206,7 @@ async fn smoke(model: &str) -> Result<Value, Error> {
     })
     .await??;
     let _worker = Worker(runtime.start(app())?);
-    runtime.command(ReactiveCommand::Chat{agent_id:"smoke-agent".into(),message:"Recall the verification code from the earlier file and the owner memory token. Answer from conversation history only. Do not use any tools or read files.".into()}).await?;
+    runtime.command(ReactiveCommand::Chat{agent_id:"smoke-agent".into(),message:"Recall the verification code from the earlier file and the owner memory token. Answer from conversation history only. Do not use any tools or read files.".into(),run_id:None}).await?;
     let chat = wait_run(&runtime, 1).await?;
     contains(&chat, &[&code, &memory])?;
     if first.session_id != chat.session_id {

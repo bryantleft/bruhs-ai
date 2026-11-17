@@ -1,7 +1,7 @@
 //! One bruh's conversation as every surface shows it, the Stop fallback for
 //! older services and the commands a settings edit turns into.
 
-use super::{service_is_current, BruhAccess, BruhDraft, BruhLook, BruhState};
+use super::{crew_commands_ready, BruhAccess, BruhDraft, BruhLook, BruhState};
 use crate::reactive::{
     OutboxItem, OutboxKind, ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun, RunStatus,
     RunTrigger,
@@ -152,7 +152,7 @@ pub fn transcript(
 /// to an older one that rejects the newer commands.
 #[must_use]
 pub fn stop_commands(protocol: u32, runs: &[ReactiveRun]) -> Vec<ReactiveCommand> {
-    if service_is_current(protocol) {
+    if crew_commands_ready(protocol) {
         return vec![ReactiveCommand::StopAll];
     }
     runs.iter()
