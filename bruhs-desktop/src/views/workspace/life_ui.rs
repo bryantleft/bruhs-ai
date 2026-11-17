@@ -456,12 +456,13 @@ impl Workspace {
     }
 
     fn life_summary_card(&self, label: &str, value: String) -> AnyElement {
+        let selector = format!("desktop-life-summary-{label}");
         div()
+            .debug_selector(move || selector)
             .id(SharedString::from(format!("life-summary-{label}")))
             .role(Role::Group)
             .aria_label(format!("{label}: {value}"))
-            .flex_1()
-            .min_w(px(150.0))
+            .min_w_0()
             .rounded(px(6.0))
             .bg(theme::longan_900().opacity(0.65))
             .border_1()
@@ -650,7 +651,7 @@ impl Workspace {
 
     /// The Health tab's entry form: one name and value pair for a workout,
     /// sleep, recovery or habit. The Finance tab has a form in each card.
-    fn render_health_quick_add(&self, compact: bool, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_health_quick_add(&self, narrow: bool, cx: &Context<'_, Self>) -> AnyElement {
         let health_buttons =
             [
                 ("Workout", HealthEntryKind::Workout),
@@ -687,7 +688,7 @@ impl Workspace {
                 div()
                     .mt_2()
                     .grid()
-                    .grid_cols(if compact { 1 } else { 2 })
+                    .grid_cols(if narrow { 1 } else { 2 })
                     .gap_2()
                     .child(Input::new(&self.life_name_input).aria_label("Workout or habit name, or sleep quality percent"))
                     .child(Input::new(&self.life_value_input).aria_label("Workout minutes, sleep hours, or recovery percent")),
@@ -1299,7 +1300,8 @@ impl Workspace {
     }
 
     pub(super) fn render_life_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
-        let compact = Self::compact_layout(window);
+        // Web's forms take their columns from `sm`.
+        let narrow = Self::narrower_than(window, SM_BREAKPOINT_PX);
         let width = f32::from(window.viewport_size().width);
         let two_columns = width >= RECORD_GRID_TWO_COLUMNS_PX;
         let finance = self.life_tab == DesktopLifeTab::Finance;
@@ -1466,12 +1468,20 @@ impl Workspace {
                                 .child(finance_copy::USD_NOTE),
                         )
                     })
-                    .child(div().flex().flex_wrap().gap_2().children(summary))
+                    // Web `grid gap-3 md:grid-cols-3`.
+                    .child(
+                        div()
+                            .debug_selector(|| "desktop-life-summary".into())
+                            .grid()
+                            .grid_cols(if width >= MD_BREAKPOINT_PX { 3 } else { 1 })
+                            .gap_3()
+                            .children(summary),
+                    )
                     .child(self.render_life_privacy(cx))
                     // Web: finance entry sits in each card; Health keeps
                     // its one form.
                     .when(!finance, |page| {
-                        page.child(self.render_health_quick_add(compact, cx))
+                        page.child(self.render_health_quick_add(narrow, cx))
                     })
                     // Web order: the record cards, then CSV import and the
                     // finance sources; the health sources share its grid.

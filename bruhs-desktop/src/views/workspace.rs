@@ -1072,9 +1072,6 @@ const WORKSPACE_LINE_HEIGHT: f32 = 1.5;
 const SM_BREAKPOINT_PX: f32 = 640.0;
 const MD_BREAKPOINT_PX: f32 = 768.0;
 const LG_BREAKPOINT_PX: f32 = 1024.0;
-/// Where Today, Inbox conversations, Life and Agent workflows still change
-/// layout; their web breakpoints are not adopted yet (PM-53).
-const WORKSPACE_COMPACT_BREAKPOINT_PX: f32 = 960.0;
 /// Web `w-[min(88vw,24rem)]`: the right panel's width as a drawer below `md`.
 const RIGHT_PANEL_DRAWER_WIDTH_PX: f32 = 384.0;
 const RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE: f32 = 0.88;
@@ -2234,10 +2231,6 @@ impl Workspace {
         f32::from(window.viewport_size().width) < breakpoint_px
     }
 
-    fn compact_layout(window: &Window) -> bool {
-        Self::narrower_than(window, WORKSPACE_COMPACT_BREAKPOINT_PX)
-    }
-
     /// Web: below `sm` the sidebar is a drawer over a scrim; from `sm` it
     /// docks. The window's 640px minimum keeps it docked outside tests.
     fn sidebar_drawer_layout(window: &Window) -> bool {
@@ -2561,7 +2554,6 @@ impl Workspace {
     }
 
     fn render_main_surface(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
-        let compact = Self::compact_layout(window);
         match &self.active_view {
             AppView::Today => self.render_today_page(window, cx),
             AppView::Inbox => self.render_inbox_page(cx),
@@ -2688,7 +2680,11 @@ impl Workspace {
             ),
             AppView::ClipDetail { .. } => self.render_source_clip_editor(false, cx),
             AppView::ConversationDetail { conversation_id } => {
-                let detail = self.render_conversation_detail(conversation_id, compact, cx);
+                let detail = self.render_conversation_detail(
+                    conversation_id,
+                    Self::narrower_than(window, SM_BREAKPOINT_PX),
+                    cx,
+                );
                 self.with_back_to_people(detail, cx)
             }
             // Web `sm:grid-cols-2`: two columns of times from `sm`.

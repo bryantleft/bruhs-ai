@@ -306,3 +306,51 @@ fn the_month_fits_its_six_weeks_in_a_short_window_like_web(cx: &mut TestAppConte
         "the weeks share the height: {first:?} {last:?}"
     );
 }
+
+/// Web Agent workflows: `lg:grid-cols-[minmax(0,1fr)_22rem]`, so the grants
+/// sit beside the workflows from 1024px and under them below.
+#[gpui::test]
+fn agent_workflows_put_the_grants_beside_from_lg_like_web(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    workspace.update(cx, |workspace, cx| {
+        workspace.active_view = AppView::Automations;
+        cx.notify();
+    });
+    cx.simulate_resize(size(px(1000.0), px(1600.0)));
+    cx.run_until_parked();
+    let workflows = bounds(cx, "desktop-automation-workflows");
+    let grants = bounds(cx, "desktop-automation-grants");
+    assert!(
+        grants.top() >= workflows.bottom(),
+        "under the workflows below lg"
+    );
+
+    cx.simulate_resize(size(px(1100.0), px(1600.0)));
+    cx.run_until_parked();
+    let workflows = bounds(cx, "desktop-automation-workflows");
+    let grants = bounds(cx, "desktop-automation-grants");
+    assert!(grants.left() >= workflows.right(), "beside them from lg");
+    assert_eq!(grants.size.width, px(352.0), "web 22rem");
+}
+
+/// Web Life: the summary cards are one column below `md` and three from it.
+#[gpui::test]
+fn life_summary_cards_take_three_columns_from_md_like_web(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    workspace.update(cx, |workspace, cx| {
+        workspace.active_view = AppView::Life;
+        workspace.sidebar_visible = true;
+        cx.notify();
+    });
+    for (width, columns) in [(700.0, 1.0), (800.0, 3.0)] {
+        cx.simulate_resize(size(px(width), px(900.0)));
+        cx.run_until_parked();
+        let grid = bounds(cx, "desktop-life-summary");
+        let card = bounds(cx, "desktop-life-summary-Manual net worth");
+        let share = f32::from(grid.size.width) / f32::from(card.size.width);
+        assert!(
+            (share - columns).abs() < 0.3,
+            "{columns} column(s) at {width}px: grid {grid:?}, card {card:?}"
+        );
+    }
+}
