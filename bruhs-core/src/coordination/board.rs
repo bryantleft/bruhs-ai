@@ -140,7 +140,11 @@ impl BoardLinks {
                 let mut link = TaskLink::default();
                 if let Some(path) = worktrees.get(&task.id) {
                     let branch = cache.branches.get(path);
-                    link.branch = branch.and_then(|entry| entry.value.clone());
+                    link.branch = branch.and_then(|entry| entry.value.clone()).or_else(|| {
+                        task.removed_worktree
+                            .as_ref()
+                            .map(|removed| removed.branch.clone())
+                    });
                     let pulls = link
                         .branch
                         .as_ref()
@@ -148,13 +152,18 @@ impl BoardLinks {
                     if let Some(pulls) = pulls {
                         link.pulls = pulls.value.clone();
                     }
-                    // Archived work keeps what was read last; it is not refreshed.
+                    // Archived work and removed worktrees keep what was read
+                    // last; they are not refreshed (a removed one has no folder).
                     let due = branch.is_none_or(|entry| now.duration_since(entry.at) >= BRANCH_TTL)
                         || (link.branch.is_some()
                             && pulls.is_none_or(|entry| {
                                 now.duration_since(entry.at) >= pulls_ttl(&entry.value)
                             }));
-                    if due && task.archived_at.is_none() && !stale.contains(path) {
+                    if due
+                        && task.archived_at.is_none()
+                        && task.removed_worktree.is_none()
+                        && !stale.contains(path)
+                    {
                         stale.push(path.clone());
                     }
                 }

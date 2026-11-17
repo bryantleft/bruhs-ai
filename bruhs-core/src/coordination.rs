@@ -20,6 +20,7 @@ mod board;
 mod recovery;
 mod wait;
 mod wakes;
+mod worktrees;
 pub use access::{AccessGrant, AccessScope, IssuedAccess};
 pub use board::{BoardLinks, LinkFuture, LinkSource};
 pub use recovery::ResetWorker;
@@ -426,6 +427,7 @@ impl CoordinationRuntime {
             }
             CoordinationCommand::Archive { id } => self.set_archived(&id, true).await?,
             CoordinationCommand::Unarchive { id } => self.set_archived(&id, false).await?,
+            CoordinationCommand::RemoveWorktree { id } => self.remove_worktree(&id).await?,
             CoordinationCommand::AutoResume { id, enabled } => {
                 let mut data = self.0.data.lock().await;
                 let task = data.tasks.get_mut(&id).ok_or_else(|| not_found(&id))?;
@@ -553,6 +555,7 @@ impl CoordinationRuntime {
                 auto_resume_on_limit: false,
                 limit_reported: false,
                 archived_at: None,
+                removed_worktree: None,
             },
         );
         self.persist(&mut data).await?;
@@ -703,6 +706,8 @@ impl CoordinationRuntime {
             drop(data);
             (task, context, prompt, fresh)
         };
+        // A worktree the owner removed is checked out again from its branch.
+        self.restore_worktree(id).await?;
         let provider = provider_for_model_id(&task.model);
         if *cancelled.borrow() {
             return Ok(());

@@ -34,7 +34,7 @@ pub fn clone_path(src: &Path, dst: &Path) -> io::Result<()> {
 
 /// Remove what a failed clone left at `path`, first making its directories
 /// writable, since read-only source folders are cloned read-only.
-fn remove_partial(path: &Path) -> io::Result<()> {
+pub(crate) fn remove_partial(path: &Path) -> io::Result<()> {
     let meta = match path.symlink_metadata() {
         Ok(meta) => meta,
         Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
@@ -47,10 +47,16 @@ fn remove_partial(path: &Path) -> io::Result<()> {
     {
         use std::os::unix::fs::PermissionsExt;
         let mut dirs = vec![path.to_path_buf()];
+        // Best effort: a folder this cannot open is reported by the removal.
         while let Some(dir) = dirs.pop() {
-            let mode = std::fs::symlink_metadata(&dir)?.permissions().mode();
-            std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode | 0o700))?;
-            for entry in std::fs::read_dir(&dir)?.flatten() {
+            if let Ok(meta) = std::fs::symlink_metadata(&dir) {
+                let mode = meta.permissions().mode() | 0o700;
+                let _ = std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(mode));
+            }
+            let Ok(entries) = std::fs::read_dir(&dir) else {
+                continue;
+            };
+            for entry in entries.flatten() {
                 if entry.file_type().is_ok_and(|kind| kind.is_dir()) {
                     dirs.push(entry.path());
                 }

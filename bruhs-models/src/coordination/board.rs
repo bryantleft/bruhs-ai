@@ -551,6 +551,7 @@ mod tests {
             auto_resume_on_limit: false,
             limit_reported: false,
             archived_at: None,
+            removed_worktree: None,
         }
     }
 

@@ -11,6 +11,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- Finished Workbench tasks can remove their worktree to free disk. The
+  task panel shows what removing it frees now and what stays shared with
+  your checkout, measured by Pith's scanner on macOS. Removal keeps the
+  branch and refuses uncommitted work, and the task's next message checks
+  the branch out again. You can swap the meter for your own command or turn
+  it off; see `docs/worktree-disk.md`.
 - New worktrees start with your checkout's build output on macOS (APFS) and
   on Linux with Btrfs or reflink XFS. Its ignored Cargo `target/debug` and,
   when the lockfiles match, `node_modules` are cloned copy-on-write, so an

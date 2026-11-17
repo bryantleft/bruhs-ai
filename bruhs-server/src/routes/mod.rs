@@ -38,6 +38,7 @@ pub mod remote_hosts;
 pub mod rich_response;
 pub mod secrets;
 pub mod skills;
+pub mod task_worktree;
 pub mod tasks;
 pub mod terminal;
 pub mod updates;

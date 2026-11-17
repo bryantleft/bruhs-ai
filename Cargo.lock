@@ -1173,6 +1173,7 @@ dependencies = [
  "serde_json",
  "sha2 0.10.9",
  "sqlparser",
+ "storage-scanner",
  "tempfile",
  "thiserror 2.0.18",
  "tokio",
@@ -9120,6 +9121,19 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "a2eb9349b6444b326872e140eb1cf5e7c522154d69e7a0ffb0fb81c06b37543f"
 
 [[package]]
+name = "storage-scanner"
+version = "0.2.0"
+source = "git+https://github.com/bryantleft/bruhs?rev=739a4bb85a973c40f1c5f9a550f2024ce7528ab4#739a4bb85a973c40f1c5f9a550f2024ce7528ab4"
+dependencies = [
+ "getrandom 0.4.2",
+ "libc",
+ "rayon",
+ "serde",
+ "serde_json",
+ "trash",
+]
+
+[[package]]
 name = "str_indices"
 version = "0.4.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10135,6 +10149,25 @@ dependencies = [
 ]
 
 [[package]]
+name = "trash"
+version = "5.3.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "1e13ed7a76ae8b9053f33493745ebb4cd2e5ee1cccd9823bb96ec97b78ec4844"
+dependencies = [
+ "chrono",
+ "libc",
+ "log",
+ "objc2 0.6.4",
+ "objc2-foundation 0.3.2",
+ "once_cell",
+ "percent-encoding",
+ "scopeguard",
+ "urlencoding",
+ "windows 0.62.2",
+ "windows-core 0.62.2",
+]
+
+[[package]]
 name = "triomphe"
 version = "0.1.15"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -10363,6 +10396,12 @@ dependencies = [
  "percent-encoding",
  "serde",
 ]
+
+[[package]]
+name = "urlencoding"
+version = "2.1.3"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "daf8dba3b7eb870caf1ddeed7bc9d2a049f3cfdfae7cb521b087cc33ae4c49da"
 
 [[package]]
 name = "usvg"
