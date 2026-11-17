@@ -2724,6 +2724,7 @@ impl Workspace {
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
             AppView::Bruh { .. } => self.render_bruh_page(),
+            AppView::Room { .. } => div().flex_1().h_full(),
             AppView::Workbench => div()
                 .flex_1()
                 .h_full()

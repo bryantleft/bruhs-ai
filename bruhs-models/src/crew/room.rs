@@ -8,6 +8,9 @@ use super::BruhStatus;
 use crate::thread_link::{self, MAX_HOPS, MAX_TITLE_CHARS};
 use crate::EpochMs;
 
+mod page;
+pub use page::*;
+
 /// The most bruhs one room holds.
 pub const MAX_ROOM_MEMBERS: usize = 8;
 /// The longest room name.
