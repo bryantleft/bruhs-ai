@@ -516,3 +516,99 @@ fn restored_google_events_are_only_provider_events(cx: &mut gpui::TestAppContext
         assert_eq!(ids, ["google-sync"]);
     });
 }
+
+fn task(id: &str, title: &str) -> DesktopWorkItem {
+    DesktopWorkItem {
+        id: id.into(),
+        project_id: None,
+        title: title.into(),
+        description: None,
+        status: DesktopWorkItemStatus::Todo,
+        priority: DesktopPriority::None,
+        due_date: None,
+        planning: WorkItemPlanning::default(),
+        updated_at: EpochMs::UNIX_EPOCH,
+    }
+}
+
+fn dependencies(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext) -> Vec<String> {
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        workspace
+            .selected_work_item()
+            .expect("a selected task")
+            .planning
+            .dependency_ids
+    })
+}
+
+/// PM-28: the task detail picks a dependency from a list of the other
+/// tasks and removes one dependency with its chip, as the web does. A
+/// dependency whose task is gone says "Missing task".
+#[gpui::test]
+fn task_detail_picks_and_removes_one_dependency(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = parity_workspace(cx);
+    cx.simulate_resize(gpui::size(px(1400.0), px(1400.0)));
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.active_view = AppView::Tasks;
+        workspace.work_items = vec![
+            task("write", "Write"),
+            task("review", "Review"),
+            task("ship", "Ship"),
+        ];
+        workspace.select_work_item_by_id("ship", window, cx);
+    });
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-task-detail-focus-blocks");
+
+    click_debug_selector(cx, "desktop-task-detail-select-dependencies");
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-task-detail-dependency-placeholder");
+    // Every other task, in list order: Write and Review, not Ship itself.
+    assert_rendered_bounds(cx, "desktop-task-detail-dependency-option-1");
+    assert_no_rendered_bounds(cx, "desktop-task-detail-dependency-option-2");
+    click_debug_selector(cx, "desktop-task-detail-dependency-option-1");
+    cx.run_until_parked();
+    assert_eq!(dependencies(&workspace, cx), ["review"]);
+    assert_no_rendered_bounds(cx, "desktop-task-detail-menu-dependencies");
+
+    click_debug_selector(cx, "desktop-task-detail-select-dependencies");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-task-detail-dependency-option-0");
+    cx.run_until_parked();
+    // Picking one already there, or the placeholder, changes nothing.
+    for option in [
+        "desktop-task-detail-dependency-option-1",
+        "desktop-task-detail-dependency-placeholder",
+    ] {
+        click_debug_selector(cx, "desktop-task-detail-select-dependencies");
+        cx.run_until_parked();
+        click_debug_selector(cx, option);
+        cx.run_until_parked();
+    }
+    assert_eq!(dependencies(&workspace, cx), ["review", "write"]);
+
+    // A chip removes only its own dependency.
+    click_debug_selector(cx, "desktop-task-detail-dependency-chip-0");
+    cx.run_until_parked();
+    assert_eq!(dependencies(&workspace, cx), ["write"]);
+    assert_no_rendered_bounds(cx, "desktop-task-detail-dependency-chip-1");
+
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.work_items.retain(|task| task.id != "write");
+        let ship = workspace
+            .work_items
+            .iter_mut()
+            .find(|task| task.id == "ship")
+            .unwrap();
+        ship.planning.time_block_event_ids = vec!["block-1".into()];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    // The web's note appears once the task has focus blocks, and the chip
+    // for the deleted task stays (titled "Missing task") until removed.
+    assert_rendered_bounds(cx, "desktop-task-detail-focus-blocks");
+    assert_rendered_bounds(cx, "desktop-task-detail-dependency-chip-0");
+    click_debug_selector(cx, "desktop-task-detail-dependency-chip-0");
+    cx.run_until_parked();
+    assert!(dependencies(&workspace, cx).is_empty());
+}

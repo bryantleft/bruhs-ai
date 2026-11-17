@@ -648,33 +648,25 @@ impl Workspace {
         );
     }
 
-    pub(super) fn cycle_selected_work_item_dependency(&mut self, cx: &mut Context<'_, Self>) {
-        let Some(selected_id) = self.selected_work_item_id.clone() else {
-            return;
-        };
-        let candidates = self
-            .work_items
-            .iter()
-            .filter(|item| item.id != selected_id)
-            .map(|item| item.id.clone())
-            .collect::<Vec<_>>();
-        if candidates.is_empty() {
-            return;
-        }
-        self.update_selected_work_item(
-            move |item| {
-                if let Some(candidate) = candidates
-                    .iter()
-                    .find(|candidate| !item.planning.dependency_ids.contains(candidate))
-                {
-                    item.planning.dependency_ids.push(candidate.clone());
-                } else {
-                    item.planning.dependency_ids.clear();
-                }
-                true
-            },
-            cx,
-        );
+    /// Web task detail's dependency picker: adds the chosen task once and
+    /// closes the picker.
+    pub(super) fn add_selected_work_item_dependency(
+        &mut self,
+        dependency_id: &str,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.task_detail_menu_open = None;
+        self.update_selected_work_item(|item| item.planning.add_dependency(dependency_id), cx);
+        cx.notify();
+    }
+
+    /// Web's dependency chip: removes that one dependency.
+    pub(super) fn remove_selected_work_item_dependency(
+        &mut self,
+        dependency_id: &str,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.update_selected_work_item(|item| item.planning.remove_dependency(dependency_id), cx);
     }
 
     pub(super) fn update_work_item_status(

@@ -36,6 +36,7 @@ pub mod rewind;
 pub mod rich_response;
 pub mod run_place;
 pub mod sidebar;
+pub mod task_detail;
 pub mod terminal;
 pub mod text;
 pub mod tools;

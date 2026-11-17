@@ -10,6 +10,10 @@ use crate::ui::{
     Button, ButtonSize, ButtonVariant, DatePicker, Dialog, Dropdown, DropdownOption, Input,
     Textarea,
 };
+use bruhs_models::logic::task_detail::{
+    dependency_candidates, dependency_title, ADD_DEPENDENCY_LABEL, ADD_DEPENDENCY_PICKER_LABEL,
+    REMOVE_DEPENDENCY_LABEL,
+};
 
 /// Compute the entire optimistic transition before enqueueing either record.
 /// Reading current state here also makes repeated Done clicks idempotent.
@@ -54,6 +58,50 @@ fn change_status(
         changes.push((None, next));
     }
     changes
+}
+
+/// The dependency picker's rows: "Add dependency…", then every other task
+/// (`bruhs_models::logic::task_detail`, which desktop's picker uses too).
+fn dependency_picker_options(current_id: &str, items: &[WorkItem]) -> Vec<DropdownOption> {
+    std::iter::once(DropdownOption::new("", ADD_DEPENDENCY_LABEL))
+        .chain(
+            dependency_candidates(
+                current_id,
+                items
+                    .iter()
+                    .map(|item| (item.id.as_str(), item.title.as_str())),
+            )
+            .into_iter()
+            .map(|(id, title)| DropdownOption::new(id, title)),
+        )
+        .collect()
+}
+
+#[cfg(test)]
+mod dependency_tests {
+    use super::{dependency_picker_options, WorkItem};
+
+    #[test]
+    fn the_picker_offers_every_other_task_after_its_placeholder_like_desktop() {
+        let tasks = [
+            WorkItem::new_at("Write", 1),
+            WorkItem::new_at("Review", 1),
+            WorkItem::new_at("Ship", 1),
+        ];
+        let options = dependency_picker_options(&tasks[1].id, &tasks);
+        let rows = options
+            .iter()
+            .map(|option| (option.value.as_str(), option.label.as_str()))
+            .collect::<Vec<_>>();
+        assert_eq!(
+            rows,
+            [
+                ("", "Add dependency…"),
+                (tasks[0].id.as_str(), "Write"),
+                (tasks[2].id.as_str(), "Ship"),
+            ]
+        );
+    }
 }
 
 #[cfg(test)]
@@ -222,28 +270,14 @@ pub fn TaskDetail() -> impl IntoView {
                 });
                 let current_id = item.id.clone();
                 let dependency_options = Signal::derive(move || {
-                    let mut options = vec![DropdownOption::new("", "Add dependency…")];
-                    options.extend(
-                        work_items.with(|items| {
-                            items
-                                .iter()
-                                .filter(|candidate| candidate.id != current_id)
-                                .map(|candidate| {
-                                    DropdownOption::new(candidate.id.clone(), candidate.title.clone())
-                                })
-                                .collect::<Vec<_>>()
-                        }),
-                    );
-                    options
+                    work_items.with(|items| dependency_picker_options(&current_id, items))
                 });
                 let on_dependency = Callback::new(move |dependency_id: String| {
                     if dependency_id.is_empty() {
                         return;
                     }
                     update_item(Box::new(move |it| {
-                        if !it.planning.dependency_ids.contains(&dependency_id) {
-                            it.planning.dependency_ids.push(dependency_id);
-                        }
+                        it.planning.add_dependency(&dependency_id);
                     }));
                 });
 
@@ -431,26 +465,29 @@ pub fn TaskDetail() -> impl IntoView {
                                         options=dependency_options
                                         value=Signal::derive(String::new)
                                         on_change=on_dependency
-                                        label="Add dependency"
+                                        label=ADD_DEPENDENCY_PICKER_LABEL
                                         class="w-full"
                                     />
                                     <div class="flex flex-wrap gap-1.5">
                                         {item.planning.dependency_ids.into_iter().map(|dependency_id| {
                                             let title = work_items.with_untracked(|items| {
-                                                items
-                                                    .iter()
-                                                    .find(|candidate| candidate.id == dependency_id)
-                                                    .map_or_else(|| "Missing task".to_string(), |candidate| candidate.title.clone())
+                                                dependency_title(
+                                                    &dependency_id,
+                                                    items.iter().map(|candidate| (candidate.id.as_str(), candidate.title.as_str())),
+                                                )
+                                                .to_string()
                                             });
                                             let remove_id = dependency_id;
                                             view! {
                                                 <button
                                                     type="button"
                                                     class="inline-flex max-w-full items-center gap-1 rounded-grape bg-longan-800 px-2 py-1 text-label-sm text-rambutan-400 hover:text-lychee-300 cursor-pointer"
-                                                    title="Remove dependency"
+                                                    title=REMOVE_DEPENDENCY_LABEL
                                                     on:click=move |_| update_item(Box::new({
                                                         let remove_id = remove_id.clone();
-                                                        move |it| it.planning.dependency_ids.retain(|id| id != &remove_id)
+                                                        move |it| {
+                                                            it.planning.remove_dependency(&remove_id);
+                                                        }
                                                     }))
                                                 >
                                                     <span class="truncate">{title}</span><span aria-hidden="true">"×"</span>
