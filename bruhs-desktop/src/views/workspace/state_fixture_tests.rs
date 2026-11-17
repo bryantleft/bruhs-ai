@@ -82,14 +82,13 @@ fn state_file_from_2026_10_03_saves_the_same_enum_strings() {
         "The retired mode is ignored when saving old records"
     );
     let original: serde_json::Value = serde_json::from_str(FIXTURE_2026_10_03).expect("json");
-    for key in [
-        "permission_mode",
-        "active_view",
-        "task_view_mode",
-        "calendar_mode",
-    ] {
+    for key in ["permission_mode", "task_view_mode", "calendar_mode"] {
         assert_eq!(written[key], original[key], "{key}");
     }
+    // The view is saved as its web route so a detail view keeps its record.
+    // Earlier builds always started in Chat, so none of them reads it.
+    assert_eq!(original["active_view"], "calendar");
+    assert_eq!(written["active_view"], "/calendar");
     for (index, thread) in original["threads"]
         .as_array()
         .expect("threads")

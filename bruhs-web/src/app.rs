@@ -8,79 +8,9 @@ use crate::state::{
 use crate::storage;
 use leptos::prelude::*;
 
-/// Parse a routed hash into an AppView.
+/// Parse a routed hash into an AppView (the routes live on `AppView`).
 pub(crate) fn parse_hash(hash: &str) -> Option<AppView> {
-    let h = hash.trim_start_matches('#');
-    if h.strip_prefix("thread/").is_some_and(|id| !id.is_empty()) {
-        return Some(AppView::Chat);
-    }
-    if let Some(id) = h.strip_prefix("/whiteboards/") {
-        return uuid::Uuid::parse_str(id)
-            .ok()
-            .map(|_| AppView::Whiteboards {
-                board_id: Some(id.into()),
-            });
-    }
-    if let Some(rest) = h.strip_prefix("/meeting-notes/") {
-        let note_id: String = js_sys::decode_uri_component(rest).ok()?.into();
-        if !note_id.trim().is_empty() && note_id.len() <= 128 {
-            return Some(AppView::MeetingNoteDetail { note_id });
-        }
-        return None;
-    }
-    if let Some(rest) = h.strip_prefix("/meetings/") {
-        if !rest.is_empty() {
-            return Some(AppView::MeetingDetail {
-                meeting_id: rest.to_string(),
-            });
-        }
-    }
-    if let Some(rest) = h.strip_prefix("/knowledge/documents/") {
-        if !rest.is_empty() {
-            return Some(AppView::DocumentDetail {
-                document_id: rest.to_string(),
-            });
-        }
-    }
-    if let Some(rest) = h.strip_prefix("/knowledge/clips/") {
-        if !rest.is_empty() {
-            return Some(AppView::ClipDetail {
-                clip_id: rest.to_string(),
-            });
-        }
-    }
-    if let Some(rest) = h.strip_prefix("/inbox/") {
-        if !rest.is_empty() {
-            return Some(AppView::ConversationDetail {
-                conversation_id: rest.to_string(),
-            });
-        }
-    }
-    if let Some(rest) = h.strip_prefix("/book/") {
-        if !rest.is_empty() {
-            return Some(AppView::Booking {
-                slug: rest.to_string(),
-            });
-        }
-    }
-    match h {
-        "/today" => Some(AppView::Today),
-        "/inbox" => Some(AppView::Inbox),
-        "/knowledge" => Some(AppView::Knowledge),
-        "/chat" => Some(AppView::Chat),
-        "/tasks" => Some(AppView::Tasks),
-        "/calendar" => Some(AppView::Calendar),
-        "/life" => Some(AppView::Life),
-        "/automations" => Some(AppView::Automations),
-        "/workbench" => Some(AppView::Workbench),
-        "/whiteboards" => Some(AppView::Whiteboards { board_id: None }),
-        "/meetings" => Some(AppView::Meetings),
-        "/people" => Some(AppView::People),
-        "/search" => Some(AppView::Search),
-        "/terminal" => Some(AppView::Terminal),
-        "/settings" => Some(AppView::Settings),
-        _ => None,
-    }
+    AppView::from_route(hash)
 }
 
 fn thread_route(thread_id: Option<&str>, initial_route: Option<&str>) -> String {
@@ -139,40 +69,11 @@ pub fn App() -> impl IntoView {
                 pending_thread_route.set_value(None);
             }
             let hash = match &view {
-                AppView::Today => "#/today".to_string(),
-                AppView::Inbox => "#/inbox".to_string(),
-                AppView::Knowledge => "#/knowledge".to_string(),
                 AppView::Chat => thread_route(
                     thread_id.as_deref(),
                     pending_thread_route.get_value().as_deref(),
                 ),
-                AppView::Tasks => "#/tasks".to_string(),
-                AppView::Calendar => "#/calendar".to_string(),
-                AppView::Life => "#/life".to_string(),
-                AppView::Automations => "#/automations".to_string(),
-                AppView::Workbench => "#/workbench".to_string(),
-                AppView::Whiteboards { board_id } => board_id.as_ref().map_or_else(
-                    || "#/whiteboards".into(),
-                    |id| format!("#/whiteboards/{id}"),
-                ),
-                AppView::Meetings => "#/meetings".to_string(),
-                AppView::MeetingDetail { meeting_id } => format!("#/meetings/{meeting_id}"),
-                AppView::MeetingNoteDetail { note_id } => {
-                    let encoded: String = js_sys::encode_uri_component(note_id).into();
-                    format!("#/meeting-notes/{encoded}")
-                }
-                AppView::DocumentDetail { document_id } => {
-                    format!("#/knowledge/documents/{document_id}")
-                }
-                AppView::ClipDetail { clip_id } => format!("#/knowledge/clips/{clip_id}"),
-                AppView::ConversationDetail { conversation_id } => {
-                    format!("#/inbox/{conversation_id}")
-                }
-                AppView::Booking { slug } => format!("#/book/{slug}"),
-                AppView::People => "#/people".to_string(),
-                AppView::Search => "#/search".to_string(),
-                AppView::Terminal => "#/terminal".to_string(),
-                AppView::Settings => "#/settings".to_string(),
+                view => format!("#{}", view.route()),
             };
             if let Some(window) = web_sys::window() {
                 if window.location().hash().ok().as_deref() != Some(hash.as_str()) {
