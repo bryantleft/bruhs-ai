@@ -61,6 +61,7 @@ actions!(
 
 mod assistant_content;
 mod auth;
+mod codex_auth;
 #[cfg(test)]
 mod behavior_tests;
 mod composer_ui;
@@ -683,6 +684,8 @@ pub struct ChatView {
     composer_hint_scroll: ScrollHandle,
     composer_hints_suppressed_value: Option<String>,
     auth_status: DesktopAuthStatus,
+    /// The Codex CLI login, once checked (web `CodexAuthSignal`).
+    codex_auth: Option<DesktopAuthStatus>,
     initial_auth_pending: bool,
     pending_permission: Option<DesktopPermissionRequest>,
     pending_secret: Option<bruhs_models::secrets::SecretRequest>,
@@ -1128,6 +1131,7 @@ impl ChatView {
             composer_hint_scroll: ScrollHandle::new(),
             composer_hints_suppressed_value: None,
             auth_status: DesktopAuthStatus::default(),
+            codex_auth: None,
             initial_auth_pending: false,
             pending_permission: None,
             pending_secret: None,
@@ -1257,8 +1261,10 @@ impl ChatView {
         if !self.effort_chip_visible() {
             self.effort_menu_open = false;
         }
-        if self.is_claude_model() {
-            self.start_claude_auth_check(cx);
+        match AgentProvider::for_model(&self.model_id) {
+            AgentProvider::Claude => self.start_claude_auth_check(cx),
+            AgentProvider::Codex => self.start_codex_auth_check(cx),
+            _ => {}
         }
         cx.notify();
     }

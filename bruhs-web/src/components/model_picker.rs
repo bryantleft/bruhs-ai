@@ -69,10 +69,11 @@ pub fn auth_line(
 ) -> String {
     match provider {
         AgentProvider::Codex => {
+            use bruhs_models::logic::cli_login::{CODEX_SIGNED_IN_LINE, CODEX_SIGNED_OUT_LINE};
             if codex_authenticated {
-                "Codex CLI signed in".to_string()
+                CODEX_SIGNED_IN_LINE.to_string()
             } else {
-                "Codex CLI not signed in. Run `codex login`".to_string()
+                CODEX_SIGNED_OUT_LINE.to_string()
             }
         }
         AgentProvider::Claude => {

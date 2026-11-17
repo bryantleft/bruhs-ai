@@ -64,6 +64,7 @@ impl DesktopAuthStatus {
     }
 }
 
+#[cfg(test)]
 pub(super) fn auth_banner_visible_like_web(model_id: &str, authenticated: bool) -> bool {
     AgentProvider::for_model(model_id) == AgentProvider::Claude && !authenticated
 }
@@ -263,6 +264,17 @@ pub(super) fn normalize_claude_command_error(error: &std::io::Error) -> String {
     } else {
         error.to_string()
     }
+}
+
+/// What a CLI's sign-in banner says and which actions it offers.
+struct CliAuthBanner<'a> {
+    provider: AgentProvider,
+    title: String,
+    signed_out: &'a SignedOut,
+    login_label: &'static str,
+    login_id: &'static str,
+    recheck_id: &'static str,
+    recheck_label: &'static str,
 }
 
 #[derive(Default)]
@@ -466,25 +478,84 @@ impl ChatView {
         cx.notify();
     }
 
+    /// The sign-in banner for the selected model's CLI, as on the web: Claude
+    /// and Codex offer a login here; other runtimes manage it in their CLI.
     pub(super) fn render_auth_banner(&self, cx: &Context<'_, Self>) -> AnyElement {
-        let DesktopAuthStatus::SignedOut(signed_out) = &self.auth_status else {
-            return div().into_any_element();
-        };
-        if !auth_banner_visible_like_web(&self.model_id, false) {
-            return div().into_any_element();
+        match AgentProvider::for_model(&self.model_id) {
+            AgentProvider::Claude => match &self.auth_status {
+                DesktopAuthStatus::SignedOut(signed_out) => self.render_cli_auth_banner(
+                    CliAuthBanner {
+                        provider: AgentProvider::Claude,
+                        title: signed_out.error.as_ref().map_or_else(
+                            || CLAUDE_AUTH_NOT_AUTHENTICATED_LABEL.to_string(),
+                            |error| format!("Could not check auth: {error}"),
+                        ),
+                        signed_out,
+                        login_label: CLAUDE_LOGIN_ACTION_LABEL,
+                        login_id: "desktop-claude-login",
+                        recheck_id: "desktop-claude-auth-recheck",
+                        recheck_label: "Check Claude authentication again",
+                    },
+                    cx,
+                ),
+                DesktopAuthStatus::SignedIn(_) => div().into_any_element(),
+            },
+            AgentProvider::Codex => match &self.codex_auth {
+                Some(DesktopAuthStatus::SignedOut(signed_out)) => self.render_cli_auth_banner(
+                    CliAuthBanner {
+                        provider: AgentProvider::Codex,
+                        title: signed_out.error.as_ref().map_or_else(
+                            || codex_auth::CODEX_AUTH_NOT_AUTHENTICATED_LABEL.to_string(),
+                            |error| format!("Could not check Codex auth: {error}"),
+                        ),
+                        signed_out,
+                        login_label: codex_auth::CODEX_LOGIN_ACTION_LABEL,
+                        login_id: "desktop-codex-login",
+                        recheck_id: "desktop-codex-auth-recheck",
+                        recheck_label: "Check Codex authentication again",
+                    },
+                    cx,
+                ),
+                _ => div().into_any_element(),
+            },
+            _ => div().into_any_element(),
         }
+    }
 
-        let title = if let Some(error) = &signed_out.error {
-            format!("Could not check auth: {error}")
-        } else {
-            CLAUDE_AUTH_NOT_AUTHENTICATED_LABEL.to_string()
-        };
+    fn start_cli_login(&mut self, provider: AgentProvider, cx: &mut Context<'_, Self>) {
+        match provider {
+            AgentProvider::Codex => self.start_codex_login(cx),
+            _ => self.start_claude_login(cx),
+        }
+    }
+
+    fn start_cli_auth_check(&mut self, provider: AgentProvider, cx: &mut Context<'_, Self>) {
+        match provider {
+            AgentProvider::Codex => self.start_codex_auth_check(cx),
+            _ => self.start_claude_auth_check(cx),
+        }
+    }
+
+    fn render_cli_auth_banner(
+        &self,
+        banner: CliAuthBanner<'_>,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let CliAuthBanner {
+            provider,
+            title,
+            signed_out,
+            login_label,
+            login_id,
+            recheck_id,
+            recheck_label,
+        } = banner;
         let message = signed_out.message.clone();
         let login_in_flight = signed_out.login_in_flight;
         let login_label = if login_in_flight {
             CLAUDE_LOGIN_WAITING_LABEL
         } else {
-            CLAUDE_LOGIN_ACTION_LABEL
+            login_label
         };
 
         div()
@@ -545,7 +616,7 @@ impl ChatView {
                                     .mt(px(AUTH_BANNER_ACTION_TOP_MARGIN_PX))
                                     .child(
                                         web_button(
-                                            "desktop-claude-login",
+                                            login_id,
                                             WebButtonVariant::Primary,
                                             WebButtonSize::Small,
                                             ButtonState::disabled_if(login_in_flight),
@@ -561,18 +632,18 @@ impl ChatView {
                                                         el.border_color(theme::persimmon_400())
                                                     })
                                                     .on_click(cx.listener(
-                                                        |this, _ev, _window, cx| {
-                                                            this.start_claude_login(cx);
+                                                        move |this, _ev, _window, cx| {
+                                                            this.start_cli_login(provider, cx);
                                                         },
                                                     ))
                                                     .on_key_down(cx.listener(
-                                                        |this, event: &KeyDownEvent, window, cx| {
+                                                        move |this, event: &KeyDownEvent, window, cx| {
                                                             if is_web_button_activation_key(
                                                                 event.keystroke.key.as_str(),
                                                             ) {
                                                                 window.prevent_default();
                                                                 cx.stop_propagation();
-                                                                this.start_claude_login(cx);
+                                                                this.start_cli_login(provider, cx);
                                                             }
                                                         },
                                                     ))
@@ -581,28 +652,28 @@ impl ChatView {
                                     )
                                     .child(
                                         web_button(
-                                            "desktop-claude-auth-recheck",
+                                            recheck_id,
                                             WebButtonVariant::Outline,
                                             WebButtonSize::Small,
                                             ButtonState::Enabled,
                                         )
-                                        .aria_label("Check Claude authentication again")
+                                        .aria_label(recheck_label)
                                         .child("Check again")
                                         .tab_index(0)
                                         .role(Role::Button)
                                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                        .on_click(cx.listener(|this, _ev, _window, cx| {
-                                            this.start_claude_auth_check(cx);
+                                        .on_click(cx.listener(move |this, _ev, _window, cx| {
+                                            this.start_cli_auth_check(provider, cx);
                                         }))
                                         .on_key_down(
                                             cx.listener(
-                                                |this, event: &KeyDownEvent, window, cx| {
+                                                move |this, event: &KeyDownEvent, window, cx| {
                                                     if is_web_button_activation_key(
                                                         event.keystroke.key.as_str(),
                                                     ) {
                                                         window.prevent_default();
                                                         cx.stop_propagation();
-                                                        this.start_claude_auth_check(cx);
+                                                        this.start_cli_auth_check(provider, cx);
                                                     }
                                                 },
                                             ),
