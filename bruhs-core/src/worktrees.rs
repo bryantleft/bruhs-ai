@@ -87,7 +87,7 @@ pub fn inside(root: &Path, path: &Path) -> bool {
 const LOCK_WAIT: std::time::Duration = std::time::Duration::from_secs(120);
 
 /// The cross-process lock for removals and restores in `root`. Gives up
-/// after [`LOCK_WAIT`] rather than blocking a turn indefinitely. It is not
+/// after `LOCK_WAIT` rather than blocking a turn indefinitely. It is not
 /// reentrant: never take it while holding it.
 pub async fn lock(root: &Path) -> Result<std::fs::File, String> {
     std::fs::create_dir_all(root).map_err(|error| error.to_string())?;

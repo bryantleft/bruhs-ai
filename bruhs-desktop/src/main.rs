@@ -23,10 +23,8 @@ mod whiteboard_performance;
 
 use gpui::*;
 use gpui_component::{Root, TitleBar};
-#[cfg(debug_assertions)]
 use std::cell::RefCell;
 use std::env;
-#[cfg(debug_assertions)]
 use std::rc::Rc;
 use views::chat::FindInThread;
 use views::diff_panel::FindInDiff;

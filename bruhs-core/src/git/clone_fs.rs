@@ -190,6 +190,9 @@ mod imp {
 /// Whether `dir` can clone at all (APFS yes; tmpfs and ext4 no). Tests that
 /// need a clone skip themselves otherwise.
 #[cfg(test)]
+///
+/// With `BRUHS_REQUIRE_CLONES` set (CI on Btrfs and XFS), an unsupported
+/// volume fails the test instead of skipping it.
 pub(crate) fn clones_supported(dir: &Path) -> bool {
     let src = dir.join(".probe-src");
     let dst = dir.join(".probe-dst");
@@ -197,6 +200,11 @@ pub(crate) fn clones_supported(dir: &Path) -> bool {
     let supported = clone_path(&src, &dst).is_ok();
     let _ = std::fs::remove_file(&src);
     let _ = std::fs::remove_file(&dst);
+    assert!(
+        supported || std::env::var_os("BRUHS_REQUIRE_CLONES").is_none(),
+        "BRUHS_REQUIRE_CLONES is set, but {} cannot clone",
+        dir.display()
+    );
     supported
 }
 
