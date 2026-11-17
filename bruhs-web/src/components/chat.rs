@@ -42,7 +42,7 @@ use crate::components::timeline_view::Timeline;
 use crate::state::{
     auto_title, AgentMessage, BaseBranchSignal, ChipRetargetGuard, ClaudeAutoCompactSignal,
     ClaudeEffortSignal, CompactFullSignal, CompactIdleSignal, ComposerChips, ComposerDraft,
-    DiffFocusPath, DiffScope, DiffScopeSignal, FollowUpSteerSignal, GitStatusSignal, MessageStatus,
+    DiffFocusPath, DiffScope, DiffScopeSignal, FollowUpSteerSignal, GitStatusSignal,
     OpenFileSignal, PanelSurface, PendingPermissionsSignal, PermissionModeSignal,
     PreviousWorktreeSignal, PromptQueueSignal, QueueHolds, RightPanelSignal, RunChoiceSignal,
     ThreadNotice, Turns, UnreadThreads,
@@ -996,21 +996,18 @@ pub fn ChatPage() -> impl IntoView {
         wasm_bindgen_futures::spawn_local(async move {
             let finished_id = assistant_id.clone();
             let finishing = live.clone();
-            let finish_message = move |error: Option<String>| {
+            let finish_message = move |stopped: bool, error: Option<String>| {
                 let now = js_sys::Date::now();
                 finishing.update(|m| {
                     if let Some(m) = m.as_mut().filter(|m| m.id == finished_id) {
-                        m.status = MessageStatus::Finished { at_ms: Some(now) };
-                        if m.error.is_none() {
-                            m.error = error;
-                        }
+                        m.finish(now, stopped, error);
                     }
                 });
             };
             let request_thread = match ThreadId::try_from(thread_id.as_str()) {
                 Ok(id) => Some(id),
                 Err(error) => {
-                    finish_message(Some(format!("This thread cannot be sent: {error}.")));
+                    finish_message(false, Some(format!("This thread cannot be sent: {error}.")));
                     None
                 }
             };
@@ -1111,7 +1108,7 @@ pub fn ChatPage() -> impl IntoView {
                 }
             }
             if let Some(message) = blocked {
-                finish_message(Some(message));
+                finish_message(false, Some(message));
             } else {
                 while let Some(request_thread) = request_thread.as_ref() {
                     let resumed = resume.is_some() && !fresh;
@@ -1276,16 +1273,19 @@ pub fn ChatPage() -> impl IntoView {
                         }
                         NextStep::GiveUpBusy => {
                             thread_notice.set(Some(STILL_BUSY.to_string()));
-                            finish_message(Some(STILL_BUSY.to_string()));
+                            finish_message(false, Some(STILL_BUSY.to_string()));
                             break;
                         }
                         NextStep::Finish => {
                             completed = result.is_ok();
                             stopped = matches!(result, Err(StreamError::Stopped));
-                            finish_message(match result {
-                                Err(StreamError::Stopped) | Ok(()) => None,
-                                Err(error) => Some(error.to_string()),
-                            });
+                            finish_message(
+                                stopped,
+                                match result {
+                                    Err(StreamError::Stopped) | Ok(()) => None,
+                                    Err(error) => Some(error.to_string()),
+                                },
+                            );
                             break;
                         }
                     }

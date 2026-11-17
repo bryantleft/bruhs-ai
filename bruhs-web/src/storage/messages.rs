@@ -67,6 +67,10 @@ struct StoredMessage<'a> {
     parts: StoredParts<'a>,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'a str>,
+    /// Written only when true, so rows of turns that were not stopped keep
+    /// their earlier shape.
+    #[serde(skip_serializing_if = "is_false")]
+    stopped: bool,
     #[serde(skip_serializing_if = "<[bruhs_models::logic::attachments::UploadedFile]>::is_empty")]
     files: &'a [bruhs_models::logic::attachments::UploadedFile],
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -90,6 +94,10 @@ struct StoredTool<'a> {
     is_error: bool,
     started_at_ms: Option<f64>,
     ended_at_ms: Option<f64>,
+}
+
+fn is_false(value: &bool) -> bool {
+    !*value
 }
 
 impl Serialize for StoredMessages<'_> {
@@ -119,6 +127,7 @@ impl Serialize for StoredMessages<'_> {
                 model: model.as_deref(),
                 parts: StoredParts(parts),
                 error: error.as_deref(),
+                stopped: status.is_stopped(),
                 files,
                 checkpoint: checkpoint.as_deref(),
             })?;

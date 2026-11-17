@@ -867,9 +867,10 @@ fn epoch_ms(ms: f64) -> i64 {
     bruhs_models::EpochMs::saturating_from_f64(ms).as_millis()
 }
 
-/// A web message in the record shape desktop returns. The web keeps no
-/// per-message stop marker, so `stopped` is false; the duration is the
-/// time from start to finish when both are known.
+/// A web message in the record shape desktop returns. `stopped` is the
+/// stop the web records when the user stops a turn (rows saved before that
+/// read as not stopped); the duration is the time from start to finish, or
+/// to the stop, when both are known.
 fn message_record(message: &AgentMessage) -> ChatMessageRecord<'_> {
     let started = message.started_at_ms.map(epoch_ms);
     let finished = message.status.finished_at_ms().map(epoch_ms);
@@ -900,7 +901,7 @@ fn message_record(message: &AgentMessage) -> ChatMessageRecord<'_> {
                 is_error: call.is_error,
             })
             .collect(),
-        stopped: false,
+        stopped: message.was_stopped(),
         error: message.error.as_deref(),
     }
 }

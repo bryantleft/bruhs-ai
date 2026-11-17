@@ -200,3 +200,38 @@ fn missing_and_empty_tool_outputs_remain_distinct() {
     assert_eq!(encoded.strings.len(), 5);
     assert_eq!(encoded.record().unwrap(), record);
 }
+
+/// A stopped turn keeps its stop through the compact format, only stopped
+/// rows carry the flag, and a row saved before stops were recorded reads as
+/// finished.
+#[test]
+fn stopped_turns_survive_storage_and_older_rows_read_as_finished() {
+    let mut stopped = AgentMessage::assistant_placeholder("model".into(), 1.0);
+    stopped.parts.push(crate::state::MessagePart::Text("partial".into()));
+    stopped.finish(2.0, true, None);
+    let mut finished = AgentMessage::assistant_placeholder("model".into(), 3.0);
+    finished.finish(4.0, false, None);
+    let record = MessagesRecord::new("thread".into(), vec![stopped, finished]);
+    let encoded = envelope(&record);
+    let stored: serde_json::Value = serde_json::from_str(&encoded.payload).unwrap();
+    assert_eq!(stored["messages"][0]["stopped"], true);
+    assert!(stored["messages"][1].get("stopped").is_none());
+    let decoded = encoded.record().unwrap();
+    assert_eq!(decoded, record);
+    assert!(decoded.messages()[0].was_stopped());
+    assert_eq!(decoded.messages()[0].status.finished_at_ms(), Some(2.0));
+    assert!(!decoded.messages()[1].was_stopped());
+
+    let older: MessagesRecord = serde_json::from_value(serde_json::json!({
+        "thread_id":"thread", "messages":[{
+            "id":"old", "role":"assistant", "is_streaming":false,
+            "completed_at_ms":5.0, "parts":[{"kind":"text","value":"saved"}]
+        }]
+    }))
+    .unwrap();
+    let older = envelope(&older).record().unwrap();
+    assert_eq!(
+        older.messages()[0].status,
+        crate::state::MessageStatus::Finished { at_ms: Some(5.0) }
+    );
+}

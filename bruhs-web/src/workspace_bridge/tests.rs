@@ -52,6 +52,26 @@ fn web_messages_project_into_the_record_shape_desktop_returns() {
     assert!(record["tool_calls"][0].get("started_at_ms").is_none());
 }
 
+/// A turn the user stopped reports `stopped` like desktop's; a failed one
+/// reports its error instead, never both.
+#[test]
+fn stopped_turns_report_stopped_and_failed_ones_their_error() {
+    let mut stopped = assistant();
+    stopped.finish(1_400.0, true, None);
+    let record = message_record(&stopped);
+    assert!(record.stopped);
+    assert_eq!(record.error, None);
+    assert_eq!(record.completed_at_ms, Some(1_400));
+    assert_eq!(record.duration_ms, Some(400));
+
+    let mut failed = assistant();
+    failed.error = Some("provider error".into());
+    failed.finish(1_400.0, true, None);
+    let record = message_record(&failed);
+    assert!(!record.stopped);
+    assert_eq!(record.error, Some("provider error"));
+}
+
 #[test]
 fn streaming_messages_and_their_offsets_are_never_counted() {
     let streaming = AgentMessage::assistant_placeholder("claude".into(), 2_000.0);
