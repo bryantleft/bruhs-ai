@@ -519,6 +519,7 @@ impl Workspace {
         {
             self.persist_requests += 1;
         }
+        self.offer_focus_suggestion();
         // Optimistic edits must be searchable even when their save fails or
         // changes neither the collection length nor a coarse timestamp.
         self.universal_search_index.replace(None);
@@ -673,42 +674,24 @@ impl RestoredRecords {
                     .collect(),
             })
             .unwrap_or_default();
-        if records
-            .automation_state
-            .suggestions
-            .iter()
-            .all(|suggestion| suggestion.id != "protect-focus")
-        {
-            records
-                .automation_state
-                .suggestions
-                .push(bruhs_models::ProactiveSuggestion {
-                id: "protect-focus".into(),
-                title: "Protect a focus block".into(),
-                explanation:
-                    "Create a task, calendar block, and local note as one reversible transaction."
-                        .into(),
-                evidence: format!(
-                    "{} tasks and {} calendar entries are currently stored locally.",
-                    records.work_items.len(),
-                    records.calendar_events.len()
-                ),
-                domain: bruhs_models::AgentDomain::Tasks,
-                operations: vec![
-                    bruhs_models::WorkflowOperation::CreateTask {
-                        title: "Finish the highest-impact task".into(),
-                    },
-                    bruhs_models::WorkflowOperation::AddCapture {
-                        content: "Focus plan".into(),
-                    },
-                ],
-                dismissed: false,
-                shown_count: 0,
-                last_shown_at_ms: None,
-            });
-        }
+        // The web's Today and Agent workflows offer the same suggestion once
+        // unfinished tasks are stored; `Workspace::persist` offers it when the
+        // first one is added later.
+        records.automation_state.offer_focus_suggestion(
+            unfinished_task_count(&records.work_items),
+            records.calendar_events.len(),
+            EpochMs::now().as_millis(),
+        );
         records
     }
+}
+
+/// Tasks that are neither done nor canceled, as the web's Today counts them.
+pub(super) fn unfinished_task_count(work_items: &[DesktopWorkItem]) -> usize {
+    work_items
+        .iter()
+        .filter(|item| !item.status.is_completed())
+        .count()
 }
 
 impl Workspace {

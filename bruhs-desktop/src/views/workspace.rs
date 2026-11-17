@@ -2562,7 +2562,7 @@ impl Workspace {
     fn render_main_surface(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
         let compact = Self::compact_layout(window);
         match &self.active_view {
-            AppView::Today => self.render_today_page(compact, cx),
+            AppView::Today => self.render_today_page(window, cx),
             AppView::Inbox => self.render_inbox_page(cx),
             AppView::Knowledge => self.render_knowledge_page(cx),
             AppView::Chat => {
