@@ -1237,6 +1237,7 @@ impl Workspace {
                 crate::views::page_header::page_header("Today", Some(date.into())).child(
                     div()
                         .flex()
+                        .flex_wrap()
                         .gap_2()
                         .child(
                             web_button(

@@ -221,3 +221,58 @@ fn booking_times_use_two_columns_from_sm_like_web(cx: &mut TestAppContext) {
     assert_eq!(second.top(), first.top(), "two columns from sm");
     assert!(second.left() >= first.right());
 }
+
+/// With the sidebar docked at 640px a page is about 390px wide. Like the
+/// web's `flex-wrap` headers, the desktop's wrap their actions under the
+/// title instead of squeezing it or running past the window's edge.
+#[gpui::test]
+fn narrow_page_headers_wrap_like_web(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    cx.simulate_resize(size(px(640.0), px(480.0)));
+    let inside = |cx: &mut VisualTestContext, selector: &'static str| {
+        let element = bounds(cx, selector);
+        assert!(
+            element.right() <= px(640.0),
+            "{selector} runs past the window: {element:?}"
+        );
+        element
+    };
+    let show = |workspace: &Entity<Workspace>, cx: &mut VisualTestContext, view: AppView| {
+        workspace.update(cx, |workspace, cx| {
+            workspace.active_view = view;
+            workspace.sidebar_visible = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
+    };
+
+    show(&workspace, cx, AppView::Today);
+    assert!(shown(cx, "desktop-workspace-sidebar"));
+    let title = inside(cx, "desktop-page-title");
+    assert!(
+        title.size.width >= px(80.0) && title.size.height <= px(60.0),
+        "Today's title keeps its width: {title:?}"
+    );
+    let plan = inside(cx, "desktop-today-plan");
+    assert!(plan.top() >= title.bottom(), "the actions wrap under it");
+
+    show(&workspace, cx, AppView::Knowledge);
+    inside(cx, "desktop-knowledge-new-document");
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        let mut plan = KnowledgeDocument::new("Plan", "Body", 1);
+        plan.id = "plan".into();
+        workspace.knowledge_documents = vec![plan];
+        workspace.select_knowledge_document("plan", window, cx);
+    });
+    cx.run_until_parked();
+    inside(cx, "desktop-knowledge-save");
+
+    show(&workspace, cx, AppView::Life);
+    inside(cx, "desktop-life-title");
+    inside(cx, "desktop-life-privacy-text");
+    inside(cx, "desktop-life-agent-access");
+
+    show(&workspace, cx, AppView::People);
+    inside(cx, "desktop-page-title");
+}

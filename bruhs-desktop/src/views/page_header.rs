@@ -7,10 +7,12 @@ use gpui::prelude::*;
 use gpui::*;
 
 /// The header bar. Add the page's actions with `.child(…)`; they sit on the
-/// right.
+/// right, and like the web's they wrap under the title when the page is too
+/// narrow for both (give a group of them `flex_wrap` too).
 pub fn page_header(title: impl Into<SharedString>, subtitle: Option<SharedString>) -> Div {
     div()
         .flex()
+        .flex_wrap()
         .flex_shrink_0()
         .items_center()
         .justify_between()
@@ -20,10 +22,12 @@ pub fn page_header(title: impl Into<SharedString>, subtitle: Option<SharedString
         .border_b_1()
         .border_color(theme::longan_800().opacity(0.5))
         .child(
-            // flex_1: a bare min_w_0 column collapses to zero width in a
-            // GPUI row and wraps its text one glyph per line.
+            // Web `min-w-0` in a wrapping row: the title keeps its width
+            // and the actions wrap; a long subtitle wraps within the row.
+            // (`flex_1` here squeezed the title to a glyph per line when
+            // the actions filled the row.)
             div()
-                .flex_1()
+                .debug_selector(|| "desktop-page-title".to_string())
                 .min_w_0()
                 .child(
                     div()
