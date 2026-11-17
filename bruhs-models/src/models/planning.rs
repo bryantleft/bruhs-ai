@@ -205,6 +205,21 @@ pub mod today_copy {
     pub fn ready(count: usize) -> String {
         format!("{count} ready")
     }
+
+    /// A focus queue row's estimate: "90m", or 45m when the task has none.
+    pub fn estimate(minutes: Option<u16>) -> String {
+        format!("{}m", minutes.unwrap_or(45))
+    }
+
+    /// A focus queue row's accessible name, on both apps.
+    pub fn focus_row_label(title: &str, priority: &str, estimate: &str) -> String {
+        format!("Open task {title}, {priority} priority, {estimate}")
+    }
+
+    /// An Overdue or Waiting on row's accessible name, on both apps.
+    pub fn task_row_label(title: &str) -> String {
+        format!("Open task {title}")
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -598,6 +613,21 @@ fn round_up(value: f64, quantum: f64) -> f64 {
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn today_rows_read_the_same_on_both_apps() {
+        use super::today_copy;
+        assert_eq!(today_copy::estimate(Some(90)), "90m");
+        assert_eq!(today_copy::estimate(None), "45m");
+        assert_eq!(
+            today_copy::focus_row_label("Ship the beta", "Urgent", "90m"),
+            "Open task Ship the beta, Urgent priority, 90m"
+        );
+        assert_eq!(
+            today_copy::task_row_label("Book the venue"),
+            "Open task Book the venue"
+        );
+    }
+
     use super::*;
 
     #[test]

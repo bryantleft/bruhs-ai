@@ -849,7 +849,7 @@ impl Workspace {
             .cursor_pointer()
             .tab_index(0)
             .role(Role::Button)
-            .aria_label(format!("Open task {}", item.title))
+            .aria_label(bruhs_models::today_copy::task_row_label(&item.title))
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -891,10 +891,7 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let item_id = item.id.clone();
-        let estimate = item
-            .planning
-            .estimate_minutes
-            .map_or_else(|| "45m".to_string(), |minutes| format!("{minutes}m"));
+        let estimate = bruhs_models::today_copy::estimate(item.planning.estimate_minutes);
         let first = index == 0;
         let group = SharedString::from(format!("desktop-today-focus-row-{index}"));
         div()
@@ -912,10 +909,10 @@ impl Workspace {
             .cursor_pointer()
             .tab_index(0)
             .role(Role::Button)
-            .aria_label(format!(
-                "Open task {}, {} priority, {estimate}",
-                item.title,
-                item.priority.label()
+            .aria_label(bruhs_models::today_copy::focus_row_label(
+                &item.title,
+                item.priority.label(),
+                &estimate,
             ))
             .border_1()
             .border_color(gpui::transparent_black())
