@@ -1583,3 +1583,5 @@ async fn an_answer_after_expiry_resumes_even_while_the_run_wraps_up() {
     );
     assert_eq!(decided(task).await, Some(crate::PermissionDecision::Allow));
 }
+
+mod approval_lifecycle_tests;

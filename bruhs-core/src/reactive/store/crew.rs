@@ -10,8 +10,8 @@ use crate::reactive::clock;
 use bruhs_models::{
     agent::AgentProvider,
     crew::{
-        approval_fingerprint, approval_summary, level_unavailable, rail_order, status_for,
-        ApprovalRequest, ApprovalState, BruhAccess, BruhLook, BruhProfile, BruhState,
+        approval_fingerprint, approval_summary, effective_level, level_unavailable, rail_order,
+        status_for, ApprovalRequest, ApprovalState, BruhAccess, BruhLook, BruhProfile, BruhState,
     },
     logic::run_place::claude_effort,
     reactive::{
@@ -25,6 +25,8 @@ use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
 
 const ACCESS_CHANGED: &str = "Access changed. Review the new access before starting another run.";
+/// How long a late approval's grant stays usable.
+pub(in crate::reactive) const GRANT_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
 pub(in crate::reactive) fn initialize(connection: &Connection) -> Result<(), ReactiveError> {
     connection.execute_batch(
@@ -82,7 +84,17 @@ pub(in crate::reactive) fn set_bruh(
     }
     let old = profile(connection, agent_id)?;
     if old.access != access {
-        cancel_runs(connection, "agent_id", agent_id, ACCESS_CHANGED)?;
+        delete_grants(connection, agent_id)?;
+        // Compared at the level the runtime runs: a Codex bruh stored at Ask
+        // already runs read only, so saving it as Read only changes nothing.
+        let provider = AgentProvider::for_model(&agent.model);
+        let effective = |access: &BruhAccess| BruhAccess {
+            level: effective_level(access.level, provider),
+            ..access.clone()
+        };
+        if effective(&old.access) != effective(&access) {
+            cancel_runs(connection, "agent_id", agent_id, ACCESS_CHANGED)?;
+        }
     }
     save(
         connection,
@@ -122,6 +134,7 @@ pub(in crate::reactive) fn stop(
     let now = EpochMs::now();
     for id in &targets {
         cancel_runs(connection, "agent_id", id, STOPPED)?;
+        delete_grants(connection, id)?;
         let mut statement = connection.prepare(
             "SELECT payload FROM reactive_outbox WHERE agent_id=?1 AND json_extract(payload,'$.approval') IS NOT NULL AND json_extract(payload,'$.resolved_at') IS NULL",
         )?;
@@ -178,6 +191,11 @@ pub(in crate::reactive) fn delete(
     agent_id: &str,
 ) -> Result<(), ReactiveError> {
     connection.execute("DELETE FROM reactive_bruhs WHERE agent_id=?1", [agent_id])?;
+    delete_grants(connection, agent_id)
+}
+
+/// Drop every late approval grant the agent holds.
+fn delete_grants(connection: &Connection, agent_id: &str) -> Result<(), ReactiveError> {
     connection.execute(
         "DELETE FROM reactive_approval_grants WHERE agent_id=?1",
         [agent_id],
@@ -277,9 +295,7 @@ pub(in crate::reactive) fn decide_approval(
     if item.read_at.is_none() {
         item.read_at = Some(now);
     }
-    if item.system == SystemDelivery::Pending {
-        item.system = SystemDelivery::Skipped;
-    }
+    skip_system(&mut item);
     item.resolved_at = Some(now);
     if !live {
         let agent = enabled_agent(connection, &item.agent_id)?;
@@ -344,18 +360,56 @@ pub(in crate::reactive) fn withdraw_approval(
         Some(request) if request.state == ApprovalState::Waiting && item.resolved_at.is_none() => {
             request.state = ApprovalState::Denied;
             item.resolved_at = Some(EpochMs::now());
+            skip_system(&mut item);
             always_on::save_item(connection, &item)
         }
         _ => Ok(()),
     }
 }
 
-/// Use up a late approval's grant for this exact call, if there is one.
+/// A system notification not sent yet is no longer worth sending.
+fn skip_system(item: &mut OutboxItem) {
+    if item.system == SystemDelivery::Pending {
+        item.system = SystemDelivery::Skipped;
+    }
+}
+
+/// Expire the approvals a run was waiting on when it stopped without
+/// answering them (a restart, or a retry that reuses the run id). They stay
+/// open, so a late answer still resumes the bruh with a new run.
+pub(in crate::reactive) fn expire_run_approvals(
+    connection: &Connection,
+    run_id: &str,
+) -> Result<(), ReactiveError> {
+    let mut statement = connection.prepare(
+        "SELECT payload FROM reactive_outbox WHERE json_extract(payload,'$.run_id')=?1 AND json_extract(payload,'$.approval.state')='waiting' AND json_extract(payload,'$.resolved_at') IS NULL",
+    )?;
+    let rows = statement.query_map([run_id], |row| row.get::<_, String>(0))?;
+    let items = rows
+        .map(|row| decode::<OutboxItem>(row?))
+        .collect::<Result<Vec<_>, _>>()?;
+    for mut item in items {
+        if let Some(request) = item.approval.as_mut() {
+            request.state = ApprovalState::Expired;
+        }
+        skip_system(&mut item);
+        always_on::save_item(connection, &item)?;
+    }
+    Ok(())
+}
+
+/// Use up a late approval's grant for this exact call, if there is one and
+/// it is younger than [`GRANT_TTL_MS`]. An older grant is dropped unused.
 pub(in crate::reactive) fn take_grant(
     connection: &Connection,
     agent_id: &str,
     fingerprint: &str,
 ) -> Result<bool, ReactiveError> {
+    let cutoff = EpochMs::now().as_millis().saturating_sub(GRANT_TTL_MS);
+    connection.execute(
+        "DELETE FROM reactive_approval_grants WHERE created<?1",
+        [cutoff],
+    )?;
     Ok(connection.execute(
         "DELETE FROM reactive_approval_grants WHERE agent_id=?1 AND fingerprint=?2",
         params![agent_id, fingerprint],

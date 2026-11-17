@@ -106,6 +106,8 @@ pub(super) fn open(path: &Path) -> Result<(Connection, RuntimeLock), ReactiveErr
             run.error = Some("The server stopped during this run. Review its output before explicitly retrying; work was not replayed.".into());
             run.updated_at = EpochMs::now();
             save_run(connection, &run)?;
+            // Nothing waits on its approvals any more; a late answer resumes it.
+            crew::expire_run_approvals(connection, &run.id)?;
         }
         Ok(())
     })?;
@@ -939,6 +941,9 @@ pub(super) fn command(
                 }
                 check_run_enabled(connection, &run)?;
                 queue_capacity(connection)?;
+                // The retry reuses the run id, so its old approvals must not
+                // look like a live wait.
+                crew::expire_run_approvals(connection, &run.id)?;
                 run.status = RunStatus::Queued;
                 run.updated_at = EpochMs::now();
                 run.not_before = run.updated_at;
