@@ -898,7 +898,7 @@ impl ReactiveAutomations {
         cx: &Context<'_, Self>,
     ) -> Div {
         let measured = self.bruh.as_ref().map_or(0.0, |page| page.width.get());
-        let viewport = f32::from(window.viewport_size().width);
+        let viewport = gpui_component::zoom::css_px(window.viewport_size().width);
         let width = if measured > 0.0 { measured } else { viewport };
         let layout = Layout::of(width, viewport);
         let root = div()
@@ -919,7 +919,7 @@ impl ReactiveAutomations {
                 root.child(
                     canvas(
                         move |bounds, _, cx| {
-                            let width = f32::from(bounds.size.width);
+                            let width = gpui_component::zoom::css_px(bounds.size.width);
                             if (measured.get() - width).abs() > 0.5 {
                                 measured.set(width);
                                 cx.notify(entity);
