@@ -422,6 +422,10 @@ enum Overlay {
     ProjectDeleteConfirm {
         project_id: String,
     },
+    /// The task detail's "Delete task?" (web `TaskDetail`).
+    TaskDeleteConfirm {
+        item_id: String,
+    },
     RecordDeleteConfirm {
         target: RecordDeleteTarget,
     },
@@ -2995,6 +2999,9 @@ impl Render for Workspace {
                     }
                     Overlay::ProjectDeleteConfirm { .. } => {
                         self.render_project_delete_confirm(window, cx)
+                    }
+                    Overlay::TaskDeleteConfirm { ref item_id } => {
+                        self.render_task_delete_confirm(item_id, window, cx)
                     }
                     Overlay::RecordDeleteConfirm { ref target } => {
                         self.render_record_delete_confirm(target, window, cx)

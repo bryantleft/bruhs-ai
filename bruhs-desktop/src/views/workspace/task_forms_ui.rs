@@ -763,7 +763,6 @@ impl Workspace {
 
     pub(super) fn render_task_detail(&self, item: DesktopWorkItem, cx: &Context<'_, Self>) -> Div {
         let delete_id = item.id.clone();
-        let delete_id_for_key = item.id.clone();
         let close_key = element_key(&item.id);
         let estimate_label = item.planning.estimate_minutes.map_or_else(
             || "No estimate".to_string(),
@@ -1056,16 +1055,10 @@ impl Workspace {
                         .tab_index(0)
                         .role(Role::Button)
                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                        .on_click(cx.listener(move |this, _ev, _window, cx| {
-                            this.delete_work_item_by_id(&delete_id, cx);
-                        }))
-                        .on_key_down(cx.listener(
-                            move |this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                    this.delete_work_item_by_id(&delete_id_for_key, cx);
-                                }
+                        // Enter and Space click a focused button on key up.
+                        .on_click(cx.listener(
+                            move |this, _ev, window, cx| {
+                                this.request_delete_work_item(&delete_id, window, cx);
                             },
                         )),
                     ),

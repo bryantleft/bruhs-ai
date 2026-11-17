@@ -786,6 +786,39 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
+    /// Web task detail: Delete task asks first, as deleting a project does.
+    pub(super) fn request_delete_work_item(
+        &mut self,
+        item_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !self.work_items.iter().any(|item| item.id == item_id) {
+            return;
+        }
+        self.open_overlay(Overlay::TaskDeleteConfirm {
+            item_id: item_id.to_string(),
+        });
+        self.focus_first_modal_tab_stop(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn cancel_task_delete(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.dismiss_overlay(|overlay| matches!(overlay, Overlay::TaskDeleteConfirm { .. }));
+        self.workspace_focus_handle.focus(window, cx);
+        cx.notify();
+    }
+
+    pub(super) fn confirm_task_delete(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(Overlay::TaskDeleteConfirm { item_id }) = self.overlay.clone() else {
+            return;
+        };
+        self.dismiss_overlay(|overlay| matches!(overlay, Overlay::TaskDeleteConfirm { .. }));
+        // The panel and its controls go away with the task.
+        self.workspace_focus_handle.focus(window, cx);
+        self.delete_work_item_by_id(&item_id, cx);
+    }
+
     pub(super) fn request_delete_project_by_id(
         &mut self,
         project_id: &str,
