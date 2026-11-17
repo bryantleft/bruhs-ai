@@ -2,9 +2,10 @@
 //! approvals inline, older runs a page at a time, and a composer.
 
 use bruhs_models::crew::{
-    transcript, ApprovalState, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
+    approval_outcome, composer_block, line_key, may_have_more, merge_runs, transcript, BruhLook,
+    BruhStatus, TranscriptItem, RAIL_FACE_PX,
 };
-use bruhs_models::reactive::{OutboxItem, ReactiveCommand, ReactiveRun, HISTORY_LIMIT};
+use bruhs_models::reactive::{OutboxItem, ReactiveCommand, ReactiveRun};
 use leptos::html;
 use leptos::prelude::*;
 
@@ -14,64 +15,6 @@ use crate::ui::{BrailleBruh, Button, ButtonSize, ButtonVariant, Textarea};
 
 const CARD: &str =
     "min-w-0 max-w-[80%] space-y-2 rounded-grape bg-longan-900 p-3 inset-ring inset-ring-longan-700";
-
-/// Puts a page of runs into those already shown, replacing runs it updates.
-fn merge_runs(shown: &mut Vec<ReactiveRun>, page: Vec<ReactiveRun>) {
-    for run in page {
-        match shown.iter_mut().find(|known| known.id == run.id) {
-            Some(known) => *known = run,
-            None => shown.push(run),
-        }
-    }
-}
-
-/// Whether a page this long may have older runs behind it.
-fn may_have_more(page_len: usize) -> bool {
-    page_len >= HISTORY_LIMIT
-}
-
-/// Why the composer is off for a bruh in this state.
-fn composer_block(status: Option<BruhStatus>) -> Option<&'static str> {
-    match status? {
-        BruhStatus::Paused => Some("This bruh is paused. Resume it to chat."),
-        BruhStatus::Off => Some("This bruh is off. Turn it on in Agent workflows to chat."),
-        _ => None,
-    }
-}
-
-fn approval_outcome(item: &OutboxItem) -> Option<&'static str> {
-    item.resolved_at?;
-    Some(
-        match item.approval.as_ref().map(|approval| approval.state) {
-            Some(ApprovalState::Approved) => "Approved",
-            Some(ApprovalState::Denied) => "Denied",
-            Some(ApprovalState::Expired) => "Expired",
-            Some(ApprovalState::Waiting) | None => "Withdrawn",
-        },
-    )
-}
-
-/// What identifies a line as drawn: a line is redrawn only when this changes,
-/// so a reply typed into a card survives unrelated updates.
-fn line_key(item: &TranscriptItem) -> String {
-    match item {
-        TranscriptItem::Owner {
-            run_id, pending, ..
-        } => format!("owner:{run_id}:{pending}"),
-        TranscriptItem::Bruh {
-            run_id,
-            text,
-            failed,
-            ..
-        } => format!("bruh:{run_id}:{failed}:{text}"),
-        TranscriptItem::Card { item } => format!(
-            "card:{}:{}:{:?}",
-            item.id,
-            item.resolved_at.is_some(),
-            item.approval.as_ref().map(|approval| approval.state)
-        ),
-    }
-}
 
 #[component]
 pub fn BruhChat(agent_id: String) -> impl IntoView {
@@ -342,78 +285,4 @@ fn question_card(item: OutboxItem, data: CrewData) -> AnyView {
         </article>
     }
     .into_any()
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bruhs_models::EpochMs;
-
-    fn run(id: &str, status: &str) -> ReactiveRun {
-        serde_json::from_value(serde_json::json!({
-            "id": id, "agent_id": "a", "source_id": null, "subscription_id": null,
-            "event_id": null, "status": status, "prompt": id, "thread_id": "t",
-            "session_id": null, "created_at": 1, "updated_at": 1,
-            "not_before": 1, "result": null, "error": null,
-        }))
-        .unwrap()
-    }
-
-    #[test]
-    fn a_newer_page_updates_runs_in_place_and_adds_the_rest() {
-        let mut shown = vec![run("r2", "running"), run("r1", "completed")];
-        merge_runs(
-            &mut shown,
-            vec![run("r3", "queued"), run("r2", "completed")],
-        );
-        let got: Vec<(&str, _)> = shown
-            .iter()
-            .map(|run| (run.id.as_str(), run.status))
-            .collect();
-        assert_eq!(
-            got,
-            vec![
-                ("r2", bruhs_models::reactive::RunStatus::Completed),
-                ("r1", bruhs_models::reactive::RunStatus::Completed),
-                ("r3", bruhs_models::reactive::RunStatus::Queued),
-            ]
-        );
-        assert!(may_have_more(HISTORY_LIMIT) && !may_have_more(HISTORY_LIMIT - 1));
-    }
-
-    #[test]
-    fn the_composer_says_why_a_paused_or_off_bruh_cannot_chat() {
-        assert!(composer_block(Some(BruhStatus::Paused))
-            .is_some_and(|reason| reason.contains("paused")));
-        assert!(composer_block(Some(BruhStatus::Off)).is_some_and(|reason| reason.contains("off")));
-        for status in [
-            BruhStatus::Asleep,
-            BruhStatus::Working,
-            BruhStatus::NeedsYou,
-        ] {
-            assert_eq!(composer_block(Some(status)), None);
-        }
-        assert_eq!(composer_block(None), None);
-    }
-
-    #[test]
-    fn a_decided_approval_says_how_and_an_open_one_waits() {
-        let mut item: OutboxItem = serde_json::from_value(serde_json::json!({
-            "id": "i", "agent_id": "a", "run_id": "r", "kind": "ask", "title": "t",
-            "message": "m", "created_at": 1,
-            "approval": {"tool": "SandboxNetworkAccess", "summary": "Reach example.com", "fingerprint": "f", "state": "expired"},
-        }))
-        .unwrap();
-        // Expired stays open: a late approval still counts.
-        assert_eq!(approval_outcome(&item), None);
-        item.resolved_at = Some(EpochMs::saturating_from_i64(2));
-        assert_eq!(approval_outcome(&item), Some("Expired"));
-        if let Some(approval) = item.approval.as_mut() {
-            approval.state = ApprovalState::Approved;
-        }
-        assert_eq!(approval_outcome(&item), Some("Approved"));
-        let open = line_key(&TranscriptItem::Card { item: item.clone() });
-        item.resolved_at = None;
-        assert_ne!(open, line_key(&TranscriptItem::Card { item }));
-    }
 }

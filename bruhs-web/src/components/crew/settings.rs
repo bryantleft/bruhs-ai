@@ -1,12 +1,12 @@
 //! A bruh's settings: who it is, how it runs, what it may do and its face.
 //! Save sends `settings_commands`, so a face edit never touches the agent.
 
-use bruhs_models::agent::{AgentProvider, ModelId};
+use bruhs_models::agent::ModelId;
 use bruhs_models::crew::{
-    level_unavailable, settings_commands, AccessLevel, BruhAccess, BruhLook, BruhSettings,
+    access_options, clamp_level, current_settings, settings_commands, AccessLevel, BruhAccess,
+    BruhLook, BruhSettings,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
-use bruhs_models::reactive::ReactiveSnapshot;
 use leptos::prelude::*;
 
 use super::data::use_crew_snapshot;
@@ -18,41 +18,6 @@ const SECTION: &str =
     "min-w-0 space-y-3 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50";
 const RADIO: &str = "bruhs-control inline-flex min-h-control flex-1 items-center justify-center rounded-seed px-3 text-label-sm transition-colors focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
 const DELIVER_NEEDS_FULL: &str = "Needs Full access.";
-
-/// Each access level in display order, with why `model` can't run it.
-fn access_options(model: &str) -> Vec<(AccessLevel, Option<&'static str>)> {
-    let provider = AgentProvider::for_model(model);
-    [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full]
-        .into_iter()
-        .map(|level| (level, level_unavailable(level, provider)))
-        .collect()
-}
-
-/// `level`, or Read only when `model` can't run it.
-fn clamp_level(level: AccessLevel, model: &str) -> AccessLevel {
-    if level_unavailable(level, AgentProvider::for_model(model)).is_some() {
-        AccessLevel::ReadOnly
-    } else {
-        level
-    }
-}
-
-/// The settings a bruh has now, from the snapshot.
-fn current_settings(snapshot: &ReactiveSnapshot, agent_id: &str) -> Option<BruhSettings> {
-    let agent = snapshot.agents.iter().find(|agent| agent.id == agent_id)?;
-    let state = snapshot
-        .bruhs
-        .iter()
-        .find(|bruh| bruh.agent_id == agent_id)?;
-    Some(BruhSettings {
-        name: agent.name.clone(),
-        instructions: agent.instructions.clone(),
-        model: agent.model.clone(),
-        effort: state.effort.clone(),
-        look: state.look.clone(),
-        access: state.access.clone(),
-    })
-}
 
 fn effort_options() -> Vec<DropdownOption> {
     std::iter::once(DropdownOption::new("", "Default"))
@@ -240,49 +205,5 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                 {move || data.service_reason().map(|reason| view! { <p class="min-w-0 text-label-sm text-rambutan-400">{reason}</p> })}
             </div>
         </form>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bruhs_models::crew::level_unavailable;
-
-    #[test]
-    fn access_options_explain_what_this_model_cannot_do() {
-        let codex_ask = level_unavailable(AccessLevel::Ask, AgentProvider::Codex);
-        assert!(codex_ask.is_some());
-        assert_eq!(
-            access_options("gpt-5.1-codex"),
-            vec![
-                (AccessLevel::ReadOnly, None),
-                (AccessLevel::Ask, codex_ask),
-                (AccessLevel::Full, None),
-            ]
-        );
-        assert_eq!(
-            access_options("claude-sonnet-4-6"),
-            vec![
-                (AccessLevel::ReadOnly, None),
-                (AccessLevel::Ask, None),
-                (AccessLevel::Full, None),
-            ]
-        );
-    }
-
-    #[test]
-    fn a_model_that_cannot_ask_drops_ask_to_read_only() {
-        assert_eq!(
-            clamp_level(AccessLevel::Ask, "gpt-5.1-codex"),
-            AccessLevel::ReadOnly
-        );
-        assert_eq!(
-            clamp_level(AccessLevel::Full, "gpt-5.1-codex"),
-            AccessLevel::Full
-        );
-        assert_eq!(
-            clamp_level(AccessLevel::Ask, "claude-sonnet-4-6"),
-            AccessLevel::Ask
-        );
     }
 }

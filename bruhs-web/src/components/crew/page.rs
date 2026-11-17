@@ -1,7 +1,7 @@
 //! A bruh's own page: its face, name, job and status, Stop or Resume, and
 //! tabs for its chat, memory, routines and settings.
 
-use bruhs_models::crew::{status_line, BruhStatus, PAGE_FACE_PX};
+use bruhs_models::crew::{job_line, status_line, BruhStatus, PAGE_FACE_PX};
 use bruhs_models::reactive::ReactiveCommand;
 use leptos::prelude::*;
 
@@ -35,15 +35,6 @@ impl Tab {
             Tab::Settings => "Settings",
         }
     }
-}
-
-/// The job line under a bruh's name: the first line of its instructions.
-fn job_line(instructions: &str) -> &str {
-    instructions
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or_default()
 }
 
 #[component]
@@ -187,16 +178,5 @@ pub fn BruhPage(agent_id: String) -> impl IntoView {
                 })}
             </Show>
         </section>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_job_is_the_first_line_with_words() {
-        assert_eq!(job_line("\n  Watch bills.\nPay nothing."), "Watch bills.");
-        assert_eq!(job_line(""), "");
     }
 }

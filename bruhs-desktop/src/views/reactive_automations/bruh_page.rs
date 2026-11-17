@@ -16,9 +16,10 @@ use crate::views::dropdown::{
     dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler,
 };
 use crate::views::web_button::is_web_button_activation_key;
-use bruhs_models::agent::{AgentProvider, ModelId};
+use bruhs_models::agent::ModelId;
 use bruhs_models::crew::{
-    level_unavailable, settings_commands, status_line, transcript, AccessLevel, ApprovalState,
+    access_options, approval_outcome, clamp_level, composer_block, current_settings, job_line,
+    line_key, may_have_more, merge_runs, settings_commands, status_line, transcript, AccessLevel,
     BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem, PAGE_FACE_PX, RAIL_FACE_PX,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
@@ -107,114 +108,12 @@ impl BruhTab {
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub(crate) struct ReactiveOpenAutomations;
 
-/// The job line under a bruh's name: the first line of its instructions.
-fn job_line(instructions: &str) -> &str {
-    instructions
-        .lines()
-        .map(str::trim)
-        .find(|line| !line.is_empty())
-        .unwrap_or_default()
-}
-
-/// Puts a page of runs into those already shown, replacing runs it updates.
-fn merge_runs(shown: &mut Vec<ReactiveRun>, page: Vec<ReactiveRun>) {
-    for run in page {
-        match shown.iter_mut().find(|known| known.id == run.id) {
-            Some(known) => *known = run,
-            None => shown.push(run),
-        }
-    }
-}
-
-/// Whether a page this long may have older runs behind it.
-fn may_have_more(page_len: usize) -> bool {
-    page_len >= HISTORY_LIMIT
-}
-
-/// Why the composer is off for a bruh in this state.
-fn composer_block(status: Option<BruhStatus>) -> Option<&'static str> {
-    match status? {
-        BruhStatus::Paused => Some("This bruh is paused. Resume it to chat."),
-        BruhStatus::Off => Some("This bruh is off. Turn it on in Agent workflows to chat."),
-        _ => None,
-    }
-}
-
-/// How a decided approval ended; `None` while it still waits.
-fn approval_outcome(item: &OutboxItem) -> Option<&'static str> {
-    item.resolved_at?;
-    Some(
-        match item.approval.as_ref().map(|approval| approval.state) {
-            Some(ApprovalState::Approved) => "Approved",
-            Some(ApprovalState::Denied) => "Denied",
-            Some(ApprovalState::Expired) => "Expired",
-            Some(ApprovalState::Waiting) | None => "Withdrawn",
-        },
-    )
-}
-
-/// What identifies a line as drawn; the transcript follows a new last line.
-fn line_key(item: &TranscriptItem) -> String {
-    match item {
-        TranscriptItem::Owner {
-            run_id, pending, ..
-        } => format!("owner:{run_id}:{pending}"),
-        TranscriptItem::Bruh {
-            run_id,
-            text,
-            failed,
-            ..
-        } => format!("bruh:{run_id}:{failed}:{text}"),
-        TranscriptItem::Card { item } => format!(
-            "card:{}:{}:{:?}",
-            item.id,
-            item.resolved_at.is_some(),
-            item.approval.as_ref().map(|approval| approval.state)
-        ),
-    }
-}
-
 /// An open question card waits for a typed reply.
 fn open_question(item: &OutboxItem, agent_id: &str) -> bool {
     item.agent_id == agent_id
         && item.kind == OutboxKind::Ask
         && item.approval.is_none()
         && item.resolved_at.is_none()
-}
-
-/// Each access level in display order, with why `model` can't run it.
-fn access_options(model: &str) -> Vec<(AccessLevel, Option<&'static str>)> {
-    let provider = AgentProvider::for_model(model);
-    [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full]
-        .into_iter()
-        .map(|level| (level, level_unavailable(level, provider)))
-        .collect()
-}
-
-/// `level`, or Read only when `model` can't run it.
-fn clamp_level(level: AccessLevel, model: &str) -> AccessLevel {
-    if level_unavailable(level, AgentProvider::for_model(model)).is_some() {
-        AccessLevel::ReadOnly
-    } else {
-        level
-    }
-}
-
-/// The settings a bruh has now, from the snapshot.
-fn current_settings(snapshot: &ReactiveSnapshot, agent_id: &str) -> Option<BruhSettings> {
-    let agent = snapshot.agents.iter().find(|agent| agent.id == agent_id)?;
-    let state = snapshot
-        .bruhs
-        .iter()
-        .find(|bruh| bruh.agent_id == agent_id)?;
-    Some(BruhSettings {
-        name: agent.name.clone(),
-        instructions: agent.instructions.clone(),
-        model: agent.model.clone(),
-        effort: state.effort.clone(),
-        look: state.look.clone(),
-        access: state.access.clone(),
-    })
 }
 
 /// The runs the chat shows, newest page first, then older pages.
@@ -1920,20 +1819,15 @@ impl ReactiveAutomations {
 #[cfg(test)]
 mod tests {
     use super::super::setup::{with_agent_fields, AgentFields};
-    use super::{
-        approval_outcome, clamp_level, composer_block, job_line, line_key, may_have_more, BruhTab,
-        Editor, ReactiveAutomations, RunsPage,
-    };
+    use super::{BruhTab, Editor, ReactiveAutomations, RunsPage};
     use crate::theme;
     use bruhs_models::crew::{
-        AccessLevel, BruhAccess, BruhColor, BruhLook, BruhState, BruhStatus, TranscriptItem,
-        CREW_PROTOCOL,
+        AccessLevel, BruhAccess, BruhColor, BruhLook, BruhState, BruhStatus, CREW_PROTOCOL,
     };
     use bruhs_models::reactive::{
         OutboxItem, ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun, ReactiveSnapshot,
         RunStatus, HISTORY_LIMIT,
     };
-    use bruhs_models::EpochMs;
     use gpui::{AppContext as _, Entity, VisualTestContext};
     use std::{cell::RefCell, rc::Rc};
 
@@ -2278,12 +2172,6 @@ mod tests {
     }
 
     #[test]
-    fn the_job_is_the_first_line_with_words() {
-        assert_eq!(job_line("\n  Watch bills.\nPay nothing."), "Watch bills.");
-        assert_eq!(job_line(""), "");
-    }
-
-    #[test]
     fn a_newer_page_updates_runs_in_place_and_older_pages_extend_them() {
         let mut page = RunsPage::default();
         page.take_newest(vec![run("r2", "running"), run("r1", "completed")]);
@@ -2310,53 +2198,13 @@ mod tests {
         );
         page.take_earlier(vec![run("r0", "completed")]);
         assert_eq!(page.oldest.as_deref(), Some("r0"));
-        assert!(may_have_more(HISTORY_LIMIT) && !may_have_more(HISTORY_LIMIT - 1));
-    }
-
-    #[test]
-    fn the_composer_says_why_a_paused_or_off_bruh_cannot_chat() {
-        assert!(composer_block(Some(BruhStatus::Paused))
-            .is_some_and(|reason| reason.contains("paused")));
-        assert!(composer_block(Some(BruhStatus::Off)).is_some_and(|reason| reason.contains("off")));
-        for status in [
-            BruhStatus::Asleep,
-            BruhStatus::Working,
-            BruhStatus::NeedsYou,
-        ] {
-            assert_eq!(composer_block(Some(status)), None);
-        }
-        assert_eq!(composer_block(None), None);
-    }
-
-    #[test]
-    fn a_decided_approval_says_how_and_an_open_one_waits() {
-        let mut item = ask("i", true);
-        assert_eq!(approval_outcome(&item), None);
-        item.resolved_at = Some(EpochMs::saturating_from_i64(2));
-        assert_eq!(approval_outcome(&item), Some("Withdrawn"));
-        if let Some(approval) = item.approval.as_mut() {
-            approval.state = bruhs_models::crew::ApprovalState::Approved;
-        }
-        assert_eq!(approval_outcome(&item), Some("Approved"));
-        let open = line_key(&TranscriptItem::Card { item: item.clone() });
-        item.resolved_at = None;
-        assert_ne!(open, line_key(&TranscriptItem::Card { item }));
-    }
-
-    #[test]
-    fn a_model_that_cannot_ask_drops_ask_to_read_only() {
-        assert_eq!(
-            clamp_level(AccessLevel::Ask, "gpt-5.1-codex"),
-            AccessLevel::ReadOnly
-        );
-        assert_eq!(
-            clamp_level(AccessLevel::Full, "gpt-5.1-codex"),
-            AccessLevel::Full
-        );
-        assert_eq!(
-            clamp_level(AccessLevel::Ask, "claude-sonnet-4-6"),
-            AccessLevel::Ask
-        );
+        // A full page may have older runs behind it.
+        let full: Vec<ReactiveRun> = (0..HISTORY_LIMIT)
+            .map(|n| run(&format!("old{n}"), "completed"))
+            .collect();
+        page.take_earlier(full);
+        assert!(page.more);
+        assert_eq!(page.oldest.as_deref(), Some("old49"));
     }
 
     #[gpui::test]
