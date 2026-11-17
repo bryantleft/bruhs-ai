@@ -27,6 +27,8 @@ impl WorkbenchPanel {
             let mut panel = PreviewPanelView::new(window, cx);
             // The page relays Verification's draft through `window.ipc`.
             panel.set_page_messages(sender);
+            // Web shows the Workbench page without browser chrome.
+            panel.set_url_row(false);
             panel.go_to(
                 &format!("{}/api/workbench/ui", server_base.trim_end_matches('/')),
                 window,
@@ -72,6 +74,10 @@ impl WorkbenchPanel {
     #[cfg(test)]
     pub(crate) fn server_base(&self) -> &str {
         &self.server_base
+    }
+    #[cfg(test)]
+    pub(crate) fn url_row_shown(&self, cx: &App) -> bool {
+        self.preview.read(cx).url_row_shown()
     }
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<'_, Self>) {
         self.preview.update(cx, |p, _| p.set_shown(shown));

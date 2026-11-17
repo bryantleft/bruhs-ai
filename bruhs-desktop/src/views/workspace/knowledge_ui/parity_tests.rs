@@ -206,9 +206,10 @@ fn document_preview_shows_the_unsaved_body_like_web(cx: &mut gpui::TestAppContex
     );
     workspace.read_with(cx, |workspace, _| assert!(!workspace.knowledge.preview));
 
-    // From the title field, Shift-Tab reaches Save, then Preview; one Enter
-    // toggles it once.
-    cx.simulate_keystrokes("shift-tab shift-tab");
+    // From the title field, Shift-Tab reaches Preview: Save waits for a
+    // change, and like a disabled web button it is skipped. One Enter
+    // toggles Preview once.
+    cx.simulate_keystrokes("shift-tab");
     press_key(cx, "enter");
     workspace.read_with(cx, |workspace, _| {
         assert!(
@@ -251,4 +252,55 @@ fn ask_agent_is_on_the_document_page_like_web(cx: &mut gpui::TestAppContext) {
         let chat = workspace.active_thread().expect("a thread").chat.read(cx);
         assert_eq!(chat.input_state.read(cx).value().as_str(), prompt);
     });
+}
+
+/// PM-43: like the web, the body field is at least 384px tall, the line
+/// under the tags says whether the document is saved, Save waits for a
+/// change, and an empty Backlinks panel says so.
+#[gpui::test]
+fn document_page_shows_its_body_and_save_state_like_web(cx: &mut gpui::TestAppContext) {
+    use bruhs_models::logic::knowledge_library::document_copy;
+    let (workspace, cx) = fixture(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        let mut plan = KnowledgeDocument::new("Plan", "# Saved\n\nLine two", 1);
+        plan.id = "plan".into();
+        workspace.knowledge_documents = vec![plan];
+        workspace.select_knowledge_document("plan", window, cx);
+    });
+    cx.run_until_parked();
+    let body = cx
+        .debug_bounds("desktop-knowledge-body")
+        .expect("the body field is drawn");
+    assert!(
+        body.size.height >= gpui::px(384.0),
+        "web's 384px body field, not one line: {body:?}"
+    );
+    let line = |workspace: &gpui::Entity<Workspace>, cx: &mut VisualTestContext| {
+        workspace.read_with(cx, |workspace, cx| workspace.document_save_line(cx))
+    };
+    assert_eq!(line(&workspace, cx), document_copy::SAVED);
+    workspace.read_with(cx, |workspace, cx| {
+        assert!(
+            !workspace.current_document_dirty(cx),
+            "Save waits for a change"
+        );
+    });
+    assert!(cx.debug_bounds("desktop-knowledge-save-line").is_some());
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.knowledge_body_input.update(cx, |input, cx| {
+            input.set_value("# Saved\n\nLine two, edited", window, cx);
+        });
+    });
+    cx.run_until_parked();
+    assert_eq!(line(&workspace, cx), document_copy::UNSAVED);
+    click(cx, "desktop-knowledge-save");
+    workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(
+            workspace.knowledge_documents[0].body_markdown,
+            "# Saved\n\nLine two, edited"
+        );
+        assert!(!workspace.current_document_dirty(cx));
+    });
+    assert_eq!(line(&workspace, cx), document_copy::SAVED);
 }

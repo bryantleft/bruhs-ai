@@ -76,11 +76,20 @@ fn build_grid(anchor_ms: f64) -> Vec<GridCell> {
 /// Events that overlap the local day starting at `day_ms`.
 fn events_for_day(events: &[CalendarEvent], day_ms: f64) -> Vec<CalendarEvent> {
     let day_end = crate::clock::add_local_days(day_ms, 1);
-    events
+    let mut day: Vec<CalendarEvent> = events
         .iter()
         .filter(|e| e.start_at_ms < day_end && e.end_at_ms > day_ms)
         .cloned()
-        .collect()
+        .collect();
+    // All-day events first, then by start, then title, as desktop lists a day.
+    day.sort_by(|a, b| {
+        b.all_day
+            .cmp(&a.all_day)
+            .then(a.start_at_ms.total_cmp(&b.start_at_ms))
+            .then_with(|| a.title.cmp(&b.title))
+            .then_with(|| a.id.cmp(&b.id))
+    });
+    day
 }
 
 /// Tasks whose `due_date` (a YYYY-MM-DD local date string) falls on this

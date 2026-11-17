@@ -1299,7 +1299,7 @@ impl ChatView {
                     .child(self.footer_icon_button(
                         "desktop-attach-file",
                         "Attach files",
-                        assets::TOOL_FILE_ICON_PATH,
+                        assets::PAPERCLIP_ICON_PATH,
                         |this, window, cx| this.attach_files(window, cx),
                         cx,
                     ))

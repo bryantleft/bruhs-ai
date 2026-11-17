@@ -142,7 +142,7 @@ pub fn PeoplePage() -> impl IntoView {
 
     view! {
         <div class="flex h-full flex-col bg-longan-950">
-            <crate::ui::PageHeader title="People" subtitle="Profiles from your meetings, with notes and reminders." />
+            <crate::ui::PageHeader title="People" subtitle=people_copy::PAGE_SUBTITLE />
             <div aria-label="Relationship save status">
                 <MetadataStatus status=relationship_store.status
                     retry=Callback::new(move |_| relationship_store.retry())

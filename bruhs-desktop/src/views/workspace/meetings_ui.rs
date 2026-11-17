@@ -1941,10 +1941,63 @@ impl Workspace {
     }
 
     /// Web `SearchPage`: ranked local results across every hydrated domain.
+    /// Web's Search keys while the search field has focus: Up and Down
+    /// choose a result, Enter opens it, Escape clears the search. Returns
+    /// whether the key was used.
+    pub(super) fn search_key(
+        &mut self,
+        event: &KeyDownEvent,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) -> bool {
+        let key = event.keystroke.key.as_str();
+        if event.keystroke.modifiers != Modifiers::default()
+            || !self.search_query_input.focus_handle(cx).is_focused(window)
+        {
+            return false;
+        }
+        let composing = self.search_query_input.update(cx, |input, cx| {
+            input.marked_text_range(window, cx).is_some()
+        });
+        if composing {
+            return false;
+        }
+        let query = self.search_query_input.read(cx).value().to_string();
+        match key {
+            "enter" => {
+                let hits = self.universal_search(&query, cx).1;
+                let Some(hit) = hits.get(self.search_selected.min(hits.len().saturating_sub(1)))
+                else {
+                    return false;
+                };
+                self.open_universal_search_hit(hit.clone(), window, cx);
+                true
+            }
+            "escape" => {
+                self.search_query_input
+                    .update(cx, |input, cx| input.set_value("", window, cx));
+                self.search_selected = 0;
+                cx.notify();
+                true
+            }
+            _ => {
+                let count = self.universal_search(&query, cx).1.len();
+                let Some(next) = Self::move_command_selected_index(self.search_selected, count, key)
+                else {
+                    return false;
+                };
+                self.search_selected = next;
+                cx.notify();
+                true
+            }
+        }
+    }
+
     pub(super) fn render_search_page(&self, window: &Window, cx: &Context<'_, Self>) -> AnyElement {
         let search_focused = self.search_query_input.focus_handle(cx).is_focused(window);
         let query = self.search_query_input.read(cx).value().to_string();
         let (indexed_count, results) = self.universal_search(&query, cx);
+        let selected = self.search_selected.min(results.len().saturating_sub(1));
         let transcripts_loading = self.meetings_hub.read(cx).search_loading;
 
         let status: AnyElement = if query.trim().is_empty() {
@@ -1956,7 +2009,7 @@ impl Workspace {
                 .px_4()
                 .py_3()
                 .child(body(
-                    "Find local records instantly. Results open the exact record.",
+                    bruhs_models::search_copy::HINT,
                     BODY_SM_PX,
                     theme::rambutan_500(),
                 ))
@@ -1991,6 +2044,15 @@ impl Workspace {
                         .id(("desktop-search-hit", index))
                         .debug_selector(move || format!("desktop-search-hit-{index}"))
                         .w_full()
+                        // Web: the selected result is lit and announced.
+                        .aria_selected(index == selected)
+                        .when(index == selected, |row| row.bg(theme::longan_800()))
+                        .on_mouse_move(cx.listener(move |this, _event, _window, cx| {
+                            if this.search_selected != index {
+                                this.search_selected = index;
+                                cx.notify();
+                            }
+                        }))
                         .rounded(px(8.0))
                         .px_3()
                         .py(px(10.0))
@@ -2070,6 +2132,12 @@ impl Workspace {
         div()
             .id("desktop-search-page")
             .debug_selector(|| "desktop-search-page".to_string())
+            .capture_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if this.search_key(event, window, cx) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                }
+            }))
             .flex_1()
             .h_full()
             .min_w_0()
@@ -2875,13 +2943,14 @@ impl Workspace {
         subscriptions.push(redraw_on_edit(&relationship_item_input, window, cx));
         let search_query_input = cx.new(|cx| {
             InputState::new(window, cx)
-                .placeholder("Search tasks, events, people, meetings, threads…")
+                .placeholder(bruhs_models::search_copy::PLACEHOLDER)
         });
         subscriptions.push(cx.subscribe_in(
             &search_query_input,
             window,
             |this: &mut Self, _input, ev: &InputEvent, _window, cx| {
                 if matches!(ev, InputEvent::Change) {
+                    this.search_selected = 0;
                     this.meetings_hub
                         .update(cx, |hub, cx| hub.ensure_search_cache(cx));
                     cx.notify();

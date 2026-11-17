@@ -1043,7 +1043,6 @@ impl Workspace {
             .debug_selector(|| "desktop-people-page".to_string())
             .relative()
             .flex_1()
-            .h_full()
             .min_w_0()
             .min_h_0()
             .overflow_y_scroll()
@@ -1051,8 +1050,7 @@ impl Workspace {
             .p_4()
             .flex()
             .flex_col()
-            .gap_3()
-            .child(label("People", H4_PX, theme::rambutan_100()).font_weight(FontWeight::MEDIUM));
+            .gap_3();
         if let Some(undo) = self.render_people_undo(cx) {
             page_el = page_el.child(undo);
         }
@@ -1184,7 +1182,21 @@ impl Workspace {
                 .map_or_else(String::new, |p| p.display_name.clone());
             page_el = page_el.child(self.render_enroll_modal(name, state, cx));
         }
-        page_el.into_any_element()
+        // Web `PageHeader`: the title and subtitle above the scrolling page.
+        div()
+            .flex_1()
+            .h_full()
+            .min_w_0()
+            .min_h_0()
+            .flex()
+            .flex_col()
+            .bg(theme::longan_950())
+            .child(crate::views::page_header::page_header(
+                "People",
+                Some(copy::PAGE_SUBTITLE.into()),
+            ))
+            .child(page_el)
+            .into_any_element()
     }
 
     fn render_people_create(&self, cx: &Context<'_, Self>) -> AnyElement {

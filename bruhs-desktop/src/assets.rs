@@ -28,6 +28,8 @@ pub const TOOL_GLOBE_ICON_PATH: &str = "icons/globe.svg";
 pub const TOOL_MESSAGE_QUESTION_ICON_PATH: &str = "icons/message-circle-question.svg";
 // Sidebar / composer icons (same lucide paths as bruhs-web/src/ui/icon.rs).
 pub const SQUARE_PEN_ICON_PATH: &str = "icons/square-pen.svg";
+/// The composer's Attach control, as on the web.
+pub const PAPERCLIP_ICON_PATH: &str = "icons/paperclip.svg";
 pub const FOLDER_PLUS_ICON_PATH: &str = "icons/folder-plus.svg";
 pub const LIST_CHECKS_ICON_PATH: &str = "icons/list-checks.svg";
 pub const MIC_ICON_PATH: &str = "icons/mic.svg";
@@ -84,6 +86,7 @@ const EXTERNAL_LINK_ICON: &[u8] =
     include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/external-link.svg");
 pub const EXTERNAL_LINK_ICON_PATH: &str = "icons/external-link.svg";
 pub const REFRESH_ICON_PATH: &str = "icons/refresh-cw.svg";
+const PAPERCLIP_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>"#;
 const SQUARE_PEN_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 3H5a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.375 2.625a1 1 0 0 1 3 3l-9.013 9.014a2 2 0 0 1-.853.505l-2.873.84a.5.5 0 0 1-.62-.62l.84-2.873a2 2 0 0 1 .506-.852z"/></svg>"#;
 const FOLDER_PLUS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 10v6"/><path d="M9 13h6"/><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"#;
 const LIST_CHECKS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m3 17 2 2 4-4"/><path d="m3 7 2 2 4-4"/><path d="M13 6h8"/><path d="M13 12h8"/><path d="M13 18h8"/></svg>"#;
@@ -220,6 +223,7 @@ impl AssetSource for DesktopAssets {
             "icons/square-terminal.svg" => Ok(Some(Cow::Borrowed(TOP_BAR_TERMINAL_ICON))),
             EXTERNAL_LINK_ICON_PATH => Ok(Some(Cow::Borrowed(EXTERNAL_LINK_ICON))),
             SQUARE_PEN_ICON_PATH => Ok(Some(Cow::Borrowed(SQUARE_PEN_ICON))),
+            PAPERCLIP_ICON_PATH => Ok(Some(Cow::Borrowed(PAPERCLIP_ICON))),
             FOLDER_PLUS_ICON_PATH => Ok(Some(Cow::Borrowed(FOLDER_PLUS_ICON))),
             LIST_CHECKS_ICON_PATH => Ok(Some(Cow::Borrowed(LIST_CHECKS_ICON))),
             MIC_ICON_PATH => Ok(Some(Cow::Borrowed(MIC_ICON))),
@@ -264,6 +268,7 @@ impl AssetSource for DesktopAssets {
             ]),
             "icons" => Ok(vec![
                 "activity.svg".into(),
+                "paperclip.svg".into(),
                 "sun.svg".into(),
                 "inbox.svg".into(),
                 "arrow-up.svg".into(),

@@ -1424,6 +1424,8 @@ pub struct Workspace {
     /// Normalized universal-search records, rebuilt only when source data's
     /// fingerprint changes rather than on every keystroke.
     universal_search_index: RefCell<Option<(u64, bruhs_models::SearchIndex)>>,
+    /// The Search result Up and Down select and Enter opens (web `selected`).
+    search_selected: usize,
     person_rename_input: Entity<InputState>,
     speaker_rename_input: Entity<InputState>,
     renaming_person_id: Option<String>,
@@ -2095,6 +2097,7 @@ impl Workspace {
             transcript_rendered_rows: std::cell::Cell::new(0),
             search_query_input,
             universal_search_index: RefCell::new(None),
+            search_selected: 0,
             person_rename_input,
             speaker_rename_input,
             renaming_person_id: None,

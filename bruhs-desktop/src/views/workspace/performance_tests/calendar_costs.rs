@@ -1,7 +1,8 @@
 use super::{fixture, print_samples, tasks};
 use crate::views::workspace::{
-    at_hour, calendar_month_days, event_overlaps_day, month_grid_start, work_item_due_on, AppView,
-    DesktopCalendarEvent, DesktopCalendarMode, Workspace, DESKTOP_DATE_FORMAT,
+    at_hour, calendar_month_days, day_event_order, event_overlaps_day, month_grid_start,
+    work_item_due_on, AppView, DesktopCalendarEvent, DesktopCalendarMode, Workspace,
+    DESKTOP_DATE_FORMAT,
 };
 use bruhs_models::{num::ToFloatLossy, CalendarEvent as RemoteEvent};
 use chrono::{Duration, Local, NaiveDate, TimeZone};
@@ -114,10 +115,11 @@ fn month_projection_preserves_boundaries_exact_due_strings_counts_and_source_ord
     let days = calendar_month_days(&events, &tasks, start);
     assert_eq!(days.len(), 42);
     for day in days {
-        let expected_events = events
+        let mut expected_events = events
             .iter()
             .filter(|event| event_overlaps_day(event, day.date))
             .collect::<Vec<_>>();
+        expected_events.sort_by(|a, b| day_event_order(a, b));
         let expected_tasks = tasks
             .iter()
             .filter(|task| work_item_due_on(task, day.date))

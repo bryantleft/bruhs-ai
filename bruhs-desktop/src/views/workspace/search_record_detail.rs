@@ -279,3 +279,77 @@ impl Workspace {
         )
     }
 }
+
+#[cfg(test)]
+mod search_key_tests {
+    use super::super::performance_tests::fixture;
+    use super::super::AppView;
+    use bruhs_models::KnowledgeDocument;
+
+    /// PM-51: like the web, Down and Up choose a Search result while the
+    /// search field has focus, Enter opens the chosen one, and Escape clears
+    /// the search.
+    #[gpui::test]
+    fn search_keys_choose_and_open_results_like_web(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        workspace.update_in(cx, |workspace, window, cx| {
+            let mut alpha = KnowledgeDocument::new("Quartz alpha", "First", 1);
+            alpha.id = "alpha".into();
+            let mut beta = KnowledgeDocument::new("Quartz beta", "Second", 2);
+            beta.id = "beta".into();
+            workspace.knowledge_documents = vec![alpha, beta];
+            workspace.active_view = AppView::Search;
+            workspace.search_query_input.update(cx, |input, cx| {
+                input.set_value("", window, cx);
+                input.focus(window, cx);
+            });
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.simulate_input("quartz");
+        cx.run_until_parked();
+        let hits = workspace.update(cx, |workspace, cx| {
+            workspace
+                .universal_search("quartz", cx)
+                .1
+                .into_iter()
+                .map(|hit| hit.document.title)
+                .collect::<Vec<_>>()
+        });
+        assert_eq!(hits.len(), 2, "{hits:?}");
+        workspace.read_with(cx, |workspace, _| assert_eq!(workspace.search_selected, 0));
+
+        cx.simulate_keystrokes("down");
+        workspace.read_with(cx, |workspace, _| assert_eq!(workspace.search_selected, 1));
+        cx.simulate_keystrokes("up");
+        cx.simulate_keystrokes("down");
+        cx.simulate_keystrokes("enter");
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            let AppView::DocumentDetail { document_id } = &workspace.active_view else {
+                panic!("Enter opens the chosen result: {:?}", workspace.active_view);
+            };
+            let opened = workspace
+                .knowledge_documents
+                .iter()
+                .find(|document| &document.id == document_id)
+                .map(|document| document.title.clone());
+            assert_eq!(opened.as_deref(), Some(hits[1].as_str()));
+        });
+
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.active_view = AppView::Search;
+            workspace
+                .search_query_input
+                .update(cx, |input, cx| input.focus(window, cx));
+            cx.notify();
+        });
+        cx.run_until_parked();
+        cx.simulate_keystrokes("escape");
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(workspace.search_query_input.read(cx).value().as_str(), "");
+            assert_eq!(workspace.search_selected, 0);
+            assert_eq!(workspace.active_view, AppView::Search);
+        });
+    }
+}

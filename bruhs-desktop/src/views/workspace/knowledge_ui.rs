@@ -5,7 +5,7 @@
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
-use bruhs_models::logic::knowledge_library::{self as library, source_host, Card};
+use bruhs_models::logic::knowledge_library::{self as library, document_copy, source_host, Card};
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::num::ToFloatLossy;
 use gpui::prelude::*;
@@ -81,6 +81,9 @@ impl KnowledgeState {
         self.index.get_mut().take();
     }
 }
+
+/// Web's document body field: `min-h-[384px]`.
+const DOCUMENT_BODY_HEIGHT_PX: f32 = 384.0;
 
 /// The web Knowledge page's subtitle.
 const KNOWLEDGE_PAGE_SUBTITLE: &str = "Markdown documents and saved sources, local and searchable.";
@@ -241,6 +244,45 @@ impl Workspace {
         };
         self.clip_create_visible = false;
         self.persist_and_notify(cx);
+    }
+
+    /// The open document's fields differ from what is saved (web `dirty`).
+    pub(super) fn current_document_dirty(&self, cx: &App) -> bool {
+        let AppView::DocumentDetail { document_id } = &self.active_view else {
+            return false;
+        };
+        let Some(document) = self
+            .knowledge_documents
+            .iter()
+            .find(|document| document.id == *document_id)
+        else {
+            return false;
+        };
+        let tags = self
+            .knowledge_tags_input
+            .read(cx)
+            .value()
+            .split(',')
+            .map(str::to_string)
+            .collect();
+        document.clone().revise(
+            self.knowledge_title_input.read(cx).value().to_string(),
+            self.knowledge_body_input.read(cx).value().to_string(),
+            tags,
+            document.updated_at_ms,
+        )
+    }
+
+    /// Web's line under the tags: whether the document is saved.
+    fn document_save_line(&self, cx: &App) -> &'static str {
+        match self.save_status {
+            SaveStatus::Saving => document_copy::SAVING,
+            SaveStatus::Failed(_) | SaveStatus::Conflict | SaveStatus::RecoveryRequired(_) => {
+                document_copy::NOT_SAVED
+            }
+            SaveStatus::Saved if self.current_document_dirty(cx) => document_copy::UNSAVED,
+            SaveStatus::Saved => document_copy::SAVED,
+        }
     }
 
     pub(super) fn save_current_document(&mut self, cx: &mut Context<'_, Self>) {
@@ -974,6 +1016,7 @@ impl Workspace {
         let Some(document) = document else {
             return self.render_knowledge_page(cx);
         };
+        let dirty = self.current_document_dirty(cx);
         let links = document
             .links
             .iter()
@@ -1228,16 +1271,17 @@ impl Workspace {
                                     "save-knowledge-document",
                                     WebButtonVariant::Primary,
                                     WebButtonSize::Small,
-                                    ButtonState::Enabled,
+                                    ButtonState::disabled_if(!dirty),
                                 )
                                 .debug_selector(|| "desktop-knowledge-save".to_string())
                                 .aria_label("Save")
                                 .child("Save")
-                                .on_click(cx.listener(
-                                    |this, _event, _window, cx| {
+                                // Web: disabled until the document changes.
+                                .when(dirty, |button| {
+                                    button.on_click(cx.listener(|this, _event, _window, cx| {
                                         this.save_current_document(cx);
-                                    },
-                                )),
+                                    }))
+                                }),
                             ),
                     ),
             )
@@ -1275,6 +1319,8 @@ impl Workspace {
                                         div()
                                             .debug_selector(|| "desktop-knowledge-body".to_string())
                                             .w_full()
+                                            // Web's body field: at least 384px tall.
+                                            .h(px(DOCUMENT_BODY_HEIGHT_PX))
                                             .child(
                                                 Input::new(&self.knowledge_body_input)
                                                     .aria_label("Document Markdown body")
@@ -1292,6 +1338,18 @@ impl Workspace {
                                         Input::new(&self.knowledge_tags_input)
                                             .aria_label("Document tags, comma separated")
                                             .w_full(),
+                                    )
+                                    .child(
+                                        div()
+                                            .id("desktop-knowledge-save-line")
+                                            .debug_selector(|| {
+                                                "desktop-knowledge-save-line".to_string()
+                                            })
+                                            .role(Role::Status)
+                                            .min_h(px(20.0))
+                                            .text_size(px(12.0))
+                                            .text_color(theme::rambutan_500())
+                                            .child(self.document_save_line(cx)),
                                     ),
                             )
                             .child(
@@ -1336,7 +1394,20 @@ impl Workspace {
                                             .into_any_element(),
                                         ),
                                     ))
-                                    .child(knowledge_meta_panel("Backlinks", backlinks, None))
+                                    .child(knowledge_meta_panel(
+                                        "Backlinks",
+                                        if backlinks.is_empty() {
+                                            vec![div()
+                                                .px_2()
+                                                .text_size(px(13.0))
+                                                .text_color(theme::rambutan_500())
+                                                .child(document_copy::NO_BACKLINKS)
+                                                .into_any_element()]
+                                        } else {
+                                            backlinks
+                                        },
+                                        None,
+                                    ))
                                     .child(knowledge_meta_panel("History", versions, None)),
                             ),
                     ),
