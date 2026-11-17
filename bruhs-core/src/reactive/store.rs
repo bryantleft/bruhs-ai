@@ -224,6 +224,8 @@ pub(super) fn snapshot(connection: &mut Connection) -> Result<ReactiveSnapshot, 
         memories: always_on::memories(connection)?,
         follow_ups: always_on::follow_ups(connection)?,
         notification_settings: always_on::notification_settings(connection)?,
+        bruhs: Vec::new(),
+        protocol: 0,
     })
 }
 
@@ -826,6 +828,15 @@ pub(super) fn command(
                 applied_steps,
                 total_steps,
             )?,
+            ReactiveCommand::CreateBruh { .. }
+            | ReactiveCommand::SetBruh { .. }
+            | ReactiveCommand::StopAll
+            | ReactiveCommand::StopBruh { .. }
+            | ReactiveCommand::ResumeBruh { .. }
+            | ReactiveCommand::ResumeAll
+            | ReactiveCommand::DecideApproval { .. } => {
+                return Err(ReactiveError::Conflict("Not available yet.".into()));
+            }
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
                 if run.status == RunStatus::Queued {
@@ -958,6 +969,7 @@ fn new_run(
         report_warning: None,
         fresh_session: false,
         context_tokens: None,
+        owner_message: None,
     })
 }
 

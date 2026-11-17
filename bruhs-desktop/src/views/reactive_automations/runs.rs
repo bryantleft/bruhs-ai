@@ -106,6 +106,7 @@ mod tests {
             report_warning: None,
             fresh_session: false,
             context_tokens: None,
+            owner_message: None,
         }
     }
 

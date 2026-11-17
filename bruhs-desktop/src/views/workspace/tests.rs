@@ -3488,6 +3488,7 @@ fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::Test
             resolved_at: None,
             answer: None,
             system: Default::default(),
+            approval: None,
         };
         workspace.reactive_automations.update(cx, |panel, cx| {
             panel.show_snapshot_for_test(

@@ -219,6 +219,7 @@ mod tests {
             resolved_at: None,
             answer: None,
             system: SystemDelivery::NotRequested,
+            approval: None,
         }
     }
 
@@ -227,6 +228,8 @@ mod tests {
             unread: usize::from(latest.is_some()),
             open_questions: 0,
             latest_unread: latest,
+            bruhs: Vec::new(),
+            protocol: 0,
         }
     }
 

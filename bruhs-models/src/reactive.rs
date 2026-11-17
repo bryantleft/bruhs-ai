@@ -1,5 +1,6 @@
 //! Durable event-driven agents shared by the local server and both clients.
 
+use crate::crew::{BruhAccess, BruhLook, BruhState};
 use crate::{ids::ThreadId, EpochMs};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -209,6 +210,9 @@ pub struct ReactiveRun {
     /// Context window after the run's last model request, when reported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub context_tokens: Option<u64>,
+    /// The owner's own words on a Chat run, kept when batching rewrites `prompt`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -320,6 +324,36 @@ pub enum ReactiveCommand {
         #[serde(default)]
         total_steps: u32,
     },
+    CreateBruh {
+        agent: ReactiveAgent,
+        #[serde(default)]
+        look: BruhLook,
+        #[serde(default)]
+        access: BruhAccess,
+        #[serde(default)]
+        effort: Option<String>,
+    },
+    SetBruh {
+        agent_id: String,
+        look: BruhLook,
+        access: BruhAccess,
+        #[serde(default)]
+        effort: Option<String>,
+    },
+    /// Pause every bruh and cancel what is running.
+    StopAll,
+    StopBruh {
+        agent_id: String,
+    },
+    ResumeBruh {
+        agent_id: String,
+    },
+    ResumeAll,
+    /// Decide a tool call a bruh paused on.
+    DecideApproval {
+        id: String,
+        approve: bool,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -350,6 +384,12 @@ pub struct ReactiveSnapshot {
     pub follow_ups: Vec<FollowUp>,
     #[serde(default)]
     pub notification_settings: NotificationSettings,
+    /// Every bruh as the rail shows it.
+    #[serde(default)]
+    pub bruhs: Vec<BruhState>,
+    /// Crew wire version the service speaks; 0 from an older service.
+    #[serde(default)]
+    pub protocol: u32,
 }
 
 impl ReactiveSnapshot {

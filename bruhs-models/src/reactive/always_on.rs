@@ -111,9 +111,16 @@ pub struct OutboxItem {
     pub answer: Option<String>,
     #[serde(default)]
     pub system: SystemDelivery,
+    /// A tool call waiting on the owner's decision.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub approval: Option<crate::crew::ApprovalRequest>,
 }
 
 impl OutboxItem {
+    pub fn is_open_approval(&self) -> bool {
+        self.approval.is_some() && self.resolved_at.is_none()
+    }
+
     pub fn is_unread(&self) -> bool {
         self.read_at.is_none() && self.resolved_at.is_none()
     }
@@ -131,6 +138,10 @@ pub struct OutboxSignal {
     /// The newest unread item, so a client can show it without a full snapshot.
     #[serde(default)]
     pub latest_unread: Option<OutboxItem>,
+    #[serde(default)]
+    pub bruhs: Vec<crate::crew::BruhState>,
+    #[serde(default)]
+    pub protocol: u32,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

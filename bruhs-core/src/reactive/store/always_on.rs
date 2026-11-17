@@ -109,6 +109,7 @@ fn create_item(
         } else {
             SystemDelivery::NotRequested
         },
+        approval: None,
     };
     // A retried run reuses its receipt; its earlier update stays the record.
     let exists: bool = connection.query_row(
@@ -217,6 +218,8 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
         unread: usize::try_from(unread).unwrap_or_default(),
         open_questions: usize::try_from(open_questions).unwrap_or_default(),
         latest_unread: latest.map(decode).transpose()?,
+        bruhs: Vec::new(),
+        protocol: 0,
     })
 }
 

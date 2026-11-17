@@ -182,6 +182,7 @@ mod tests {
             resolved_at: None,
             answer: None,
             system: SystemDelivery::NotRequested,
+            approval: None,
         }
     }
 

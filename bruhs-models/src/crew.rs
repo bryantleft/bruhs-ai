@@ -10,6 +10,8 @@ use crate::EpochMs;
 
 mod access;
 pub use access::*;
+#[cfg(test)]
+mod wire_tests;
 
 /// Version of the crew wire format the background service speaks.
 pub const CREW_PROTOCOL: u32 = 1;
@@ -334,6 +336,27 @@ pub fn service_notice(
     } else {
         None
     }
+}
+
+/// Where an approval a bruh asked for stands.
+#[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum ApprovalState {
+    #[default]
+    Waiting,
+    Approved,
+    Denied,
+    Expired,
+}
+
+/// A tool call a bruh paused on until the owner decides.
+#[derive(Serialize, Deserialize, Debug, Clone, PartialEq, Eq)]
+pub struct ApprovalRequest {
+    pub tool: String,
+    pub summary: String,
+    pub fingerprint: String,
+    #[serde(default)]
+    pub state: ApprovalState,
 }
 
 /// Starting values for a new bruh.
