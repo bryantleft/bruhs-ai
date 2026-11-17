@@ -303,9 +303,7 @@ impl Workspace {
                     .flex_col()
                     .gap(px(CREW_ROW_GAP_PX))
                     .children(
-                        rows.iter()
-                            .enumerate()
-                            .map(|(index, bruh)| self.render_crew_row(index, bruh, cx)),
+                        rows.iter().map(|bruh| self.render_crew_row(bruh, cx)),
                     ),
             )
         });
@@ -373,7 +371,6 @@ impl Workspace {
 
     fn render_crew_row(
         &self,
-        index: usize,
         bruh: &BruhState,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
@@ -385,7 +382,9 @@ impl Workspace {
         let selector = format!("desktop-crew-row-{agent_id}");
         on_press(
             div()
-                .id(("desktop-crew-row", index))
+                // Keyed by the bruh, so focus stays on it when the rail
+                // re-sorts.
+                .id(SharedString::from(selector.clone()))
                 .debug_selector(move || selector)
                 .role(Role::Button)
                 .aria_label(row_label(bruh))
@@ -651,13 +650,27 @@ mod tests {
         // Clicking a row opens the bruh.
         cx.simulate_click(amy.center(), gpui::Modifiers::default());
         cx.run_until_parked();
-        workspace.update(cx, |workspace, _| {
+        workspace.update(cx, |workspace, cx| {
             assert_eq!(
                 workspace.active_view,
                 bruhs_models::AppView::Bruh {
                     agent_id: "id-amy".into()
                 }
             );
+            assert_eq!(
+                workspace.reactive_automations.read(cx).bruh_page_agent(),
+                Some("id-amy")
+            );
+        });
+        assert!(cx.debug_bounds("desktop-bruh-page").is_some(), "its page shows");
+        // Leaving the bruh closes its page; Automations draws the panel again.
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.activate_sidebar_view(bruhs_models::AppView::Automations, window, cx);
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-bruh-page").is_none());
+        workspace.update(cx, |workspace, cx| {
+            assert_eq!(workspace.reactive_automations.read(cx).bruh_page_agent(), None);
         });
     }
 

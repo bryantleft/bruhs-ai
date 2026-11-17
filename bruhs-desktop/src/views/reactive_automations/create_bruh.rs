@@ -19,16 +19,16 @@ const ROLE_LABEL: &str = "Start from role";
 /// Web `Textarea rows=2`: two 21px lines, `py-1.5` and the 1px ring.
 const JOB_FIELD_PX: f32 = 55.0;
 const LABEL_TEXT_PX: f32 = 12.0;
-const FIELD_TEXT_PX: f32 = theme::APP_INPUT_TEXT_SIZE_PX;
-const FIELD_RADIUS_PX: f32 = 8.0;
-const FIELD_X_PADDING_PX: f32 = 10.0;
+pub(super) const FIELD_TEXT_PX: f32 = theme::APP_INPUT_TEXT_SIZE_PX;
+pub(super) const FIELD_RADIUS_PX: f32 = 8.0;
+pub(super) const FIELD_X_PADDING_PX: f32 = 10.0;
 const ROLE_LIST_PADDING_PX: f32 = 4.0;
 const ROLE_OPTION_RADIUS_PX: f32 = 6.0;
 /// Web `bg-white/5 inset-ring-white/10` on fields.
 const FIELD_FILL_OPACITY: f32 = 0.05;
 const FIELD_RING_OPACITY: f32 = 0.10;
 const OPTION_HOVER_OPACITY: f32 = 0.60;
-const ERROR_FILL_OPACITY: f32 = 0.10;
+pub(super) const ERROR_FILL_OPACITY: f32 = 0.10;
 
 /// The dialog's state while it is open.
 pub(super) struct CreateBruh {
@@ -61,7 +61,7 @@ fn role_draft(roles: &[ResolvedRole], id: &str) -> Option<BruhDraft> {
         .map(|role| draft_from_role(role, DEFAULT_AGENT_MODEL))
 }
 
-fn label(text: &'static str) -> Div {
+pub(super) fn label(text: &'static str) -> Div {
     div()
         .text_size(px(LABEL_TEXT_PX))
         .font_family(theme::UI_SMALL_FONT_FAMILY)
@@ -69,7 +69,7 @@ fn label(text: &'static str) -> Div {
         .child(text)
 }
 
-fn hint(text: impl Into<SharedString>) -> Div {
+pub(super) fn hint(text: impl Into<SharedString>) -> Div {
     div()
         .min_w_0()
         .text_size(px(LABEL_TEXT_PX))
@@ -78,7 +78,7 @@ fn hint(text: impl Into<SharedString>) -> Div {
         .child(text.into())
 }
 
-fn labelled(text: &'static str, control: impl IntoElement) -> Div {
+pub(super) fn labelled(text: &'static str, control: impl IntoElement) -> Div {
     div()
         .min_w_0()
         .w_full()
@@ -89,7 +89,11 @@ fn labelled(text: &'static str, control: impl IntoElement) -> Div {
         .child(control)
 }
 
-fn text_field(input: &Entity<InputState>, aria: &'static str, disabled: bool) -> impl IntoElement {
+pub(super) fn text_field(
+    input: &Entity<InputState>,
+    aria: &'static str,
+    disabled: bool,
+) -> impl IntoElement {
     Styled::h(
         Input::new(input).aria_label(aria).disabled(disabled),
         px(theme::CONTROL_PX),

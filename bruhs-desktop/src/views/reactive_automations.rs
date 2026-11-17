@@ -8,6 +8,7 @@ use crate::{
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::crew::{service_is_current, service_notice, BruhState, ServiceNotice};
 use bruhs_models::reactive::*;
+mod bruh_page;
 mod create_bruh;
 mod editor_fields;
 mod face_editor;
@@ -17,11 +18,12 @@ mod runs;
 mod setup;
 mod updates;
 mod weekly_reports;
+pub(crate) use bruh_page::ReactiveOpenAutomations;
 pub(crate) use create_bruh::ReactiveBruhCreated;
 use gpui::{prelude::*, *};
 use gpui_component::input::{Input, InputEvent, InputState};
 use std::{
-    collections::{HashMap, HashSet},
+    collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
     time::{Duration, Instant},
 };
@@ -197,6 +199,11 @@ pub(crate) struct ReactiveAutomations {
     awareness: Option<gpui::Subscription>,
     crew: CrewState,
     create: Option<create_bruh::CreateBruh>,
+    /// The bruh page on screen, while the workspace shows one.
+    bruh: Option<bruh_page::BruhPage>,
+    /// Commands waiting for the one in flight, sent in order; a failure
+    /// drops them, since they assumed it would apply.
+    queued: VecDeque<(ReactiveCommand, Scope)>,
     /// Every command sent, in order; tests never reach a server.
     #[cfg(test)]
     sent: Vec<ReactiveCommand>,
@@ -488,6 +495,8 @@ impl ReactiveAutomations {
             awareness: None,
             crew: CrewState::default(),
             create: None,
+            bruh: None,
+            queued: VecDeque::new(),
             #[cfg(test)]
             sent: Vec::new(),
         };
@@ -573,9 +582,13 @@ impl ReactiveAutomations {
                 message: format!("{}: {}", self.agent_name(&item.agent_id), item.title),
             });
         }
-        self.snapshot = Some(bruhs_models::weekly_reports::editable_automation_snapshot(
-            snapshot,
-        ));
+        let snapshot = bruhs_models::weekly_reports::editable_automation_snapshot(snapshot);
+        let changed = self.snapshot.as_ref() != Some(&snapshot);
+        self.snapshot = Some(snapshot);
+        // A bruh page reads its newest runs again whenever anything changed.
+        if changed {
+            self.reload_bruh_runs(cx);
+        }
         let settings = self.snapshot.as_ref().map(|s| &s.notification_settings);
         if self
             .notify_form
@@ -631,8 +644,12 @@ impl ReactiveAutomations {
         }
         #[cfg(test)]
         self.sent.push(command.clone());
-        // Tests record the command and never reach a real server.
+        // Tests record the command, and any queued after it, and never reach
+        // a real server.
         if cfg!(test) {
+            if let Some((next, scope)) = self.queued.pop_front() {
+                self.send_in(next, scope, cx);
+            }
             return;
         }
         self.busy = true;
@@ -656,8 +673,12 @@ impl ReactiveAutomations {
                     Ok(snapshot) => {
                         this.set_snapshot(snapshot, cx);
                         this.apply_effect(effect, cx);
+                        if let Some((next, scope)) = this.queued.pop_front() {
+                            this.send_in(next, scope, cx);
+                        }
                     }
                     Err(error) => {
+                        this.queued.clear();
                         let message = reactive_error(error);
                         if scope == Scope::CreateBruh {
                             this.create_failed();
@@ -673,6 +694,21 @@ impl ReactiveAutomations {
             });
         }));
         cx.notify();
+    }
+    /// Send `commands` in order, after any command already on its way.
+    fn send_all(
+        &mut self,
+        commands: Vec<ReactiveCommand>,
+        scope: Scope,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.queued
+            .extend(commands.into_iter().map(|command| (command, scope.clone())));
+        if !self.busy {
+            if let Some((next, scope)) = self.queued.pop_front() {
+                self.send_in(next, scope, cx);
+            }
+        }
     }
     fn apply_effect(&mut self, effect: Effect, cx: &mut Context<'_, Self>) {
         match effect {
@@ -1361,6 +1397,10 @@ impl ReactiveAutomations {
             self.crew.bruhs = signal.bruhs;
             cx.notify();
         }
+        // A bruh page reads the crew again on every change, like the web's.
+        if self.bruh.is_some() {
+            self.refresh_snapshot(cx);
+        }
         self.note_crew_protocol(signal.protocol, cx);
     }
     /// Record the serving protocol; a new one reads the installed service
@@ -1460,6 +1500,7 @@ impl EventEmitter<ReactivePreview> for ReactiveAutomations {}
 impl EventEmitter<ReactiveProjectOpened> for ReactiveAutomations {}
 impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
 impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
+impl EventEmitter<ReactiveOpenAutomations> for ReactiveAutomations {}
 
 impl Render for ReactiveAutomations {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
@@ -1469,6 +1510,12 @@ impl Render for ReactiveAutomations {
         }
         if !self.service.loaded && cfg!(not(test)) {
             self.load_service(cx);
+        }
+        if let Some(agent_id) = self.bruh_page_agent().map(str::to_string) {
+            self.ensure_bruh_page(_window, cx);
+            return self
+                .render_bruh_page(&agent_id, _window, cx)
+                .into_any_element();
         }
         let disabled = self.busy || self.snapshot.is_none();
         self.ensure_weekly_inputs(_window, cx);
@@ -1508,7 +1555,7 @@ impl Render for ReactiveAutomations {
                 panel = panel.child(editor);
             }
         }
-        panel = panel.child(self.render_automation_cards(cx));
+        panel = panel.child(self.render_automation_cards_for(None, cx));
         // Both wait for the server: no settings or service state exists before it answers.
         let notifications = self
             .notify_form
@@ -2074,7 +2121,7 @@ impl Render for ReactiveAutomations {
                 panel = panel.child(row.child(actions));
             }
         }
-        panel
+        panel.into_any_element()
     }
 }
 

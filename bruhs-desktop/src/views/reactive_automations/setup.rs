@@ -8,6 +8,9 @@ pub(super) struct AutomationEditor {
     subscription: SubscriptionEditor,
     review: Option<AutomationSetup>,
     advanced: bool,
+    /// Opened on a bruh's page: the routine runs as that bruh, so its agent
+    /// fields are hidden and the agent is sent exactly as saved.
+    agent_locked: bool,
 }
 
 impl AutomationEditor {
@@ -17,6 +20,54 @@ impl AutomationEditor {
     pub(super) fn subscription_mut(&mut self) -> &mut SubscriptionEditor {
         &mut self.subscription
     }
+    #[cfg(test)]
+    pub(super) fn review(&self) -> Option<&AutomationSetup> {
+        self.review.as_ref()
+    }
+    /// The bruh this routine is locked to, when it was opened on its page.
+    pub(super) fn locked_agent(&self) -> Option<&str> {
+        self.agent_locked.then_some(self.agent.agent.id.as_str())
+    }
+}
+
+/// What the setup form says about the agent.
+pub(super) struct AgentFields {
+    pub(super) name: String,
+    pub(super) purpose: String,
+    pub(super) folder: String,
+    pub(super) model: String,
+    pub(super) memory: String,
+}
+
+/// `agent` with the form's fields applied (web `with_agent_fields`). A
+/// routine made on a bruh's page runs as that bruh: its agent stays exactly
+/// as saved, so a routine never renames it, rewrites its job, moves its
+/// folder, switches its model past the access check or turns it on.
+pub(super) fn with_agent_fields(
+    mut agent: ReactiveAgent,
+    fields: AgentFields,
+    agent_locked: bool,
+) -> Result<ReactiveAgent, String> {
+    if agent_locked {
+        return Ok(agent);
+    }
+    if fields.name.trim().is_empty()
+        || fields.purpose.trim().is_empty()
+        || fields.folder.trim().is_empty()
+    {
+        return Err(
+            "Enter an automation name, purpose, and working folder before reviewing.".into(),
+        );
+    }
+    bruhs_models::agent::ModelId::try_from(fields.model.clone())
+        .map_err(|error| error.to_string())?;
+    agent.name = fields.name;
+    agent.instructions = fields.purpose;
+    agent.project_path = fields.folder;
+    agent.model = fields.model;
+    agent.memory = fields.memory;
+    agent.enabled = true;
+    Ok(agent)
 }
 
 impl ReactiveAutomations {
@@ -26,11 +77,41 @@ impl ReactiveAutomations {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        self.open_automation_as(setup, None, window, cx);
+    }
+    /// A routine on `agent_id`'s page: a new one starts from that bruh, and
+    /// either way the bruh is never rewritten.
+    pub(super) fn open_routine(
+        &mut self,
+        setup: Option<AutomationSetup>,
+        agent_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(bruh) = self
+            .snapshot
+            .as_ref()
+            .and_then(|snapshot| snapshot.agents.iter().find(|agent| agent.id == agent_id))
+            .cloned()
+        else {
+            return;
+        };
+        self.open_automation_as(setup, Some(bruh), window, cx);
+    }
+    fn open_automation_as(
+        &mut self,
+        setup: Option<AutomationSetup>,
+        bruh: Option<ReactiveAgent>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         if self.busy || self.snapshot.is_none() {
             return;
         }
         let is_new = setup.is_none();
-        self.open_agent(setup.as_ref().map(|s| s.agent.clone()), window, cx);
+        let agent_locked = bruh.is_some();
+        let seed = setup.as_ref().map(|s| s.agent.clone()).or(bruh);
+        self.open_agent(seed, window, cx);
         let Some(Editor::Agent(agent)) = self.editor.take() else {
             return;
         };
@@ -57,6 +138,7 @@ impl ReactiveAutomations {
             subscription,
             review: None,
             advanced: false,
+            agent_locked,
         })));
         self.error = None;
         cx.notify();
@@ -132,7 +214,8 @@ impl ReactiveAutomations {
             );
         }
         let mut body=card().child(heading("Set up an automation")).child(muted("Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."))
-            .child(field("Automation name",&editor.agent.name,false,self.busy)).child(field("What should this automation do?",&editor.agent.instructions,true,self.busy)).child(field("Automation working folder",&editor.agent.path,false,self.busy)).child(field("Model",&editor.agent.model,false,self.busy)).child(muted("Starts when"))
+            .when(editor.agent_locked,|body|body.child(muted("This routine runs as this bruh. Change its job and model in Settings.").debug_selector(||"automation-runs-as-bruh".to_string())))
+            .when(!editor.agent_locked,|body|body.child(field("Automation name",&editor.agent.name,false,self.busy)).child(field("What should this automation do?",&editor.agent.instructions,true,self.busy)).child(field("Automation working folder",&editor.agent.path,false,self.busy)).child(field("Model",&editor.agent.model,false,self.busy))).child(muted("Starts when"))
             .child(div().flex().flex_wrap().gap_2().children([("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("calendar","At set times of day"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(kind,label)|control(SharedString::from(format!("automation-kind-{kind}")),label,self.busy).aria_selected(editor.source.kind==kind).when(editor.source.kind==kind,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.kind=kind;editor.source.value=edit_input(if kind=="app_event"{"meeting.completed"}else{""},kind=="command",window,cx);if kind=="schedule"{editor.source.interval.update(cx,|input,cx|input.set_value("3600",window,cx));}}cx.notify();}))));
         body=match editor.source.kind {
             "folder"=>body.child(field("Folder to watch",&editor.source.value,false,self.busy)).child(field("File pattern",&editor.source.pattern,false,self.busy)),
@@ -156,12 +239,14 @@ impl ReactiveAutomations {
         );
         if editor.advanced {
             let mut advanced = card()
-                .child(field(
-                    "Automation memory",
-                    &editor.agent.memory,
-                    true,
-                    self.busy,
-                ))
+                .when(!editor.agent_locked, |advanced| {
+                    advanced.child(field(
+                        "Automation memory",
+                        &editor.agent.memory,
+                        true,
+                        self.busy,
+                    ))
+                })
                 .child(field(
                     "Event-specific instructions",
                     &editor.subscription.instructions,
@@ -271,20 +356,29 @@ impl ReactiveAutomations {
                 ),
         )
     }
-    pub(super) fn render_automation_cards(&self, cx: &Context<'_, Self>) -> Div {
+    /// The automation cards: every one, or only `agent`'s routines on its
+    /// bruh page, where the bruh's memory has its own tab.
+    pub(super) fn render_automation_cards_for(
+        &self,
+        agent: Option<&str>,
+        cx: &Context<'_, Self>,
+    ) -> Div {
         let mut body = div().flex().flex_col().gap_3();
         let Some(snapshot) = &self.snapshot else {
             return body;
         };
         let mut shown_agents = HashSet::new();
-        if snapshot.subscriptions.is_empty() {
-            body=body.child(muted("No automations yet. Start with a scan folder, a meeting event, or a repeating check."));
-        }
-        for setup in snapshot
+        let setups: Vec<AutomationSetup> = snapshot
             .subscriptions
             .iter()
+            .filter(|subscription| agent.is_none_or(|id| subscription.agent_id == id))
             .filter_map(|subscription| AutomationSetup::from_subscription(snapshot, subscription))
-        {
+            .collect();
+        if setups.is_empty() {
+            body=body.child(muted("No automations yet. Start with a scan folder, a meeting event, or a repeating check."));
+        }
+        let routines = agent.map(str::to_string);
+        for setup in setups {
             let active = setup.enabled();
             let edit = setup.clone();
             let chat_id = setup.agent.id.clone();
@@ -368,8 +462,14 @@ impl ReactiveAutomations {
                             "Edit automation",
                             self.busy,
                         )
-                        .on_activate(cx, move |this, window, cx| {
-                            this.open_automation(Some(edit.clone()), window, cx)
+                        .on_activate(cx, {
+                            let routines = routines.clone();
+                            move |this, window, cx| match &routines {
+                                Some(agent_id) => {
+                                    this.open_routine(Some(edit.clone()), agent_id, window, cx)
+                                }
+                                None => this.open_automation(Some(edit.clone()), window, cx),
+                            }
                         }),
                     )
                     .child(
@@ -381,16 +481,24 @@ impl ReactiveAutomations {
                             "Chat",
                             self.busy,
                         )
-                        .on_activate(cx, move |this, window, cx| {
-                            this.editor = Some(Editor::Chat {
-                                agent_id: chat_id.clone(),
-                                message: edit_input("", true, window, cx),
-                            });
-                            cx.notify();
+                        .on_activate(cx, {
+                            let on_page = routines.is_some();
+                            move |this, window, cx| {
+                                // On a bruh's page, Chat is the page's own tab.
+                                if on_page {
+                                    this.set_bruh_tab(super::bruh_page::BruhTab::Chat, cx);
+                                    return;
+                                }
+                                this.editor = Some(Editor::Chat {
+                                    agent_id: chat_id.clone(),
+                                    message: edit_input("", true, window, cx),
+                                });
+                                cx.notify();
+                            }
                         }),
                     ),
             );
-            if shown_agents.insert(setup.agent.id.clone()) {
+            if routines.is_none() && shown_agents.insert(setup.agent.id.clone()) {
                 row = row.child(self.render_agent_records(&setup.agent.id, cx));
             }
             body = body.child(row);
@@ -401,23 +509,14 @@ impl ReactiveAutomations {
 
 impl AutomationEditor {
     fn build(&self, cx: &App) -> Result<AutomationSetup, String> {
-        let mut agent = self.agent.agent.clone();
-        agent.name = value(&self.agent.name, cx);
-        agent.instructions = value(&self.agent.instructions, cx);
-        agent.project_path = value(&self.agent.path, cx);
-        agent.model = value(&self.agent.model, cx);
-        agent.memory = value(&self.agent.memory, cx);
-        agent.enabled = true;
-        if agent.name.trim().is_empty()
-            || agent.instructions.trim().is_empty()
-            || agent.project_path.trim().is_empty()
-        {
-            return Err(
-                "Enter an automation name, purpose, and working folder before reviewing.".into(),
-            );
-        }
-        bruhs_models::agent::ModelId::try_from(agent.model.clone())
-            .map_err(|error| error.to_string())?;
+        let fields = AgentFields {
+            name: value(&self.agent.name, cx),
+            purpose: value(&self.agent.instructions, cx),
+            folder: value(&self.agent.path, cx),
+            model: value(&self.agent.model, cx),
+            memory: value(&self.agent.memory, cx),
+        };
+        let agent = with_agent_fields(self.agent.agent.clone(), fields, self.agent_locked)?;
         let mut source = self.source.source.clone();
         if source.name.trim().is_empty() {
             source.name = format!("{} source", agent.name);

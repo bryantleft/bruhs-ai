@@ -70,10 +70,15 @@ fn small_label(text: &'static str) -> Div {
 }
 
 impl ReactiveAutomations {
-    /// Change the look of the editor that is open.
+    /// Change the look of the editor that is open: the create dialog's,
+    /// which sits above everything, else the bruh page's settings.
     fn edit_look(&mut self, change: impl FnOnce(&mut BruhLook), cx: &mut Context<'_, Self>) {
-        if let Some(create) = self.create.as_mut() {
-            change(&mut create.look);
+        let look = match self.create.as_mut() {
+            Some(create) => Some(&mut create.look),
+            None => self.bruh_settings_look_mut(),
+        };
+        if let Some(look) = look {
+            change(look);
             cx.notify();
         }
     }

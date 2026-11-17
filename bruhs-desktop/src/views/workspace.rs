@@ -1850,6 +1850,15 @@ impl Workspace {
                      window,
                      cx| this.open_created_bruh(event.agent_id.clone(), window, cx),
                 ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
+                     _: &crate::views::reactive_automations::ReactiveOpenAutomations,
+                     window,
+                     cx| this.activate_sidebar_view(AppView::Automations, window, cx),
+                ));
                 subscriptions.push(cx.subscribe(
                     &panel,
                     |this, _, event: &crate::views::reactive_automations::ReactivePreview, cx| {
@@ -2640,8 +2649,7 @@ impl Workspace {
             AppView::Calendar => self.render_calendar_page(cx),
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
-            // Until the desktop bruh page lands, a bruh opens Automations.
-            AppView::Bruh { .. } => self.render_automations_page(window, cx),
+            AppView::Bruh { .. } => self.render_bruh_page(),
             AppView::Workbench => div()
                 .flex_1()
                 .h_full()
@@ -2759,6 +2767,7 @@ impl Render for Workspace {
         self.page_history.visit(&page_key(&self.active_view));
         self.sync_thread_catalog(cx);
         self.sync_create_bruh(cx);
+        self.sync_bruh_page(cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
         if !self.overlay_open() {
