@@ -203,6 +203,20 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- In the desktop app, a Knowledge document's body field is tall again, as on
+  the web, instead of one line. The line under the tags says whether the
+  document is saved, and Save waits until something changed.
+- After a reload, the web task list keeps tasks in the order they were
+  created, as the desktop app does, instead of reshuffling them.
+- A month day on the calendar lists all-day events first, then the rest by
+  start time, on the web and in the desktop app; a full day keeps the
+  earliest.
+- Desktop Search moves through results with Up and Down, opens one with
+  Enter and clears with Escape, as on the web.
+- Smaller desktop differences from the web are fixed: Inbox rows mark unread
+  conversations with a dot, People has its subtitle, the Workbench page no
+  longer shows the preview's address bar on macOS, and the composer's
+  Attach button is a paperclip.
 - In the desktop app, Ask agent is on a Knowledge document's page, as on
   the web, and puts the document in the composer. It was in the library,
   where it did nothing.
