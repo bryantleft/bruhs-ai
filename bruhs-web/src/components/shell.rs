@@ -59,6 +59,7 @@ pub fn Shell() -> impl IntoView {
     let find_thread_open = RwSignal::new(false);
     let find_diff_open = RwSignal::new(false);
     let crew_focus = RwSignal::new(0u32);
+    let agent_updates = use_context::<crate::agent_updates::AgentUpdates>();
     provide_context(crate::components::crew::shortcuts::CrewFocusRequest(
         crew_focus,
     ));
@@ -467,8 +468,8 @@ pub fn Shell() -> impl IntoView {
                             .update(|items| items.retain(|item| item.thread_id.as_str() != id));
                         turns.abort(&id);
                     }
-                    let protocol = use_context::<crate::agent_updates::AgentUpdates>()
-                        .and_then(|updates| updates.protocol.get_untracked());
+                    let protocol =
+                        agent_updates.and_then(|updates| updates.protocol.get_untracked());
                     crate::components::crew::shortcuts::stop_all(protocol, move |message| {
                         thread_notice.flash(message);
                     });
