@@ -456,6 +456,22 @@ impl DeliveryService {
                 if output_full {
                     return Err(DeliveryError::Command("The last command completed but its output exceeded the combined 1 MiB receipt budget. Its completed-step count was saved. Inspect the repository before preparing another action.".into()));
                 }
+                if let (0, Some(workspace)) = (index, prepared.workspace_path.as_deref()) {
+                    // The reviewed `git worktree add` just made the issue
+                    // workspace; reuse the checkout's build output before
+                    // setup runs. Clones only, so nothing is copied or
+                    // committed and the owner's checkout is untouched.
+                    let seeded = crate::git::seed_worktree_build_dirs(
+                        Path::new(&prepared.path),
+                        Path::new(workspace),
+                    )
+                    .await;
+                    if !seeded.is_empty() {
+                        tracing::info!(
+                            "issue workspace {workspace} shares build folders {seeded:?}"
+                        );
+                    }
+                }
             }
             Ok(())
         };

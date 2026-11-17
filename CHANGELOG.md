@@ -11,6 +11,13 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- New worktrees start with your checkout's build output on macOS (APFS) and
+  on Linux with Btrfs or reflink XFS. Its ignored Cargo `target/debug` and,
+  when the lockfiles match, `node_modules` are cloned copy-on-write, so an
+  agent's first build or install starts warm at almost no disk cost. On this
+  repository, 89 GB of build output arrives in about 7 seconds for under
+  70 MiB. Projects can turn it off or add folders in `.bruhs/config.json`;
+  see `docs/worktree-disk.md`.
 - The web command palette can open a local server, as the desktop app's
   does. Choose Open a local server… to list what is listening on
   localhost, type to filter the list, and press Enter to open one in a new

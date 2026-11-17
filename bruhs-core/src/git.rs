@@ -1,6 +1,8 @@
 //! Git working-tree queries shared by bruhs-server (HTTP routes) and
 //! bruhs-desktop (direct calls): status, unified diff, branch list, checkout,
 //! adding a worktree, and checkpointing that worktree for Edit from here.
+//! New worktrees reuse the checkout's build folders through copy-on-write
+//! clones where the filesystem allows (`docs/worktree-disk.md`).
 //!
 //! Callers resolve and confine the repository path themselves; every
 //! function here trusts `dir`. Every `git` child is killed when its future is
@@ -18,6 +20,9 @@ use tokio::process::Command;
 use bruhs_models::logic::git::{parse_porcelain, BranchName, BranchNameError, GitStatus};
 use bruhs_models::logic::text::truncate_utf8;
 
+mod clone_fs;
+mod cow;
+
 /// Working-tree diffs beyond this size are cut so UIs stay responsive.
 pub const DIFF_LIMIT_BYTES: usize = 2 * 1024 * 1024;
 /// At most this many untracked files are rendered as additions.
@@ -26,6 +31,16 @@ pub const UNTRACKED_LIMIT: usize = 50;
 pub const GIT_TIMEOUT: Duration = Duration::from_secs(30);
 /// Bytes of stderr kept for error messages.
 const STDERR_LIMIT: usize = 16 * 1024;
+/// Environment that would point `git` at a repository other than its
+/// working directory's.
+const INHERITED_REPOSITORY_ENV: [&str; 6] = [
+    "GIT_DIR",
+    "GIT_WORK_TREE",
+    "GIT_INDEX_FILE",
+    "GIT_COMMON_DIR",
+    "GIT_OBJECT_DIRECTORY",
+    "GIT_ALTERNATE_OBJECT_DIRECTORIES",
+];
 
 #[derive(Debug, thiserror::Error)]
 #[non_exhaustive]
@@ -156,6 +171,12 @@ impl<'a> GitCommand<'a> {
             .stdout(Stdio::piped())
             .stderr(Stdio::piped())
             .kill_on_drop(true);
+        // `dir` alone names the repository. Git exports these to hooks, so a
+        // host started from one would otherwise act on the hook's repository
+        // or index instead.
+        for key in INHERITED_REPOSITORY_ENV {
+            command.env_remove(key);
+        }
         for (key, value) in &self.env {
             command.env(key, value);
         }
@@ -587,6 +608,11 @@ pub fn worktree_dest(project: &Path, branch: &str) -> Result<PathBuf, GitError> 
 ///
 /// A second call is a no-op when `dest` already exists and its HEAD is
 /// `branch`. The checkout at `repo` is left on its current branch.
+///
+/// Git checks the worktree out as usual. Then, unless the project turns it
+/// off (`.bruhs/config.json` `worktree`), the checkout's ignored build
+/// folders are cloned in copy-on-write, so the agent's first build or
+/// install starts warm at almost no disk cost; see `docs/worktree-disk.md`.
 pub async fn add_worktree(
     repo: &Path,
     base: &str,
@@ -643,11 +669,33 @@ pub async fn add_worktree(
         .run()
         .await?
     };
-    if out.success() {
-        Ok(())
-    } else {
-        Err(out.failure())
+    if !out.success() {
+        return Err(out.failure());
     }
+    let seeded = seed_worktree_build_dirs(repo, dest).await;
+    if !seeded.is_empty() {
+        tracing::info!(
+            "worktree {} shares build folders {seeded:?} with {}",
+            dest.display(),
+            repo.display()
+        );
+    }
+    Ok(())
+}
+
+/// Clone the build folders of `repo`'s checkout into the checked-out
+/// worktree at `dest`: [`add_worktree`] calls it, and so does delivery after
+/// its reviewed `git worktree add`. Best effort, and off when the project
+/// says so.
+pub async fn seed_worktree_build_dirs(repo: &Path, dest: &Path) -> Vec<String> {
+    let Some(root) = cow::toplevel(repo).await else {
+        return Vec::new();
+    };
+    let config = cow::options(&root).await;
+    if !config.copy_on_write {
+        return Vec::new();
+    }
+    cow::seed_build_dirs(&root, dest, &config).await
 }
 
 /// Tree with no entries. `git hash-object -t tree --stdin </dev/null`.
@@ -1122,6 +1170,134 @@ mod tests {
             add_worktree(repo.path(), "main", &occupied, "bruhs/abc123").await,
             Err(GitError::Failed(message)) if message.contains("already exists")
         ));
+    }
+
+    /// `git status --porcelain` in `dir` with an isolated config.
+    fn porcelain(dir: &Path) -> String {
+        let out = std::process::Command::new("git")
+            .args(["status", "--porcelain"])
+            .current_dir(dir)
+            .env("GIT_CONFIG_GLOBAL", "/dev/null")
+            .env("GIT_CONFIG_NOSYSTEM", "1")
+            .output()
+            .unwrap();
+        assert!(out.status.success());
+        String::from_utf8_lossy(&out.stdout).into_owned()
+    }
+
+    /// A project with warm Cargo and npm output beside its checkout.
+    fn project_with_build_output() -> Repo {
+        let repo = Repo::new();
+        repo.write(".gitignore", "node_modules/\ntarget/\n.bruhs/\n");
+        repo.write("package.json", "{}\n");
+        repo.write("package-lock.json", "{}\n");
+        repo.write("Cargo.toml", "[package]\nname = \"x\"\n");
+        repo.git(&["add", "-A"]);
+        repo.git(&["commit", "-q", "-m", "manifests"]);
+        repo.write("node_modules/pkg/index.js", "module.exports = 1;\n");
+        repo.write("target/.rustc_info.json", "{}\n");
+        repo.write("target/debug/.cargo-lock", "");
+        repo.write("target/debug/deps/libx.rlib", "rlib\n");
+        repo.write("target/debug/incremental/x/query", "keyed by path\n");
+        repo.write("target/release/x", "release\n");
+        repo.write("cache/hits", "not ignored\n");
+        repo
+    }
+
+    /// Git checks the worktree out; where the volume clones, the warm build
+    /// output arrives too, minus Cargo's path-keyed incremental state and
+    /// other profiles. A configured folder Git would show as untracked is
+    /// never cloned.
+    #[tokio::test]
+    async fn add_worktree_clones_build_output_and_still_matches_the_commit() {
+        let repo = project_with_build_output();
+        repo.write(
+            ".bruhs/config.json",
+            r#"{"worktree":{"build_dirs":["cache"]}}"#,
+        );
+        let dest_root = tempfile::tempdir_in(repo.path().parent().unwrap()).unwrap();
+        let dest = dest_root.path().join("wt");
+
+        add_worktree(repo.path(), "main", &dest, "bruhs/cow")
+            .await
+            .unwrap();
+
+        assert_eq!(head_of(&dest), "bruhs/cow");
+        assert_eq!(porcelain(&dest), "");
+        assert!(!dest.join("cache").exists());
+        if clone_fs::clones_supported(dest_root.path()) {
+            assert_eq!(
+                std::fs::read_to_string(dest.join("node_modules/pkg/index.js")).unwrap(),
+                "module.exports = 1;\n"
+            );
+            assert!(dest.join("target/.rustc_info.json").is_file());
+            assert!(dest.join("target/debug/deps/libx.rlib").is_file());
+            assert!(!dest.join("target/debug/incremental").exists());
+            assert!(!dest.join("target/debug/.cargo-lock").exists());
+            assert!(!dest.join("target/release").exists());
+        }
+    }
+
+    /// A branch whose lockfile moved on gets `target` but no `node_modules`.
+    #[tokio::test]
+    async fn add_worktree_skips_node_modules_for_other_dependencies() {
+        let repo = project_with_build_output();
+        repo.git(&["switch", "-q", "-c", "upgrade"]);
+        repo.write("package-lock.json", "{\"upgraded\":true}\n");
+        repo.git(&["commit", "-q", "-am", "upgrade"]);
+        repo.git(&["switch", "-q", "main"]);
+        let dest_root = tempfile::tempdir_in(repo.path().parent().unwrap()).unwrap();
+        if !clone_fs::clones_supported(dest_root.path()) {
+            eprintln!("skipped: this filesystem cannot clone");
+            return;
+        }
+        let dest = dest_root.path().join("wt");
+        add_worktree(repo.path(), "main", &dest, "upgrade")
+            .await
+            .unwrap();
+        assert!(dest.join("target/debug/deps/libx.rlib").is_file());
+        assert!(!dest.join("node_modules").exists());
+    }
+
+    /// The owner can turn cloning off, and a running Cargo build keeps its
+    /// half-written `target` to itself.
+    #[tokio::test]
+    async fn add_worktree_respects_the_project_switch_and_a_running_build() {
+        let repo = project_with_build_output();
+        let dest_root = tempfile::tempdir_in(repo.path().parent().unwrap()).unwrap();
+        if !clone_fs::clones_supported(dest_root.path()) {
+            eprintln!("skipped: this filesystem cannot clone");
+            return;
+        }
+
+        let lock = std::fs::File::open(repo.path().join("target/debug/.cargo-lock")).unwrap();
+        lock.lock().unwrap();
+        let building = dest_root.path().join("building");
+        add_worktree(repo.path(), "main", &building, "bruhs/building")
+            .await
+            .unwrap();
+        assert!(!building.join("target").exists());
+        assert!(building.join("node_modules/pkg/index.js").is_file());
+        lock.unlock().unwrap();
+
+        repo.write(
+            ".bruhs/config.json",
+            r#"{"worktree":{"copy_on_write":false}}"#,
+        );
+        let off = dest_root.path().join("off");
+        add_worktree(repo.path(), "main", &off, "bruhs/off")
+            .await
+            .unwrap();
+        assert!(!off.join("node_modules").exists());
+        assert!(!off.join("target").exists());
+        assert_eq!(porcelain(&off), "");
+
+        repo.write(".bruhs/config.json", "{ not json");
+        let invalid = dest_root.path().join("invalid");
+        add_worktree(repo.path(), "main", &invalid, "bruhs/invalid")
+            .await
+            .unwrap();
+        assert!(!invalid.join("node_modules").exists());
     }
 
     #[test]
