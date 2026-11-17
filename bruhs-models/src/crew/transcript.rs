@@ -37,12 +37,22 @@ pub enum TranscriptItem {
     },
     /// A question or approval waiting inline.
     Card { item: OutboxItem },
+    /// A run waiting for the owner's review before it starts: Run sends
+    /// `ApproveRun`, Dismiss sends `CancelRun`.
+    Review {
+        run_id: String,
+        /// What woke the bruh.
+        trigger: &'static str,
+        /// What the run was asked to do.
+        prompt: String,
+        at: EpochMs,
+    },
 }
 
 impl TranscriptItem {
     fn at(&self) -> EpochMs {
         match self {
-            Self::Owner { at, .. } | Self::Bruh { at, .. } => *at,
+            Self::Owner { at, .. } | Self::Bruh { at, .. } | Self::Review { at, .. } => *at,
             Self::Card { item } => item.created_at,
         }
     }
@@ -50,7 +60,7 @@ impl TranscriptItem {
     fn order(&self) -> (u8, &str) {
         match self {
             Self::Owner { run_id, .. } => (0, run_id),
-            Self::Bruh { run_id, .. } => (1, run_id),
+            Self::Bruh { run_id, .. } | Self::Review { run_id, .. } => (1, run_id),
             Self::Card { item } => (2, &item.id),
         }
     }
@@ -68,7 +78,9 @@ fn is_owner_line(run: &ReactiveRun) -> bool {
 }
 
 /// The conversation with one bruh: the owner's messages, what it answered or
-/// reported, and its open questions and approvals, oldest first.
+/// reported, its open questions and approvals, and the runs waiting for the
+/// owner's review, oldest first. A run that ended without a word reads as
+/// [`STOPPED_LINE`], or as its reason when it was cancelled with one.
 #[must_use]
 pub fn transcript(
     agent_id: &str,
@@ -92,6 +104,16 @@ pub fn transcript(
         if run.status == RunStatus::Merged {
             continue;
         }
+        let trigger = run.trigger.as_ref().map_or("Event", RunTrigger::label);
+        if run.status == RunStatus::AwaitingReview {
+            items.push(TranscriptItem::Review {
+                run_id: run.id.clone(),
+                trigger,
+                prompt: run.prompt.clone(),
+                at: run.created_at,
+            });
+            continue;
+        }
         let (text, failed) = match (&run.result, &run.error) {
             (Some(result), _) => (result.clone(), false),
             (None, Some(error))
@@ -102,17 +124,17 @@ pub fn transcript(
             (None, None) if matches!(run.status, RunStatus::Failed | RunStatus::Interrupted) => {
                 (STOPPED_LINE.to_string(), run.status == RunStatus::Failed)
             }
+            (None, error) if run.status == RunStatus::Cancelled => (
+                error.clone().unwrap_or_else(|| STOPPED_LINE.to_string()),
+                false,
+            ),
             _ => continue,
         };
         items.push(TranscriptItem::Bruh {
             run_id: run.id.clone(),
             text,
             at: run.updated_at,
-            trigger: if chat {
-                None
-            } else {
-                Some(run.trigger.as_ref().map_or("Event", RunTrigger::label))
-            },
+            trigger: (!chat).then_some(trigger),
             failed,
         });
     }
@@ -380,7 +402,10 @@ mod tests {
         let mut failed = run("e1", "a", "failed", 3, 4);
         failed.trigger = Some(RunTrigger::Event);
         let cancelled = chat("c2", "cancelled", 5, 6, "never mind");
-        let got = transcript("a", &[stopped, failed, cancelled], &[]);
+        let mut access = run("e2", "a", "cancelled", 7, 8);
+        access.trigger = Some(RunTrigger::Event);
+        access.error = Some("Access changed.".into());
+        let got = transcript("a", &[stopped, failed, cancelled, access], &[]);
         let lines: Vec<_> = got
             .iter()
             .filter_map(|item| match item {
@@ -395,7 +420,31 @@ mod tests {
             .collect();
         assert_eq!(
             lines,
-            vec![("c1", STOPPED_LINE, false), ("e1", STOPPED_LINE, true)]
+            vec![
+                ("c1", STOPPED_LINE, false),
+                ("e1", STOPPED_LINE, true),
+                ("c2", STOPPED_LINE, false),
+                ("e2", "Access changed.", false),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_run_awaiting_review_asks_the_owner_inline() {
+        let mut waiting = run("e1", "a", "awaiting_review", 3, 3);
+        waiting.trigger = Some(RunTrigger::Event);
+        waiting.prompt = "Invoice arrived".into();
+        let mut queued = run("e2", "a", "queued", 4, 4);
+        queued.trigger = Some(RunTrigger::Event);
+        let got = transcript("a", &[waiting, queued], &[]);
+        assert_eq!(
+            got,
+            vec![TranscriptItem::Review {
+                run_id: "e1".into(),
+                trigger: "Event",
+                prompt: "Invoice arrived".into(),
+                at: at(3),
+            }]
         );
     }
 

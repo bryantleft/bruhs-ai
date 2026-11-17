@@ -1390,7 +1390,83 @@ impl ReactiveAutomations {
                 self.render_bruh_approval(&item, layout, cx)
             }
             TranscriptItem::Card { item } => self.render_bruh_question(&item, layout, cx),
+            TranscriptItem::Review {
+                run_id,
+                trigger,
+                prompt,
+                ..
+            } => self.render_bruh_review(&run_id, trigger, prompt, layout, cx),
         }
+    }
+
+    /// A run waiting for review (web `review_card`): Run starts it, Dismiss
+    /// cancels it. Every service knows both commands.
+    fn render_bruh_review(
+        &self,
+        run_id: &str,
+        trigger: &'static str,
+        prompt: String,
+        layout: Layout,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let (run, dismiss) = (run_id.to_string(), run_id.to_string());
+        let prompt_id = format!("desktop-bruh-review-prompt-{run_id}");
+        self.render_bruh_card(run_id, "Run waiting for review", layout)
+            .child(small_text(
+                format!("{trigger}: waiting for your review"),
+                theme::rambutan_400(),
+            ))
+            .child(
+                div()
+                    .id(SharedString::from(prompt_id))
+                    .max_h(px(DETAIL_MAX_PX))
+                    .overflow_y_scroll()
+                    .p_2()
+                    .rounded(px(RADIUS_GRAPE_PX))
+                    .bg(theme::longan_950())
+                    .font_family(theme::CODE_FONT_FAMILY)
+                    .text_size(px(LABEL_TEXT_PX))
+                    .text_color(theme::rambutan_300())
+                    .child(prompt),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_wrap()
+                    .items_center()
+                    .gap_2()
+                    .child(page_button(
+                        format!("desktop-bruh-run-{run_id}"),
+                        "Run",
+                        WebButtonVariant::Primary,
+                        self.busy,
+                        cx,
+                        move |this, _, cx| {
+                            this.send_all(
+                                vec![ReactiveCommand::ApproveRun { id: run.clone() }],
+                                Scope::General,
+                                cx,
+                            );
+                        },
+                    ))
+                    .child(page_button(
+                        format!("desktop-bruh-dismiss-{run_id}"),
+                        "Dismiss",
+                        WebButtonVariant::Outline,
+                        self.busy,
+                        cx,
+                        move |this, _, cx| {
+                            this.send_all(
+                                vec![ReactiveCommand::CancelRun {
+                                    id: dismiss.clone(),
+                                }],
+                                Scope::General,
+                                cx,
+                            );
+                        },
+                    )),
+            )
+            .into_any_element()
     }
 
     fn render_bruh_card(&self, id: &str, aria: &'static str, layout: Layout) -> Stateful<Div> {
@@ -2011,6 +2087,31 @@ mod tests {
                 id: "i1".into(),
                 approve: true,
             })
+        );
+    }
+
+    #[gpui::test]
+    fn a_run_awaiting_review_can_run_or_be_dismissed(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(snapshot(BruhStatus::NeedsYou, Vec::new())),
+            BruhTab::Chat,
+        );
+        panel.update(cx, |panel, cx| {
+            panel.show_bruh_runs_for_test(vec![run("r1", "awaiting_review")]);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-bruh-dismiss-r1").is_some());
+        click(cx, "desktop-bruh-run-r1");
+        assert_eq!(
+            sent(&panel, cx).last(),
+            Some(&ReactiveCommand::ApproveRun { id: "r1".into() })
+        );
+        click(cx, "desktop-bruh-dismiss-r1");
+        assert_eq!(
+            sent(&panel, cx).last(),
+            Some(&ReactiveCommand::CancelRun { id: "r1".into() })
         );
     }
 

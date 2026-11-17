@@ -73,6 +73,7 @@ pub fn line_key(item: &TranscriptItem) -> String {
             failed,
             ..
         } => format!("bruh:{run_id}:{failed}:{text}"),
+        TranscriptItem::Review { run_id, .. } => format!("review:{run_id}"),
         TranscriptItem::Card { item } => format!(
             "card:{}:{}:{:?}",
             item.id,

@@ -211,7 +211,31 @@ fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
         .into_any(),
         TranscriptItem::Card { item } if item.approval.is_some() => approval_card(item, data),
         TranscriptItem::Card { item } => question_card(item, data),
+        TranscriptItem::Review {
+            run_id,
+            trigger,
+            prompt,
+            ..
+        } => review_card(run_id, trigger, prompt, data),
     }
+}
+
+/// A run waiting for review: Run starts it, Dismiss cancels it. Both are
+/// commands every service knows, so an older one takes them too.
+fn review_card(run_id: String, trigger: &'static str, prompt: String, data: CrewData) -> AnyView {
+    let id = StoredValue::new(run_id);
+    let disabled = Signal::derive(move || data.busy.get());
+    view! {
+        <article class=CARD aria-label="Run waiting for review" data-crew-review="">
+            <p class="text-label-sm text-rambutan-400">{format!("{trigger}: waiting for your review")}</p>
+            <pre class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-grape bg-longan-950 p-2 text-code-sm text-rambutan-300">{prompt}</pre>
+            <div class="flex flex-wrap items-center gap-2">
+                <Button size=ButtonSize::Small disabled=disabled on_click=Callback::new(move |_| data.send.run(ReactiveCommand::ApproveRun { id: id.get_value() }))>"Run"</Button>
+                <Button variant=ButtonVariant::Outline size=ButtonSize::Small disabled=disabled on_click=Callback::new(move |_| data.send.run(ReactiveCommand::CancelRun { id: id.get_value() }))>"Dismiss"</Button>
+            </div>
+        </article>
+    }
+    .into_any()
 }
 
 fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
