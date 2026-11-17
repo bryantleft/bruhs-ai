@@ -5,6 +5,9 @@
 use crate::models::{BackgroundTask, TaskKind};
 use crate::registry::BackgroundTaskRegistry;
 use bruhs_models::agent::{AgentProvider, PermissionMode};
+use bruhs_models::crew::{
+    claude_deny_rules, effective_level, gate, AccessLevel, BruhAccess, Gate, GatedAction,
+};
 use bruhs_models::ids::ThreadId;
 use bruhs_models::thread_link::ThreadAccess;
 use codex_sdk_rs::{ApprovalPolicy, CodexAccess, SandboxMode};
@@ -81,6 +84,9 @@ pub struct AgentTurn {
     pub instructions: Option<String>,
     /// Event handlers never inherit interactive integrations or elevated access.
     pub unattended: bool,
+    /// What an unattended turn may do, at the effective level for
+    /// [`AgentTurn::provider`] (see [`AgentTurn::unattended_with`]).
+    pub unattended_access: BruhAccess,
 }
 
 impl AgentTurn {
@@ -109,6 +115,7 @@ impl AgentTurn {
             thread_access: ThreadAccess::default(),
             instructions: None,
             unattended: false,
+            unattended_access: BruhAccess::default(),
         }
     }
 
@@ -120,10 +127,26 @@ impl AgentTurn {
         self
     }
 
-    /// Restrict an event turn independently of the owner's interactive settings.
-    pub fn unattended(mut self) -> Self {
+    /// Restrict an event turn independently of the owner's interactive
+    /// settings: read only (see [`AgentTurn::unattended_with`]).
+    pub fn unattended(self) -> Self {
+        self.unattended_with(BruhAccess::default())
+    }
+
+    /// Run an event turn at a bruh's access, independently of the owner's
+    /// interactive settings: no thread or app tools, a lean context, and the
+    /// effective level for this turn's provider (Codex can't ask, so Ask
+    /// runs read only there). Read only plans, Ask asks before every change,
+    /// Full accepts edits in its working folder.
+    pub fn unattended_with(mut self, access: BruhAccess) -> Self {
+        let level = effective_level(access.level, self.provider);
+        self.permission_mode = match level {
+            AccessLevel::ReadOnly => PermissionMode::Plan,
+            AccessLevel::Ask => PermissionMode::Default,
+            AccessLevel::Full => PermissionMode::AcceptEdits,
+        };
+        self.unattended_access = BruhAccess { level, ..access };
         self.unattended = true;
-        self.permission_mode = PermissionMode::Plan;
         self.thread_access = ThreadAccess::Off;
         self.lean = true;
         self
@@ -630,6 +653,7 @@ impl AgentOrchestrator {
             thread_access,
             instructions,
             unattended,
+            unattended_access,
         } = turn;
         // The thread's own context first (a meeting's transcript), then what
         // its role asks of it.
@@ -707,7 +731,7 @@ impl AgentOrchestrator {
             .flatten();
         apply_lean_context(&mut query_options, lean);
         if unattended {
-            restrict_unattended(&mut query_options);
+            restrict_unattended(&mut query_options, &unattended_access);
         }
 
         let artifact_project = project_path.clone();
@@ -975,9 +999,77 @@ pub(crate) fn lean_codex(options: &mut codex_sdk_rs::QueryOptions) {
 /// The Codex feature flag that loads plugins.
 const CODEX_PLUGINS_FEATURE: &str = "features.plugins";
 
-fn restrict_unattended(options: &mut ProviderQueryOptions) {
+/// Tools an unattended run that may write gets without asking, so reads
+/// never wait on the owner. Read only runs get `Tools::ReadOnly` instead.
+const UNATTENDED_READ_TOOLS: [&str; 4] = ["Read", "Grep", "Glob", "LS"];
+
+/// Code hosts a Full bruh's sandboxed shell may reach only when it can
+/// deliver (push, merge, open pull requests); without Can deliver they are
+/// refused outright rather than asked about.
+const FORGE_HOSTS: [&str; 4] = ["github.com", "*.github.com", "gitlab.com", "*.gitlab.com"];
+
+/// Whether an unattended turn at `access` on `provider` runs its shell in
+/// Claude's bash sandbox, confined to the working folder (see
+/// [`restrict_unattended`]). Only then may the permission gate let a Full
+/// bruh's shell commands run without asking.
+pub(crate) fn unattended_shell_confined(access: &BruhAccess, provider: AgentProvider) -> bool {
+    provider == AgentProvider::Claude
+        && effective_level(access.level, provider) == AccessLevel::Full
+}
+
+/// `--settings` for an unattended Claude turn at `access`: the deny rules
+/// only (app tools, the user's own deny rules from `files`, and delivery
+/// unless the gate allows it), plus the bash sandbox when the shell runs
+/// without asking. Hooks and allow rules stay out: they could turn an
+/// outside event into host-side actions before the gate runs.
+fn unattended_claude_settings(
+    access: &BruhAccess,
+    files: &[serde_json::Value],
+) -> serde_json::Value {
+    let mut deny = vec![serde_json::json!("mcp__*")];
+    for file in files {
+        deny.extend(
+            file["permissions"]["deny"]
+                .as_array()
+                .into_iter()
+                .flatten()
+                .cloned(),
+        );
+    }
+    deny.extend(
+        claude_deny_rules(access, access.level)
+            .into_iter()
+            .map(serde_json::Value::from),
+    );
+    let mut settings = serde_json::json!({"permissions": {"deny": deny}});
+    if unattended_shell_confined(access, AgentProvider::Claude) {
+        // Writes outside the working folder fail and network hosts become
+        // permission requests. Fail closed where the sandbox can't start,
+        // never fall back to an unsandboxed command, and send every command
+        // through the gate, which also catches the delivery forms the
+        // prefix deny rules miss (`git -C dir push`).
+        let hosts = if gate(access, access.level, GatedAction::Delivery) == Gate::Allow {
+            "allowedDomains"
+        } else {
+            "deniedDomains"
+        };
+        settings["sandbox"] = serde_json::json!({
+            "enabled": true,
+            "failIfUnavailable": true,
+            "allowUnsandboxedCommands": false,
+            "autoAllowBashIfSandboxed": false,
+            "network": {hosts: FORGE_HOSTS},
+        });
+    }
+    settings
+}
+
+/// Limit an unattended turn to `access` (already the effective level for
+/// its provider): a filtered environment, no settings files, hooks or MCP
+/// servers, and the tools, permission mode and sandbox for the level.
+fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess) {
     // Event content must not gain access to the daemon's integration tokens
-    // through a read-only shell's environment. Provider logins remain on disk.
+    // through a shell's environment. Provider logins remain on disk.
     let environment: Vec<_> = [
         "PATH",
         "HOME",
@@ -1015,30 +1107,45 @@ fn restrict_unattended(options: &mut ProviderQueryOptions) {
         ProviderQueryOptions::Claude(options) => {
             options.inherit_env = false;
             options.env = environment;
-            options.tools = claude_sdk_rs::Tools::ReadOnly;
-            options.permission_mode = Some(claude_sdk_rs::PermissionMode::Plan);
+            let read_tools = || {
+                claude_sdk_rs::Tools::Allow(
+                    UNATTENDED_READ_TOOLS
+                        .iter()
+                        .map(|t| t.to_string())
+                        .collect(),
+                )
+            };
+            let (tools, mode) = match access.level {
+                AccessLevel::ReadOnly => (
+                    claude_sdk_rs::Tools::ReadOnly,
+                    claude_sdk_rs::PermissionMode::Plan,
+                ),
+                AccessLevel::Ask => (read_tools(), claude_sdk_rs::PermissionMode::Default),
+                AccessLevel::Full => (read_tools(), claude_sdk_rs::PermissionMode::AcceptEdits),
+            };
+            // Every ask reaches the run's permission handler, never a
+            // silent denial (a turn built for bypass would have them off).
+            options.permission_prompts = true;
+            options.tools = tools;
+            options.permission_mode = Some(mode);
             options.setting_sources = Some(Vec::new());
-            let mut deny = vec![serde_json::json!("mcp__*")];
-            for file in user_claude_settings() {
-                deny.extend(
-                    file["permissions"]["deny"]
-                        .as_array()
-                        .into_iter()
-                        .flatten()
-                        .cloned(),
-                );
-            }
-            // Loading hooks or allow rules here could turn an outside event
-            // into host-side actions before the read-only tool gate runs.
-            options.settings = Some(serde_json::json!({"permissions":{"deny":deny}}).to_string());
+            options.settings =
+                Some(unattended_claude_settings(access, &user_claude_settings()).to_string());
             options.mcp_config = None;
         }
         ProviderQueryOptions::Codex(options) => {
             options.inherit_env = false;
             options.env = environment;
             options.ignore_user_config = true;
+            // Codex can't ask, so only Full writes, and only in its
+            // workspace; workspace-write keeps the network off, so it can't
+            // push either.
+            let sandbox = match access.level {
+                AccessLevel::Full => codex_sdk_rs::SandboxMode::WorkspaceWrite,
+                AccessLevel::ReadOnly | AccessLevel::Ask => codex_sdk_rs::SandboxMode::ReadOnly,
+            };
             options.access = codex_sdk_rs::CodexAccess::Sandboxed {
-                sandbox: codex_sdk_rs::SandboxMode::ReadOnly,
+                sandbox,
                 approval: codex_sdk_rs::ApprovalPolicy::Never,
             };
             options.enable_web_search = false;
@@ -1850,7 +1957,7 @@ mod tests {
                 None,
                 None,
             );
-            restrict_unattended(&mut options);
+            restrict_unattended(&mut options, &BruhAccess::default());
             let environment = match &options {
                 ProviderQueryOptions::Claude(options) => &options.env,
                 ProviderQueryOptions::Codex(options) => &options.env,
@@ -1901,6 +2008,251 @@ mod tests {
                 ProviderQueryOptions::External(_) => panic!("expected a managed provider"),
             }
         }
+    }
+
+    fn bruh_access(level: AccessLevel, can_deliver: bool) -> BruhAccess {
+        BruhAccess {
+            level,
+            can_deliver,
+            ..Default::default()
+        }
+    }
+
+    /// The `--settings` an unattended Claude turn at `access` runs with.
+    fn unattended_claude(access: &BruhAccess) -> (claude_sdk_rs::QueryOptions, serde_json::Value) {
+        let mut options = options(
+            AgentProvider::Claude,
+            PermissionMode::BypassPermissions,
+            None,
+        );
+        restrict_unattended(&mut options, access);
+        let options = claude(options);
+        let settings = serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
+        (options, settings)
+    }
+
+    #[test]
+    fn unattended_access_sets_claude_tools_modes_and_deny_rules() {
+        let reads = claude_sdk_rs::Tools::Allow(
+            UNATTENDED_READ_TOOLS
+                .iter()
+                .map(|t| t.to_string())
+                .collect(),
+        );
+        for (level, can_deliver, mode, tools, push_rule) in [
+            (
+                AccessLevel::ReadOnly,
+                false,
+                PermissionMode::Plan,
+                claude_sdk_rs::Tools::ReadOnly,
+                true,
+            ),
+            (
+                AccessLevel::Ask,
+                false,
+                PermissionMode::Default,
+                reads.clone(),
+                true,
+            ),
+            (
+                AccessLevel::Full,
+                false,
+                PermissionMode::AcceptEdits,
+                reads.clone(),
+                true,
+            ),
+            (
+                AccessLevel::Full,
+                true,
+                PermissionMode::AcceptEdits,
+                reads,
+                false,
+            ),
+        ] {
+            let access = bruh_access(level, can_deliver);
+            let turn = AgentTurn::new(
+                ThreadId::new_v4(),
+                "event",
+                "/tmp",
+                "sonnet",
+                AgentProvider::Claude,
+                PermissionMode::BypassPermissions,
+            )
+            .unattended_with(access.clone());
+            assert_eq!(turn.permission_mode, mode, "{level:?}");
+            assert_eq!(turn.unattended_access, access);
+            assert!(turn.unattended && turn.lean);
+            assert_eq!(turn.thread_access, ThreadAccess::Off);
+
+            let (options, settings) = unattended_claude(&access);
+            assert_eq!(options.tools, tools, "{level:?}");
+            assert_eq!(
+                options.permission_mode,
+                Some(claude_permission_mode(mode)),
+                "{level:?}"
+            );
+            assert!(options.permission_prompts, "{level:?} must route asks");
+            assert!(!options.inherit_env);
+            assert_eq!(options.setting_sources, Some(Vec::new()));
+            assert!(options.mcp_config.is_none());
+            assert!(settings.get("hooks").is_none());
+            assert!(settings["permissions"].get("allow").is_none());
+            let deny: Vec<&str> = settings["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect();
+            assert!(deny.contains(&"mcp__*"), "{level:?}");
+            assert_eq!(
+                deny.contains(&"Bash(git push:*)"),
+                push_rule,
+                "{level:?} can_deliver={can_deliver}"
+            );
+            // Only Full's shell runs without asking, so only it is sandboxed.
+            assert_eq!(
+                settings.get("sandbox").is_some(),
+                level == AccessLevel::Full,
+                "{level:?}"
+            );
+        }
+    }
+
+    /// F18: a Full bruh's shell runs in Claude's bash sandbox, confined to
+    /// its working folder, failing closed where the sandbox can't start, and
+    /// with no unsandboxed fallback. Every command still reaches the bruh's
+    /// permission gate. Forge hosts are reachable only with Can deliver on.
+    #[test]
+    fn unattended_full_claude_confines_its_shell_to_the_working_folder() {
+        for can_deliver in [false, true] {
+            let access = bruh_access(AccessLevel::Full, can_deliver);
+            assert!(unattended_shell_confined(&access, AgentProvider::Claude));
+            let (_, settings) = unattended_claude(&access);
+            let sandbox = &settings["sandbox"];
+            assert_eq!(sandbox["enabled"], true);
+            assert_eq!(sandbox["failIfUnavailable"], true);
+            assert_eq!(sandbox["allowUnsandboxedCommands"], false);
+            assert_eq!(sandbox["autoAllowBashIfSandboxed"], false);
+            let (open, closed) = if can_deliver {
+                ("allowedDomains", "deniedDomains")
+            } else {
+                ("deniedDomains", "allowedDomains")
+            };
+            let hosts: Vec<&str> = sandbox["network"][open]
+                .as_array()
+                .unwrap()
+                .iter()
+                .filter_map(serde_json::Value::as_str)
+                .collect();
+            assert_eq!(hosts, FORGE_HOSTS, "can_deliver={can_deliver}");
+            assert!(sandbox["network"].get(closed).is_none());
+        }
+        for (level, provider) in [
+            (AccessLevel::Ask, AgentProvider::Claude),
+            (AccessLevel::ReadOnly, AgentProvider::Claude),
+            (AccessLevel::Full, AgentProvider::Codex),
+            (AccessLevel::Full, AgentProvider::Cursor),
+        ] {
+            assert!(
+                !unattended_shell_confined(&bruh_access(level, true), provider),
+                "{level:?} on {provider:?}"
+            );
+        }
+    }
+
+    /// The prefix deny rules miss `git -C dir push`, so delivery must not
+    /// rest on them: the sandbox sends every command through the gate, which
+    /// denies it, and the forge hosts stay unreachable without Can deliver.
+    #[test]
+    fn a_confined_full_shell_still_cannot_deliver_without_can_deliver() {
+        let push = serde_json::json!({"command": "git -C repo push origin main"});
+        let run = |access: &BruhAccess, input: &serde_json::Value| {
+            bruhs_models::crew::permission_gate(
+                access,
+                AgentProvider::Claude,
+                "Bash",
+                input,
+                "/tmp/work",
+                unattended_shell_confined(access, AgentProvider::Claude),
+            )
+        };
+        let without = bruh_access(AccessLevel::Full, false);
+        let (_, settings) = unattended_claude(&without);
+        assert_eq!(settings["sandbox"]["autoAllowBashIfSandboxed"], false);
+        assert_eq!(
+            run(&without, &push),
+            Gate::Deny(bruhs_models::crew::DELIVERY_DENIAL)
+        );
+        assert_eq!(
+            run(&without, &serde_json::json!({"command": "cargo test"})),
+            Gate::Allow
+        );
+        assert!(settings["sandbox"]["network"]["deniedDomains"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("github.com")));
+        assert_eq!(
+            run(&bruh_access(AccessLevel::Full, true), &push),
+            Gate::Allow
+        );
+    }
+
+    #[test]
+    fn unattended_full_codex_writes_only_in_its_workspace() {
+        let sandbox = |level| {
+            let mut options = options(
+                AgentProvider::Codex,
+                PermissionMode::BypassPermissions,
+                None,
+            );
+            restrict_unattended(&mut options, &bruh_access(level, true));
+            codex(options).access
+        };
+        assert_eq!(
+            sandbox(AccessLevel::Full),
+            CodexAccess::Sandboxed {
+                sandbox: SandboxMode::WorkspaceWrite,
+                approval: ApprovalPolicy::Never,
+            }
+        );
+        for level in [AccessLevel::Ask, AccessLevel::ReadOnly] {
+            assert_eq!(
+                sandbox(level),
+                CodexAccess::Sandboxed {
+                    sandbox: SandboxMode::ReadOnly,
+                    approval: ApprovalPolicy::Never,
+                },
+                "{level:?}"
+            );
+        }
+        let turn = |level| {
+            AgentTurn::new(
+                ThreadId::new_v4(),
+                "event",
+                "/tmp",
+                "gpt-5.5",
+                AgentProvider::Codex,
+                PermissionMode::BypassPermissions,
+            )
+            .unattended_with(bruh_access(level, false))
+        };
+        let ask = turn(AccessLevel::Ask);
+        assert_eq!(ask.permission_mode, PermissionMode::Plan);
+        assert_eq!(ask.unattended_access.level, AccessLevel::ReadOnly);
+        let full = turn(AccessLevel::Full);
+        assert_eq!(full.permission_mode, PermissionMode::AcceptEdits);
+        assert_eq!(full.unattended_access.level, AccessLevel::Full);
+        let other = AgentTurn::new(
+            ThreadId::new_v4(),
+            "event",
+            "/tmp",
+            "default",
+            AgentProvider::Cursor,
+            PermissionMode::BypassPermissions,
+        )
+        .unattended_with(bruh_access(AccessLevel::Full, true));
+        assert_eq!(other.permission_mode, PermissionMode::Plan);
+        assert_eq!(other.unattended_access.level, AccessLevel::ReadOnly);
     }
     use tokio_stream::StreamExt;
 
