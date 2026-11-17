@@ -30,6 +30,8 @@ pub mod knowledge_page;
 pub mod life_page;
 pub mod local_tools_panel;
 pub(crate) mod mail_compose;
+pub mod mcp_connection;
+pub mod mcp_review;
 pub mod meeting_detail;
 pub mod meeting_live;
 pub mod meeting_note_detail;

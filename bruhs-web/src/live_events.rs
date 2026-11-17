@@ -43,18 +43,27 @@ fn next_backoff(delay_ms: u32) -> u32 {
 }
 
 type Handler = Rc<dyn Fn(String)>;
+type LostHandler = Rc<dyn Fn()>;
 
 /// Handlers for the frames of the live stream, by frame name. Register them
 /// all, then [`LiveEvents::connect`] once.
 #[derive(Default)]
 pub struct LiveEvents {
     handlers: Vec<(&'static str, Handler)>,
+    lost: Vec<LostHandler>,
 }
 
 impl LiveEvents {
     /// Call `handler` with the data of every frame named `name`.
     pub fn on(&mut self, name: &'static str, handler: impl Fn(String) + 'static) {
         self.handlers.push((name, Rc::new(handler)));
+    }
+
+    /// Call `handler` whenever the open stream ends: an error, or the page
+    /// going into the back/forward cache. The server sees the stream close
+    /// too, and anything bound to it (an MCP workspace session) ends.
+    pub fn on_lost(&mut self, handler: impl Fn() + 'static) {
+        self.lost.push(Rc::new(handler));
     }
 
     /// Open the stream for the life of the page. `live_meeting` names the
@@ -66,6 +75,7 @@ impl LiveEvents {
     ) {
         let connection = Rc::new(Connection {
             handlers: self.handlers,
+            lost: self.lost,
             backoff_ms: Cell::new(BACKOFF_INITIAL_MS),
             generation: Cell::new(0),
             hidden: Cell::new(false),
@@ -98,6 +108,7 @@ impl Drop for OpenStream {
 
 struct Connection {
     handlers: Vec<(&'static str, Handler)>,
+    lost: Vec<LostHandler>,
     backoff_ms: Cell<u32>,
     /// Bumped on every open and on page hide, so a retry scheduled for an
     /// older stream does nothing.
@@ -203,6 +214,13 @@ impl Connection {
         });
     }
 
+    /// The open stream ended; tell whoever bound something to it.
+    fn ended(&self) {
+        for handler in &self.lost {
+            handler();
+        }
+    }
+
     /// The stream is open again: end the outage and take its banner down.
     fn reconnected(connection: &Rc<Self>) {
         let mut outage = connection.outage.get();
@@ -221,6 +239,7 @@ impl Connection {
         if let Some(open) = connection.open.borrow().as_ref() {
             open.source.close();
         }
+        connection.ended();
         let delay = connection.backoff_ms.get();
         connection.backoff_ms.set(next_backoff(delay));
         log::warn!("live events stream error; reconnecting in {delay}ms");
@@ -272,7 +291,9 @@ impl Connection {
             hiding
                 .generation
                 .set(hiding.generation.get().wrapping_add(1));
-            hiding.open.borrow_mut().take();
+            if hiding.open.borrow_mut().take().is_some() {
+                hiding.ended();
+            }
         });
         let showing = Rc::clone(connection);
         let on_show = Closure::<dyn FnMut(web_sys::Event)>::new(move |_: web_sys::Event| {

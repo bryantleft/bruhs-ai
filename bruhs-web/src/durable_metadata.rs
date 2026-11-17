@@ -99,6 +99,21 @@ where
     pub fn get_untracked(self) -> T {
         self.value.get_untracked()
     }
+    /// [`Self::ready`] outside any reactive scope, for request handlers.
+    pub fn ready_untracked(self) -> bool {
+        self.loaded.get_untracked()
+    }
+    /// [`Self::settled`] outside any reactive scope: the latest value is
+    /// saved and no transaction holds it.
+    pub fn settled_untracked(self) -> bool {
+        self.status
+            .with_untracked(|status| *status == SaveState::Saved)
+            && !self.exclusive.get_untracked()
+    }
+    /// Read the value without subscribing, and without copying it.
+    pub fn with_untracked<R>(self, f: impl FnOnce(&T) -> R) -> R {
+        self.value.with_untracked(f)
+    }
     pub fn recovery_json(self) -> String {
         if !self.loaded.get() {
             return crate::state::load_pref(self.key).unwrap_or_else(|| {

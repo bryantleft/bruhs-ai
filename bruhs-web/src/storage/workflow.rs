@@ -20,7 +20,7 @@ use std::collections::HashMap;
 use wasm_bindgen::JsValue;
 mod life;
 mod people;
-pub use life::{is_life_domain, rollback_needs_life};
+pub use life::{is_life_domain, rollback_needs_life, snapshot as life_snapshot};
 pub use people::rollback_people_ids;
 
 pub struct WorkflowCommit<T> {

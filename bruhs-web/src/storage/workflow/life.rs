@@ -30,7 +30,8 @@ pub(super) async fn checked(
     checked_state(tx, expected).await.map(Some)
 }
 
-pub(super) fn snapshot(life: &LifeContext, domain: AgentDomain, id: &str) -> Option<String> {
+/// The exact saved form of a Life record a workflow created, as its receipt holds it.
+pub fn snapshot(life: &LifeContext, domain: AgentDomain, id: &str) -> Option<String> {
     match domain {
         AgentDomain::Finance => life
             .finance
