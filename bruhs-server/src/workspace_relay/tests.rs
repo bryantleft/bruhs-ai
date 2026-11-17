@@ -356,6 +356,16 @@ async fn a_client_reaches_the_tab_through_the_real_server_and_loses_it_on_close(
         .json()
         .await
         .unwrap();
+    let token: Value =
+        serde_json::from_slice(&std::fs::read(&enabled.connection_path).unwrap()).unwrap();
+    let malformed = http
+        .post(format!("{base}{CALL_PATH}"))
+        .bearer_auth(token["token"].as_str().unwrap())
+        .body("not json")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(malformed.status(), StatusCode::BAD_REQUEST);
     // bruhs-mcp's own transport, reading the copied path.
     let client = bruhs_core::workspace_bridge::BridgeClient::from_file(std::path::Path::new(
         &enabled.connection_path,

@@ -60,9 +60,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - The web app now has the local MCP workspace connection the desktop app
   has. In Agent workflows, choose Enable for this session and Copy MCP config;
   a trusted MCP client running `bruhs-mcp` can then use the same tools against
-  the open tab: read your tasks, calendar, chat, People, Meetings, notes,
-  Finance and Health (each only with its Read grant and, for Life, its
-  consent), and propose changes. Proposals and undo requests wait for your
+  the open tab: read chat, tasks, calendar, captures, Knowledge, Inbox, People,
+  Meetings and meeting notes, Finance and Health (each only with its Read grant
+  and, for Life, its consent), and propose changes. Proposals and undo requests wait for your
   review in Agent workflows, and approved steps are saved like any other
   workflow step. The copied config names a private file; the session token
   never reaches the clipboard. Disabling, closing or reloading the tab, or

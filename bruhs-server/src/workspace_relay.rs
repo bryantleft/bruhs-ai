@@ -365,17 +365,16 @@ pub async fn post_call(
         .and_then(|value| value.to_str().ok())
         .and_then(|value| value.strip_prefix("Bearer "))
         .unwrap_or_default();
-    if token.is_empty() {
+    // The token is checked before the body is decoded, so an unauthorized
+    // caller learns nothing about what the relay would accept. `call` checks
+    // it again: the session may end in between.
+    if token.is_empty() || !relay.authorized(token) {
         return refusal(StatusCode::UNAUTHORIZED, NOT_AUTHORIZED);
     }
-    // The token is checked before the body is decoded, so an unauthorized
-    // caller learns nothing about what the relay would accept.
-    let outcome = match serde_json::from_slice::<BridgeRequest>(&body) {
-        Ok(request) => relay.call(token, request).await,
-        Err(_) if !relay.authorized(token) => CallOutcome::Unauthorized,
-        Err(_) => return (StatusCode::BAD_REQUEST, "Invalid workspace request.").into_response(),
+    let Ok(request) = serde_json::from_slice::<BridgeRequest>(&body) else {
+        return (StatusCode::BAD_REQUEST, "Invalid workspace request.").into_response();
     };
-    match outcome {
+    match relay.call(token, request).await {
         CallOutcome::Answered(response) => match serde_json::to_vec(&response) {
             Ok(bytes) if bytes.len() <= MAX_RESPONSE_BYTES => (
                 StatusCode::OK,
