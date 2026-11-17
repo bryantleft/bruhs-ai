@@ -23,6 +23,11 @@ pub use mail::{
 };
 mod people_sync;
 mod reactive;
+#[expect(
+    unused_imports,
+    reason = "the crew run page (a later task) is the first caller"
+)]
+pub use reactive::agent_runs;
 pub use reactive::{background_service, set_background_service};
 pub use reactive::{reactive_command, reactive_hook_token, reactive_snapshot, ReactiveHookToken};
 pub use reactive::{weekly_report, weekly_report_command, weekly_reports};

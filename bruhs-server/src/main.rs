@@ -430,6 +430,11 @@ fn router_with_capture_daemon(
         )
         .route("/api/reactive", get(routes::reactive::snapshot))
         .route("/api/reactive/commands", post(routes::reactive::command))
+        .route("/api/reactive/stream", get(routes::reactive::stream))
+        .route(
+            "/api/reactive/agents/{id}/runs",
+            get(routes::reactive::agent_runs),
+        )
         .route(
             "/api/databases",
             get(routes::database::list).post(routes::database::save),

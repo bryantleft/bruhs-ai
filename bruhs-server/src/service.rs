@@ -172,6 +172,9 @@ struct ReleaseManifest {
     web: BTreeMap<String, String>,
     /// Where the binary was copied from, for the record only.
     installed_from: String,
+    /// The crew protocol this release speaks; 0 for a release older than the field.
+    #[serde(default)]
+    reactive_protocol: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
@@ -461,6 +464,7 @@ pub(crate) fn stage_release(
         binary_sha256: sha256_file(binary)?,
         web: hash_tree(web_dist)?,
         installed_from: binary.display().to_string(),
+        reactive_protocol: bruhs_models::crew::CREW_PROTOCOL,
     };
     let releases = home.join("releases");
     std::fs::create_dir_all(&releases).map_err(|e| io_failed("create", &releases, e))?;
@@ -1090,6 +1094,10 @@ pub fn status(asker: Asker) -> BackgroundService {
     let loaded = manager.is_some();
     let service_pid = manager.flatten();
     let binary = installed.then(|| installed_binary(&path)).flatten();
+    let reactive_protocol = binary.as_deref().and_then(|binary| {
+        let manifest = read_manifest(Path::new(binary).parent()?)?;
+        Some(manifest.reactive_protocol)
+    });
     let log_path = installed
         .then(service_log)
         .flatten()
@@ -1114,6 +1122,7 @@ pub fn status(asker: Asker) -> BackgroundService {
             _ => None,
         },
         log_path,
+        reactive_protocol,
     }
 }
 
@@ -1726,6 +1735,24 @@ mod tests {
         );
         let manifest = read_manifest(&release.dir).unwrap();
         assert!(verify_release(&release.dir, &manifest));
+        assert_eq!(
+            manifest.reactive_protocol,
+            bruhs_models::crew::CREW_PROTOCOL
+        );
+    }
+
+    #[test]
+    fn a_manifest_without_the_protocol_reads_as_zero() {
+        let temp = tempfile::tempdir().unwrap();
+        let home = temp.path().join("service");
+        let (binary, dist) = source(temp.path(), b"server v1");
+        let release = stage_release(&lock(&home), &home, &binary, &dist).unwrap();
+        let file = release.dir.join(RELEASE_MANIFEST);
+        let mut value: serde_json::Value =
+            serde_json::from_slice(&std::fs::read(&file).unwrap()).unwrap();
+        value.as_object_mut().unwrap().remove("reactive_protocol");
+        std::fs::write(&file, serde_json::to_vec(&value).unwrap()).unwrap();
+        assert_eq!(read_manifest(&release.dir).unwrap().reactive_protocol, 0);
     }
 
     #[test]

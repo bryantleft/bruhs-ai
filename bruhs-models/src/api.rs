@@ -74,6 +74,9 @@ pub struct BackgroundService {
     /// Where the service writes its output, when it writes to a file.
     #[serde(default)]
     pub log_path: Option<String>,
+    /// The crew protocol of the installed release (0 for an older one); None when not installed.
+    #[serde(default)]
+    pub reactive_protocol: Option<u32>,
 }
 
 /// `POST /api/service`.

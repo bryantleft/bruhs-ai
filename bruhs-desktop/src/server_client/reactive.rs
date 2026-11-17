@@ -1,7 +1,7 @@
 //! Reactive automation shares the local server's durable state with the web app.
 use super::{ServerClient, ServerError};
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
-use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
+use bruhs_models::reactive::{ReactiveCommand, ReactiveRun, ReactiveSnapshot};
 use bruhs_models::weekly_reports::{EngineeringReport, WeeklyReportCommand, WeeklyReportsSnapshot};
 use serde::Deserialize;
 
@@ -52,6 +52,30 @@ impl ServerClient {
 
     pub async fn reactive_snapshot(&self) -> Result<ReactiveSnapshot, ServerError> {
         self.get_json("/api/reactive").await
+    }
+
+    #[expect(
+        dead_code,
+        reason = "the crew run page (a later task) is the first caller"
+    )]
+    /// One agent's runs, newest first; `before` is the id of the last run already shown.
+    pub async fn agent_runs(
+        &self,
+        agent_id: &str,
+        before: Option<&str>,
+    ) -> Result<Vec<ReactiveRun>, ServerError> {
+        let mut url = reqwest::Url::parse(&self.base)
+            .map_err(|_| ServerError::Invalid("Invalid local server URL"))?;
+        url.path_segments_mut()
+            .map_err(|()| ServerError::Invalid("Invalid local server URL"))?
+            .pop_if_empty()
+            .extend(["api", "reactive", "agents", agent_id, "runs"]);
+        if let Some(before) = before {
+            url.query_pairs_mut().append_pair("before", before);
+        }
+        let request = "Read agent runs";
+        let response = Self::check(self.http()?.get(url).send().await, request).await?;
+        Self::decode(response, request).await
     }
 
     pub async fn reactive_command(
