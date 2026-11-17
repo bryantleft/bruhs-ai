@@ -1247,6 +1247,10 @@ pub fn Sidebar() -> impl IntoView {
                 </button>
             </div>
 
+            // The crew, above the threads and outside their sections, so a
+            // bruh never joins thread drag and drop.
+            <crate::components::crew::rail::CrewRail on_open=Callback::new(move |()| dismiss_mobile_navigation()) />
+
             // Thread cards: fresh first, older seen threads under "Settled".
             <span id="thread-navigation-help" class="sr-only">"Use Up and Down to move between threads, Home and End to reach the first or last, and Enter to open. Search includes settled threads."</span>
             <ul node_ref=viewport.node role="list" aria-label="Threads" class="relative min-h-0 flex-1 overflow-y-auto px-2 pb-2"
