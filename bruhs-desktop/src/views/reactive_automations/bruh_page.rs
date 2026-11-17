@@ -460,18 +460,21 @@ fn bubble(max_width: f32) -> Div {
 struct Layout {
     column: f32,
     padding: f32,
+    /// Web `sm:`, a media query: the window, not the page, is 640px or wider.
+    wide: bool,
 }
 
 impl Layout {
-    fn of(width: f32) -> Self {
-        let padding = if width >= SM_BREAKPOINT_PX {
-            PAGE_WIDE_PADDING_PX
-        } else {
-            PAGE_PADDING_PX
-        };
+    fn of(width: f32, viewport: f32) -> Self {
+        let wide = viewport >= SM_BREAKPOINT_PX;
         Self {
             column: width.min(COLUMN_MAX_PX),
-            padding,
+            padding: if wide {
+                PAGE_WIDE_PADDING_PX
+            } else {
+                PAGE_PADDING_PX
+            },
+            wide,
         }
     }
 
@@ -511,6 +514,25 @@ impl ReactiveAutomations {
         }
         self.bruh = agent_id.map(BruhPage::new);
         cx.notify();
+    }
+
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=bruh-settings:<id>`: the Settings tab.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_show_bruh_settings(&mut self, agent_id: &str, cx: &mut Context<'_, Self>) {
+        self.show_bruh(Some(agent_id.to_string()), cx);
+        self.set_bruh_tab(BruhTab::Settings, cx);
+    }
+
+    /// The open page's bruh name, as the snapshot has it.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_bruh_name(&self) -> Option<String> {
+        let agent_id = self.bruh_page_agent()?;
+        let snapshot = self.snapshot.as_ref()?;
+        let state = snapshot
+            .bruhs
+            .iter()
+            .find(|bruh| bruh.agent_id == agent_id)?;
+        Some(state.name.clone())
     }
 
     #[cfg(test)]
@@ -850,12 +872,9 @@ impl ReactiveAutomations {
         cx: &Context<'_, Self>,
     ) -> Div {
         let measured = self.bruh.as_ref().map_or(0.0, |page| page.width.get());
-        let width = if measured > 0.0 {
-            measured
-        } else {
-            f32::from(window.viewport_size().width)
-        };
-        let layout = Layout::of(width);
+        let viewport = f32::from(window.viewport_size().width);
+        let width = if measured > 0.0 { measured } else { viewport };
+        let layout = Layout::of(width, viewport);
         let root = div()
             .debug_selector(|| "desktop-bruh-page".to_string())
             .relative()
@@ -1038,6 +1057,7 @@ impl ReactiveAutomations {
         let paused = state.status == BruhStatus::Paused;
         let wake = state.next_wake_ms.map(local_time);
         div()
+            .debug_selector(|| "desktop-bruh-header".to_string())
             .flex_shrink_0()
             .flex()
             .flex_wrap()
@@ -1596,7 +1616,7 @@ impl ReactiveAutomations {
         );
         let effort = labelled("Effort", self.render_effort_dropdown(form, cx));
         // Web `sm:grid-cols-2`.
-        let run = section("How it runs").child(if layout.column >= SM_BREAKPOINT_PX {
+        let run = section("How it runs").child(if layout.wide {
             div()
                 .min_w_0()
                 .flex()
@@ -1819,7 +1839,7 @@ impl ReactiveAutomations {
 #[cfg(test)]
 mod tests {
     use super::super::setup::{with_agent_fields, AgentFields};
-    use super::{BruhTab, Editor, ReactiveAutomations, RunsPage};
+    use super::{BruhTab, Editor, Layout, ReactiveAutomations, RunsPage};
     use crate::theme;
     use bruhs_models::crew::{
         AccessLevel, BruhAccess, BruhColor, BruhLook, BruhState, BruhStatus, CREW_PROTOCOL,
@@ -1972,6 +1992,37 @@ mod tests {
                 approve: true,
             })
         );
+    }
+
+    #[test]
+    fn the_sm_breakpoint_reads_the_window_like_the_web_media_query() {
+        // A 640px window leaves the page about 392px beside the sidebar; the
+        // web's `sm:px-6` and `sm:grid-cols-2` still apply.
+        let docked = Layout::of(392.0, 640.0);
+        assert_eq!(docked.padding, super::PAGE_WIDE_PADDING_PX);
+        assert!(docked.wide);
+        let phone = Layout::of(390.0, 390.0);
+        assert_eq!(phone.padding, super::PAGE_PADDING_PX);
+        assert!(!phone.wide);
+        assert_eq!(Layout::of(1032.0, 1280.0).column, super::COLUMN_MAX_PX);
+    }
+
+    #[gpui::test]
+    fn stop_stays_inside_the_header_on_narrow_pages(cx: &mut gpui::TestAppContext) {
+        let mut wide = snapshot(BruhStatus::Working, Vec::new());
+        wide.agents[0].instructions =
+            "Watch every bill and statement that arrives, and draft the replies.".into();
+        let (_panel, cx) = open(cx, Some(wide), BruhTab::Chat);
+        for width in [390.0, 640.0] {
+            cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(800.0)));
+            cx.run_until_parked();
+            let header = cx.debug_bounds("desktop-bruh-header").expect("header");
+            let stop = cx.debug_bounds("desktop-bruh-stop").expect("stop");
+            assert!(
+                header.contains(&stop.origin) && header.contains(&stop.bottom_right()),
+                "{width}: stop {stop:?} outside header {header:?}"
+            );
+        }
     }
 
     #[gpui::test]

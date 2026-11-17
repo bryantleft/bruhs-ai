@@ -98,6 +98,17 @@ impl Workspace {
         bottom
     }
 
+    /// The crew page on screen: view, page agent and shown name.
+    pub fn smoke_crew_report(&self, cx: &App) -> String {
+        let panel = self.reactive_automations.read(cx);
+        format!(
+            "view={:?} page={:?} name={:?}",
+            self.active_view,
+            panel.bruh_page_agent(),
+            panel.smoke_bruh_name(),
+        )
+    }
+
     /// `BRUHS_DESKTOP_SMOKE_SCENE`: put the window in one named state for a
     /// comparison screenshot. Returns false for an unknown scene.
     pub fn smoke_scene(
@@ -157,6 +168,23 @@ impl Workspace {
                 self.toggle_date_picker(date_picker_ui::DatePickerTarget::EventStart, window, cx);
             }
             "settings" => self.open_settings(&OpenSettings, window, cx),
+            // The crew: a bruh's page on its Chat or Settings tab, and the
+            // New bruh dialog (web-vs-desktop crew comparison).
+            "bruh-create" => self.open_create_bruh_dialog(window, cx),
+            scene if scene.starts_with("bruh:") || scene.starts_with("bruh-settings:") => {
+                let (kind, agent_id) = scene.split_once(':').unwrap_or_default();
+                self.activate_sidebar_view(
+                    AppView::Bruh {
+                        agent_id: agent_id.to_string(),
+                    },
+                    window,
+                    cx,
+                );
+                if kind == "bruh-settings" {
+                    self.reactive_automations
+                        .update(cx, |panel, cx| panel.smoke_show_bruh_settings(agent_id, cx));
+                }
+            }
             "notice" => self
                 .meetings_hub
                 .update(cx, |hub, cx| hub.smoke_post_notice(cx)),

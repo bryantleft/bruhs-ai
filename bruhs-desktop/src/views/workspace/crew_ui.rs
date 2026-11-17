@@ -20,6 +20,12 @@ const CREW_INNER_X_PADDING_PX: f32 = 4.0;
 const CREW_GAP_PX: f32 = 4.0;
 /// Web `space-y-0.5` between rows.
 const CREW_ROW_GAP_PX: f32 = 2.0;
+/// A row's transparent focus border. The web draws an outline instead, so
+/// the border comes out of the row's padding.
+const CREW_ROW_BORDER_PX: f32 = 1.0;
+/// Web `px-2 py-1` on a row, less the focus border.
+const CREW_ROW_X_PADDING_PX: f32 = 8.0 - CREW_ROW_BORDER_PX;
+const CREW_ROW_Y_PADDING_PX: f32 = 4.0 - CREW_ROW_BORDER_PX;
 /// Web `max-h-[40vh]` on the list: the rail takes at most this share of the
 /// sidebar, and its list scrolls.
 const CREW_MAX_SHARE: f32 = 0.4;
@@ -392,14 +398,14 @@ impl Workspace {
                 .w_full()
                 .min_h(px(theme::CONTROL_PX))
                 .min_w_0()
-                .px_2()
-                .py_1()
+                .px(px(CREW_ROW_X_PADDING_PX))
+                .py(px(CREW_ROW_Y_PADDING_PX))
                 .flex()
                 .items_center()
                 .gap_2()
                 .cursor_pointer()
                 .rounded(px(CREW_RADIUS_GRAPE_PX))
-                .border_1()
+                .border(px(CREW_ROW_BORDER_PX))
                 .border_color(gpui::transparent_black())
                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .map(|el| {
@@ -585,10 +591,11 @@ impl Workspace {
             .gap_2()
             .child(cancel)
             .child(create);
-        self.render_modal_shell(
+        self.render_modal_shell_sized(
             NEW_BRUH_LABEL,
             fields.unwrap_or_else(div),
             Some(footer),
+            DESKTOP_DIALOG_2XL_WIDTH_PX,
             window,
             cx,
         )
@@ -655,6 +662,27 @@ mod tests {
 
     fn leak(text: String) -> &'static str {
         Box::leak(text.into_boxed_str())
+    }
+
+    #[gpui::test]
+    fn crew_rows_are_as_tall_as_the_web_rows(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        show(
+            &workspace,
+            cx,
+            vec![bruh("amy", BruhStatus::Asleep)],
+            CREW_PROTOCOL,
+        );
+        let row = cx.debug_bounds("desktop-crew-row-id-amy").expect("amy");
+        // Web: py-1 around a 13px name and a 12px status line at 1.5 line
+        // height. The 1px focus border sits inside that padding.
+        let web = 4.0 + 13.0 * 1.5 + 12.0 * 1.5 + 4.0;
+        assert!(
+            (f32::from(row.size.height) - web).abs() < 0.5,
+            "row {:?}, web {web}",
+            row.size.height
+        );
     }
 
     #[gpui::test]
@@ -941,6 +969,9 @@ mod tests {
         cx.run_until_parked();
         assert!(cx.debug_bounds("desktop-create-bruh").is_some());
         assert!(cx.debug_bounds("desktop-bruh-face-editor").is_some());
+        // Web `max-w-2xl`.
+        let dialog = cx.debug_bounds("desktop-modal-dialog").expect("dialog");
+        assert_eq!(dialog.size.width, gpui::px(672.0));
         // Cancel closes it, and the panel forgets its bruh.
         let cancel = cx
             .debug_bounds("desktop-create-bruh-cancel")
