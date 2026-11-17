@@ -2,10 +2,11 @@ use bruhs_models::WorkflowOperation;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
+/// A "Review workflow" disclosure with the full payload of `workflow_id`,
+/// which may change while it is open (the workflow history).
 #[component]
-pub fn WorkflowReview(workflow_id: String) -> impl IntoView {
+pub fn WorkflowReview(#[prop(into)] workflow_id: Signal<String>) -> impl IntoView {
     let crate::state::AutomationStateSignal(automation) = expect_context();
-    let workflow_id = StoredValue::new(workflow_id);
     let opened = RwSignal::new(false);
     view! {
         <details class="w-full min-w-0" on:toggle=move |event: web_sys::Event| {
@@ -13,7 +14,7 @@ pub fn WorkflowReview(workflow_id: String) -> impl IntoView {
         }>
             <summary class="bruhs-control flex min-h-control items-center text-label-sm text-rambutan-400 cursor-pointer">"Review workflow"</summary>
             <Show when=move || opened.get()>
-                {move || automation.with(|state| workflow_id.with_value(|id| {
+                {move || automation.with(|state| workflow_id.with(|id| {
                     state.workflows.iter().find(|workflow| &workflow.id == id).map(|workflow| {
                         let operations = workflow.steps.iter().map(|step| step.operation.clone()).collect();
                         view! { <WorkflowPayload operations=operations /> }

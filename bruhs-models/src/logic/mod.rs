@@ -44,3 +44,4 @@ pub mod text;
 pub mod tools;
 pub mod wav;
 pub mod workbench_draft;
+pub mod workflow_history;

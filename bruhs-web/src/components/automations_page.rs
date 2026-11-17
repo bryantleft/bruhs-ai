@@ -6,22 +6,9 @@ use leptos::prelude::*;
 
 use crate::state::{
     AutomationStateSignal, CalendarEventsSignal, CapturesSignal, InboxConversationsSignal,
-    KnowledgeDocumentsSignal, LifeContextSignal, WorkItemsSignal,
+    KnowledgeDocumentsSignal, LifeContextSignal, ReviewedWorkflowSignal, WorkItemsSignal,
 };
 use crate::ui::{Button, ButtonSize, ButtonVariant};
-
-fn status_label(status: WorkflowStatus) -> &'static str {
-    match status {
-        WorkflowStatus::Draft => "Draft",
-        WorkflowStatus::Previewed => "Previewed",
-        WorkflowStatus::Declined => "Declined",
-        WorkflowStatus::Running => "Running",
-        WorkflowStatus::Paused => "Paused",
-        WorkflowStatus::Completed => "Completed",
-        WorkflowStatus::Failed => "Failed",
-        WorkflowStatus::RolledBack => "Rolled back",
-    }
-}
 
 #[component]
 pub fn AutomationsPage() -> impl IntoView {
@@ -86,6 +73,7 @@ pub fn AutomationsPage() -> impl IntoView {
     });
 
     let active_workflow = RwSignal::new(None::<String>);
+    let ReviewedWorkflowSignal(reviewed) = expect_context();
     let preview = RwSignal::new(None::<WorkflowPreview>);
     let execution_error = RwSignal::new(None::<String>);
 
@@ -103,6 +91,7 @@ pub fn AutomationsPage() -> impl IntoView {
                 };
                 next_preview = state.preview(&workflow_id, now);
             });
+            reviewed.set(Some(workflow_id.clone()));
             active_workflow.set(Some(workflow_id));
             preview.set(next_preview);
         };
@@ -131,6 +120,16 @@ pub fn AutomationsPage() -> impl IntoView {
             execution_error.set(Some(error.to_string()));
         }
     };
+    // Controls that change records wait for the store, the executor and any
+    // pending save.
+    let locked = move || {
+        !automation.editable()
+            || matches!(
+                automation.status.get(),
+                crate::durable_metadata::SaveState::Saving
+            )
+            || !executor.ready.get()
+    };
     let rollback = move |workflow_id: String| {
         execution_error.set(None);
         if let Err(error) = executor.rollback(workflow_id) {
@@ -157,12 +156,11 @@ pub fn AutomationsPage() -> impl IntoView {
                 <div class="mx-auto mb-4 max-w-6xl">
                     <super::mcp_connection::McpConnectionPanel />
                 </div>
-                <fieldset disabled=move || !automation.editable() || matches!(automation.status.get(), crate::durable_metadata::SaveState::Saving) || !executor.ready.get() class="m-0 min-w-0 border-0 p-0">
                 {move || execution_error.get().map(|message| view! {
                     <p role="alert" class="mx-auto mb-3 max-w-6xl rounded-grape bg-longan-900 px-3 py-2 text-body-sm text-lychee-300">{message}</p>
                 })}
                 <div class="mx-auto grid max-w-6xl gap-4 lg:grid-cols-[minmax(0,1fr)_22rem]">
-                    <div class="space-y-4">
+                    <fieldset disabled=locked class="m-0 min-w-0 space-y-4 border-0 p-0">
                         <super::mcp_review::WorkflowReviews shown=Signal::derive(move || active_workflow.get()) error=execution_error />
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="suggestions-title">
                             <div class="flex items-center justify-between gap-3">
@@ -286,9 +284,10 @@ pub fn AutomationsPage() -> impl IntoView {
                                 view! { <button type="button" class="mt-3 mr-2 text-button text-lychee-300 hover:text-lychee-200 cursor-pointer" on:click=move |_| rollback(id.clone())>{format!("Undo {title}")}</button> }
                             }).collect_view())}
                         </section>
-                    </div>
+                    </fieldset>
 
                     <aside class="space-y-4">
+                        <fieldset disabled=locked class="m-0 min-w-0 border-0 p-0">
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="capabilities-title">
                             <h2 id="capabilities-title" class="text-h4 text-rambutan-100">"Capability grants"</h2>
                             <p class="text-body-sm text-rambutan-500">"Read and Write are independent. Finance and Health start fully off."</p>
@@ -314,6 +313,7 @@ pub fn AutomationsPage() -> impl IntoView {
                                 }).collect_view()}
                             </div>
                         </section>
+                        </fieldset>
 
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50">
                             <p class="text-label-sm uppercase tracking-wide text-rambutan-400">"Safety contract"</p>
@@ -325,16 +325,10 @@ pub fn AutomationsPage() -> impl IntoView {
                             }}</p>
                         </section>
 
-                        {move || automation.with(|state| state.workflows.last().cloned().map(|workflow| view! {
-                            <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50">
-                                <p class="text-label-sm uppercase tracking-wide text-rambutan-400">"Latest workflow"</p>
-                                <p class="mt-1 text-label text-rambutan-200">{workflow.title}</p>
-                                <p class="text-body-sm text-rambutan-500">{status_label(workflow.status)}</p>
-                            </section>
-                        }))}
+                        // Browsing changes no record, so it never waits on a save.
+                        <super::workflow_history::WorkflowHistory />
                     </aside>
                 </div>
-                </fieldset>
             </div>
         </section>
     }
