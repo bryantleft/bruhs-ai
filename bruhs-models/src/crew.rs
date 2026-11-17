@@ -10,6 +10,8 @@ use crate::EpochMs;
 
 mod access;
 pub use access::*;
+mod transcript;
+pub use transcript::*;
 #[cfg(test)]
 mod wire_tests;
 
