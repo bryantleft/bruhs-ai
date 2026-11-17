@@ -158,6 +158,8 @@ use task_forms_ui::*;
 use tasks_ui::*;
 
 // --- Actions ---
+/// Escape closes overlays; shared with the `bruhs-ui` components.
+pub use bruhs_ui::actions::CloseOverlays;
 actions!(
     workspace,
     [
@@ -170,7 +172,6 @@ actions!(
         StopAll,
         OpenTaskCreateShortcut,
         OpenCapture,
-        CloseOverlays,
         OpenChatView,
         OpenTodayView,
         OpenInboxView,
