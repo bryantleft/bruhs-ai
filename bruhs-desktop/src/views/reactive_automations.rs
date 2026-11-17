@@ -923,6 +923,40 @@ impl ReactiveAutomations {
         }));
         cx.notify();
     }
+    /// Web's Meeting event list: the topic is picked, not typed.
+    fn render_topic_picker(&self, editor: &SourceEditor, cx: &Context<'_, Self>) -> Stateful<Div> {
+        let current = editor.value.read(cx).value().to_string();
+        div()
+            .id("reactive-source-topics")
+            .flex()
+            .flex_wrap()
+            .gap_2()
+            .role(Role::Group)
+            .aria_label("Meeting event")
+            .children(
+                bruhs_models::reactive::APP_EVENT_TOPICS
+                    .into_iter()
+                    .map(|(topic, label)| {
+                        control(
+                            SharedString::from(format!("reactive-source-topic-{topic}")),
+                            label,
+                            self.busy,
+                        )
+                        .when(current == topic, |button| {
+                            button.bg(theme::blueberry_500().opacity(0.15))
+                        })
+                        .on_activate(cx, move |this, window, cx| {
+                            if let Some(Editor::Source(editor)) = &mut this.editor {
+                                editor
+                                    .value
+                                    .update(cx, |input, cx| input.set_value(topic, window, cx));
+                            }
+                            cx.notify();
+                        })
+                    }),
+            )
+    }
+
     fn render_editor(&self, cx: &Context<'_, Self>) -> Option<Div> {
         let editor = self.editor.as_ref()?;
         let mut body = card();
@@ -975,7 +1009,7 @@ impl ReactiveAutomations {
                     "folder"=>body.child(field("Folder to watch", &editor.value, false, self.busy)).child(field("File pattern", &editor.pattern, false, self.busy)).child(field("File settle time in seconds", &editor.settle, false, self.busy)).child(control("reactive-source-recursive",if editor.recursive{"Include subfolders: On"}else{"Include subfolders: Off"},self.busy).on_activate(cx, |this,_,cx|{if let Some(Editor::Source(editor))=&mut this.editor{editor.recursive= !editor.recursive;}cx.notify();})),
                     "http"=>body.child(field("Website URL", &editor.value, false, self.busy)),
                     "command"=>body.child(field("Command to run", &editor.value, true, self.busy)).child(field("Command working folder", &editor.cwd, false, self.busy)).child(field("Command timeout in seconds", &editor.timeout, false, self.busy)).child(muted("This command runs on your machine when the source is enabled. Use a command you trust.")),
-                    "app_event"=>body.child(field("App event topic", &editor.value, false, self.busy)).child(muted("Choose meeting.completed, meeting.transcribed, or meeting.summary.")),
+                    "app_event"=>body.child(muted("Meeting event")).child(self.render_topic_picker(editor, cx)),
                     "calendar"=>body.child(self.render_calendar_fields(editor, cx)),
                     "webhook"=>body.child(muted("Save the source, then reveal its private token from the source row.")),
                     "custom"=>body.child(muted("MQTT and Zigbee bridges can publish through the local API. Use a folder source for an FTP upload folder.")),
@@ -1779,5 +1813,48 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(cx.debug_bounds("reactive-Save agent").is_some());
+    }
+
+    #[gpui::test]
+    fn an_app_event_source_picks_its_topic_from_the_web_list(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let holder = Rc::new(std::cell::RefCell::new(None));
+        let capture = holder.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let panel = cx.new(ReactiveAutomations::new);
+            *capture.borrow_mut() = Some(panel.clone());
+            gpui_component::Root::new(panel, window, cx)
+        });
+        let panel = holder.borrow().clone().unwrap();
+        panel.update_in(cx, |panel, window, cx| {
+            panel.snapshot = Some(ReactiveSnapshot::default());
+            panel.loaded = true;
+            panel.open_source(None, window, cx);
+            let Some(Editor::Source(editor)) = &mut panel.editor else {
+                panic!("source editor");
+            };
+            editor.kind = "app_event";
+        });
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        for (_, label) in bruhs_models::reactive::APP_EVENT_TOPICS {
+            assert!(
+                cx.debug_bounds(Box::leak(format!("reactive-{label}").into_boxed_str()))
+                    .is_some(),
+                "{label} is offered"
+            );
+        }
+        let summary = cx.debug_bounds("reactive-Summary ready").expect("summary");
+        cx.simulate_click(summary.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        panel.read_with(cx, |panel, cx| {
+            let Some(Editor::Source(editor)) = &panel.editor else {
+                panic!("source editor");
+            };
+            assert_eq!(value(&editor.value, cx), "meeting.summary");
+        });
     }
 }

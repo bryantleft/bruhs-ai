@@ -17,6 +17,12 @@ pub const MAX_PAYLOAD_BYTES: usize = 64 * 1024;
 pub const MAX_TEXT_CHARS: usize = crate::thread_link::MAX_MESSAGE_CHARS;
 /// Snapshots show a page of recent activity; older identities remain in durable storage.
 pub const HISTORY_LIMIT: usize = 50;
+/// The app events an automation can start on, with how both apps name them.
+pub const APP_EVENT_TOPICS: [(&str, &str); 3] = [
+    ("meeting.completed", "Meeting completed"),
+    ("meeting.transcribed", "Final transcript updated"),
+    ("meeting.summary", "Summary ready"),
+];
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
