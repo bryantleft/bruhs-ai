@@ -1263,10 +1263,10 @@ impl ChatView {
         if !self.effort_chip_visible() {
             self.effort_menu_open = false;
         }
-        match AgentProvider::for_model(&self.model_id) {
-            AgentProvider::Claude => self.start_claude_auth_check(cx),
-            AgentProvider::Codex => self.start_codex_auth_check(cx),
-            _ => {}
+        if self.is_claude_model() {
+            self.start_claude_auth_check(cx);
+        } else if AgentProvider::for_model(&self.model_id) == AgentProvider::Codex {
+            self.start_codex_auth_check(cx);
         }
         cx.notify();
     }
