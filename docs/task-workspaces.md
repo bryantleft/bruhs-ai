@@ -61,7 +61,9 @@ listener.
 ## Working on a task
 
 Choose a project directory, model and access mode, then start a task. Choose
-New worktree when its edits need a separate branch. Model comparisons require
+New worktree when its edits need a separate branch. A new worktree starts with the project
+checkout's warm `target/debug` and `node_modules` where the filesystem can
+clone them; see [Worktree disk use](worktree-disk.md). Model comparisons require
 separate worktrees and use the same prompt for each selected model. The host
 admits at most one comparison model per logical CPU and runs at most that many
 active provider turns at once; queued work holds no CLI process. A parent awaiting

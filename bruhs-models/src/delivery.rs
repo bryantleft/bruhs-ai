@@ -68,6 +68,71 @@ pub struct ProjectScripts {
     pub run: Vec<Command>,
     #[serde(default)]
     pub teardown: Vec<Command>,
+    #[serde(default)]
+    pub worktree: WorktreeConfig,
+}
+
+/// How bruhs fills a new worktree of this project (`.bruhs/config.json`
+/// `worktree`). By default the checkout's ignored build folders are cloned
+/// into it copy-on-write where the filesystem supports that; see
+/// `docs/worktree-disk.md`.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct WorktreeConfig {
+    /// `false` reuses no build folder: the worktree is only Git's checkout.
+    #[serde(default = "copy_on_write_default")]
+    pub copy_on_write: bool,
+    /// Ignored folders, relative to the repository root, to clone into a new
+    /// worktree besides the detected Cargo `target/debug` and `node_modules`
+    /// folders. Folders that store absolute paths, such as Python virtual
+    /// environments, break when cloned to another place.
+    #[serde(default)]
+    pub build_dirs: Vec<String>,
+}
+
+fn copy_on_write_default() -> bool {
+    true
+}
+
+impl Default for WorktreeConfig {
+    fn default() -> Self {
+        Self {
+            copy_on_write: true,
+            build_dirs: Vec::new(),
+        }
+    }
+}
+
+/// At most this many configured build folders are read.
+pub const MAX_WORKTREE_BUILD_DIRS: usize = 32;
+
+impl WorktreeConfig {
+    /// The configured build folders that stay inside the repository: relative,
+    /// without `.`/`..` segments, outside `.git`, and at most
+    /// [`MAX_WORKTREE_BUILD_DIRS`] of them. Trailing slashes are dropped.
+    pub fn valid_build_dirs(&self) -> Vec<&str> {
+        self.build_dirs
+            .iter()
+            .map(|dir| dir.trim_end_matches('/'))
+            .filter(|dir| is_repository_relative(dir))
+            .take(MAX_WORKTREE_BUILD_DIRS)
+            .collect()
+    }
+}
+
+/// `path` names something inside a repository: non-empty `/`-separated
+/// segments, none of them `.`, `..` or `.git` (in any case), no backslash
+/// and no NUL.
+pub fn is_repository_relative(path: &str) -> bool {
+    !path.is_empty()
+        && path.len() <= 1024
+        && !path.contains(['\\', '\0'])
+        && path.split('/').all(|segment| {
+            !segment.is_empty()
+                && segment != "."
+                && segment != ".."
+                && !segment.eq_ignore_ascii_case(".git")
+        })
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -517,5 +582,25 @@ mod tests {
         assert!(check("PENDING", None).pending());
         assert!(!check("COMPLETED", Some("CANCELLED")).failed());
         assert!(!check("COMPLETED", Some("SUCCESS")).pending());
+    }
+
+    #[test]
+    fn worktree_config_defaults_to_copy_on_write_and_keeps_paths_inside_the_repository() {
+        let scripts: ProjectScripts = serde_json::from_str(r#"{"setup":[]}"#).unwrap();
+        assert_eq!(scripts.worktree, WorktreeConfig::default());
+        assert!(scripts.worktree.copy_on_write);
+
+        let scripts: ProjectScripts = serde_json::from_str(
+            r#"{"worktree":{"copy_on_write":false,"build_dirs":["vendor/bundle/","../up","/abs",".git/x","a/./b","web/.cache",""]}}"#,
+        )
+        .unwrap();
+        assert!(!scripts.worktree.copy_on_write);
+        assert_eq!(
+            scripts.worktree.valid_build_dirs(),
+            ["vendor/bundle", "web/.cache"]
+        );
+        assert!(serde_json::from_str::<ProjectScripts>(r#"{"worktree":{"clone":true}}"#).is_err());
+        assert!(!is_repository_relative("a\\..\\b"));
+        assert!(!is_repository_relative(".GIT"));
     }
 }

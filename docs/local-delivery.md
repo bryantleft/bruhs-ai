@@ -56,6 +56,8 @@ Project commands live in `.bruhs/config.json`:
 
 Each phase runs commands sequentially in the selected workspace. Run setup, Run project and Run teardown each require their own preview and explicit execution. A long-running server remains Running until it exits, is stopped or reaches the execution timeout chosen for that action. Discovery does not execute repository scripts. Shell scripts can be used deliberately by naming a shell executable and literal arguments; the review then shows that shell invocation.
 
+The same file's `worktree` section controls which build folders new worktrees reuse from the checkout; see [Worktree disk use](worktree-disk.md). Start issue in a worktree clones the checkout's ignored build folders into the new workspace right after its reviewed `git worktree add`, before setup runs; the clone counts against the action's time budget.
+
 ## Follow CI and reviews
 
 Choose a poll interval to watch a PR. The server keeps polling while its UI is closed. Changes to check failures, completed checks, review/comments, head commits, merge conflicts and terminal PR state create durable notifications. Comments from the signed-in owner do not wake a watch. A closed or merged PR stops its watch. Failed reads remain visible and are retried on the chosen cadence without replacing the previous successful snapshot.
