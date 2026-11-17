@@ -156,5 +156,15 @@ pub fn source_host(url: &str) -> String {
         .to_string()
 }
 
+/// The document page's save line and empty Backlinks panel, on both apps.
+pub mod document_copy {
+    pub const SAVED: &str = "Saved locally";
+    pub const UNSAVED: &str = "Unsaved changes";
+    pub const SAVING: &str = "Saving document and attachments…";
+    pub const NOT_SAVED: &str =
+        "Document or attachment not saved. Your changes are kept; use the save recovery notice to retry.";
+    pub const NO_BACKLINKS: &str = "Nothing links here yet.";
+}
+
 #[cfg(test)]
 mod tests;

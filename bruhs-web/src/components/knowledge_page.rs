@@ -1,7 +1,7 @@
 //! Local-first knowledge library: lightweight Markdown documents, source
 //! clips, typed links, citations, backlinks, attachments, and version history.
 
-use bruhs_models::logic::knowledge_library::{self as library, source_host};
+use bruhs_models::logic::knowledge_library::{self as library, document_copy, source_host};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_models::{
     backlinks_for, KnowledgeAttachment, KnowledgeCitation, KnowledgeDocument, KnowledgeLink,
@@ -613,9 +613,9 @@ fn DocumentEditor(document_id: String) -> impl IntoView {
                                 <p class="min-h-[20px] text-label-sm text-rambutan-500" aria-live="polite">{move || {
                                     use crate::durable_metadata::SaveState;
                                     match saves.record_status(crate::task_saves::Kind::Document, &stable_document_id.get_value()) {
-                                        SaveState::Error { .. } => "Document or attachment not saved. Your changes are kept; use the save recovery notice to retry.".to_string(),
-                                        SaveState::Saving | SaveState::Loading => "Saving document and attachments…".to_string(),
-                                        SaveState::Saved => notice.get().unwrap_or_else(|| if dirty.get() { "Unsaved changes".to_string() } else if attachment_busy.get() { "Reading attachment…".to_string() } else { "Saved locally".to_string() }),
+                                        SaveState::Error { .. } => document_copy::NOT_SAVED.to_string(),
+                                        SaveState::Saving | SaveState::Loading => document_copy::SAVING.to_string(),
+                                        SaveState::Saved => notice.get().unwrap_or_else(|| if dirty.get() { document_copy::UNSAVED.to_string() } else if attachment_busy.get() { "Reading attachment…".to_string() } else { document_copy::SAVED.to_string() }),
                                     }
                                 }}</p>
                             </div>
@@ -693,7 +693,7 @@ fn DocumentEditor(document_id: String) -> impl IntoView {
                                         let items = documents.with(|items| backlinks_for(&stable_document_id.get_value(), items));
                                         if items.is_empty() {
                                             return view! {
-                                                <p class="px-2 text-body-sm text-rambutan-500">"Nothing links here yet."</p>
+                                                <p class="px-2 text-body-sm text-rambutan-500">{document_copy::NO_BACKLINKS}</p>
                                             }
                                             .into_any();
                                         }

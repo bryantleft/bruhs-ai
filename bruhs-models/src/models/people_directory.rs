@@ -21,6 +21,7 @@ pub const RELATIONSHIP_DUE_TOMORROW_MS: i64 = 86_400_000;
 /// App-owned People copy both surfaces render, so web and desktop match word
 /// for word. Follows `docs/ui-standards.md`: short sentences, no dashes.
 pub mod people_copy {
+    pub const PAGE_SUBTITLE: &str = "Profiles from your meetings, with notes and reminders.";
     pub const CREATE_LABEL: &str = "New person";
     pub const CREATE_PLACEHOLDER: &str = "Name";
     pub const CREATE_BUTTON: &str = "Add person";

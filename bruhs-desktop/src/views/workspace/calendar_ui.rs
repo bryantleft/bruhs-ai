@@ -205,6 +205,18 @@ pub(super) struct CalendarMonthDay<'a> {
     pub total_records: usize,
 }
 
+/// How a day's events are listed: all-day first, then by start, then title.
+pub(super) fn day_event_order(
+    a: &DesktopCalendarEvent,
+    b: &DesktopCalendarEvent,
+) -> std::cmp::Ordering {
+    b.all_day
+        .cmp(&a.all_day)
+        .then(a.start_at.cmp(&b.start_at))
+        .then_with(|| a.title.cmp(&b.title))
+        .then_with(|| a.id.cmp(&b.id))
+}
+
 pub(super) fn calendar_month_days<'a>(
     events: &'a [DesktopCalendarEvent],
     tasks: &'a [DesktopWorkItem],
@@ -223,7 +235,11 @@ pub(super) fn calendar_month_days<'a>(
             }
         })
         .collect::<Vec<_>>();
-    for event in events {
+    // A day lists all-day events first, then by start, as the web does; a
+    // full cell keeps the earliest.
+    let mut ordered: Vec<&DesktopCalendarEvent> = events.iter().collect();
+    ordered.sort_by(|a, b| day_event_order(a, b));
+    for event in ordered {
         let first = days.partition_point(|day| day.end <= event.start_at);
         let end = days.partition_point(|day| day.start < event.end_at);
         if first >= end {
@@ -1799,18 +1815,19 @@ pub(super) fn calendar_day_list_label(total: usize, date: NaiveDate) -> String {
 }
 
 impl Workspace {
-    /// Every event and due task of `date`, in month order: events (local,
-    /// then provider) and then tasks due that day.
+    /// Every event and due task of `date`, in month order: events (all-day
+    /// first, then by start) and then tasks due that day.
     pub(super) fn calendar_day_records(
         &self,
         date: NaiveDate,
         cx: &Context<'_, Self>,
     ) -> (Vec<DesktopCalendarEvent>, Vec<DesktopWorkItem>) {
-        let events = self
+        let mut events: Vec<DesktopCalendarEvent> = self
             .visible_calendar_events(cx)
             .into_iter()
             .filter(|event| event_overlaps_day(event, date))
             .collect();
+        events.sort_by(day_event_order);
         let due = date.format(DESKTOP_DATE_FORMAT).to_string();
         let tasks = self
             .work_items
@@ -2030,5 +2047,54 @@ impl Workspace {
             )
             .children(rows);
         self.render_modal_shell(CALENDAR_DAY_LIST_LABEL, content, None, window, cx)
+    }
+}
+
+#[cfg(test)]
+mod day_order_tests {
+    use super::{at_hour, calendar_month_days, DesktopCalendarEvent};
+    use chrono::{Duration, NaiveDate};
+
+    fn event(
+        id: &str,
+        title: &str,
+        date: NaiveDate,
+        hour: u32,
+        all_day: bool,
+    ) -> DesktopCalendarEvent {
+        DesktopCalendarEvent {
+            id: id.into(),
+            title: title.into(),
+            start_at: at_hour(date, if all_day { 0 } else { hour }),
+            end_at: if all_day {
+                at_hour(date + Duration::days(1), 0)
+            } else {
+                at_hour(date, hour) + Duration::minutes(30)
+            },
+            all_day,
+            ..Default::default()
+        }
+    }
+
+    /// PM-45: like the web, a day lists all-day events first, then by start,
+    /// whatever order they were saved in, and a full cell keeps the earliest.
+    #[test]
+    fn a_month_day_lists_events_all_day_first_then_by_start() {
+        let date = NaiveDate::from_ymd_opt(2026, 11, 16).unwrap();
+        let events = vec![
+            event("focus", "Focus block", date, 13, false),
+            event("late", "Late review", date, 17, false),
+            event("standup", "Standup", date, 9, false),
+            event("holiday", "Holiday", date, 0, true),
+            event("lunch", "Lunch", date, 12, false),
+        ];
+        let days = calendar_month_days(&events, &[], date);
+        let ids: Vec<&str> = days[0]
+            .events
+            .iter()
+            .map(|event| event.id.as_str())
+            .collect();
+        assert_eq!(ids, ["holiday", "standup", "lunch"]);
+        assert_eq!(days[0].total_records, 5);
     }
 }

@@ -509,67 +509,89 @@ impl Workspace {
                     this.select_inbox_conversation(&keyboard_id, window, cx);
                 }
             }))
+            .flex()
+            .items_start()
+            .gap_3()
+            // Web: a dot marks unread rows (blueberry), read ones stay muted.
             .child(
                 div()
-                    .flex()
-                    .items_center()
-                    .justify_between()
-                    .child(
-                        div()
-                            .truncate()
-                            .text_size(px(13.0))
-                            .min_w_0()
-                            .flex_1()
-                            .font_weight(if conversation.unread {
-                                FontWeight::SEMIBOLD
-                            } else {
-                                FontWeight::NORMAL
-                            })
-                            .text_color(if conversation.unread {
-                                theme::rambutan_100()
-                            } else {
-                                theme::rambutan_300()
-                            })
-                            .child(sender),
-                    )
-                    .child(
-                        div()
-                            .flex_shrink_0()
-                            .text_size(px(12.0))
-                            .text_color(theme::rambutan_500())
-                            .child(inbox_date(conversation.message_at_ms)),
-                    ),
-            )
-            .child(
-                div()
-                    .mt_1()
-                    .truncate()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_300())
-                    .child(if conversation.subject.trim().is_empty() {
-                        "(No subject)".to_string()
+                    .debug_selector(move || format!("desktop-inbox-card-dot-{key}"))
+                    .mt(px(6.0))
+                    .size(px(8.0))
+                    .flex_shrink_0()
+                    .rounded_full()
+                    .bg(if conversation.unread {
+                        theme::blueberry_400()
                     } else {
-                        conversation.subject.clone()
+                        theme::longan_700()
                     }),
             )
             .child(
                 div()
-                    .mt_1()
-                    .truncate()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_500())
-                    .overflow_hidden()
-                    .child(preview),
-            )
-            .child(
-                div()
-                    .mt_1()
-                    .flex()
-                    .gap_3()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_500())
-                    .child(format!("{} import", conversation.source.label()))
-                    .when(conversation.important, |element| element.child("Important")),
+                    .min_w_0()
+                    .flex_1()
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .justify_between()
+                            .child(
+                                div()
+                                    .truncate()
+                                    .text_size(px(13.0))
+                                    .min_w_0()
+                                    .flex_1()
+                                    .font_weight(if conversation.unread {
+                                        FontWeight::SEMIBOLD
+                                    } else {
+                                        FontWeight::NORMAL
+                                    })
+                                    .text_color(if conversation.unread {
+                                        theme::rambutan_100()
+                                    } else {
+                                        theme::rambutan_300()
+                                    })
+                                    .child(sender),
+                            )
+                            .child(
+                                div()
+                                    .flex_shrink_0()
+                                    .text_size(px(12.0))
+                                    .text_color(theme::rambutan_500())
+                                    .child(inbox_date(conversation.message_at_ms)),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .mt_1()
+                            .truncate()
+                            .text_size(px(12.0))
+                            .text_color(theme::rambutan_300())
+                            .child(if conversation.subject.trim().is_empty() {
+                                "(No subject)".to_string()
+                            } else {
+                                conversation.subject.clone()
+                            }),
+                    )
+                    .child(
+                        div()
+                            .mt_1()
+                            .truncate()
+                            .text_size(px(12.0))
+                            .text_color(theme::rambutan_500())
+                            .overflow_hidden()
+                            .child(preview),
+                    )
+                    .child(
+                        div()
+                            .mt_1()
+                            .flex()
+                            .gap_3()
+                            .text_size(px(12.0))
+                            .text_color(theme::rambutan_500())
+                            .child(format!("{} import", conversation.source.label()))
+                            .when(conversation.important, |element| element.child("Important")),
+                    ),
             )
             .into_any_element()
     }

@@ -34,12 +34,21 @@ pub async fn load() -> Result<Vec<WorkItem>, SaveError> {
     let db = open_db().await?;
     let tx = LocalTransaction::new(db.transaction(&[STORE_WORK_ITEMS], TransactionMode::ReadOnly)?);
     let result = async {
-        tx.object_store(STORE_WORK_ITEMS)?
+        let mut items = tx
+            .object_store(STORE_WORK_ITEMS)?
             .get_all(None, None)?
             .await?
             .into_iter()
-            .map(|raw| from_js(raw).map_err(|_| SaveError::Corrupt))
-            .collect()
+            .map(|raw| from_js::<WorkItem>(raw).map_err(|_| SaveError::Corrupt))
+            .collect::<Result<Vec<_>, _>>()?;
+        // IndexedDB returns tasks by id. Lists show them as created, as they
+        // were before the reload and as desktop keeps them.
+        items.sort_by(|a, b| {
+            a.created_at
+                .cmp(&b.created_at)
+                .then_with(|| a.id.cmp(&b.id))
+        });
+        Ok(items)
     }
     .await;
     finish(tx, result).await

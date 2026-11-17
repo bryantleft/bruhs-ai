@@ -771,7 +771,7 @@ pub fn SearchPage() -> impl IntoView {
 
                 <Input
                     input_type="search".to_string()
-                    placeholder="Search tasks, notes, events, people, meetings, threads…".to_string()
+                    placeholder=bruhs_models::search_copy::PLACEHOLDER.to_string()
                     value=Signal::derive(move || query.get())
                     aria_label="Search everything".to_string()
                     role="combobox".to_string()
@@ -793,7 +793,7 @@ pub fn SearchPage() -> impl IntoView {
                     if value.trim().is_empty() {
                         return view! {
                             <div class="rounded-grape inset-ring inset-ring-longan-800 bg-longan-900/30 px-4 py-3 text-body-sm text-rambutan-500">
-                                "Find local records instantly. ↑↓ to choose, Enter to open, Esc to clear."
+                                {bruhs_models::search_copy::HINT}
                             </div>
                         }.into_any();
                     }

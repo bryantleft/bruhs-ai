@@ -118,6 +118,12 @@ impl From<SearchDocument> for IndexedDocument {
     }
 }
 
+/// The Search page's words, on both apps.
+pub mod search_copy {
+    pub const PLACEHOLDER: &str = "Search tasks, notes, events, people, meetings, threads…";
+    pub const HINT: &str = "Find local records instantly. ↑↓ to choose, Enter to open, Esc to clear.";
+}
+
 /// A ranked result returned by [`SearchIndex::search`].
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SearchHit {

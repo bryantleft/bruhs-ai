@@ -242,6 +242,8 @@ pub struct PreviewPanelView {
     host_error: Option<String>,
     /// Frames in which the body asked the host to place the page.
     place_attempts: u32,
+    /// The URL row above the page; the Workbench shows its page without it.
+    url_row: bool,
 }
 
 impl EventEmitter<PreviewPanelEvent> for PreviewPanelView {}
@@ -270,6 +272,7 @@ impl PreviewPanelView {
             host: WebViewHost::new(),
             host_error: None,
             place_attempts: 0,
+            url_row: true,
         };
         view.refresh_servers(cx);
         view
@@ -321,6 +324,17 @@ impl PreviewPanelView {
     #[cfg(debug_assertions)]
     pub fn place_attempts(&self) -> u32 {
         self.place_attempts
+    }
+
+    /// Show or hide the URL row. Where no page can be embedded the row stays,
+    /// since its Open in browser is the way to the page.
+    pub fn set_url_row(&mut self, shown: bool) {
+        self.url_row = shown || !WebViewHost::available();
+    }
+
+    #[cfg(test)]
+    pub(crate) fn url_row_shown(&self) -> bool {
+        self.url_row
     }
 
     /// Receive the messages pages post with `window.ipc.postMessage`. Call
@@ -802,7 +816,7 @@ impl Render for PreviewPanelView {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(self.render_header(cx))
+            .when(self.url_row, |panel| panel.child(self.render_header(cx)))
             .child(body)
     }
 }

@@ -1425,6 +1425,9 @@ mod dictation_draft_tests {
             .read_with(cx, |workspace, _| workspace.workbench_panel.clone())
             .expect("the Workbench view makes its panel");
         let base = panel.read_with(cx, |panel, _| panel.server_base().to_string());
+        // PM-49: like the web, the embedded page has no URL row.
+        let url_row = panel.read_with(cx, |panel, cx| panel.url_row_shown(cx));
+        assert_eq!(url_row, !cfg!(target_os = "macos"));
         let body = serde_json::json!({ "type": DICTATION_DRAFT_MESSAGE, "text": "Dictated words" })
             .to_string();
         workspace.update_in(cx, |workspace, window, cx| {
