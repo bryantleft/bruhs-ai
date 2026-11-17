@@ -10,10 +10,7 @@ use crate::state::{
 };
 use crate::task_saves::TaskSaves;
 use crate::ui::{Button, ButtonSize, ButtonVariant, Dialog};
-use bruhs_models::{
-    propose_day_plan_in_window, AgentDomain, DayPlanProposal, ProactiveSuggestion,
-    WorkflowOperation,
-};
+use bruhs_models::{propose_day_plan_in_window, today_copy, DayPlanProposal};
 
 fn local_day_bounds(now_ms: f64) -> (f64, f64) {
     let now = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(now_ms));
@@ -209,42 +206,9 @@ pub fn TodayPage() -> impl IntoView {
             return;
         }
         let event_count = events.with(Vec::len);
+        // Shared with desktop and Agent workflows: written only when added.
         automation.update(|state| {
-            if state
-                .suggestions
-                .iter()
-                .all(|suggestion| suggestion.id != "protect-focus")
-            {
-                let now = crate::clock::now_ms();
-                let start_at_ms = ((bruhs_models::EpochMs::saturating_from_i64(now).as_f64() / 1_800_000.0).ceil() + 1.0) * 1_800_000.0;
-                state.suggestions.push(ProactiveSuggestion {
-                    id: "protect-focus".into(),
-                    title: "Protect a focus block".into(),
-                    explanation: "A task, calendar block, and local note can be reviewed as one reversible transaction."
-                        .into(),
-                    evidence: format!(
-                        "{unfinished} unfinished tasks and {event_count} calendar entries are stored locally."
-                    ),
-                    domain: AgentDomain::Tasks,
-                    operations: vec![
-                        WorkflowOperation::CreateTask {
-                            title: "Finish the most important task".into(),
-                        },
-                        WorkflowOperation::CreateCalendarEvent {
-                            title: "Protected focus".into(),
-                            start_at_ms,
-                            end_at_ms: start_at_ms + 45.0 * 60_000.0,
-                        },
-                        WorkflowOperation::AddCapture {
-                            content: "Focus plan\nProtected 45 minutes for the most important task."
-                                .into(),
-                        },
-                    ],
-                    dismissed: false,
-                    shown_count: 0,
-                    last_shown_at_ms: None,
-                });
-            }
+            state.offer_focus_suggestion(unfinished, event_count, crate::clock::now_ms());
         });
     });
 
@@ -318,10 +282,10 @@ pub fn TodayPage() -> impl IntoView {
                 </div>
                 <div class="flex flex-wrap items-center gap-2">
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| set_active_view.set(AppView::Automations))>
-                        "Agent workflows"
+                        {today_copy::AGENT_WORKFLOWS}
                     </Button>
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| set_active_view.set(AppView::Life))>
-                        "Life"
+                        {today_copy::LIFE}
                     </Button>
                     <Button variant=ButtonVariant::Primary size=ButtonSize::Small disabled=Signal::derive(move || planning.with(|state| state.busy)) on_click=Callback::new(draft_plan)>
                         "Plan my day"
@@ -407,7 +371,7 @@ pub fn TodayPage() -> impl IntoView {
                                 {move || {
                                     let next = snapshot.get().next;
                                     if next.is_empty() {
-                                        empty_row("Nothing else on the calendar today.").into_any()
+                                        empty_row(today_copy::SCHEDULE_EMPTY).into_any()
                                     } else {
                                         next.into_iter().map(|entry| {
                                             let event_id = entry.event_id.clone();
@@ -429,13 +393,13 @@ pub fn TodayPage() -> impl IntoView {
                         <section class="min-w-0 rounded-2xl bg-longan-900 inset-ring inset-ring-white/5 p-4" aria-labelledby="focus-heading">
                             <div class="mb-3 flex items-center justify-between">
                                 <h2 id="focus-heading" class="text-h4 text-rambutan-100">"Focus queue"</h2>
-                                <span class="text-label-sm text-rambutan-400">{move || format!("{} ready", snapshot.get().focus_queue.len())}</span>
+                                <span class="text-label-sm text-rambutan-400">{move || today_copy::ready(snapshot.get().focus_queue.len())}</span>
                             </div>
                             <div class="space-y-1">
                                 {move || {
                                     let queue = snapshot.get().focus_queue;
                                     if queue.is_empty() {
-                                        empty_row("No ready tasks. Add one or clear a dependency.").into_any()
+                                        empty_row(today_copy::FOCUS_QUEUE_EMPTY).into_any()
                                     } else {
                                         queue.into_iter().enumerate().map(|(index, task)| {
                                             let task_id = task.id.clone();
@@ -456,15 +420,15 @@ pub fn TodayPage() -> impl IntoView {
                     </div>
 
                     <div class="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
-                        <TodayTaskSection title="Overdue" tone="lychee" empty="Nothing overdue." items=Signal::derive(move || snapshot.get().overdue) on_open=Callback::new(open_task) />
-                        <TodayTaskSection title="Waiting on" tone="blueberry" empty="Nothing is blocked on someone else." items=Signal::derive(move || snapshot.get().waiting_on) on_open=Callback::new(open_task) />
+                        <TodayTaskSection title="Overdue" tone="lychee" empty=today_copy::OVERDUE_EMPTY items=Signal::derive(move || snapshot.get().overdue) on_open=Callback::new(open_task) />
+                        <TodayTaskSection title="Waiting on" tone="blueberry" empty=today_copy::WAITING_ON_EMPTY items=Signal::derive(move || snapshot.get().waiting_on) on_open=Callback::new(open_task) />
 
                         <section class="rounded-2xl bg-longan-900 inset-ring inset-ring-white/5 p-4" aria-labelledby="followups-heading">
                             <div class="mb-3 flex items-center justify-between"><h2 id="followups-heading" class="text-h4 text-rambutan-100">"Follow ups"</h2><span class="size-2 rounded-full bg-durian-400"></span></div>
                             <div class="space-y-1.5">
                                 {move || {
                                     let items = snapshot.get().follow_ups;
-                                    if items.is_empty() { empty_row("No recent follow ups.").into_any() } else {
+                                    if items.is_empty() { empty_row(today_copy::FOLLOW_UPS_EMPTY).into_any() } else {
                                         items.into_iter().take(4).map(|item| {
                                             let person_id = item.person_id.clone();
                                             view! {
@@ -484,7 +448,7 @@ pub fn TodayPage() -> impl IntoView {
                             <div class="space-y-1.5">
                                 {move || {
                                     let items = snapshot.get().recent_decisions;
-                                    if items.is_empty() { empty_row("No recent meeting decisions.").into_any() } else {
+                                    if items.is_empty() { empty_row(today_copy::DECISIONS_EMPTY).into_any() } else {
                                         items.into_iter().take(4).map(|item| {
                                             let meeting_id = item.meeting_id.clone();
                                             view! {

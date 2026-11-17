@@ -1,6 +1,6 @@
 use bruhs_models::{
     focus_workflow_operations as focus_operations, AgentAccess, AgentDomain, BackgroundJobStatus,
-    ProactiveSuggestion, WorkflowOperation, WorkflowPreview, WorkflowStatus,
+    WorkflowOperation, WorkflowPreview, WorkflowStatus, PROTECT_FOCUS_SUGGESTION_ID,
 };
 use leptos::prelude::*;
 
@@ -23,7 +23,6 @@ pub fn AutomationsPage() -> impl IntoView {
     let meeting_notes =
         expect_context::<crate::workflow_executor::WorkflowExecutor>().meeting_notes;
 
-    let now_ms = crate::clock::now_ms();
     Effect::new(move |_| {
         if !automation.ready() {
             return;
@@ -37,38 +36,15 @@ pub fn AutomationsPage() -> impl IntoView {
             state
                 .suggestions
                 .iter()
-                .any(|suggestion| suggestion.id == "protect-focus")
+                .any(|suggestion| suggestion.id == PROTECT_FOCUS_SUGGESTION_ID)
         });
         if unfinished == 0 || exists {
             return;
         }
+        // Shared with Today and desktop: the same wording and evidence.
+        let entries = events.with_untracked(Vec::len);
         automation.update(|state| {
-        if state
-            .suggestions
-            .iter()
-            .all(|suggestion| suggestion.id != "protect-focus")
-        {
-            let conflicts = events.with_untracked(|evs| {
-                evs.iter()
-                    .filter(|event| event.end_at_ms >= bruhs_models::EpochMs::saturating_from_i64(now_ms).as_f64())
-                    .count()
-            });
-            state.suggestions.push(ProactiveSuggestion {
-                id: "protect-focus".into(),
-                title: "Protect a focus block".into(),
-                explanation:
-                    "A task, calendar block, and local note can be created as one reversible transaction."
-                        .into(),
-                evidence: format!(
-                    "{unfinished} unfinished tasks and {conflicts} upcoming calendar entries are currently stored locally."
-                ),
-                domain: AgentDomain::Tasks,
-                operations: focus_operations(now_ms),
-                dismissed: false,
-                shown_count: 0,
-                last_shown_at_ms: None,
-            });
-        }
+            state.offer_focus_suggestion(unfinished, entries, crate::clock::now_ms());
         });
     });
 

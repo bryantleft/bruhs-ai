@@ -62,6 +62,41 @@ pub fn focus_workflow_operations(now_ms: i64) -> Vec<WorkflowOperation> {
     ]
 }
 
+/// The id of the local "Protect a focus block" suggestion.
+pub const PROTECT_FOCUS_SUGGESTION_ID: &str = "protect-focus";
+
+/// The local suggestion Today and Agent workflows show while unfinished
+/// tasks are stored: a task, a protected calendar block and a note, reviewed
+/// as one reversible workflow. Both apps build it here, so its wording and
+/// evidence match.
+pub fn protect_focus_suggestion(
+    unfinished_tasks: usize,
+    calendar_entries: usize,
+    now_ms: i64,
+) -> ProactiveSuggestion {
+    let tasks = match unfinished_tasks {
+        1 => "1 unfinished task".to_string(),
+        count => format!("{count} unfinished tasks"),
+    };
+    let entries = match calendar_entries {
+        1 => "1 calendar entry".to_string(),
+        count => format!("{count} calendar entries"),
+    };
+    ProactiveSuggestion {
+        id: PROTECT_FOCUS_SUGGESTION_ID.into(),
+        title: "Protect a focus block".into(),
+        explanation:
+            "A task, calendar block, and local note can be reviewed as one reversible transaction."
+                .into(),
+        evidence: format!("{tasks} and {entries} are stored locally."),
+        domain: AgentDomain::Tasks,
+        operations: focus_workflow_operations(now_ms),
+        dismissed: false,
+        shown_count: 0,
+        last_shown_at_ms: None,
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum AgentDomain {
@@ -1136,6 +1171,31 @@ impl AutomationState {
         true
     }
 
+    /// Adds [`protect_focus_suggestion`] the first time unfinished tasks are
+    /// stored. It is offered once: a dismissed suggestion stays dismissed.
+    /// Returns whether it was added.
+    pub fn offer_focus_suggestion(
+        &mut self,
+        unfinished_tasks: usize,
+        calendar_entries: usize,
+        now_ms: i64,
+    ) -> bool {
+        if unfinished_tasks == 0
+            || self
+                .suggestions
+                .iter()
+                .any(|suggestion| suggestion.id == PROTECT_FOCUS_SUGGESTION_ID)
+        {
+            return false;
+        }
+        self.suggestions.push(protect_focus_suggestion(
+            unfinished_tasks,
+            calendar_entries,
+            now_ms,
+        ));
+        true
+    }
+
     pub fn surfaceable_suggestions(&self, now_ms: i64) -> Vec<&ProactiveSuggestion> {
         self.suggestions
             .iter()
@@ -1451,5 +1511,45 @@ mod tests {
         assert!(state
             .surfaceable_suggestions(100 + 2 * SUGGESTION_COOLDOWN_MS)
             .is_empty());
+    }
+
+    /// PM-39: both apps word the focus suggestion as the web's Today did and
+    /// count only unfinished tasks, which Today passes in.
+    #[test]
+    fn the_focus_suggestion_counts_unfinished_tasks_once_they_exist() {
+        let suggestion = protect_focus_suggestion(3, 3, 0);
+        assert_eq!(suggestion.id, PROTECT_FOCUS_SUGGESTION_ID);
+        assert_eq!(suggestion.title, "Protect a focus block");
+        assert_eq!(
+            suggestion.explanation,
+            "A task, calendar block, and local note can be reviewed as one reversible transaction."
+        );
+        assert_eq!(
+            suggestion.evidence,
+            "3 unfinished tasks and 3 calendar entries are stored locally."
+        );
+        assert_eq!(suggestion.operations, focus_workflow_operations(0));
+        assert_eq!(
+            protect_focus_suggestion(1, 1, 0).evidence,
+            "1 unfinished task and 1 calendar entry are stored locally."
+        );
+
+        let mut state = AutomationState::default();
+        assert!(
+            !state.offer_focus_suggestion(0, 4, 0),
+            "nothing to focus on yet"
+        );
+        assert!(state.suggestions.is_empty());
+        assert!(state.offer_focus_suggestion(2, 0, 0));
+        assert!(state.dismiss_suggestion(PROTECT_FOCUS_SUGGESTION_ID, 1));
+        assert!(
+            !state.offer_focus_suggestion(5, 5, 2),
+            "a dismissed suggestion is not offered again"
+        );
+        assert_eq!(state.suggestions.len(), 1);
+        assert_eq!(
+            state.suggestions[0].evidence,
+            "2 unfinished tasks and 0 calendar entries are stored locally."
+        );
     }
 }

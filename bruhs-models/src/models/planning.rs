@@ -188,6 +188,25 @@ pub struct RecentDecision {
     pub decided_at: i64,
 }
 
+/// App-owned Today copy both surfaces render, so web and desktop match word
+/// for word. Follows `docs/ui-standards.md`: short sentences, no dashes.
+pub mod today_copy {
+    /// The header's links to the Agent workflows and Life pages.
+    pub const AGENT_WORKFLOWS: &str = "Agent workflows";
+    pub const LIFE: &str = "Life";
+    pub const SCHEDULE_EMPTY: &str = "Nothing else on the calendar today.";
+    pub const FOCUS_QUEUE_EMPTY: &str = "No ready tasks. Add one or clear a dependency.";
+    pub const OVERDUE_EMPTY: &str = "Nothing overdue.";
+    pub const WAITING_ON_EMPTY: &str = "Nothing is blocked on someone else.";
+    pub const FOLLOW_UPS_EMPTY: &str = "No recent follow ups.";
+    pub const DECISIONS_EMPTY: &str = "No recent meeting decisions.";
+
+    /// How many tasks the focus queue holds, beside its title: "3 ready".
+    pub fn ready(count: usize) -> String {
+        format!("{count} ready")
+    }
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct TodaySnapshot {
     pub now: Option<AgendaEntry>,

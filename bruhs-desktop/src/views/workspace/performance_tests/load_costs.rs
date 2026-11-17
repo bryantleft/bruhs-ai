@@ -199,6 +199,15 @@ fn saved_state(
     state
 }
 
+/// The frozen restorer seeds the focus suggestion in its old wording, even
+/// without tasks; since PM-39 the current one offers the web's shared
+/// suggestion once an unfinished task exists. Both snapshots set their
+/// suggestions aside so the rest compares exactly; the current ones return.
+fn set_aside_focus_suggestions(expected: &mut Observation, actual: &mut Observation) -> Value {
+    expected.snapshot["automation_state"]["suggestions"].take();
+    actual.snapshot["automation_state"]["suggestions"].take()
+}
+
 struct Observation {
     total_ms: f64,
     read_decode_hash_ms: f64,
@@ -344,8 +353,9 @@ fn complete_workspace_load_preserves_original_state_and_backup_recovery(cx: &mut
     state.calendar_events.push(invalid);
     for recovery in [false, true] {
         let bytes = write_fixture(&path, &state, recovery);
-        let expected = observe(cx, &path, original);
-        let actual = observe(cx, &path, current);
+        let mut expected = observe(cx, &path, original);
+        let mut actual = observe(cx, &path, current);
+        let suggestions = set_aside_focus_suggestions(&mut expected, &mut actual);
         assert_eq!(actual.snapshot, expected.snapshot);
         assert_eq!(actual.recovered, recovery);
         assert_eq!(
@@ -369,17 +379,21 @@ fn complete_workspace_load_preserves_original_state_and_backup_recovery(cx: &mut
         ] {
             assert_eq!(actual.snapshot[field], input[field], "{field}");
         }
+        assert_eq!(suggestions.as_array().unwrap().len(), 1);
         assert_eq!(
-            actual.snapshot["automation_state"]["suggestions"]
-                .as_array()
-                .unwrap()
-                .len(),
-            1
+            suggestions[0]["evidence"],
+            "3 unfinished tasks and 3 calendar entries are stored locally."
         );
     }
     std::fs::remove_file(&path).unwrap();
     let mut expected_missing = observe(cx, &path, original);
     let mut missing = observe(cx, &path, current);
+    let suggestions = set_aside_focus_suggestions(&mut expected_missing, &mut missing);
+    assert_eq!(
+        suggestions,
+        json!([]),
+        "no unfinished task, so no focus suggestion yet"
+    );
     for observation in [&mut expected_missing, &mut missing] {
         assert_eq!(observation.snapshot["threads"].as_array().unwrap().len(), 1);
         assert_eq!(observation.snapshot["threads"][0]["messages"], json!([]));
@@ -425,13 +439,14 @@ fn complete_workspace_load_cost(cx: &mut TestAppContext) {
         for recovery in [false, true] {
             let path = root.path().join(format!("{label}-{recovery}.json"));
             let bytes = write_fixture(&path, &state, recovery);
-            let expected = observe(cx, &path, original);
+            let mut expected = observe(cx, &path, original);
             let mut total = Vec::new();
             let mut load = Vec::new();
             let mut construct = Vec::new();
             let mut settle = Vec::new();
             for iteration in 0..35 {
-                let observation = observe(cx, &path, restore);
+                let mut observation = observe(cx, &path, restore);
+                set_aside_focus_suggestions(&mut expected, &mut observation);
                 assert_eq!(
                     observation.snapshot, expected.snapshot,
                     "{label}, recovery={recovery}, iteration={iteration}"

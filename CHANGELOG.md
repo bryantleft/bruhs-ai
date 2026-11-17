@@ -139,6 +139,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Changed
 
+- Today in the desktop app now looks like the web's. Agent workflows and
+  Life are quiet links in the header, the focus queue numbers its tasks,
+  shows each priority in its color and says how many are ready, and
+  Overdue, Waiting on, Follow ups and Decisions sit in one row, each with its
+  colored dot. The local focus suggestion reads the same in both apps and
+  counts only unfinished tasks.
 - A follow-up on Today opens that person's profile, on the web and in the
   desktop app, instead of only the People page.
 - Removed the workflow overview and What's new sections from the landing

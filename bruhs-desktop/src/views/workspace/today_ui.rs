@@ -2,8 +2,27 @@
 
 use super::*;
 
+use bruhs_models::today_copy;
+
 /// Web "Calendar →" at the right of Now & next.
 const TODAY_CALENDAR_LINK_LABEL: &str = "Calendar →";
+/// Web `text-h4`: each Today card's title.
+const TODAY_CARD_TITLE_PX: f32 = 16.0;
+/// Web `rounded-2xl`: Today's cards.
+const TODAY_CARD_RADIUS_PX: f32 = 16.0;
+/// Web `rounded-grape`: a row inside a card.
+const TODAY_ROW_RADIUS_PX: f32 = 8.0;
+/// Web `size-6`: a focus queue row's rank.
+const TODAY_RANK_PX: f32 = 24.0;
+/// Web `w-9`: a focus queue row's estimate.
+const TODAY_ESTIMATE_WIDTH_PX: f32 = 36.0;
+/// Web `size-2`: a status card's dot.
+const TODAY_DOT_PX: f32 = 8.0;
+/// Web's `lg` breakpoint: Now & next beside Focus queue, 0.9 to 1.1.
+const TODAY_TWO_COLUMNS_PX: f32 = 1024.0;
+/// Web's `md` and `xl` breakpoints: the status cards two, then four, to a row.
+const TODAY_STATUS_TWO_COLUMNS_PX: f32 = 768.0;
+const TODAY_STATUS_FOUR_COLUMNS_PX: f32 = 1280.0;
 /// Today's day-plan wording, as the web's Today page and day-plan store
 /// say it.
 const DAY_PLAN_APPLIED: &str = "Day plan applied.";
@@ -90,6 +109,32 @@ impl Workspace {
             return now;
         }
         Local::now()
+    }
+
+    /// Web Today's local suggestion, offered once the first unfinished task
+    /// is stored and saved with the change that added it.
+    pub(super) fn offer_focus_suggestion(&mut self) {
+        if self
+            .automation_state
+            .suggestions
+            .iter()
+            .any(|suggestion| suggestion.id == bruhs_models::PROTECT_FOCUS_SUGGESTION_ID)
+        {
+            return;
+        }
+        self.automation_state.offer_focus_suggestion(
+            unfinished_task_count(&self.work_items),
+            self.calendar_events.len(),
+            EpochMs::now().as_millis(),
+        );
+    }
+
+    /// A Today task row opens the task on Tasks.
+    fn open_today_task(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.selected_work_item_id = Some(id.to_string());
+        self.active_view = AppView::Tasks;
+        self.workspace_focus_handle.focus(window, cx);
+        self.persist_and_notify(cx);
     }
 
     pub(super) fn draft_desktop_day_plan(&mut self, cx: &mut Context<'_, Self>) {
@@ -783,6 +828,8 @@ impl Workspace {
         )
     }
 
+    /// Web `TodayTaskSection`'s row: the task's title over its due date or
+    /// whom it waits on.
     pub(super) fn render_today_task_row(
         &self,
         item: &WorkItem,
@@ -793,12 +840,11 @@ impl Workspace {
         div()
             .id(("desktop-today-task", element_key(&item.id)))
             .w_full()
-            .rounded(px(6.0))
+            .rounded(px(TODAY_ROW_RADIUS_PX))
             .px_2()
             .py_2()
             .flex()
-            .items_center()
-            .gap_2()
+            .flex_col()
             .hover(|element| element.bg(theme::longan_800().opacity(0.6)))
             .cursor_pointer()
             .tab_index(0)
@@ -808,15 +854,12 @@ impl Workspace {
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .on_click(cx.listener(move |this, _event, window, cx| {
-                this.selected_work_item_id = Some(item_id.clone());
-                this.active_view = AppView::Tasks;
-                this.workspace_focus_handle.focus(window, cx);
-                this.persist_and_notify(cx);
+                this.open_today_task(&item_id, window, cx);
             }))
             .child(
                 div()
-                    .flex_1()
-                    .min_w_0()
+                    .font_family(theme::UI_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
                     .text_size(px(13.0))
                     .text_color(theme::rambutan_200())
                     .overflow_hidden()
@@ -826,80 +869,229 @@ impl Workspace {
             )
             .child(
                 div()
-                    .text_size(px(11.0))
-                    .text_color(theme::rambutan_500())
+                    .mt(px(2.0))
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(px(12.0))
+                    .text_color(theme::rambutan_400())
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
                     .child(detail),
             )
             .into_any_element()
     }
 
+    /// Web's focus queue row: its rank (the first in persimmon), the title,
+    /// the priority in its color and the estimate.
+    fn render_today_focus_row(
+        &self,
+        index: usize,
+        item: &WorkItem,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let item_id = item.id.clone();
+        let estimate = item
+            .planning
+            .estimate_minutes
+            .map_or_else(|| "45m".to_string(), |minutes| format!("{minutes}m"));
+        let first = index == 0;
+        let group = SharedString::from(format!("desktop-today-focus-row-{index}"));
+        div()
+            .id(("desktop-today-focus", element_key(&item.id)))
+            .debug_selector(move || format!("desktop-today-focus-{index}"))
+            .group(group.clone())
+            .w_full()
+            .rounded(px(TODAY_ROW_RADIUS_PX))
+            .px(px(10.0))
+            .py_2()
+            .flex()
+            .items_center()
+            .gap_3()
+            .hover(|element| element.bg(theme::longan_800().opacity(0.6)))
+            .cursor_pointer()
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(format!(
+                "Open task {}, {} priority, {estimate}",
+                item.title,
+                item.priority.label()
+            ))
+            .border_1()
+            .border_color(gpui::transparent_black())
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .on_click(cx.listener(move |this, _event, window, cx| {
+                this.open_today_task(&item_id, window, cx);
+            }))
+            .child(
+                div()
+                    .debug_selector(move || format!("desktop-today-focus-rank-{index}"))
+                    .flex_shrink_0()
+                    .size(px(TODAY_RANK_PX))
+                    .rounded_full()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .bg(if first {
+                        theme::persimmon_500().opacity(0.15)
+                    } else {
+                        theme::longan_800()
+                    })
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(px(12.0))
+                    .text_color(if first {
+                        theme::persimmon_300()
+                    } else {
+                        theme::rambutan_500()
+                    })
+                    .child((index + 1).to_string()),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .font_family(theme::CODE_FONT_FAMILY)
+                    .text_size(px(14.0))
+                    .text_color(theme::rambutan_200())
+                    .group_hover(group, |el| el.text_color(theme::rambutan_100()))
+                    .overflow_hidden()
+                    .whitespace_nowrap()
+                    .text_ellipsis()
+                    .child(item.title.clone()),
+            )
+            .child(
+                div()
+                    .debug_selector(move || format!("desktop-today-focus-priority-{index}"))
+                    .flex_shrink_0()
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(px(12.0))
+                    .text_color(priority_color(item.priority))
+                    .child(item.priority.label()),
+            )
+            .child(
+                div()
+                    .flex_shrink_0()
+                    .w(px(TODAY_ESTIMATE_WIDTH_PX))
+                    .text_right()
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(px(12.0))
+                    .text_color(theme::rambutan_400())
+                    .child(estimate),
+            )
+            .into_any_element()
+    }
+
+    /// Web: the focus queue's "3 ready" at the right of its title.
+    fn render_today_ready_count(count: usize) -> AnyElement {
+        div()
+            .debug_selector(|| "desktop-today-focus-ready".to_string())
+            .flex_shrink_0()
+            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .font_weight(FontWeight::MEDIUM)
+            .text_size(px(12.0))
+            .text_color(theme::rambutan_400())
+            .child(today_copy::ready(count))
+            .into_any_element()
+    }
+
+    /// Web's colored dot at the right of a status card's title.
+    fn render_today_dot(key: &'static str, color: Hsla) -> AnyElement {
+        div()
+            .debug_selector(move || format!("desktop-today-dot-{key}"))
+            .flex_shrink_0()
+            .size(px(TODAY_DOT_PX))
+            .rounded_full()
+            .bg(color)
+            .into_any_element()
+    }
+
     /// A Today card: its title, with `action` at the right of the title
-    /// row (web "Calendar →"), over its rows or `empty`.
+    /// row (web "Calendar →", "3 ready" or a status dot), over its rows,
+    /// `row_gap` apart, or `empty`.
     pub(super) fn render_today_section(
         &self,
         title: &'static str,
         action: Option<AnyElement>,
         rows: Vec<AnyElement>,
         empty: &'static str,
-    ) -> AnyElement {
+        row_gap: f32,
+    ) -> Stateful<Div> {
+        let key = title.to_lowercase().replace(' ', "-");
         div()
             .id(("desktop-today-section", element_key(title)))
+            .debug_selector(move || format!("desktop-today-section-{key}"))
             .role(Role::Group)
             .aria_label(title)
-            .flex_1()
-            .min_w(px(250.0))
-            .rounded(px(12.0))
+            .min_w_0()
+            .rounded(px(TODAY_CARD_RADIUS_PX))
             .border_1()
             .border_color(gpui::white().opacity(0.05))
             .bg(theme::longan_900())
             .p_4()
             .flex()
             .flex_col()
-            .gap_2()
             .child(
                 div()
+                    .mb_3()
                     .flex()
                     .items_center()
                     .justify_between()
                     .gap_2()
                     .child(
+                        // No `min_w_0`: gpui would lay the title out at its
+                        // min-content width, one letter per line.
                         div()
                             .font_family(theme::HEADING_FONT_FAMILY)
-                            .text_size(px(13.0))
+                            .text_size(px(TODAY_CARD_TITLE_PX))
                             .font_weight(FontWeight::MEDIUM)
                             .text_color(theme::rambutan_100())
                             .child(title),
                     )
                     .children(action),
             )
-            .when(rows.is_empty(), |element| {
-                // Web `empty_row`: a quiet line, not a box inside the card.
-                element.child(
-                    div()
-                        .py_1()
-                        .text_size(px(12.0))
-                        .text_color(theme::rambutan_500())
-                        .child(empty),
-                )
-            })
-            .children(rows)
-            .into_any_element()
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap(px(row_gap))
+                    .when(rows.is_empty(), |element| {
+                        // Web `empty_row`: a quiet line, not a box inside the card.
+                        element.child(
+                            div()
+                                .py_1()
+                                .font_family(theme::CODE_FONT_FAMILY)
+                                .text_size(px(13.0))
+                                .text_color(theme::rambutan_500())
+                                .child(empty),
+                        )
+                    })
+                    .children(rows),
+            )
     }
 
-    pub(super) fn render_today_page(&self, compact: bool, cx: &Context<'_, Self>) -> Div {
+    pub(super) fn render_today_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
         let snapshot = self.today_snapshot(cx);
         let date = self.planning_now().format("%A, %B %-d").to_string();
         let unread_updates = self.reactive_automations.read(cx).unread_count();
+        // Web's breakpoints read the window's width.
+        let width = f32::from(window.viewport_size().width);
+        let two_columns = width >= TODAY_TWO_COLUMNS_PX;
+        let status_columns = if width >= TODAY_STATUS_FOUR_COLUMNS_PX {
+            4
+        } else if width >= TODAY_STATUS_TWO_COLUMNS_PX {
+            2
+        } else {
+            1
+        };
+        let ready = snapshot.focus_queue.len();
         let focus_rows = snapshot
             .focus_queue
             .iter()
-            .map(|item| {
-                let estimate = item
-                    .planning
-                    .estimate_minutes
-                    .map_or_else(|| "45m".to_string(), |minutes| format!("{minutes}m"));
-                self.render_today_task_row(item, estimate, cx)
-            })
+            .enumerate()
+            .map(|(index, item)| self.render_today_focus_row(index, item, cx))
             .collect::<Vec<_>>();
         let overdue_rows = snapshot
             .overdue
@@ -1037,12 +1229,19 @@ impl Workspace {
             .next()
             .map(|suggestion| {
                 let id = suggestion.id.clone();
+                // Web: label, title, explanation and evidence in its type
+                // scale, with a quiet Dismiss and a blueberry Review.
                 div()
-                    .rounded(px(14.0))
+                    .id("desktop-today-suggestion")
+                    .debug_selector(|| "desktop-today-suggestion".to_string())
+                    .role(Role::Group)
+                    .aria_label("Proactive agent suggestion")
+                    .rounded(px(TODAY_CARD_RADIUS_PX))
                     .border_1()
                     .border_color(theme::blueberry_400().opacity(0.2))
                     .bg(theme::blueberry_500().opacity(0.1))
-                    .p_4()
+                    .px_4()
+                    .py_3()
                     .flex()
                     .items_start()
                     .justify_between()
@@ -1053,45 +1252,59 @@ impl Workspace {
                             .min_w_0()
                             .child(
                                 div()
-                                    .text_size(px(10.0))
-                                    .text_color(theme::blueberry_400())
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_size(px(12.0))
+                                    .text_color(theme::blueberry_300())
                                     .child("SUGGESTED LOCALLY"),
                             )
                             .child(
                                 div()
                                     .mt_1()
-                                    .text_size(px(12.0))
+                                    .font_family(theme::UI_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_size(px(13.0))
                                     .text_color(theme::rambutan_100())
                                     .child(suggestion.title.clone()),
                             )
                             .child(
                                 div()
+                                    .debug_selector(|| {
+                                        "desktop-today-suggestion-explanation".to_string()
+                                    })
                                     .mt_1()
-                                    .text_size(px(11.0))
+                                    .font_family(theme::CODE_FONT_FAMILY)
+                                    .text_size(px(13.0))
                                     .text_color(theme::rambutan_400())
                                     .child(suggestion.explanation.clone()),
                             )
                             .child(
                                 div()
+                                    .debug_selector(|| {
+                                        "desktop-today-suggestion-evidence".to_string()
+                                    })
                                     .mt_1()
-                                    .text_size(px(10.0))
-                                    .text_color(theme::blueberry_400())
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_size(px(12.0))
+                                    .text_color(theme::blueberry_300())
                                     .child(format!("Evidence: {}", suggestion.evidence)),
                             ),
                     )
                     .child(
                         div()
                             .flex()
-                            .gap_1()
+                            .items_center()
+                            .gap_2()
                             .child(
-                                web_button(
+                                Self::today_text_action(
                                     "today-dismiss-agent-suggestion",
-                                    WebButtonVariant::Ghost,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
+                                    "Dismiss",
+                                    theme::rambutan_500(),
+                                    theme::rambutan_200(),
+                                    theme::CONTROL_SM_PX,
                                 )
-                                .aria_label("Dismiss")
-                                .child("Dismiss")
+                                .aria_label("Dismiss proactive suggestion")
                                 .on_click(cx.listener(
                                     move |this, _event, _window, cx| {
                                         let _ = this
@@ -1102,19 +1315,35 @@ impl Workspace {
                                 )),
                             )
                             .child(
-                                web_button(
-                                    "today-review-agent-suggestion",
-                                    WebButtonVariant::Outline,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label("Review")
-                                .child("Review")
-                                .on_click(cx.listener(
-                                    |this, _event, window, cx| {
+                                // Web: a blueberry-tinted button.
+                                div()
+                                    .id("today-review-agent-suggestion")
+                                    .debug_selector(|| {
+                                        "desktop-today-suggestion-review".to_string()
+                                    })
+                                    .role(Role::Button)
+                                    .tab_index(0)
+                                    .aria_label("Review")
+                                    .min_h(px(theme::CONTROL_PX))
+                                    .px_3()
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
+                                    .rounded(px(TODAY_ROW_RADIUS_PX))
+                                    .border_1()
+                                    .border_color(theme::blueberry_400().opacity(0.2))
+                                    .bg(theme::blueberry_500().opacity(0.15))
+                                    .hover(|el| el.bg(theme::blueberry_500().opacity(0.2)))
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                    .font_family(theme::UI_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
+                                    .text_color(theme::blueberry_200())
+                                    .cursor_pointer()
+                                    .child("Review")
+                                    .on_click(cx.listener(|this, _event, window, cx| {
                                         this.activate_sidebar_view(AppView::Automations, window, cx)
-                                    },
-                                )),
+                                    })),
                             ),
                     )
                     .into_any_element()
@@ -1242,16 +1471,17 @@ impl Workspace {
                         .child(
                             web_button(
                                 "open-agent-workflows",
-                                WebButtonVariant::Outline,
+                                WebButtonVariant::Ghost,
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
+                            .debug_selector(|| "desktop-today-agent-workflows".to_string())
                             .aria_label(crate::views::reactive_automations::unread_label(
-                                "Agent workflows",
+                                today_copy::AGENT_WORKFLOWS,
                                 unread_updates,
                             ))
                             .gap_1()
-                            .child("Agent workflows")
+                            .child(today_copy::AGENT_WORKFLOWS)
                             .when(unread_updates > 0, |button| {
                                 button.child(crate::views::reactive_automations::unread_badge(
                                     unread_updates,
@@ -1266,12 +1496,13 @@ impl Workspace {
                         .child(
                             web_button(
                                 "open-life-context",
-                                WebButtonVariant::Outline,
+                                WebButtonVariant::Ghost,
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
-                            .aria_label("Life context")
-                            .child("Life context")
+                            .debug_selector(|| "desktop-today-life".to_string())
+                            .aria_label(today_copy::LIFE)
+                            .child(today_copy::LIFE)
                             .on_click(cx.listener(
                                 |this, _event, window, cx| {
                                     this.activate_sidebar_view(AppView::Life, window, cx)
@@ -1320,59 +1551,95 @@ impl Workspace {
                             .children(self.render_day_plan_applied(cx))
                             .children(suggestion)
                             .child(briefing)
+                            // Web: Now & next beside Focus queue, 0.9 to 1.1,
+                            // from its `lg` breakpoint; stacked below it.
                             .child(
                                 div()
                                     .flex()
-                                    .flex_wrap()
+                                    .when(two_columns, |row| row.flex_row())
+                                    .when(!two_columns, |row| row.flex_col())
                                     .gap_4()
-                                    .child(self.render_today_section(
-                                        "Now & next",
-                                        Some(self.render_today_calendar_link(cx)),
-                                        schedule_rows,
-                                        "Nothing else on the calendar today.",
-                                    ))
-                                    .child(self.render_today_section(
-                                        "Focus queue",
-                                        None,
-                                        focus_rows,
-                                        "No ready tasks.",
-                                    )),
+                                    .child(
+                                        self.render_today_section(
+                                            "Now & next",
+                                            Some(self.render_today_calendar_link(cx)),
+                                            schedule_rows,
+                                            today_copy::SCHEDULE_EMPTY,
+                                            8.0,
+                                        )
+                                        .when(two_columns, |card| {
+                                            card.flex_basis(px(0.0)).flex_grow(0.9)
+                                        }),
+                                    )
+                                    .child(
+                                        self.render_today_section(
+                                            "Focus queue",
+                                            Some(Self::render_today_ready_count(ready)),
+                                            focus_rows,
+                                            today_copy::FOCUS_QUEUE_EMPTY,
+                                            4.0,
+                                        )
+                                        .when(two_columns, |card| {
+                                            card.flex_basis(px(0.0)).flex_grow(1.1)
+                                        }),
+                                    ),
                             )
+                            // Web: the four status cards, each with its dot,
+                            // four to a row from `xl`, two from `md`.
                             .child(
                                 div()
-                                    .flex()
-                                    .when(compact, |element| element.flex_col())
-                                    .when(!compact, |element| element.flex_row().flex_wrap())
+                                    .debug_selector(|| "desktop-today-status-cards".to_string())
+                                    .grid()
+                                    .grid_cols(status_columns)
                                     .gap_4()
                                     .child(self.render_today_section(
                                         "Overdue",
-                                        None,
+                                        Some(Self::render_today_dot(
+                                            "overdue",
+                                            theme::lychee_400(),
+                                        )),
                                         overdue_rows,
-                                        "Nothing overdue.",
+                                        today_copy::OVERDUE_EMPTY,
+                                        6.0,
                                     ))
                                     .child(self.render_today_section(
                                         "Waiting on",
-                                        None,
+                                        Some(Self::render_today_dot(
+                                            "waiting-on",
+                                            theme::blueberry_400(),
+                                        )),
                                         waiting_rows,
-                                        "Nothing is blocked on someone else.",
+                                        today_copy::WAITING_ON_EMPTY,
+                                        6.0,
                                     ))
                                     .child(self.render_today_section(
                                         "Follow ups",
-                                        None,
+                                        Some(Self::render_today_dot(
+                                            "follow-ups",
+                                            theme::durian_400(),
+                                        )),
                                         follow_up_rows,
-                                        "No recent follow ups.",
+                                        today_copy::FOLLOW_UPS_EMPTY,
+                                        6.0,
                                     ))
                                     .child(self.render_today_section(
                                         "Decisions",
-                                        None,
+                                        Some(Self::render_today_dot(
+                                            "decisions",
+                                            theme::pandan_400(),
+                                        )),
                                         decision_rows,
-                                        "No recent meeting decisions.",
+                                        today_copy::DECISIONS_EMPTY,
+                                        6.0,
                                     )),
                             ),
                     ),
             )
     }
 }
+
+#[cfg(test)]
+mod parity_tests;
 
 #[cfg(test)]
 mod audit_tests {
@@ -1422,6 +1689,7 @@ mod audit_tests {
                                 probe.into_any_element(),
                             ],
                             "",
+                            6.0,
                         )
                     }),
                 )
