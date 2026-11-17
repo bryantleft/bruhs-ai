@@ -426,6 +426,9 @@ enum Overlay {
     TaskDeleteConfirm {
         item_id: String,
     },
+    /// The Tasks header's "Projects" in a compact window, where the project
+    /// sidebar cannot show (web `TasksPage`).
+    TaskProjects,
     RecordDeleteConfirm {
         target: RecordDeleteTarget,
     },
@@ -3003,6 +3006,7 @@ impl Render for Workspace {
                     Overlay::TaskDeleteConfirm { ref item_id } => {
                         self.render_task_delete_confirm(item_id, window, cx)
                     }
+                    Overlay::TaskProjects => self.render_task_projects(window, cx),
                     Overlay::RecordDeleteConfirm { ref target } => {
                         self.render_record_delete_confirm(target, window, cx)
                     }

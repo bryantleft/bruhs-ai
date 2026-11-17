@@ -211,6 +211,8 @@ pub(super) fn select_task_detail_priority_option_like_web(
 pub(super) const TASKS_ALL_PROJECTS_LABEL: &str = "All Tasks";
 pub(super) const TASKS_NEW_PROJECT_LABEL: &str = "New project";
 pub(super) const TASKS_NEW_TASK_LABEL: &str = "New task";
+/// Web `TasksPage`'s project picker for compact windows.
+pub(super) const TASKS_PROJECTS_LABEL: &str = "Projects";
 pub(super) const TASKS_HEADER_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const TASKS_HEADER_MIN_HEIGHT_PX: f32 = 40.0;
 pub(super) const TASKS_HEADER_X_PADDING_PX: f32 = 16.0;
@@ -431,6 +433,8 @@ impl Workspace {
         self.selected_project_id = selected_project_id;
         self.selected_work_item_id = selected_work_item_id;
         self.reset_task_pages();
+        // Web: choosing a project closes the compact Projects dialog.
+        self.dismiss_overlay(|overlay| matches!(overlay, Overlay::TaskProjects));
         self.persist_and_notify(cx);
     }
 
@@ -447,6 +451,7 @@ impl Workspace {
         self.projects.push(project);
         self.selected_work_item_id = selected_work_item_id;
         self.reset_task_pages();
+        self.dismiss_overlay(|overlay| matches!(overlay, Overlay::TaskProjects));
         self.persist_and_notify(cx);
     }
 
@@ -850,6 +855,35 @@ impl Workspace {
         self.delete_project_by_id(&project_id, cx);
     }
 
+    /// Web `TasksPage` "Projects": the project list in a dialog, for a
+    /// window too compact for the project sidebar.
+    pub(super) fn open_task_projects(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.open_overlay(Overlay::TaskProjects);
+        self.focus_first_modal_tab_stop(window, cx);
+        cx.notify();
+    }
+
+    /// The compact Projects dialog: the project list at full width, 60% of
+    /// the window tall, as the web's.
+    pub(super) fn render_task_projects(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        let height = f32::from(window.viewport_size().height) * 0.6;
+        self.render_modal_shell(
+            TASKS_PROJECTS_LABEL,
+            div()
+                .debug_selector(|| "desktop-task-projects-dialog".to_string())
+                .h(px(height))
+                .flex()
+                .child(self.project_list(true, cx)),
+            None,
+            window,
+            cx,
+        )
+    }
+
     pub(super) fn set_task_view_mode(
         &mut self,
         mode: DesktopTaskViewMode,
@@ -880,7 +914,7 @@ impl Workspace {
                     .overflow_hidden()
                     .flex()
                     .flex_col()
-                    .child(self.render_tasks_header(cx))
+                    .child(self.render_tasks_header(compact, cx))
                     .child(self.render_tasks_body(cx)),
             )
             .when_some(self.selected_work_item(), |el, item| {
@@ -903,6 +937,15 @@ impl Workspace {
     }
 
     pub(super) fn render_project_sidebar(&self, cx: &Context<'_, Self>) -> Div {
+        self.project_list(false, cx)
+            .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX))
+            .min_w(px(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX))
+            .debug_selector(|| "desktop-project-sidebar".to_string())
+    }
+
+    /// All Tasks, the projects and "+ New project". `in_dialog` fills the
+    /// compact Projects dialog, as the web's list fills its own below `md`.
+    fn project_list(&self, in_dialog: bool, cx: &Context<'_, Self>) -> Div {
         let project_rows: Vec<AnyElement> = self
             .projects
             .iter()
@@ -910,11 +953,13 @@ impl Workspace {
             .collect();
 
         div()
-            .w(px(WORKSPACE_SIDE_PANEL_WIDTH_PX))
-            .min_w(px(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX))
+            .when(in_dialog, |el| {
+                el.w_full()
+                    .min_w_0()
+                    .debug_selector(|| "desktop-task-projects-list".to_string())
+            })
             .h_full()
             .flex_shrink_0()
-            .debug_selector(|| "desktop-project-sidebar".to_string())
             .bg(theme::longan_950())
             .border_r_1()
             .border_color(theme::longan_800().opacity(PROJECT_SIDEBAR_BORDER_OPACITY))
@@ -1152,14 +1197,18 @@ impl Workspace {
             .into_any_element()
     }
 
-    pub(super) fn render_tasks_header(&self, cx: &Context<'_, Self>) -> Div {
+    /// `compact`: the window is too narrow for the project sidebar, so the
+    /// header offers web's "Projects" dialog in its place.
+    pub(super) fn render_tasks_header(&self, compact: bool, cx: &Context<'_, Self>) -> Div {
         div()
             .min_h(px(TASKS_HEADER_MIN_HEIGHT_PX))
             .px(px(TASKS_HEADER_X_PADDING_PX))
             .py(px(TASKS_HEADER_Y_PADDING_PX))
             .flex()
+            .flex_wrap()
             .items_center()
             .justify_between()
+            .gap_2()
             .border_b_1()
             .border_color(theme::longan_800().opacity(TASKS_HEADER_BORDER_OPACITY))
             .flex_shrink_0()
@@ -1174,6 +1223,32 @@ impl Workspace {
                     .text_color(theme::rambutan_400())
                     .child(self.selected_project_name()),
             )
+            .when(compact, |header| {
+                header.child(
+                    div()
+                        .id("tasks-open-projects")
+                        .debug_selector(|| "desktop-task-open-projects".to_string())
+                        .flex_shrink_0()
+                        .rounded(px(TASKS_HEADER_CONTROL_RADIUS_PX))
+                        .border_1()
+                        .border_color(theme::longan_700())
+                        .px_2()
+                        .py_2()
+                        .font_family(theme::UI_FONT_FAMILY)
+                        .font_weight(FontWeight::MEDIUM)
+                        .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
+                        .text_color(theme::rambutan_300())
+                        .tab_index(0)
+                        .role(Role::Button)
+                        .aria_label(TASKS_PROJECTS_LABEL)
+                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                        .cursor_pointer()
+                        .on_click(cx.listener(|this, _ev, window, cx| {
+                            this.open_task_projects(window, cx);
+                        }))
+                        .child(TASKS_PROJECTS_LABEL),
+                )
+            })
             .child(
                 div()
                     .flex()
