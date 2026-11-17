@@ -9,12 +9,13 @@ use super::{
 use bruhs_models::{
     crew::{
         room::{
-            check_room, recipients, room_order, room_prompt, skipped_line, Room, RoomAuthor,
-            RoomMember, RoomMessage, RoomState, ROOM_CONTEXT_MESSAGES,
+            check_room, handoff_failed_line, handoff_stopped_line, recipients, room_next_hop,
+            room_order, room_prompt, skipped_line, stopped_line, Room, RoomAuthor, RoomMember,
+            RoomMessage, RoomState, FORMER_BRUH, ROOM_CONTEXT_MESSAGES,
         },
-        BruhStatus,
+        BruhStatus, STOPPED_LINE,
     },
-    reactive::{ReactiveAgent, RunStatus, RunTrigger, HISTORY_LIMIT},
+    reactive::{ReactiveAgent, ReactiveRun, RunStatus, RunTrigger, HISTORY_LIMIT},
     weekly_reports::managed_preset_id,
     EpochMs,
 };
@@ -286,6 +287,123 @@ pub(in crate::reactive) fn hand_to(
         save_run(connection, &run)?;
     }
     Ok(())
+}
+
+/// A room run ended: post its one message, and pass a reply's @mentions
+/// on. A repeat save of the run writes nothing.
+pub(in crate::reactive) fn on_run_saved(
+    connection: &Connection,
+    run: &ReactiveRun,
+) -> Result<(), ReactiveError> {
+    let Some(RunTrigger::Room { room_id, hop, .. }) = &run.trigger else {
+        return Ok(());
+    };
+    let me = || RoomAuthor::Bruh {
+        agent_id: run.agent_id.clone(),
+    };
+    let or_stopped = |text: Option<&String>| {
+        text.filter(|text| !text.trim().is_empty())
+            .map_or_else(|| STOPPED_LINE.to_owned(), Clone::clone)
+    };
+    let (author, text, failed) = match run.status {
+        RunStatus::Completed => (me(), or_stopped(run.result.as_ref()), false),
+        RunStatus::Failed | RunStatus::Interrupted => (me(), or_stopped(run.error.as_ref()), true),
+        RunStatus::Cancelled => {
+            let name = get::<ReactiveAgent>(connection, "reactive_agents", &run.agent_id)?
+                .map_or_else(|| FORMER_BRUH.to_owned(), |agent| agent.name);
+            (
+                RoomAuthor::System,
+                stopped_line(&name, run.error.as_deref()),
+                false,
+            )
+        }
+        _ => return Ok(()),
+    };
+    let extra = Extra {
+        run_id: Some(run.id.clone()),
+        failed,
+        result_of: Some(run.id.clone()),
+        ..Extra::default()
+    };
+    let Some(message) = append(connection, room_id, author, text, extra)? else {
+        return Ok(());
+    };
+    if run.status != RunStatus::Completed {
+        return Ok(());
+    }
+    let Some(room) = get::<Room>(connection, "reactive_rooms", room_id)? else {
+        return Ok(());
+    };
+    let crew = members(connection, &room)?;
+    let to = recipients(&message.text, &room, &names(&crew), &message.author);
+    if to.is_empty() {
+        return Ok(());
+    }
+    let Some(next) = room_next_hop(*hop) else {
+        append(
+            connection,
+            room_id,
+            RoomAuthor::System,
+            handoff_stopped_line(),
+            Extra::default(),
+        )?;
+        return Ok(());
+    };
+    for id in &to {
+        match hand_to(connection, &room, &message, std::slice::from_ref(id), next) {
+            Ok(()) => {}
+            Err(ReactiveError::Conflict(error) | ReactiveError::Invalid(error)) => {
+                let name = crew
+                    .iter()
+                    .find(|agent| agent.id == *id)
+                    .map_or(FORMER_BRUH, |agent| agent.name.as_str());
+                append(
+                    connection,
+                    room_id,
+                    RoomAuthor::System,
+                    handoff_failed_line(name, &error),
+                    Extra::default(),
+                )?;
+            }
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
+/// The envelope a room run starts with: the room as it reads now. A run
+/// whose room, membership or trigger message is gone keeps the prompt it
+/// was queued with.
+pub(in crate::reactive) fn prompt_for(
+    connection: &Connection,
+    run: &ReactiveRun,
+) -> Result<String, ReactiveError> {
+    let Some(RunTrigger::Room {
+        room_id,
+        message_id,
+        ..
+    }) = &run.trigger
+    else {
+        return Ok(run.prompt.clone());
+    };
+    let Some(room) = get::<Room>(connection, "reactive_rooms", room_id)? else {
+        return Ok(run.prompt.clone());
+    };
+    let crew = members(connection, &room)?;
+    let Some(me) = crew.iter().find(|agent| agent.id == run.agent_id) else {
+        return Ok(run.prompt.clone());
+    };
+    let history = prompt_history(connection, room_id, message_id)?;
+    if !history.iter().any(|message| message.id == *message_id) {
+        return Ok(run.prompt.clone());
+    }
+    Ok(room_prompt(
+        &room,
+        &names(&crew),
+        &me.name,
+        &history,
+        message_id,
+    ))
 }
 
 /// Every room with its last message number and the members with a queued

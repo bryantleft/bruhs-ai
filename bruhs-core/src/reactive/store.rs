@@ -573,9 +573,11 @@ fn run_status(status: RunStatus) -> &'static str {
     }
 }
 
+/// Write a run. A room run that just ended posts in its room here, inside
+/// the caller's transaction.
 pub(super) fn save_run(connection: &Connection, run: &ReactiveRun) -> Result<(), ReactiveError> {
     connection.execute("INSERT INTO reactive_runs(id,agent_id,subscription_id,event_id,status,created,not_before,payload) VALUES(?1,?2,?3,?4,?5,?6,?7,?8) ON CONFLICT(id) DO UPDATE SET status=excluded.status,event_id=excluded.event_id,not_before=excluded.not_before,payload=excluded.payload", params![run.id, run.agent_id, run.subscription_id, run.event_id, run_status(run.status), run.created_at.as_millis(), run.not_before.as_millis(), encode(run)?])?;
-    Ok(())
+    rooms::on_run_saved(connection, run)
 }
 
 fn runs_where(
@@ -943,6 +945,12 @@ pub(super) fn command(
             }
             ReactiveCommand::RetryRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
+                // Its reply belongs to a moment in the room that has passed.
+                if run.trigger.as_ref().and_then(RunTrigger::room_id).is_some() {
+                    return Err(ReactiveError::Conflict(
+                        "Post in the room again to retry.".into(),
+                    ));
+                }
                 if !matches!(
                     run.status,
                     RunStatus::Failed | RunStatus::Interrupted | RunStatus::Cancelled
@@ -1361,6 +1369,12 @@ fn absorb(primary: &mut ReactiveRun, merged: &mut ReactiveRun, reason: &str) {
     merged.updated_at = EpochMs::now();
 }
 
+/// Runs that are never combined with another: weekly reports, and room
+/// runs, whose reply is posted where they were asked.
+fn ungrouped(run: &ReactiveRun) -> bool {
+    reports::ungrouped(run) || run.trigger.as_ref().and_then(RunTrigger::room_id).is_some()
+}
+
 /// `on_busy: restart`: stop the agent's current run and redo its work with the new event.
 fn restart_running(connection: &Connection, run: &mut ReactiveRun) -> Result<(), ReactiveError> {
     let Some(mut running) = runs_where(
@@ -1371,7 +1385,7 @@ fn restart_running(connection: &Connection, run: &mut ReactiveRun) -> Result<(),
     .pop() else {
         return Ok(());
     };
-    if reports::ungrouped(&running) || reports::ungrouped(run) {
+    if ungrouped(&running) || ungrouped(run) {
         return Ok(());
     }
     let combined = combine(&[&running, run]);
@@ -1412,7 +1426,7 @@ pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, R
             return Ok(None);
         }
         let agent: ReactiveAgent = required(connection, "reactive_agents", &run.agent_id, "agent")?;
-        if !reports::ungrouped(&run) {
+        if !ungrouped(&run) {
             let limit = i64::try_from(MAX_BATCH_RUNS.saturating_sub(1)).unwrap_or(0);
             let mut statement = connection.prepare("SELECT payload FROM reactive_runs WHERE agent_id=?1 AND status='queued' AND not_before<=?2 AND id<>?3 ORDER BY created,rowid LIMIT ?4")?;
             let rows = statement.query_map(params![run.agent_id, now, run.id, limit], |row| {
@@ -1424,6 +1438,9 @@ pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, R
             drop(statement);
             let mut batch = vec![run.clone()];
             for mut candidate in candidates {
+                if ungrouped(&candidate) {
+                    continue;
+                }
                 if let Err(error) = check_run_enabled(connection, &candidate) {
                     candidate.status = RunStatus::Cancelled;
                     candidate.error = Some(error.to_string());
@@ -1473,6 +1490,11 @@ pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, R
             }
         }
         run.fresh_session = run.session_id.is_none();
+        // A room run reads the room as it is now; a resumed one keeps the
+        // owner's decision it was queued with.
+        if matches!(run.trigger, Some(RunTrigger::Room { resumed: false, .. })) {
+            run.prompt = rooms::prompt_for(connection, &run)?;
+        }
         let context = always_on::run_context(connection, &run)?;
         let bruh = crew::profile(connection, &agent.id)?;
         run.status = RunStatus::Running;

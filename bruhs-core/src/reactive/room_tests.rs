@@ -1,9 +1,9 @@
 //! Rooms: saving them, owner posts, the runs a post queues and message pages.
 
-use super::crew_tests::{agent, claim_one, runtime_with};
-use super::{store, ReactiveError, ReactiveRuntime};
+use super::crew_tests::{agent, claim_one, finish, record_session, run, runtime_with};
+use super::{store, worker, ReactiveError, ReactiveRuntime};
 use bruhs_models::crew::room::*;
-use bruhs_models::crew::BruhStatus;
+use bruhs_models::crew::{BruhStatus, STOPPED_LINE};
 use bruhs_models::reactive::*;
 
 fn named(id: &str, name: &str) -> ReactiveAgent {
@@ -504,4 +504,553 @@ async fn a_full_queue_fails_the_post_and_keeps_nothing() {
     assert!(matches!(result, Err(ReactiveError::Conflict(_))));
     assert!(messages(&runtime, "r").await.is_empty());
     assert_eq!(runtime.snapshot().await.unwrap().rooms[0].last_seq, 0);
+}
+
+// ── Room runs end in the room ──────────────────────────────────────────────
+
+/// Finish a running run with `status` and `error`, as the worker does.
+async fn end(runtime: &ReactiveRuntime, id: &str, status: RunStatus, error: Option<&str>) {
+    let (id, error) = (id.to_owned(), error.map(str::to_owned));
+    runtime
+        .call(move |connection| store::finish_run(connection, &id, status, None, error, None))
+        .await
+        .unwrap();
+}
+
+/// Each line as (author, text, failed), oldest first.
+async fn lines(runtime: &ReactiveRuntime, room_id: &str) -> Vec<(RoomAuthor, String, bool)> {
+    messages(runtime, room_id)
+        .await
+        .into_iter()
+        .map(|line| (line.author, line.text, line.failed))
+        .collect()
+}
+
+fn bruh(id: &str) -> RoomAuthor {
+    RoomAuthor::Bruh {
+        agent_id: id.into(),
+    }
+}
+
+#[tokio::test]
+async fn a_room_run_shares_the_bruhs_session_and_names_the_room() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    runtime
+        .command(ReactiveCommand::Chat {
+            agent_id: "a".into(),
+            message: "First".into(),
+            run_id: None,
+        })
+        .await
+        .unwrap();
+    let chat = claim_one(&runtime).await.unwrap();
+    record_session(&runtime, &chat.run.id).await;
+    finish(&runtime, &chat.run.id, "Done").await;
+    create(
+        &runtime,
+        Room {
+            name: "Launch".into(),
+            ..room("r", &["a"], None)
+        },
+    )
+    .await;
+    post(&runtime, "r", "@Agent a go").await;
+
+    let claim = claim_one(&runtime).await.unwrap();
+    assert!(in_room(&claim.run, "r"));
+    assert_eq!(claim.run.session_id.as_deref(), Some("s1"));
+    assert!(!claim.run.fresh_session);
+    let turn = worker::turn(&claim.agent, &claim.bruh, &claim.run, &claim.context);
+    assert!(turn.prompt.starts_with("Your name is Agent a.\n"));
+    assert!(turn.prompt.contains("[Room \"Launch\" with "));
+    assert_eq!(turn.session_id.as_deref(), Some("s1"));
+}
+
+#[tokio::test]
+async fn a_completed_room_run_posts_its_reply_once() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    post(&runtime, "r", "@Agent a go").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    finish(&runtime, &claim.run.id, "Done.").await;
+
+    let kept = messages(&runtime, "r").await;
+    assert_eq!(kept.len(), 2);
+    assert_eq!(kept[0].author, RoomAuthor::Owner);
+    assert_eq!(
+        (&kept[1].author, kept[1].text.as_str(), kept[1].failed),
+        (&bruh("a"), "Done.", false)
+    );
+    assert_eq!(kept[1].run_id.as_deref(), Some(claim.run.id.as_str()));
+    assert_eq!(kept[1].seq, 2);
+
+    // A late result, stopped output or another save of the run adds nothing.
+    finish(&runtime, &claim.run.id, "Again.").await;
+    let id = claim.run.id.clone();
+    runtime
+        .call(move |connection| store::cancelled_output(connection, &id, "partial".into()))
+        .await
+        .unwrap();
+    let done = run(&runtime, &claim.run.id).await;
+    assert_eq!(done.status, RunStatus::Completed);
+    runtime
+        .call(move |connection| store::save_run(connection, &done))
+        .await
+        .unwrap();
+    // `append` itself refuses a second message for the same run.
+    let id = claim.run.id.clone();
+    let again = runtime
+        .call(move |connection| {
+            store::rooms::append(
+                connection,
+                "r",
+                RoomAuthor::System,
+                "Twice".into(),
+                store::rooms::Extra {
+                    result_of: Some(id),
+                    ..store::rooms::Extra::default()
+                },
+            )
+        })
+        .await
+        .unwrap();
+    assert!(again.is_none());
+    assert_eq!(messages(&runtime, "r").await, kept);
+}
+
+#[tokio::test]
+async fn an_empty_reply_reads_stopped() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    post(&runtime, "r", "@Agent a go").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    finish(&runtime, &claim.run.id, "  \n").await;
+    assert_eq!(
+        lines(&runtime, "r").await.pop().unwrap(),
+        (bruh("a"), STOPPED_LINE.to_string(), false)
+    );
+}
+
+#[tokio::test]
+async fn a_reply_mentioning_a_member_hands_off_with_the_next_hop() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b"), agent("c")]).await;
+    create(&runtime, room("r", &["a", "b"], Some("a"))).await;
+    post(&runtime, "r", "@Agent a start").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    finish(
+        &runtime,
+        &claim.run.id,
+        "@Agent b take it, and @Agent a too",
+    )
+    .await;
+
+    let reply = messages(&runtime, "r").await.pop().unwrap();
+    assert_eq!(reply.author, bruh("a"));
+    let snapshot = runtime.snapshot().await.unwrap();
+    let queued = queued_in(&snapshot, "r");
+    assert_eq!(
+        agents_of(&queued),
+        ["b"],
+        "a bruh never hands work to itself, and a reply does not go to the lead"
+    );
+    assert_eq!(
+        queued[0].trigger,
+        Some(RunTrigger::Room {
+            room_id: "r".into(),
+            message_id: reply.id.clone(),
+            hop: 1,
+            resumed: false,
+        })
+    );
+
+    // A reply that names nobody, or a non-member, hands off nothing.
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.agent_id, "b");
+    finish(&runtime, &claim.run.id, "Done. @Agent c might know.").await;
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert!(queued_in(&snapshot, "r").is_empty());
+    assert!(snapshot
+        .runs
+        .iter()
+        .all(|run| run.agent_id != "c" && run.status != RunStatus::Queued));
+}
+
+#[tokio::test]
+async fn a_ping_pong_stops_after_the_hop_limit_with_one_system_line() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
+    create(&runtime, room("r", &["a", "b"], None)).await;
+    post(&runtime, "r", "@Agent a start").await;
+    let mut claimed = 0;
+    let mut hops = Vec::new();
+    while let Some(claim) = claim_one(&runtime).await {
+        claimed += 1;
+        let Some(RunTrigger::Room { hop, .. }) = claim.run.trigger else {
+            panic!("not a room run");
+        };
+        hops.push(hop);
+        let other = if claim.run.agent_id == "a" {
+            "@Agent b"
+        } else {
+            "@Agent a"
+        };
+        finish(&runtime, &claim.run.id, &format!("{other} your turn")).await;
+        assert!(claimed <= 20);
+    }
+    assert_eq!(claimed, 1 + 6);
+    assert_eq!(hops, [0, 1, 2, 3, 4, 5, 6]);
+    let all = messages(&runtime, "r").await;
+    assert_eq!(
+        all.iter()
+            .filter(|m| m.author == RoomAuthor::System)
+            .count(),
+        1
+    );
+    assert_eq!(all.last().unwrap().text, handoff_stopped_line());
+    assert_eq!(all.len(), 1 + 7 + 1);
+}
+
+#[tokio::test]
+async fn a_hand_off_that_cannot_queue_says_so_in_the_room() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b"), agent("c")]).await;
+    create(&runtime, room("r", &["a", "b"], None)).await;
+    post(&runtime, "r", "@Agent a start").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    // Fill the queue so it stays full once a's run ends.
+    let mut chat = None;
+    for i in 0..HISTORY_LIMIT - 1 {
+        let snapshot = runtime
+            .command(ReactiveCommand::Chat {
+                agent_id: "c".into(),
+                message: format!("Chat {i}"),
+                run_id: None,
+            })
+            .await
+            .unwrap();
+        chat = snapshot.runs.into_iter().find(|run| run.agent_id == "c");
+    }
+    let mut extra = chat.unwrap();
+    extra.id = uuid::Uuid::new_v4().to_string();
+    runtime
+        .call(move |connection| store::save_run(connection, &extra))
+        .await
+        .unwrap();
+
+    finish(&runtime, &claim.run.id, "@Agent b over to you").await;
+    let tail = lines(&runtime, "r").await;
+    let error = format!("This runtime has {HISTORY_LIMIT} unresolved runs. Review or cancel them before accepting more events.");
+    assert_eq!(
+        tail[1..],
+        [
+            (bruh("a"), "@Agent b over to you".to_string(), false),
+            (
+                RoomAuthor::System,
+                handoff_failed_line("Agent b", &error),
+                false
+            ),
+        ]
+    );
+    let snapshot = runtime.snapshot().await.unwrap();
+    assert!(queued_in(&snapshot, "r").is_empty());
+    assert_eq!(
+        run(&runtime, &claim.run.id).await.status,
+        RunStatus::Completed
+    );
+}
+
+#[tokio::test]
+async fn a_queued_room_run_sees_messages_posted_while_it_waited() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    let queued = queued_in(&post(&runtime, "r", "@Agent a first").await, "r")[0].clone();
+    post(&runtime, "r", "and also this").await;
+    assert!(!queued.prompt.contains("and also this"));
+
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.id, queued.id);
+    assert!(claim.run.prompt.contains("Owner (to you): @Agent a first"));
+    assert!(claim.run.prompt.contains("\nOwner: and also this\n"));
+    assert_eq!(run(&runtime, &queued.id).await.prompt, claim.run.prompt);
+}
+
+#[tokio::test]
+async fn a_resumed_room_run_keeps_its_own_prompt() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    let mut queued = queued_in(&post(&runtime, "r", "@Agent a first").await, "r")[0].clone();
+    queued.prompt = "The owner approved your request: deploy. Do it now.".into();
+    let Some(RunTrigger::Room { resumed, .. }) = queued.trigger.as_mut() else {
+        panic!("not a room run");
+    };
+    *resumed = true;
+    runtime
+        .call(move |connection| store::save_run(connection, &queued))
+        .await
+        .unwrap();
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(
+        claim.run.prompt,
+        "The owner approved your request: deploy. Do it now."
+    );
+}
+
+#[tokio::test]
+async fn a_room_run_whose_trigger_is_gone_keeps_its_stored_prompt() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    let queued = queued_in(&post(&runtime, "r", "@Agent a first").await, "r")[0].clone();
+    runtime
+        .call(|connection| {
+            connection.execute("DELETE FROM reactive_room_messages WHERE room_id='r'", [])?;
+            Ok(())
+        })
+        .await
+        .unwrap();
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.prompt, queued.prompt);
+}
+
+#[tokio::test]
+async fn room_runs_are_never_batched_with_chat_runs() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
+    create(&runtime, room("r", &["a", "b"], None)).await;
+    let chat = |agent_id: &'static str, message: &'static str| {
+        let runtime = &runtime;
+        async move {
+            runtime
+                .command(ReactiveCommand::Chat {
+                    agent_id: agent_id.into(),
+                    message: message.into(),
+                    run_id: None,
+                })
+                .await
+                .unwrap()
+                .runs
+                .into_iter()
+                .find(|run| run.owner_message.as_deref() == Some(message))
+                .unwrap()
+                .id
+        }
+    };
+
+    // A room run first: it is claimed alone.
+    let room_run = queued_in(&post(&runtime, "r", "@Agent a go").await, "r")[0]
+        .id
+        .clone();
+    let a_chat = chat("a", "Chat for a").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.id, room_run);
+    assert!(claim.run.merged_runs.is_empty());
+    assert_eq!(run(&runtime, &a_chat).await.status, RunStatus::Queued);
+
+    // A chat first: later chats join it, the room run waits its turn.
+    let first = chat("b", "One for b").await;
+    let b_room = queued_in(&post(&runtime, "r", "@Agent b go").await, "r")
+        .into_iter()
+        .find(|run| run.agent_id == "b")
+        .unwrap()
+        .id
+        .clone();
+    let second = chat("b", "Two for b").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.id, first);
+    assert_eq!(claim.run.merged_runs, std::slice::from_ref(&second));
+    assert_eq!(run(&runtime, &second).await.status, RunStatus::Merged);
+    let waiting = run(&runtime, &b_room).await;
+    assert_eq!(waiting.status, RunStatus::Queued);
+    assert!(waiting.merged_into.is_none());
+}
+
+#[tokio::test]
+async fn a_running_room_run_is_never_restarted_by_an_event() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    for change in [
+        ReactiveChange::SaveSource {
+            source: EventSource {
+                id: "inbox".into(),
+                name: "Inbox".into(),
+                enabled: true,
+                kind: SourceKind::Custom,
+            },
+        },
+        ReactiveChange::SaveSubscription {
+            subscription: Subscription {
+                id: "sub-a".into(),
+                source_id: "inbox".into(),
+                agent_id: "a".into(),
+                instructions: "Summarize the event.".into(),
+                enabled: true,
+                auto_run: true,
+                debounce_ms: 0,
+                throttle_ms: 0,
+                on_busy: BusyPolicy::Restart,
+            },
+        },
+    ] {
+        runtime
+            .command(ReactiveCommand::Apply { change })
+            .await
+            .unwrap();
+    }
+    create(&runtime, room("r", &["a"], None)).await;
+    post(&runtime, "r", "@Agent a go").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    runtime
+        .publish("inbox", "one", serde_json::json!({"n": 1}))
+        .await
+        .unwrap();
+    let running = run(&runtime, &claim.run.id).await;
+    assert_eq!(running.status, RunStatus::Running);
+    let queued: Vec<ReactiveRun> = runtime
+        .snapshot()
+        .await
+        .unwrap()
+        .runs
+        .into_iter()
+        .filter(|run| run.status == RunStatus::Queued)
+        .collect();
+    assert_eq!(queued.len(), 1);
+    assert!(queued[0].merged_runs.is_empty());
+    assert!(!in_room(&queued[0], "r"));
+}
+
+#[tokio::test]
+async fn a_failed_or_interrupted_room_run_posts_a_failed_line() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    post(&runtime, "r", "@Agent a one").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    end(&runtime, &claim.run.id, RunStatus::Failed, Some("boom")).await;
+    let failed = messages(&runtime, "r").await.pop().unwrap();
+    assert_eq!(
+        (failed.author, failed.text.as_str(), failed.failed),
+        (bruh("a"), "boom", true)
+    );
+    assert_eq!(failed.run_id.as_deref(), Some(claim.run.id.as_str()));
+
+    post(&runtime, "r", "@Agent a two").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    end(&runtime, &claim.run.id, RunStatus::Interrupted, None).await;
+    assert_eq!(
+        lines(&runtime, "r").await.pop().unwrap(),
+        (bruh("a"), STOPPED_LINE.to_string(), true)
+    );
+
+    // A failure never hands off, even when its error names a member.
+    post(&runtime, "r", "@Agent a three").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    end(&runtime, &claim.run.id, RunStatus::Failed, Some("@Agent a")).await;
+    assert!(queued_in(&runtime.snapshot().await.unwrap(), "r").is_empty());
+}
+
+#[tokio::test]
+async fn a_cancelled_room_run_posts_a_stopped_line() {
+    let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
+    create(&runtime, room("r", &["a", "b"], None)).await;
+    post(&runtime, "r", "@Agent a one").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    runtime
+        .command(ReactiveCommand::CancelRun {
+            id: claim.run.id.clone(),
+        })
+        .await
+        .unwrap();
+    let stopped = messages(&runtime, "r").await.pop().unwrap();
+    assert_eq!(
+        (stopped.author, stopped.text.as_str()),
+        (RoomAuthor::System, "Agent a did not answer. Stopped.")
+    );
+    assert_eq!(stopped.run_id.as_deref(), Some(claim.run.id.as_str()));
+    // The worker's partial output after a cancel adds nothing.
+    let id = claim.run.id.clone();
+    runtime
+        .call(move |connection| store::cancelled_output(connection, &id, "partial".into()))
+        .await
+        .unwrap();
+    assert_eq!(messages(&runtime, "r").await.len(), 2);
+
+    let queued = queued_in(&post(&runtime, "r", "@Agent b two").await, "r")[0]
+        .id
+        .clone();
+    update(&runtime, room("r", &["a"], None)).await;
+    assert_eq!(
+        lines(&runtime, "r").await.pop().unwrap(),
+        (
+            RoomAuthor::System,
+            stopped_line("Agent b", Some("Removed from the room.")),
+            false
+        )
+    );
+    assert_eq!(run(&runtime, &queued).await.status, RunStatus::Cancelled);
+}
+
+#[tokio::test]
+async fn a_room_reply_is_not_repeated_as_an_update() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    post(&runtime, "r", "@Agent a one").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    finish(
+        &runtime,
+        &claim.run.id,
+        "Done.\n\n```bruhs-report\n{\"outcome\":\"notify\",\"title\":\"Hi\",\"message\":\"Hello back.\"}\n```",
+    )
+    .await;
+    assert!(runtime.snapshot().await.unwrap().outbox.is_empty());
+    assert_eq!(
+        lines(&runtime, "r").await.pop().unwrap(),
+        (bruh("a"), "Done.".to_string(), false)
+    );
+
+    post(&runtime, "r", "@Agent a two").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    finish(
+        &runtime,
+        &claim.run.id,
+        "Done.\n\n```bruhs-report\n{\"outcome\":\"ask\",\"title\":\"Which card?\",\"message\":\"Work or personal?\"}\n```",
+    )
+    .await;
+    let outbox = runtime.snapshot().await.unwrap().outbox;
+    assert_eq!(outbox.len(), 1);
+    assert_eq!(
+        (outbox[0].kind, outbox[0].run_id.as_str()),
+        (OutboxKind::Ask, claim.run.id.as_str())
+    );
+
+    // A chat run still gets its update.
+    runtime
+        .command(ReactiveCommand::Chat {
+            agent_id: "a".into(),
+            message: "Hi".into(),
+            run_id: None,
+        })
+        .await
+        .unwrap();
+    let claim = claim_one(&runtime).await.unwrap();
+    finish(
+        &runtime,
+        &claim.run.id,
+        "Done.\n\n```bruhs-report\n{\"outcome\":\"notify\",\"title\":\"Hi\",\"message\":\"Hello back.\"}\n```",
+    )
+    .await;
+    assert_eq!(runtime.snapshot().await.unwrap().outbox.len(), 2);
+}
+
+#[tokio::test]
+async fn a_room_run_cannot_be_retried() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    let id = queued_in(&post(&runtime, "r", "@Agent a go").await, "r")[0]
+        .id
+        .clone();
+    runtime
+        .command(ReactiveCommand::CancelRun { id: id.clone() })
+        .await
+        .unwrap();
+    let result = runtime
+        .command(ReactiveCommand::RetryRun { id: id.clone() })
+        .await;
+    assert!(
+        matches!(result, Err(ReactiveError::Conflict(ref m)) if m == "Post in the room again to retry.")
+    );
+    assert_eq!(run(&runtime, &id).await.status, RunStatus::Cancelled);
 }

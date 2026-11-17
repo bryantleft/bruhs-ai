@@ -776,7 +776,10 @@ pub(super) fn apply_report(
         }
     }
     let (outcome, mut title, mut message) = effective_outcome(body, report);
+    // A room run's reply is already in the room; only a question needs a card.
+    let in_room = run.trigger.as_ref().and_then(RunTrigger::room_id).is_some();
     let kind = match outcome {
+        RunOutcome::Notify if in_room => None,
         RunOutcome::Notify => Some(OutboxKind::Notify),
         RunOutcome::Ask => Some(OutboxKind::Ask),
         RunOutcome::Silent if is_weekly_report => {
