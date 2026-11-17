@@ -4,7 +4,7 @@
 use bruhs_models::agent::ModelId;
 use bruhs_models::crew::{
     access_options, clamp_level, current_settings, settings_commands, AccessLevel, BruhAccess,
-    BruhLook, BruhSettings,
+    BruhLook, BruhSettings, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use leptos::prelude::*;
@@ -182,7 +182,10 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                     reasons.into_iter().map(|reason| view! { <p class="text-label-sm text-rambutan-500">{reason}</p> }).collect_view()
                 }}
                 <div class="flex min-h-control items-center justify-between gap-3">
-                    <span class="text-label-sm text-rambutan-300">"Send as me"</span>
+                    <div class="min-w-0">
+                        <span class="text-label-sm text-rambutan-300">"Send as me"</span>
+                        <p data-send-as-me-hint="" class="text-label-sm text-rambutan-500">{SEND_AS_ME_HINT}</p>
+                    </div>
                     <Switch label="Send as me" checked=Signal::derive(move || send_as_me.get()) on_change=Callback::new(move |on| send_as_me.set(on)) />
                 </div>
                 <div class="flex min-h-control items-center justify-between gap-3">

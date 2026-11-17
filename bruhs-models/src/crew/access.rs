@@ -33,9 +33,14 @@ pub const DELIVERY_DENIAL: &str =
     "Pushing, merging and opening pull requests need Full access with Can deliver on.";
 pub const LOCAL_HOST_DENIAL: &str = "Bruhs can't reach services on this computer.";
 
-/// Forge hosts a shell command can act on as the owner: `gh`, `glab` and
-/// any command naming one of these ask first, even at Full.
+/// Forge hosts a shell command can act on as the owner. Plain `gh`, `glab`
+/// and commands naming one of these ask first at Full; see
+/// [`is_forge_command`] for what the check misses.
 pub const FORGE_COMMAND_HOSTS: [&str; 2] = ["github.com", "gitlab.com"];
+
+/// The line under Send as me in a bruh's Settings, on both apps.
+pub const SEND_AS_ME_HINT: &str =
+    "At Full access, a Claude bruh also comments, files issues and calls GitHub or GitLab as you without asking.";
 
 /// Claude `--disallowedTools` rules that keep a run from delivering code.
 pub const DELIVERY_DENY_RULES: [&str; 5] = [
@@ -205,9 +210,15 @@ pub fn is_delivery_command(command: &str) -> bool {
 }
 
 /// Whether a shell line acts on a forge other than by delivering: a `gh` or
-/// `glab` command (also behind `sudo`, `env` or `sh -c`), or any command but
-/// `git` that names a forge host, such as `curl` to its API. Lexical, so it
-/// errs toward asking.
+/// `glab` word (also behind `sudo`, `env` or `sh -c`), a command naming a
+/// forge host, such as `curl` to its API, or a `git` command that defines an
+/// alias or runs a `!` shell command.
+///
+/// This is a speed bump for the plain forms, not a boundary. It reads the
+/// line's words, so a script, an interpreter (`python -c`), a variable, an
+/// escape (`g\h`) or a split host name gets past it. With Can deliver on,
+/// the sandbox lets every command reach GitHub and GitLab, and `gh` runs
+/// with the owner's login: such a Full bruh can act there as the owner.
 #[must_use]
 pub fn is_forge_command(command: &str) -> bool {
     shell_commands(command).any(|words| {
@@ -215,9 +226,18 @@ pub fn is_forge_command(command: &str) -> bool {
             return false;
         }
         let program = |word: &str| {
-            let word = word.trim_matches(['"', '\'']);
+            let word = word.trim_matches(['"', '\'', '!']);
             word.rsplit('/').next().unwrap_or(word).to_owned()
         };
+        // A git alias or `!` command runs whatever it names.
+        if words.first().is_some_and(|first| program(first) == "git")
+            && words.iter().any(|word| {
+                let word = word.trim_start_matches(['"', '\'']);
+                word.starts_with('!') || word.contains("alias.")
+            })
+        {
+            return true;
+        }
         if words
             .iter()
             .any(|word| matches!(program(word).as_str(), "gh" | "glab"))
@@ -814,6 +834,10 @@ mod tests {
             "glab issue note 2 -m hi",
             "curl -X POST https://api.github.com/repos/a/b/issues",
             "wget --post-data=x https://GitLab.com/api/v4/projects",
+            "git -c alias.x='!gh issue comment 3 -b hi' x",
+            "git -c alias.y='!curl -X POST https://api.github.com/x' y",
+            "git -c 'alias.z=!sh post.sh' z",
+            "git config alias.p '!gh api -X POST x' && git p",
         ] {
             assert!(is_forge_command(command), "{command}");
             assert_eq!(gate(&full(true), command), Gate::Approve, "{command}");
@@ -829,6 +853,7 @@ mod tests {
             "git push",
             "gh pr create --fill",
             "git clone https://github.com/a/b",
+            "git -C repo status",
             "cargo test",
             "echo github",
         ] {
@@ -838,6 +863,14 @@ mod tests {
         assert_eq!(
             gate(&BruhAccess::default(), "gh issue list"),
             Gate::Deny(READ_ONLY_DENIAL)
+        );
+    }
+
+    #[test]
+    fn the_send_as_me_hint_names_the_forges_without_dashes() {
+        assert!(SEND_AS_ME_HINT.contains("GitHub") && SEND_AS_ME_HINT.contains("Full access"));
+        assert!(
+            !SEND_AS_ME_HINT.contains(['–', '—', '•', '·']) && !SEND_AS_ME_HINT.contains(" - ")
         );
     }
 

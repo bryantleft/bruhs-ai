@@ -21,6 +21,7 @@ use bruhs_models::crew::{
     access_options, approval_outcome, clamp_level, composer_block, current_settings, job_line,
     line_key, may_have_more, merge_runs, settings_commands, status_line, transcript, AccessLevel,
     BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem, PAGE_FACE_PX, RAIL_FACE_PX,
+    SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use gpui_component::scroll::{ScrollableElement, Scrollbar};
@@ -1828,7 +1829,18 @@ impl ReactiveAutomations {
                     .items_center()
                     .justify_between()
                     .gap_3()
-                    .child(small_text("Send as me", theme::rambutan_300()))
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(small_text("Send as me", theme::rambutan_300()))
+                            .child(
+                                div()
+                                    .debug_selector(|| "desktop-bruh-send-as-me-hint".to_string())
+                                    .child(hint(SEND_AS_ME_HINT)),
+                            ),
+                    )
                     .child(page_switch(
                         "desktop-bruh-send-as-me",
                         "Send as me",
@@ -2165,6 +2177,18 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(lines(&panel, cx).len(), 1, "a new snapshot rebuilds it");
+    }
+
+    /// Send as me says what it already lets a Full bruh do.
+    #[gpui::test]
+    fn send_as_me_explains_what_it_allows(cx: &mut gpui::TestAppContext) {
+        let (_, cx) = open(
+            cx,
+            Some(snapshot(BruhStatus::Asleep, Vec::new())),
+            BruhTab::Settings,
+        );
+        assert!(cx.debug_bounds("desktop-bruh-send-as-me").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-send-as-me-hint").is_some());
     }
 
     #[gpui::test]
