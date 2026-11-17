@@ -972,6 +972,22 @@ mod tests {
         });
     }
 
+    /// With no answer from the service yet, ⌘. sends nothing and says so.
+    #[gpui::test]
+    fn stop_all_before_the_service_answers_reports_a_failure(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        dispatch(&workspace, cx, Box::new(super::StopAll));
+        assert_eq!(sent(&workspace, cx), Vec::<ReactiveCommand>::new());
+        workspace.update(cx, |workspace, cx| {
+            let notice = workspace.meetings_hub.read(cx).notice.as_ref();
+            assert_eq!(
+                notice.map(|n| n.message.as_str()),
+                Some("Couldn't stop every bruh: the background service hasn't answered yet")
+            );
+        });
+    }
+
     #[gpui::test]
     fn stop_all_cancels_each_live_run_on_an_old_service(cx: &mut gpui::TestAppContext) {
         let (workspace, cx) = fixture(cx);

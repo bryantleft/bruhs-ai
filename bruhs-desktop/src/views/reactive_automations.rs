@@ -42,6 +42,9 @@ pub(crate) fn local_time(at: bruhs_models::EpochMs) -> String {
     updates::local_time(at)
 }
 
+/// Why ⌘. stopped nothing before the service ever answered.
+const SERVICE_UNREACHABLE: &str = "the background service hasn't answered yet";
+
 /// The auto run switch's label: the policy, and that it is on.
 fn auto_run_control(auto_run: bool, level: AccessLevel) -> String {
     if auto_run {
@@ -1440,11 +1443,22 @@ impl ReactiveAutomations {
         &mut self,
         cx: &mut Context<'_, Self>,
     ) -> Task<Result<&'static str, String>> {
+        let Some(protocol) = self
+            .crew
+            .protocol
+            .or_else(|| self.snapshot.as_ref().map(|snapshot| snapshot.protocol))
+        else {
+            // Nothing has answered yet, so nothing can be stopped: say so
+            // rather than claim a stop that never went out.
+            return Task::ready(bruhs_models::crew::stop_all_result(&[
+                SERVICE_UNREACHABLE.to_string()
+            ]));
+        };
         let runs = self
             .snapshot
             .as_ref()
             .map_or(&[][..], |snapshot| snapshot.runs.as_slice());
-        let commands = bruhs_models::crew::stop_commands(self.crew.protocol.unwrap_or(0), runs);
+        let commands = bruhs_models::crew::stop_commands(protocol, runs);
         #[cfg(test)]
         {
             let _ = cx;
