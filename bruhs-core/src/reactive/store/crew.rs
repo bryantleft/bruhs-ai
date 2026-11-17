@@ -1,0 +1,186 @@
+//! Bruh profiles: how each agent looks, what it may do and its effort, kept
+//! beside `reactive_agents` so a cosmetic edit never touches the agent row,
+//! its runs or its provider session.
+
+use super::{cancel_runs, decode, encode, records, required, ReactiveError};
+use crate::reactive::clock;
+use bruhs_models::{
+    agent::AgentProvider,
+    crew::{
+        level_unavailable, rail_order, status_for, BruhAccess, BruhLook, BruhProfile, BruhState,
+    },
+    logic::run_place::claude_effort,
+    reactive::{EventSource, ReactiveAgent, SourceKind, Subscription},
+    weekly_reports::managed_preset_id,
+    EpochMs,
+};
+use rusqlite::{params, Connection, OptionalExtension};
+
+const ACCESS_CHANGED: &str = "Access changed. Review the new access before starting another run.";
+
+pub(in crate::reactive) fn initialize(connection: &Connection) -> Result<(), ReactiveError> {
+    connection.execute_batch(
+        "CREATE TABLE IF NOT EXISTS reactive_bruhs(agent_id TEXT PRIMARY KEY,payload TEXT NOT NULL);",
+    )?;
+    Ok(())
+}
+
+/// The saved profile, or today's look and read-only access when none was saved.
+pub(in crate::reactive) fn profile(
+    connection: &Connection,
+    agent_id: &str,
+) -> Result<BruhProfile, ReactiveError> {
+    let payload: Option<String> = connection
+        .query_row(
+            "SELECT payload FROM reactive_bruhs WHERE agent_id=?1",
+            [agent_id],
+            |row| row.get(0),
+        )
+        .optional()?;
+    Ok(payload.map(decode).transpose()?.unwrap_or_default())
+}
+
+fn save(
+    connection: &Connection,
+    agent_id: &str,
+    profile: &BruhProfile,
+) -> Result<(), ReactiveError> {
+    connection.execute(
+        "INSERT INTO reactive_bruhs(agent_id,payload) VALUES(?1,?2) ON CONFLICT(agent_id) DO UPDATE SET payload=excluded.payload",
+        params![agent_id, encode(profile)?],
+    )?;
+    Ok(())
+}
+
+/// Look and effort edits write only the profile. An access change also stops
+/// the bruh's running and pending runs; its session and pause stay.
+pub(in crate::reactive) fn set_bruh(
+    connection: &Connection,
+    agent_id: &str,
+    look: BruhLook,
+    access: BruhAccess,
+    effort: Option<String>,
+) -> Result<(), ReactiveError> {
+    let agent: ReactiveAgent = required(connection, "reactive_agents", agent_id, "agent")?;
+    if effort
+        .as_deref()
+        .is_some_and(|effort| claude_effort(effort).is_none())
+    {
+        return Err(ReactiveError::Invalid("Choose a supported effort.".into()));
+    }
+    if let Some(reason) = level_unavailable(access.level, AgentProvider::for_model(&agent.model)) {
+        return Err(ReactiveError::Invalid(reason.into()));
+    }
+    let old = profile(connection, agent_id)?;
+    if old.access != access {
+        cancel_runs(connection, "agent_id", agent_id, ACCESS_CHANGED)?;
+    }
+    save(
+        connection,
+        agent_id,
+        &BruhProfile {
+            look,
+            access,
+            effort,
+            ..old
+        },
+    )
+}
+
+pub(in crate::reactive) fn delete(
+    connection: &Connection,
+    agent_id: &str,
+) -> Result<(), ReactiveError> {
+    connection.execute("DELETE FROM reactive_bruhs WHERE agent_id=?1", [agent_id])?;
+    Ok(())
+}
+
+fn count(connection: &Connection, sql: &str, agent_id: &str) -> Result<usize, ReactiveError> {
+    let count: i64 = connection.query_row(sql, [agent_id], |row| row.get(0))?;
+    Ok(usize::try_from(count).unwrap_or_default())
+}
+
+/// Earliest pending follow-up or enabled calendar subscription for the agent.
+fn next_wake(
+    connection: &Connection,
+    agent_id: &str,
+    subscriptions: &[Subscription],
+    sources: &[EventSource],
+    now: EpochMs,
+) -> Result<Option<EpochMs>, ReactiveError> {
+    let follow_up: Option<i64> = connection.query_row(
+        "SELECT MIN(due) FROM reactive_follow_ups WHERE agent_id=?1 AND status='pending'",
+        [agent_id],
+        |row| row.get(0),
+    )?;
+    let calendar = subscriptions
+        .iter()
+        .filter(|subscription| subscription.enabled && subscription.agent_id == agent_id)
+        .filter_map(|subscription| {
+            sources
+                .iter()
+                .find(|source| source.id == subscription.source_id && source.enabled)
+        })
+        .filter_map(|source| match &source.kind {
+            SourceKind::Calendar {
+                times,
+                weekdays,
+                time_zone,
+            } => clock::next_calendar_due(times, weekdays, time_zone, now.as_millis()).ok(),
+            _ => None,
+        });
+    Ok(follow_up
+        .into_iter()
+        .chain(calendar)
+        .min()
+        .and_then(|due| EpochMs::new(due).ok()))
+}
+
+/// Every bruh as the rail shows it. Weekly report presets are not bruhs.
+pub(in crate::reactive) fn bruh_states(
+    connection: &Connection,
+    now: EpochMs,
+) -> Result<Vec<BruhState>, ReactiveError> {
+    let subscriptions = records::<Subscription>(connection, "reactive_subscriptions")?;
+    let sources = records::<EventSource>(connection, "reactive_sources")?;
+    let mut states = Vec::new();
+    for agent in records::<ReactiveAgent>(connection, "reactive_agents")?
+        .into_iter()
+        .filter(|agent| managed_preset_id(&agent.id).is_none())
+    {
+        let profile = profile(connection, &agent.id)?;
+        let open_asks = count(
+            connection,
+            "SELECT COUNT(*) FROM reactive_outbox WHERE agent_id=?1 AND json_extract(payload,'$.kind')='ask' AND json_extract(payload,'$.resolved_at') IS NULL",
+            &agent.id,
+        )?;
+        let running = count(
+            connection,
+            "SELECT COUNT(*) FROM reactive_runs WHERE agent_id=?1 AND status='running'",
+            &agent.id,
+        )?;
+        let unread = count(
+            connection,
+            "SELECT COUNT(*) FROM reactive_outbox WHERE agent_id=?1 AND json_extract(payload,'$.read_at') IS NULL AND json_extract(payload,'$.resolved_at') IS NULL",
+            &agent.id,
+        )?;
+        let next_wake_ms = next_wake(connection, &agent.id, &subscriptions, &sources, now)?;
+        states.push(BruhState {
+            status: status_for(
+                agent.enabled,
+                profile.paused_at.is_some(),
+                open_asks > 0,
+                running > 0,
+            ),
+            agent_id: agent.id,
+            name: agent.name,
+            look: profile.look,
+            access: profile.access,
+            effort: profile.effort,
+            next_wake_ms,
+            unread,
+        });
+    }
+    rail_order(&mut states);
+    Ok(states)
+}

@@ -4,7 +4,7 @@ use bruhs_models::reactive::{ReactiveCommand, ReactiveEvent, ReactiveSnapshot};
 use rusqlite::Connection;
 use serde_json::Value;
 use std::{
-    path::Path,
+    path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc,
@@ -17,6 +17,8 @@ mod always_on_tests;
 #[cfg(test)]
 mod automation_tests;
 pub mod clock;
+#[cfg(test)]
+mod crew_tests;
 mod notify;
 mod report_sources;
 pub mod sources;
@@ -61,9 +63,59 @@ pub use notify::{system_notifier, Notifier};
 pub struct ReactiveRuntime {
     connection: Arc<Mutex<Connection>>,
     _lock: Arc<store::RuntimeLock>,
+    /// The resolved database file's parent. Every per-bruh path
+    /// (`bruhs/<id>/work`, and later ones such as a browser profile) lives
+    /// under this one root, so deleting a bruh has one tree to clean up.
+    home: Arc<PathBuf>,
     started: Arc<AtomicBool>,
     changes: watch::Sender<u64>,
     notifier: Arc<std::sync::RwLock<Notifier>>,
+}
+
+/// A bruh's work folder and the directories this call created for it.
+struct NewFolder {
+    folder: PathBuf,
+    created: Vec<PathBuf>,
+}
+
+impl NewFolder {
+    /// Undo a folder made for a bruh that was not saved; never removes contents.
+    fn remove(&self) {
+        for directory in self.created.iter().rev() {
+            if let Err(error) = std::fs::remove_dir(directory) {
+                tracing::warn!(%error, "An unused bruh folder could not be removed");
+            }
+        }
+    }
+}
+
+/// Create `<home>/bruhs/<id>/work`, private to the owner on Unix.
+fn work_folder(home: &Path, id: &str) -> Result<NewFolder, ReactiveError> {
+    bruhs_models::ids::validate_id(id).map_err(|_| {
+        ReactiveError::Invalid(
+            "Use a nonempty ID without path separators or control characters.".into(),
+        )
+    })?;
+    let folder = home.join("bruhs").join(id).join("work");
+    let created = folder
+        .ancestors()
+        .take_while(|directory| *directory != home && !directory.exists())
+        .map(Path::to_path_buf)
+        .collect::<Vec<_>>()
+        .into_iter()
+        .rev()
+        .collect();
+    let mut builder = std::fs::DirBuilder::new();
+    builder.recursive(true);
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::DirBuilderExt;
+        builder.mode(0o700);
+    }
+    builder
+        .create(&folder)
+        .map_err(|_| ReactiveError::Storage("Could not create the bruh's work folder.".into()))?;
+    Ok(NewFolder { folder, created })
 }
 
 /// Field order closes the SQLite connection before releasing its ownership lock.
@@ -106,13 +158,23 @@ impl ReactiveRuntime {
 
     pub async fn open(path: impl AsRef<Path>) -> Result<Self, ReactiveError> {
         let path = path.as_ref().to_owned();
-        let (connection, lock) = tokio::task::spawn_blocking(move || store::open(&path))
-            .await
-            .map_err(|_| ReactiveError::Storage("Database worker stopped during open.".into()))??;
+        let (connection, lock, home) = tokio::task::spawn_blocking(move || {
+            let (connection, lock) = store::open(&path)?;
+            let home = std::fs::canonicalize(&path)
+                .ok()
+                .and_then(|path| path.parent().map(Path::to_path_buf))
+                .ok_or_else(|| {
+                    ReactiveError::Storage("Could not resolve the database folder.".into())
+                })?;
+            Ok::<_, ReactiveError>((connection, lock, home))
+        })
+        .await
+        .map_err(|_| ReactiveError::Storage("Database worker stopped during open.".into()))??;
         let (changes, _) = watch::channel(0);
         Ok(Self {
             connection: Arc::new(Mutex::new(connection)),
             _lock: Arc::new(lock),
+            home: Arc::new(home),
             started: Arc::new(AtomicBool::new(false)),
             changes,
             notifier: Arc::new(std::sync::RwLock::new(system_notifier())),
@@ -230,15 +292,49 @@ impl ReactiveRuntime {
     }
 
     /// Direct user commands apply immediately; agent requests must use `Propose`.
+    /// A new bruh without a folder gets a private one under the runtime's home.
     pub async fn command(
         &self,
-        command: ReactiveCommand,
+        mut command: ReactiveCommand,
     ) -> Result<ReactiveSnapshot, ReactiveError> {
+        let home = Arc::clone(&self.home);
         let snapshot = self
-            .call(move |connection| store::command(connection, command))
+            .call(move |connection| {
+                let created = match &mut command {
+                    ReactiveCommand::CreateBruh { agent, .. }
+                        if agent.project_path.trim().is_empty() =>
+                    {
+                        let work = work_folder(&home, &agent.id)?;
+                        let Some(folder) = work.folder.to_str() else {
+                            work.remove();
+                            return Err(ReactiveError::Storage(
+                                "The bruh's work folder path is not valid text.".into(),
+                            ));
+                        };
+                        agent.project_path = folder.to_owned();
+                        Some(work)
+                    }
+                    _ => None,
+                };
+                let result = store::command(connection, command);
+                if result.is_err() {
+                    created.iter().for_each(NewFolder::remove);
+                }
+                result
+            })
             .await?;
         self.changed();
         Ok(snapshot)
+    }
+
+    /// One agent's runs, newest first, a page at a time.
+    pub async fn agent_runs(
+        &self,
+        agent_id: String,
+        before: Option<bruhs_models::EpochMs>,
+    ) -> Result<Vec<bruhs_models::reactive::ReactiveRun>, ReactiveError> {
+        self.call(move |connection| store::agent_runs(connection, &agent_id, before))
+            .await
     }
 
     pub async fn publish(

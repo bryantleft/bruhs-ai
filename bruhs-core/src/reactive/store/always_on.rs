@@ -56,7 +56,7 @@ pub(super) fn set_notification_settings(
 
 // ── Outbox ─────────────────────────────────────────────────────────────────
 
-fn save_item(connection: &Connection, item: &OutboxItem) -> Result<(), ReactiveError> {
+pub(super) fn save_item(connection: &Connection, item: &OutboxItem) -> Result<(), ReactiveError> {
     connection.execute(
         "INSERT INTO reactive_outbox(id,agent_id,run_id,created,payload) VALUES(?1,?2,?3,?4,?5) ON CONFLICT(id) DO UPDATE SET payload=excluded.payload",
         params![item.id, item.agent_id, item.run_id, item.created_at.as_millis(), encode(item)?],
@@ -218,8 +218,8 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
         unread: usize::try_from(unread).unwrap_or_default(),
         open_questions: usize::try_from(open_questions).unwrap_or_default(),
         latest_unread: latest.map(decode).transpose()?,
-        bruhs: Vec::new(),
-        protocol: 0,
+        bruhs: super::crew::bruh_states(connection, EpochMs::now())?,
+        protocol: bruhs_models::crew::CREW_PROTOCOL,
     })
 }
 

@@ -280,6 +280,10 @@ pub(super) fn guard_generic_command(
                 required(connection, "reactive_proposals", id, "proposal")?;
             change(connection, &proposal.change)
         }
+        ReactiveCommand::CreateBruh { agent, .. } => guard_managed_identity(connection, &agent.id),
+        ReactiveCommand::SetBruh { agent_id, .. }
+        | ReactiveCommand::StopBruh { agent_id }
+        | ReactiveCommand::ResumeBruh { agent_id } => guard_managed_identity(connection, agent_id),
         _ => Ok(()),
     }
 }
