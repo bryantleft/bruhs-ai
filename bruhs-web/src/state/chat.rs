@@ -1234,7 +1234,10 @@ mod tests {
 
         let mut done = AgentMessage::assistant_placeholder("model".into(), 1.0);
         done.finish(3.0, false, None);
-        assert!(serde_json::to_value(&done).unwrap().get("stopped").is_none());
+        assert!(serde_json::to_value(&done)
+            .unwrap()
+            .get("stopped")
+            .is_none());
 
         let load = |v: serde_json::Value| serde_json::from_value::<AgentMessage>(v).unwrap();
         let both = load(serde_json::json!({
