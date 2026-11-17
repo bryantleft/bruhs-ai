@@ -67,6 +67,8 @@ pub use planning::*;
 pub use project::*;
 pub use record_detail::*;
 pub use relationship::*;
+pub mod relationship_draft;
+pub use relationship_draft::*;
 mod relationship_merge;
 pub use relationship_merge::*;
 pub use scheduling::*;

@@ -52,6 +52,46 @@ pub mod people_copy {
     pub const EMPTY: &str =
         "No people yet. Add one above, or profiles populate after your first meeting summary completes.";
 
+    // Unsubmitted relationship drafts (web `RelationshipDraftStatus`).
+    pub const DRAFTS_LABEL: &str = "Unsubmitted relationship drafts";
+    /// Web keeps drafts per tab.
+    pub const DRAFTS_KEPT_TAB: &str = "Kept only in this tab. Reopen a contact to Save details or Add its item. Nothing here is saved automatically.";
+    /// Desktop keeps drafts until the app quits.
+    pub const DRAFTS_KEPT_APP: &str = "Kept only until you quit Bruhs. Reopen a contact to Save details or Add its item. Nothing here is saved automatically.";
+    pub const DRAFT_OPEN: &str = "Open draft";
+    pub const DRAFT_DISCARD: &str = "Discard draft";
+    pub const DRAFTS_TRUNCATED: &str = "Showing the first 24 drafts. Save or discard these to reach the rest; private recovery includes all drafts.";
+    pub const DRAFTS_VIEW: &str = "View unsubmitted drafts (private)";
+    pub const DRAFTS_HIDE: &str = "Hide unsubmitted drafts";
+    pub const DRAFTS_COPY_NOTE: &str = "Copy somewhere private before discarding or leaving. This includes unsaved notes and original comparison fields.";
+    pub const DRAFTS_RECOVERY_LABEL: &str = "Unsubmitted relationship recovery data";
+    /// Save details refused: a field it changes was also saved elsewhere.
+    pub const DETAILS_CHANGED: &str = "Saved details changed while you were editing. Your draft is kept. Copy it before discarding to review the latest details.";
+    /// A merge refused while either contact has unsaved relationship edits.
+    pub const MERGE_DRAFTS_UNSAVED: &str =
+        "Save the unsaved relationship details before merging these contacts.";
+
+    /// "1 unsubmitted relationship draft", "3 unsubmitted relationship drafts".
+    pub fn drafts_status(count: usize) -> String {
+        match count {
+            1 => "1 unsubmitted relationship draft".to_string(),
+            count => format!("{count} unsubmitted relationship drafts"),
+        }
+    }
+
+    /// A draft whose contact no longer exists.
+    pub fn draft_unavailable_contact(id: &str) -> String {
+        format!("Unavailable contact ({id})")
+    }
+
+    pub fn draft_open_label(name: &str) -> String {
+        format!("Open draft for {name}")
+    }
+
+    pub fn draft_discard_label(name: &str) -> String {
+        format!("Discard draft for {name}")
+    }
+
     /// The merge confirmation sentence.
     pub fn merge_confirm(source: &str, target: &str) -> String {
         format!(

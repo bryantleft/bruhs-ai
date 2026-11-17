@@ -39,10 +39,10 @@ impl RelationshipStore {
     pub fn begin_merge(self, person_ids: &[String]) -> Result<RelationshipTransaction, SaveError> {
         if self
             .editor_drafts
-            .with_untracked(|drafts| person_ids.iter().any(|id| drafts.contains_key(id)))
+            .with_untracked(|drafts| person_ids.iter().any(|id| drafts.contains(id)))
         {
             return Err(SaveError::Rejected(
-                "Save the unsaved relationship details before merging these contacts.",
+                bruhs_models::people_copy::MERGE_DRAFTS_UNSAVED,
             ));
         }
         self.begin_exclusive(person_ids)

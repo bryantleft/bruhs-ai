@@ -146,7 +146,7 @@ pub fn RelationshipPanel(person_id: String) -> impl IntoView {
         let Some([company, role, email, phone, location, notes]) =
             read_draft().details_to_save(saved_fields())
         else {
-            draft_error.set(Some("Saved details changed while you were editing. Your draft is kept. Copy it before discarding to review the latest details."));
+            draft_error.set(Some(people_copy::DETAILS_CHANGED));
             return;
         };
         if store.update(&id.get_value(), |profile| {
