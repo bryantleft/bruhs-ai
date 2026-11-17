@@ -34,7 +34,7 @@ section() { # title, license file
   printf '\n\nBundled libraries, scripts and fonts\n------------------------------------\n'
   # The gpui crates from the zed fork carry no license field, so cargo-about
   # skips them; gpui is Apache-2.0.
-  section "GPUI and its zed crates (Apache-2.0), from github.com/bnleft/zed" "$(crate_dir gpui)/LICENSE-APACHE"
+  section "GPUI and its zed crates (Apache-2.0), from github.com/bryantleft/zed" "$(crate_dir gpui)/LICENSE-APACHE"
   section "whisper.cpp (MIT), in bruhs-capture" "$(crate_dir whisper-rs-sys)/whisper.cpp/LICENSE"
   section "sherpa-onnx (Apache-2.0), Contents/Frameworks/libsherpa-onnx-*.dylib" "$(crate_dir sherpa-rs-sys)/sherpa-onnx/LICENSE"
   section "ONNX Runtime (MIT), Contents/Frameworks/libonnxruntime*.dylib" packaging/licenses/onnxruntime-LICENSE

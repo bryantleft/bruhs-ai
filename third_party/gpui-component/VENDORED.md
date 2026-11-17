@@ -26,7 +26,7 @@ The UI scrollbar work is recorded in the `scroll/scrollbar.rs` and
 adaptations.
 
 - `Cargo.toml` (workspace): `gpui`, `gpui_platform`, `gpui_web`, `gpui_macros`,
-  `reqwest_client` point at the `bnleft/zed` fork pinned by `rev` instead of
+  `reqwest_client` point at the `bryantleft/zed` fork pinned by `rev` instead of
   `zed-industries/zed` (see "gpui pins" below).
 - `crates/ui/Cargo.toml`: adds a `test-support = []` feature.
 - `crates/ui/src/lib.rs`, `root.rs`, `input/native.rs`, `input/content_type.rs`:
@@ -65,9 +65,9 @@ adaptations.
 ## gpui pins
 
 This directory is not a workspace member, so it keeps its own copy of the gpui
-git pins in `Cargo.toml`, all at the same `bnleft/zed` rev as the root
+git pins in `Cargo.toml`, all at the same `bryantleft/zed` rev as the root
 workspace: `gpui`, `gpui_platform`, `gpui_web`, `gpui_macros`,
-`reqwest_client` (rev `47abf3f6a213244d9de96128d27693101defe986`). The root
+`reqwest_client` (rev `1c31c0cfec278c73fc8a04aab8e84c2056c01a42`). The root
 `Cargo.toml` `[workspace.dependencies]` states that rev once for the rest of the
 repo. When moving gpui forward, bump the root rev **and** the five pins here so
 Cargo resolves a single gpui.

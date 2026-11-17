@@ -70,7 +70,7 @@ allow-registry = ["https://github.com/rust-lang/crates.io-index"]
 # Every git source in Cargo.lock. The zed fork carries gpui (see the note in
 # the root Cargo.toml); the rest are pulled in by gpui / bruhs-capture.
 allow-git = [
-    "https://github.com/bnleft/zed",
+    "https://github.com/bryantleft/zed",
     "https://github.com/yury/cidre",
     "https://github.com/zed-industries/font-kit",
     "https://github.com/zed-industries/xim-rs.git",

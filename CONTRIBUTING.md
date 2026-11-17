@@ -144,5 +144,6 @@ tags `v<version>`. Asset names carry no version, so
 - `third_party/gpui-component` is a vendored copy of
   [longbridge/gpui-component](https://github.com/longbridge/gpui-component)
   (Apache-2.0); `VENDORED.md` lists the local changes.
-- gpui comes from the [bnleft/zed](https://github.com/bnleft/zed) fork, which
-  adds browser-style prose line breaking.
+- gpui comes from the [bryantleft/zed](https://github.com/bryantleft/zed) fork
+  (branch `bruhs-patches`), which adds browser-style prose line breaking,
+  page zoom and an accessibility tree that tests can read.

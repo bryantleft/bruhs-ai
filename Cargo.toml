@@ -84,20 +84,23 @@ cpal = "0.15"
 # Secret Service backend links libdbus (CI installs libdbus-1-dev).
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
-# gpui comes from a fork, one commit ahead of upstream: it wraps prose the
-# way a browser does (no break at `/`, break after `-`) so the desktop app and
-# the web app break the same lines. Upstream deliberately does the opposite for
-# `/`, so this is not something to send back. To move gpui forward, rebase
-# `bruhs-prose-line-breaking` on bnleft/zed and bump the rev here and in
-# third_party/gpui-component/Cargo.toml (excluded from this workspace, so it
-# keeps its own pins; see third_party/gpui-component/VENDORED.md).
-gpui = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
-gpui_platform = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
+# gpui comes from a fork, two commits ahead of upstream (branch
+# `bruhs-patches` on bryantleft/zed): it wraps prose the way a browser does (no
+# break at `/`, break after `-`) so the desktop app and the web app break the
+# same lines, and it adds `Window::set_zoom` (the desktop's ⌘+ / ⌘− / ⌘0,
+# like the web app's browser zoom) and an accessibility tree tests can read.
+# Upstream deliberately breaks at `/`, so the first is not something to send
+# back. To move gpui forward, rebase `bruhs-patches` on bryantleft/zed and bump
+# the rev here, in third_party/gpui-component/Cargo.toml and in
+# third_party/gpui-windows/Cargo.toml (excluded from this workspace, so they
+# keep their own pins; see third_party/gpui-component/VENDORED.md).
+gpui = { git = "https://github.com/bryantleft/zed", rev = "1c31c0cfec278c73fc8a04aab8e84c2056c01a42" }
+gpui_platform = { git = "https://github.com/bryantleft/zed", rev = "1c31c0cfec278c73fc8a04aab8e84c2056c01a42" }
 
 # Dev-only
 tempfile = "3"
 
-[patch."https://github.com/bnleft/zed"]
+[patch."https://github.com/bryantleft/zed"]
 # zed's `ztracing` (and through it `zlog`, `ztracing_macro`) is GPL-3.0; gpui's
 # sum_tree only uses its no-op `#[instrument]`. This keeps the distributed
 # binaries MIT. See third_party/ztracing-noop/README.md.

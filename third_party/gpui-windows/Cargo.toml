@@ -15,17 +15,17 @@ test-support = ["gpui/test-support"]
 screen-capture = ["gpui/screen-capture", "scap"]
 
 [dependencies]
-gpui = { default-features = false, git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
+gpui = { default-features = false, git = "https://github.com/bryantleft/zed", rev = "1c31c0cfec278c73fc8a04aab8e84c2056c01a42" }
 
 [target.'cfg(target_os = "windows")'.dependencies]
 accesskit = "0.24.0"
 accesskit_windows = "0.33.1"
 anyhow = "1.0.86"
-collections = { version = "0.1.0", git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
+collections = { version = "0.1.0", git = "https://github.com/bryantleft/zed", rev = "1c31c0cfec278c73fc8a04aab8e84c2056c01a42" }
 dunce = "1.0"
 etagere = "0.2"
 futures = "0.3.32"
-gpui_util = { git = "https://github.com/bnleft/zed", rev = "47abf3f6a213244d9de96128d27693101defe986" }
+gpui_util = { git = "https://github.com/bryantleft/zed", rev = "1c31c0cfec278c73fc8a04aab8e84c2056c01a42" }
 image = "0.25.1"
 itertools = "0.14.0"
 log = { version = "0.4.16", features = ["kv_unstable_serde", "serde"] }
