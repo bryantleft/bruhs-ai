@@ -447,6 +447,10 @@ fn router_with_capture_daemon(
             get(routes::reactive::agent_runs),
         )
         .route(
+            "/api/reactive/rooms/{id}/messages",
+            get(routes::reactive::room_messages),
+        )
+        .route(
             "/api/databases",
             get(routes::database::list).post(routes::database::save),
         )
