@@ -1391,9 +1391,12 @@ pub struct Workspace {
     scheduling_selected_task_id: Option<String>,
     life_tab: DesktopLifeTab,
     life_error: Option<String>,
+    /// Web's Life notice: what the last CSV import did, until dismissed.
+    life_notice: Option<String>,
     life_name_input: Entity<InputState>,
     life_value_input: Entity<InputState>,
     life_category_input: Entity<InputState>,
+    life_csv_input: Entity<InputState>,
     task_create_title_input: Entity<InputState>,
     task_create_description_input: Entity<InputState>,
     task_create_due_input: Entity<InputState>,
@@ -1545,6 +1548,7 @@ impl Workspace {
             life_name_input,
             life_value_input,
             life_category_input,
+            life_csv_input,
         } = Self::new_life_inputs(window, cx, &mut subscriptions);
         let TaskFormInputs {
             task_create_title_input,
@@ -2061,9 +2065,11 @@ impl Workspace {
             scheduling_selected_task_id: None,
             life_tab: DesktopLifeTab::Finance,
             life_error: None,
+            life_notice: None,
             life_name_input,
             life_value_input,
             life_category_input,
+            life_csv_input,
             task_create_title_input,
             task_create_description_input,
             task_create_due_input,

@@ -87,30 +87,6 @@ pub fn holding(symbol: String, value: &str, now_ms: i64) -> Result<Holding, Entr
     ))
 }
 
-/// Pasted CSV rows `merchant, category, signed amount[, note]`, at most
-/// 2,000; a header row and rows without a valid amount are skipped.
-pub fn csv_transactions(value: &str, now_ms: i64) -> Vec<FinanceTransaction> {
-    value
-        .lines()
-        .take(2_000)
-        .filter_map(|line| {
-            let fields = line.split(',').map(str::trim).collect::<Vec<_>>();
-            if fields.len() < 3 || fields[0].eq_ignore_ascii_case("merchant") {
-                return None;
-            }
-            let amount = parse_amount_minor(fields[2])?;
-            let mut transaction = FinanceTransaction::manual(
-                fields[0],
-                fields.get(1).copied().unwrap_or("Other"),
-                amount,
-                now_ms,
-            );
-            transaction.note = fields.get(3).map(|note| (*note).to_string());
-            Some(transaction)
-        })
-        .collect()
-}
-
 /// A workout needs an activity and whole minutes (0–65535).
 pub fn workout(activity: String, minutes: &str, now_ms: i64) -> Option<WorkoutLog> {
     let minutes = minutes.parse::<u16>().ok()?;
@@ -143,19 +119,6 @@ mod tests {
         assert_eq!(parse_amount_minor("$1,234.56"), Some(123_456));
         assert_eq!(parse_amount_minor("-5.25"), Some(-525));
         assert_eq!(parse_amount_minor("nope"), None);
-    }
-
-    #[test]
-    fn csv_import_is_bounded_and_skips_headers() {
-        let rows = csv_transactions(
-            "merchant,category,amount,note\nCoffee,Food,-4.50,Meeting\nBad,row,nope",
-            10,
-        );
-        assert_eq!(rows.len(), 1);
-        assert_eq!(rows[0].amount_minor, -450);
-        assert_eq!(rows[0].note.as_deref(), Some("Meeting"));
-        let many = "a,b,1\n".repeat(2_500);
-        assert_eq!(csv_transactions(&many, 0).len(), 2_000);
     }
 
     /// The amount is checked before the name, as the form always did, and
