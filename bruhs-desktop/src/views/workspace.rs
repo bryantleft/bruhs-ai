@@ -1217,7 +1217,8 @@ pub struct Workspace {
     title_instructions: String,
     title_instructions_by_project: BTreeMap<String, String>,
     title_instructions_input: Entity<InputState>,
-    title_project_input: Entity<InputState>,
+    /// The project whose title instructions Settings shows; empty for none.
+    title_project: String,
     title_project_instructions_input: Entity<InputState>,
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
     keybinding_index: usize,
@@ -1537,7 +1538,7 @@ impl Workspace {
             .as_ref()
             .and_then(|state| state.title_instructions.clone())
             .unwrap_or_default();
-        let (title_instructions_input, title_project_input, title_project_instructions_input) =
+        let (title_instructions_input, title_project_instructions_input) =
             Self::new_title_instruction_inputs(
                 saved_title_instructions,
                 window,
@@ -1890,7 +1891,7 @@ impl Workspace {
                 .map(|state| state.title_instructions_by_project.clone())
                 .unwrap_or_default(),
             title_instructions_input,
-            title_project_input,
+            title_project: String::new(),
             title_project_instructions_input,
             keybindings,
             keybinding_index: 0,

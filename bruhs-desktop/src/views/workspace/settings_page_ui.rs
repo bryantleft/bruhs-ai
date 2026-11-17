@@ -188,6 +188,7 @@ pub(super) const SETTINGS_EDITOR_DROPDOWN_ID: &str = "desktop-editor";
 pub(super) const SETTINGS_COMPACT_IDLE_DROPDOWN_ID: &str = "desktop-compact-idle";
 pub(super) const SETTINGS_THREAD_ACCESS_DROPDOWN_ID: &str = "desktop-thread-access";
 pub(super) const SETTINGS_THREAD_HOPS_DROPDOWN_ID: &str = "desktop-thread-hops";
+pub(super) const SETTINGS_TITLE_PROJECT_DROPDOWN_ID: &str = "desktop-title-project";
 /// [`bruhs_models::thread_link::HOP_CHOICES`] as dropdown values.
 const THREAD_HOP_OPTIONS: [&str; 4] = ["2", "4", "6", "10"];
 
@@ -458,6 +459,16 @@ impl Workspace {
             SETTINGS_THREAD_HOPS_DROPDOWN_ID => {
                 self.thread_hops = bruhs_models::thread_link::parse_hops(value);
                 self.persist_and_notify(cx);
+            }
+            SETTINGS_TITLE_PROJECT_DROPDOWN_ID => {
+                self.title_project = value.to_string();
+                let text = self
+                    .title_instructions_by_project
+                    .get(value)
+                    .cloned()
+                    .unwrap_or_default();
+                self.title_project_instructions_input
+                    .update(cx, |field, cx| field.set_value(text, window, cx));
             }
             _ => {
                 self.select_role_setting(id, value, window, cx);
@@ -954,20 +965,55 @@ impl Workspace {
                         .flex()
                         .flex_col()
                         .gap_2()
-                        .child(
-                            div()
-                                .h(px(theme::CONTROL_PX))
-                                .child(Input::new(&self.title_project_input).aria_label("Project name for title instructions")),
-                        )
-                        .child(
-                            div()
-                                .h(px(80.0))
-                                .child(Input::new(&self.title_project_instructions_input).aria_label("Project title instructions")),
-                        )
+                        .child(self.render_title_project_control(cx))
+                        // Web shows the field once a project is chosen.
+                        .when(!self.title_project.is_empty(), |el| {
+                            el.child(
+                                div().h(px(80.0)).child(
+                                    Input::new(&self.title_project_instructions_input)
+                                        .aria_label("Project thread title instructions"),
+                                ),
+                            )
+                        })
                         .into_any_element(),
                 ),
             ),
         ]
+    }
+
+    /// Web: a list of the projects threads are in, "Choose a project" first.
+    fn render_title_project_control(&self, cx: &Context<'_, Self>) -> AnyElement {
+        let options = std::iter::once(DropdownOption {
+            value: "",
+            label: "Choose a project".to_string(),
+            description: None,
+        })
+        .chain(
+            self.thread_project_names()
+                .into_iter()
+                .map(|name| DropdownOption {
+                    value: role_settings_ui::project_value(&name),
+                    label: name,
+                    description: None,
+                }),
+        )
+        .collect();
+        let groups = vec![DropdownGroup {
+            label: None,
+            mark: None,
+            options,
+        }];
+        let (toggle, select) =
+            self.settings_dropdown_handlers(SETTINGS_TITLE_PROJECT_DROPDOWN_ID, cx);
+        dropdown(
+            SETTINGS_TITLE_PROJECT_DROPDOWN_ID,
+            "Project for title instructions",
+            role_settings_ui::project_value(&self.title_project),
+            groups,
+            self.settings_listbox(SETTINGS_TITLE_PROJECT_DROPDOWN_ID),
+            toggle,
+            select,
+        )
     }
 
     pub(super) fn render_settings_beta_rows(&self, cx: &Context<'_, Self>) -> Vec<AnyElement> {
@@ -1334,7 +1380,9 @@ impl Workspace {
 
 #[cfg(test)]
 mod ui_audit_tests {
-    use super::{settings_rows_stack, SettingsSection, Workspace};
+    use super::{
+        settings_rows_stack, SettingsSection, Workspace, SETTINGS_TITLE_PROJECT_DROPDOWN_ID,
+    };
     use crate::{app_state::DesktopState, theme};
     use ::core::prelude::v1::test;
     use gpui::{px, size, AppContext, TestAppContext};
@@ -1346,6 +1394,67 @@ mod ui_audit_tests {
         assert!(settings_rows_stack(768.0));
         assert!(!settings_rows_stack(1024.0));
         assert!(!settings_rows_stack(1920.0));
+    }
+
+    #[gpui::test]
+    fn project_title_instructions_pick_a_project_from_a_list_like_web(cx: &mut TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+            cx.set_global(DesktopState::new().expect("desktop state"));
+        });
+        let capture = Rc::new(RefCell::new(None));
+        let captured = capture.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let workspace = cx.new(|cx| Workspace::new(window, cx));
+            *captured.borrow_mut() = Some(workspace.clone());
+            gpui_component::Root::new(workspace, window, cx)
+        });
+        let workspace = capture.borrow().clone().expect("workspace");
+        workspace.update_in(cx, |workspace, window, cx| {
+            let thread = workspace.threads.first_mut().expect("a thread");
+            thread.project_name = "Alpha".into();
+            assert_eq!(workspace.thread_project_names(), ["Alpha"]);
+            workspace
+                .title_instructions_by_project
+                .insert("Alpha".into(), "prefix: A".into());
+            workspace.open_settings(&super::OpenSettings, window, cx);
+            workspace.set_settings_section(SettingsSection::General, cx);
+            assert!(workspace.title_project.is_empty(), "nothing chosen yet");
+            // Choosing a project loads its lines into the field.
+            workspace.select_settings_option(
+                SETTINGS_TITLE_PROJECT_DROPDOWN_ID,
+                "Alpha",
+                window,
+                cx,
+            );
+            assert_eq!(workspace.title_project, "Alpha");
+            let field = workspace.title_project_instructions_input.clone();
+            assert_eq!(field.read(cx).value().as_ref(), "prefix: A");
+            field.update(cx, |input, cx| input.set_value("", window, cx));
+        });
+        // The field appears once a project is chosen; type into it.
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, window, cx| {
+            let field = workspace.title_project_instructions_input.clone();
+            field.update(cx, |input, cx| input.focus(window, cx));
+        });
+        cx.update(|window, _| window.refresh());
+        cx.run_until_parked();
+        cx.simulate_input("max 20");
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert_eq!(
+                workspace
+                    .title_instructions_by_project
+                    .get("Alpha")
+                    .map(String::as_str),
+                Some("max 20")
+            );
+            workspace.select_settings_option(SETTINGS_TITLE_PROJECT_DROPDOWN_ID, "", window, cx);
+            assert!(workspace.title_project.is_empty());
+        });
     }
 
     #[gpui::test]
