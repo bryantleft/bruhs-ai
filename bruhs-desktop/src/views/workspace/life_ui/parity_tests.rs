@@ -1,12 +1,17 @@
 //! Web parity for the Life page: CSV import, deleting a transaction, the
-//! holdings list and the sleep and recovery card, in the web's cards, and
-//! each finance card's own form (PM-46).
+//! holdings list and the sleep and recovery card, in the web's cards, each
+//! finance card's own form (PM-46) and each health card's own form (PM-59).
 
 use super::super::load_desktop_state_from_path;
 use super::super::performance_tests::fixture;
 use super::super::{AppView, DesktopLifeTab, Workspace};
-use bruhs_models::{FinanceTransaction, Holding, LifeContext, RecoveryLog, SleepLog};
-use gpui::{Bounds, Entity, Pixels, VisualTestContext};
+use super::HealthForms;
+use bruhs_models::{
+    health_copy, FinanceTransaction, HealthEntryError, HealthField, HealthJournal, Holding,
+    LifeContext, RecoveryLog, SleepLog, WorkoutLog,
+};
+use gpui::{Bounds, Entity, Focusable, Pixels, VisualTestContext};
+use gpui_component::input::InputState;
 use std::sync::Arc;
 
 fn bounds(cx: &mut VisualTestContext, selector: &str) -> Option<Bounds<Pixels>> {
@@ -234,7 +239,8 @@ fn sleep_and_recovery_card_counts_logs_like_web(cx: &mut gpui::TestAppContext) {
             "2 sleep logs, 1 recovery log"
         );
         workspace
-            .life_value_input
+            .life_health
+            .recovery_score
             .update(cx, |input, cx| input.set_value("70", window, cx));
         workspace.add_health_entry(super::HealthEntryKind::Recovery, window, cx);
         assert_eq!(
@@ -432,13 +438,14 @@ fn finance_cards_hold_their_own_forms_like_web(cx: &mut gpui::TestAppContext) {
         assert!(privacy.reveal_exact_amounts_to_agent);
     });
 
-    // Health keeps its one entry form.
+    // Health has no Quick add form either: its cards hold their own (PM-59).
     workspace.update(cx, |workspace, cx| {
         workspace.life_tab = DesktopLifeTab::Health;
         cx.notify();
     });
     cx.run_until_parked();
-    assert!(bounds(cx, "desktop-life-quick-add").is_some());
+    assert!(bounds(cx, "desktop-life-quick-add").is_none());
+    assert!(bounds(cx, "desktop-life-field-Workout activity").is_some());
     assert!(bounds(cx, "desktop-life-field-Account name").is_none());
 }
 
@@ -457,4 +464,383 @@ fn the_csv_box_is_web_height(cx: &mut gpui::TestAppContext) {
         .debug_bounds("desktop-life-csv-input")
         .expect("the CSV box is drawn");
     assert!(csv.size.height >= gpui::px(96.0), "{csv:?}");
+}
+
+/// A full key press. GPUI clicks a focused control on key up, which
+/// `simulate_keystrokes` never sends.
+fn press_key(cx: &mut VisualTestContext, key: &str) {
+    let keystroke = gpui::Keystroke::parse(key).expect("test keystroke should parse");
+    cx.simulate_event(gpui::KeyDownEvent {
+        keystroke: keystroke.clone(),
+        is_held: false,
+        prefer_character_input: false,
+    });
+    cx.simulate_event(gpui::KeyUpEvent { keystroke });
+    cx.run_until_parked();
+}
+
+/// One health form field.
+type HealthPick = fn(&HealthForms) -> &Entity<InputState>;
+
+const WORKOUT: [HealthPick; 2] = [
+    |forms| &forms.workout_activity,
+    |forms| &forms.workout_minutes,
+];
+const SLEEP: [HealthPick; 2] = [|forms| &forms.sleep_hours, |forms| &forms.sleep_quality];
+const RECOVERY: [HealthPick; 1] = [|forms| &forms.recovery_score];
+const HABIT: [HealthPick; 1] = [|forms| &forms.habit_title];
+
+/// The Health tab at the same-size check's 1280x800, with `seed`'s logs.
+fn health_page(
+    cx: &mut gpui::TestAppContext,
+    seed: impl FnOnce(&mut HealthJournal),
+) -> (Entity<Workspace>, &mut VisualTestContext) {
+    let (workspace, cx) = fixture(cx);
+    cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+    let mut context = LifeContext::default();
+    seed(&mut context.health);
+    open_life(&workspace, cx, DesktopLifeTab::Health, context);
+    (workspace, cx)
+}
+
+fn field(cx: &mut VisualTestContext, words: HealthField) -> Bounds<Pixels> {
+    bounds(cx, &format!("desktop-life-field-{}", words.label))
+        .unwrap_or_else(|| panic!("{} is drawn", words.label))
+}
+
+fn drawn(cx: &mut VisualTestContext, selector: &str) -> Bounds<Pixels> {
+    bounds(cx, selector).unwrap_or_else(|| panic!("{selector} is drawn"))
+}
+
+/// `inner` is drawn, and so clicked, inside `outer`, and on screen: a
+/// wrapping row once drew its button about 85px below itself.
+fn assert_inside(outer: Bounds<Pixels>, inner: Bounds<Pixels>, what: &str) {
+    assert!(
+        inner.left() >= outer.left()
+            && inner.right() <= outer.right()
+            && inner.top() >= outer.top()
+            && inner.bottom() <= outer.bottom(),
+        "{what}: {inner:?} is outside {outer:?}"
+    );
+    assert!(inner.bottom() <= gpui::px(800.0), "{what} is on screen");
+}
+
+fn typed(
+    workspace: &Entity<Workspace>,
+    cx: &mut VisualTestContext,
+    picks: &[HealthPick],
+) -> Vec<String> {
+    workspace.read_with(cx, |workspace, cx| {
+        picks
+            .iter()
+            .map(|pick| pick(&workspace.life_health).read(cx).value().to_string())
+            .collect()
+    })
+}
+
+/// Clicks `button` with `values` in the form's fields: the page notice says
+/// `error`, the fields keep what was typed and nothing is saved.
+fn assert_refused(
+    workspace: &Entity<Workspace>,
+    cx: &mut VisualTestContext,
+    (picks, values): (&[HealthPick], &[&str]),
+    button: &str,
+    error: HealthEntryError,
+) {
+    workspace.update_in(cx, |workspace, window, cx| {
+        for (pick, value) in picks.iter().zip(values) {
+            pick(&workspace.life_health)
+                .update(cx, |input, cx| input.set_value(*value, window, cx));
+        }
+    });
+    let (saves, before) = workspace.read_with(cx, |workspace, _| {
+        (
+            workspace.persist_requests,
+            workspace.life_context.health.clone(),
+        )
+    });
+    click(cx, button);
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(
+            workspace.life_notice.as_deref(),
+            Some(error.to_string().as_str())
+        );
+        assert_eq!(workspace.life_context.health, before, "nothing is added");
+        assert_eq!(workspace.persist_requests, saves, "nothing is saved");
+    });
+    assert_eq!(typed(workspace, cx, picks), values, "the draft stays");
+    assert!(bounds(cx, "desktop-life-notice").is_some());
+    // Clear the form for the keyboard entry that follows.
+    workspace.update_in(cx, |workspace, window, cx| {
+        for pick in picks {
+            pick(&workspace.life_health).update(cx, |input, cx| input.set_value("", window, cx));
+        }
+    });
+}
+
+/// Types `values` with the keyboard: into the first field, Tab to each next
+/// field, then Tab to the form's button and press Enter. Fails unless each
+/// Tab lands on the next field and the last one leaves the fields.
+fn type_and_press_enter(
+    workspace: &Entity<Workspace>,
+    cx: &mut VisualTestContext,
+    picks: &[HealthPick],
+    values: &[&str],
+) {
+    let focused = |cx: &mut VisualTestContext, pick: HealthPick| {
+        workspace.update_in(cx, |workspace, window, cx| {
+            pick(&workspace.life_health)
+                .read(cx)
+                .focus_handle(cx)
+                .is_focused(window)
+        })
+    };
+    workspace.update_in(cx, |workspace, window, cx| {
+        picks[0](&workspace.life_health).update(cx, |input, cx| input.focus(window, cx));
+    });
+    cx.run_until_parked();
+    for (index, (pick, value)) in picks.iter().zip(values).enumerate() {
+        if index > 0 {
+            cx.simulate_keystrokes("tab");
+        }
+        assert!(focused(cx, *pick), "Tab reaches field {index}");
+        cx.simulate_input(value);
+    }
+    cx.simulate_keystrokes("tab");
+    assert!(
+        !picks.iter().any(|pick| focused(cx, *pick)),
+        "Tab moves on to the form's button"
+    );
+    press_key(cx, "enter");
+}
+
+/// PM-59: like the web's Workout card (`grid-cols-[1fr_7rem_auto]`), the
+/// activity, a 7rem minutes field and Log sit in one row inside the card,
+/// over the newest workouts. Tab goes from the activity to the minutes to
+/// Log, and Enter there logs the workout first and clears the row; bad
+/// minutes are refused in the page notice and stay for correction. The
+/// cards sit two to a row from the web's `lg`.
+#[gpui::test]
+fn workout_card_logs_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = health_page(cx, |health| {
+        health.workouts.push(WorkoutLog::manual("Swim", 20, 1));
+    });
+    let card = drawn(cx, "desktop-life-workouts");
+    let row = drawn(cx, "desktop-life-workout-form");
+    let activity = field(cx, health_copy::WORKOUT_ACTIVITY);
+    let minutes = field(cx, health_copy::WORKOUT_MINUTES);
+    let log = drawn(cx, "desktop-life-log-workout");
+    assert_inside(card, row, "the Workout form");
+    for (what, part) in [("activity", activity), ("minutes", minutes), ("Log", log)] {
+        assert_inside(row, part, what);
+    }
+    assert!(activity.right() < minutes.left() && minutes.right() < log.left());
+    assert!(
+        activity.size.width > minutes.size.width * 2.0,
+        "the activity takes the rest"
+    );
+    assert_eq!(minutes.size.width, gpui::px(112.0), "7rem");
+    assert_eq!(minutes.size.height, gpui::px(36.0));
+    assert_eq!((log.top(), log.bottom()), (minutes.top(), minutes.bottom()));
+    assert!(
+        drawn(cx, "desktop-life-workout-0").top() > row.bottom(),
+        "rows under the form"
+    );
+
+    assert_refused(
+        &workspace,
+        cx,
+        (&WORKOUT, &["Run", "0"]),
+        "desktop-life-log-workout",
+        HealthEntryError::WorkoutMinutes,
+    );
+    type_and_press_enter(&workspace, cx, &WORKOUT, &["Run", "30"]);
+    workspace.read_with(cx, |workspace, _| {
+        let workouts = &workspace.life_context.health.workouts;
+        assert_eq!(workouts.len(), 2);
+        assert_eq!(
+            (workouts[0].activity.as_str(), workouts[0].duration_minutes),
+            ("Run", 30)
+        );
+        assert!(
+            workspace.life_notice.is_none(),
+            "a saved entry clears the notice"
+        );
+    });
+    assert_eq!(typed(&workspace, cx, &WORKOUT), ["", ""]);
+    assert!(
+        bounds(cx, "desktop-life-workout-1").is_some(),
+        "both listed"
+    );
+
+    // Web `lg:grid-cols-2`: side by side from 1024px, stacked below.
+    let sleep = drawn(cx, "desktop-life-sleep");
+    let card = drawn(cx, "desktop-life-workouts");
+    assert_eq!(card.top(), sleep.top());
+    cx.simulate_resize(gpui::size(gpui::px(1023.0), gpui::px(800.0)));
+    cx.run_until_parked();
+    assert!(drawn(cx, "desktop-life-workouts").bottom() <= drawn(cx, "desktop-life-sleep").top());
+}
+
+/// PM-59: like the web's Sleep & recovery card
+/// (`sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]`), Hours, Quality %
+/// and Sleep fill its first row: the fields share the width beside a button
+/// as wide as Recovery under it. Tab goes hours, quality, Sleep, and Enter
+/// there logs the night in minutes; bad hours are refused in the notice.
+/// Below the web's `sm` the form is one column.
+#[gpui::test]
+fn sleep_row_logs_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = health_page(cx, |_| {});
+    let card = drawn(cx, "desktop-life-sleep");
+    let row = drawn(cx, "desktop-life-sleep-row");
+    let hours = field(cx, health_copy::SLEEP_HOURS);
+    let quality = field(cx, health_copy::SLEEP_QUALITY);
+    let sleep = drawn(cx, "desktop-life-log-sleep");
+    let recovery = drawn(cx, "desktop-life-log-recovery");
+    assert_inside(card, row, "the Sleep row");
+    for (what, part) in [("hours", hours), ("quality", quality), ("Sleep", sleep)] {
+        assert_inside(row, part, what);
+    }
+    assert!(hours.right() < quality.left() && quality.right() < sleep.left());
+    assert_eq!(hours.size.width, quality.size.width, "minmax(0,1fr) twice");
+    assert_eq!(sleep.size.width, recovery.size.width, "one auto column");
+    assert_eq!(sleep.left(), recovery.left());
+    assert_eq!((sleep.top(), sleep.bottom()), (hours.top(), hours.bottom()));
+    assert_eq!(
+        recovery.top() - sleep.bottom(),
+        gpui::px(12.0),
+        "web rows 8px apart, each 4px down"
+    );
+
+    assert_refused(
+        &workspace,
+        cx,
+        (&SLEEP, &["25", "80"]),
+        "desktop-life-log-sleep",
+        HealthEntryError::SleepHours,
+    );
+    type_and_press_enter(&workspace, cx, &SLEEP, &["7.5", "80"]);
+    workspace.read_with(cx, |workspace, _| {
+        let health = &workspace.life_context.health;
+        assert_eq!(health.sleep.len(), 1);
+        assert_eq!(
+            (
+                health.sleep[0].duration_minutes,
+                health.sleep[0].quality_percent
+            ),
+            (450, 80)
+        );
+        assert_eq!(
+            health.sleep_and_recovery_summary(),
+            "1 sleep log, 0 recovery logs"
+        );
+        assert!(workspace.life_notice.is_none());
+    });
+    assert_eq!(typed(&workspace, cx, &SLEEP), ["", ""]);
+
+    // Web `grid-cols-1` below `sm`: each field and button on its own line.
+    cx.simulate_resize(gpui::size(gpui::px(639.0), gpui::px(800.0)));
+    cx.run_until_parked();
+    let hours = field(cx, health_copy::SLEEP_HOURS);
+    let quality = field(cx, health_copy::SLEEP_QUALITY);
+    let sleep = drawn(cx, "desktop-life-log-sleep");
+    let score = field(cx, health_copy::RECOVERY_SCORE);
+    assert!(hours.bottom() < quality.top() && quality.bottom() < sleep.top());
+    assert!(sleep.bottom() < score.top());
+    assert_eq!(sleep.size.width, hours.size.width, "full width");
+    assert!(bounds(cx, "desktop-life-sleep-row").is_none());
+}
+
+/// PM-59: like the web's Sleep & recovery card, Recovery score % and
+/// Recovery fill its second row, the field under Hours, the button under
+/// Sleep. Tab goes from the score to Recovery, and Enter there logs the
+/// score first; a score over 100 is refused in the page notice.
+#[gpui::test]
+fn recovery_row_logs_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = health_page(cx, |health| {
+        health.recovery.push(RecoveryLog::manual(50, 1));
+    });
+    let card = drawn(cx, "desktop-life-sleep");
+    let row = drawn(cx, "desktop-life-recovery-row");
+    let score = field(cx, health_copy::RECOVERY_SCORE);
+    let recovery = drawn(cx, "desktop-life-log-recovery");
+    assert_inside(card, row, "the Recovery row");
+    assert_inside(row, score, "the score");
+    assert_inside(row, recovery, "Recovery");
+    let hours = field(cx, health_copy::SLEEP_HOURS);
+    assert_eq!(
+        (score.left(), score.size.width),
+        (hours.left(), hours.size.width)
+    );
+    assert_eq!(
+        (recovery.top(), recovery.bottom()),
+        (score.top(), score.bottom())
+    );
+    assert!(drawn(cx, "desktop-life-sleep-summary").top() > row.bottom());
+
+    assert_refused(
+        &workspace,
+        cx,
+        (&RECOVERY, &["101"]),
+        "desktop-life-log-recovery",
+        HealthEntryError::RecoveryScore,
+    );
+    type_and_press_enter(&workspace, cx, &RECOVERY, &["64"]);
+    workspace.read_with(cx, |workspace, _| {
+        let recovery = &workspace.life_context.health.recovery;
+        assert_eq!(
+            recovery
+                .iter()
+                .map(|log| log.score_percent)
+                .collect::<Vec<_>>(),
+            [64, 50],
+            "newest first"
+        );
+        assert!(workspace.life_notice.is_none());
+    });
+    assert_eq!(typed(&workspace, cx, &RECOVERY), [""]);
+}
+
+/// PM-59: like the web's Habits card (`grid-cols-[1fr_auto]`), the title and
+/// Add sit in one row inside the card, over today's checklist. Tab goes
+/// from the title to Add, and Enter there adds the habit first; a blank
+/// title is refused in the page notice.
+#[gpui::test]
+fn habits_card_adds_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = health_page(cx, |_| {});
+    let card = drawn(cx, "desktop-life-habits");
+    let row = drawn(cx, "desktop-life-habit-form");
+    let title = field(cx, health_copy::HABIT_TITLE);
+    let add = drawn(cx, "desktop-life-add-habit");
+    assert_inside(card, row, "the Habits form");
+    assert_inside(row, title, "the title");
+    assert_inside(row, add, "Add");
+    assert!(title.right() < add.left());
+    assert!(
+        title.size.width > add.size.width * 4.0,
+        "the title takes the rest"
+    );
+    assert_eq!((add.top(), add.bottom()), (title.top(), title.bottom()));
+
+    assert_refused(
+        &workspace,
+        cx,
+        (&HABIT, &["  "]),
+        "desktop-life-add-habit",
+        HealthEntryError::UnnamedHabit,
+    );
+    type_and_press_enter(&workspace, cx, &HABIT, &["Stretch"]);
+    workspace.read_with(cx, |workspace, _| {
+        let habits = &workspace.life_context.health.habits;
+        assert_eq!(habits.len(), 1);
+        assert_eq!(
+            (habits[0].title.as_str(), habits[0].target_days_per_week),
+            ("Stretch", 5)
+        );
+        assert!(workspace.life_notice.is_none());
+    });
+    assert_eq!(typed(&workspace, cx, &HABIT), [""]);
+    assert!(
+        drawn(cx, "desktop-life-habit-0").top() > drawn(cx, "desktop-life-habit-form").bottom()
+    );
 }

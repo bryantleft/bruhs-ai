@@ -1414,11 +1414,11 @@ pub struct Workspace {
     scheduling_link_duration_input: Entity<InputState>,
     scheduling_selected_task_id: Option<String>,
     life_tab: DesktopLifeTab,
-    life_error: Option<String>,
-    /// Web's Life notice: what the last CSV import did, until dismissed.
+    /// Web's Life notice: what the last CSV import did, or why a card's
+    /// entry was refused, until dismissed.
     life_notice: Option<String>,
-    life_name_input: Entity<InputState>,
-    life_value_input: Entity<InputState>,
+    /// Each health card's form (web `health_tab`).
+    life_health: life_ui::HealthForms,
     /// Each finance card's form (web `finance_tab`).
     life_finance: life_ui::FinanceForms,
     life_csv_input: Entity<InputState>,
@@ -1574,8 +1574,7 @@ impl Workspace {
             scheduling_link_duration_input,
         } = Self::new_scheduling_inputs(window, cx, &mut subscriptions);
         let life_ui::LifeInputs {
-            life_name_input,
-            life_value_input,
+            life_health,
             life_finance,
             life_csv_input,
         } = Self::new_life_inputs(window, cx, &mut subscriptions);
@@ -2094,10 +2093,8 @@ impl Workspace {
             scheduling_link_duration_input,
             scheduling_selected_task_id: None,
             life_tab: DesktopLifeTab::Finance,
-            life_error: None,
             life_notice: None,
-            life_name_input,
-            life_value_input,
+            life_health,
             life_finance,
             life_csv_input,
             task_create_title_input,

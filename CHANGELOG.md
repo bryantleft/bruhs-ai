@@ -270,6 +270,13 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   transaction, whichever apply. Before, only the eight newest jobs and the
   three newest undoable workflows had them. A workflow you start now shows in
   the history.
+- Health in the desktop app now has the web's form in each card: Activity,
+  Minutes and Log in Workout; a Sleep row and a Recovery row in Sleep &
+  recovery; and a title and Add in Habits, in place of one Quick add form.
+  Both apps check these entries the same way and use the same words. A
+  value a log would quietly change, such as 0 workout minutes or a 101%
+  score, is refused, and the page notice says what to enter; the web used
+  to do nothing or save the changed value.
 - In a narrow desktop window the sidebar stays docked, as on the web,
   instead of hiding below 960px. The right panel docks from 768px; in a
   narrower window it opens over the chat, and a click beside it closes it.

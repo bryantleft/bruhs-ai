@@ -1,12 +1,11 @@
 //! Private, manual-first finance and health context.
 
-mod entries;
 mod record_detail;
 
 use bruhs_models::{
-    finance_copy, finance_entry, finance_provider_adapters, health_provider_adapters,
-    life_agent_prompt, FinanceEntryError, FinanceField, LifeContext, LifeInsightDomain,
-    LifeProviderAdapter, LifeSection, ProviderStatus,
+    finance_copy, finance_entry, finance_provider_adapters, health_copy, health_entry,
+    health_provider_adapters, life_agent_prompt, FinanceEntryError, FinanceField, HealthEntryError,
+    HealthField, LifeContext, LifeInsightDomain, LifeProviderAdapter, LifeSection, ProviderStatus,
 };
 use leptos::prelude::*;
 
@@ -141,20 +140,26 @@ impl Page {
         }
     }
 
-    /// Apply a health entry when the form holds one; otherwise do nothing.
+    /// Apply a health entry: on success add it and clear `fields`, else
+    /// show why not and keep what was typed. The rules are shared with
+    /// desktop in `bruhs_models::health_entry`.
     fn health<T>(
         self,
-        entry: Option<T>,
+        entry: Result<T, HealthEntryError>,
         fields: &[RwSignal<String>],
         add: impl FnOnce(&mut bruhs_models::HealthJournal, T),
     ) {
-        if let Some(record) = entry {
-            let now = now_ms();
-            self.life.update(|context| {
-                add(&mut context.health, record);
-                context.health.updated_at_ms = now;
-            });
-            clear(fields);
+        match entry {
+            Ok(record) => {
+                let now = now_ms();
+                self.life.update(|context| {
+                    add(&mut context.health, record);
+                    context.health.updated_at_ms = now;
+                });
+                clear(fields);
+                self.notice.set(None);
+            }
+            Err(error) => self.notice.set(Some(error.to_string())),
         }
     }
 
@@ -241,8 +246,8 @@ impl Page {
 
     fn log_workout(self) {
         let i = self.inputs;
-        let entry = entries::workout(
-            i.workout_activity.get_untracked(),
+        let entry = health_entry::workout(
+            &i.workout_activity.get_untracked(),
             &i.workout_minutes.get_untracked(),
             now_ms(),
         );
@@ -253,7 +258,7 @@ impl Page {
 
     fn log_sleep(self) {
         let i = self.inputs;
-        let entry = entries::sleep(
+        let entry = health_entry::sleep(
             &i.sleep_hours.get_untracked(),
             &i.sleep_quality.get_untracked(),
             now_ms(),
@@ -265,13 +270,13 @@ impl Page {
 
     fn log_recovery(self) {
         let i = self.inputs;
-        let entry = entries::recovery(&i.recovery_score.get_untracked(), now_ms());
+        let entry = health_entry::recovery(&i.recovery_score.get_untracked(), now_ms());
         self.health(entry, &[i.recovery_score], |h, r| h.recovery.insert(0, r));
     }
 
     fn add_habit(self) {
         let i = self.inputs;
-        let entry = entries::habit(i.habit_title.get_untracked());
+        let entry = health_entry::habit(&i.habit_title.get_untracked());
         self.health(entry, &[i.habit_title], |h, habit| {
             h.habits.insert(0, habit)
         });
@@ -327,6 +332,15 @@ fn field(
 /// A finance form's field, with the words both apps share.
 fn finance_field(
     words: FinanceField,
+    value: RwSignal<String>,
+    inputmode: Option<&'static str>,
+) -> impl IntoView {
+    field(words.label, words.placeholder, value, inputmode)
+}
+
+/// A health form's field, with the words both apps share.
+fn health_field(
+    words: HealthField,
     value: RwSignal<String>,
     inputmode: Option<&'static str>,
 ) -> impl IntoView {
@@ -758,9 +772,7 @@ fn health_tab(page: Page) -> impl IntoView {
             <div class="flex flex-wrap items-center justify-between gap-3">
                 <div>
                     <h2 class="text-label text-rambutan-200">"Health privacy"</h2>
-                    <p class="mt-0.5 text-body-sm text-rambutan-500">
-                        "Local logs are excluded from agent context by default. This surface never diagnoses."
-                    </p>
+                    <p class="mt-0.5 text-body-sm text-rambutan-500">{health_copy::PRIVACY_NOTE}</p>
                 </div>
                 <button
                     type="button"
@@ -807,14 +819,14 @@ fn workouts(page: Page) -> impl IntoView {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Workout"</h2>
             <div class="mt-2 grid grid-cols-[1fr_7rem_auto] gap-2">
-                {field("Workout activity", "Run", i.workout_activity, None)}
-                {field("Workout duration minutes", "Minutes", i.workout_minutes, Some("numeric"))}
+                {health_field(health_copy::WORKOUT_ACTIVITY, i.workout_activity, None)}
+                {health_field(health_copy::WORKOUT_MINUTES, i.workout_minutes, Some("numeric"))}
                 <button
                     type="button"
                     class="min-h-[44px] min-w-[44px] sm:min-h-[24px] sm:min-w-[24px] mt-1 rounded-seed bg-pandan-500/10 px-2 text-label-sm text-pandan-300 cursor-pointer"
                     on:click=move |_| page.log_workout()
                 >
-                    "Log"
+                    {health_copy::LOG_WORKOUT}
                 </button>
             </div>
             <div class="mt-3 space-y-1">{rows}</div>
@@ -829,12 +841,12 @@ fn sleep_and_recovery(page: Page) -> impl IntoView {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Sleep & recovery"</h2>
             <div class="mt-2 grid grid-cols-1 sm:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] gap-2">
-                {field("Sleep hours", "Hours", i.sleep_hours, Some("decimal"))}
-                {field("Sleep quality percent", "Quality %", i.sleep_quality, Some("numeric"))}
-                <button type="button" class=SMALL_ACTION on:click=move |_| page.log_sleep()>"Sleep"</button>
-                {field("Recovery score percent", "Recovery score %", i.recovery_score, Some("numeric"))}
+                {health_field(health_copy::SLEEP_HOURS, i.sleep_hours, Some("decimal"))}
+                {health_field(health_copy::SLEEP_QUALITY, i.sleep_quality, Some("numeric"))}
+                <button type="button" class=SMALL_ACTION on:click=move |_| page.log_sleep()>{health_copy::LOG_SLEEP}</button>
+                {health_field(health_copy::RECOVERY_SCORE, i.recovery_score, Some("numeric"))}
                 <span></span>
-                <button type="button" class=SMALL_ACTION on:click=move |_| page.log_recovery()>"Recovery"</button>
+                <button type="button" class=SMALL_ACTION on:click=move |_| page.log_recovery()>{health_copy::LOG_RECOVERY}</button>
             </div>
             <p class="mt-3 text-body-sm text-rambutan-500">{summary}</p>
         </section>
@@ -888,13 +900,13 @@ fn habits(page: Page) -> impl IntoView {
         <section class=CARD_CLASS>
             <h2 class="text-label text-rambutan-200">"Habits"</h2>
             <div class="mt-2 grid grid-cols-[1fr_auto] gap-2">
-                {field("New habit title", "Walk after lunch", i.habit_title, None)}
+                {health_field(health_copy::HABIT_TITLE, i.habit_title, None)}
                 <button
                     type="button"
                     class=SMALL_ACTION
                     on:click=move |_| page.add_habit()
                 >
-                    "Add"
+                    {health_copy::ADD_HABIT}
                 </button>
             </div>
             <div class="mt-3 space-y-1">{rows}</div>
