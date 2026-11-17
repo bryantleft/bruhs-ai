@@ -4,7 +4,7 @@
 //! from `lg` (1024px), and puts booking times in two columns from `sm`.
 
 use super::{
-    docked_right_panel_range, docked_right_panel_width, AppView, Workspace,
+    docked_right_panel_range, docked_right_panel_width, AppView, DesktopCalendarMode, Workspace,
     RIGHT_PANEL_MIN_WIDTH_PX, WORKSPACE_RIGHT_PANEL_WIDTH_PX,
 };
 use crate::{app_state::DesktopState, theme};
@@ -275,4 +275,34 @@ fn narrow_page_headers_wrap_like_web(cx: &mut TestAppContext) {
 
     show(&workspace, cx, AppView::People);
     inside(cx, "desktop-page-title");
+}
+
+/// Web `grid-rows-6`: the month's six weeks share the window's height, so a
+/// short window shows every week and clips each day's records instead of
+/// scrolling the month.
+#[gpui::test]
+fn the_month_fits_its_six_weeks_in_a_short_window_like_web(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    cx.simulate_resize(size(px(640.0), px(480.0)));
+    workspace.update(cx, |workspace, cx| {
+        workspace.active_view = AppView::Calendar;
+        workspace.calendar_mode = DesktopCalendarMode::Month;
+        workspace.calendar_anchor =
+            chrono::NaiveDate::from_ymd_opt(2026, 11, 16).expect("a valid date");
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let month = bounds(cx, "desktop-calendar-month");
+    assert!(month.bottom() <= px(480.0), "{month:?}");
+    // November 2026 starts on a Sunday; its sixth week ends on December 12.
+    let first = bounds(cx, "desktop-calendar-day-2026-11-01");
+    let last = bounds(cx, "desktop-calendar-day-2026-12-12");
+    assert!(
+        last.bottom() <= month.bottom(),
+        "the sixth week shows: {last:?}"
+    );
+    assert!(
+        (f32::from(last.size.height) - f32::from(first.size.height)).abs() <= 1.0,
+        "the weeks share the height: {first:?} {last:?}"
+    );
 }

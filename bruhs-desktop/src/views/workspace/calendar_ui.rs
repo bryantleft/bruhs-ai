@@ -526,7 +526,6 @@ pub(super) const CALENDAR_NEW_EVENT_BORDER_OPACITY: f32 = 0.20;
 pub(super) const CALENDAR_NEW_EVENT_BG_OPACITY: f32 = 0.15;
 pub(super) const CALENDAR_NEW_EVENT_HOVER_BG_OPACITY: f32 = 0.25;
 pub(super) const CALENDAR_NEW_EVENT_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const CALENDAR_MONTH_ROW_MIN_HEIGHT_PX: f32 = 92.0;
 pub(super) const CALENDAR_MONTH_TODAY_SIZE_PX: f32 = 20.0;
 pub(super) const CALENDAR_MONTH_TODAY_RADIUS_PX: f32 = 999.0;
 pub(super) const CALENDAR_MONTH_CELL_PADDING_PX: f32 = 6.0;
@@ -1157,9 +1156,11 @@ impl Workspace {
                         )
                     })
                     .collect();
+                // Web `grid-rows-6`: the six weeks share the height and a
+                // short window clips each day's records, as web's cells do.
                 div()
                     .flex_1()
-                    .min_h(px(CALENDAR_MONTH_ROW_MIN_HEIGHT_PX))
+                    .min_h_0()
                     .flex()
                     .flex_row()
                     .children(cells)
@@ -1185,8 +1186,7 @@ impl Workspace {
                 div()
                     .flex_1()
                     .min_h_0()
-                    .id("desktop-calendar-month-scroll")
-                    .overflow_y_scrollbar()
+                    .overflow_hidden()
                     .flex()
                     .flex_col()
                     .children(weeks),
