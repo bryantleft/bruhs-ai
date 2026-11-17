@@ -12,6 +12,11 @@ use crate::config::{Config, ServerState, Settings};
 
 pub(super) const SPARSE_THREAD: &str = "http/sparse Ω";
 
+/// The combined stream opens with the task snapshot, the calendar and
+/// meetings handshakes and, on Unix, the workspace relay's hello frame
+/// (`crate::workspace_relay`).
+const COMBINED_OPENING_FRAMES: usize = if cfg!(unix) { 4 } else { 3 };
+
 pub(super) struct Fixture {
     pub(super) state: Arc<AppState>,
     pub(super) tasks: Vec<BackgroundTask>,
@@ -159,7 +164,10 @@ impl Fixture {
     }
 
     pub(super) fn canonical_opened(&self, frames: &[Frame], combined: bool) -> Value {
-        assert_eq!(frames.len(), if combined { 3 } else { 1 });
+        assert_eq!(
+            frames.len(),
+            if combined { COMBINED_OPENING_FRAMES } else { 1 }
+        );
         let task = frames
             .iter()
             .find(|frame| frame.event() == combined.then_some("tasks"))
@@ -172,6 +180,19 @@ impl Fixture {
                     .find(|frame| frame.event() == Some(name))
                     .expect("named handshake");
                 assert_eq!(frame.value(), json!({"kind": "stream_opened"}));
+            }
+            if cfg!(unix) {
+                // The workspace relay's hello names this stream with a fresh
+                // secret, so only its shape is canonical.
+                let hello = frames
+                    .iter()
+                    .find(|frame| frame.event() == Some("workspace_bridge"))
+                    .expect("workspace relay hello")
+                    .value();
+                assert_eq!(hello["kind"], "hello");
+                assert!(hello["stream_id"]
+                    .as_str()
+                    .is_some_and(|id| id.len() == 64 && id.bytes().all(|b| b.is_ascii_hexdigit())));
             }
             json!({"tasks": tasks, "calendar": {"kind": "stream_opened"}, "meetings": {"kind": "stream_opened"}})
         } else {
@@ -302,7 +323,7 @@ impl Frames {
 
     pub(super) async fn opened(&mut self, combined: bool) -> Vec<Frame> {
         let mut frames = Vec::new();
-        for _ in 0..if combined { 3 } else { 1 } {
+        for _ in 0..if combined { COMBINED_OPENING_FRAMES } else { 1 } {
             frames.push(self.next().await);
         }
         frames

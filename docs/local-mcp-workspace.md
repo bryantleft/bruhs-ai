@@ -89,13 +89,14 @@ bounds and errors. The wire types are in
 - **One session at a time.** Enabling in a second tab ends the first tab's
   session, and the first tab says so. The native app's connection is separate
   and unaffected.
-- **Revocation.** **Disable connection**, closing or reloading the tab, the
-  page being hidden (the tab closes its stream then), and stopping
-  bruhs-server each end the session and remove its file. A stream that
-  reconnects never resumes a session: enable again and copy the new config.
-  The session's review state (its proposals and undo requests) ends with it;
-  the workflows themselves stay in Agent workflows. A server crash can leave
-  the file behind; its token cannot authorize a newly started server.
+- **Revocation.** **Disable connection**, another tab enabling, and closing,
+  reloading or hiding the tab (the tab closes its stream then) each end the
+  session and remove its file. Stopping bruhs-server ends it too: sessions live
+  only in the running server, so a file left behind by a stop or a crash holds
+  a token no newly started server accepts. A stream that reconnects never
+  resumes a session: enable again and copy the new config. The session's
+  review state (its proposals and undo requests) ends with it; the workflows
+  themselves stay in Agent workflows.
 - **Unavailable states.** Without its live stream (bruhs-server stopped or
   unreachable) the tab cannot enable a session and says so. A request that
   arrives before the tab has loaded the records it reads is refused with an
