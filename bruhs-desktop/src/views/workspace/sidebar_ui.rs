@@ -1491,14 +1491,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
-    ) -> (Entity<InputState>, Entity<InputState>, Entity<InputState>) {
+    ) -> (Entity<InputState>, Entity<InputState>) {
         let global_input = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
                 .placeholder("prefix: Bug\nmax 48")
                 .default_value(global)
         });
-        let project_input = cx.new(|cx| InputState::new(window, cx).placeholder("Project name"));
         let project_instructions = cx.new(|cx| {
             InputState::new(window, cx)
                 .multi_line(true)
@@ -1518,30 +1517,13 @@ impl Workspace {
             },
         ));
         subscriptions.push(cx.subscribe_in(
-            &project_input,
-            window,
-            |this, input, event: &InputEvent, window, cx| {
-                if !matches!(event, InputEvent::Change) {
-                    return;
-                }
-                let name = input.read(cx).value().trim().to_string();
-                let text = this
-                    .title_instructions_by_project
-                    .get(&name)
-                    .cloned()
-                    .unwrap_or_default();
-                let instructions = this.title_project_instructions_input.clone();
-                instructions.update(cx, |field, cx| field.set_value(text, window, cx));
-            },
-        ));
-        subscriptions.push(cx.subscribe_in(
             &project_instructions,
             window,
             |this, input, event: &InputEvent, _window, cx| {
                 if !matches!(event, InputEvent::Change) {
                     return;
                 }
-                let name = this.title_project_input.read(cx).value().trim().to_string();
+                let name = this.title_project.clone();
                 if name.is_empty() {
                     return;
                 }
@@ -1554,7 +1536,7 @@ impl Workspace {
                 this.persist(cx);
             },
         ));
-        (global_input, project_input, project_instructions)
+        (global_input, project_instructions)
     }
 }
 

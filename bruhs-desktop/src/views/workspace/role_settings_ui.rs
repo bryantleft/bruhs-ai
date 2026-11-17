@@ -61,7 +61,7 @@ pub(super) struct RoleInputs {
 
 /// A dropdown value is `'static` and a project's name is not, so each
 /// distinct name is kept once for the life of the app.
-fn project_value(name: &str) -> &'static str {
+pub(super) fn project_value(name: &str) -> &'static str {
     use std::collections::BTreeSet;
     use std::sync::{Mutex, PoisonError};
     static VALUES: Mutex<BTreeSet<&'static str>> = Mutex::new(BTreeSet::new());
@@ -432,9 +432,10 @@ impl Workspace {
         self.role_inputs.project.clone()
     }
 
-    /// The projects a role can be overridden in: every project a thread is
-    /// in, by name (web: the same list).
-    fn role_project_names(&self) -> Vec<String> {
+    /// Every project a thread is in, by name: where a role can be
+    /// overridden and which project title instructions apply to (web: the
+    /// same list).
+    pub(super) fn thread_project_names(&self) -> Vec<String> {
         let mut names: Vec<String> = self
             .threads
             .iter()
@@ -703,7 +704,7 @@ impl Workspace {
         let project_groups = flat(
             std::iter::once(option(INHERIT, "No project"))
                 .chain(
-                    self.role_project_names()
+                    self.thread_project_names()
                         .into_iter()
                         .map(|name| option(project_value(&name), name)),
                 )
