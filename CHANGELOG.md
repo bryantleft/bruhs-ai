@@ -57,6 +57,17 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   link in the scheduling panel opens it: pick one of the next free times
   inside the link's availability and buffers, add a name, and the booking is
   saved as a local event on your calendar.
+- The web app now has the local MCP workspace connection the desktop app
+  has. In Agent workflows, choose Enable for this session and Copy MCP config;
+  a trusted MCP client running `bruhs-mcp` can then use the same tools against
+  the open tab: read your tasks, calendar, chat, People, Meetings, notes,
+  Finance and Health (each only with its Read grant and, for Life, its
+  consent), and propose changes. Proposals and undo requests wait for your
+  review in Agent workflows, and approved steps are saved like any other
+  workflow step. The copied config names a private file; the session token
+  never reaches the clipboard. Disabling, closing or reloading the tab, or
+  stopping bruhs-server ends the session. One tab holds the connection at a
+  time. See `docs/local-mcp-workspace.md`.
 - The model picker now lists the models your Cursor account can run, under
   Cursor default, on the web and in the desktop app. Bruhs reads them from
   `cursor-agent --list-models`. When Cursor cannot list them, the picker says
