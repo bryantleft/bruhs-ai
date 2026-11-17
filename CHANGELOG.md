@@ -11,6 +11,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Added
 
+- The desktop app zooms like a browser: ⌘+ and ⌘− (or View → Zoom In and
+  Zoom Out) step from 67% to 300%, ⌘0 returns to 100%, and the level is
+  remembered. Pages reflow for the larger text at the web's widths.
 - Workbench has a Worktrees tab listing every worktree bruhs made, chat
   ones included, with what removing each frees. Remove keeps the branch,
   and the chat's or task's next message checks it out again, on the web and
@@ -247,6 +250,20 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- The desktop app's keyboard works from the start: reopened on a page
+  other than Chat, it used to ignore Tab and the shortcuts until a click.
+- In the desktop app, Tab leaves a reply, note or other multi-line field,
+  as it does on the web, instead of indenting the text; the composer still
+  indents list items and code.
+- A project's Delete button in the desktop Tasks list can be reached with
+  Tab, as on the web.
+- Desktop Agent workflows shows Local suggestions as the web does: its own
+  New dry run, then each suggestion with its evidence, Dismiss and Preview.
+- Screen readers hear the same names for Today's task rows and a
+  document's fields in both apps.
+- On a touch screen, a tap on a month calendar day opens that day's list,
+  with full-size rows and New event, instead of hitting tiny dates and
+  event pills.
 - In a narrow desktop window the sidebar stays docked, as on the web,
   instead of hiding below 960px. The right panel docks from 768px; in a
   narrower window it opens over the chat, and a click beside it closes it.
