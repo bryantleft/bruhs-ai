@@ -30,6 +30,21 @@ use bruhs_models::{AppView, EpochMs};
 
 /// Shared app drawer width.
 pub const SIDEBAR_WIDTH_PX: f32 = 248.0;
+/// Web `@keyframes bruhs-status-pulse`: two seconds, full opacity to 40%,
+/// 0.45 from 50% to 90%, then back.
+const STATUS_PULSE_PERIOD_MS: u64 = 2000;
+const STATUS_PULSE_DIM_OPACITY: f32 = 0.45;
+
+/// The Working mark's opacity `progress` (0..1) through one pulse.
+fn status_pulse_opacity(progress: f32) -> f32 {
+    let fade = |from: f32, to: f32, at: f32| from + (to - from) * at.clamp(0.0, 1.0);
+    match progress {
+        p if p < 0.4 => 1.0,
+        p if p < 0.5 => fade(1.0, STATUS_PULSE_DIM_OPACITY, (p - 0.4) / 0.1),
+        p if p < 0.9 => STATUS_PULSE_DIM_OPACITY,
+        p => fade(STATUS_PULSE_DIM_OPACITY, 1.0, (p - 0.9) / 0.1),
+    }
+}
 /// Matches the chat and panel headers.
 pub const SIDEBAR_HEADER_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
 /// Room for the macOS traffic lights (gpui-component puts them at x=12).
@@ -651,15 +666,33 @@ impl Workspace {
                     CardStatus::Approval => (theme::durian_400(), "Waiting for approval"),
                     _ => (theme::pandan_400(), "Ready"),
                 };
-                div()
+                let dot = div()
                     .debug_selector(move || format!("desktop-thread-card-status-{debug_key}"))
                     .size(px(SIDEBAR_CARD_DOT_PX))
                     .rounded_full()
                     .bg(color)
                     .id(("desktop-thread-card-status", key))
                     .role(Role::Image)
-                    .aria_label(label)
-                    .into_any_element()
+                    .aria_label(label);
+                // Web `animate-status-pulse`: the Working mark breathes
+                // unless the system asks for reduced motion.
+                if other == CardStatus::Working && !crate::motion::reduce_motion(cx) {
+                    div()
+                        .debug_selector(move || format!("desktop-thread-card-pulse-{debug_key}"))
+                        .child(
+                            dot.with_animation(
+                                ("desktop-thread-card-pulse", key),
+                                Animation::new(std::time::Duration::from_millis(
+                                    STATUS_PULSE_PERIOD_MS,
+                                ))
+                                .repeat(),
+                                |dot, delta| dot.opacity(status_pulse_opacity(delta)),
+                            ),
+                        )
+                        .into_any_element()
+                } else {
+                    dot.into_any_element()
+                }
             }
         };
 
@@ -1543,7 +1576,52 @@ impl Workspace {
 
 #[cfg(test)]
 mod tests {
-    use super::thread_matches;
+    use super::{status_pulse_opacity, thread_matches};
+
+    /// Web `bruhs-status-pulse`'s keyframes.
+    #[test]
+    fn the_working_mark_pulses_like_web() {
+        assert_eq!(status_pulse_opacity(0.0), 1.0);
+        assert_eq!(status_pulse_opacity(0.39), 1.0);
+        assert!((status_pulse_opacity(0.45) - 0.725).abs() < 1e-4);
+        assert_eq!(status_pulse_opacity(0.5), 0.45);
+        assert_eq!(status_pulse_opacity(0.89), 0.45);
+        assert!((status_pulse_opacity(0.95) - 0.725).abs() < 1e-4);
+        assert!((status_pulse_opacity(1.0) - 1.0).abs() < 1e-4);
+    }
+
+    /// Like web's `animate-status-pulse`, a Working card's mark pulses
+    /// unless the system asks for reduced motion; the mark itself stays.
+    #[gpui::test]
+    fn the_working_mark_pulses_only_with_motion(cx: &mut gpui::TestAppContext) {
+        use super::super::{element_key, performance_tests::fixture};
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        let id = workspace.update_in(cx, |workspace, window, cx| {
+            workspace.new_thread_in_project("proj".into(), "/tmp/bruhs-pulse".into(), window, cx);
+            let thread = workspace.threads.last().expect("a thread");
+            thread.chat.update(cx, |chat, _| chat.is_streaming = true);
+            let id = thread.id.clone();
+            workspace.sidebar_working_open = true;
+            cx.notify();
+            id
+        });
+        let key = element_key(&id);
+        let pulse: &'static str =
+            Box::leak(format!("desktop-thread-card-pulse-{key}").into_boxed_str());
+        let mark: &'static str =
+            Box::leak(format!("desktop-thread-card-status-{key}").into_boxed_str());
+        for reduced in [false, true] {
+            cx.update(|_, cx| crate::motion::set_reduced_motion(reduced, cx));
+            cx.run_until_parked();
+            assert!(cx.debug_bounds(mark).is_some(), "the Working mark shows");
+            assert_eq!(
+                cx.debug_bounds(pulse).is_some(),
+                !reduced,
+                "reduced: {reduced}"
+            );
+        }
+    }
 
     #[test]
     fn search_matches_titles_and_project_names() {
