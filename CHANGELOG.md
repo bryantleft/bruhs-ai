@@ -37,6 +37,15 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   (⌘⇧C copies one) selects that thread, and `bruhs://open/` followed by a
   page's web route opens that page, such as `bruhs://open/inbox/<id>` for a
   conversation.
+- The desktop app catches up with the web on Today, Calendar and Tasks.
+  Today's decisions open their meeting, Now & next links to the calendar,
+  and a day plan that could not be saved says so, with Dismiss, Refresh
+  saved tasks and calendar, and Retry day-plan recovery. The event dialog
+  can record a meeting. Google Calendar events stay readable offline and
+  after a restart, and Remove all removes them for good. A task's
+  dependencies are picked from a list and removed one at a time, deleting a
+  task asks first, and a compact window switches projects from a Projects
+  dialog.
 - The desktop app has the web's booking page for a scheduling link. The
   link in the scheduling panel opens it: pick one of the next free times
   inside the link's availability and buffers, add a name, and the booking is
@@ -83,6 +92,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Changed
 
+- A follow-up on Today opens that person's profile, on the web and in the
+  desktop app, instead of only the People page.
 - Removed the workflow overview and What's new sections from the landing
   page. The Changelog remains available in the navigation and command menu.
 - Chat and coding conversations now share one thread list on web and desktop.
