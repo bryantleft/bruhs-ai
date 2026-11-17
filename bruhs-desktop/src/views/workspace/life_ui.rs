@@ -98,6 +98,8 @@ const BODY_SM_PX: f32 = 13.0;
 const LABEL_SM_PX: f32 = 12.0;
 /// Web's `lg` breakpoint: from here the record cards sit two to a row.
 const RECORD_GRID_TWO_COLUMNS_PX: f32 = 1024.0;
+/// Web `min-h-[96px]`: the CSV import box.
+const LIFE_CSV_INPUT_HEIGHT_PX: f32 = 96.0;
 /// Web's `md` breakpoint: from here the finance sources sit three to a row.
 const SOURCES_THREE_COLUMNS_PX: f32 = 768.0;
 /// Transactions a card lists, newest first (web `take(8)`).
@@ -1009,7 +1011,13 @@ impl Workspace {
                 div()
                     .debug_selector(|| "desktop-life-csv-input".into())
                     .mt_2()
-                    .child(Input::new(&self.life_csv_input).aria_label("Finance CSV rows")),
+                    // A multi-line Input takes its height from itself; web
+                    // `min-h-[96px]`.
+                    .child(
+                        Input::new(&self.life_csv_input)
+                            .h(px(LIFE_CSV_INPUT_HEIGHT_PX))
+                            .aria_label("Finance CSV rows"),
+                    ),
             )
             .child(
                 div().mt_2().flex().child(
