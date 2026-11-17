@@ -187,6 +187,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- In the desktop app, Ask agent is on a Knowledge document's page, as on
+  the web, and puts the document in the composer. It was in the library,
+  where it did nothing.
 - The web capture dialog's Contact tab shows its icon instead of a dot, and
   file sizes in the web email composer use the app's small label size
   instead of falling back to 16px.

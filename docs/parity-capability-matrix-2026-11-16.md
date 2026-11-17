@@ -67,6 +67,7 @@ then move it to the matching list below.
 | PM-35 | Local app context during a meeting | Meetings | n/a (by design) | implemented | — | `bruhs-server/src/routes/local_focus.rs` `authorize`; `meetings_hub/local_focus.rs` | Recorded constraint: the server serves this timeline only to the native loopback client | Closed: platform difference |
 | PM-36 | `thread.continueInWorkbench` shortcut | Workbench | implemented | implemented | — | shared `logic/keybindings.rs:75`; `command_bar.rs:544`; `keybindings_ui.rs:158,736`, `import_ui.rs:659` | Desktop tests `every_default_command_is_bound_or_is_sidebar_undo`, `binding_names_match_the_action_types`; web test `nav_and_shortcut_tables_are_well_formed` | Closed in 43542e27 |
 | PM-37 | Keep each contact's unsaved relationship edits while the app runs | People | implemented (tab-scoped editor drafts) | missing (opening another card reloads the saved details) | desktop | `relationship_store.rs:69-116`, `people_page/relationship.rs:114-166`; `people_view.rs` (`load_relationship_inputs`) | open | Open: found while checking PM-31 |
+| PM-38 | Ask agent about a Knowledge document | Knowledge and capture | implemented | implemented | — | `knowledge_page.rs:588`; `knowledge_ui.rs` document header | Desktop test `ask_agent_is_on_the_document_page_like_web` | Closed in 67c2b604: desktop showed the button in the library, where it did nothing |
 
 ## Product gaps on both surfaces
 
