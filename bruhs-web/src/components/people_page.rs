@@ -324,7 +324,7 @@ fn PersonCard(person_id: String, directory: Memo<Directory>, cards: CardState) -
                             type="button"
                             id=format!("person-record-{}", id.get_value())
                             aria-expanded=move || is_expanded().to_string()
-                            class="flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 text-left cursor-pointer"
+                            class="bruhs-control flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 text-left cursor-pointer"
                             on:click=move |_| {
                                 let current = id.get_value();
                                 expanded.update(|open| {
