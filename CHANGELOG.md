@@ -22,6 +22,13 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 - You can give Continue in workbench a key on the web and in the desktop
   app: `thread.continueInWorkbench` is now listed, unbound, under Settings →
   Keybindings.
+- You can rename a thread in the desktop app, as on the web: double-click
+  its title in the header, or use the pen beside it. Enter saves and Escape
+  keeps the old title.
+- The desktop app shows the web's Codex sign-in banner when a thread uses a
+  Codex model and Codex is signed out. Log in with Codex runs `codex login`
+  and waits for it, and the model picker shows whether the Codex CLI is
+  signed in.
 - The desktop app has the web's booking page for a scheduling link. The
   link in the scheduling panel opens it: pick one of the next free times
   inside the link's availability and buffers, add a name, and the booking is
