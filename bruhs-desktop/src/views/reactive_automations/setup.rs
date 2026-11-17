@@ -1,5 +1,6 @@
 //! One review and one atomic command activate a complete automation.
 use super::*;
+use bruhs_models::crew::{BruhLook, BruhStatus, RAIL_FACE_PX};
 
 pub(super) struct AutomationEditor {
     agent: AgentEditor,
@@ -287,8 +288,30 @@ impl ReactiveAutomations {
             let active = setup.enabled();
             let edit = setup.clone();
             let chat_id = setup.agent.id.clone();
+            let (look, face_status) = snapshot
+                .bruhs
+                .iter()
+                .find(|bruh| bruh.agent_id == setup.agent.id)
+                .map_or_else(
+                    || (BruhLook::default(), BruhStatus::Asleep),
+                    |bruh| (bruh.look.clone(), bruh.status),
+                );
             let mut row = card()
-                .child(heading(setup.agent.name.clone()))
+                .child(
+                    div()
+                        .min_w_0()
+                        .flex()
+                        .items_center()
+                        .gap_2()
+                        .child(crate::views::crew_face::bruh_face(
+                            SharedString::from(format!("automation-{}", setup.subscription.id)),
+                            RAIL_FACE_PX,
+                            look,
+                            face_status,
+                            cx,
+                        ))
+                        .child(heading(setup.agent.name.clone())),
+                )
                 .child(muted(setup.agent.instructions.clone()))
                 .child(muted(source_summary(&setup.source.kind)))
                 .child(muted(automation_status(&setup)))

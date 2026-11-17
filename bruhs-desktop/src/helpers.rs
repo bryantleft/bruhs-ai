@@ -122,6 +122,47 @@ fn bundle_dirs() -> Option<(PathBuf, PathBuf)> {
     Some((contents.join("MacOS"), contents.join("Resources")))
 }
 
+/// What to do when this build can't update the background service itself.
+pub const SERVICE_INSTALL_HINT: &str = "Run bruhs-server service install from this build.";
+
+/// Whether this launch runs from an app bundle that carries `bruhs-server`.
+/// Asked while drawing, so it is read once.
+pub fn bundled() -> bool {
+    static BUNDLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+    *BUNDLED.get_or_init(|| {
+        bundle_dirs().is_some_and(|(macos, _)| macos.join("bruhs-server").is_file())
+    })
+}
+
+/// Reinstall the background service from this bundle's `bruhs-server`, so it
+/// runs this release. The answering server can't do it when it is the old
+/// one: installing copies the answering server's own binary. Blocks until
+/// the installer finishes, so call it off the main thread.
+pub fn update_bundled_service() -> Result<(), String> {
+    let Some((macos, resources)) = bundle_dirs() else {
+        return Err(SERVICE_INSTALL_HINT.into());
+    };
+    let binary = macos.join("bruhs-server");
+    if !binary.is_file() {
+        return Err(SERVICE_INSTALL_HINT.into());
+    }
+    let output = Command::new(binary)
+        .args(["service", "install"])
+        .env("BRUHS_WEB_DIST", resources.join("web"))
+        .stdin(Stdio::null())
+        .output()
+        .map_err(|error| format!("Couldn't update the background service: {error}"))?;
+    if output.status.success() {
+        return Ok(());
+    }
+    let reason = String::from_utf8_lossy(&output.stderr).trim().to_string();
+    Err(if reason.is_empty() {
+        "Couldn't update the background service.".into()
+    } else {
+        reason
+    })
+}
+
 fn log_file(name: &str) -> Stdio {
     crate::paths::log_dir()
         .and_then(|dir| {
@@ -251,6 +292,15 @@ mod tests {
     fn a_source_build_has_no_bundle() {
         // `cargo test` runs from target/, never inside an .app.
         assert!(bundle_dirs().is_none());
+        assert!(!bundled());
+    }
+
+    #[test]
+    fn outside_a_bundle_the_service_update_says_what_to_run() {
+        assert_eq!(
+            update_bundled_service(),
+            Err("Run bruhs-server service install from this build.".to_string())
+        );
     }
 
     #[test]

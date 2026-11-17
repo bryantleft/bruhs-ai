@@ -25,7 +25,6 @@ pub(crate) fn face_at(
 
 /// A bruh's face `size_px` square. `key` names it for selectors and animation
 /// state; it must be unique among faces on screen.
-#[expect(dead_code, reason = "first caller is the crew rail, in a later task")]
 pub fn bruh_face(
     key: SharedString,
     size_px: f32,

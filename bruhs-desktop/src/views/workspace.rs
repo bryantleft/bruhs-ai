@@ -72,6 +72,7 @@ mod capture_ui;
 mod chat_events_tests;
 mod connected_inbox;
 mod credential_settings;
+mod crew_ui;
 mod date_picker_ui;
 mod event_dialog_ui;
 #[cfg(test)]
@@ -445,6 +446,8 @@ enum Overlay {
         /// The unit dropdown's listbox.
         unit_open: bool,
     },
+    /// The crew rail's "New bruh" (web `CreateBruhDialog`).
+    CreateBruh,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -801,6 +804,8 @@ struct PersistedWorkspaceState {
     /// Missing means closed, matching the web default.
     sidebar_working_open: Option<bool>,
     sidebar_snoozed_open: Option<bool>,
+    /// Missing means open, matching the web default.
+    crew_rail_open: Option<bool>,
     /// Missing means the Working section is on.
     sidebar_working_section: Option<bool>,
     /// Missing means update checks are on (web `bruhs.updateChecks`).
@@ -1247,6 +1252,8 @@ pub struct Workspace {
     sidebar_settled_open: bool,
     sidebar_working_open: bool,
     sidebar_snoozed_open: bool,
+    /// The crew rail above the threads; open unless closed.
+    crew_rail_open: bool,
     /// On unless this device saved it off.
     sidebar_working_section: bool,
     title_instructions: String,
@@ -1834,6 +1841,15 @@ impl Workspace {
                         this.persist_and_notify(cx);
                     },
                 ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
+                     event: &crate::views::reactive_automations::ReactiveBruhCreated,
+                     window,
+                     cx| this.open_created_bruh(event.agent_id.clone(), window, cx),
+                ));
                 subscriptions.push(cx.subscribe(
                     &panel,
                     |this, _, event: &crate::views::reactive_automations::ReactivePreview, cx| {
@@ -1930,6 +1946,10 @@ impl Workspace {
                 .as_ref()
                 .and_then(|state| state.sidebar_snoozed_open)
                 .unwrap_or(false),
+            crew_rail_open: persisted
+                .as_ref()
+                .and_then(|state| state.crew_rail_open)
+                .unwrap_or(true),
             sidebar_working_section: persisted
                 .as_ref()
                 .and_then(|state| state.sidebar_working_section)
@@ -2738,6 +2758,7 @@ impl Render for Workspace {
         }
         self.page_history.visit(&page_key(&self.active_view));
         self.sync_thread_catalog(cx);
+        self.sync_create_bruh(cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
         if !self.overlay_open() {
@@ -3108,6 +3129,7 @@ impl Render for Workspace {
                     Overlay::UpdateConfirm => self.render_update_confirm(window, cx),
                     Overlay::RestartConfirm => self.render_restart_confirm(window, cx),
                     Overlay::SnoozeCustom { .. } => self.render_snooze_custom(window, cx),
+                    Overlay::CreateBruh => self.render_create_bruh(window, cx),
                 })
             })
             // Drawn after the form dialog so it sits on top of it.

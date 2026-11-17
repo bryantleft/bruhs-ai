@@ -5,14 +5,19 @@ use crate::{
     server_client::{ReactiveHookToken, ServerClient, ServerError},
     theme,
 };
+use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
+use bruhs_models::crew::{service_is_current, service_notice, BruhState, ServiceNotice};
 use bruhs_models::reactive::*;
+mod create_bruh;
 mod editor_fields;
+mod face_editor;
 mod memory;
 mod notifications;
 mod runs;
 mod setup;
 mod updates;
 mod weekly_reports;
+pub(crate) use create_bruh::ReactiveBruhCreated;
 use gpui::{prelude::*, *};
 use gpui_component::input::{Input, InputEvent, InputState};
 use std::{
@@ -21,6 +26,58 @@ use std::{
     time::{Duration, Instant},
 };
 pub(crate) use updates::{unread_badge, unread_label};
+
+/// The service's live crew frames: bruh states and its protocol.
+const CREW_STREAM_PATH: &str = "/api/reactive/stream";
+/// An older service is updated automatically at most once per launch.
+static AUTO_UPDATE_TRIED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// A local date and time for an instant, as the automation cards write it.
+pub(crate) fn local_time(at: bruhs_models::EpochMs) -> String {
+    updates::local_time(at)
+}
+
+/// The installed service's crew protocol. An installed service whose release
+/// can't say counts as the oldest.
+fn installed_protocol(service: &BackgroundService) -> Option<u32> {
+    service
+        .installed
+        .then(|| service.reactive_protocol.unwrap_or(0))
+}
+
+/// How the app can bring an older service up to date.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum ServiceUpdate {
+    /// The current server installs itself as the login service.
+    InstallFromServer,
+    /// The bundle's own `bruhs-server service install`: the answering server
+    /// is the old one, and installing through it would copy itself again.
+    Bundled,
+}
+
+/// The update for `notice`, when this launch has one.
+fn service_update(notice: ServiceNotice, bundled: bool) -> Option<ServiceUpdate> {
+    match notice {
+        ServiceNotice::InstalledOld => Some(ServiceUpdate::InstallFromServer),
+        ServiceNotice::ServingOld => bundled.then_some(ServiceUpdate::Bundled),
+    }
+}
+
+/// The crew as the rail shows it, kept current by the live stream.
+#[derive(Default)]
+struct CrewState {
+    bruhs: Vec<BruhState>,
+    /// The serving service's crew protocol, once a frame or snapshot says.
+    protocol: Option<u32>,
+    /// The installed login service's protocol; `None` when none is installed.
+    installed_protocol: Option<u32>,
+    /// The serving protocol the installed service was last read for.
+    installed_read_for: Option<u32>,
+    stream: Option<Task<()>>,
+    service_request: Option<Task<()>>,
+    updating: bool,
+    update_error: Option<String>,
+}
 
 // Match the web panel and existing connection status polling.
 const REFRESH: Duration = Duration::from_secs(2);
@@ -95,6 +152,10 @@ enum Scope {
     Updates,
     Agent(String),
     Notifications,
+    /// The crew rail.
+    Crew,
+    /// The create bruh dialog.
+    CreateBruh,
 }
 
 #[derive(Clone)]
@@ -134,6 +195,11 @@ pub(crate) struct ReactiveAutomations {
     /// A draft-decision report is in flight (owned by the workspace reconciler).
     draft_reporting: bool,
     awareness: Option<gpui::Subscription>,
+    crew: CrewState,
+    create: Option<create_bruh::CreateBruh>,
+    /// Every command sent, in order; tests never reach a server.
+    #[cfg(test)]
+    sent: Vec<ReactiveCommand>,
 }
 
 trait ReactiveButton {
@@ -303,13 +369,19 @@ fn reactive_error(error: ServerError) -> String {
 enum Effect {
     CloseAutomation,
     CloseReply(String),
-    CloseMemory { agent_id: String, key: String },
+    CloseMemory {
+        agent_id: String,
+        key: String,
+    },
     ResetNotifications,
+    /// Open the bruh this dialog made.
+    OpenBruh(String),
     None,
 }
 impl Effect {
     fn of(command: &ReactiveCommand) -> Self {
         match command {
+            ReactiveCommand::CreateBruh { agent, .. } => Self::OpenBruh(agent.id.clone()),
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAutomation { .. },
             } => Self::CloseAutomation,
@@ -414,8 +486,13 @@ impl ReactiveAutomations {
             scoped_error: None,
             draft_reporting: false,
             awareness: None,
+            crew: CrewState::default(),
+            create: None,
+            #[cfg(test)]
+            sent: Vec::new(),
         };
         if cfg!(not(test)) {
+            panel.start_crew_stream(cx);
             panel.poll = Some(cx.spawn(async move |this, cx| loop {
                 cx.background_executor().timer(REFRESH).await;
                 if this
@@ -484,6 +561,8 @@ impl ReactiveAutomations {
     }
     /// Every snapshot passes through here so arrivals are detected exactly once.
     fn set_snapshot(&mut self, snapshot: ReactiveSnapshot, cx: &mut Context<'_, Self>) {
+        self.crew.bruhs.clone_from(&snapshot.bruhs);
+        self.note_crew_protocol(snapshot.protocol, cx);
         self.agent_names = snapshot
             .agents
             .iter()
@@ -550,6 +629,12 @@ impl ReactiveAutomations {
         if self.busy {
             return;
         }
+        #[cfg(test)]
+        self.sent.push(command.clone());
+        // Tests record the command and never reach a real server.
+        if cfg!(test) {
+            return;
+        }
         self.busy = true;
         self.reading = false;
         self.error = None;
@@ -569,11 +654,14 @@ impl ReactiveAutomations {
                 this.busy = false;
                 match result {
                     Ok(snapshot) => {
-                        this.apply_effect(effect);
                         this.set_snapshot(snapshot, cx);
+                        this.apply_effect(effect, cx);
                     }
                     Err(error) => {
                         let message = reactive_error(error);
+                        if scope == Scope::CreateBruh {
+                            this.create_failed();
+                        }
                         if scope == Scope::General {
                             this.error = Some(message);
                         } else {
@@ -586,8 +674,9 @@ impl ReactiveAutomations {
         }));
         cx.notify();
     }
-    fn apply_effect(&mut self, effect: Effect) {
+    fn apply_effect(&mut self, effect: Effect, cx: &mut Context<'_, Self>) {
         match effect {
+            Effect::OpenBruh(agent_id) => self.created_bruh(agent_id, cx),
             Effect::CloseAutomation => self.editor = None,
             Effect::CloseReply(id) => {
                 if self.reply.as_ref().is_some_and(|(open, _)| *open == id) {
@@ -1162,9 +1251,215 @@ impl ReactiveAutomations {
     }
 }
 
+/// The crew: live bruh states, the service's protocol, and updating an
+/// older service.
+impl ReactiveAutomations {
+    /// Every bruh, as the service last reported them.
+    pub(crate) fn crew(&self) -> &[BruhState] {
+        &self.crew.bruhs
+    }
+    /// The serving service's crew protocol, once known.
+    pub(crate) fn crew_protocol(&self) -> Option<u32> {
+        self.crew.protocol
+    }
+    /// Whether the service understands the crew commands. Unknown counts as
+    /// not yet.
+    pub(crate) fn crew_ready(&self) -> bool {
+        self.crew.protocol.is_some_and(service_is_current)
+    }
+    /// Which older service to update, once the serving protocol is known.
+    pub(crate) fn crew_notice(&self) -> Option<ServiceNotice> {
+        service_notice(self.crew.protocol?, self.crew.installed_protocol)
+    }
+    /// The snapshot could not be read and no crew is known yet.
+    pub(crate) fn crew_load_error(&self) -> Option<&str> {
+        self.crew
+            .protocol
+            .is_none()
+            .then_some(self.load_error.as_deref())
+            .flatten()
+    }
+    /// Why the last crew command failed.
+    pub(crate) fn crew_error(&self) -> Option<&str> {
+        self.scoped_error
+            .as_ref()
+            .filter(|(scope, _)| *scope == Scope::Crew)
+            .map(|(_, message)| message.as_str())
+    }
+    pub(crate) fn crew_busy(&self) -> bool {
+        self.busy
+    }
+    /// The service update is running.
+    pub(crate) fn service_updating(&self) -> bool {
+        self.crew.updating
+    }
+    pub(crate) fn service_update_error(&self) -> Option<&str> {
+        self.crew.update_error.as_deref()
+    }
+    /// Whether this launch can update the older service itself.
+    pub(crate) fn can_update_service(&self) -> bool {
+        self.crew_notice()
+            .and_then(|notice| service_update(notice, crate::helpers::bundled()))
+            .is_some()
+    }
+    /// Send a command from the crew rail; a failure shows in the rail.
+    pub(crate) fn send_crew(&mut self, command: ReactiveCommand, cx: &mut Context<'_, Self>) {
+        self.send_in(command, Scope::Crew, cx);
+    }
+    /// Read the crew again, such as after a failed load.
+    pub(crate) fn reload_crew(&mut self, cx: &mut Context<'_, Self>) {
+        self.refresh_snapshot(cx);
+    }
+    /// Show `states` as if the service had sent them.
+    #[cfg(test)]
+    pub(crate) fn show_crew_for_test(
+        &mut self,
+        states: Vec<BruhState>,
+        protocol: u32,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.crew.bruhs = states;
+        self.crew.protocol = Some(protocol);
+        cx.notify();
+    }
+    #[cfg(test)]
+    pub(crate) fn sent_for_test(&self) -> &[ReactiveCommand] {
+        &self.sent
+    }
+
+    /// Follow the service's live crew frames for as long as the panel lives.
+    fn start_crew_stream(&mut self, cx: &mut Context<'_, Self>) {
+        let Some(runtime) = cx
+            .try_global::<crate::app_state::DesktopState>()
+            .map(|state| std::sync::Arc::clone(&state.runtime))
+        else {
+            return;
+        };
+        let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<
+            crate::server_client::SseMessage<OutboxSignal>,
+        >();
+        runtime.spawn(
+            std::sync::Arc::new(self.client.clone())
+                .run_sse::<OutboxSignal>(CREW_STREAM_PATH.to_string(), tx),
+        );
+        self.crew.stream = Some(cx.spawn(async move |this, cx| {
+            while let Some(message) = rx.recv().await {
+                let crate::server_client::SseMessage::Event(signal) = message else {
+                    continue;
+                };
+                if this
+                    .update(cx, |this, cx| this.apply_crew_signal(signal, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
+    }
+    fn apply_crew_signal(&mut self, signal: OutboxSignal, cx: &mut Context<'_, Self>) {
+        if self.crew.bruhs != signal.bruhs {
+            self.crew.bruhs = signal.bruhs;
+            cx.notify();
+        }
+        self.note_crew_protocol(signal.protocol, cx);
+    }
+    /// Record the serving protocol; a new one reads the installed service
+    /// again.
+    fn note_crew_protocol(&mut self, protocol: u32, cx: &mut Context<'_, Self>) {
+        if self.crew.protocol != Some(protocol) {
+            self.crew.protocol = Some(protocol);
+            cx.notify();
+        }
+        if self.crew.installed_read_for != Some(protocol) && cfg!(not(test)) {
+            self.crew.installed_read_for = Some(protocol);
+            self.read_installed_service(cx);
+        }
+    }
+    fn read_installed_service(&mut self, cx: &mut Context<'_, Self>) {
+        if self.crew.updating {
+            return;
+        }
+        let client = self.client.clone();
+        let operation = spawn_tokio(cx, async move { client.background_service().await });
+        self.crew.service_request = Some(cx.spawn(async move |this, cx| {
+            let status = operation.await;
+            let _ = this.update(cx, |this, cx| {
+                if this.crew.updating {
+                    return;
+                }
+                if let Ok(status) = status {
+                    this.crew.installed_protocol = installed_protocol(&status);
+                    this.auto_update_service(cx);
+                }
+                cx.notify();
+            });
+        }));
+    }
+    /// An older service is updated once per launch; the notice and its
+    /// button stay for when that fails.
+    fn auto_update_service(&mut self, cx: &mut Context<'_, Self>) {
+        if self.can_update_service()
+            && !AUTO_UPDATE_TRIED.swap(true, std::sync::atomic::Ordering::AcqRel)
+        {
+            self.update_service(cx);
+        }
+    }
+    /// Bring the older service up to date: the bundle's own server reinstalls
+    /// the service when the answering one is old; otherwise the current
+    /// server installs itself.
+    pub(crate) fn update_service(&mut self, cx: &mut Context<'_, Self>) {
+        let Some(notice) = self.crew_notice() else {
+            return;
+        };
+        if self.crew.updating {
+            return;
+        }
+        let Some(update) = service_update(notice, crate::helpers::bundled()) else {
+            self.crew.update_error = Some(crate::helpers::SERVICE_INSTALL_HINT.to_string());
+            cx.notify();
+            return;
+        };
+        self.crew.updating = true;
+        self.crew.update_error = None;
+        let client = self.client.clone();
+        let operation: Task<Result<Option<BackgroundService>, String>> = match update {
+            ServiceUpdate::InstallFromServer => spawn_tokio(cx, async move {
+                client
+                    .set_background_service(BackgroundServiceAction::Install)
+                    .await
+                    .map(Some)
+                    .map_err(reactive_error)
+            }),
+            ServiceUpdate::Bundled => cx.background_spawn(async move {
+                crate::helpers::update_bundled_service().map(|()| None)
+            }),
+        };
+        self.crew.service_request = Some(cx.spawn(async move |this, cx| {
+            let result = operation.await;
+            let _ = this.update(cx, |this, cx| {
+                this.crew.updating = false;
+                match result {
+                    Ok(Some(status)) => {
+                        this.crew.installed_protocol = installed_protocol(&status);
+                    }
+                    // The service restarted on the new release: read it again.
+                    Ok(None) => {
+                        this.crew.installed_read_for = None;
+                        this.refresh_snapshot(cx);
+                    }
+                    Err(error) => this.crew.update_error = Some(error),
+                }
+                cx.notify();
+            });
+        }));
+        cx.notify();
+    }
+}
+
 impl EventEmitter<ReactivePreview> for ReactiveAutomations {}
 impl EventEmitter<ReactiveProjectOpened> for ReactiveAutomations {}
 impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
+impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
 
 impl Render for ReactiveAutomations {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
@@ -1889,6 +2184,92 @@ mod tests {
                 panic!("source editor");
             };
             assert_eq!(value(&editor.value, cx), "meeting.summary");
+        });
+    }
+}
+
+#[cfg(test)]
+mod crew_tests {
+    use super::{installed_protocol, service_update, ReactiveAutomations, ServiceUpdate};
+    use crate::theme;
+    use bruhs_models::api::BackgroundService;
+    use bruhs_models::crew::{BruhAccess, BruhLook, BruhState, BruhStatus, ServiceNotice};
+    use bruhs_models::reactive::{OutboxSignal, ReactiveSnapshot};
+
+    fn service(installed: bool, protocol: Option<u32>) -> BackgroundService {
+        BackgroundService {
+            supported: true,
+            installed,
+            loaded: installed,
+            binary: None,
+            detail: String::new(),
+            serving: false,
+            service_pid: None,
+            responder_pid: None,
+            log_path: None,
+            reactive_protocol: protocol,
+        }
+    }
+
+    #[test]
+    fn an_installed_service_that_cannot_say_counts_as_old() {
+        assert_eq!(installed_protocol(&service(false, None)), None);
+        assert_eq!(installed_protocol(&service(true, None)), Some(0));
+        assert_eq!(installed_protocol(&service(true, Some(1))), Some(1));
+    }
+
+    /// An old installed service is reinstalled by the current server; an old
+    /// answering server only by this bundle's own binary.
+    #[test]
+    fn each_older_service_has_its_own_update() {
+        assert_eq!(
+            service_update(ServiceNotice::InstalledOld, false),
+            Some(ServiceUpdate::InstallFromServer)
+        );
+        assert_eq!(
+            service_update(ServiceNotice::ServingOld, true),
+            Some(ServiceUpdate::Bundled)
+        );
+        assert_eq!(service_update(ServiceNotice::ServingOld, false), None);
+    }
+
+    #[gpui::test]
+    fn live_frames_and_snapshots_keep_the_crew_current(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let (panel, cx) = cx.add_window_view(|_, cx| ReactiveAutomations::new(cx));
+        let ann = BruhState {
+            agent_id: "ann".into(),
+            name: "Ann".into(),
+            look: BruhLook::default(),
+            access: BruhAccess::default(),
+            effort: None,
+            status: BruhStatus::Working,
+            next_wake_ms: None,
+            unread: 2,
+        };
+        panel.update(cx, |panel, cx| {
+            assert_eq!(panel.crew_protocol(), None);
+            assert!(!panel.crew_ready(), "unknown is not ready");
+            assert_eq!(panel.crew_notice(), None, "no notice before the protocol");
+            panel.apply_crew_signal(
+                OutboxSignal {
+                    bruhs: vec![ann.clone()],
+                    protocol: 1,
+                    ..OutboxSignal::default()
+                },
+                cx,
+            );
+            assert_eq!(panel.crew(), std::slice::from_ref(&ann));
+            assert!(panel.crew_ready());
+            // An older service's snapshot has no crew and protocol 0.
+            panel.set_snapshot(ReactiveSnapshot::default(), cx);
+            assert!(panel.crew().is_empty());
+            assert_eq!(panel.crew_protocol(), Some(0));
+            assert_eq!(panel.crew_notice(), Some(ServiceNotice::ServingOld));
+            assert!(!panel.crew_ready());
         });
     }
 }
