@@ -1,6 +1,9 @@
 //! The task detail panel and the new task dialog, with their native-style selects.
 
 use super::*;
+use bruhs_models::logic::task_detail::{
+    dependency_candidates, dependency_title, ADD_DEPENDENCY_LABEL, REMOVE_DEPENDENCY_LABEL,
+};
 pub(super) const TASK_DIALOG_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const TASK_DIALOG_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const TASK_DIALOG_TITLE_TEXT_SIZE_PX: f32 = 13.0;
@@ -622,6 +625,142 @@ impl Workspace {
         )
     }
 
+    /// Web task detail "Dependencies": a picker of the other tasks over
+    /// the chosen ones, each a chip that removes it. The candidates, labels
+    /// and edits come from `bruhs_models::logic::task_detail`.
+    pub(super) fn render_task_detail_dependencies(
+        &self,
+        item: &DesktopWorkItem,
+        cx: &Context<'_, Self>,
+    ) -> Div {
+        let tasks = || {
+            self.work_items
+                .iter()
+                .map(|task| (task.id.as_str(), task.title.as_str()))
+        };
+        let option = |id: ElementId, label: String, selected: bool| {
+            div()
+                .id(id)
+                .w_full()
+                .flex()
+                .items_center()
+                .gap(px(FORM_SELECT_OPTION_GAP_PX))
+                .px(px(FORM_SELECT_OPTION_X_PADDING_PX))
+                .py(px(FORM_SELECT_OPTION_Y_PADDING_PX))
+                .font_family(FORM_SELECT_BODY_FONT_FAMILY)
+                .text_size(px(FORM_SELECT_BODY_TEXT_SIZE_PX))
+                .text_color(if selected {
+                    theme::rambutan_100()
+                } else {
+                    theme::rambutan_300()
+                })
+                .tab_index(0)
+                .role(Role::ListBoxOption)
+                .aria_label(label.clone())
+                .aria_selected(selected)
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .cursor_pointer()
+                .hover(|el| el.bg(theme::longan_800()))
+                .child(div().flex_1().min_w_0().truncate().child(label))
+        };
+        // Like the web's select, the placeholder is the current value.
+        let mut rows = vec![option(
+            "task-detail-dependency-placeholder".into(),
+            ADD_DEPENDENCY_LABEL.to_string(),
+            true,
+        )
+        .debug_selector(|| "desktop-task-detail-dependency-placeholder".to_string())
+        .on_click(cx.listener(|this, _ev, _window, cx| {
+            this.task_detail_menu_open = None;
+            cx.notify();
+        }))
+        .into_any_element()];
+        rows.extend(
+            dependency_candidates(&item.id, tasks())
+                .into_iter()
+                .enumerate()
+                .map(|(index, (id, title))| {
+                    let id = id.to_string();
+                    option(
+                        ElementId::from(("task-detail-dependency-option", index)),
+                        title.to_string(),
+                        false,
+                    )
+                    .debug_selector(move || {
+                        format!("desktop-task-detail-dependency-option-{index}")
+                    })
+                    .on_click(cx.listener(move |this, _ev, _window, cx| {
+                        this.add_selected_work_item_dependency(&id, cx);
+                    }))
+                    .into_any_element()
+                }),
+        );
+        let chips = item
+            .planning
+            .dependency_ids
+            .iter()
+            .enumerate()
+            .map(|(index, id)| {
+                let title = dependency_title(id, tasks()).to_string();
+                let id = id.clone();
+                div()
+                    .id(("task-detail-dependency-chip", index))
+                    .debug_selector(move || format!("desktop-task-detail-dependency-chip-{index}"))
+                    .max_w_full()
+                    .min_h(px(theme::CONTROL_XS_PX))
+                    .flex()
+                    .items_center()
+                    .gap_1()
+                    .rounded(px(8.0))
+                    .bg(theme::longan_800())
+                    .px_2()
+                    .py_1()
+                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .text_size(px(12.0))
+                    .text_color(theme::rambutan_400())
+                    .hover(|el| el.text_color(theme::lychee_300()))
+                    .cursor_pointer()
+                    .tab_index(0)
+                    .role(Role::Button)
+                    .aria_label(format!("{REMOVE_DEPENDENCY_LABEL}: {title}"))
+                    .border_1()
+                    .border_color(gpui::transparent_black())
+                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                    .tooltip(|window, cx| Tooltip::new(REMOVE_DEPENDENCY_LABEL).build(window, cx))
+                    .on_click(cx.listener(move |this, _ev, _window, cx| {
+                        this.remove_selected_work_item_dependency(&id, cx);
+                    }))
+                    .child(
+                        div()
+                            .overflow_hidden()
+                            .whitespace_nowrap()
+                            .text_ellipsis()
+                            .child(title),
+                    )
+                    .child("×")
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        div()
+            .flex()
+            .flex_col()
+            .gap(px(FORM_FIELD_GAP_PX))
+            .child(self.render_task_detail_select_shell(
+                "dependencies",
+                "Dependencies",
+                ADD_DEPENDENCY_LABEL.to_string(),
+                TaskDetailMenu::Dependency,
+                rows,
+                cx,
+            ))
+            .when(!chips.is_empty(), |el| {
+                el.child(div().flex().flex_wrap().gap(px(6.0)).children(chips))
+            })
+    }
+
     pub(super) fn render_task_detail(&self, item: DesktopWorkItem, cx: &Context<'_, Self>) -> Div {
         let delete_id = item.id.clone();
         let delete_id_for_key = item.id.clone();
@@ -634,7 +773,6 @@ impl Workspace {
             || "Does not repeat".to_string(),
             |rule| rule.label().to_string(),
         );
-        let dependency_count = item.planning.dependency_ids.len();
         let time_block_count = item.planning.time_block_event_ids.len();
 
         div()
@@ -874,33 +1012,28 @@ impl Workspace {
                                             ),
                                     ),
                             )
-                            .child(
-                                div()
-                                    .flex()
-                                    .items_center()
-                                    .gap_2()
-                                    .child(
-                                        web_button(
-                                            "task-detail-dependencies",
-                                            WebButtonVariant::Ghost,
-                                            WebButtonSize::Small,
-                                            ButtonState::Enabled,
-                                        )
-                                        .aria_label("Add or clear a task dependency")
-                                        .child(format!("{dependency_count} dependencies"))
-                                        .on_click(
-                                            cx.listener(|this, _event, _window, cx| {
-                                                this.cycle_selected_work_item_dependency(cx);
-                                            }),
-                                        ),
-                                    )
-                                    .child(
-                                        div()
-                                            .text_size(px(11.0))
-                                            .text_color(theme::rambutan_500())
-                                            .child(format!("{time_block_count} focus blocks")),
-                                    ),
-                            ),
+                            .child(self.render_task_detail_dependencies(&item, cx))
+                            // Web: shown only once the task has focus blocks.
+                            .when(time_block_count != 0, |el| {
+                                el.child(
+                                    div()
+                                        .debug_selector(|| {
+                                            "desktop-task-detail-focus-blocks".to_string()
+                                        })
+                                        .rounded(px(8.0))
+                                        .border_1()
+                                        .border_color(theme::persimmon_400().opacity(0.2))
+                                        .bg(theme::persimmon_500().opacity(0.1))
+                                        .px_3()
+                                        .py_2()
+                                        .font_family(theme::CODE_FONT_FAMILY)
+                                        .text_size(px(13.0))
+                                        .text_color(theme::persimmon_200())
+                                        .child(format!(
+                                            "Scheduled in {time_block_count} focus block(s)"
+                                        )),
+                                )
+                            }),
                     ),
             )
             .child(

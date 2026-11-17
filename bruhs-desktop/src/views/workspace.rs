@@ -472,6 +472,7 @@ enum TaskDetailMenu {
     Project,
     Status,
     Priority,
+    Dependency,
 }
 
 #[derive(Clone)]
