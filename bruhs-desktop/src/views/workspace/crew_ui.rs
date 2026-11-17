@@ -147,6 +147,9 @@ impl Workspace {
         let ready = panel.crew_ready();
         let rows = rail_rows(panel.crew());
         let any_paused = rows.iter().any(|bruh| bruh.status == BruhStatus::Paused);
+        let any_awake = rows
+            .iter()
+            .any(|bruh| !matches!(bruh.status, BruhStatus::Paused | BruhStatus::Off));
         let header = div()
             .px(px(CREW_INNER_X_PADDING_PX))
             .flex()
@@ -247,9 +250,22 @@ impl Workspace {
             if let Some(notice) = panel.crew_notice().filter(|_| !panel.service_updating()) {
                 body = body.child(self.render_crew_notice(notice, cx));
             }
-            if any_paused {
-                body = body.child(div().px(px(CREW_INNER_X_PADDING_PX)).flex().child(
-                    if ready && !panel.crew_busy() {
+            if any_paused || any_awake {
+                let mut actions = div()
+                    .px(px(CREW_INNER_X_PADDING_PX))
+                    .flex()
+                    .flex_wrap()
+                    .gap_1();
+                // Stop all, as ⌘. stops the bruhs: it works on an older service too.
+                if any_awake {
+                    actions = actions.child(on_press(
+                        small_action("desktop-crew-stop-all", "Stop all", false),
+                        cx,
+                        |this, _window, cx| this.stop_crew(cx),
+                    ));
+                }
+                if any_paused {
+                    actions = actions.child(if ready && !panel.crew_busy() {
                         on_press(
                             small_action("desktop-crew-resume-all", "Resume all", false),
                             cx,
@@ -261,8 +277,9 @@ impl Workspace {
                         )
                     } else {
                         small_action("desktop-crew-resume-all", "Resume all", true)
-                    },
-                ));
+                    });
+                }
+                body = body.child(actions);
             }
             if panel.crew_protocol().is_none() {
                 if panel.crew_load_error().is_some() {
@@ -503,6 +520,11 @@ impl Workspace {
         if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
             chat.update(cx, |chat, cx| chat.stop_streaming(cx));
         }
+        self.stop_crew(cx);
+    }
+
+    /// Stop every bruh, then say how it went.
+    fn stop_crew(&mut self, cx: &mut Context<'_, Self>) {
         let stopping = self
             .reactive_automations
             .update(cx, |panel, cx| panel.stop_all_crew(cx));
@@ -921,6 +943,31 @@ mod tests {
             assert_eq!(
                 notice.map(|n| n.message.as_str()),
                 Some("Couldn't stop every bruh: offline")
+            );
+        });
+    }
+
+    /// The rail's Stop all stops the bruhs without touching the chat on screen.
+    #[gpui::test]
+    fn the_rail_stop_all_stops_every_bruh(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        show(
+            &workspace,
+            cx,
+            vec![bruh("amy", BruhStatus::Working)],
+            CREW_PROTOCOL,
+        );
+        assert!(cx.debug_bounds("desktop-crew-resume-all").is_none());
+        let stop = cx.debug_bounds("desktop-crew-stop-all").expect("stop all");
+        cx.simulate_click(stop.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        assert_eq!(sent(&workspace, cx), [ReactiveCommand::StopAll]);
+        workspace.update(cx, |workspace, cx| {
+            let notice = workspace.meetings_hub.read(cx).notice.as_ref();
+            assert_eq!(
+                notice.map(|n| n.message.as_str()),
+                Some("Stopped all bruhs.")
             );
         });
     }

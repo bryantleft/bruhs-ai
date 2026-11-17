@@ -17,7 +17,7 @@ use super::data::use_crew_snapshot;
 use super::face::BruhFace;
 use super::shortcuts::CrewFocusRequest;
 use crate::components::reactive_automations::local_time;
-use crate::state::{load_pref, save_pref, ActiveView, AppView, SetActiveView};
+use crate::state::{load_pref, save_pref, ActiveView, AppView, SetActiveView, ThreadNotice};
 use crate::ui::Icon;
 
 /// Where the rail's open or closed state is kept.
@@ -170,7 +170,35 @@ pub fn CrewRail(
                 .is_some_and(|rows| rows.iter().any(|bruh| bruh.status == BruhStatus::Paused))
         })
     });
+    let any_awake = Memo::new(move |_| {
+        rows.with(|rows| {
+            rows.as_ref().is_some_and(|rows| {
+                rows.iter()
+                    .any(|bruh| !matches!(bruh.status, BruhStatus::Paused | BruhStatus::Off))
+            })
+        })
+    });
     let ready = Signal::derive(move || data.crew_ready());
+    // Stop all, as ⌘. stops the bruhs: it works on an older service too.
+    let stopping = RwSignal::new(false);
+    let notice_bar = use_context::<ThreadNotice>();
+    let stop_all = move |_| {
+        stopping.set(true);
+        super::shortcuts::stop_all(data.protocol(), move |outcome| {
+            let _ = stopping.try_set(false);
+            match outcome {
+                Ok(message) => {
+                    if let Some(notice_bar) = notice_bar {
+                        notice_bar.flash(message);
+                    }
+                }
+                Err(error) => {
+                    let _ = data.error.try_set(Some(error));
+                }
+            }
+            data.reload.run(());
+        });
+    };
 
     // The installed service, read whenever the serving protocol changes.
     let service = RwSignal::new(None::<BackgroundService>);
@@ -296,15 +324,26 @@ pub fn CrewRail(
                             }}
                         </div>
                     })}
-                    <Show when=move || any_paused.get()>
-                        <div class="px-1">
-                            <button
-                                type="button"
-                                data-crew-resume-all=""
-                                class=SMALL_ACTION
-                                disabled=move || data.busy.get() || !ready.get()
-                                on:click=move |_| data.send.run(ReactiveCommand::ResumeAll)
-                            >"Resume all"</button>
+                    <Show when=move || any_paused.get() || any_awake.get()>
+                        <div class="flex flex-wrap gap-1 px-1">
+                            <Show when=move || any_awake.get()>
+                                <button
+                                    type="button"
+                                    data-crew-stop-all=""
+                                    class=SMALL_ACTION
+                                    disabled=move || stopping.get()
+                                    on:click=stop_all
+                                >"Stop all"</button>
+                            </Show>
+                            <Show when=move || any_paused.get()>
+                                <button
+                                    type="button"
+                                    data-crew-resume-all=""
+                                    class=SMALL_ACTION
+                                    disabled=move || data.busy.get() || !ready.get()
+                                    on:click=move |_| data.send.run(ReactiveCommand::ResumeAll)
+                                >"Resume all"</button>
+                            </Show>
                         </div>
                     </Show>
                     {move || match rows.with(|rows| rows.as_ref().map(Vec::is_empty)) {
