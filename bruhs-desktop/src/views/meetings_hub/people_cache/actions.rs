@@ -15,6 +15,24 @@ impl MeetingsHub {
         self.people.iter().find(|p| p.id == id).map(Arc::as_ref)
     }
 
+    /// The archived originals kept after a conflicting merge recovery, by
+    /// source contact, as pretty JSON (web "View contact merge recovery
+    /// (private)"). Built only on request: they can hold private notes and
+    /// voice data.
+    pub fn person_merge_recovery_json(&self) -> Result<String, serde_json::Error> {
+        serde_json::to_string_pretty(&self.person_merge_recoveries)
+    }
+
+    /// A contact refresh from the server is running (web `refreshing_people`).
+    pub fn people_refreshing(&self) -> bool {
+        self.people_refreshing
+    }
+
+    #[cfg(test)]
+    pub(crate) fn set_people_refreshing_for_test(&mut self, refreshing: bool) {
+        self.people_refreshing = refreshing;
+    }
+
     /// Merges waiting for local recovery, and archived originals kept after a
     /// conflicting recovery.
     pub fn person_merge_recovery_counts(&self) -> (usize, usize) {
