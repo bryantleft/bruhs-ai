@@ -8,6 +8,9 @@ use crate::logic::dither::{BRUH_FACE_RGB, BRUH_MOUTH_RGB};
 use crate::roles::ResolvedRole;
 use crate::EpochMs;
 
+mod access;
+pub use access::*;
+
 /// Version of the crew wire format the background service speaks.
 pub const CREW_PROTOCOL: u32 = 1;
 
