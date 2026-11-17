@@ -2748,6 +2748,7 @@ impl Workspace {
                 hub.restore_people(state.people_cache.clone());
                 hub.restore_meetings(state.meeting_cache.clone());
                 hub.restore_action_checkpoints(state.meeting_actions.clone());
+                hub.restore_google_events(state.google_events.clone());
             }
             hub
         });
@@ -2772,7 +2773,9 @@ impl Workspace {
                         }
                     }
                 }
-                HubEvent::PrefsChanged | HubEvent::MeetingsChanged => this.persist(cx),
+                HubEvent::PrefsChanged
+                | HubEvent::MeetingsChanged
+                | HubEvent::GoogleEventsChanged => this.persist(cx),
                 HubEvent::PeopleChanged => {
                     this.repair_retired_person_references(cx);
                     this.persist(cx);

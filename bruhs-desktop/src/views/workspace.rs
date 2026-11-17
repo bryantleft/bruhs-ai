@@ -776,6 +776,12 @@ struct PersistedWorkspaceState {
     people_cache: PeopleSnapshot,
     meeting_cache: MeetingCache,
     meeting_actions: crate::views::meetings_hub::ActionCheckpoints,
+    /// Read-only Google Calendar events, so they show offline and after a
+    /// restart (the web keeps them in IndexedDB). They stay on this device:
+    /// the agent's calendar tools read only local events, and Copy recovery
+    /// leaves them out.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    google_events: Vec<bruhs_models::CalendarEvent>,
     scheduling_preferences: SchedulingPreferences,
     life_context: LifeContext,
     automation_state: AutomationState,
