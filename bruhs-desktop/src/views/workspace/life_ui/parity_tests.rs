@@ -441,3 +441,20 @@ fn finance_cards_hold_their_own_forms_like_web(cx: &mut gpui::TestAppContext) {
     assert!(bounds(cx, "desktop-life-quick-add").is_some());
     assert!(bounds(cx, "desktop-life-field-Account name").is_none());
 }
+
+/// Web `min-h-[96px]`: the CSV import box is several rows tall, not one
+/// line (a multi-line Input takes its height from itself).
+#[gpui::test]
+fn the_csv_box_is_web_height(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = super::super::performance_tests::fixture(cx);
+    cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(1400.0)));
+    workspace.update(cx, |workspace, cx| {
+        workspace.active_view = super::super::AppView::Life;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let csv = cx
+        .debug_bounds("desktop-life-csv-input")
+        .expect("the CSV box is drawn");
+    assert!(csv.size.height >= gpui::px(96.0), "{csv:?}");
+}
