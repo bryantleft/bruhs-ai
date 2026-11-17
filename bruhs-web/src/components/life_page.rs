@@ -220,10 +220,10 @@ impl Page {
 
     fn import_csv(self) {
         let now = now_ms();
-        let imported = entries::csv_transactions(&self.inputs.csv.get_untracked(), now);
+        let imported = bruhs_models::csv_transactions(&self.inputs.csv.get_untracked(), now);
         let count = imported.len();
         if count == 0 {
-            self.notice.set(Some("No valid CSV rows found.".into()));
+            self.notice.set(Some(bruhs_models::csv_import_notice(0)));
             return;
         }
         self.life.update(|context| {
@@ -235,7 +235,7 @@ impl Page {
         });
         self.inputs.csv.set(String::new());
         self.notice
-            .set(Some(format!("Imported {count} transactions locally.")));
+            .set(Some(bruhs_models::csv_import_notice(count)));
     }
 
     fn log_workout(self) {

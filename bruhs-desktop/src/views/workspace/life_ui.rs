@@ -152,6 +152,28 @@ impl Workspace {
         }
     }
 
+    /// Web `import_csv`: pasted rows become transactions, newest first, and
+    /// the notice says how many; nothing is uploaded. Without a valid row the
+    /// paste stays for correction.
+    pub(super) fn import_life_csv(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let now = EpochMs::now().as_millis();
+        let imported = bruhs_models::csv_transactions(&self.life_csv_input.read(cx).value(), now);
+        let count = imported.len();
+        self.life_notice = Some(bruhs_models::csv_import_notice(count));
+        if count == 0 {
+            cx.notify();
+            return;
+        }
+        self.life_context
+            .finance
+            .transactions
+            .splice(0..0, imported.into_iter().map(Arc::new));
+        self.life_context.finance.updated_at_ms = now;
+        self.life_csv_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        self.persist_and_notify(cx);
+    }
+
     /// Web: a transaction row's ×.
     pub(super) fn delete_life_transaction(&mut self, id: &str, cx: &mut Context<'_, Self>) {
         let transactions = &mut self.life_context.finance.transactions;
@@ -598,6 +620,50 @@ impl Workspace {
             .into_any_element()
     }
 
+    /// Web `notice`: what the last import did, until dismissed.
+    fn render_life_notice(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+        let notice = self.life_notice.clone()?;
+        Some(
+            div()
+                .id("desktop-life-notice")
+                .debug_selector(|| "desktop-life-notice".into())
+                .role(Role::Status)
+                .aria_label(notice.clone())
+                .min_w_0()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .rounded(px(4.0))
+                .bg(theme::blueberry_500().opacity(0.1))
+                .px_3()
+                .py_2()
+                .text_size(px(BODY_SM_PX))
+                .text_color(theme::blueberry_200())
+                .child(div().min_w_0().child(notice))
+                .child(
+                    web_button(
+                        "dismiss-life-notice",
+                        WebButtonVariant::Ghost,
+                        WebButtonSize::Small,
+                        ButtonState::Enabled,
+                    )
+                    .debug_selector(|| "desktop-life-notice-dismiss".into())
+                    .min_w(px(theme::CONTROL_XS_PX))
+                    .min_h(px(theme::CONTROL_XS_PX))
+                    .text_color(theme::blueberry_200())
+                    .aria_label("Dismiss")
+                    .child("Dismiss")
+                    .on_click(cx.listener(|this, _event, _window, cx| {
+                        this.life_notice = None;
+                        cx.notify();
+                    })),
+                )
+                .into_any_element(),
+        )
+    }
+
     /// Web `finance_tab`'s grid: Accounts, Transactions, Budgets & income
     /// and Holdings.
     fn render_finance_cards(&self, two_columns: bool, cx: &Context<'_, Self>) -> AnyElement {
@@ -751,6 +817,41 @@ impl Workspace {
             ],
         )
         .into_any_element()
+    }
+
+    /// Web `csv_import`: paste rows, import them, nothing uploaded.
+    fn render_life_csv_import(&self, cx: &Context<'_, Self>) -> AnyElement {
+        life_card("life-csv", "CSV import")
+            .child(
+                div()
+                    .mt_1()
+                    .text_size(px(BODY_SM_PX))
+                    .text_color(theme::rambutan_500())
+                    .child("Paste local rows as merchant, category, signed amount, optional note. Nothing is uploaded."),
+            )
+            .child(
+                div()
+                    .debug_selector(|| "desktop-life-csv-input".into())
+                    .mt_2()
+                    .child(Input::new(&self.life_csv_input).aria_label("Finance CSV rows")),
+            )
+            .child(
+                div().mt_2().flex().child(
+                    web_button(
+                        "life-import-csv",
+                        WebButtonVariant::Outline,
+                        WebButtonSize::Small,
+                        ButtonState::Enabled,
+                    )
+                    .debug_selector(|| "desktop-life-import-csv".into())
+                    .aria_label("Import rows")
+                    .child("Import rows")
+                    .on_click(cx.listener(|this, _event, window, cx| {
+                        this.import_life_csv(window, cx);
+                    })),
+                ),
+            )
+            .into_any_element()
     }
 
     /// Web `health_tab`'s grid: Workout, Sleep & recovery, Habits and the
@@ -1177,31 +1278,34 @@ impl Workspace {
                     .flex_col()
                     .gap_3()
                     .when_some(self.render_search_record_detail(cx), |page, detail| page.child(detail))
+                    .children(self.render_life_notice(cx))
                     .when(finance, |el| el.child(div().text_size(px(11.0)).text_color(theme::rambutan_500())
                         .child("Manual amounts are USD. Other currencies stay separate in minor units; no exchange rate is applied.")))
                     .child(div().flex().flex_wrap().gap_2().children(summary))
                     .child(self.render_life_privacy(cx))
                     .child(self.render_life_quick_add(compact, cx))
-                    // Web order: the record cards, then the finance sources;
-                    // the health sources share its grid.
+                    // Web order: the record cards, then CSV import and the
+                    // finance sources; the health sources share its grid.
                     .child(if finance {
                         self.render_finance_cards(two_columns, cx)
                     } else {
                         self.render_health_cards(two_columns, cx)
                     })
                     .when(finance, |page| {
-                        page.child(self.render_life_providers(width >= SOURCES_THREE_COLUMNS_PX))
+                        page.child(self.render_life_csv_import(cx))
+                            .child(self.render_life_providers(width >= SOURCES_THREE_COLUMNS_PX))
                     })
                     .child(self.render_life_insights(cx)),
             )
     }
 }
 
-/// The manual Finance / Health entry fields.
+/// The manual Finance / Health entry fields and the CSV paste.
 pub(super) struct LifeInputs {
     pub(super) life_name_input: Entity<InputState>,
     pub(super) life_value_input: Entity<InputState>,
     pub(super) life_category_input: Entity<InputState>,
+    pub(super) life_csv_input: Entity<InputState>,
 }
 
 impl Workspace {
@@ -1219,10 +1323,18 @@ impl Workspace {
         let life_category_input =
             cx.new(|cx| InputState::new(window, cx).placeholder("Category (optional)"));
         subscriptions.push(redraw_on_edit(&life_category_input, window, cx));
+        let life_csv_input = cx.new(|cx| {
+            InputState::new(window, cx)
+                .placeholder("Coffee, Food, -5.25, client meeting")
+                .multi_line(true)
+                .rows(4)
+        });
+        subscriptions.push(redraw_on_edit(&life_csv_input, window, cx));
         LifeInputs {
             life_name_input,
             life_value_input,
             life_category_input,
+            life_csv_input,
         }
     }
 }

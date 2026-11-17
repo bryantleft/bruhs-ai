@@ -1,6 +1,7 @@
-//! Web parity for the Life page: deleting a transaction, the holdings list
-//! and the sleep and recovery card, in the web's cards.
+//! Web parity for the Life page: CSV import, deleting a transaction, the
+//! holdings list and the sleep and recovery card, in the web's cards.
 
+use super::super::load_desktop_state_from_path;
 use super::super::performance_tests::fixture;
 use super::super::{AppView, DesktopLifeTab, Workspace};
 use bruhs_models::{FinanceTransaction, Holding, LifeContext, RecoveryLog, SleepLog};
@@ -45,6 +46,85 @@ fn merchants(workspace: &Workspace) -> Vec<String> {
         .iter()
         .map(|transaction| transaction.merchant.clone())
         .collect()
+}
+
+/// PM-14: like the web's CSV import card, pasted rows become transactions
+/// ahead of the older ones, the notice says how many, and the paste clears;
+/// a paste without a valid row stays for correction. The import is saved.
+#[gpui::test]
+async fn csv_import_adds_rows_first_and_says_how_many_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    let dir = std::env::temp_dir().join(format!("bruhs-life-csv-{}", uuid::Uuid::new_v4()));
+    let path = dir.join("state.json");
+    workspace.update(cx, |workspace, _| {
+        workspace.persistence_test_path = Some(path.clone());
+    });
+    let mut context = LifeContext::default();
+    context.finance.transactions.push(spend("Older", 1));
+    open_life(&workspace, cx, DesktopLifeTab::Finance, context);
+    assert!(bounds(cx, "desktop-life-csv").is_some());
+    assert!(bounds(cx, "desktop-life-notice").is_none());
+
+    let invalid = "merchant,category,amount\nBad,row,nope";
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .life_csv_input
+            .update(cx, |input, cx| input.set_value(invalid, window, cx));
+    });
+    click(cx, "desktop-life-import-csv");
+    workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(
+            workspace.life_notice.as_deref(),
+            Some("No valid CSV rows found.")
+        );
+        assert_eq!(merchants(workspace), ["Older"]);
+        assert_eq!(
+            workspace.life_csv_input.read(cx).value().as_str(),
+            invalid,
+            "the paste stays for correction"
+        );
+    });
+    assert!(bounds(cx, "desktop-life-notice").is_some());
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.life_csv_input.update(cx, |input, cx| {
+            input.set_value(
+                "Coffee, Food, -5.25, client meeting\nRent, Home, -1200",
+                window,
+                cx,
+            );
+        });
+    });
+    click(cx, "desktop-life-import-csv");
+    workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(
+            workspace.life_notice.as_deref(),
+            Some("Imported 2 transactions locally.")
+        );
+        assert_eq!(merchants(workspace), ["Coffee", "Rent", "Older"]);
+        let coffee = &workspace.life_context.finance.transactions[0];
+        assert_eq!(coffee.amount_minor, -525);
+        assert_eq!(coffee.category, "Food");
+        assert_eq!(coffee.note.as_deref(), Some("client meeting"));
+        assert!(workspace.life_csv_input.read(cx).value().is_empty());
+    });
+    assert!(
+        bounds(cx, "desktop-life-transaction-2").is_some(),
+        "the Transactions card lists the imported rows"
+    );
+    cx.condition(&workspace, |workspace, _| workspace.save_status.is_saved())
+        .await;
+    let saved = load_desktop_state_from_path(&path)
+        .unwrap()
+        .unwrap()
+        .life_context
+        .finance;
+    assert_eq!(saved.transactions.len(), 3);
+    assert_eq!(saved.transactions[1].amount_minor, -120_000);
+
+    click(cx, "desktop-life-notice-dismiss");
+    assert!(bounds(cx, "desktop-life-notice").is_none());
+    std::fs::remove_dir_all(dir).unwrap();
 }
 
 /// PM-15: like the web, each listed transaction has a ×, Delete
@@ -143,6 +223,10 @@ fn sleep_and_recovery_card_counts_logs_like_web(cx: &mut gpui::TestAppContext) {
     ] {
         assert!(bounds(cx, selector).is_some(), "{selector}");
     }
+    assert!(
+        bounds(cx, "desktop-life-csv").is_none(),
+        "CSV import is a finance card"
+    );
     workspace.update_in(cx, |workspace, window, cx| {
         assert_eq!(
             workspace.life_context.health.sleep_and_recovery_summary(),
