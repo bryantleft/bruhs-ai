@@ -421,6 +421,11 @@ pub(in crate::reactive) fn bruh_states(
             "SELECT COUNT(*) FROM reactive_outbox WHERE agent_id=?1 AND json_extract(payload,'$.kind')='ask' AND json_extract(payload,'$.resolved_at') IS NULL",
             &agent.id,
         )?;
+        let awaiting_review = count(
+            connection,
+            "SELECT COUNT(*) FROM reactive_runs WHERE agent_id=?1 AND status='awaiting_review'",
+            &agent.id,
+        )?;
         let running = count(
             connection,
             "SELECT COUNT(*) FROM reactive_runs WHERE agent_id=?1 AND status='running'",
@@ -436,7 +441,7 @@ pub(in crate::reactive) fn bruh_states(
             status: status_for(
                 agent.enabled,
                 profile.paused_at.is_some(),
-                open_asks > 0,
+                open_asks > 0 || awaiting_review > 0,
                 running > 0,
             ),
             agent_id: agent.id,

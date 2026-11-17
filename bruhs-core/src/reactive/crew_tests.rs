@@ -645,6 +645,31 @@ async fn run_count(runtime: &ReactiveRuntime, agent_id: &str) -> usize {
 }
 
 #[tokio::test]
+async fn a_run_awaiting_review_needs_the_owner() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    watch_inbox(&runtime, "a").await;
+    let mut subscription = runtime.snapshot().await.unwrap().subscriptions[0].clone();
+    subscription.auto_run = false;
+    runtime
+        .command(ReactiveCommand::Apply {
+            change: ReactiveChange::SaveSubscription { subscription },
+        })
+        .await
+        .unwrap();
+    assert_eq!(bruh_status(&runtime, "a").await, BruhStatus::Asleep);
+    runtime.publish("inbox", "mail-1", json!({})).await.unwrap();
+    let run = runtime.snapshot().await.unwrap().runs[0].clone();
+    assert_eq!(run.status, RunStatus::AwaitingReview);
+    assert_eq!(bruh_status(&runtime, "a").await, BruhStatus::NeedsYou);
+
+    runtime
+        .command(ReactiveCommand::CancelRun { id: run.id })
+        .await
+        .unwrap();
+    assert_eq!(bruh_status(&runtime, "a").await, BruhStatus::Asleep);
+}
+
+#[tokio::test]
 async fn stop_all_cancels_every_run_and_pauses_every_bruh() {
     let (_dir, runtime) = runtime_with(&[agent("a"), agent("b")]).await;
     let (running, queued) = running_and_queued(&runtime).await;

@@ -343,6 +343,14 @@ try {
   await viewport(1280, 800);
   record('screenshots saved', screenshots.every((file) => fs.statSync(file).size > 0), screenshots.map((file) => path.basename(file)).join(', '));
 
+  // A run awaiting review needs the owner: the row and the server say so.
+  const askerRow = `[data-crew-row=${js(ids.asker)}]`;
+  const needsYou = await until('Asker needs you', async () =>
+    (await snapshot()).bruhs.find((state) => state.agent_id === ids.asker)?.status === 'needs_you'
+      && await evaluate(`document.querySelector(${js(askerRow)})?.textContent.includes('Needs you') ?? false`)).catch(() => false);
+  record('a run awaiting review shows Needs you', !!needsYou,
+    `server ${(await snapshot()).bruhs.find((state) => state.agent_id === ids.asker)?.status}; row ${await evaluate(`document.querySelector(${js(askerRow)})?.textContent ?? ''`)}`);
+
   // 4. Settings: Pandan and Save leave the pending run as it was.
   const saveButton = `form[aria-label="Bruh settings"] button`;
   await click('[role="radiogroup"][aria-label="Face colour"] [aria-label="Pandan"]');
@@ -362,7 +370,9 @@ try {
     return status === 'cancelled' ? status : null;
   }).catch(async () => runStatus(pending.id));
   const level = (await snapshot()).bruhs.find((state) => state.agent_id === ids.asker)?.access.level;
-  record('changing access to Full cancels the run', afterAccess === 'cancelled' && level === 'full', `run ${afterAccess}; level ${level}`);
+  const askerAfter = (await snapshot()).bruhs.find((state) => state.agent_id === ids.asker)?.status;
+  record('changing access to Full cancels the run', afterAccess === 'cancelled' && level === 'full' && askerAfter !== 'needs_you',
+    `run ${afterAccess}; level ${level}; status ${askerAfter}`);
 
   // 6. ⌘. sends StopAll and every row says Paused; Resume all clears it.
   await press('.', 'Period', 190, META);

@@ -254,6 +254,7 @@ pub struct BruhState {
 }
 
 /// Status by priority: off, paused, needs you, working, asleep.
+/// `waiting_on_owner` is an open ask or approval, or a run awaiting review.
 #[must_use]
 pub fn status_for(
     enabled: bool,
