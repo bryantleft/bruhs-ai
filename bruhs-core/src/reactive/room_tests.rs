@@ -1056,3 +1056,30 @@ async fn a_room_run_cannot_be_retried() {
 }
 
 mod lifecycle_tests;
+
+#[tokio::test]
+async fn a_chat_can_name_its_run() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let chat = |run_id: &str| ReactiveCommand::Chat {
+        agent_id: "a".into(),
+        message: "Check the notes".into(),
+        run_id: Some(run_id.into()),
+    };
+    let snapshot = runtime.command(chat("r-1")).await.unwrap();
+    let run = find(&snapshot, "r-1");
+    assert_eq!(run.status, RunStatus::Queued);
+    assert_eq!(run.trigger, Some(RunTrigger::Chat));
+    assert_eq!(run.owner_message.as_deref(), Some("Check the notes"));
+
+    let repeated = runtime.command(chat("r-1")).await.unwrap_err();
+    assert!(
+        matches!(&repeated, ReactiveError::Conflict(message) if message == "A run with this ID already exists."),
+        "{repeated:?}"
+    );
+    assert!(matches!(
+        runtime.command(chat("bad/id")).await.unwrap_err(),
+        ReactiveError::Invalid(_)
+    ));
+    let runs = runtime.snapshot().await.unwrap().runs;
+    assert_eq!(runs.len(), 1);
+}

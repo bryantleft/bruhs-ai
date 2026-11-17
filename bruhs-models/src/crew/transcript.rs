@@ -6,6 +6,7 @@ use crate::reactive::{
     OutboxItem, OutboxKind, ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun, RunStatus,
     RunTrigger,
 };
+use crate::thread_link::parse_delivery;
 use crate::EpochMs;
 
 /// One line of a bruh's conversation.
@@ -25,6 +26,9 @@ pub enum TranscriptItem {
         at: EpochMs,
         /// The bruh has not answered yet.
         pending: bool,
+        /// Who sent it when another thread's agent did, as
+        /// [`crate::thread_link::DeliveryView::caption`] words it; `text` is then its body.
+        caption: Option<String>,
     },
     /// What the bruh said or reported.
     Bruh {
@@ -91,14 +95,17 @@ pub fn transcript(
     for run in runs.iter().filter(|run| run.agent_id == agent_id) {
         let chat = matches!(run.trigger, Some(RunTrigger::Chat));
         if is_owner_line(run) {
+            let said = run.owner_message.as_deref().unwrap_or(&run.prompt);
+            let (text, caption) = match parse_delivery(said) {
+                Some(view) => (view.body.to_string(), Some(view.caption())),
+                None => (said.to_string(), None),
+            };
             items.push(TranscriptItem::Owner {
                 run_id: run.id.clone(),
-                text: run
-                    .owner_message
-                    .clone()
-                    .unwrap_or_else(|| run.prompt.clone()),
+                text,
                 at: run.created_at,
                 pending: run.status.is_pending() || run.status == RunStatus::Running,
+                caption,
             });
         }
         if run.status == RunStatus::Merged {
@@ -332,7 +339,8 @@ mod tests {
                     run_id: "c1".into(),
                     text: "hi".into(),
                     at: at(1),
-                    pending: false
+                    pending: false,
+                    caption: None
                 },
                 TranscriptItem::Bruh {
                     run_id: "c1".into(),
@@ -352,10 +360,47 @@ mod tests {
                     run_id: "c2".into(),
                     text: "and this".into(),
                     at: at(5),
-                    pending: false
+                    pending: false,
+                    caption: None
                 },
                 TranscriptItem::Card { item: approval },
             ]
+        );
+    }
+
+    #[test]
+    fn a_message_from_a_thread_reads_as_its_body_under_a_caption() {
+        let prompt = crate::thread_link::delivery_prompt("Plan", "11111111", 1, 6, false, "check");
+        let mut sent = chat("c1", "queued", 1, 1, &prompt);
+        sent.owner_message = Some(prompt);
+        let mut waited = chat(
+            "c2",
+            "completed",
+            2,
+            2,
+            &crate::thread_link::delivery_prompt("Plan", "11111111", 1, 6, true, "sum"),
+        );
+        waited.result = Some("4".into());
+        let got = transcript("a", &[sent, waited], &[]);
+        assert_eq!(
+            got[0],
+            TranscriptItem::Owner {
+                run_id: "c1".into(),
+                text: "check".into(),
+                at: at(1),
+                pending: true,
+                caption: Some("From thread “Plan”".into()),
+            }
+        );
+        assert!(matches!(
+            &got[1],
+            TranscriptItem::Owner { text, caption: Some(caption), .. }
+                if text == "sum" && caption == "From thread “Plan”. Waiting for this reply"
+        ));
+        // The owner's own words carry no caption.
+        let typed = transcript("a", &[chat("c3", "queued", 1, 1, "hi")], &[]);
+        assert!(
+            matches!(&typed[0], TranscriptItem::Owner { caption: None, text, .. } if text == "hi")
         );
     }
 
@@ -370,7 +415,8 @@ mod tests {
                 run_id: "c1".into(),
                 text: "first".into(),
                 at: at(1),
-                pending: true
+                pending: true,
+                caption: None
             }]
         );
     }

@@ -73,6 +73,8 @@ pub struct ThreadLink {
     hops: RwSignal<u32>,
     /// The user's roles: what a new thread can start with.
     roles: RwSignal<RoleBook>,
+    /// The crew as the service last reported it: the bruhs a turn can message.
+    bruhs: RwSignal<Vec<bruhs_models::crew::BruhState>>,
     /// The chat page is mounted. It owns the turn lifecycle, so a queued
     /// message can only start while it is.
     chat_mounted: RwSignal<bool>,
@@ -166,6 +168,7 @@ impl ThreadLink {
             saves: expect_context(),
             hops: expect_context::<crate::state::ThreadHopsSignal>().0,
             roles: expect_context::<crate::state::RolesSignal>().0,
+            bruhs: expect_context::<crate::agent_updates::AgentUpdates>().bruhs,
             chat_mounted: RwSignal::new(false),
             waits: StoredValue::new(Vec::new()),
         };
@@ -243,6 +246,9 @@ impl ThreadLink {
                         // Held: answered when the recipient's turn ends.
                         None => return,
                     }
+                }
+                ThreadOperation::MessageBruh { .. } => {
+                    ThreadReply::refused("Not sent: this app can't message bruhs yet.")
                 }
             };
             Self::post(request.thread_id, request.id, reply);
@@ -348,6 +354,7 @@ impl ThreadLink {
         let threads = self.threads.get_untracked();
         let running = self.turns.running_untracked();
         let roles = self.roles.get_untracked();
+        let bruhs = self.bruhs.get_untracked();
         // Roles as they run in the caller's project.
         let project = threads
             .iter()
@@ -359,6 +366,7 @@ impl ThreadLink {
                 &cards(&threads, &running, queue, &roles),
                 caller,
                 &roles.resolved(project),
+                &bruhs,
             )
         })
     }

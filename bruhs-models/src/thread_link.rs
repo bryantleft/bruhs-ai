@@ -24,6 +24,9 @@ use crate::agent::model_label;
 use crate::ids::ThreadId;
 use crate::roles::{ResolvedRole, RoleBook, MAX_NAME_CHARS};
 
+mod bruh_message;
+pub use bruh_message::*;
+
 /// Longest chain of agent-to-agent messages after the user's own prompt,
 /// unless the user picks another of [`HOP_CHOICES`].
 pub const MAX_HOPS: u32 = 6;
@@ -45,6 +48,8 @@ pub const MAX_TITLE_CHARS: usize = 80;
 const MAX_REFERENCE_BYTES: usize = crate::ids::MAX_ID_LEN;
 /// Characters of one message kept in a `read_thread` reply.
 const READ_MESSAGE_CHARS: usize = 4_000;
+/// Longest bruh name or id `message_bruh` accepts, in bytes.
+const MAX_BRUH_REFERENCE_BYTES: usize = 128;
 /// Characters of messages one `read_thread` reply holds in total.
 const READ_TOTAL_CHARS: usize = 16_000;
 /// Characters of a waited-for answer returned to the sender.
@@ -142,18 +147,30 @@ pub enum ThreadOperation {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         role: Option<String>,
     },
+    /// Hand work to a bruh, an always-on agent, by its name or id. It runs
+    /// in the bruh's own chat, with the bruh's memory and access.
+    MessageBruh {
+        name_or_id: String,
+        message: String,
+        /// Hold the tool call until the bruh has replied.
+        #[serde(default, skip_serializing_if = "is_false")]
+        wait: bool,
+    },
 }
 
 impl ThreadOperation {
     /// Whether the operation changes anything. Read-only turns get the rest.
     pub const fn writes(&self) -> bool {
-        matches!(self, Self::Message { .. })
+        matches!(self, Self::Message { .. } | Self::MessageBruh { .. })
             || matches!(self, Self::Whiteboard { request, .. } if request.writes())
     }
 
     /// Whether the caller asked to wait for the recipient's reply.
     pub const fn waits(&self) -> bool {
-        matches!(self, Self::Message { wait: true, .. })
+        matches!(
+            self,
+            Self::Message { wait: true, .. } | Self::MessageBruh { wait: true, .. }
+        )
     }
 
     /// Reject what no client could answer, before it reaches one.
@@ -197,16 +214,31 @@ impl ThreadOperation {
                 {
                     return Err("title is too long.");
                 }
-                if message.trim().is_empty() {
-                    return Err("message is empty.");
+                valid_message(message)
+            }
+            Self::MessageBruh {
+                name_or_id,
+                message,
+                ..
+            } => {
+                if name_or_id.trim().is_empty() || name_or_id.len() > MAX_BRUH_REFERENCE_BYTES {
+                    return Err("name_or_id is not a bruh name or id.");
                 }
-                if message.chars().count() > MAX_MESSAGE_CHARS {
-                    return Err("message is too long.");
-                }
-                Ok(())
+                valid_message(message)
             }
         }
     }
+}
+
+/// A message one agent may send another: not blank, not too long.
+fn valid_message(message: &str) -> Result<(), &'static str> {
+    if message.trim().is_empty() {
+        return Err("message is empty.");
+    }
+    if message.chars().count() > MAX_MESSAGE_CHARS {
+        return Err("message is too long.");
+    }
+    Ok(())
 }
 
 /// One pending request, streamed to the app that owns the calling thread.
@@ -438,8 +470,13 @@ pub fn resolve_thread<'a>(reference: &str, ids: &[&'a str]) -> Result<&'a str, T
 }
 
 /// The `list_threads` reply. `threads` is most recent first; `caller` is the
-/// id of the thread that asked.
-pub fn list_reply(threads: &[ThreadCard<'_>], caller: &str, roles: &[ResolvedRole]) -> ThreadReply {
+/// id of the thread that asked. `bruhs` is the crew `message_bruh` reaches.
+pub fn list_reply(
+    threads: &[ThreadCard<'_>],
+    caller: &str,
+    roles: &[ResolvedRole],
+    bruhs: &[crate::crew::BruhState],
+) -> ThreadReply {
     let ids: Vec<&str> = threads.iter().map(|thread| thread.id).collect();
     let mut text =
         String::from("Threads, most recent first (id · title · project · state · model · role):\n");
@@ -475,6 +512,18 @@ pub fn list_reply(threads: &[ThreadCard<'_>], caller: &str, roles: &[ResolvedRol
         text.push_str("\nRoles a new thread can start with (message_thread's role, by name):\n");
         for role in roles {
             text.push_str(&role_line(role));
+        }
+    }
+    if !bruhs.is_empty() {
+        let ids: Vec<&str> = bruhs.iter().map(|bruh| bruh.agent_id.as_str()).collect();
+        text.push_str("\nBruhs (always-on agents; message one with message_bruh by name):\n");
+        for bruh in bruhs {
+            text.push_str(&format!(
+                "{} · {} · {}\n",
+                header_title(&bruh.name),
+                short_id(&bruh.agent_id, &ids),
+                bruh.status.label().to_lowercase(),
+            ));
         }
     }
     ThreadReply::ok(text)
@@ -651,6 +700,13 @@ pub fn next_hop(hops: u32, max_hops: u32) -> Option<u32> {
     hops.checked_add(1).filter(|next| *next <= max_hops)
 }
 
+/// The refusal once a chain of agent messages reached the user's limit.
+fn hop_limit_reply(max_hops: u32) -> ThreadReply {
+    ThreadReply::refused(format!(
+        "Not sent: this conversation between threads reached its limit of {max_hops} messages without the user. Summarize where things stand and let the user decide what happens next."
+    ))
+}
+
 /// Decide a `message_thread` call.
 ///
 /// # Errors
@@ -660,9 +716,7 @@ pub fn next_hop(hops: u32, max_hops: u32) -> Option<u32> {
 pub fn plan_message(outgoing: &Outgoing<'_>) -> Result<Delivery, ThreadReply> {
     let max_hops = outgoing.max_hops;
     let Some(hops) = next_hop(prompt_hops(outgoing.caller_prompt), max_hops) else {
-        return Err(ThreadReply::refused(format!(
-            "Not sent: this conversation between threads reached its limit of {max_hops} messages without the user. Summarize where things stand and let the user decide what happens next."
-        )));
+        return Err(hop_limit_reply(max_hops));
     };
     let recipient = match outgoing.thread_id {
         Some(reference) => {
@@ -922,6 +976,7 @@ mod tests {
             ],
             A,
             &[],
+            &[],
         );
         assert!(reply.ok);
         assert!(reply.text.contains(
@@ -931,6 +986,29 @@ mod tests {
             "22222222 · Research · bruhs-ai · running, 2 queued · Claude Sonnet 4.6 · Writer\n"
         ));
         assert!(!reply.text.contains("Roles a new thread can start with"));
+        assert!(!reply.text.contains("Bruhs"));
+    }
+
+    #[test]
+    fn list_names_the_bruhs_a_thread_can_message() {
+        let bruh = |id: &str, name: &str, status| crate::crew::BruhState {
+            agent_id: id.into(),
+            name: name.into(),
+            look: crate::crew::BruhLook::default(),
+            access: crate::crew::BruhAccess::default(),
+            effort: None,
+            status,
+            next_wake_ms: None,
+            unread: 0,
+        };
+        let crew = [
+            bruh(A, "Ada", crate::crew::BruhStatus::NeedsYou),
+            bruh("b9", "Bo", crate::crew::BruhStatus::Asleep),
+        ];
+        let reply = list_reply(&[], A, &roles().resolved(""), &crew);
+        assert!(reply.text.ends_with(
+            "Executor · the sender's model\n\nBruhs (always-on agents; message one with message_bruh by name):\nAda · 11111111 · needs you\nBo · b9 · asleep\n"
+        ));
     }
 
     fn roles() -> RoleBook {
@@ -946,7 +1024,7 @@ mod tests {
 
     #[test]
     fn list_names_the_roles_a_new_thread_can_start_with() {
-        let reply = list_reply(&[], A, &roles().resolved(""));
+        let reply = list_reply(&[], A, &roles().resolved(""), &[]);
         assert!(reply.text.ends_with(
             "\nRoles a new thread can start with (message_thread's role, by name):\nWriter · Claude Sonnet 4.6 · drafting prose\nExecutor · the sender's model\n"
         ));
@@ -1008,7 +1086,7 @@ mod tests {
                 role: None,
             })
             .collect();
-        let reply = list_reply(&cards, "none", &[]);
+        let reply = list_reply(&cards, "none", &[], &[]);
         assert_eq!(reply.text.matches(" · idle · ").count(), LIST_LIMIT);
         assert!(reply.text.ends_with("3 older threads not shown.\n"));
     }

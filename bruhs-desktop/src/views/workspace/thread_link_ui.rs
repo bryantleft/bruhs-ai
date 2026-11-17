@@ -270,6 +270,9 @@ impl Workspace {
                 window,
                 cx,
             ),
+            ThreadOperation::MessageBruh { .. } => ThreadAnswer::Now(ThreadReply::refused(
+                "Not sent: this app can't message bruhs yet.",
+            )),
         }
     }
 
@@ -304,7 +307,12 @@ impl Workspace {
             .find(|thread| thread.id == caller)
             .map(|thread| thread.project_name.as_str())
             .unwrap_or_default();
-        list_reply(&cards, caller, &self.roles.resolved(project))
+        list_reply(
+            &cards,
+            caller,
+            &self.roles.resolved(project),
+            self.reactive_automations.read(cx).crew(),
+        )
     }
 
     fn thread_read_reply(

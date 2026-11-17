@@ -51,6 +51,8 @@ const WAIT: Duration = Duration::from_secs(60 * 60);
 /// The tools that change nothing; a turn never has to ask before using them.
 const READ_TOOLS: [&str; 2] = ["list_threads", "read_thread"];
 const WRITE_TOOL: &str = "message_thread";
+/// Hands work to a bruh. A write, offered where `message_thread` is.
+const BRUH_TOOL: &str = "message_bruh";
 mod whiteboards;
 
 /// Why an answer was not delivered.
@@ -384,6 +386,7 @@ impl ThreadBroker {
                     .iter()
                     .chain(whiteboards::READS.iter())
                     .chain((!self.connection.read_only).then_some(&WRITE_TOOL))
+                    .chain((!self.connection.read_only).then_some(&BRUH_TOOL))
                     .chain((!self.connection.read_only).then_some(&whiteboards::WRITE))
                     .map(|tool| format!("{tool} = {{ approval_mode = \"approve\" }}"))
                     .collect();
@@ -565,11 +568,22 @@ fn tools(connection: &Connection) -> Value {
             "role": {"type": "string", "description": "For a new thread: the name of a role from list_threads. The thread runs on that role's model and instructions."},
             "message": {"type": "string", "description": "Self-contained: the other agent sees none of this conversation."}
         });
-        let returns = if connection.can_wait {
+        let mut bruh_properties = json!({
+            "name_or_id": {"type": "string", "description": "The bruh's name, or its id from list_threads."},
+            "message": {"type": "string", "description": "Self-contained: the bruh sees none of this conversation."}
+        });
+        let (returns, bruh_returns) = if connection.can_wait {
             properties["wait"] = json!({"type": "boolean", "description": "Hold this call until that thread has replied and return its reply. Use it when you need the answer to continue. Default false."});
-            "Returns at once unless wait is true; without wait, any answer arrives later as a new message in this thread, so never poll for it."
+            bruh_properties["wait"] = json!({"type": "boolean", "description": "Hold this call until the bruh has replied and return its reply. Use it when you need the answer to continue. Default false."});
+            (
+                "Returns at once unless wait is true; without wait, any answer arrives later as a new message in this thread, so never poll for it.",
+                "Returns at once unless wait is true; without wait, its answer stays in the bruh's chat and does not come back here.",
+            )
         } else {
-            "Returns at once; any answer arrives later as a new message in this thread, so never wait or poll for it."
+            (
+                "Returns at once; any answer arrives later as a new message in this thread, so never wait or poll for it.",
+                "Returns at once; its answer stays in the bruh's chat and does not come back here.",
+            )
         };
         tools.push(json!({
             "name": WRITE_TOOL,
@@ -577,6 +591,14 @@ fn tools(connection: &Connection) -> Value {
             "inputSchema": {
                 "type": "object", "additionalProperties": false, "required": ["message"],
                 "properties": properties
+            }
+        }));
+        tools.push(json!({
+            "name": BRUH_TOOL,
+            "description": format!("Hand work to a bruh, an always-on agent from list_threads, by name. It runs in the bruh's own chat with its memory and access. {bruh_returns}"),
+            "inputSchema": {
+                "type": "object", "additionalProperties": false, "required": ["name_or_id", "message"],
+                "properties": bruh_properties
             }
         }));
     }
@@ -643,6 +665,7 @@ async fn call_tool(connection: &Connection, params: &Value) -> Value {
         Some("list_threads") => "list",
         Some("read_thread") => "read",
         Some(WRITE_TOOL) if !connection.read_only => "message",
+        Some(BRUH_TOOL) if !connection.read_only => "message_bruh",
         _ => return tool_result(&ThreadReply::refused("Unknown thread tool.")),
     };
     let mut arguments = match &params["arguments"] {
@@ -982,6 +1005,7 @@ mod tests {
                 "list_threads",
                 "read_thread",
                 "message_thread",
+                "message_bruh",
                 "list_whiteboards",
                 "read_whiteboard",
                 "whiteboard_proposal_status",
@@ -1003,7 +1027,9 @@ mod tests {
                     assert_eq!((title.as_deref(), message.as_str()), (Some("T"), "hi"));
                     ("not sent", false)
                 }
-                ThreadOperation::List | ThreadOperation::Whiteboard { .. } => {
+                ThreadOperation::List
+                | ThreadOperation::Whiteboard { .. }
+                | ThreadOperation::MessageBruh { .. } => {
                     panic!("unexpected operation")
                 }
             };
@@ -1069,6 +1095,109 @@ mod tests {
         .await;
         assert_eq!(result["isError"], true);
         assert_eq!(result["content"][0]["text"], "Unknown thread tool.");
+    }
+
+    #[tokio::test]
+    async fn message_bruh_is_offered_only_where_the_turn_may_write() {
+        let bruh = |wait: bool| ThreadOperation::MessageBruh {
+            name_or_id: "Bo".into(),
+            message: "check".into(),
+            wait,
+        };
+        for can_wait in [true, false] {
+            let mut turn = turn_in(ThreadLinks::default().with_waits(can_wait));
+            let broker = turn.scope.start(false).await.unwrap();
+            let listed = tools(&broker.connection);
+            let send = listed["tools"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|tool| tool["name"] == BRUH_TOOL)
+                .expect("a writing turn gets message_bruh");
+            assert_eq!(
+                send["inputSchema"]["required"],
+                json!(["name_or_id", "message"])
+            );
+            assert_eq!(
+                send["inputSchema"]["properties"]["wait"].is_object(),
+                can_wait
+            );
+            assert!(send["description"].as_str().unwrap().starts_with(
+                "Hand work to a bruh, an always-on agent from list_threads, by name."
+            ));
+            assert!(send.get("annotations").is_none());
+
+            // The helper relays it, with wait only where the app can wait.
+            let connection = broker.connection.clone();
+            let called = tokio::spawn(async move {
+                call_tool(
+                    &connection,
+                    &json!({"name": "message_bruh", "arguments": {"name_or_id": "Bo", "message": "check", "wait": true}}),
+                )
+                .await
+            });
+            let request = next_request(&mut turn.events).await;
+            assert_eq!(request.operation, bruh(can_wait));
+            turn.links
+                .resolve(&turn.thread_id, &request.id, ThreadReply::ok("Sent to Bo."))
+                .unwrap();
+            let result = called.await.unwrap();
+            assert_eq!(result["isError"], false);
+            assert_eq!(result["content"][0]["text"], "Sent to Bo.");
+        }
+
+        // A read-only turn neither lists nor relays it, and its broker
+        // refuses one sent straight to it.
+        let mut turn = turn_in(ThreadLinks::default().with_waits(true));
+        let broker = turn.scope.start(true).await.unwrap();
+        assert!(tools(&broker.connection)["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .all(|tool| tool["name"] != BRUH_TOOL));
+        let result = call_tool(
+            &broker.connection,
+            &json!({"name": "message_bruh", "arguments": {"name_or_id": "Bo", "message": "check"}}),
+        )
+        .await;
+        assert_eq!(result["content"][0]["text"], "Unknown thread tool.");
+        let refused = call(&broker.connection, bruh(false)).await.unwrap();
+        assert!(!refused.ok);
+        assert_eq!(
+            refused.text,
+            "Not sent: this turn is read-only. The user can allow edits to let it message other threads."
+        );
+        assert!(turn.events.try_recv().is_err());
+
+        // Codex lists it, approved, only when the turn may write.
+        for read_only in [false, true] {
+            let turn = turn_in(ThreadLinks::default());
+            let broker = turn.scope.start(read_only).await.unwrap();
+            let mut options = ProviderQueryOptions::Codex(codex_sdk_rs::QueryOptions::new("hello"));
+            broker.configure(&mut options).unwrap();
+            let ProviderQueryOptions::Codex(options) = options else {
+                panic!("expected Codex");
+            };
+            assert_eq!(
+                options.config[0]
+                    .value()
+                    .contains("message_bruh = { approval_mode = \"approve\" }"),
+                !read_only
+            );
+        }
+
+        // Claude never preapproves it: it follows the turn's permission mode.
+        let turn = turn_in(ThreadLinks::default());
+        let broker = turn.scope.start(false).await.unwrap();
+        let mut options = ProviderQueryOptions::Claude(claude_sdk_rs::QueryOptions::new("hello"));
+        broker.configure(&mut options).unwrap();
+        let ProviderQueryOptions::Claude(claude) = options else {
+            panic!("expected Claude");
+        };
+        let claude_sdk_rs::Tools::Allow(allowed) = &claude.tools else {
+            panic!("expected an allow list");
+        };
+        assert!(!allowed.iter().any(|tool| tool.ends_with("message_bruh")));
     }
 
     #[tokio::test]

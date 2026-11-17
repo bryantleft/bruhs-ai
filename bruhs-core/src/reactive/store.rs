@@ -832,9 +832,24 @@ pub(super) fn command(
             ReactiveCommand::Chat {
                 agent_id,
                 message,
-                run_id: _,
+                run_id,
             } => {
                 text(&message, "Agent message", true)?;
+                // A client that names the run can find it again: an app
+                // waiting for a bruh's answer to a thread's message.
+                if let Some(id) = &run_id {
+                    valid_id(id)?;
+                    let taken: bool = connection.query_row(
+                        "SELECT EXISTS(SELECT 1 FROM reactive_runs WHERE id=?1)",
+                        [id],
+                        |row| row.get(0),
+                    )?;
+                    if taken {
+                        return Err(ReactiveError::Conflict(
+                            "A run with this ID already exists.".into(),
+                        ));
+                    }
+                }
                 let agent = enabled_agent(connection, &agent_id)?;
                 queue_capacity(connection)?;
                 let mut run = new_run(
@@ -846,6 +861,9 @@ pub(super) fn command(
                     RunStatus::Queued,
                     0,
                 )?;
+                if let Some(id) = run_id {
+                    run.id = id;
+                }
                 run.trigger = Some(RunTrigger::Chat);
                 run.owner_message = Some(message);
                 save_run(connection, &run)?;
