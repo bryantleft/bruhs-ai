@@ -9,13 +9,15 @@ use super::{
 use bruhs_models::{
     crew::{
         room::{
-            check_room, handoff_failed_line, handoff_stopped_line, recipients, room_next_hop,
-            room_order, room_prompt, skipped_line, stopped_line, Room, RoomAuthor, RoomMember,
-            RoomMessage, RoomState, FORMER_BRUH, ROOM_CONTEXT_MESSAGES,
+            check_room, handoff_failed_line, handoff_stopped_line, left_line, recipients,
+            room_next_hop, room_order, room_prompt, skipped_line, stopped_line, Room, RoomAuthor,
+            RoomMember, RoomMessage, RoomState, FORMER_BRUH, ROOM_CONTEXT_MESSAGES,
         },
         BruhStatus, STOPPED_LINE,
     },
-    reactive::{ReactiveAgent, ReactiveRun, RunStatus, RunTrigger, HISTORY_LIMIT},
+    reactive::{
+        OutboxItem, ReactiveAgent, ReactiveRun, RunOutcome, RunStatus, RunTrigger, HISTORY_LIMIT,
+    },
     weekly_reports::managed_preset_id,
     EpochMs,
 };
@@ -91,7 +93,8 @@ pub(in crate::reactive) fn delete_room(
     Ok(())
 }
 
-/// Cancel the live runs in a room, for one member or all of them.
+/// Cancel the live runs in a room, for one member or all of them, and
+/// withdraw their approvals so a late answer can't resume them.
 fn cancel(
     connection: &Connection,
     room_id: &str,
@@ -110,8 +113,90 @@ fn cancel(
         run.updated_at = EpochMs::now();
         run.error = Some(reason.into());
         save_run(connection, &run)?;
+        crew::withdraw_run_approvals(connection, &run.id)?;
     }
     Ok(())
+}
+
+/// A deleted bruh leaves every room it was in: it is no longer a member or
+/// the lead, and each room it was in says so.
+pub(in crate::reactive) fn remove_bruh(
+    connection: &Connection,
+    agent_id: &str,
+    name: &str,
+) -> Result<(), ReactiveError> {
+    for mut room in records::<Room>(connection, "reactive_rooms")? {
+        let member = room.members.iter().any(|id| id == agent_id);
+        let lead = room.lead.as_deref() == Some(agent_id);
+        if !member && !lead {
+            continue;
+        }
+        room.members.retain(|id| id != agent_id);
+        if lead {
+            room.lead = None;
+        }
+        save(connection, "reactive_rooms", &room.id, &room)?;
+        if member {
+            append(
+                connection,
+                &room.id,
+                RoomAuthor::System,
+                left_line(name),
+                Extra::default(),
+            )?;
+        }
+    }
+    Ok(())
+}
+
+/// A room run asked the owner something (a question or an approval): the
+/// room shows it as a card beside the bruh's other lines.
+pub(in crate::reactive) fn ask_opened(
+    connection: &Connection,
+    run: &ReactiveRun,
+    item: &OutboxItem,
+) -> Result<(), ReactiveError> {
+    let Some(room_id) = run.trigger.as_ref().and_then(RunTrigger::room_id) else {
+        return Ok(());
+    };
+    let text = if item.message.trim().is_empty() {
+        item.title.clone()
+    } else {
+        item.message.clone()
+    };
+    append(
+        connection,
+        room_id,
+        RoomAuthor::Bruh {
+            agent_id: run.agent_id.clone(),
+        },
+        text,
+        Extra {
+            run_id: Some(run.id.clone()),
+            outbox_id: Some(item.id.clone()),
+            ..Extra::default()
+        },
+    )?;
+    Ok(())
+}
+
+/// The trigger for the run a late answer queues: a room run's own room and
+/// hop, marked resumed so it keeps the owner's answer as its prompt.
+pub(in crate::reactive) fn resume_trigger(original: &ReactiveRun) -> Option<RunTrigger> {
+    match &original.trigger {
+        Some(RunTrigger::Room {
+            room_id,
+            message_id,
+            hop,
+            ..
+        }) => Some(RunTrigger::Room {
+            room_id: room_id.clone(),
+            message_id: message_id.clone(),
+            hop: *hop,
+            resumed: true,
+        }),
+        _ => None,
+    }
 }
 
 /// The owner posts in a room: the message is kept, and the bruhs it reaches
@@ -301,13 +386,9 @@ pub(in crate::reactive) fn on_run_saved(
     let me = || RoomAuthor::Bruh {
         agent_id: run.agent_id.clone(),
     };
-    let or_stopped = |text: Option<&String>| {
-        text.filter(|text| !text.trim().is_empty())
-            .map_or_else(|| STOPPED_LINE.to_owned(), Clone::clone)
-    };
     let (author, text, failed) = match run.status {
-        RunStatus::Completed => (me(), or_stopped(run.result.as_ref()), false),
-        RunStatus::Failed | RunStatus::Interrupted => (me(), or_stopped(run.error.as_ref()), true),
+        RunStatus::Completed => (me(), reply_text(run), false),
+        RunStatus::Failed | RunStatus::Interrupted => (me(), failure_text(run), true),
         RunStatus::Cancelled => {
             let name = get::<ReactiveAgent>(connection, "reactive_agents", &run.agent_id)?
                 .map_or_else(|| FORMER_BRUH.to_owned(), |agent| agent.name);
@@ -369,6 +450,38 @@ pub(in crate::reactive) fn on_run_saved(
         }
     }
     Ok(())
+}
+
+fn said(text: &str) -> Option<String> {
+    (!text.trim().is_empty()).then(|| text.to_owned())
+}
+
+/// What a finished room run says: its reply or, when it wrote none, what its
+/// report tells the owner (a room run's update gets no card of its own).
+fn reply_text(run: &ReactiveRun) -> String {
+    run.result
+        .as_deref()
+        .and_then(said)
+        .or_else(|| {
+            run.report
+                .as_ref()
+                .filter(|report| report.outcome != RunOutcome::Silent)
+                .and_then(|report| said(&report.message).or_else(|| said(&report.title)))
+        })
+        .unwrap_or_else(|| STOPPED_LINE.to_owned())
+}
+
+/// What a failed room run says. A room run can't be retried (the owner
+/// posts again), so an error that says to retry reads as stopped.
+fn failure_text(run: &ReactiveRun) -> String {
+    run.error
+        .as_deref()
+        .and_then(said)
+        .filter(|error| {
+            let error = error.to_lowercase();
+            !error.contains("retry") && !error.contains("retried")
+        })
+        .unwrap_or_else(|| STOPPED_LINE.to_owned())
 }
 
 /// The envelope a room run starts with: the room as it reads now. A run

@@ -1054,3 +1054,5 @@ async fn a_room_run_cannot_be_retried() {
     );
     assert_eq!(run(&runtime, &id).await.status, RunStatus::Cancelled);
 }
+
+mod lifecycle_tests;

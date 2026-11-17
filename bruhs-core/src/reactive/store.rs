@@ -712,6 +712,7 @@ fn apply(connection: &Connection, change: &ReactiveChange) -> Result<(), Reactiv
             )?;
         }
         ReactiveChange::DeleteAgent { id } => {
+            let agent: ReactiveAgent = required(connection, "reactive_agents", id, "agent")?;
             cancel_where(connection, "agent_id", id)?;
             for subscription in records::<Subscription>(connection, "reactive_subscriptions")?
                 .into_iter()
@@ -722,6 +723,8 @@ fn apply(connection: &Connection, change: &ReactiveChange) -> Result<(), Reactiv
                     [subscription.id],
                 )?;
             }
+            // After the cancels, so each room's stopped line comes first.
+            rooms::remove_bruh(connection, id, &agent.name)?;
             connection.execute("DELETE FROM reactive_agents WHERE id=?1", [id])?;
             always_on::delete_agent(connection, id)?;
             crew::delete(connection, id)?;

@@ -119,6 +119,8 @@ fn create_item(
         approval: None,
     };
     // A retried run reuses its receipt; its earlier update stays the record.
+    // Approvals the run opened don't count: `save_item` keys them by their
+    // own id, so they never match the run's.
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM reactive_outbox WHERE run_id=?1)",
         [&run.id],
@@ -126,6 +128,9 @@ fn create_item(
     )?;
     if !exists {
         save_item(connection, &item)?;
+        if kind == OutboxKind::Ask {
+            super::rooms::ask_opened(connection, run, &item)?;
+        }
     }
     Ok(())
 }
@@ -206,9 +211,13 @@ pub(super) fn answer(
             item.title, item.message
         );
         let mut run = new_run(connection, &agent, prompt, None, None, RunStatus::Queued, 0)?;
-        run.trigger = Some(RunTrigger::Answer {
-            outbox_id: item.id.clone(),
-        });
+        // A room run resumes in its room.
+        run.trigger = get::<ReactiveRun>(connection, "reactive_runs", &item.run_id)?
+            .as_ref()
+            .and_then(super::rooms::resume_trigger)
+            .or(Some(RunTrigger::Answer {
+                outbox_id: item.id.clone(),
+            }));
         save_run(connection, &run)?;
     }
     let now = EpochMs::now();

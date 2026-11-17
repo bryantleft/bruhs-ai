@@ -3,8 +3,8 @@
 //! its runs or its provider session.
 
 use super::{
-    always_on, cancel_runs, decode, enabled_agent, encode, new_run, queue_capacity, records,
-    required, run_record, save_run, ReactiveError,
+    always_on, cancel_runs, decode, enabled_agent, encode, get, new_run, queue_capacity, records,
+    required, rooms, run_record, save_run, ReactiveError,
 };
 use crate::reactive::clock;
 use bruhs_models::{
@@ -241,6 +241,7 @@ pub(in crate::reactive) fn open_approval(
         }),
     };
     always_on::save_item(connection, &item)?;
+    rooms::ask_opened(connection, run, &item)?;
     Ok(item.id)
 }
 
@@ -308,9 +309,13 @@ pub(in crate::reactive) fn decide_approval(
             format!("The owner denied your request: {summary}. Continue without it.")
         };
         let mut run = new_run(connection, &agent, prompt, None, None, RunStatus::Queued, 0)?;
-        run.trigger = Some(RunTrigger::Answer {
-            outbox_id: item.id.clone(),
-        });
+        // A room run resumes in its room.
+        run.trigger = get::<ReactiveRun>(connection, "reactive_runs", &item.run_id)?
+            .as_ref()
+            .and_then(rooms::resume_trigger)
+            .or(Some(RunTrigger::Answer {
+                outbox_id: item.id.clone(),
+            }));
         save_run(connection, &run)?;
         if approve {
             connection.execute(
@@ -394,6 +399,30 @@ pub(in crate::reactive) fn expire_run_approvals(
         if let Some(request) = item.approval.as_mut() {
             request.state = ApprovalState::Expired;
         }
+        skip_system(&mut item);
+        always_on::save_item(connection, &item)?;
+    }
+    Ok(())
+}
+
+/// Withdraw every approval of a run that was cancelled, waiting or expired,
+/// so a late answer can't resume it.
+pub(in crate::reactive) fn withdraw_run_approvals(
+    connection: &Connection,
+    run_id: &str,
+) -> Result<(), ReactiveError> {
+    let mut statement = connection.prepare(
+        "SELECT payload FROM reactive_outbox WHERE json_extract(payload,'$.run_id')=?1 AND json_extract(payload,'$.approval') IS NOT NULL AND json_extract(payload,'$.resolved_at') IS NULL",
+    )?;
+    let rows = statement.query_map([run_id], |row| row.get::<_, String>(0))?;
+    let items = rows
+        .map(|row| decode::<OutboxItem>(row?))
+        .collect::<Result<Vec<_>, _>>()?;
+    for mut item in items {
+        if let Some(request) = item.approval.as_mut() {
+            request.state = ApprovalState::Denied;
+        }
+        item.resolved_at = Some(EpochMs::now());
         skip_system(&mut item);
         always_on::save_item(connection, &item)?;
     }
