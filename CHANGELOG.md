@@ -145,6 +145,11 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   Overdue, Waiting on, Follow ups and Decisions sit in one row, each with its
   colored dot. The local focus suggestion reads the same in both apps and
   counts only unfinished tasks.
+- A conversation in the desktop Inbox now reads like the web's: its source
+  and participants sit under the title, its actions are outlined buttons,
+  messages sit in a centered column, and the reply box is three lines tall
+  with the "⌘↵ log reply, drafts stay local" hint. Command Enter logs the
+  reply, as on the web.
 - A follow-up on Today opens that person's profile, on the web and in the
   desktop app, instead of only the People page.
 - Removed the workflow overview and What's new sections from the landing

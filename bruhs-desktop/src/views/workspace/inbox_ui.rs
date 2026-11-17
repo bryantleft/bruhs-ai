@@ -10,6 +10,16 @@ use super::*;
 
 /// The Linked person dropdown's trigger and options.
 const LINKED_PERSON_DROPDOWN_ID: &str = "desktop-inbox-linked-person";
+/// Web `sm:px-5` and `px-3`: a conversation's header, Linked person row and
+/// reply bar.
+const CONVERSATION_GUTTER_PX: f32 = 20.0;
+const CONVERSATION_GUTTER_COMPACT_PX: f32 = 12.0;
+/// Web `max-w-3xl`: the message column and the reply box.
+const CONVERSATION_COLUMN_PX: f32 = 768.0;
+/// Web `max-w-[88%]`: a message's share of the column.
+const CONVERSATION_MESSAGE_WIDTH: f32 = 0.88;
+/// Web `rows=3` at `text-body` with `py-1.5`.
+const REPLY_BOX_HEIGHT_PX: f32 = 75.0;
 
 /// A dropdown value is `'static` and a person's id is not, so each distinct
 /// id is kept once for the life of the app (like Settings' project names).
@@ -173,6 +183,7 @@ impl Workspace {
         &self,
         conversation: &InboxConversation,
         compact: bool,
+        gutter: f32,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let options = std::iter::once(DropdownOption {
@@ -215,7 +226,7 @@ impl Workspace {
             .gap_3()
             .border_b_1()
             .border_color(theme::longan_800().opacity(0.7))
-            .px_4()
+            .px(px(gutter))
             .py_2()
             .child(
                 div()
@@ -720,6 +731,12 @@ impl Workspace {
         else {
             return self.render_inbox_page(cx);
         };
+        // Web `px-3 sm:px-5`.
+        let gutter = if compact {
+            CONVERSATION_GUTTER_COMPACT_PX
+        } else {
+            CONVERSATION_GUTTER_PX
+        };
         let messages = conversation
             .messages
             .iter()
@@ -727,40 +744,65 @@ impl Workspace {
             .enumerate()
             .map(|(index, message)| {
                 let outgoing = message.direction == bruhs_models::MessageDirection::Outgoing;
+                // Web: a block 88% of the column, at its left when
+                // received and its right when sent.
                 div()
-                    .id(("inbox-message", index))
-                    .max_w(px(660.0))
-                    .rounded(px(8.0))
-                    .bg(if outgoing {
-                        theme::longan_800()
-                    } else {
-                        theme::longan_900()
-                    })
-                    .border_1()
-                    .border_color(if outgoing {
-                        theme::longan_700()
-                    } else {
-                        theme::longan_800()
-                    })
-                    .px_3()
-                    .py_2()
+                    .w_full()
+                    .flex()
+                    .when(outgoing, |row| row.justify_end())
                     .child(
                         div()
-                            .text_size(px(12.0))
-                            .text_color(theme::rambutan_500())
-                            .flex()
-                            .flex_wrap()
-                            .justify_between()
-                            .gap_3()
-                            .child(message.sender_name.clone())
-                            .child(inbox_date(message.sent_at_ms)),
-                    )
-                    .child(
-                        div()
-                            .mt_1()
-                            .text_size(px(13.0))
-                            .text_color(theme::rambutan_200())
-                            .child(message.body.clone()),
+                            .id(("inbox-message", index))
+                            .debug_selector(move || format!("desktop-inbox-message-{index}"))
+                            .min_w_0()
+                            .w(relative(CONVERSATION_MESSAGE_WIDTH))
+                            .rounded(px(8.0))
+                            .when(outgoing, |message| message.rounded_br(px(4.0)))
+                            .when(!outgoing, |message| message.rounded_bl(px(4.0)))
+                            .bg(if outgoing {
+                                theme::longan_800()
+                            } else {
+                                theme::longan_900()
+                            })
+                            .border_1()
+                            .border_color(if outgoing {
+                                theme::longan_700()
+                            } else {
+                                theme::longan_800()
+                            })
+                            .px_3()
+                            .py(px(10.0))
+                            .child(
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_baseline()
+                                    .justify_between()
+                                    .gap_x(px(16.0))
+                                    .gap_y_1()
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_size(px(12.0))
+                                    .text_color(theme::rambutan_500())
+                                    .child(div().min_w_0().child(message.sender_name.clone()))
+                                    .child(
+                                        div()
+                                            .debug_selector(move || {
+                                                format!("desktop-inbox-message-time-{index}")
+                                            })
+                                            .flex_shrink_0()
+                                            .font_features(theme::tabular_nums())
+                                            .child(inbox_date(message.sent_at_ms)),
+                                    ),
+                            )
+                            .child(
+                                div()
+                                    .mt_1()
+                                    .font_family(theme::CODE_FONT_FAMILY)
+                                    .text_size(px(14.0))
+                                    .text_color(theme::rambutan_200())
+                                    .child(message.body.clone()),
+                            ),
                     )
                     .into_any_element()
             })
@@ -781,8 +823,9 @@ impl Workspace {
             .flex_col()
             .child(
                 div()
-                    .px_4()
-                    .py_2()
+                    .flex_shrink_0()
+                    .px(px(gutter))
+                    .py(px(10.0))
                     .border_b_1()
                     .border_color(theme::longan_800())
                     .flex()
@@ -790,193 +833,306 @@ impl Workspace {
                     .items_center()
                     .gap_2()
                     .child(
-                        web_button(
-                            "back-to-inbox",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("← Inbox")
-                        .child("← Inbox")
-                        .on_click(
-                            cx.listener(|this, _event, window, cx| {
+                        // Web: a quiet "← Inbox".
+                        div()
+                            .id("back-to-inbox")
+                            .debug_selector(|| "desktop-inbox-back".to_string())
+                            .role(Role::Button)
+                            .tab_index(0)
+                            .aria_label("Back to Inbox")
+                            .flex_shrink_0()
+                            .min_h(px(theme::CONTROL_PX))
+                            .px_2()
+                            .flex()
+                            .items_center()
+                            .rounded(px(4.0))
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .hover(|el| el.bg(theme::longan_800()))
+                            .font_family(theme::UI_FONT_FAMILY)
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_size(px(theme::APP_UI_TEXT_SIZE_PX))
+                            .text_color(theme::rambutan_400())
+                            .cursor_pointer()
+                            .whitespace_nowrap()
+                            .child("← Inbox")
+                            .on_click(cx.listener(|this, _event, window, cx| {
                                 this.open_inbox_view(window, cx)
-                            }),
-                        ),
+                            })),
                     )
                     .child(
                         div()
                             .min_w_0()
                             .flex_1()
-                            .when(compact, |subject| subject.w_full().flex_none())
-                            .font_family(theme::HEADING_FONT_FAMILY)
-                            .text_size(px(15.0))
-                            .text_color(theme::rambutan_100())
-                            .child(conversation.subject.clone()),
+                            .when(compact, |title| title.w_full().flex_none())
+                            .child(
+                                div()
+                                    .debug_selector(|| {
+                                        "desktop-inbox-conversation-title".to_string()
+                                    })
+                                    .font_family(theme::HEADING_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_size(px(16.0))
+                                    .text_color(theme::rambutan_100())
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(conversation.subject.clone()),
+                            )
+                            .child(
+                                div()
+                                    .debug_selector(|| {
+                                        "desktop-inbox-conversation-subtitle".to_string()
+                                    })
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_size(px(12.0))
+                                    .text_color(theme::rambutan_500())
+                                    .overflow_hidden()
+                                    .whitespace_nowrap()
+                                    .text_ellipsis()
+                                    .child(conversation.source_and_participants()),
+                            ),
                     )
                     .child(
-                        web_button(
-                            "inbox-read",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label(if unread { "Mark read" } else { "Mark unread" })
-                        .child(if unread { "Mark read" } else { "Mark unread" })
-                        .on_click(cx.listener(
-                            move |this, _event, _window, cx| {
-                                this.mutate_current_conversation(
-                                    |conversation| conversation.mark_read(unread),
-                                    cx,
+                        div()
+                            .debug_selector(|| "desktop-inbox-actions".to_string())
+                            .flex()
+                            .flex_wrap()
+                            .gap_1()
+                            .child(
+                                inbox_action_button(
+                                    "inbox-read",
+                                    if unread { "Mark read" } else { "Mark unread" },
                                 )
-                            },
-                        )),
-                    )
-                    .child(
-                        web_button(
-                            "inbox-snooze",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label(if snoozed { "Unsnooze" } else { "Tomorrow" })
-                        .child(if snoozed { "Unsnooze" } else { "Tomorrow" })
-                        .on_click(cx.listener(
-                            move |this, _event, _window, cx| {
-                                this.mutate_current_conversation(
-                                    |conversation| {
-                                        conversation.snooze_until(if snoozed {
-                                            None
-                                        } else {
-                                            Some(EpochMs::now().as_millis() + 86_400_000)
-                                        })
+                                .on_click(cx.listener(
+                                    move |this, _event, _window, cx| {
+                                        this.mutate_current_conversation(
+                                            |conversation| conversation.mark_read(unread),
+                                            cx,
+                                        )
                                     },
-                                    cx,
+                                )),
+                            )
+                            .child(
+                                inbox_action_button(
+                                    "inbox-snooze",
+                                    if snoozed { "Unsnooze" } else { "Tomorrow" },
                                 )
-                            },
-                        )),
-                    )
-                    .child(
-                        web_button(
-                            "inbox-important",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label(if important { "Unstar" } else { "Important" })
-                        .child(if important { "Unstar" } else { "Important" })
-                        .on_click(cx.listener(
-                            |this, _event, _window, cx| {
-                                this.mutate_current_conversation(
-                                    |conversation| conversation.toggle_label("important"),
-                                    cx,
+                                .on_click(cx.listener(
+                                    move |this, _event, _window, cx| {
+                                        this.mutate_current_conversation(
+                                            |conversation| {
+                                                conversation.snooze_until(if snoozed {
+                                                    None
+                                                } else {
+                                                    Some(EpochMs::now().as_millis() + 86_400_000)
+                                                })
+                                            },
+                                            cx,
+                                        )
+                                    },
+                                )),
+                            )
+                            .child(
+                                inbox_action_button(
+                                    "inbox-important",
+                                    if important { "Unstar" } else { "Important" },
                                 )
-                            },
-                        )),
-                    )
-                    .child(
-                        web_button(
-                            "inbox-archive",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label(if archived { "Unarchive" } else { "Archive" })
-                        .child(if archived { "Unarchive" } else { "Archive" })
-                        .on_click(cx.listener(
-                            move |this, _event, _window, cx| {
-                                this.mutate_current_conversation(
-                                    |conversation| conversation.set_archived(!archived),
-                                    cx,
+                                .on_click(cx.listener(
+                                    |this, _event, _window, cx| {
+                                        this.mutate_current_conversation(
+                                            |conversation| conversation.toggle_label("important"),
+                                            cx,
+                                        )
+                                    },
+                                )),
+                            )
+                            .child(
+                                inbox_action_button(
+                                    "inbox-archive",
+                                    if archived { "Unarchive" } else { "Archive" },
                                 )
-                            },
-                        )),
-                    )
-                    .child(
-                        web_button(
-                            "inbox-ask-agent",
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("Ask agent")
-                        .child("Ask agent")
-                        .on_click(cx.listener(
-                            |this, _event, window, cx| {
-                                this.ask_agent_about_current_conversation(window, cx)
-                            },
-                        )),
-                    )
-                    .child(
-                        web_button(
-                            "inbox-delete",
-                            WebButtonVariant::Destructive,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("Delete")
-                        .child("Delete")
-                        .on_click(cx.listener(
-                            |this, _event, window, cx| this.request_record_delete(window, cx),
-                        )),
+                                .on_click(cx.listener(
+                                    move |this, _event, _window, cx| {
+                                        this.mutate_current_conversation(
+                                            |conversation| conversation.set_archived(!archived),
+                                            cx,
+                                        )
+                                    },
+                                )),
+                            )
+                            .child(
+                                inbox_action_button("inbox-ask-agent", "Ask agent").on_click(
+                                    cx.listener(|this, _event, window, cx| {
+                                        this.ask_agent_about_current_conversation(window, cx)
+                                    }),
+                                ),
+                            )
+                            .child(inbox_action_button("inbox-delete", "Delete").on_click(
+                                cx.listener(|this, _event, window, cx| {
+                                    this.request_record_delete(window, cx)
+                                }),
+                            )),
                     ),
             )
-            .child(self.render_linked_person(conversation, compact, cx))
+            .child(self.render_linked_person(conversation, compact, gutter, cx))
             .child(
                 div()
                     .flex_1()
                     .min_h_0()
                     .overflow_y_scrollbar()
-                    .p_5()
                     .flex()
-                    .flex_col()
-                    .gap_3()
-                    .children(messages),
+                    .justify_center()
+                    .child(
+                        // Web `mx-auto max-w-3xl px-4 py-5 space-y-3`.
+                        div()
+                            .debug_selector(|| "desktop-inbox-message-column".to_string())
+                            .w_full()
+                            .max_w(px(CONVERSATION_COLUMN_PX))
+                            .px_4()
+                            .py_5()
+                            .flex()
+                            .flex_col()
+                            .gap_3()
+                            .children(messages),
+                    ),
             )
             .child(
                 div()
+                    .flex_shrink_0()
                     .border_t_1()
                     .border_color(theme::longan_800())
-                    .p_3()
+                    .bg(theme::longan_950())
+                    .px(px(gutter))
+                    .py_3()
                     .flex()
-                    .flex_col()
-                    .gap_2()
-                    .child(Input::new(&self.inbox_reply_input).aria_label("Reply draft"))
+                    .justify_center()
                     .child(
+                        // Web: a three-row reply box in the message column's
+                        // width, the hint at its left and the actions at its
+                        // right.
                         div()
+                            .debug_selector(|| "desktop-inbox-reply".to_string())
+                            .w_full()
+                            .max_w(px(CONVERSATION_COLUMN_PX))
                             .flex()
-                            .justify_end()
+                            .flex_col()
                             .gap_2()
                             .child(
-                                web_button(
-                                    "save-inbox-draft",
-                                    WebButtonVariant::Outline,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label("Save draft")
-                                .child("Save draft")
-                                .on_click(cx.listener(
-                                    |this, _event, _window, cx| this.save_inbox_draft(cx),
-                                )),
+                                div()
+                                    .debug_selector(|| "desktop-inbox-reply-box".to_string())
+                                    .child(
+                                        Input::new(&self.inbox_reply_input)
+                                            .h(px(REPLY_BOX_HEIGHT_PX))
+                                            .aria_label("Reply draft"),
+                                    ),
                             )
                             .child(
-                                web_button(
-                                    "send-inbox-draft",
-                                    WebButtonVariant::Primary,
-                                    WebButtonSize::Small,
-                                    ButtonState::disabled_if(
-                                        self.inbox_reply_input.read(cx).value().trim().is_empty(),
+                                div()
+                                    .flex()
+                                    .flex_wrap()
+                                    .items_center()
+                                    .justify_between()
+                                    .gap_3()
+                                    .child(
+                                        div()
+                                            .debug_selector(|| {
+                                                "desktop-inbox-reply-hint".to_string()
+                                            })
+                                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                            .font_weight(FontWeight::MEDIUM)
+                                            .text_size(px(12.0))
+                                            .text_color(theme::rambutan_400())
+                                            .child(bruhs_models::REPLY_HINT),
+                                    )
+                                    .child(
+                                        div()
+                                            .flex()
+                                            .gap_2()
+                                            .child(
+                                                web_button(
+                                                    "save-inbox-draft",
+                                                    WebButtonVariant::Outline,
+                                                    WebButtonSize::Default,
+                                                    ButtonState::Enabled,
+                                                )
+                                                .border_color(theme::longan_700())
+                                                .text_color(theme::rambutan_300())
+                                                .aria_label("Save draft")
+                                                .child("Save draft")
+                                                .on_click(cx.listener(
+                                                    |this, _event, _window, cx| {
+                                                        this.save_inbox_draft(cx)
+                                                    },
+                                                )),
+                                            )
+                                            .child(
+                                                web_button(
+                                                    "send-inbox-draft",
+                                                    WebButtonVariant::Primary,
+                                                    WebButtonSize::Default,
+                                                    ButtonState::disabled_if(
+                                                        self.inbox_reply_input
+                                                            .read(cx)
+                                                            .value()
+                                                            .trim()
+                                                            .is_empty(),
+                                                    ),
+                                                )
+                                                .aria_label("Log reply")
+                                                .child("Log reply")
+                                                .on_click(cx.listener(
+                                                    |this, _event, window, cx| {
+                                                        this.send_inbox_draft(window, cx)
+                                                    },
+                                                )),
+                                            ),
                                     ),
-                                )
-                                .aria_label("Log reply")
-                                .child("Log reply")
-                                .on_click(cx.listener(
-                                    |this, _event, window, cx| this.send_inbox_draft(window, cx),
-                                )),
                             ),
                     ),
             )
+    }
+}
+
+/// Web `ActionButton`: an outlined text button in a conversation's header.
+fn inbox_action_button(id: &'static str, label: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .debug_selector(move || format!("desktop-{id}"))
+        .role(Role::Button)
+        .tab_index(0)
+        .aria_label(label)
+        .flex_shrink_0()
+        .min_h(px(theme::CONTROL_PX))
+        .px_2()
+        .flex()
+        .items_center()
+        .justify_center()
+        .rounded(px(4.0))
+        .border_1()
+        .border_color(theme::longan_700())
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        .hover(|el| el.bg(theme::longan_800()).text_color(theme::rambutan_200()))
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
+        .text_size(px(12.0))
+        .text_color(theme::rambutan_400())
+        .whitespace_nowrap()
+        .cursor_pointer()
+        .child(label)
+}
+
+/// ⌘↵ in the reply box logs the reply, as on the web. gpui-component inserts
+/// a newline at the cursor before it reports the key, and the web prevents
+/// it, so the reply is the text without that newline.
+fn reply_without_submit_newline(value: &str, cursor: usize) -> String {
+    match cursor.checked_sub(1) {
+        Some(at) if value.get(at..cursor) == Some("\n") => {
+            format!("{}{}", &value[..at], &value[cursor..])
+        }
+        _ => value.to_string(),
     }
 }
 
@@ -1044,6 +1200,25 @@ impl Workspace {
                 .rows(4)
         });
         subscriptions.push(redraw_on_edit(&inbox_reply_input, window, cx));
+        subscriptions.push(cx.subscribe_in(
+            &inbox_reply_input,
+            window,
+            |this: &mut Self, input, event: &InputEvent, window, cx| {
+                if let InputEvent::PressEnter {
+                    secondary: true,
+                    shift: false,
+                } = event
+                {
+                    let (value, cursor) = {
+                        let input = input.read(cx);
+                        (input.value().to_string(), input.cursor())
+                    };
+                    let body = reply_without_submit_newline(&value, cursor);
+                    input.update(cx, |input, cx| input.set_value(body, window, cx));
+                    this.send_inbox_draft(window, cx);
+                }
+            },
+        ));
         InboxInputs {
             inbox_search_input,
             inbox_sender_input,
