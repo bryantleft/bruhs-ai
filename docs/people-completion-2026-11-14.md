@@ -112,7 +112,7 @@ apply them.
 | Undo | Workflow-created reminders only. | Same. | Undo for supported People changes (merge, rename, opt-out, delete). |
 | Delete profile | Not supported. | Not supported. | Delete with confirmation or undo and a defined cascade. |
 | Opt-out | Toggle with a visible state. Before this audit: no explanation, failures only logged, visible label showed state rather than action. | Toggle with state badge and per-person accessible name. No explanation. | Explained opt-out, honest failure states, enforced in generation and retrieval. |
-| Agent access | No People read tool on the web. | `bruhs_read_people` and `bruhs_read_person` behind the People Read grant. | Grant-gated, opt-out-respecting reads; web parity or documented exclusion. |
+| Agent access | `bruhs_read_people` and `bruhs_read_person` through the web MCP connection (PARITY-03), answered by the tab with desktop's logic: the same People Read grant, opt-out withholding, bounds and errors. Before 2026-11-16: no People read tool on the web. | `bruhs_read_people` and `bruhs_read_person` behind the People Read grant. | Grant-gated, opt-out-respecting reads; web parity or documented exclusion. |
 
 ## Numbered acceptance cases
 
@@ -180,6 +180,7 @@ listed so a landing can merge them with care.
 | 2026-11-15 | PEOPLE-02 | **D1** (run `pager-d1-run-20261115T145755Z`): diagnostic confirmed the Next centre outside the test viewport; with the fix, the People page test module 7/0, default and serial, plus strict desktop clippy. | |
 | 2026-11-15 | PEOPLE-14 | **S2** (run `people-s2-run-20261115T161912Z`): core meetings 139/0/1, server meeting routes 12/0 (including no event without observations and on a failed delete), unchanged meeting-write performance contract 1/0, each default and serial, plus strict lints. | |
 | 2026-11-15 | Gate | **G3 quick gate** (run `20261115T162756Z`, HEAD 087b9518): unmodified `scripts/gate.sh --quick`, all 9 steps (fmt, clippy, clippy-wasm, test, web-assets, site-test, site-types, mobile, bench-check) passed exactly once; 32 suites, 3446 passed, 0 failed, 54 ignored. This is the quick gate only, not the full gate. | Full gate. Open items below. |
+| 2026-11-16 | PEOPLE-12 (web) | People reads moved to `bruhs_models::workspace_bridge` and both apps call them. The web answers them through its MCP connection (`docs/local-mcp-workspace.md`, Web connection). `cargo test -p bruhs-models workspace_bridge` covers the grant-first check, opt-out withholding and voice fingerprints; the desktop bridge's 114 tests pass unchanged. The end-to-end web run read People over an empty store only. | A web run over real People records, including an opted-out person. |
 
 ## Open items
 

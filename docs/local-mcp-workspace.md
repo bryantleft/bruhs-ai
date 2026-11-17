@@ -1,7 +1,10 @@
 # Local MCP workspace connection
 
-This connection is opt-in and currently supports the native Unix app only.
-It reads the running workspace, not the MCP process's separate in-memory state.
+This connection is opt-in and works with the native app and the web app, on
+Unix (macOS and Linux). It reads the running workspace, not the MCP process's
+separate in-memory state. Both apps answer it with the same logic
+(`bruhs_models::workspace_bridge`); the web app answers through bruhs-server,
+as [Web connection](#web-connection) describes.
 Connected reads are Chat summaries/completed history, Tasks, local Calendar
 events, Capture, Knowledge documents, Inbox conversations, People context,
 loaded Meeting identities/summaries/transcripts, local text Meeting notes, and
@@ -11,22 +14,26 @@ manual Finance transactions, Health workout logs, undated People reminders,
 and local text Meeting notes.
 Knowledge clips/attachments are not separate tools. Captured-meeting writes and uncached
 Meeting reads, additional provider adapters,
-externally synchronized calendar events, web connections, agent-approved
-execution, and direct agent-executed rollback are not implemented. Native
-clients can request an in-app undo review as described below.
+externally synchronized calendar events, agent-approved execution, and direct
+agent-executed rollback are not implemented. Clients can request an in-app
+undo review as described below.
 
 ## Connect a trusted local client
 
-1. Build the app and MCP executable (`cargo build -p bruhs-desktop -p bruhs-mcp`).
-2. Open **Agent workflows** in the native app. Review the domain Read/Write
-   grants, then select **Enable for this session**.
+1. Build the MCP executable and the app you use: `cargo build -p bruhs-mcp`
+   plus `-p bruhs-desktop` for the native app, or bruhs-server and the web
+   bundle (`scripts/dev.sh`) for the web app.
+2. Open **Agent workflows** in the native app or the web app. Review the
+   domain Read/Write grants, then select **Enable for this session**.
 3. Select **Copy MCP config** and add it to your trusted client's MCP settings.
    The copied command is `bruhs-mcp`; replace it with the absolute path to
    `target/debug/bruhs-mcp` if that executable is not on your client's PATH.
 4. Restart that MCP client connection after applying the configuration.
 
-No HTTP listener or browser port is used. The web verification server remains
-on port **8087**; the MCP connection uses a private Unix socket instead.
+The native app opens no HTTP listener or browser port: its connection is a
+private Unix socket. The web app has no listener of its own; its connection is
+bruhs-server's loopback relay (see [Web connection](#web-connection)). The web
+verification server remains on port **8087**.
 
 Each MCP stdio JSON-RPC frame is limited to **64 KiB including its newline**,
 separately from the private socket request limit. Oversized input receives an
@@ -41,11 +48,93 @@ temporary connection file. The session token is not copied to the clipboard.
 Do not share the file or enable access for an untrusted local process. Other
 processes running as your OS user are not a separate security boundary.
 
-Disabling the connection or closing the app revokes the session. Restarting
-does not re-enable it. Enable a fresh session and copy fresh configuration to
+Disabling the connection or closing the app revokes the session; on the web,
+so do closing, reloading or hiding the tab and stopping bruhs-server.
+Restarting does not re-enable it. Enable a fresh session and copy fresh configuration to
 reconnect. A crash can leave an inaccessible socket and private temporary file;
 their old token cannot authorize a newly started app. These ephemeral files
 are not provider credentials or a replacement for keychain-backed secrets.
+
+## Web connection
+
+The web app keeps its records in the browser tab's IndexedDB, so bruhs-server
+cannot answer a tool call itself. It relays each request to the tab that
+enabled the session, and the tab answers from its own workspace with the same
+logic as the native app: the grant check first, then the same pages, filters,
+bounds and errors. The wire types are in
+`bruhs_models::workspace_bridge::relay`; the relay is
+`bruhs-server/src/workspace_relay.rs` and the tab's side is
+`bruhs-web/src/workspace_bridge.rs`.
+
+- **Enable.** Every live events stream (`/api/events/stream`) opens with a
+  `workspace_bridge` frame naming that stream; only the tab holding the stream
+  learns its ID. **Enable for this session** sends the ID to
+  `POST /api/workspace-bridge/session`, behind the server's usual Host and
+  Origin checks ([local server access](local-server-access.md)). The server
+  binds a new session to that stream and writes the connection file (0600, in
+  a fresh 0700 directory under `/tmp`) with its loopback origin and a fresh
+  64-hex token. The tab receives only the file's path, which the copied config
+  names.
+- **Calls.** `bruhs-mcp` reads the file and sends each request to
+  `POST /api/workspace-bridge/call` with the token as a bearer credential. It
+  accepts only a plain-HTTP loopback origin with a port, uses no proxy and
+  follows no redirects. The relay refuses any request carrying `Origin` or a
+  `Sec-Fetch-*` header, so no web page can use the route, and it checks the
+  token before decoding the body. The request reaches the tab as a frame on its
+  stream; the tab answers at `POST /api/workspace-bridge/reply` with its stream
+  ID. The 64 KiB request and 1 MiB response limits are the socket's. At most 16
+  requests wait at once and each waits 15 seconds. A timeout, or a tab that
+  went away, reaches the client as a disconnected workspace: nothing is
+  claimed, so retry a proposal with the same `request_id`.
+- **One session at a time.** Enabling in a second tab ends the first tab's
+  session, and the first tab says so. The native app's connection is separate
+  and unaffected.
+- **Revocation.** **Disable connection**, closing or reloading the tab, the
+  page being hidden (the tab closes its stream then), and stopping
+  bruhs-server each end the session and remove its file. A stream that
+  reconnects never resumes a session: enable again and copy the new config.
+  The session's review state (its proposals and undo requests) ends with it;
+  the workflows themselves stay in Agent workflows. A server crash can leave
+  the file behind; its token cannot authorize a newly started server.
+- **Unavailable states.** Without its live stream (bruhs-server stopped or
+  unreachable) the tab cannot enable a session and says so. A request that
+  arrives before the tab has loaded the records it reads is refused with an
+  explicit loading error, never answered empty. Starting a session loads the
+  Meetings list the way the Meetings page does; a transcript still needs its
+  meeting opened.
+- **Writes and durability.** Writes stay proposals until the user starts the
+  transaction and runs its steps in Agent workflows. The workflow executor
+  saves each created record with its checkpoint in one IndexedDB transaction,
+  and `bruhs_workflow_status` reports `durable` only once the workflow store's
+  save is acknowledged. Undo previews check the same receipts the executor
+  checks, from the tab's state, including that a created chat is still empty,
+  closed, idle and unqueued; the executor checks again inside its transaction.
+  Reads report the tab's live state, including provisional edits, and are
+  never save receipts.
+- **Differences.** The web keeps no per-message stop marker, so its Chat
+  message records report `stopped: false`, and `duration_ms` is the time from
+  start to finish. Like the rest of bruhs-server's API, the tab-facing routes
+  trust loopback origins: a page on another loopback port could enable a
+  session for its own stream, ending yours, but it would receive only that
+  session's requests, never your tab's records, and your client keeps naming
+  the old, removed file. Like the native connection, the web connection is
+  Unix-only, because the file's privacy relies on Unix permissions.
+
+### Verification
+
+```sh
+cargo test -p bruhs-models workspace_bridge
+cargo test -p bruhs-core workspace_bridge
+cargo test -p bruhs-server workspace_relay
+cargo test -p bruhs-mcp --test web_relay
+cargo test -p bruhs-web -- workspace_bridge mcp_review workflow_status
+cargo test -p bruhs-desktop mcp_bridge
+```
+
+The end-to-end check behind PARITY-03 ran an isolated bruhs-server (scratch
+`HOME`, `BRUHS_SERVER_PORT`, `BRUHS_WEB_DIST` with a bundle built for that
+port) and drove the web bundle in headless Chrome over CDP while the real
+`bruhs-mcp` binary called tools over stdio.
 
 ## Read, preview, propose, review
 
@@ -250,7 +339,9 @@ removes only the relationship profile newly created by that workflow—not the
 contact. Several reminders for one person are checked in reverse order.
 Later relationship edits or reminder completion block the whole undo. Save
 failure remains provisional, and Retry persists the same reminder ID. The web
-People workflow adapter and hardware crash/restart acceptance remain open.
+executor has the same People reminder adapter, and the web connection proposes
+these reminders; an end-to-end run of one through the web connection, and
+hardware crash/restart acceptance, remain open.
 
 Native `bruhs_write_finance` supports `add_finance_transaction` with `merchant`,
 `category`, and `amount_minor` as an exact decimal **string** of signed USD cents
@@ -273,8 +364,9 @@ separate records removed by a mixed-domain undo. Both metadata revisions are
 checked before writing; stale data and transaction aborts cannot partly save a
 record or checkpoint. Life edits are frozen only while a Life transaction is
 in flight, and committed records appear in the existing Life surface.
-Finance/Health reads and the web MCP connection remain unimplemented. These
-local execution adapters do not establish all-domain or hardware/provider parity.
+The web connection answers Finance/Health reads and proposes these
+operations too. These local execution adapters do not establish all-domain or
+hardware/provider parity.
 
 To submit that same operation for in-app review, set `dry_run` to `false` and
 include a stable `request_id` of 1–128 bytes. This requires the current Write
@@ -283,6 +375,10 @@ the payload under that ID is rejected. Idempotency is scoped to the enabled
 session, not to a new connection session after restart. Do not blindly resubmit
 after reconnecting: inspect the saved workflows and records first.
 
+On the web, Agent workflows lists every workflow still in preview, newest
+first, each with its full payload, **Recheck grants**, **Start transaction** and
+**Decline proposal**, so a proposal left by an ended session can still be
+declined. Other views show the same pending-review notice as the native app.
 In native **Workflow review**, use **Previous workflow** and **Next workflow**
 to inspect older saved plans. The heading identifies the displayed title,
 status, and position in history. Run, background, pause, resume, and undo act
@@ -393,7 +489,7 @@ responses.
 connection session and an optional `dry_run` (defaults to `true`). Preview
 checks the saved checkpoint, all participating Write grants, and full creation
 snapshots without changing records or opening a review. With `dry_run: false`,
-it asks the user to review undo in the native app; it still deletes nothing.
+it asks the user to review undo in the app; it still deletes nothing.
 
 ```json
 {"workflow_id":"the-proposed-workflow-id","dry_run":false}
