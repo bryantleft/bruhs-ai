@@ -10,6 +10,8 @@ use crate::EpochMs;
 
 mod access;
 pub use access::*;
+mod face;
+pub use face::*;
 mod transcript;
 pub use transcript::*;
 #[cfg(test)]
