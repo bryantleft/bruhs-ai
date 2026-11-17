@@ -54,6 +54,9 @@ fn focus_operations() -> Vec<WorkflowOperation> {
     bruhs_models::focus_workflow_operations(EpochMs::now().as_millis())
 }
 
+/// Web `22rem`: the Capability grants column beside the workflows.
+const AUTOMATION_GRANTS_WIDTH_PX: f32 = 352.0;
+
 impl Workspace {
     pub(super) fn drive_background_automations(&mut self, cx: &mut Context<'_, Self>) {
         // Runs once after load and after every save: report draft decisions
@@ -559,7 +562,9 @@ impl Workspace {
     }
 
     pub(super) fn render_automations_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
-        let compact = Self::compact_layout(window);
+        // Web `lg:grid-cols-[minmax(0,1fr)_22rem]`: the grants column sits
+        // beside the workflows from `lg`, under them below.
+        let stacked = Self::narrower_than(window, LG_BREAKPOINT_PX);
         let grants = AgentDomain::ALL
             .into_iter()
             .enumerate()
@@ -810,14 +815,15 @@ impl Workspace {
                     .child(
                         div()
                             .flex()
-                            .when(compact, |content| content.flex_col())
-                            .gap_3()
+                            .when(stacked, |content| content.flex_col())
+                            .gap_4()
                             .items_start()
                             .child(
                                 div()
+                                    .debug_selector(|| "desktop-automation-workflows".into())
                                     .flex_1()
                                     .min_w_0()
-                                    .when(compact, |workflows| workflows.flex_none().w_full())
+                                    .when(stacked, |workflows| workflows.flex_none().w_full())
                                     .flex()
                                     .flex_col()
                                     .gap_3()
@@ -964,8 +970,9 @@ impl Workspace {
                             )
                             .child(
                                 div()
-                                    .w(px(320.0))
-                                    .when(compact, |grants| grants.w_full())
+                                    .debug_selector(|| "desktop-automation-grants".into())
+                                    .w(px(AUTOMATION_GRANTS_WIDTH_PX))
+                                    .when(stacked, |grants| grants.w_full())
                                     .flex_none()
                                     .child(self.automation_panel(
                                         "Capability grants",

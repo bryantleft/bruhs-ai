@@ -236,3 +236,35 @@ fn command_enter_drops_only_the_newline_it_added() {
     );
     assert_eq!(super::reply_without_submit_newline("", 0), "");
 }
+
+/// With the sidebar docked at 640px the conversation is about 390px wide.
+/// Like the web's `flex-wrap` header, its actions move under the title
+/// instead of squeezing it, and its `sm:` gutter and 192px linked-person
+/// field apply at every desktop width.
+#[gpui::test]
+fn a_narrow_conversation_wraps_its_actions_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.inbox_conversations = vec![conversation("launch", "Ada Lovelace")];
+        workspace.select_inbox_conversation("launch", window, cx);
+    });
+    for (width, wrapped) in [(640.0, true), (1280.0, false)] {
+        cx.simulate_resize(size(px(width), px(800.0)));
+        cx.run_until_parked();
+        let title = cx.debug_bounds("desktop-inbox-conversation-title").unwrap();
+        let actions = cx.debug_bounds("desktop-inbox-actions").unwrap();
+        assert!(
+            title.size.width >= px(60.0),
+            "the title keeps its width at {width}: {title:?}"
+        );
+        assert!(
+            actions.right() <= px(width),
+            "the actions stay in the window at {width}"
+        );
+        assert_eq!(
+            actions.top() >= title.bottom(),
+            wrapped,
+            "actions under the title at {width}: {title:?} {actions:?}"
+        );
+    }
+}

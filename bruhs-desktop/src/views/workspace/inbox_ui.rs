@@ -182,7 +182,7 @@ impl Workspace {
     fn render_linked_person(
         &self,
         conversation: &InboxConversation,
-        compact: bool,
+        narrow: bool,
         gutter: f32,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
@@ -239,8 +239,8 @@ impl Workspace {
             .child(
                 div()
                     // Web `w-full sm:w-48`.
-                    .when(compact, |slot| slot.w_full())
-                    .when(!compact, |slot| slot.w(px(192.0)))
+                    .when(narrow, |slot| slot.w_full())
+                    .when(!narrow, |slot| slot.w(px(192.0)))
                     .child(dropdown(
                         LINKED_PERSON_DROPDOWN_ID,
                         "Linked person",
@@ -721,7 +721,7 @@ impl Workspace {
     pub(super) fn render_conversation_detail(
         &self,
         conversation_id: &str,
-        compact: bool,
+        narrow: bool,
         cx: &Context<'_, Self>,
     ) -> Div {
         let Some(conversation) = self
@@ -731,8 +731,8 @@ impl Workspace {
         else {
             return self.render_inbox_page(cx);
         };
-        // Web `px-3 sm:px-5`.
-        let gutter = if compact {
+        // Web `px-3 sm:px-5`; `narrow` is below `sm`.
+        let gutter = if narrow {
             CONVERSATION_GUTTER_COMPACT_PX
         } else {
             CONVERSATION_GUTTER_PX
@@ -828,8 +828,10 @@ impl Workspace {
                     .py(px(10.0))
                     .border_b_1()
                     .border_color(theme::longan_800())
+                    // Web `flex-wrap`: the actions move under the title
+                    // when the row cannot hold them.
                     .flex()
-                    .when(compact, |header| header.flex_wrap())
+                    .flex_wrap()
                     .items_center()
                     .gap_2()
                     .child(
@@ -865,7 +867,6 @@ impl Workspace {
                         div()
                             .min_w_0()
                             .flex_1()
-                            .when(compact, |title| title.w_full().flex_none())
                             .child(
                                 div()
                                     .debug_selector(|| {
@@ -977,7 +978,7 @@ impl Workspace {
                             )),
                     ),
             )
-            .child(self.render_linked_person(conversation, compact, gutter, cx))
+            .child(self.render_linked_person(conversation, narrow, gutter, cx))
             .child(
                 div()
                     .flex_1()
