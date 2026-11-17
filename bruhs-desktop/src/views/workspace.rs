@@ -1853,7 +1853,9 @@ impl Workspace {
                      _,
                      event: &crate::views::reactive_automations::ReactiveBruhCreated,
                      window,
-                     cx| this.open_created_bruh(event.agent_id.clone(), window, cx),
+                     cx| {
+                        this.open_created_bruh(event.agent_id.clone(), window, cx)
+                    },
                 ));
                 subscriptions.push(cx.subscribe_in(
                     &panel,
@@ -1862,7 +1864,9 @@ impl Workspace {
                      _,
                      _: &crate::views::reactive_automations::ReactiveOpenAutomations,
                      window,
-                     cx| this.activate_sidebar_view(AppView::Automations, window, cx),
+                     cx| {
+                        this.activate_sidebar_view(AppView::Automations, window, cx)
+                    },
                 ));
                 subscriptions.push(cx.subscribe(
                     &panel,
