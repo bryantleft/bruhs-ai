@@ -218,6 +218,9 @@ impl QuietHours {
     }
 }
 
+/// Under the notification switches on Agent workflows, on both apps.
+pub const NOTIFICATIONS_NOTE: &str = "Sent by the local server, so they arrive while the app is closed when the background service is on. Off by default.";
+
 /// How agent updates reach the owner outside the app.
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]

@@ -1,7 +1,7 @@
 use super::super::{
     desktop_state_backup_path, load_desktop_state_from_path, AppView, SaveStatus, Workspace,
 };
-use super::tests::{call, connect, fixture};
+use super::tests::{call, connect, fixture, workflow_fixture};
 use super::WorkspaceBridge;
 use bruhs_core::workspace_bridge::{BridgeRequest, BridgeResponse, WorkflowProposal};
 use bruhs_models::{
@@ -123,7 +123,7 @@ async fn started(
 async fn person_reminders_restore_checkpoint_and_mixed_undo_preserves_private_context(
     cx: &mut TestAppContext,
 ) {
-    let (workspace, cx) = fixture(cx);
+    let (workspace, cx) = workflow_fixture(cx);
     let files = Files::new();
     let id = started(&workspace, cx, &files).await;
     click(&workspace, cx, "desktop-run-workflow-step").await;
@@ -221,7 +221,7 @@ mod safety;
 async fn person_reminder_partial_undo_removes_new_context_but_keeps_contact(
     cx: &mut TestAppContext,
 ) {
-    let (workspace, cx) = fixture(cx);
+    let (workspace, cx) = workflow_fixture(cx);
     let files = Files::new();
     started(&workspace, cx, &files).await;
     workspace.update_in(cx, |w, _, cx| {

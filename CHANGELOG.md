@@ -159,6 +159,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   income; and Symbol, Value and Add in Holdings, in place of one Quick add
   form. Both apps check these entries the same way and use the same words,
   and Amounts redacted stays disabled until agent access is on.
+- Agent workflows in the desktop app follows the web's order: Refresh under
+  the introduction, then Updates, Weekly engineering reports, New automation
+  and your automations, with Notifications and Background service side by
+  side below them.
   desktop app, instead of only the People page.
 - Removed the workflow overview and What's new sections from the landing
   page. The Changelog remains available in the navigation and command menu.

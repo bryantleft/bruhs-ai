@@ -106,7 +106,7 @@ pub(super) fn NotificationsPanel(
                     <Field label="Time zone" value=zone />
                 </div>
             </Show>
-            <p class="mt-2 text-label-sm text-rambutan-500">"Sent by the local server, so they arrive while the app is closed when the background service is on. Off by default."</p>
+            <p class="mt-2 text-label-sm text-rambutan-500">{bruhs_models::reactive::NOTIFICATIONS_NOTE}</p>
             <div class="mt-3">
                 <Button size=ButtonSize::Small on_click=Callback::new(move |_| {
                     sending.set_value(true);

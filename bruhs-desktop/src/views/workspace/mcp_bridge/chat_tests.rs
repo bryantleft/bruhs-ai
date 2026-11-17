@@ -1,7 +1,7 @@
 use super::super::{
     desktop_state_backup_path, load_desktop_state_from_path, AppView, SaveStatus, Workspace,
 };
-use super::tests::{call, connect, fixture};
+use super::tests::{call, connect, fixture, workflow_fixture};
 use super::WorkspaceBridge;
 use bruhs_core::workspace_bridge::{BridgeRequest, BridgeResponse, WorkflowProposal};
 use bruhs_models::{AgentAccess, AgentDomain, WorkflowOperation};
@@ -94,7 +94,7 @@ async fn started(
 async fn reviewed_chat_and_checkpoint_save_together_and_user_approved_undo_removes_only_created_records(
     cx: &mut TestAppContext,
 ) {
-    let (workspace, cx) = fixture(cx);
+    let (workspace, cx) = workflow_fixture(cx);
     let files = Files::new();
     let original = workspace.update_in(cx, |w, _, _| {
         w.threads

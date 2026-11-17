@@ -1,5 +1,5 @@
 use super::super::{load_desktop_state_from_path, AppView, Workspace};
-use super::tests::{call, connect, fixture};
+use super::tests::{call, connect, fixture, workflow_fixture};
 use super::WorkspaceBridge;
 use bruhs_core::workspace_bridge::{BridgeRequest, BridgeResponse, WorkflowProposal};
 use bruhs_models::{AgentAccess, AgentDomain, WorkflowOperation};
@@ -98,7 +98,7 @@ async fn completed(
 async fn meeting_note_exact_payload_survives_file_restore_renders_and_undo_is_durable(
     cx: &mut TestAppContext,
 ) {
-    let (workspace, cx) = fixture(cx);
+    let (workspace, cx) = workflow_fixture(cx);
     let files = Files::new();
     let id = completed(&workspace, cx, &files).await;
     let saved = load_desktop_state_from_path(&files.path())

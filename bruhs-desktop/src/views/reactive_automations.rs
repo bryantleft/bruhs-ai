@@ -26,6 +26,8 @@ pub(crate) use updates::{unread_badge, unread_label};
 const REFRESH: Duration = Duration::from_secs(2);
 // While the panel is off screen, keep the unread badge and arrival notices current.
 const BACKGROUND_REFRESH: Duration = Duration::from_secs(15);
+/// Web's `lg` breakpoint: Notifications and Background service side by side.
+const SETTINGS_TWO_COLUMNS_PX: f32 = 1024.0;
 
 struct AgentEditor {
     agent: ReactiveAgent,
@@ -1176,32 +1178,64 @@ impl Render for ReactiveAutomations {
         let disabled = self.busy || self.snapshot.is_none();
         self.ensure_weekly_inputs(_window, cx);
         self.ensure_notification_form(_window, cx);
+        // Web `lg:grid-cols-2`: Notifications beside Background service.
+        let settings_columns =
+            if f32::from(_window.viewport_size().width) >= SETTINGS_TWO_COLUMNS_PX {
+                2
+            } else {
+                1
+            };
+        // Web order: the introduction with Refresh under it, Updates, Weekly
+        // engineering reports, then New automation and its automations, then
+        // Notifications and Background service.
         let mut panel=div().id("reactive-automations").w_full().min_w_0().mb_4().p_4().rounded(px(8.0)).bg(theme::longan_900()).border_1().border_color(theme::longan_700().opacity(0.5)).flex().flex_col().gap_3()
-            .child(div().flex().flex_wrap().items_center().justify_between().gap_2().child(div().flex().flex_wrap().items_center().gap_2().child(heading("Automations")).child(updates::badge_info("Drafts only"))).child(control("reactive-refresh","Refresh",self.busy||self.reading).on_activate(cx, |this,_,cx|this.refresh(cx))))
-            .child(muted("Describe a job and choose what starts it. Review once to enable a complete automation, then pause or resume it with one control."))
-            .child(muted("Watches and schedules keep working while the local server runs, even with this page closed."))
-            // Web order: Updates sit inside the Automations card, under its introduction.
-            .when(self.snapshot.is_some(), |panel| panel.child(self.render_updates(cx)))
+            .child(div().flex().flex_wrap().items_center().gap_2().child(heading("Automations")).child(updates::badge_info("Drafts only")))
+            .child(
+                div()
+                    .debug_selector(|| "reactive-introduction".to_string())
+                    .min_w_0()
+                    .font_family(theme::CODE_FONT_FAMILY)
+                    .text_size(px(13.0))
+                    .line_height(relative(1.5))
+                    .text_color(theme::rambutan_400())
+                    .child("Describe a job and choose what starts it. Review once to enable a complete automation, then pause or resume it with one control."),
+            )
+            .child(muted("Watches and schedules keep working while the local server runs, even with this page closed.").text_color(theme::rambutan_500()))
+            .child(div().flex().child(ghost_control("reactive-refresh","Refresh",self.busy||self.reading).on_activate(cx, |this,_,cx|this.refresh(cx))))
             .when(self.snapshot.is_none()&&self.reading,|panel|panel.child(muted("Connecting to the local automation server…")))
             .when_some(self.load_error.clone(),|panel,error|panel.child(div().id("reactive-load-error").role(Role::Alert).text_size(px(13.0)).text_color(theme::lychee_300()).child(error)))
             .when_some(self.error.clone(),|panel,error|panel.child(div().id("reactive-error").role(Role::Alert).text_size(px(13.0)).text_color(theme::lychee_300()).child(error)))
+            .when(self.snapshot.is_some(), |panel| panel.child(self.render_updates(cx)))
+            .child(self.render_weekly_reports(cx))
             .child(div().flex().child(control("automation-new","New automation",disabled).on_activate(cx,|this,window,cx|this.open_automation(None,window,cx))));
-        if matches!(
-            &self.editor,
-            Some(Editor::Automation(_) | Editor::Chat { .. })
-        ) {
+        if matches!(&self.editor, Some(Editor::Automation(_))) {
             if let Some(editor) = self.render_editor(cx) {
                 panel = panel.child(editor);
             }
         }
-        panel = panel.child(self.render_weekly_reports(cx));
         panel = panel.child(self.render_automation_cards(cx));
         // Both wait for the server: no settings or service state exists before it answers.
-        if self.notify_form.is_some() {
-            panel = panel.child(self.render_notifications(cx));
+        let notifications = self
+            .notify_form
+            .is_some()
+            .then(|| self.render_notifications(cx));
+        let service = self.render_background_service(cx);
+        if notifications.is_some() || service.is_some() {
+            panel = panel.child(
+                div()
+                    .debug_selector(|| "reactive-settings-cards".to_string())
+                    .grid()
+                    .grid_cols(settings_columns)
+                    .gap_4()
+                    .children(notifications)
+                    .children(service),
+            );
         }
-        if let Some(service) = self.render_background_service(cx) {
-            panel = panel.child(service);
+        // Web: an agent's chat opens under the settings cards.
+        if matches!(&self.editor, Some(Editor::Chat { .. })) {
+            if let Some(editor) = self.render_editor(cx) {
+                panel = panel.child(editor);
+            }
         }
         panel = panel.child(
             control(
