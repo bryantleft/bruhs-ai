@@ -369,7 +369,7 @@ pub fn TodayPage() -> impl IntoView {
                                     <p class="mt-1 text-label-sm text-blueberry-300">{format!("Evidence: {}", suggestion.evidence)}</p>
                                 </div>
                                 <div class="flex items-center gap-2">
-                                    <button type="button" class="text-button text-rambutan-500 hover:text-rambutan-200 cursor-pointer" aria-label="Dismiss proactive suggestion" on:click=move |_| automation.update(|state| { let _ = state.dismiss_suggestion(&id, crate::clock::now_ms()); })>"Dismiss"</button>
+                                    <button type="button" class="bruhs-control text-button text-rambutan-500 hover:text-rambutan-200 cursor-pointer" aria-label="Dismiss proactive suggestion" on:click=move |_| automation.update(|state| { let _ = state.dismiss_suggestion(&id, crate::clock::now_ms()); })>"Dismiss"</button>
                                     <button type="button" class="rounded-grape bg-blueberry-500/15 px-3 py-1.5 text-button text-blueberry-200 inset-ring inset-ring-blueberry-400/20 hover:bg-blueberry-500/20 cursor-pointer" on:click=move |_| set_active_view.set(AppView::Automations)>"Review"</button>
                                 </div>
                             </article>
@@ -390,7 +390,7 @@ pub fn TodayPage() -> impl IntoView {
                         <section class="min-w-0 rounded-2xl bg-longan-900 inset-ring inset-ring-white/5 p-4" aria-labelledby="schedule-heading">
                             <div class="mb-3 flex items-center justify-between">
                                 <h2 id="schedule-heading" class="text-h4 text-rambutan-100">"Now & next"</h2>
-                                <button class="text-button text-rambutan-500 hover:text-rambutan-200 cursor-pointer" on:click=move |_| set_active_view.set(AppView::Calendar)>"Calendar →"</button>
+                                <button class="bruhs-control text-button text-rambutan-500 hover:text-rambutan-200 cursor-pointer" on:click=move |_| set_active_view.set(AppView::Calendar)>"Calendar →"</button>
                             </div>
                             <div class="space-y-2">
                                 {move || snapshot.get().now.map(|entry| {
