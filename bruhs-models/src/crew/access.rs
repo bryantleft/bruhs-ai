@@ -28,6 +28,7 @@ pub enum GatedAction {
 }
 
 pub const READ_ONLY_DENIAL: &str = "This bruh is read only. Return a reviewable draft instead.";
+pub const APP_TOOL_DENIAL: &str = "App tools aren't available to bruh runs.";
 pub const DELIVERY_DENIAL: &str =
     "Pushing, merging and opening pull requests need Full access with Can deliver on.";
 
@@ -92,6 +93,12 @@ pub fn gate(access: &BruhAccess, level: AccessLevel, action: GatedAction) -> Gat
 /// The gate for one tool call of a bruh run. `project_path` is the bruh's
 /// working folder; `shell_confined` is true only when the run's shell is
 /// sandboxed to that folder.
+///
+/// The folder check is lexical (see [`inside_folder`]): the caller must pass
+/// a canonical `project_path` and canonical `file_path`/`notebook_path` in
+/// `input` (symlinks resolved; for a file that doesn't exist yet, its
+/// nearest existing ancestor resolved), or a symlink inside the folder can
+/// point a write outside it.
 #[must_use]
 pub fn permission_gate(
     access: &BruhAccess,
@@ -102,14 +109,28 @@ pub fn permission_gate(
     shell_confined: bool,
 ) -> Gate {
     let level = effective_level(access.level, provider);
-    if tool.starts_with("mcp__") || level == AccessLevel::ReadOnly {
+    if tool.starts_with("mcp__") {
+        return Gate::Deny(if level == AccessLevel::ReadOnly {
+            READ_ONLY_DENIAL
+        } else {
+            APP_TOOL_DENIAL
+        });
+    }
+    if matches!(tool, "Read" | "Grep" | "Glob" | "LS") {
+        return gate(access, level, GatedAction::Read);
+    }
+    if level == AccessLevel::ReadOnly {
         return Gate::Deny(READ_ONLY_DENIAL);
     }
     match tool {
         "Bash" => {
             let command = input["command"].as_str().unwrap_or_default();
-            if is_delivery_command(command) {
-                gate(access, level, GatedAction::Delivery)
+            let delivery =
+                is_delivery_command(command).then(|| gate(access, level, GatedAction::Delivery));
+            if let Some(denied @ Gate::Deny(_)) = delivery {
+                // An allowed delivery still runs the whole line, so the rest
+                // of it follows the normal shell rule below.
+                denied
             } else if level == AccessLevel::Full && shell_confined {
                 Gate::Allow
             } else {
@@ -200,6 +221,11 @@ fn absolute_components(path: &str) -> Option<Vec<&str>> {
 
 /// Whether `path` is `folder` or inside it, compared lexically. Relative
 /// paths, `..` components and an empty or root folder never count.
+///
+/// This crate does no I/O, so it can't see symlinks: callers must pass
+/// canonical paths (symlinks resolved; for a file that doesn't exist yet,
+/// its nearest existing ancestor resolved) or a symlink inside `folder` can
+/// lead outside it.
 #[must_use]
 pub fn inside_folder(path: &str, folder: &str) -> bool {
     match (absolute_components(path), absolute_components(folder)) {
@@ -458,6 +484,17 @@ mod tests {
                 "/work/bruh",
                 true
             ),
+            Gate::Deny(APP_TOOL_DENIAL)
+        );
+        assert_eq!(
+            permission_gate(
+                &BruhAccess::default(),
+                AgentProvider::Claude,
+                "mcp__x__y",
+                &serde_json::json!({}),
+                "/work/bruh",
+                true
+            ),
             Gate::Deny(READ_ONLY_DENIAL)
         );
         assert_eq!(
@@ -496,6 +533,31 @@ mod tests {
         assert!(!inside_folder("/a/b", "a"));
         assert!(!inside_folder("/a/b", ""));
         assert!(!inside_folder("/a/b", "/"));
+    }
+
+    #[test]
+    fn reads_are_allowed_at_every_level() {
+        let ask = BruhAccess {
+            level: AccessLevel::Ask,
+            ..Default::default()
+        };
+        let input = serde_json::json!({"file_path": "/etc/hosts", "pattern": "x"});
+        for access in [BruhAccess::default(), ask, full(false)] {
+            for tool in ["Read", "Grep", "Glob", "LS"] {
+                for provider in [
+                    AgentProvider::Claude,
+                    AgentProvider::Codex,
+                    AgentProvider::Grok,
+                ] {
+                    assert_eq!(
+                        permission_gate(&access, provider, tool, &input, "/w", false),
+                        Gate::Allow,
+                        "{tool} {:?} {provider:?}",
+                        access.level
+                    );
+                }
+            }
+        }
     }
 
     #[test]
@@ -590,9 +652,41 @@ mod tests {
                 "Bash",
                 &push,
                 "/w",
-                false
+                true
             ),
             Gate::Allow
+        );
+        // Delivery allowed still needs a confined shell for the rest of the line.
+        for command in ["git push", "rm -rf ~/x && git push"] {
+            let input = serde_json::json!({"command": command});
+            assert_eq!(
+                permission_gate(
+                    &full(true),
+                    AgentProvider::Claude,
+                    "Bash",
+                    &input,
+                    "/w",
+                    false
+                ),
+                Gate::Approve,
+                "{command}"
+            );
+        }
+        let ask_deliver = BruhAccess {
+            level: AccessLevel::Ask,
+            can_deliver: true,
+            ..Default::default()
+        };
+        assert_eq!(
+            permission_gate(
+                &ask_deliver,
+                AgentProvider::Claude,
+                "Bash",
+                &push,
+                "/w",
+                true
+            ),
+            Gate::Deny(DELIVERY_DENIAL)
         );
         assert_eq!(
             claude_deny_rules(&full(true), AccessLevel::Full),
