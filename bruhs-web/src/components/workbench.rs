@@ -1,4 +1,5 @@
 //! Shared domain UI, with a narrowly scoped bridge into the current draft.
+use bruhs_models::logic::workbench_draft::{append_dictation_draft, DICTATION_DRAFT_MESSAGE};
 use leptos::prelude::*;
 use wasm_bindgen::{closure::Closure, JsCast};
 
@@ -38,20 +39,10 @@ pub fn Workbench() -> impl IntoView {
             let Ok(message) = serde_wasm_bindgen::from_value::<DraftMessage>(event.data()) else {
                 return;
             };
-            if message.r#type != "bruhs-dictation-draft" || message.text.trim().is_empty() {
+            if message.r#type != DICTATION_DRAFT_MESSAGE || message.text.trim().is_empty() {
                 return;
             }
-            draft.update(|text| {
-                let separator = if text.is_empty() || text.ends_with(char::is_whitespace) {
-                    ""
-                } else {
-                    "\n"
-                };
-                let remaining = bruhs_models::logic::composer_text::MESSAGE_CHAR_LIMIT
-                    .saturating_sub(text.chars().count() + separator.chars().count());
-                text.push_str(separator);
-                text.extend(message.text.chars().take(remaining));
-            });
+            draft.update(|text| *text = append_dictation_draft(text, &message.text));
             view.set(crate::state::AppView::Chat);
         });
     if let Some(window) = web_sys::window() {

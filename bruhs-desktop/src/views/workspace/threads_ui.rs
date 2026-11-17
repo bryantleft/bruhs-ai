@@ -841,6 +841,28 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
+    /// Workbench Verification's "Use draft", as on the web: the dictation
+    /// goes after the active thread's composer text, and Chat opens.
+    pub(super) fn receive_dictation_draft(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) else {
+            return;
+        };
+        chat.update(cx, |chat, cx| {
+            let current = chat.input_state.read(cx).value().to_string();
+            let draft =
+                bruhs_models::logic::workbench_draft::append_dictation_draft(&current, text);
+            chat.set_composer_draft(draft, window, cx);
+        });
+        self.active_view = AppView::Chat;
+        self.close_transient_surfaces();
+        self.persist_and_notify(cx);
+    }
+
     pub(super) fn discard_active_draft(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let Some(id) = self.active_thread_id.clone() else {
             return;
@@ -1379,5 +1401,59 @@ impl Workspace {
             }
         }
         (threads, active_thread_id)
+    }
+}
+
+#[cfg(test)]
+mod dictation_draft_tests {
+    use super::super::performance_tests::fixture;
+    use super::super::AppView;
+    use bruhs_models::logic::workbench_draft::DICTATION_DRAFT_MESSAGE;
+
+    /// PM-33: like the web, Workbench Verification's "Use draft" puts the
+    /// dictation after the active thread's composer text and opens Chat. A
+    /// page that is not bruhs-server's own cannot.
+    #[gpui::test]
+    fn a_workbench_draft_fills_the_composer_like_web(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        workspace.update(cx, |workspace, cx| {
+            workspace.active_view = AppView::Workbench;
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let panel = workspace
+            .read_with(cx, |workspace, _| workspace.workbench_panel.clone())
+            .expect("the Workbench view makes its panel");
+        let base = panel.read_with(cx, |panel, _| panel.server_base().to_string());
+        let body = serde_json::json!({ "type": DICTATION_DRAFT_MESSAGE, "text": "Dictated words" })
+            .to_string();
+        workspace.update_in(cx, |workspace, window, cx| {
+            let chat = workspace.active_thread().expect("a thread").chat.clone();
+            chat.update(cx, |chat, cx| {
+                chat.set_composer_draft("Context".into(), window, cx)
+            });
+        });
+
+        // Another site the web view was sent to is ignored.
+        panel.update(cx, |panel, cx| {
+            panel.receive_page_message("https://example.com/api/workbench/ui", &body, cx)
+        });
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, _| {
+            assert_eq!(workspace.active_view, AppView::Workbench);
+        });
+
+        panel.update(cx, |panel, cx| {
+            panel.receive_page_message(&format!("{base}/api/workbench/ui#verification"), &body, cx)
+        });
+        cx.run_until_parked();
+        workspace.read_with(cx, |workspace, cx| {
+            assert_eq!(workspace.active_view, AppView::Chat);
+            let chat = workspace.active_thread().expect("a thread").chat.read(cx);
+            assert_eq!(
+                chat.input_state.read(cx).value().as_str(),
+                "Context\nDictated words"
+            );
+        });
     }
 }

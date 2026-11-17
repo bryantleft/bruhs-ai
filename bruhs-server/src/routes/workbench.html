@@ -4,7 +4,9 @@
 <iframe id="panel" title="Workbench task sessions" src="/api/coordination/ui" allow="microphone; clipboard-write"></iframe>
 <script>
 const panel=document.getElementById('panel');let pendingTask=null,parentOrigin=null,panelReady=false;
-function deliverTask(){if(!panelReady)return;if(pendingTask&&panel.getAttribute('src')==='/api/coordination/ui'){panel.contentWindow.postMessage(pendingTask,location.origin);pendingTask=null}if(parentOrigin)panel.contentWindow.postMessage({type:'bruhs:composer-bridge-ready'},location.origin)}
+// The desktop app shows this page top-level in its own web view, which offers window.ipc.
+const desktopComposer=parent===window&&typeof window.ipc?.postMessage==='function';
+function deliverTask(){if(!panelReady)return;if(pendingTask&&panel.getAttribute('src')==='/api/coordination/ui'){panel.contentWindow.postMessage(pendingTask,location.origin);pendingTask=null}if(parentOrigin||desktopComposer)panel.contentWindow.postMessage({type:'bruhs:composer-bridge-ready'},location.origin)}
 function select(){const links=[...document.querySelectorAll('nav a')],choice=links.find(a=>a.hash===location.hash)||links[0];for(const a of links){if(a===choice)a.setAttribute('aria-current','page');else a.removeAttribute('aria-current')}if(panel.getAttribute('src')!==choice.dataset.src){panelReady=false;panel.src=choice.dataset.src}else deliverTask();panel.title='Workbench '+choice.textContent.toLowerCase()}
 panel.addEventListener('load',()=>{panelReady=true;deliverTask()});
 addEventListener('message',event=>{
@@ -17,8 +19,9 @@ addEventListener('message',event=>{
  const data=event.data;
  if(data.type==='bruhs:open-workspace'&&typeof data.path==='string'&&typeof data.prompt==='string'){
   pendingTask={type:'bruhs:prefill-task',path:data.path,prompt:data.prompt,title:'Work on issue'};location.hash='#tasks';select();
- }else if(data.type==='bruhs-dictation-draft'&&typeof data.text==='string'&&parentOrigin){
-  parent.postMessage({type:data.type,text:data.text},parentOrigin);
+ }else if(data.type==='bruhs-dictation-draft'&&typeof data.text==='string'&&(parentOrigin||desktopComposer)){
+  const draft={type:data.type,text:data.text};
+  if(parentOrigin)parent.postMessage(draft,parentOrigin);else window.ipc.postMessage(JSON.stringify(draft));
  }
 });
 addEventListener('hashchange',select);select();

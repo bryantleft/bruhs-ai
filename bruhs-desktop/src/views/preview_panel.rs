@@ -35,6 +35,10 @@ const SERVERS_NONE: &str = "Nothing is listening on localhost.";
 const NO_WEBVIEW_HINT: &str = "No embedded browser on this platform. Use Open in browser.";
 const BORDER_OPACITY: f32 = 0.6;
 
+/// What a page posted with `window.ipc.postMessage`: the posting frame's
+/// URL and the message.
+pub type PageMessage = (String, String);
+
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum PreviewPanelEvent {
     /// "Open in browser" (or a page that cannot be embedded).
@@ -58,6 +62,8 @@ mod host {
         bounds: Option<(f32, f32, f32, f32)>,
         /// A hide failed and was logged; quiet until one succeeds.
         hide_failing: bool,
+        /// Where `window.ipc` messages go; set before the page view exists.
+        messages: Option<async_channel::Sender<super::PageMessage>>,
     }
 
     fn rect(bounds: gpui::Bounds<gpui::Pixels>) -> Rect {
@@ -84,6 +90,12 @@ mod host {
             true
         }
 
+        /// Pass pages' `window.ipc` messages to `sender`. Only a page view
+        /// made after this call has the handler.
+        pub fn set_messages(&mut self, sender: async_channel::Sender<super::PageMessage>) {
+            self.messages = Some(sender);
+        }
+
         #[cfg(any(test, debug_assertions))]
         pub fn is_live(&self) -> bool {
             self.webview.is_some()
@@ -104,12 +116,18 @@ mod host {
             );
             match &self.webview {
                 None => {
-                    let webview = WebViewBuilder::new()
+                    let mut builder = WebViewBuilder::new()
                         .with_url(url)
                         .with_bounds(rect(bounds))
-                        .with_background_color(BACKGROUND)
-                        .build_as_child(window)
-                        .map_err(|e| e.to_string())?;
+                        .with_background_color(BACKGROUND);
+                    if let Some(sender) = self.messages.clone() {
+                        builder =
+                            builder.with_ipc_handler(move |request: wry::http::Request<String>| {
+                                let frame = request.uri().to_string();
+                                let _ = sender.try_send((frame, request.into_body()));
+                            });
+                    }
+                    let webview = builder.build_as_child(window).map_err(|e| e.to_string())?;
                     self.webview = Some(webview);
                     self.url = Some(url.to_string());
                     self.visible = true;
@@ -185,6 +203,7 @@ mod host {
         pub fn available() -> bool {
             false
         }
+        pub fn set_messages(&mut self, _sender: async_channel::Sender<super::PageMessage>) {}
         #[cfg(any(test, debug_assertions))]
         pub fn is_live(&self) -> bool {
             false
@@ -302,6 +321,13 @@ impl PreviewPanelView {
     #[cfg(debug_assertions)]
     pub fn place_attempts(&self) -> u32 {
         self.place_attempts
+    }
+
+    /// Receive the messages pages post with `window.ipc.postMessage`. Call
+    /// before the first navigation: the handler is fixed when the page view
+    /// is made.
+    pub fn set_page_messages(&mut self, sender: async_channel::Sender<PageMessage>) {
+        self.host.set_messages(sender);
     }
 
     /// The workspace calls this every frame it renders; hiding is immediate

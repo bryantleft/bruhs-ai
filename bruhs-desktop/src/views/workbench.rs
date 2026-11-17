@@ -1,19 +1,34 @@
 //! The local workbench domain UI is shared with web, without embedding the app shell.
 use super::preview_panel::{PreviewPanelEvent, PreviewPanelView};
+use bruhs_models::logic::workbench_draft::dictation_draft_text;
 use gpui::{prelude::*, *};
+
+/// Verification's "Use draft": dictation for the active thread's composer
+/// (web: the Workbench frame's `bruhs-dictation-draft` message).
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WorkbenchEvent {
+    DictationDraft(String),
+}
 
 pub struct WorkbenchPanel {
     preview: Entity<PreviewPanelView>,
+    /// bruhs-server, whose own pages alone may offer a draft.
+    server_base: String,
     _events: Subscription,
+    _page_messages: Task<()>,
 }
+impl EventEmitter<WorkbenchEvent> for WorkbenchPanel {}
 impl WorkbenchPanel {
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
+        let server_base = std::env::var("BRUHS_SERVER_URL")
+            .unwrap_or_else(|_| crate::server_client::DEFAULT_SERVER_URL.into());
+        let (sender, page_messages) = async_channel::unbounded();
         let preview = cx.new(|cx| {
             let mut panel = PreviewPanelView::new(window, cx);
-            let base = std::env::var("BRUHS_SERVER_URL")
-                .unwrap_or_else(|_| crate::server_client::DEFAULT_SERVER_URL.into());
+            // The page relays Verification's draft through `window.ipc`.
+            panel.set_page_messages(sender);
             panel.go_to(
-                &format!("{}/api/workbench/ui", base.trim_end_matches('/')),
+                &format!("{}/api/workbench/ui", server_base.trim_end_matches('/')),
                 window,
                 cx,
             );
@@ -24,10 +39,39 @@ impl WorkbenchPanel {
             let PreviewPanelEvent::OpenExternal(url) = event;
             cx.open_url(url);
         });
+        let _page_messages = cx.spawn(async move |this, cx| {
+            while let Ok((frame, body)) = page_messages.recv().await {
+                if this
+                    .update(cx, |this, cx| this.receive_page_message(&frame, &body, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        });
         Self {
             preview,
+            server_base,
             _events: events,
+            _page_messages,
         }
+    }
+    /// A page's `window.ipc` message: a dictation draft from one of
+    /// bruhs-server's own pages goes to the composer; anything else is
+    /// ignored.
+    pub(crate) fn receive_page_message(
+        &mut self,
+        frame: &str,
+        body: &str,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if let Some(text) = dictation_draft_text(frame, &self.server_base, body) {
+            cx.emit(WorkbenchEvent::DictationDraft(text));
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn server_base(&self) -> &str {
+        &self.server_base
     }
     pub fn set_shown(&mut self, shown: bool, cx: &mut Context<'_, Self>) {
         self.preview.update(cx, |p, _| p.set_shown(shown));
