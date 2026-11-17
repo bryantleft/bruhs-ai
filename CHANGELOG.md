@@ -207,9 +207,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   instead of hiding below 960px. The right panel docks from 768px; in a
   narrower window it opens over the chat, and a click beside it closes it.
   Tasks, a task's details, a document's details and booking times also
-  change layout at the web's widths. As on the web, a docked right panel
-  leaves the chat at least 360px, is at most 70% of the window, and keeps
-  the width you gave it when the window is resized.
+  change layout at the web's widths, and page headers move their buttons
+  under the title when there is no room beside it. As on the web, a docked
+  right panel leaves the chat at least 360px, is at most 70% of the
+  window, and keeps the width you gave it when the window is resized.
+- In a short desktop window the month calendar shows all six weeks, as on
+  the web, instead of scrolling them; each day shows the records that fit.
 - In the desktop app, a Knowledge document's body field is tall again, as on
   the web, instead of one line. The line under the tags says whether the
   document is saved, and Save waits until something changed.
