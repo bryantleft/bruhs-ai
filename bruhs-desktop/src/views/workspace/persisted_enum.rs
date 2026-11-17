@@ -128,6 +128,32 @@ pub(super) mod required {
     }
 }
 
+/// `#[serde(with = "persisted_enum::view_route")]` for the saved view: its
+/// web route, so a detail view keeps its record id. A name saved by an
+/// earlier build reads back as before.
+pub(super) mod view_route {
+    use super::*;
+
+    pub(in crate::views::workspace) fn serialize<S: Serializer>(
+        value: &Option<AppView>,
+        serializer: S,
+    ) -> Result<S::Ok, S::Error> {
+        match value {
+            Some(view) => serializer.serialize_some(&view.route()),
+            None => serializer.serialize_none(),
+        }
+    }
+
+    pub(in crate::views::workspace) fn deserialize<'de, D: Deserializer<'de>>(
+        deserializer: D,
+    ) -> Result<Option<AppView>, D::Error> {
+        let raw = Option::<String>::deserialize(deserializer)?;
+        Ok(raw
+            .as_deref()
+            .map(|raw| AppView::from_route(raw).unwrap_or_else(|| AppView::from_persisted(raw))))
+    }
+}
+
 /// `#[serde(with = "persisted_enum::optional")]` for an `Option<T>`; `null`
 /// stays `None`.
 pub(super) mod optional {

@@ -131,6 +131,7 @@ mod thread_snapshot;
 mod threads_ui;
 mod today_ui;
 mod updates_ui;
+mod view_restore;
 mod whiteboard_ui;
 use calendar_ui::*;
 use event_dialog_ui::*;
@@ -748,7 +749,7 @@ struct PersistedWorkspaceState {
     #[serde(with = "persisted_enum::optional")]
     permission_mode: Option<PermissionMode>,
     sidebar_visible: Option<bool>,
-    #[serde(with = "persisted_enum::optional")]
+    #[serde(with = "persisted_enum::view_route")]
     active_view: Option<AppView>,
     active_thread_id: Option<String>,
     #[serde(with = "persisted_enum::optional")]
@@ -1707,6 +1708,9 @@ impl Workspace {
         );
         let role_inputs = Self::new_role_inputs(window, cx, &mut subscriptions);
         let base_branch = String::new();
+        let reopen_view = persisted
+            .as_ref()
+            .and_then(|state| state.active_view.clone());
         let mut workspace = Self {
             workflow_window: window.window_handle(),
             automation_pending: false,
@@ -2073,6 +2077,12 @@ impl Workspace {
         };
         workspace.reveal_selected_task_page();
         workspace.stamp_run_prefs_on_threads(cx);
+        // Return to the view the app closed on, as the web does from its URL.
+        if let Some(view) = reopen_view {
+            cx.defer_in(window, move |this, window, cx| {
+                this.reopen_view_after_start(view, window, cx);
+            });
+        }
         workspace.sync_keybindings(cx);
         workspace.start_meeting_suggestions(cx);
         cx.spawn(async move |this, cx| loop {
