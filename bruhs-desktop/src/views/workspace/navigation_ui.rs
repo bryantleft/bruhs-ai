@@ -21,7 +21,7 @@ impl Workspace {
             .flex_shrink_0()
             .px(px(12.0))
             .when(sidebar_drawer || !self.sidebar_visible, |el| {
-                el.pl(px(SIDEBAR_HEADER_LEFT_INSET_PX))
+                el.pl(px(self.traffic_light_inset_px()))
             })
             .flex()
             .items_center()

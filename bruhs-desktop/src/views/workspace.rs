@@ -78,6 +78,8 @@ mod event_dialog_ui;
 mod import_tests;
 mod import_ui;
 mod mail_compose;
+#[cfg(test)]
+mod zoom_tests;
 pub(crate) use import_ui::portable_messages;
 mod inbox_ui;
 mod keybindings_ui;
@@ -202,7 +204,10 @@ actions!(
         CopyResumeCommand,
         CopyThreadMarkdown,
         ContinueInT3,
-        ContinueInWorkbench
+        ContinueInWorkbench,
+        ZoomIn,
+        ZoomOut,
+        ResetZoom
     ]
 );
 
@@ -812,6 +817,10 @@ struct PersistedWorkspaceState {
     terminal_drawer_height: Option<f32>,
     /// Web `bruhs.rightPanelWidth`.
     right_panel_width: Option<f32>,
+    /// Page zoom (⌘+ / ⌘− / ⌘0), the browser zoom of the web app. Absent
+    /// means 100%.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    zoom: Option<f32>,
     /// Web `bruhs.whisper_model` / `bruhs.diarize` / `bruhs.auto_record` /
     /// `bruhs.personality` preferences.
     meeting_prefs: Option<MeetingPrefs>,
@@ -1469,6 +1478,8 @@ pub struct Workspace {
     /// Right panel width in px, dragged at its left edge (web `RightPanelWidth`).
     right_panel_width: f32,
     right_panel_split_state: Entity<ResizableState>,
+    /// Page zoom; see [`crate::zoom`].
+    zoom: f32,
     /// Split between the transcript and the drawer; persists the drag.
     terminal_split_state: Entity<ResizableState>,
     /// Keeps the input, panel and hub subscriptions alive.
@@ -2131,6 +2142,7 @@ impl Workspace {
             right_panel_width,
             right_panel_split_state,
             terminal_split_state,
+            zoom: crate::zoom::restore(persisted.as_ref().and_then(|state| state.zoom)),
             _subscriptions: subscriptions,
         };
         workspace.reveal_selected_task_page();
@@ -2142,6 +2154,7 @@ impl Workspace {
             });
         }
         workspace.sync_keybindings(cx);
+        workspace.apply_zoom(window, cx);
         workspace.start_meeting_suggestions(cx);
         cx.spawn(async move |this, cx| loop {
             cx.background_executor()
@@ -2241,6 +2254,41 @@ impl Workspace {
     /// it docks beside the chat.
     fn right_panel_drawer_layout(window: &Window) -> bool {
         Self::narrower_than(window, MD_BREAKPOINT_PX)
+    }
+
+    /// ⌘+ / ⌘− / ⌘0: zoom the window's content like a browser zooms the web
+    /// app, and remember the level.
+    pub(crate) fn set_zoom(&mut self, zoom: f32, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.zoom = zoom;
+        self.apply_zoom(window, cx);
+        self.persist_and_notify(cx);
+    }
+
+    /// Give the window the saved zoom, and keep the macOS traffic lights
+    /// centred in the zoomed header.
+    fn apply_zoom(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        window.set_zoom(self.zoom, cx);
+        #[cfg(target_os = "macos")]
+        window.set_traffic_light_position(point(
+            px(12.0),
+            px(crate::zoom::traffic_light_top(
+                theme::APP_HEADER_HEIGHT_PX,
+                self.zoom,
+            )),
+        ));
+    }
+
+    /// Room for the macOS traffic lights, which stay in window points while
+    /// the content zooms.
+    fn traffic_light_inset_px(&self) -> f32 {
+        #[cfg(target_os = "macos")]
+        {
+            crate::zoom::traffic_light_inset(SIDEBAR_HEADER_LEFT_INSET_PX, self.zoom)
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            SIDEBAR_HEADER_LEFT_INSET_PX
+        }
     }
 
     fn toggle_sidebar_for_window(&mut self, window: &Window, cx: &mut Context<'_, Self>) {
@@ -3022,6 +3070,15 @@ impl Render for Workspace {
             .line_height(relative(WORKSPACE_LINE_HEIGHT))
             .on_action(cx.listener(Self::new_thread))
             .on_action(cx.listener(Self::toggle_sidebar))
+            .on_action(cx.listener(|this, _: &ZoomIn, window, cx| {
+                this.set_zoom(crate::zoom::zoom_in(this.zoom), window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ZoomOut, window, cx| {
+                this.set_zoom(crate::zoom::zoom_out(this.zoom), window, cx);
+            }))
+            .on_action(cx.listener(|this, _: &ResetZoom, window, cx| {
+                this.set_zoom(crate::zoom::DEFAULT, window, cx);
+            }))
             .on_action(cx.listener(Self::toggle_tasks))
             .on_action(cx.listener(Self::focus_command_bar))
             .on_action(cx.listener(Self::focus_chat_input))

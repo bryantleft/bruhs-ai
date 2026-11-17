@@ -1234,7 +1234,7 @@ impl Workspace {
                             .id("desktop-settings-header")
                             .debug_selector(|| "desktop-settings-header".to_string())
                             .h(px(SETTINGS_PAGE_HEADER_HEIGHT_PX))
-                            .pl(px(SIDEBAR_HEADER_LEFT_INSET_PX))
+                            .pl(px(self.traffic_light_inset_px()))
                             .pr(px(SETTINGS_PAGE_X_PADDING_PX))
                             .flex_shrink_0()
                             .border_b_1()

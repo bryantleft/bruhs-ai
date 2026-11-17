@@ -313,7 +313,7 @@ impl Workspace {
             .id("sidebar-header")
             .debug_selector(|| "desktop-sidebar-header".to_string())
             .h(px(SIDEBAR_HEADER_HEIGHT_PX))
-            .pl(px(SIDEBAR_HEADER_LEFT_INSET_PX))
+            .pl(px(self.traffic_light_inset_px()))
             .pr_4()
             .flex()
             .items_center()

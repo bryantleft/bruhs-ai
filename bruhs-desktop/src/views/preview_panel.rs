@@ -59,23 +59,25 @@ mod host {
         webview: Option<WebView>,
         url: Option<String>,
         visible: bool,
-        bounds: Option<(f32, f32, f32, f32)>,
+        /// Placed content bounds and the zoom they were placed at.
+        bounds: Option<(f32, f32, f32, f32, f32)>,
         /// A hide failed and was logged; quiet until one succeeds.
         hide_failing: bool,
         /// Where `window.ipc` messages go; set before the page view exists.
         messages: Option<async_channel::Sender<super::PageMessage>>,
     }
 
-    fn rect(bounds: gpui::Bounds<gpui::Pixels>) -> Rect {
+    /// The page's frame in window points: content bounds times the zoom.
+    fn rect(bounds: gpui::Bounds<gpui::Pixels>, zoom: f32) -> Rect {
         Rect {
             position: LogicalPosition::new(
-                f64::from(f32::from(bounds.origin.x)),
-                f64::from(f32::from(bounds.origin.y)),
+                f64::from(f32::from(bounds.origin.x) * zoom),
+                f64::from(f32::from(bounds.origin.y) * zoom),
             )
             .into(),
             size: LogicalSize::new(
-                f64::from(f32::from(bounds.size.width).max(1.0)),
-                f64::from(f32::from(bounds.size.height).max(1.0)),
+                f64::from((f32::from(bounds.size.width) * zoom).max(1.0)),
+                f64::from((f32::from(bounds.size.height) * zoom).max(1.0)),
             )
             .into(),
         }
@@ -108,17 +110,20 @@ mod host {
             url: &str,
             bounds: gpui::Bounds<gpui::Pixels>,
         ) -> Result<(), String> {
+            // The window's zoom places the page and zooms its content too.
+            let zoom = window.zoom();
             let key = (
                 f32::from(bounds.origin.x),
                 f32::from(bounds.origin.y),
                 f32::from(bounds.size.width),
                 f32::from(bounds.size.height),
+                zoom,
             );
             match &self.webview {
                 None => {
                     let mut builder = WebViewBuilder::new()
                         .with_url(url)
-                        .with_bounds(rect(bounds))
+                        .with_bounds(rect(bounds, zoom))
                         .with_background_color(BACKGROUND);
                     if let Some(sender) = self.messages.clone() {
                         builder =
@@ -128,6 +133,7 @@ mod host {
                             });
                     }
                     let webview = builder.build_as_child(window).map_err(|e| e.to_string())?;
+                    webview.zoom(f64::from(zoom)).map_err(|e| e.to_string())?;
                     self.webview = Some(webview);
                     self.url = Some(url.to_string());
                     self.visible = true;
@@ -143,8 +149,11 @@ mod host {
                         self.visible = true;
                     }
                     if self.bounds != Some(key) {
+                        if self.bounds.map(|old| old.4) != Some(zoom) {
+                            webview.zoom(f64::from(zoom)).map_err(|e| e.to_string())?;
+                        }
                         webview
-                            .set_bounds(rect(bounds))
+                            .set_bounds(rect(bounds, zoom))
                             .map_err(|e| e.to_string())?;
                         self.bounds = Some(key);
                     }

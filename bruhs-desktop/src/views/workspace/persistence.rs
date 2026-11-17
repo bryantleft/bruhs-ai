@@ -486,6 +486,7 @@ impl Workspace {
             editor_id: Some(self.editor_id.clone()),
             terminal_drawer_height: Some(self.terminal_drawer_height),
             right_panel_width: Some(self.right_panel_width),
+            zoom: (!crate::zoom::is_default(self.zoom)).then_some(self.zoom),
             meeting_prefs: Some(self.meetings_hub.read(cx).prefs.clone()),
             run_choice: self.run_choice.as_str().to_string(),
             claude_effort: self.claude_effort.clone(),
