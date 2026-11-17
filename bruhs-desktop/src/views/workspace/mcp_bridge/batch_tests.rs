@@ -1,5 +1,5 @@
 use super::super::{load_desktop_state_from_path, SaveStatus};
-use super::tests::{call, connect, fixture};
+use super::tests::{call, connect, fixture, workflow_fixture};
 use super::WorkspaceBridge;
 use bruhs_core::workspace_bridge::{BridgeRequest, BridgeResponse, WorkflowProposal};
 use bruhs_models::{AgentAccess, AgentDomain, WorkflowOperation, WorkflowStatus};
@@ -123,7 +123,7 @@ async fn batch_rejects_any_missing_grant_or_invalid_adapter_before_creating_work
 
 #[gpui::test]
 async fn one_batch_review_yields_saved_five_domain_progress_and_undo(cx: &mut TestAppContext) {
-    let (workspace, cx) = fixture(cx);
+    let (workspace, cx) = workflow_fixture(cx);
     let directory =
         std::env::temp_dir().join(format!("bruhs-batch-durability-{}", uuid::Uuid::new_v4()));
     let path = directory.join("state.json");
@@ -227,7 +227,7 @@ async fn one_batch_review_yields_saved_five_domain_progress_and_undo(cx: &mut Te
 async fn batch_rechecks_revocation_and_changed_later_payload_between_steps(
     cx: &mut TestAppContext,
 ) {
-    let (workspace, cx) = fixture(cx);
+    let (workspace, cx) = workflow_fixture(cx);
     workspace.update_in(cx, |w, _, _| {
         for operation in proposal().operations {
             w.automation_state

@@ -141,11 +141,11 @@ pub fn AutomationsPage() -> impl IntoView {
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="suggestions-title">
                             <div class="flex items-center justify-between gap-3">
                                 <div>
-                                    <h2 id="suggestions-title" class="text-h4 text-rambutan-100">"Local suggestions"</h2>
-                                    <p class="text-body-sm text-rambutan-500">"Evidence is shown before any proposal. Suggestions appear at most three times, no more than daily."</p>
+                                    <h2 id="suggestions-title" class="text-h4 text-rambutan-100">{bruhs_models::suggestion_copy::TITLE}</h2>
+                                    <p class="text-body-sm text-rambutan-500">{bruhs_models::suggestion_copy::DESCRIPTION}</p>
                                 </div>
                                 <Button class="whitespace-nowrap" variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| make_preview(focus_operations(crate::clock::now_ms()), "Protect focus", None))>
-                                    "New dry run"
+                                    {bruhs_models::suggestion_copy::NEW_DRY_RUN}
                                 </Button>
                             </div>
                             <div class="mt-3 space-y-2">
@@ -155,16 +155,16 @@ pub fn AutomationsPage() -> impl IntoView {
                                     let title = suggestion.title.clone();
                                     let workflow_title = title.clone();
                                     let operations = suggestion.operations.clone();
-                                    let preview_label = format!("Preview {} changes", operations.len());
+                                    let preview_label = bruhs_models::suggestion_copy::preview(operations.len());
                                     view! {
                                         <article class="rounded-grape bg-longan-950/70 p-3 inset-ring inset-ring-longan-700/40">
                                             <div class="flex items-start justify-between gap-3">
                                                 <div class="min-w-0">
                                                     <h3 class="text-label text-rambutan-200">{title}</h3>
                                                     <p class="mt-1 text-body-sm text-rambutan-400">{suggestion.explanation.clone()}</p>
-                                                    <p class="mt-2 text-label-sm text-blueberry-300">{format!("Evidence: {}", suggestion.evidence)}</p>
+                                                    <p class="mt-2 text-label-sm text-blueberry-300">{bruhs_models::suggestion_copy::evidence(&suggestion.evidence)}</p>
                                                 </div>
-                                                <button type="button" class="shrink-0 text-label-sm text-rambutan-500 hover:text-rambutan-200 cursor-pointer" aria-label="Dismiss suggestion" on:click=move |_| automation.update(|state| { let _ = state.dismiss_suggestion(&id, crate::clock::now_ms()); })>"Dismiss"</button>
+                                                <button type="button" class="shrink-0 text-label-sm text-rambutan-500 hover:text-rambutan-200 cursor-pointer" aria-label=bruhs_models::suggestion_copy::DISMISS_LABEL on:click=move |_| automation.update(|state| { let _ = state.dismiss_suggestion(&id, crate::clock::now_ms()); })>{bruhs_models::suggestion_copy::DISMISS}</button>
                                             </div>
                                             <button type="button" class="mt-3 rounded-grape bg-persimmon-500 px-3 py-1.5 text-label-sm text-longan-950 hover:bg-persimmon-400 cursor-pointer" on:click=move |_| {
                                                 automation.update(|state| { let _ = state.mark_suggestion_surfaced(&id_for_preview, crate::clock::now_ms()); });

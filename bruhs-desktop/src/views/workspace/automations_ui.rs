@@ -10,6 +10,8 @@ mod reactive_tests;
 #[cfg(test)]
 mod review_tests;
 mod rollback;
+#[cfg(test)]
+mod suggestion_tests;
 use bruhs_models::{
     agent_tool_definitions, AgentAccess, AgentDomain, BackgroundJobStatus, FinanceTransaction,
     WorkflowOperation, WorkflowStatus, WorkoutLog,
@@ -237,6 +239,9 @@ impl Workspace {
         )
     }
 
+    /// Tests' shortcut to a previewed focus workflow that also counts the
+    /// suggestion as shown (the card's Preview does that for any suggestion).
+    #[cfg(test)]
     fn preview_focus_automation(&mut self, cx: &mut Context<'_, Self>) {
         let now = EpochMs::now().as_millis();
         // The suggestion is surfaced at most once per cooldown; a refusal
@@ -258,14 +263,201 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    fn dismiss_focus_suggestion(&mut self, cx: &mut Context<'_, Self>) {
+    /// Web "Dismiss suggestion".
+    fn dismiss_suggestion(&mut self, id: &str, cx: &mut Context<'_, Self>) {
         if !self
             .automation_state
-            .dismiss_suggestion("protect-focus", EpochMs::now().as_millis())
+            .dismiss_suggestion(id, EpochMs::now().as_millis())
         {
-            tracing::debug!("focus suggestion was already gone");
+            tracing::debug!("suggestion {id} was already gone");
         }
         self.persist_and_notify(cx);
+    }
+
+    /// Web "Preview N changes": counts the suggestion as shown, then
+    /// previews its operations as a workflow to review.
+    fn preview_suggestion(&mut self, id: &str, cx: &mut Context<'_, Self>) {
+        let now = EpochMs::now().as_millis();
+        let Some(suggestion) = self
+            .automation_state
+            .suggestions
+            .iter()
+            .find(|suggestion| suggestion.id == id)
+            .cloned()
+        else {
+            return;
+        };
+        if !self.automation_state.mark_suggestion_surfaced(id, now) {
+            tracing::debug!("suggestion {id} was already surfaced");
+        }
+        let workflow =
+            self.automation_state
+                .create_workflow(suggestion.title, suggestion.operations, now);
+        if self.automation_state.preview(&workflow, now).is_none() {
+            self.automation_error =
+                Some("The workflow could not be previewed. No records were changed.".into());
+        }
+        self.reviewed_workflow_id = Some(workflow);
+        self.persist_and_notify(cx);
+    }
+
+    /// Web "New dry run": previews the focus workflow without counting a
+    /// suggestion as shown.
+    fn new_focus_dry_run(&mut self, cx: &mut Context<'_, Self>) {
+        let now = EpochMs::now().as_millis();
+        let workflow =
+            self.automation_state
+                .create_workflow("Protect focus", focus_operations(), now);
+        if self.automation_state.preview(&workflow, now).is_none() {
+            self.automation_error =
+                Some("The focus workflow could not be previewed. No records were changed.".into());
+        }
+        self.reviewed_workflow_id = Some(workflow);
+        self.persist_and_notify(cx);
+    }
+
+    /// Web `Local suggestions`: the section's own dry run, then a card per
+    /// suggestion that may surface, with its evidence, Dismiss and Preview.
+    fn render_local_suggestions(&self, cx: &Context<'_, Self>) -> Div {
+        use bruhs_models::suggestion_copy as copy;
+        let now = EpochMs::now().as_millis();
+        let cards = self
+            .automation_state
+            .surfaceable_suggestions(now)
+            .into_iter()
+            .enumerate()
+            .map(|(index, suggestion)| {
+                let preview_id = suggestion.id.clone();
+                let dismiss_id = suggestion.id.clone();
+                let preview = copy::preview(suggestion.operations.len());
+                div()
+                    .debug_selector(move || format!("desktop-suggestion-{index}"))
+                    .rounded(px(6.0))
+                    .bg(theme::longan_950().opacity(0.7))
+                    .border_1()
+                    .border_color(theme::longan_700().opacity(0.4))
+                    .p_3()
+                    .child(
+                        div()
+                            .flex()
+                            .items_start()
+                            .justify_between()
+                            .gap_3()
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .min_w_0()
+                                    .child(
+                                        div()
+                                            .text_size(px(12.0))
+                                            .text_color(theme::rambutan_200())
+                                            .child(suggestion.title.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt_1()
+                                            .text_size(px(12.0))
+                                            .text_color(theme::rambutan_400())
+                                            .child(suggestion.explanation.clone()),
+                                    )
+                                    .child(
+                                        div()
+                                            .mt_2()
+                                            .text_size(px(11.0))
+                                            .text_color(theme::blueberry_300())
+                                            .child(copy::evidence(&suggestion.evidence)),
+                                    ),
+                            )
+                            .child(
+                                web_button(
+                                    ("automation-suggestion-dismiss", index),
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(move || {
+                                    format!("desktop-automation-suggestion-dismiss-{index}")
+                                })
+                                .aria_label(copy::DISMISS_LABEL)
+                                .child(copy::DISMISS)
+                                .on_click(cx.listener(
+                                    move |this, _event, _window, cx| {
+                                        this.dismiss_suggestion(&dismiss_id, cx);
+                                    },
+                                )),
+                            ),
+                    )
+                    .child(
+                        div().mt_3().child(
+                            web_button(
+                                ("automation-suggestion-preview", index),
+                                WebButtonVariant::Primary,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .debug_selector(move || {
+                                format!("desktop-automation-suggestion-preview-{index}")
+                            })
+                            .aria_label(preview.clone())
+                            .child(preview)
+                            .on_click(cx.listener(
+                                move |this, _event, _window, cx| {
+                                    this.preview_suggestion(&preview_id, cx);
+                                },
+                            )),
+                        ),
+                    )
+                    .into_any_element()
+            })
+            .collect::<Vec<_>>();
+        div()
+            .debug_selector(|| "desktop-local-suggestions".into())
+            .rounded(px(6.0))
+            .bg(theme::longan_900().opacity(0.65))
+            .border_1()
+            .border_color(theme::longan_800())
+            .p_3()
+            .child(
+                div()
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .flex_1()
+                            .min_w_0()
+                            .child(
+                                div()
+                                    .text_size(px(12.0))
+                                    .text_color(theme::rambutan_200())
+                                    .child(copy::TITLE),
+                            )
+                            .child(
+                                div()
+                                    .text_size(px(11.0))
+                                    .text_color(theme::rambutan_500())
+                                    .child(copy::DESCRIPTION),
+                            ),
+                    )
+                    .child(
+                        web_button(
+                            "automation-new-dry-run",
+                            WebButtonVariant::Ghost,
+                            WebButtonSize::Small,
+                            ButtonState::Enabled,
+                        )
+                        .debug_selector(|| "desktop-automation-new-dry-run".into())
+                        .aria_label(copy::NEW_DRY_RUN)
+                        .child(copy::NEW_DRY_RUN)
+                        .on_click(
+                            cx.listener(|this, _event, _window, cx| this.new_focus_dry_run(cx)),
+                        ),
+                    ),
+            )
+            .when(!cards.is_empty(), |panel| {
+                panel.child(div().mt_3().flex().flex_col().gap_2().children(cards))
+            })
     }
 
     fn start_reviewed_automation(&mut self, id: &str, cx: &mut Context<'_, Self>) {
@@ -765,13 +957,6 @@ impl Workspace {
                     .into_any_element()
             })
             .collect::<Vec<_>>();
-        let focus_suggestion = self
-            .automation_state
-            .surfaceable_suggestions(EpochMs::now().as_millis())
-            .into_iter()
-            .find(|suggestion| suggestion.id == "protect-focus")
-            .cloned();
-
         div()
             .flex_1()
             .h_full()
@@ -827,36 +1012,7 @@ impl Workspace {
                                     .flex()
                                     .flex_col()
                                     .gap_3()
-                                    .child(self.automation_panel(
-                                        "Local suggestion",
-                                        div()
-                                            .mt_2()
-                                            .text_size(px(11.0))
-                                            .text_color(theme::rambutan_400())
-                                            .child(focus_suggestion.as_ref().map_or_else(
-                                                || "No suggestion is due. Local suggestions appear at most three times, no more than daily.".to_string(),
-                                                |suggestion| format!(
-                                                    "{}. {} Evidence: {}",
-                                                    suggestion.title,
-                                                    suggestion.explanation,
-                                                    suggestion.evidence
-                                                ),
-                                            ))
-                                            .child(
-                                                web_button("automation-preview", WebButtonVariant::Primary, WebButtonSize::Small, ButtonState::Enabled)
-                                                    .aria_label("New dry run")
-                                                    .mt_2()
-                                                    .child("New dry run")
-                                                    .on_click(cx.listener(|this, _event, _window, cx| this.preview_focus_automation(cx))),
-                                            )
-                                            .when(focus_suggestion.is_some(), |panel| panel.child(
-                                                web_button("automation-dismiss-suggestion", WebButtonVariant::Ghost, WebButtonSize::Small, ButtonState::Enabled)
-                                                    .aria_label("Dismiss focus suggestion")
-                                                    .mt_2()
-                                                    .child("Dismiss")
-                                                    .on_click(cx.listener(|this, _event, _window, cx| this.dismiss_focus_suggestion(cx))),
-                                            )),
-                                    ))
+                                    .child(self.render_local_suggestions(cx))
                                     .child(self.automation_panel(
                                         "Workflow review",
                                         div()

@@ -636,6 +636,26 @@ pub struct AgentAuditEvent {
     pub occurred_at_ms: i64,
 }
 
+/// The Local suggestions section's words, on web and desktop.
+pub mod suggestion_copy {
+    pub const TITLE: &str = "Local suggestions";
+    pub const DESCRIPTION: &str =
+        "Evidence is shown before any proposal. Suggestions appear at most three times, no more than daily.";
+    pub const NEW_DRY_RUN: &str = "New dry run";
+    pub const DISMISS_LABEL: &str = "Dismiss suggestion";
+    pub const DISMISS: &str = "Dismiss";
+
+    /// A suggestion's preview button: "Preview 3 changes".
+    pub fn preview(count: usize) -> String {
+        format!("Preview {count} changes")
+    }
+
+    /// "Evidence: 3 unfinished tasks and 3 calendar entries are stored locally."
+    pub fn evidence(evidence: &str) -> String {
+        format!("Evidence: {evidence}")
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct ProactiveSuggestion {
     pub id: String,
