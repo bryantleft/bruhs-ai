@@ -1034,6 +1034,87 @@ fn desktop_model_picker_opens_from_chip_and_selects(cx: &mut gpui::TestAppContex
     });
 }
 
+#[gpui::test]
+fn desktop_thread_rename_should_match_web_header(cx: &mut gpui::TestAppContext) {
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        theme::apply_bruhs_theme(cx);
+        cx.set_global(DesktopState::new().expect("desktop state should initialize"));
+    });
+    let chat_cell: Rc<RefCell<Option<gpui::Entity<ChatView>>>> = Rc::new(RefCell::new(None));
+    let chat_for_window = chat_cell.clone();
+    let (_root, cx) = cx.add_window_view(|window, cx| {
+        let chat = cx.new(|cx| {
+            let mut chat = ChatView::new(window, cx);
+            chat.start_thread("thread-rename", "Old title", cx);
+            chat
+        });
+        *chat_for_window.borrow_mut() = Some(chat.clone());
+        gpui_component::Root::new(chat, window, cx)
+    });
+    let chat = chat_cell.borrow().clone().expect("chat entity");
+    // GPUI reports focus changes, such as leaving the field, only in an
+    // active window.
+    cx.update(|window, _| window.activate_window());
+    let saves = Rc::new(std::cell::Cell::new(0));
+    let counted = saves.clone();
+    cx.update(|_, cx| {
+        cx.subscribe(&chat, move |_, event: &super::ChatViewEvent, _| {
+            if matches!(event, super::ChatViewEvent::MessagesChanged) {
+                counted.set(counted.get() + 1);
+            }
+        })
+        .detach();
+    });
+    cx.run_until_parked();
+    assert_chat_no_rendered_bounds(cx, "desktop-chat-header-rename");
+
+    // The pen opens the field with the title selected, so typing replaces
+    // it; Enter saves and returns to the composer.
+    click_chat_debug_selector(cx, "desktop-chat-header-rename-button");
+    cx.run_until_parked();
+    assert_chat_rendered_bounds(cx, "desktop-chat-header-rename");
+    cx.simulate_input("New title");
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        assert_eq!(chat.thread_title, "New title");
+        assert!(chat.title_rename.is_none());
+        assert!(gpui::Focusable::focus_handle(&chat.input_state, cx).is_focused(window));
+    });
+    assert_eq!(saves.get(), 1, "a rename saves the thread");
+
+    // Escape keeps the title.
+    click_chat_debug_selector(cx, "desktop-chat-header-rename-button");
+    cx.run_until_parked();
+    cx.simulate_input("Discard me");
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    chat.update_in(cx, |chat, window, cx| {
+        assert_eq!(chat.thread_title, "New title");
+        assert!(chat.title_rename.is_none());
+        // A blank draft keeps it too, here saved by leaving the field.
+        chat.start_title_rename(window, cx);
+        let input = chat
+            .title_rename
+            .as_ref()
+            .expect("rename open")
+            .input
+            .clone();
+        input.update(cx, |input, cx| input.set_value("   ", window, cx));
+    });
+    assert_chat_rendered_bounds(cx, "desktop-chat-header-rename");
+    chat.update_in(cx, |chat, window, cx| chat.focus_composer(window, cx));
+    // Focus listeners run when the next frame draws.
+    refresh_chat_test_window(cx);
+    chat.update(cx, |chat, _| {
+        assert_eq!(chat.thread_title, "New title");
+        assert!(chat.title_rename.is_none());
+    });
+    assert_eq!(saves.get(), 1, "an unchanged title does not save");
+}
+
 #[test]
 fn turn_fold_label_worked_and_stopped() {
     assert_eq!(turn_fold_label(Some(223_000), false), "Worked for 3m 43s");

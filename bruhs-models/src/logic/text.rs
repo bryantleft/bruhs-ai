@@ -25,8 +25,30 @@ pub fn plain_title(title: &str) -> std::borrow::Cow<'_, str> {
     std::borrow::Cow::Owned(title.replace('`', ""))
 }
 
+/// A thread rename, trimmed; `None` keeps the old title (a blank or
+/// unchanged draft). Moved from the web's `chat_header.rs` for desktop.
+pub fn resolve_rename(draft: &str, original: &str) -> Option<String> {
+    let trimmed = draft.trim();
+    if trimmed.is_empty() || trimmed == original {
+        None
+    } else {
+        Some(trimmed.to_string())
+    }
+}
+
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn rename_rejects_empty_and_unchanged() {
+        use super::resolve_rename;
+        assert_eq!(resolve_rename("   ", "Old"), None);
+        assert_eq!(resolve_rename("Old", "Old"), None);
+        assert_eq!(
+            resolve_rename("  New name ", "Old"),
+            Some("New name".to_string())
+        );
+    }
+
     #[test]
     fn plain_title_drops_paired_backticks_only() {
         use super::plain_title;

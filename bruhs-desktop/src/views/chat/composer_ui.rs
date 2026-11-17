@@ -24,8 +24,8 @@ use bruhs_models::logic::run_place::{WorkspaceChoice, CLAUDE_EFFORTS};
 
 use super::{
     composer_input_disabled_like_web, composer_input_tab_index_like_web, element_key,
-    is_web_button_activation_key, ChatView, ChatViewEvent, InputEnter, InputEscape, InputMoveDown,
-    InputMoveUp, PermissionMode, StashDraft,
+    is_web_button_activation_key, title_rename, ChatView, ChatViewEvent, InputEnter, InputEscape,
+    InputMoveDown, InputMoveUp, PermissionMode, StashDraft,
 };
 use crate::views::sidebar_order::relative_age;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
@@ -40,6 +40,11 @@ pub const CHAT_HEADER_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub const CHAT_HEADER_CRUMB_MAX_WIDTH_PX: f32 = 160.0;
 /// Web: the role tag is `max-w-32 text-label-sm` on `bg-longan-800/60`.
 pub const CHAT_HEADER_ROLE_MAX_WIDTH_PX: f32 = 128.0;
+/// Hover group for the header, which reveals the rename pen like web's
+/// `group/header`.
+const CHAT_HEADER_GROUP: &str = "chat-header";
+pub const CHAT_HEADER_RENAME_LABEL: &str = "Rename thread";
+pub const CHAT_HEADER_RENAME_HINT: &str = "Double click to rename";
 pub const CHAT_HEADER_ROLE_TEXT_SIZE_PX: f32 = 12.0;
 const CHAT_HEADER_ROLE_BG_OPACITY: f32 = 0.60;
 pub const CHAT_HEADER_TOGGLE_HEIGHT_PX: f32 = theme::CONTROL_SM_PX;
@@ -544,6 +549,7 @@ impl ChatView {
         div()
             .id("chat-header")
             .debug_selector(|| "desktop-chat-header".to_string())
+            .group(CHAT_HEADER_GROUP)
             .h(px(CHAT_HEADER_HEIGHT_PX))
             .px(px(CHAT_HEADER_X_PADDING_PX))
             .flex()
@@ -610,41 +616,56 @@ impl ChatView {
                             .text_color(theme::rambutan_600())
                             .child("/"),
                     )
-                    .child(
-                        div()
-                            .debug_selector(|| "desktop-chat-header-title".to_string())
-                            .min_w_0()
-                            // With a role the tag sits right after the title
-                            // (web), so the title takes only its own width.
-                            .when(role.is_none(), |el| el.flex_1())
-                            .truncate()
-                            .text_color(theme::rambutan_100())
+                    .map(|el| match self.title_rename.as_ref() {
+                        Some(rename) => el.child(self.render_title_rename(rename, cx)),
+                        None => el
                             .child(
-                                bruhs_models::logic::text::plain_title(&self.thread_title)
-                                    .into_owned(),
-                            ),
-                    )
-                    .when_some(role, |el, role| {
-                        let hint = format!("Role: {role}. /role changes it.");
-                        el.child(
-                            div()
-                                .id("chat-header-role")
-                                .debug_selector(|| "desktop-chat-header-role".to_string())
-                                .flex_shrink_0()
-                                .max_w(px(CHAT_HEADER_ROLE_MAX_WIDTH_PX))
-                                .truncate()
-                                .rounded(px(4.0))
-                                .bg(theme::longan_800().opacity(CHAT_HEADER_ROLE_BG_OPACITY))
-                                .px(px(6.0))
-                                .text_size(px(CHAT_HEADER_ROLE_TEXT_SIZE_PX))
-                                .text_color(theme::rambutan_300())
-                                .tooltip(move |window, cx| {
-                                    Tooltip::new(hint.clone()).build(window, cx)
-                                })
-                                .child(role),
-                        )
-                        // Keeps the title and its tag at the left.
-                        .child(div().flex_1())
+                                div()
+                                    .id("chat-header-title")
+                                    .debug_selector(|| "desktop-chat-header-title".to_string())
+                                    .min_w_0()
+                                    .truncate()
+                                    .cursor_text()
+                                    .text_color(theme::rambutan_100())
+                                    .tooltip(|window, cx| {
+                                        Tooltip::new(CHAT_HEADER_RENAME_HINT).build(window, cx)
+                                    })
+                                    .on_click(cx.listener(
+                                        |this, event: &ClickEvent, window, cx| {
+                                            if event.click_count() == 2 {
+                                                this.start_title_rename(window, cx);
+                                            }
+                                        },
+                                    ))
+                                    .child(
+                                        bruhs_models::logic::text::plain_title(&self.thread_title)
+                                            .into_owned(),
+                                    ),
+                            )
+                            .when_some(role, |el, role| {
+                                let hint = format!("Role: {role}. /role changes it.");
+                                el.child(
+                                    div()
+                                        .id("chat-header-role")
+                                        .debug_selector(|| "desktop-chat-header-role".to_string())
+                                        .flex_shrink_0()
+                                        .max_w(px(CHAT_HEADER_ROLE_MAX_WIDTH_PX))
+                                        .truncate()
+                                        .rounded(px(4.0))
+                                        .bg(theme::longan_800()
+                                            .opacity(CHAT_HEADER_ROLE_BG_OPACITY))
+                                        .px(px(6.0))
+                                        .text_size(px(CHAT_HEADER_ROLE_TEXT_SIZE_PX))
+                                        .text_color(theme::rambutan_300())
+                                        .tooltip(move |window, cx| {
+                                            Tooltip::new(hint.clone()).build(window, cx)
+                                        })
+                                        .child(role),
+                                )
+                            })
+                            .child(self.render_rename_button(cx))
+                            // Keeps the title, its tag and the pen at the left.
+                            .child(div().flex_1()),
                     }),
             )
             .child(
@@ -692,6 +713,80 @@ impl ChatView {
                         |_this, _window, cx| cx.emit(ChatViewEvent::TogglePanel),
                         cx,
                     )),
+            )
+            .into_any_element()
+    }
+
+    /// Web's pen beside the title: shown on header hover or keyboard focus.
+    fn render_rename_button(&self, cx: &Context<'_, Self>) -> AnyElement {
+        div()
+            .id("chat-header-rename-button")
+            .debug_selector(|| "desktop-chat-header-rename-button".to_string())
+            .group("chat-header-rename-button")
+            .flex_shrink_0()
+            .size(px(theme::CONTROL_XS_PX))
+            .flex()
+            .items_center()
+            .justify_center()
+            .rounded(px(4.0))
+            .opacity(0.)
+            .group_hover(CHAT_HEADER_GROUP, |el| el.opacity(1.))
+            .hover(|el| el.bg(theme::longan_800().opacity(0.50)))
+            .focus_visible(|el| el.opacity(1.))
+            .tab_index(0)
+            .role(Role::Button)
+            .aria_label(CHAT_HEADER_RENAME_LABEL)
+            .cursor_pointer()
+            .tooltip(|window, cx| Tooltip::new(CHAT_HEADER_RENAME_LABEL).build(window, cx))
+            .on_click(cx.listener(|this, _event, window, cx| {
+                cx.stop_propagation();
+                this.start_title_rename(window, cx);
+            }))
+            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
+                if is_web_button_activation_key(event.keystroke.key.as_str()) {
+                    window.prevent_default();
+                    cx.stop_propagation();
+                    this.start_title_rename(window, cx);
+                }
+            }))
+            .child(
+                svg()
+                    .path(assets::PEN_LINE_ICON_PATH)
+                    .size(px(CHAT_HEADER_ICON_SIZE_PX))
+                    .text_color(theme::rambutan_500())
+                    .group_hover("chat-header-rename-button", |el| {
+                        el.text_color(theme::rambutan_100())
+                    }),
+            )
+            .into_any_element()
+    }
+
+    /// The title field while renaming; Escape leaves the old title.
+    fn render_title_rename(
+        &self,
+        rename: &title_rename::TitleRename,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
+        div()
+            .id("chat-header-rename")
+            .debug_selector(|| "desktop-chat-header-rename".to_string())
+            .min_w_0()
+            .flex_1()
+            .h(px(theme::CONTROL_XS_PX))
+            .flex()
+            .items_center()
+            .px_1()
+            .rounded(px(4.0))
+            .border_1()
+            .border_color(theme::persimmon_400().opacity(0.40))
+            .text_color(theme::rambutan_100())
+            .on_action(cx.listener(|this, _: &InputEscape, window, cx| {
+                this.cancel_title_rename(window, cx);
+            }))
+            .child(
+                Input::new(&rename.input)
+                    .appearance(false)
+                    .aria_label("Thread title"),
             )
             .into_any_element()
     }
