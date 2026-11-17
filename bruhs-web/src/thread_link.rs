@@ -10,15 +10,23 @@
 //! turn for that message ends, and gets that turn's reply. The call is not
 //! held when nothing could answer it soon: the chat page is not mounted, the
 //! queue is paused, or no lane is free.
+//!
+//! `message_bruh` hands work to a bruh instead. A bruh's chat lives in the
+//! background service, so the message goes there as a `Chat` with a run id
+//! picked here, and a sender that waits is held ([`BruhWait`]) while that
+//! run is read on every crew change and every [`BRUH_WAIT_POLL_MS`].
 
 use bruhs_models::agent::Role;
+use bruhs_models::crew::{rooms_ready, BruhState};
 use bruhs_models::ids::ThreadId;
+use bruhs_models::reactive::{ReactiveCommand, ReactiveRun};
 use bruhs_models::roles::RoleBook;
 use bruhs_models::thread_link::{
-    answer_reply, delivered_reply, list_reply, pick_role, plan_message, read_reply,
-    recipient_waiting_reply, resolve_thread, Answer, Created, Delivery, DeliveryState, Outgoing,
-    Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadReplySubmission,
-    ThreadRequest,
+    answer_reply, bruh_answer_reply, bruh_sent_reply, chat_answer, delivered_reply, list_reply,
+    pick_role, plan_bruh_message, plan_message, read_reply, recipient_waiting_reply,
+    resolve_thread, Answer, BruhOutgoing, Created, Delivery, DeliveryState, Outgoing, Recipient,
+    ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadReplySubmission, ThreadRequest,
+    BRUH_WAIT_POLL_MS,
 };
 use leptos::prelude::*;
 
@@ -36,6 +44,26 @@ struct Wait {
     /// for among the recipient's other turns.
     prompt: String,
 }
+
+/// A `message_bruh` call held until the bruh's chat run `run_id` ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+struct BruhWait {
+    request_id: String,
+    /// The thread whose turn waits.
+    caller: ThreadId,
+    agent_id: String,
+    /// The bruh's name, for the reply.
+    name: String,
+    run_id: String,
+    /// A page of the bruh's runs has shown the run, so one that no longer
+    /// does has gone.
+    seen: bool,
+}
+
+/// What `message_bruh` says to a service older than rooms: it would drop
+/// the run id, so a wait could never find the run.
+const BRUH_SERVICE_OLD: &str =
+    "Not sent: the background service is older and can't take messages for bruhs. Tell the user to update it.";
 
 /// One `message_thread` call's arguments.
 #[derive(Clone, Copy)]
@@ -74,11 +102,16 @@ pub struct ThreadLink {
     /// The user's roles: what a new thread can start with.
     roles: RwSignal<RoleBook>,
     /// The crew as the service last reported it: the bruhs a turn can message.
-    bruhs: RwSignal<Vec<bruhs_models::crew::BruhState>>,
+    bruhs: RwSignal<Vec<BruhState>>,
+    /// The service's crew protocol; `None` until its first frame.
+    protocol: RwSignal<Option<u32>>,
     /// The chat page is mounted. It owns the turn lifecycle, so a queued
     /// message can only start while it is.
     chat_mounted: RwSignal<bool>,
     waits: StoredValue<Vec<Wait>>,
+    bruh_waits: StoredValue<Vec<BruhWait>>,
+    /// A loop reads the held bruh runs every [`BRUH_WAIT_POLL_MS`].
+    bruh_polling: StoredValue<bool>,
 }
 
 /// Threads as cards, most recent first. A thread whose role was deleted
@@ -152,9 +185,53 @@ fn is_removed(wait: &Wait, queue: &PromptQueue, exists: bool, busy: bool) -> boo
     !exists || !(queued || busy)
 }
 
+/// Take the bruh waits that are over, each with its reply. `pages` holds
+/// the newest runs of each bruh that could be read. A wait ends when its
+/// run has ended, when the bruh has left the crew, or when its run, shown
+/// once, is no longer there; otherwise it keeps waiting.
+fn due_bruh_answers(
+    waits: &mut Vec<BruhWait>,
+    crew: &[BruhState],
+    pages: &[(String, Vec<ReactiveRun>)],
+) -> Vec<(BruhWait, ThreadReply)> {
+    let mut due = Vec::new();
+    waits.retain_mut(|wait| {
+        let reply = if crew.iter().all(|bruh| bruh.agent_id != wait.agent_id) {
+            Some(bruh_answer_reply(&wait.name, Answer::Removed))
+        } else if let Some((_, runs)) = pages.iter().find(|(id, _)| *id == wait.agent_id) {
+            match chat_answer(runs, &wait.run_id) {
+                Some(answer) => Some(bruh_answer_reply(&wait.name, answer)),
+                None if runs.iter().any(|run| run.id == wait.run_id) => {
+                    wait.seen = true;
+                    None
+                }
+                None if wait.seen => Some(bruh_answer_reply(&wait.name, Answer::Removed)),
+                None => None,
+            }
+        } else {
+            None
+        };
+        match reply {
+            Some(reply) => {
+                due.push((wait.clone(), reply));
+                false
+            }
+            None => true,
+        }
+    });
+    due
+}
+
+/// Forget the bruh waits of `caller`, whose turn is over: the broker has
+/// already ended its calls.
+fn forget_bruh_waits_of(waits: &mut Vec<BruhWait>, caller: &str) {
+    waits.retain(|wait| wait.caller.as_str() != caller);
+}
+
 impl ThreadLink {
     pub fn install() {
         let crate::state::PromptQueueSignal(queue) = expect_context();
+        let updates = expect_context::<crate::agent_updates::AgentUpdates>();
         let link = Self {
             boards: expect_context(),
             threads: expect_context::<crate::state::ThreadsSignal>().0,
@@ -168,9 +245,12 @@ impl ThreadLink {
             saves: expect_context(),
             hops: expect_context::<crate::state::ThreadHopsSignal>().0,
             roles: expect_context::<crate::state::RolesSignal>().0,
-            bruhs: expect_context::<crate::agent_updates::AgentUpdates>().bruhs,
+            bruhs: updates.bruhs,
+            protocol: updates.protocol,
             chat_mounted: RwSignal::new(false),
             waits: StoredValue::new(Vec::new()),
+            bruh_waits: StoredValue::new(Vec::new()),
+            bruh_polling: StoredValue::new(false),
         };
         provide_context(link);
         // A held call must end when its message can no longer run: the user
@@ -180,6 +260,13 @@ impl ThreadLink {
             link.queue.track();
             link.threads.track();
             link.end_removed();
+        });
+        // A crew change can mean a held bruh run has ended, or its bruh left.
+        Effect::new(move |_| {
+            link.bruhs.track();
+            if link.bruh_waits.with_value(|waits| !waits.is_empty()) {
+                leptos::task::spawn_local(link.check_bruh_waits());
+            }
         });
     }
 
@@ -247,9 +334,18 @@ impl ThreadLink {
                         None => return,
                     }
                 }
-                ThreadOperation::MessageBruh { .. } => {
-                    ThreadReply::refused("Not sent: this app can't message bruhs yet.")
-                }
+                ThreadOperation::MessageBruh {
+                    name_or_id,
+                    message,
+                    wait,
+                } => match self
+                    .send_bruh(&request.thread_id, &request.id, &name_or_id, &message, wait)
+                    .await
+                {
+                    Some(reply) => reply,
+                    // Held: answered when the bruh's run ends.
+                    None => return,
+                },
             };
             Self::post(request.thread_id, request.id, reply);
         });
@@ -272,6 +368,9 @@ impl ThreadLink {
     /// `thread_id`'s turn ended with these messages. Answer the calls that
     /// waited on it, and forget the calls its own turn was holding.
     pub fn turn_ended(self, thread_id: &str, settled: &[AgentMessage], stopped: bool) {
+        // The broker ended the bruh calls of a turn that is over, too.
+        self.bruh_waits
+            .update_value(|waits| forget_bruh_waits_of(waits, thread_id));
         let due = self
             .waits
             .try_update_value(|waits| {
@@ -346,6 +445,124 @@ impl ThreadLink {
                 .map(|thread| thread.title.as_str())
                 .unwrap_or_default();
             let reply = answer_reply(&wait.recipient, title, &ids, Answer::Removed);
+            Self::post(wait.caller, wait.request_id, reply);
+        }
+    }
+
+    /// Send a `message_bruh` to the bruh's chat. `None` when the call is
+    /// held for the bruh's reply.
+    async fn send_bruh(
+        self,
+        caller_id: &ThreadId,
+        request_id: &str,
+        name_or_id: &str,
+        message: &str,
+        wait: bool,
+    ) -> Option<ThreadReply> {
+        let caller = caller_id.as_str();
+        if !self.protocol.get_untracked().is_some_and(rooms_ready) {
+            return Some(ThreadReply::refused(BRUH_SERVICE_OLD));
+        }
+        let threads = self.threads.get_untracked();
+        let Some(sender) = threads.iter().find(|thread| thread.id == caller) else {
+            return Some(ThreadReply::refused(
+                "Not sent: this thread no longer exists in the app.",
+            ));
+        };
+        let ids: Vec<&str> = threads.iter().map(|thread| thread.id.as_str()).collect();
+        let prompt = self
+            .turns
+            .messages(caller)
+            .map(|settled| running_prompt(&settled))
+            .unwrap_or_default();
+        let bruhs = self.bruhs.get_untracked();
+        let plan = match plan_bruh_message(
+            &BruhOutgoing {
+                caller_id: caller,
+                caller_title: &sender.title,
+                caller_prompt: &prompt,
+                ids: &ids,
+                name_or_id,
+                message,
+                wait,
+                max_hops: self.hops.get_untracked(),
+            },
+            &bruhs,
+        ) {
+            Ok(plan) => plan,
+            Err(refusal) => return Some(refusal),
+        };
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let command = ReactiveCommand::Chat {
+            agent_id: plan.agent_id.clone(),
+            message: plan.prompt,
+            run_id: Some(run_id.clone()),
+        };
+        if let Err(error) = crate::api::reactive_command(&command).await {
+            return Some(ThreadReply::refused(format!("Not sent: {error}")));
+        }
+        if !wait {
+            return Some(bruh_sent_reply(&plan.name));
+        }
+        self.bruh_waits.update_value(|waits| {
+            waits.push(BruhWait {
+                request_id: request_id.to_string(),
+                caller: caller_id.clone(),
+                agent_id: plan.agent_id,
+                name: plan.name,
+                run_id,
+                seen: false,
+            });
+        });
+        self.poll_bruh_waits();
+        None
+    }
+
+    /// Read the held bruh runs every [`BRUH_WAIT_POLL_MS`] while any wait.
+    fn poll_bruh_waits(self) {
+        if self.bruh_polling.get_value() {
+            return;
+        }
+        self.bruh_polling.set_value(true);
+        leptos::task::spawn_local(async move {
+            loop {
+                gloo_timers::future::TimeoutFuture::new(BRUH_WAIT_POLL_MS).await;
+                let waiting = self
+                    .bruh_waits
+                    .try_with_value(|waits| !waits.is_empty())
+                    .unwrap_or(false);
+                if !waiting {
+                    let _ = self.bruh_polling.try_set_value(false);
+                    break;
+                }
+                self.check_bruh_waits().await;
+            }
+        });
+    }
+
+    /// Read the newest runs of each bruh a call waits on, and answer the
+    /// calls whose wait is over.
+    async fn check_bruh_waits(self) {
+        let mut agents: Vec<String> = self
+            .bruh_waits
+            .try_with_value(|waits| waits.iter().map(|wait| wait.agent_id.clone()).collect())
+            .unwrap_or_default();
+        agents.sort();
+        agents.dedup();
+        let mut pages = Vec::new();
+        for agent_id in agents {
+            match crate::api::agent_runs(&agent_id, None).await {
+                Ok(runs) => pages.push((agent_id, runs)),
+                // Read again on the next tick.
+                Err(error) => log::debug!("bruh runs could not be read: {error}"),
+            }
+        }
+        let crew = self.bruhs.get_untracked();
+        let due = self
+            .bruh_waits
+            .try_update_value(|waits| due_bruh_answers(waits, &crew, &pages))
+            .unwrap_or_default();
+        for (wait, reply) in due {
             Self::post(wait.caller, wait.request_id, reply);
         }
     }
@@ -588,6 +805,7 @@ impl ThreadLink {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bruhs_models::reactive::RunStatus;
     use bruhs_models::EpochMs;
 
     fn thread(id: &str, title: &str, project: &str, updated: i64) -> Thread {
@@ -616,6 +834,122 @@ mod tests {
             recipient: recipient.into(),
             prompt: prompt.into(),
         }
+    }
+
+    const BO: &str = "b0b0b0b0-0000-4000-8000-000000000000";
+
+    fn bruh(id: &str, name: &str) -> bruhs_models::crew::BruhState {
+        bruhs_models::crew::BruhState {
+            agent_id: id.into(),
+            name: name.into(),
+            look: bruhs_models::crew::BruhLook::default(),
+            access: bruhs_models::crew::BruhAccess::default(),
+            effort: None,
+            status: bruhs_models::crew::BruhStatus::Working,
+            next_wake_ms: None,
+            unread: 0,
+        }
+    }
+
+    fn run(id: &str, status: RunStatus, result: Option<&str>) -> ReactiveRun {
+        let mut run: ReactiveRun = serde_json::from_value(serde_json::json!({
+            "id": id, "agent_id": BO, "source_id": null, "subscription_id": null,
+            "event_id": null, "status": "queued", "prompt": id, "thread_id": "t",
+            "session_id": null, "created_at": 1, "updated_at": 1,
+            "not_before": 1, "result": null, "error": null,
+        }))
+        .unwrap();
+        run.status = status;
+        run.result = result.map(str::to_string);
+        run
+    }
+
+    fn bruh_wait(caller: &ThreadId, run_id: &str) -> BruhWait {
+        BruhWait {
+            request_id: format!("ask-{run_id}"),
+            caller: caller.clone(),
+            agent_id: BO.into(),
+            name: "Bo".into(),
+            run_id: run_id.into(),
+            seen: false,
+        }
+    }
+
+    #[test]
+    fn a_held_bruh_wait_answers_once_from_the_run_page() {
+        let caller = ThreadId::new_v4();
+        let mut waits = vec![bruh_wait(&caller, "r-done"), bruh_wait(&caller, "r-busy")];
+        let crew = [bruh(BO, "Bo")];
+        let pages = [(
+            BO.to_string(),
+            vec![
+                run("r-busy", RunStatus::Running, None),
+                run("r-done", RunStatus::Completed, Some("All green.")),
+            ],
+        )];
+        let due = due_bruh_answers(&mut waits, &crew, &pages);
+        assert_eq!(due.len(), 1, "only the completed run answers");
+        assert_eq!(due[0].0.request_id, "ask-r-done");
+        assert!(due[0].1.ok);
+        assert!(
+            due[0].1.text.starts_with("Bo answered:"),
+            "{}",
+            due[0].1.text
+        );
+        assert!(due[0].1.text.contains("All green."));
+        // The running one still waits, and the answered one never answers twice.
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].run_id, "r-busy");
+        assert!(due_bruh_answers(&mut waits, &crew, &pages).is_empty());
+        // No page for its bruh (the read failed): nothing changes.
+        assert!(due_bruh_answers(&mut waits, &crew, &[]).is_empty());
+        assert_eq!(waits.len(), 1);
+    }
+
+    #[test]
+    fn a_bruh_wait_ends_when_the_bruh_leaves_the_crew_or_its_run_goes_missing() {
+        let caller = ThreadId::new_v4();
+        // The bruh left the crew: the wait ends without a page.
+        let mut waits = vec![bruh_wait(&caller, "r-1")];
+        let due = due_bruh_answers(&mut waits, &[bruh("someone-else", "Ada")], &[]);
+        assert_eq!(due.len(), 1);
+        assert!(!due[0].1.ok);
+        assert_eq!(due[0].1.text, "Bo never ran the message.");
+        assert!(waits.is_empty());
+
+        // A run never shown yet may still be on its way.
+        let crew = [bruh(BO, "Bo")];
+        let mut waits = vec![bruh_wait(&caller, "r-1")];
+        let empty = [(BO.to_string(), Vec::new())];
+        assert!(due_bruh_answers(&mut waits, &crew, &empty).is_empty());
+        assert!(!waits[0].seen);
+        // Once shown, it counts as seen; gone after that, the wait ends.
+        let shown = [(BO.to_string(), vec![run("r-1", RunStatus::Queued, None)])];
+        assert!(due_bruh_answers(&mut waits, &crew, &shown).is_empty());
+        assert!(waits[0].seen);
+        let due = due_bruh_answers(&mut waits, &crew, &empty);
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].1.text, "Bo never ran the message.");
+        assert!(waits.is_empty());
+    }
+
+    #[test]
+    fn a_turn_that_ends_drops_its_bruh_waits() {
+        let ended = ThreadId::new_v4();
+        let other = ThreadId::new_v4();
+        let mut waits = vec![
+            bruh_wait(&ended, "r-1"),
+            bruh_wait(&other, "r-2"),
+            bruh_wait(&ended, "r-3"),
+        ];
+        forget_bruh_waits_of(&mut waits, ended.as_str());
+        assert_eq!(
+            waits
+                .iter()
+                .map(|wait| wait.run_id.as_str())
+                .collect::<Vec<_>>(),
+            ["r-2"]
+        );
     }
 
     #[test]

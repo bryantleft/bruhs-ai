@@ -1346,12 +1346,22 @@ impl ReactiveAutomations {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         match line {
-            TranscriptItem::Owner { text, pending, .. } => div()
+            // A message from a thread's agent names its sender, as thread
+            // chats do.
+            TranscriptItem::Owner {
+                text,
+                pending,
+                caption,
+                ..
+            } => div()
                 .min_w_0()
                 .flex()
                 .flex_col()
                 .items_end()
                 .gap_1()
+                .when_some(caption, |el, caption| {
+                    el.child(small_text(caption, theme::blueberry_400()))
+                })
                 .child(
                     bubble(layout.bubble())
                         .bg(theme::longan_800())

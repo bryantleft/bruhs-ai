@@ -1322,6 +1322,8 @@ pub struct Workspace {
     thread_hops: u32,
     /// Tool calls held until another thread has replied.
     thread_waits: Vec<thread_link_ui::ThreadWait>,
+    /// `message_bruh` calls held until the bruh's run has ended.
+    bruh_waits: thread_link_ui::BruhWaits,
     /// Named model setups an agent can start a thread with.
     roles: bruhs_models::roles::RoleBook,
     /// Models for the jobs that are not threads.
@@ -1883,6 +1885,13 @@ impl Workspace {
                         this.activate_sidebar_view(AppView::Automations, window, cx)
                     },
                 ));
+                // A crew change can end a held `message_bruh` call.
+                subscriptions.push(cx.subscribe(
+                    &panel,
+                    |this, _, _: &crate::views::reactive_automations::ReactiveCrewChanged, cx| {
+                        this.check_bruh_waits(cx)
+                    },
+                ));
                 subscriptions.push(cx.subscribe(
                     &panel,
                     |this, _, event: &crate::views::reactive_automations::ReactivePreview, cx| {
@@ -2027,6 +2036,7 @@ impl Workspace {
             thread_access,
             thread_hops,
             thread_waits: Vec::new(),
+            bruh_waits: thread_link_ui::BruhWaits::default(),
             roles,
             task_models,
             meeting_suggestions,

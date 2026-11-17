@@ -184,8 +184,15 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
 
 fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
     match item {
-        TranscriptItem::Owner { text, pending, .. } => view! {
+        // A message from a thread's agent names its sender, as thread chats do.
+        TranscriptItem::Owner {
+            text,
+            pending,
+            caption,
+            ..
+        } => view! {
             <div class="flex min-w-0 flex-col items-end gap-1">
+                {caption.map(|caption| view! { <span data-from-thread="" class="text-label-sm text-blueberry-400">{caption}</span> })}
                 <p class="min-w-0 max-w-[80%] whitespace-pre-wrap break-words rounded-grape bg-longan-800 px-3 py-2 text-body text-rambutan-100">{text}</p>
                 {pending.then(|| view! { <span class="text-label-sm text-rambutan-500">"Waiting for a reply"</span> })}
             </div>

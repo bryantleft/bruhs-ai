@@ -7,17 +7,25 @@
 //! queue. Threads run side by side here, so the view never moves, and a
 //! sender may wait: its tool call is held ([`ThreadWait`]) until the
 //! recipient's turn for that message ends, and gets that turn's reply.
+//!
+//! `message_bruh` hands work to a bruh instead. A bruh's chat lives in the
+//! background service, so the message goes there as a `Chat` with a run id
+//! picked here, and a sender that waits is held ([`BruhWait`]) while that
+//! run is read on every crew change and every [`BRUH_WAIT_POLL_MS`].
 
 use super::Workspace;
 use crate::app_state::DesktopState;
 use crate::views::chat::{ChatView, MessageRole, ThreadMessageAnswer};
+use bruhs_models::crew::BruhState;
 use bruhs_models::ids::ThreadId;
+use bruhs_models::reactive::{ReactiveCommand, ReactiveRun};
 use bruhs_models::thread_link::{
-    answer_reply, delivered_reply, list_reply, pick_role, plan_message, read_reply,
-    recipient_waiting_reply, resolve_thread, Answer, Created, Delivery, DeliveryState, Outgoing,
-    Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadRequest,
+    answer_reply, bruh_answer_reply, bruh_sent_reply, chat_answer, delivered_reply, list_reply,
+    pick_role, plan_bruh_message, plan_message, read_reply, recipient_waiting_reply,
+    resolve_thread, Answer, BruhOutgoing, Created, Delivery, DeliveryState, Outgoing, Recipient,
+    ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadRequest, BRUH_WAIT_POLL_MS,
 };
-use gpui::{Context, Entity, Window};
+use gpui::{Context, Entity, Task, Window};
 
 /// A tool call held until `recipient` has answered `prompt`.
 pub(super) struct ThreadWait {
@@ -28,6 +36,84 @@ pub(super) struct ThreadWait {
     /// The delivered prompt, header included: what names the turn to wait
     /// for among the recipient's other turns.
     prompt: String,
+}
+
+/// A `message_bruh` call held until the bruh's chat run `run_id` ends.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(super) struct BruhWait {
+    request_id: String,
+    /// The thread whose turn waits.
+    pub(super) caller: ThreadId,
+    agent_id: String,
+    /// The bruh's name, for the reply.
+    pub(super) name: String,
+    pub(super) run_id: String,
+    /// A page of the bruh's runs has shown the run, so one that no longer
+    /// does has gone.
+    seen: bool,
+}
+
+/// The held `message_bruh` calls, and whether a loop reads them.
+#[derive(Default)]
+pub(super) struct BruhWaits {
+    pub(super) waits: Vec<BruhWait>,
+    polling: bool,
+}
+
+/// What `message_bruh` says to a service older than rooms: it would drop
+/// the run id, so a wait could never find the run.
+const BRUH_SERVICE_OLD: &str =
+    "Not sent: the background service is older and can't take messages for bruhs. Tell the user to update it.";
+
+/// Take the bruh waits that are over, each with its reply. `pages` holds
+/// the newest runs of each bruh that could be read. A wait ends when its
+/// run has ended, when the bruh has left the crew, or when its run, shown
+/// once, is no longer there; otherwise it keeps waiting. The web's
+/// `due_bruh_answers` holds the same rule.
+fn due_bruh_answers(
+    waits: &mut Vec<BruhWait>,
+    crew: &[BruhState],
+    pages: &[(String, Vec<ReactiveRun>)],
+) -> Vec<(BruhWait, ThreadReply)> {
+    let mut due = Vec::new();
+    waits.retain_mut(|wait| {
+        let reply = if crew.iter().all(|bruh| bruh.agent_id != wait.agent_id) {
+            Some(bruh_answer_reply(&wait.name, Answer::Removed))
+        } else if let Some((_, runs)) = pages.iter().find(|(id, _)| *id == wait.agent_id) {
+            match chat_answer(runs, &wait.run_id) {
+                Some(answer) => Some(bruh_answer_reply(&wait.name, answer)),
+                None if runs.iter().any(|run| run.id == wait.run_id) => {
+                    wait.seen = true;
+                    None
+                }
+                None if wait.seen => Some(bruh_answer_reply(&wait.name, Answer::Removed)),
+                None => None,
+            }
+        } else {
+            None
+        };
+        match reply {
+            Some(reply) => {
+                due.push((wait.clone(), reply));
+                false
+            }
+            None => true,
+        }
+    });
+    due
+}
+
+#[cfg(test)]
+thread_local! {
+    /// Every answer handed to the broker, for tests: no turn waits there.
+    static RESOLVED: std::cell::RefCell<Vec<(String, ThreadReply)>> =
+        const { std::cell::RefCell::new(Vec::new()) };
+}
+
+/// The answers handed to the broker since the last call.
+#[cfg(test)]
+pub(super) fn take_resolved_for_test() -> Vec<(String, ThreadReply)> {
+    RESOLVED.with(|resolved| std::mem::take(&mut *resolved.borrow_mut()))
 }
 
 /// One `message_thread` call's arguments.
@@ -48,6 +134,8 @@ pub(super) enum ThreadAnswer {
     Now(ThreadReply),
     /// Hold the tool call until `recipient` has answered `prompt`.
     Later { recipient: String, prompt: String },
+    /// A task answers the tool call through `resolve_thread_request`.
+    Pending,
 }
 
 impl Workspace {
@@ -98,7 +186,8 @@ impl Workspace {
             .detach();
             return;
         }
-        match self.thread_reply(chat, &request.operation, window, cx) {
+        match self.thread_reply(chat, &request.operation, &request.id, window, cx) {
+            ThreadAnswer::Pending => {}
             ThreadAnswer::Now(reply) => {
                 Self::resolve_thread_request(&request.thread_id, &request.id, reply, cx)
             }
@@ -128,6 +217,12 @@ impl Workspace {
         reply: ThreadReply,
         cx: &Context<'_, Self>,
     ) {
+        #[cfg(test)]
+        RESOLVED.with(|resolved| {
+            resolved
+                .borrow_mut()
+                .push((request_id.to_string(), reply.clone()));
+        });
         let links = cx.global::<DesktopState>().app.thread_links().clone();
         if let Err(error) = links.resolve(thread_id, request_id, reply) {
             // The turn ended while this was answered; nobody is waiting.
@@ -142,6 +237,19 @@ impl Workspace {
         chat: &Entity<ChatView>,
         cx: &mut Context<'_, Self>,
     ) {
+        if !self.bruh_waits.waits.is_empty() && !chat.read(cx).is_streaming {
+            // Its turn is over, so the broker already ended its calls.
+            if let Some(thread) = self
+                .threads
+                .iter()
+                .find(|thread| thread.chat.entity_id() == chat.entity_id())
+            {
+                let caller = thread.id.as_str();
+                self.bruh_waits
+                    .waits
+                    .retain(|wait| wait.caller.as_str() != caller);
+            }
+        }
         if self.thread_waits.is_empty() {
             return;
         }
@@ -201,6 +309,9 @@ impl Workspace {
     /// Thread `id` is being deleted: end the calls waiting on it, and forget
     /// the ones it was holding.
     pub(super) fn end_thread_waits_on(&mut self, id: &str, cx: &Context<'_, Self>) {
+        self.bruh_waits
+            .waits
+            .retain(|wait| wait.caller.as_str() != id);
         if self.thread_waits.is_empty() {
             return;
         }
@@ -231,6 +342,7 @@ impl Workspace {
         &mut self,
         chat: &Entity<ChatView>,
         operation: &ThreadOperation,
+        request_id: &str,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) -> ThreadAnswer {
@@ -270,9 +382,11 @@ impl Workspace {
                 window,
                 cx,
             ),
-            ThreadOperation::MessageBruh { .. } => ThreadAnswer::Now(ThreadReply::refused(
-                "Not sent: this app can't message bruhs yet.",
-            )),
+            ThreadOperation::MessageBruh {
+                name_or_id,
+                message,
+                wait,
+            } => self.bruh_message_reply(&caller, name_or_id, message, *wait, request_id, cx),
         }
     }
 
@@ -507,6 +621,183 @@ impl Workspace {
         });
         ThreadAnswer::Now(delivered_reply(&id, &title, &all, started_thread, state))
     }
+
+    /// Send a `message_bruh` to the bruh's chat. A task answers the call
+    /// once the service took it, or holds it for the bruh's reply.
+    fn bruh_message_reply(
+        &mut self,
+        caller: &str,
+        name_or_id: &str,
+        message: &str,
+        wait: bool,
+        request_id: &str,
+        cx: &mut Context<'_, Self>,
+    ) -> ThreadAnswer {
+        let panel = self.reactive_automations.clone();
+        if !panel.read(cx).rooms_ready() {
+            return ThreadAnswer::Now(ThreadReply::refused(BRUH_SERVICE_OLD));
+        }
+        let (Ok(caller_id), Some(sender)) = (
+            ThreadId::try_from(caller),
+            self.threads.iter().find(|thread| thread.id == caller),
+        ) else {
+            return ThreadAnswer::Now(ThreadReply::refused(
+                "Not sent: this thread no longer exists in the app.",
+            ));
+        };
+        let sender_chat = sender.chat.read(cx);
+        // The prompt of the turn that is sending.
+        let prompt = sender_chat
+            .messages
+            .iter()
+            .rev()
+            .find(|message| message.role == MessageRole::User)
+            .map(|message| message.content.as_str())
+            .unwrap_or_default();
+        let ids: Vec<&str> = self
+            .threads
+            .iter()
+            .map(|thread| thread.id.as_str())
+            .collect();
+        let plan = match plan_bruh_message(
+            &BruhOutgoing {
+                caller_id: caller,
+                caller_title: &sender_chat.thread_title,
+                caller_prompt: prompt,
+                ids: &ids,
+                name_or_id,
+                message,
+                wait,
+                max_hops: self.thread_hops,
+            },
+            panel.read(cx).crew(),
+        ) {
+            Ok(plan) => plan,
+            Err(refusal) => return ThreadAnswer::Now(refusal),
+        };
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let sending = panel.update(cx, |panel, cx| {
+            panel.send_now(
+                ReactiveCommand::Chat {
+                    agent_id: plan.agent_id.clone(),
+                    message: plan.prompt,
+                    run_id: Some(run_id.clone()),
+                },
+                cx,
+            )
+        });
+        let request_id = request_id.to_string();
+        cx.spawn(async move |this, cx| {
+            let sent = sending.await;
+            let _ = this.update(cx, |this, cx| match sent {
+                Err(error) => Self::resolve_thread_request(
+                    &caller_id,
+                    &request_id,
+                    ThreadReply::refused(format!("Not sent: {error}")),
+                    cx,
+                ),
+                Ok(()) if !wait => Self::resolve_thread_request(
+                    &caller_id,
+                    &request_id,
+                    bruh_sent_reply(&plan.name),
+                    cx,
+                ),
+                Ok(()) => {
+                    this.bruh_waits.waits.push(BruhWait {
+                        request_id,
+                        caller: caller_id,
+                        agent_id: plan.agent_id,
+                        name: plan.name,
+                        run_id,
+                        seen: false,
+                    });
+                    this.poll_bruh_waits(cx);
+                }
+            });
+        })
+        .detach();
+        ThreadAnswer::Pending
+    }
+
+    /// Read the held bruh runs every [`BRUH_WAIT_POLL_MS`] while any wait.
+    fn poll_bruh_waits(&mut self, cx: &mut Context<'_, Self>) {
+        if self.bruh_waits.polling {
+            return;
+        }
+        self.bruh_waits.polling = true;
+        let every = std::time::Duration::from_millis(u64::from(BRUH_WAIT_POLL_MS));
+        cx.spawn(async move |this, cx| loop {
+            cx.background_executor().timer(every).await;
+            let waiting = this
+                .update(cx, |this, cx| {
+                    if this.bruh_waits.waits.is_empty() {
+                        this.bruh_waits.polling = false;
+                        return false;
+                    }
+                    this.check_bruh_waits(cx);
+                    true
+                })
+                .unwrap_or(false);
+            if !waiting {
+                break;
+            }
+        })
+        .detach();
+    }
+
+    /// Read the newest runs of each bruh a call waits on, and answer the
+    /// calls whose wait is over.
+    pub(super) fn check_bruh_waits(&mut self, cx: &mut Context<'_, Self>) {
+        if self.bruh_waits.waits.is_empty() {
+            return;
+        }
+        let mut agents: Vec<String> = self
+            .bruh_waits
+            .waits
+            .iter()
+            .map(|wait| wait.agent_id.clone())
+            .collect();
+        agents.sort();
+        agents.dedup();
+        // Tests never reach a server: they settle waits with their own pages.
+        let reading: Task<Vec<(String, Vec<ReactiveRun>)>> = if cfg!(test) {
+            Task::ready(Vec::new())
+        } else {
+            let client = self.reactive_automations.read(cx).client();
+            crate::app_state::spawn_tokio(cx, async move {
+                let mut pages = Vec::new();
+                for agent_id in agents {
+                    match client.agent_runs(&agent_id, None).await {
+                        Ok(runs) => pages.push((agent_id, runs)),
+                        // Read again on the next tick.
+                        Err(error) => tracing::debug!("bruh runs could not be read: {error}"),
+                    }
+                }
+                pages
+            })
+        };
+        cx.spawn(async move |this, cx| {
+            let pages = reading.await;
+            let _ = this.update(cx, |this, cx| this.settle_bruh_waits(&pages, cx));
+        })
+        .detach();
+    }
+
+    /// Answer the held bruh calls whose wait `pages` shows is over.
+    fn settle_bruh_waits(
+        &mut self,
+        pages: &[(String, Vec<ReactiveRun>)],
+        cx: &mut Context<'_, Self>,
+    ) {
+        let due = due_bruh_answers(
+            &mut self.bruh_waits.waits,
+            self.reactive_automations.read(cx).crew(),
+            pages,
+        );
+        for (wait, reply) in due {
+            Self::resolve_thread_request(&wait.caller, &wait.request_id, reply, cx);
+        }
+    }
 }
 
 #[cfg(test)]
@@ -578,14 +869,16 @@ mod tests {
         cx: &mut VisualTestContext,
     ) -> ThreadAnswer {
         workspace.update_in(cx, |workspace, window, cx| {
-            workspace.thread_reply(chat, &operation, window, cx)
+            workspace.thread_reply(chat, &operation, "ask-1", window, cx)
         })
     }
 
     fn now(answer: ThreadAnswer) -> ThreadReply {
         match answer {
             ThreadAnswer::Now(reply) => reply,
-            ThreadAnswer::Later { .. } => panic!("expected an answer now"),
+            ThreadAnswer::Later { .. } | ThreadAnswer::Pending => {
+                panic!("expected an answer now")
+            }
         }
     }
 
@@ -1228,5 +1521,168 @@ mod tests {
                 Some("claude-haiku-4-5".to_string())
             );
         });
+    }
+
+    fn bo() -> bruhs_models::crew::BruhState {
+        bruhs_models::crew::BruhState {
+            agent_id: "b0b0b0b0-0000-4000-8000-000000000000".into(),
+            name: "Bo".into(),
+            look: bruhs_models::crew::BruhLook::default(),
+            access: bruhs_models::crew::BruhAccess::default(),
+            effort: None,
+            status: bruhs_models::crew::BruhStatus::Asleep,
+            next_wake_ms: None,
+            unread: 0,
+        }
+    }
+
+    fn message_bo(text: &str, wait: bool) -> ThreadOperation {
+        ThreadOperation::MessageBruh {
+            name_or_id: "Bo".into(),
+            message: text.into(),
+            wait,
+        }
+    }
+
+    fn sent_commands(
+        workspace: &Entity<Workspace>,
+        cx: &mut VisualTestContext,
+    ) -> Vec<bruhs_models::reactive::ReactiveCommand> {
+        workspace.read_with(cx, |workspace, cx| {
+            workspace
+                .reactive_automations
+                .read(cx)
+                .sent_for_test()
+                .to_vec()
+        })
+    }
+
+    #[gpui::test]
+    fn message_bruh_sends_a_chat_with_the_thread_header(cx: &mut TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        let (sender, _, recipient, _) = two_threads(&workspace, cx);
+        workspace.update(cx, |workspace, cx| {
+            workspace.reactive_automations.update(cx, |panel, cx| {
+                panel.show_crew_for_test(vec![bo()], bruhs_models::crew::CREW_PROTOCOL, cx)
+            });
+        });
+        let answer = ask(&workspace, &sender, message_bo("check", false), cx);
+        assert_eq!(answer, ThreadAnswer::Pending);
+        cx.run_until_parked();
+
+        let sent = sent_commands(&workspace, cx);
+        assert_eq!(sent.len(), 1, "{sent:?}");
+        let bruhs_models::reactive::ReactiveCommand::Chat {
+            agent_id,
+            message,
+            run_id,
+        } = &sent[0]
+        else {
+            panic!("expected a chat, got {:?}", sent[0]);
+        };
+        assert_eq!(agent_id, &bo().agent_id);
+        assert!(run_id.is_some());
+        let delivery = parse_delivery(message).expect("a thread header");
+        assert_eq!(delivery.body, "check");
+        assert_eq!(delivery.hops, 1);
+
+        let replies = take_resolved_for_test();
+        assert_eq!(replies.len(), 1, "{replies:?}");
+        assert_eq!(replies[0].0, "ask-1");
+        assert!(replies[0].1.ok);
+        assert!(
+            replies[0].1.text.starts_with("Sent to Bo."),
+            "{}",
+            replies[0].1.text
+        );
+        workspace.read_with(cx, |workspace, _| {
+            assert!(workspace.bruh_waits.waits.is_empty())
+        });
+        recipient.update(cx, |chat, _| chat.is_streaming = false);
+    }
+
+    #[gpui::test]
+    fn message_bruh_on_an_older_service_is_refused(cx: &mut TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        let (sender, _, recipient, _) = two_threads(&workspace, cx);
+        workspace.update(cx, |workspace, cx| {
+            workspace
+                .reactive_automations
+                .update(cx, |panel, cx| panel.show_crew_for_test(vec![bo()], 1, cx));
+        });
+        let refused = now(ask(&workspace, &sender, message_bo("check", true), cx));
+        assert!(!refused.ok);
+        assert_eq!(
+            refused.text,
+            "Not sent: the background service is older and can't take messages for bruhs. Tell the user to update it."
+        );
+        cx.run_until_parked();
+        assert!(sent_commands(&workspace, cx).is_empty());
+        recipient.update(cx, |chat, _| chat.is_streaming = false);
+    }
+
+    #[gpui::test]
+    fn a_waited_bruh_message_is_held_and_ends_with_its_callers_turn(cx: &mut TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        let (sender, sender_id, recipient, _) = two_threads(&workspace, cx);
+        workspace.update(cx, |workspace, cx| {
+            workspace.reactive_automations.update(cx, |panel, cx| {
+                panel.show_crew_for_test(vec![bo()], bruhs_models::crew::CREW_PROTOCOL, cx)
+            });
+        });
+        sender.update(cx, |chat, _| chat.is_streaming = true);
+        let answer = ask(&workspace, &sender, message_bo("check", true), cx);
+        assert_eq!(answer, ThreadAnswer::Pending);
+        cx.run_until_parked();
+        assert!(take_resolved_for_test().is_empty(), "the call is held");
+        let held = workspace.read_with(cx, |workspace, _| workspace.bruh_waits.waits.clone());
+        assert_eq!(held.len(), 1);
+        assert_eq!(held[0].caller.as_str(), sender_id);
+        assert_eq!(held[0].name, "Bo");
+        let sent = sent_commands(&workspace, cx);
+        let bruhs_models::reactive::ReactiveCommand::Chat {
+            run_id, message, ..
+        } = &sent[0]
+        else {
+            panic!("expected a chat");
+        };
+        assert_eq!(run_id.as_deref(), Some(held[0].run_id.as_str()));
+        assert!(parse_delivery(message).is_some_and(|delivery| delivery.awaited));
+
+        // The run ends: the held call gets the bruh's reply, once.
+        let done: ReactiveRun = serde_json::from_value(serde_json::json!({
+            "id": held[0].run_id, "agent_id": bo().agent_id, "source_id": null,
+            "subscription_id": null, "event_id": null, "status": "completed",
+            "prompt": "check", "thread_id": "t", "session_id": null, "created_at": 1,
+            "updated_at": 1, "not_before": 1, "result": "All green.", "error": null,
+        }))
+        .unwrap();
+        let page = vec![(bo().agent_id, vec![done])];
+        workspace.update(cx, |workspace, cx| workspace.settle_bruh_waits(&page, cx));
+        let replies = take_resolved_for_test();
+        assert_eq!(replies.len(), 1);
+        assert_eq!(replies[0].0, "ask-1");
+        assert!(replies[0].1.ok && replies[0].1.text.starts_with("Bo answered:"));
+        assert!(replies[0].1.text.contains("All green."));
+        workspace.update(cx, |workspace, cx| workspace.settle_bruh_waits(&page, cx));
+        assert!(take_resolved_for_test().is_empty());
+
+        // Held again, then the caller's turn ends: the broker ended its call,
+        // so the wait goes without an answer.
+        let _ = ask(&workspace, &sender, message_bo("again", true), cx);
+        cx.run_until_parked();
+        assert_eq!(
+            workspace.read_with(cx, |workspace, _| workspace.bruh_waits.waits.len()),
+            1
+        );
+        sender.update(cx, |chat, _| chat.is_streaming = false);
+        workspace.update(cx, |workspace, cx| {
+            workspace.settle_thread_waits(&sender, cx)
+        });
+        workspace.read_with(cx, |workspace, _| {
+            assert!(workspace.bruh_waits.waits.is_empty())
+        });
+        assert!(take_resolved_for_test().is_empty());
+        recipient.update(cx, |chat, _| chat.is_streaming = false);
     }
 }

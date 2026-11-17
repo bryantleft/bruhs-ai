@@ -1456,6 +1456,37 @@ impl ReactiveAutomations {
     pub(crate) fn send_crew(&mut self, command: ReactiveCommand, cx: &mut Context<'_, Self>) {
         self.send_in(command, Scope::Crew, cx);
     }
+    /// Send `command` at once, beside any command in flight, for a caller
+    /// that must hear how it went, such as `message_bruh`. The task ends
+    /// with the server's error, if any.
+    pub(crate) fn send_now(
+        &mut self,
+        command: ReactiveCommand,
+        cx: &mut Context<'_, Self>,
+    ) -> Task<Result<(), String>> {
+        #[cfg(test)]
+        {
+            let _ = cx;
+            self.sent.push(command);
+            Task::ready(Ok(()))
+        }
+        #[cfg(not(test))]
+        {
+            let client = self.client.clone();
+            let sending = spawn_tokio(cx, async move {
+                client
+                    .reactive_command(&command)
+                    .await
+                    .map(|_| ())
+                    .map_err(reactive_error)
+            });
+            cx.spawn(async move |this, cx| {
+                let result = sending.await;
+                let _ = this.update(cx, |this, cx| this.refresh_snapshot(cx));
+                result
+            })
+        }
+    }
     /// Stop every bruh: one command to a current service, a cancel per live
     /// run to an older one, going on past a cancel that fails. Sent at once,
     /// beside any command in flight: Stop never waits in the queue, where a
@@ -1579,6 +1610,7 @@ impl ReactiveAutomations {
     fn apply_crew_signal(&mut self, signal: OutboxSignal, cx: &mut Context<'_, Self>) {
         if self.crew.bruhs != signal.bruhs {
             self.crew.bruhs = signal.bruhs;
+            cx.emit(ReactiveCrewChanged);
             cx.notify();
         }
         // A bruh page reads the crew again on every change, like the web's.
@@ -1690,6 +1722,11 @@ impl EventEmitter<ReactiveProjectOpened> for ReactiveAutomations {}
 impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
 impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
 impl EventEmitter<ReactiveOpenAutomations> for ReactiveAutomations {}
+impl EventEmitter<ReactiveCrewChanged> for ReactiveAutomations {}
+
+/// A live crew frame changed some bruh's state, so a run may have ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReactiveCrewChanged;
 
 impl Render for ReactiveAutomations {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
