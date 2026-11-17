@@ -9,6 +9,9 @@ use super::{BruhLook, BruhStatus};
 /// One full sweep of a working bruh's gaze, in milliseconds (never faster
 /// than once per two seconds). The single source for sweep timing.
 pub const SWEEP_PERIOD_MS: i64 = 2400;
+/// Time between two drawn steps of a sweep: 12.5 frames a second, so a
+/// sweep is 30 steps. Both apps draw a working face no more often.
+pub const SWEEP_FRAME_MS: u64 = 80;
 /// How far a working bruh's gaze swings to either side.
 pub const SWEEP_LOOK_X: f32 = 0.6;
 

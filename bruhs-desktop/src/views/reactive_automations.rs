@@ -228,6 +228,8 @@ pub(crate) struct ReactiveAutomations {
     /// Commands waiting for the one in flight, sent in order; a failure
     /// drops them, since they assumed it would apply.
     queued: VecDeque<(ReactiveCommand, Scope)>,
+    /// Bumped whenever the snapshot changes.
+    snapshot_rev: u64,
     /// Every command sent, in order; tests never reach a server.
     #[cfg(test)]
     sent: Vec<ReactiveCommand>,
@@ -524,6 +526,7 @@ impl ReactiveAutomations {
             create: None,
             bruh: None,
             queued: VecDeque::new(),
+            snapshot_rev: 0,
             #[cfg(test)]
             sent: Vec::new(),
             #[cfg(test)]
@@ -614,6 +617,9 @@ impl ReactiveAutomations {
         let snapshot = bruhs_models::weekly_reports::editable_automation_snapshot(snapshot);
         let changed = self.snapshot.as_ref() != Some(&snapshot);
         self.snapshot = Some(snapshot);
+        if changed {
+            self.snapshot_rev = self.snapshot_rev.wrapping_add(1);
+        }
         // A bruh page reads its newest runs again whenever anything changed.
         if changed {
             self.reload_bruh_runs(cx);

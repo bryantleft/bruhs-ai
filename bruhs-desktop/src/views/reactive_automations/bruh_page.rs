@@ -126,6 +126,8 @@ struct RunsPage {
     oldest: Option<String>,
     more: bool,
     error: Option<String>,
+    /// Bumped whenever `runs` changes, so the transcript is built again.
+    version: u64,
 }
 
 impl RunsPage {
@@ -137,6 +139,7 @@ impl RunsPage {
         }
         merge_runs(&mut self.runs, page);
         self.error = None;
+        self.version = self.version.wrapping_add(1);
     }
 
     /// An older page, from Load earlier.
@@ -146,6 +149,7 @@ impl RunsPage {
             self.oldest = Some(last.id.clone());
         }
         merge_runs(&mut self.runs, page);
+        self.version = self.version.wrapping_add(1);
     }
 }
 
@@ -281,6 +285,11 @@ pub(super) struct BruhPage {
     scroll: ScrollHandle,
     /// The last transcript line drawn; a new one scrolls into view.
     last_line: Option<String>,
+    /// The conversation, built when the snapshot or the runs change rather
+    /// than on every frame (a sweeping face redraws the page often).
+    lines: Rc<Vec<TranscriptItem>>,
+    /// The snapshot revision and runs version `lines` was built from.
+    built_for: Option<(u64, u64)>,
     /// The page's width, measured as it is drawn.
     width: Rc<Cell<f32>>,
     _subscriptions: Vec<gpui::Subscription>,
@@ -302,6 +311,8 @@ impl BruhPage {
             settings: None,
             scroll: ScrollHandle::new(),
             last_line: None,
+            lines: Rc::new(Vec::new()),
+            built_for: None,
             width: Rc::new(Cell::new(0.0)),
             _subscriptions: Vec::new(),
         }
@@ -661,19 +672,32 @@ impl ReactiveAutomations {
         }
     }
 
-    /// The page's inputs and data, made before it draws.
+    /// The page's inputs and data, made before it draws. The work runs only
+    /// when the snapshot or the runs changed since the last frame.
     pub(super) fn ensure_bruh_page(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let Some(page) = self.bruh.as_ref() else {
+            return;
+        };
+        let stamp = (self.snapshot_rev, page.runs.version);
+        let current = page.built_for == Some(stamp) && page.message.is_some();
+        let requested = page.runs_requested;
+        if current {
+            if !requested {
+                self.reload_bruh_runs(cx);
+            }
+            return;
+        }
         let saved = self
             .bruh_page_agent()
             .and_then(|agent_id| current_settings(self.snapshot.as_ref()?, agent_id));
         let outbox = self
             .snapshot
             .as_ref()
-            .map(|snapshot| snapshot.outbox.clone())
-            .unwrap_or_default();
+            .map_or(&[][..], |snapshot| snapshot.outbox.as_slice());
         let Some(page) = self.bruh.as_mut() else {
             return;
         };
+        page.built_for = Some(stamp);
         if page.message.is_none() {
             let message = cx.new(|cx| {
                 InputState::new(window, cx)
@@ -724,9 +748,8 @@ impl ReactiveAutomations {
                 page.replies.insert(item.id.clone(), (input, watch));
             }
         }
-        let last = transcript(&agent_id, &page.runs.runs, &outbox)
-            .last()
-            .map(line_key);
+        page.lines = Rc::new(transcript(&agent_id, &page.runs.runs, outbox));
+        let last = page.lines.last().map(line_key);
         if last != page.last_line {
             page.scroll.scroll_to_bottom();
             page.last_line = last;
@@ -987,7 +1010,7 @@ impl ReactiveAutomations {
             .map(|agent| job_line(&agent.instructions).to_string())
             .unwrap_or_default();
         let body = match tab {
-            BruhTab::Chat => self.render_bruh_chat(agent_id, state, layout, cx),
+            BruhTab::Chat => self.render_bruh_chat(state, layout, cx),
             BruhTab::Memory => self.render_bruh_scroll(
                 "desktop-bruh-memory",
                 layout
@@ -1190,21 +1213,11 @@ impl ReactiveAutomations {
             )
     }
 
-    fn render_bruh_chat(
-        &self,
-        agent_id: &str,
-        state: &BruhState,
-        layout: Layout,
-        cx: &Context<'_, Self>,
-    ) -> Div {
+    fn render_bruh_chat(&self, state: &BruhState, layout: Layout, cx: &Context<'_, Self>) -> Div {
         let Some(page) = self.bruh.as_ref() else {
             return div();
         };
-        let outbox = self
-            .snapshot
-            .as_ref()
-            .map_or(&[][..], |snapshot| snapshot.outbox.as_slice());
-        let lines = transcript(agent_id, &page.runs.runs, outbox);
+        let lines = Rc::clone(&page.lines);
         let blocked = composer_block(Some(state.status));
         let empty = page
             .message
@@ -1240,7 +1253,8 @@ impl ReactiveAutomations {
             })
             .children(
                 lines
-                    .into_iter()
+                    .iter()
+                    .cloned()
                     .map(|line| self.render_bruh_line(line, &state.look, layout, cx)),
             );
         let composer = layout
@@ -2113,6 +2127,44 @@ mod tests {
             sent(&panel, cx).last(),
             Some(&ReactiveCommand::CancelRun { id: "r1".into() })
         );
+    }
+
+    /// A redraw with nothing new reuses the conversation instead of
+    /// building it again on every frame.
+    #[gpui::test]
+    fn the_transcript_is_built_only_when_runs_or_the_snapshot_change(
+        cx: &mut gpui::TestAppContext,
+    ) {
+        let (panel, cx) = open(
+            cx,
+            Some(snapshot(BruhStatus::Working, vec![ask("i1", false)])),
+            BruhTab::Chat,
+        );
+        let lines = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| {
+                Rc::clone(&panel.bruh.as_ref().unwrap().lines)
+            })
+        };
+        let first = lines(&panel, cx);
+        assert_eq!(first.len(), 1);
+        panel.update(cx, |_, cx| cx.notify());
+        cx.run_until_parked();
+        assert!(
+            Rc::ptr_eq(&first, &lines(&panel, cx)),
+            "rebuilt on a redraw"
+        );
+        panel.update(cx, |panel, cx| {
+            panel.show_bruh_runs_for_test(vec![run("r1", "awaiting_review")]);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(lines(&panel, cx).len(), 2, "new runs rebuild it");
+        panel.update(cx, |panel, cx| {
+            panel.set_snapshot(snapshot(BruhStatus::Working, Vec::new()), cx);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(lines(&panel, cx).len(), 1, "a new snapshot rebuilds it");
     }
 
     #[gpui::test]
