@@ -4,18 +4,10 @@
 use leptos::html::Input;
 use leptos::prelude::*;
 
+use bruhs_models::logic::text::resolve_rename;
+
 use crate::state::{PanelSurface, RightPanelSignal};
 use crate::ui::Icon;
-
-/// Trim a rename; `None` means "keep the old title" (empty or unchanged).
-pub fn resolve_rename(draft: &str, original: &str) -> Option<String> {
-    let trimmed = draft.trim();
-    if trimmed.is_empty() || trimmed == original {
-        None
-    } else {
-        Some(trimmed.to_string())
-    }
-}
 
 #[component]
 pub fn ChatHeader(thread_id: String) -> impl IntoView {
@@ -219,20 +211,5 @@ fn PanelToggle(
                 <span class="rounded-seed bg-pandan-400/20 px-1 text-label-sm tabular-nums text-pandan-300">{badge.get()}</span>
             })}
         </button>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn rename_rejects_empty_and_unchanged() {
-        assert_eq!(resolve_rename("   ", "Old"), None);
-        assert_eq!(resolve_rename("Old", "Old"), None);
-        assert_eq!(
-            resolve_rename("  New name ", "Old"),
-            Some("New name".to_string())
-        );
     }
 }

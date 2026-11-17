@@ -81,6 +81,7 @@ mod smoke;
 mod streaming;
 mod svg_cache;
 mod timeline_ui;
+mod title_rename;
 mod tool_output_ui;
 mod viewport;
 use assistant_content::*;
@@ -708,6 +709,8 @@ pub struct ChatView {
     model_picker_scroll: ScrollHandle,
     model_picker_query: Entity<InputState>,
     _model_picker_subscription: Subscription,
+    /// The header's inline rename while it is open.
+    title_rename: Option<title_rename::TitleRename>,
     pub input_state: Entity<InputState>,
     /// The running (or stopped but possibly still unwinding) turn's sender
     /// on the tokio runtime. A stopped turn keeps its aborted handle here so
@@ -1142,6 +1145,7 @@ impl ChatView {
             model_picker_scroll: ScrollHandle::new(),
             model_picker_query,
             _model_picker_subscription,
+            title_rename: None,
             input_state,
             agent_task: None,
             stream_task: None,
