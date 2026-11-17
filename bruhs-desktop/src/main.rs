@@ -301,6 +301,10 @@ fn main() {
             let window_options = WindowOptions {
                 titlebar: Some(TitleBar::title_bar_options()),
                 window_min_size: Some(size(px(640.0), px(480.0))),
+                // Same-size comparisons with the web (debug builds only).
+                #[cfg(debug_assertions)]
+                window_bounds: smoke::window_size()
+                    .map(|size| WindowBounds::Windowed(Bounds::centered(None, size, cx))),
                 ..Default::default()
             };
             let link_workspace: Rc<RefCell<Option<Entity<views::workspace::Workspace>>>> =
@@ -438,6 +442,23 @@ mod tests {
         DESKTOP_WINDOW_SMOKE_READY,
     };
     use super::{DESKTOP_GLOBAL_SHORTCUTS, JUMP_THREAD_FIRST_INDEX};
+
+    #[cfg(debug_assertions)]
+    #[test]
+    fn window_size_hook_reads_points_and_keeps_the_minimum() {
+        use gpui::{px, size};
+        assert_eq!(
+            super::smoke::parse_window_size("1280x800"),
+            Some(size(px(1280.0), px(800.0)))
+        );
+        assert_eq!(
+            super::smoke::parse_window_size(" 1440 x 900 "),
+            Some(size(px(1440.0), px(900.0)))
+        );
+        for bad in ["", "1280", "320x200", "wide x tall", "NaNx800"] {
+            assert_eq!(super::smoke::parse_window_size(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn desktop_global_shortcuts_should_match_web_shell_reference() {

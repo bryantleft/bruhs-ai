@@ -48,6 +48,24 @@ const DESKTOP_SMOKE_SKIP_TERMINAL_ENV: &str = "BRUHS_DESKTOP_SMOKE_SKIP_TERMINAL
 /// Named window state for a web-vs-desktop comparison screenshot (`Workspace::smoke_scene`).
 const DESKTOP_SMOKE_SCENE_ENV: &str = "BRUHS_DESKTOP_SMOKE_SCENE";
 
+/// `1280x800`: open the main window at that size in points, so a
+/// screenshot matches a web capture at the same viewport.
+const DESKTOP_WINDOW_SIZE_ENV: &str = "BRUHS_DESKTOP_WINDOW_SIZE";
+
+/// The main window's size from `BRUHS_DESKTOP_WINDOW_SIZE`, if set.
+pub(crate) fn window_size() -> Option<Size<Pixels>> {
+    parse_window_size(&env::var(DESKTOP_WINDOW_SIZE_ENV).ok()?)
+}
+
+/// `"1280x800"` as points; at least the 640×480 minimum window.
+pub(crate) fn parse_window_size(raw: &str) -> Option<Size<Pixels>> {
+    let (width, height) = raw.trim().split_once('x')?;
+    let width: f32 = width.trim().parse().ok()?;
+    let height: f32 = height.trim().parse().ok()?;
+    (width >= 640.0 && height >= 480.0 && width.is_finite() && height.is_finite())
+        .then(|| size(px(width), px(height)))
+}
+
 pub(crate) fn desktop_window_smoke_enabled() -> bool {
     env::var(DESKTOP_WINDOW_SMOKE_ENV)
         .ok()
