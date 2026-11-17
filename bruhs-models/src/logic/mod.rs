@@ -5,6 +5,7 @@
 //! [`crate::models::auto_record`]; time helpers in [`crate::time`]; the model
 //! catalog and provider routing in [`crate::agent`].
 
+pub mod app_link;
 pub mod attachments;
 pub mod booking;
 pub mod branch_pull;

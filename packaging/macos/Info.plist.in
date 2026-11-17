@@ -26,6 +26,17 @@
   <string>public.app-category.productivity</string>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>CFBundleURLTypes</key>
+  <array>
+    <dict>
+      <key>CFBundleURLName</key>
+      <string>dev.bruhs.app</string>
+      <key>CFBundleURLSchemes</key>
+      <array>
+        <string>bruhs</string>
+      </array>
+    </dict>
+  </array>
   <key>NSMicrophoneUsageDescription</key>
   <string>Bruhs records meetings you start or allow, and transcribes them on this Mac.</string>
   <key>NSHumanReadableCopyright</key>

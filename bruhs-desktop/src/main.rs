@@ -197,9 +197,13 @@ fn main() {
         tracing::error!("Synthetic meeting dock acceptance requires a debug build.");
         return;
     }
+    // `bruhs://` links from the OS. One that launches the app waits in the
+    // channel until the workspace is open.
+    let (link_tx, link_rx) = async_channel::unbounded::<String>();
     gpui_platform::application()
         .with_assets(assets::DesktopAssets)
-        .run(|cx: &mut App| {
+        .with_app_links(link_tx)
+        .run(move |cx: &mut App| {
             cx.on_action(|_: &Quit, cx| cx.quit());
             cx.bind_keys([KeyBinding::new("cmd-q", Quit, None)]);
             cx.set_menus([Menu::new("bruhs.ai").items([MenuItem::action("Quit bruhs.ai", Quit)])]);
@@ -299,6 +303,9 @@ fn main() {
                 window_min_size: Some(size(px(640.0), px(480.0))),
                 ..Default::default()
             };
+            let link_workspace: Rc<RefCell<Option<Entity<views::workspace::Workspace>>>> =
+                Rc::new(RefCell::new(None));
+            let link_workspace_for_window = link_workspace.clone();
             // The smoke hooks drive the workspace after the window opens.
             #[cfg(debug_assertions)]
             let workspace_cell: Rc<
@@ -309,7 +316,7 @@ fn main() {
             // Bring the window to the front even when launched from a shell;
             // an unfocused, off-screen window never draws a frame.
             cx.activate(true);
-            match cx.open_window(window_options, |window, cx| {
+            let opened = cx.open_window(window_options, |window, cx| {
                 // The first level on the window MUST be a gpui_component::Root —
                 // it provides the dialog/sheet/notification overlays and applies
                 // the theme background + font family to the whole window.
@@ -325,12 +332,17 @@ fn main() {
                     false
                 });
                 let workspace = cx.new(|cx| views::workspace::Workspace::new(window, cx));
+                *link_workspace_for_window.borrow_mut() = Some(workspace.clone());
                 #[cfg(debug_assertions)]
                 {
                     *workspace_for_window.borrow_mut() = Some(workspace.clone());
                 }
                 cx.new(|cx| Root::new(workspace, window, cx))
-            }) {
+            });
+            if let (Ok(window), Some(workspace)) = (&opened, link_workspace.borrow().clone()) {
+                open_app_links(*window, workspace, link_rx, cx);
+            }
+            match opened {
                 // Launch checks driven by environment variables: debug
                 // builds only, so a release app cannot be auto-driven.
                 #[cfg(debug_assertions)]
@@ -362,6 +374,46 @@ fn main() {
                 }
             }
         });
+}
+
+/// Queues the `bruhs://` links the OS hands the app.
+trait AppLinks {
+    fn with_app_links(self, links: async_channel::Sender<String>) -> Self;
+}
+
+impl AppLinks for Application {
+    fn with_app_links(self, links: async_channel::Sender<String>) -> Self {
+        self.on_open_urls(move |urls| {
+            for url in urls {
+                let _ = links.try_send(url);
+            }
+        });
+        self
+    }
+}
+
+/// Open each `bruhs://` link in the workspace and bring the app forward.
+fn open_app_links(
+    window: WindowHandle<Root>,
+    workspace: Entity<views::workspace::Workspace>,
+    links: async_channel::Receiver<String>,
+    cx: &mut App,
+) {
+    cx.spawn(async move |cx| {
+        while let Ok(link) = links.recv().await {
+            let workspace = workspace.clone();
+            let opened = window.update(cx, |_, window, cx| {
+                workspace.update(cx, |workspace, cx| {
+                    workspace.open_app_link(&link, window, cx)
+                });
+                window.activate_window();
+            });
+            if opened.is_err() {
+                break;
+            }
+        }
+    })
+    .detach();
 }
 
 #[cfg(test)]

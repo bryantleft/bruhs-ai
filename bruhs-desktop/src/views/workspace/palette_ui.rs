@@ -344,7 +344,7 @@ impl PaletteItem {
 
 pub(super) const PALETTE_THREAD_LIMIT_MIXED: usize = 6;
 pub(super) const PALETTE_RECORD_LIMIT: usize = 20;
-pub(super) const THREAD_LINK_PREFIX: &str = "bruhs://thread/";
+pub(super) use bruhs_models::logic::app_link::THREAD_LINK_PREFIX;
 
 /// The id inside a pasted `bruhs://thread/<id>` reference.
 pub(super) fn thread_link_id(query: &str) -> Option<&str> {
