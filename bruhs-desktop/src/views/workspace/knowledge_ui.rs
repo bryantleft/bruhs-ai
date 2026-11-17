@@ -84,6 +84,8 @@ impl KnowledgeState {
 
 /// Web's document body field: `min-h-[384px]`.
 const DOCUMENT_BODY_HEIGHT_PX: f32 = 384.0;
+/// Web's source excerpt field: 12 rows.
+const SOURCE_EXCERPT_HEIGHT_PX: f32 = 264.0;
 
 /// The web Knowledge page's subtitle.
 const KNOWLEDGE_PAGE_SUBTITLE: &str = "Markdown documents and saved sources, local and searchable.";
@@ -1324,7 +1326,10 @@ impl Workspace {
                                             .child(
                                                 Input::new(&self.knowledge_body_input)
                                                     .aria_label("Document Markdown body")
-                                                    .w_full(),
+                                                    .w_full()
+                                                    // A multi-line field sizes to the
+                                                    // Input, not its box.
+                                                    .h_full(),
                                             )
                                             .into_any_element()
                                     })
@@ -1673,7 +1678,9 @@ impl Workspace {
                             .child(
                                 Input::new(&self.clip_excerpt_input)
                                     .aria_label("Source excerpt")
-                                    .w_full(),
+                                    .w_full()
+                                    // Web's 12-row excerpt field.
+                                    .h(px(SOURCE_EXCERPT_HEIGHT_PX)),
                             ),
                     ),
             )

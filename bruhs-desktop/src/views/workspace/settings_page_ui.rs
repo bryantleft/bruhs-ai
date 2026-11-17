@@ -951,7 +951,11 @@ impl Workspace {
                     div()
                         .w(px(288.0))
                         .h(px(96.0))
-                        .child(Input::new(&self.title_instructions_input).aria_label("Thread title instructions"))
+                        .child(
+                            Input::new(&self.title_instructions_input)
+                                .aria_label("Thread title instructions")
+                                .h_full(),
+                        )
                         .into_any_element(),
                 ),
             ),
@@ -971,7 +975,8 @@ impl Workspace {
                             el.child(
                                 div().h(px(80.0)).child(
                                     Input::new(&self.title_project_instructions_input)
-                                        .aria_label("Project thread title instructions"),
+                                        .aria_label("Project thread title instructions")
+                                        .h_full(),
                                 ),
                             )
                         })
