@@ -24,6 +24,13 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   repository, 89 GB of build output arrives in about 7 seconds for under
   70 MiB. Projects can turn it off or add folders in `.bruhs/config.json`;
   see `docs/worktree-disk.md`.
+- The web's Agent workflows page can step back through older workflows, as
+  the desktop app's can. Workflow history opens on the newest one; Previous
+  workflow and Next workflow move through every workflow you previewed,
+  declined, ran or undid, each reading like "Protect focus, Declined,
+  workflow 2 of 6", and Review workflow shows the one on screen in full.
+  The desktop app's history now names an undone workflow "Rolled back", as
+  the web does.
 - The web command palette can open a local server, as the desktop app's
   does. Choose Open a local server… to list what is listening on
   localhost, type to filter the list, and press Enter to open one in a new
