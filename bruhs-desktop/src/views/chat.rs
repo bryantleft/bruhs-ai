@@ -61,9 +61,9 @@ actions!(
 
 mod assistant_content;
 mod auth;
-mod codex_auth;
 #[cfg(test)]
 mod behavior_tests;
+mod codex_auth;
 mod composer_ui;
 mod content_cache;
 mod dictation;
