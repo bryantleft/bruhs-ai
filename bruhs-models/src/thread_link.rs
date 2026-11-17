@@ -645,6 +645,12 @@ pub fn delivery_body(prompt: &str) -> &str {
     parse_delivery(prompt).map_or(prompt, |delivery| delivery.body)
 }
 
+/// The hop count of a message sent after `hops` earlier ones: one more,
+/// or `None` when that passes `max_hops`.
+pub fn next_hop(hops: u32, max_hops: u32) -> Option<u32> {
+    hops.checked_add(1).filter(|next| *next <= max_hops)
+}
+
 /// Decide a `message_thread` call.
 ///
 /// # Errors
@@ -652,13 +658,12 @@ pub fn delivery_body(prompt: &str) -> &str {
 /// The refusal to return to the model: the hop limit, an unknown or
 /// ambiguous recipient, or a thread messaging itself.
 pub fn plan_message(outgoing: &Outgoing<'_>) -> Result<Delivery, ThreadReply> {
-    let hops = prompt_hops(outgoing.caller_prompt).saturating_add(1);
     let max_hops = outgoing.max_hops;
-    if hops > max_hops {
+    let Some(hops) = next_hop(prompt_hops(outgoing.caller_prompt), max_hops) else {
         return Err(ThreadReply::refused(format!(
             "Not sent: this conversation between threads reached its limit of {max_hops} messages without the user. Summarize where things stand and let the user decide what happens next."
         )));
-    }
+    };
     let recipient = match outgoing.thread_id {
         Some(reference) => {
             let id = resolve_thread(reference, outgoing.ids)?;
@@ -771,6 +776,13 @@ pub fn recipient_waiting_reply(
 
 #[cfg(test)]
 mod tests {
+    #[test]
+    fn next_hop_counts_one_more_and_refuses_past_the_limit() {
+        assert_eq!(next_hop(0, MAX_HOPS), Some(1));
+        assert_eq!(next_hop(MAX_HOPS, MAX_HOPS), None);
+        assert_eq!(next_hop(u32::MAX, MAX_HOPS), None);
+    }
+
     use super::*;
 
     const A: &str = "11111111-aaaa-4aaa-8aaa-aaaaaaaaaaaa";

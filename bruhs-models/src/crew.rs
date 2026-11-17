@@ -16,6 +16,7 @@ mod face;
 pub use face::*;
 mod page;
 pub use page::*;
+pub mod room;
 mod transcript;
 pub use transcript::*;
 #[cfg(test)]
