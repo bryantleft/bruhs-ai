@@ -654,3 +654,63 @@ fn task_delete_asks_before_deleting(cx: &mut gpui::TestAppContext) {
         assert!(workspace.workspace_focus_handle.is_focused(window));
     });
 }
+
+/// PM-30: in a compact window the project sidebar cannot show, so the Tasks
+/// header offers the web's "Projects" dialog. Choosing a project, or All
+/// Tasks, filters the list and closes it. A wide window shows the sidebar
+/// and no Projects button, as the web hides it from `md` up.
+#[gpui::test]
+fn compact_tasks_switch_project_from_the_projects_dialog(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = parity_workspace(cx);
+    cx.simulate_resize(gpui::size(px(760.0), px(700.0)));
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.active_view = AppView::Tasks;
+        workspace.sidebar_visible = true;
+        workspace.projects = vec![
+            DesktopProject {
+                id: "alpha".into(),
+                name: "Alpha".into(),
+            },
+            DesktopProject {
+                id: "beta".into(),
+                name: "Beta".into(),
+            },
+        ];
+        let mut alpha = task("alpha-task", "Alpha task");
+        alpha.project_id = Some("alpha".into());
+        let mut beta = task("beta-task", "Beta task");
+        beta.project_id = Some("beta".into());
+        workspace.work_items = vec![alpha, beta];
+        workspace.selected_project_id = None;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-project-sidebar");
+
+    click_debug_selector(cx, "desktop-task-open-projects");
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-task-projects-dialog");
+    assert_rendered_bounds(cx, "desktop-task-projects-list");
+    click_debug_selector(cx, project_row_debug_selector("beta"));
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-task-projects-dialog");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.selected_project_id.as_deref(), Some("beta"));
+    });
+    assert_rendered_bounds(cx, task_row_debug_selector("beta-task"));
+    assert_no_rendered_bounds(cx, task_row_debug_selector("alpha-task"));
+
+    click_debug_selector(cx, "desktop-task-open-projects");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-project-all");
+    cx.run_until_parked();
+    assert_no_rendered_bounds(cx, "desktop-task-projects-dialog");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.selected_project_id, None);
+    });
+
+    cx.simulate_resize(gpui::size(px(1400.0), px(900.0)));
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-project-sidebar");
+    assert_no_rendered_bounds(cx, "desktop-task-open-projects");
+}
