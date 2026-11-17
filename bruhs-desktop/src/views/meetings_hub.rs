@@ -103,6 +103,9 @@ pub enum HubEvent {
     PersonMergeResolved(Box<bruhs_models::PersonMergeResolution>),
     PersonMergesResolved(Vec<bruhs_models::PersonMergeResolution>),
     MeetingsChanged,
+    /// Google events arrived, were deleted or were removed; the workspace
+    /// saves them so they show offline and after a restart.
+    GoogleEventsChanged,
     /// Only these transcript rows need new geometry; `None` means a full snapshot.
     TranscriptChanged {
         meeting_id: String,
@@ -990,11 +993,13 @@ impl MeetingsHub {
                 }
                 upsert_google_event(&mut self.google_events, remote);
                 self.bump_search_revision();
+                cx.emit(HubEvent::GoogleEventsChanged);
             }
             CalendarSyncEvent::EventDeleted { google_event_id } => {
                 self.google_events
                     .retain(|e| e.google_event_id.as_deref() != Some(google_event_id.as_str()));
                 self.bump_search_revision();
+                cx.emit(HubEvent::GoogleEventsChanged);
             }
             CalendarSyncEvent::CalendarsRefreshed { calendars } => {
                 self.calendars = calendars;
@@ -1601,10 +1606,23 @@ impl MeetingsHub {
         );
     }
 
-    /// Web "Remove all" imported Google events.
+    /// Web "Remove all" imported Google events. The workspace saves the
+    /// empty list, so they stay removed after a restart.
     pub fn clear_google_events(&mut self, cx: &mut Context<'_, Self>) {
         self.google_events.clear();
+        self.bump_search_revision();
+        cx.emit(HubEvent::GoogleEventsChanged);
         cx.notify();
+    }
+
+    /// The Google events saved with the workspace. Only provider events
+    /// are read only, so anything else in the saved list is dropped rather
+    /// than shown as Google's.
+    pub fn restore_google_events(&mut self, events: Vec<CalendarEvent>) {
+        self.google_events = events
+            .into_iter()
+            .filter(CalendarEvent::is_provider_read_only)
+            .collect();
     }
 
     pub fn has_google_events(&self) -> bool {

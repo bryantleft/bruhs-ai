@@ -81,7 +81,7 @@ impl Workspace {
                     .child("Copy recovery")
                     .on_click(cx.listener(|this, _, _, cx| {
                         // Explicit local clipboard action; recovery is never sent to the agent.
-                        match serde_json::to_string_pretty(&this.snapshot(cx)) {
+                        match serde_json::to_string_pretty(&this.recovery_snapshot(cx)) {
                             Ok(json) => cx.write_to_clipboard(ClipboardItem::new_string(json)),
                             Err(_) => this.persistence_error = Some("The recovery snapshot could not be encoded. Keep this window open.".into()),
                         }

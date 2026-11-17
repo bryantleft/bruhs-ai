@@ -457,6 +457,7 @@ impl Workspace {
             people_cache: self.meetings_hub.read(cx).people_snapshot(),
             meeting_cache: self.meetings_hub.read(cx).meeting_cache(),
             meeting_actions: self.meetings_hub.read(cx).action_checkpoints(),
+            google_events: self.meetings_hub.read(cx).google_events.clone(),
             scheduling_preferences: self.scheduling_preferences.clone(),
             life_context: self.life_context.clone(),
             automation_state: self.automation_state.clone(),
@@ -503,6 +504,14 @@ impl Workspace {
             previous_worktree: self.previous_worktree.clone(),
             keybindings: self.keybindings.clone(),
         }
+    }
+
+    /// What Copy recovery puts on the clipboard: this window's own records.
+    /// Google's events stay out; the provider keeps them.
+    pub(super) fn recovery_snapshot(&self, cx: &App) -> PersistedWorkspaceState {
+        let mut state = self.snapshot(cx);
+        state.google_events.clear();
+        state
     }
 
     pub(super) fn persist(&mut self, cx: &mut Context<'_, Self>) {

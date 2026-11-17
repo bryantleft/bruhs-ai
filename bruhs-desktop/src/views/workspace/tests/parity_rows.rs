@@ -395,3 +395,124 @@ fn event_dialog_records_a_meeting_for_a_local_event(cx: &mut gpui::TestAppContex
     assert_rendered_bounds(cx, "desktop-event-create-dialog");
     assert_no_rendered_bounds(cx, "desktop-event-record-meeting");
 }
+
+/// A workspace restarted from `path`, as a launch reads it.
+fn restart_from(
+    workspace: &Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+    path: &std::path::Path,
+) -> Entity<Workspace> {
+    workspace.update_in(cx, |_, window, cx| {
+        cx.new(|cx| {
+            Workspace::from_loaded_state(
+                load_desktop_state_with_backup(path),
+                window,
+                cx,
+                crate::views::workspace::RestoredRecords::take_from_persisted,
+                Workspace::restore_threads,
+            )
+        })
+    })
+}
+
+/// PM-26 and PM-27: a synced Google event is saved with the workspace, so
+/// it comes back read only after a restart; Copy recovery leaves it out,
+/// and the agent's calendar tools never see it. Settings › Calendar ›
+/// Remove all removes it for good.
+#[gpui::test]
+async fn google_events_survive_a_restart_until_removed(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = parity_workspace(cx);
+    let dir = std::env::temp_dir().join(format!("bruhs-google-events-{}", uuid::Uuid::new_v4()));
+    let path = dir.join("state.json");
+    let start_ms = EpochMs::now().as_millis() + 3_600_000;
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.persistence_test_path = Some(path.clone());
+        workspace.meetings_hub.update(cx, |hub, cx| {
+            hub.apply_calendar_event(
+                bruhs_models::CalendarSyncEvent::EventUpserted {
+                    event: Box::new(google_event("google-sync", "Provider sync", start_ms)),
+                },
+                cx,
+            );
+        });
+    });
+    cx.condition(&workspace, |workspace, _| workspace.save_status.is_saved())
+        .await;
+    let saved = load_desktop_state_from_path(&path).unwrap().unwrap();
+    assert_eq!(saved.google_events.len(), 1);
+    assert_eq!(saved.google_events[0].title, "Provider sync");
+    assert_eq!(saved.google_events[0].location.as_deref(), Some("Room 4"));
+    workspace.update_in(cx, |workspace, _window, cx| {
+        assert!(
+            workspace.recovery_snapshot(cx).google_events.is_empty(),
+            "Copy recovery keeps only this window's own records"
+        );
+        assert_eq!(workspace.snapshot(cx).google_events.len(), 1);
+    });
+
+    let restarted = restart_from(&workspace, cx, &path);
+    restarted.update_in(cx, |restarted, _window, cx| {
+        let events = restarted.visible_calendar_events(cx);
+        let google = events
+            .iter()
+            .find(|event| event.id == "google-sync")
+            .expect("the Google event shows after a restart");
+        assert!(google.is_read_only());
+        assert_eq!(google.title, "Provider sync");
+        assert!(
+            restarted
+                .calendar_events
+                .iter()
+                .all(|event| event.id != "google-sync"),
+            "the agent's calendar tools read local events only"
+        );
+    });
+
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.open_settings(&OpenSettings, window, cx);
+    });
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-settings-nav-calendar");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-settings-google-clear");
+    cx.run_until_parked();
+    cx.condition(&workspace, |workspace, _| workspace.save_status.is_saved())
+        .await;
+    workspace.update_in(cx, |workspace, _window, cx| {
+        assert!(workspace.meetings_hub.read(cx).google_events.is_empty());
+    });
+    assert_no_rendered_bounds(cx, "desktop-settings-google-clear");
+    let saved = load_desktop_state_from_path(&path).unwrap().unwrap();
+    assert!(saved.google_events.is_empty(), "Remove all is saved");
+    let restarted = restart_from(&workspace, cx, &path);
+    restarted.update_in(cx, |restarted, _window, cx| {
+        assert!(restarted.meetings_hub.read(cx).google_events.is_empty());
+        assert!(restarted
+            .visible_calendar_events(cx)
+            .iter()
+            .all(|event| event.id != "google-sync"));
+    });
+    fs::remove_dir_all(dir).unwrap();
+}
+
+/// A saved list holds only Google's own events: anything else is dropped on
+/// restore rather than shown as a provider's.
+#[gpui::test]
+fn restored_google_events_are_only_provider_events(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = parity_workspace(cx);
+    workspace.update_in(cx, |workspace, _window, cx| {
+        let mut local = google_event("forged", "Local look-alike", 0);
+        local.source = bruhs_models::EventSource::Local;
+        workspace.meetings_hub.update(cx, |hub, _| {
+            hub.restore_google_events(vec![local, google_event("google-sync", "Provider sync", 0)]);
+        });
+        let ids = workspace
+            .meetings_hub
+            .read(cx)
+            .google_events
+            .iter()
+            .map(|event| event.id.clone())
+            .collect::<Vec<_>>();
+        assert_eq!(ids, ["google-sync"]);
+    });
+}
