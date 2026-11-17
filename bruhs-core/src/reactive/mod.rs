@@ -14,6 +14,7 @@ use tokio::sync::{watch, Mutex};
 
 #[cfg(test)]
 mod always_on_tests;
+mod approval;
 #[cfg(test)]
 mod automation_tests;
 pub mod clock;

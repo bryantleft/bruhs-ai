@@ -948,3 +948,613 @@ fn each_run_names_the_bruh_and_its_access() {
     assert!(codex_ask.prompt.contains("Access: read only."));
     assert_eq!(codex_ask.unattended_access.level, AccessLevel::ReadOnly);
 }
+
+// ── Approvals ──────────────────────────────────────────────────────────────
+
+const LONG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+const SHORT_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+const DENIED: &str = "The owner denied this. Continue without it.";
+const NOT_ANSWERED: &str =
+    "The owner has not answered yet. Stop here and say you are waiting on their approval.";
+
+fn access(level: AccessLevel) -> BruhAccess {
+    BruhAccess {
+        level,
+        ..BruhAccess::default()
+    }
+}
+
+/// A chat claimed for `agent_id`, now Running.
+async fn claimed(runtime: &ReactiveRuntime, agent_id: &str) -> ReactiveRun {
+    chat(runtime, agent_id, "Do the work.").await;
+    let claim = claim_one(runtime).await.unwrap();
+    assert_eq!(claim.run.agent_id, agent_id);
+    claim.run
+}
+
+type Decision = Result<Option<crate::PermissionDecision>, ReactiveError>;
+
+/// `approval::decide` on a Claude bruh run, in the background.
+fn spawn_decide(
+    runtime: &ReactiveRuntime,
+    level: AccessLevel,
+    run: &ReactiveRun,
+    project_path: &str,
+    tool: &str,
+    input: serde_json::Value,
+    timeout: std::time::Duration,
+) -> tokio::task::JoinHandle<Decision> {
+    let (runtime, run) = (runtime.clone(), run.clone());
+    let (project_path, tool) = (project_path.to_owned(), tool.to_owned());
+    tokio::spawn(async move {
+        super::approval::decide(
+            &runtime,
+            &access(level),
+            bruhs_models::agent::AgentProvider::Claude,
+            &run,
+            &project_path,
+            &tool,
+            &input,
+            timeout,
+        )
+        .await
+    })
+}
+
+async fn decided(task: tokio::task::JoinHandle<Decision>) -> Option<crate::PermissionDecision> {
+    tokio::time::timeout(std::time::Duration::from_secs(5), task)
+        .await
+        .expect("the approval wait should end")
+        .unwrap()
+        .unwrap()
+}
+
+fn deny(reason: &str) -> Option<crate::PermissionDecision> {
+    Some(crate::PermissionDecision::Deny {
+        reason: Some(reason.into()),
+    })
+}
+
+async fn approvals(runtime: &ReactiveRuntime, agent_id: &str) -> Vec<OutboxItem> {
+    runtime
+        .snapshot()
+        .await
+        .unwrap()
+        .outbox
+        .into_iter()
+        .filter(|item| item.agent_id == agent_id && item.approval.is_some())
+        .collect()
+}
+
+async fn approval_item(runtime: &ReactiveRuntime, id: &str) -> OutboxItem {
+    let id = id.to_owned();
+    runtime
+        .call(move |connection| store::crew::approval(connection, &id))
+        .await
+        .unwrap()
+}
+
+/// The newest waiting approval for `agent_id`, once the worker has opened it.
+async fn waiting_approval(runtime: &ReactiveRuntime, agent_id: &str) -> OutboxItem {
+    let mut changes = runtime.watch_changes();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            if let Some(item) = approvals(runtime, agent_id).await.into_iter().find(|item| {
+                item.approval.as_ref().unwrap().state == ApprovalState::Waiting
+                    && item.resolved_at.is_none()
+            }) {
+                return item;
+            }
+            changes.changed().await.unwrap();
+        }
+    })
+    .await
+    .expect("an approval should open")
+}
+
+async fn decide_approval(runtime: &ReactiveRuntime, id: &str, approve: bool) -> ReactiveSnapshot {
+    runtime
+        .command(ReactiveCommand::DecideApproval {
+            id: id.into(),
+            approve,
+        })
+        .await
+        .unwrap()
+}
+
+async fn take_grant(runtime: &ReactiveRuntime, agent_id: &str, fingerprint: &str) -> bool {
+    let (agent_id, fingerprint) = (agent_id.to_owned(), fingerprint.to_owned());
+    runtime
+        .call(move |connection| store::crew::take_grant(connection, &agent_id, &fingerprint))
+        .await
+        .unwrap()
+}
+
+fn project() -> String {
+    std::env::temp_dir().to_string_lossy().into_owned()
+}
+
+#[tokio::test]
+async fn ask_turns_a_write_into_an_approval_that_blocks_until_decided() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    let input = json!({"command": "cargo test"});
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &run,
+        &project(),
+        "Bash",
+        input.clone(),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&runtime, "a").await;
+    assert_eq!(item.kind, OutboxKind::Ask);
+    assert_eq!(item.title, "Approval needed");
+    assert_eq!(item.message, "Run cargo test");
+    assert_eq!(item.run_id, run.id);
+    let request = item.approval.clone().unwrap();
+    assert_eq!(request.tool, "Bash");
+    assert_eq!(request.summary, "Run cargo test");
+    assert_eq!(request.fingerprint, approval_fingerprint("Bash", &input));
+    assert_eq!(bruh_status(&runtime, "a").await, BruhStatus::NeedsYou);
+    assert!(!task.is_finished());
+
+    decide_approval(&runtime, &item.id, true).await;
+    assert_eq!(decided(task).await, Some(crate::PermissionDecision::Allow));
+    let item = approval_item(&runtime, &item.id).await;
+    assert_eq!(item.approval.unwrap().state, ApprovalState::Approved);
+    assert!(item.resolved_at.is_some() && item.read_at.is_some());
+    // A live approval is used directly: no grant is left behind and no run queued.
+    assert!(!take_grant(&runtime, "a", &request.fingerprint).await);
+    assert_eq!(run_count(&runtime, "a").await, 1);
+    // Deciding again the same way changes nothing; the other way conflicts.
+    decide_approval(&runtime, &item.id, true).await;
+    let conflict = runtime
+        .command(ReactiveCommand::DecideApproval {
+            id: item.id.clone(),
+            approve: false,
+        })
+        .await
+        .unwrap_err();
+    assert_eq!(conflict.to_string(), "This request was already decided.");
+}
+
+#[tokio::test]
+async fn a_denied_or_replied_approval_tells_the_agent_why() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &run,
+        &project(),
+        "Bash",
+        json!({"command": "cargo test"}),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&runtime, "a").await;
+    decide_approval(&runtime, &item.id, false).await;
+    assert_eq!(decided(task).await, deny(DENIED));
+    let denied = approval_item(&runtime, &item.id).await;
+    assert_eq!(denied.approval.unwrap().state, ApprovalState::Denied);
+    assert!(denied.resolved_at.is_some());
+
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &run,
+        &project(),
+        "Bash",
+        json!({"command": "cargo build"}),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&runtime, "a").await;
+    runtime
+        .command(ReactiveCommand::AnswerOutbox {
+            id: item.id.clone(),
+            message: "use make".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(
+        decided(task).await,
+        deny("The owner denied this and replied: use make")
+    );
+    let replied = approval_item(&runtime, &item.id).await;
+    assert_eq!(replied.approval.unwrap().state, ApprovalState::Denied);
+    assert_eq!(replied.answer.as_deref(), Some("use make"));
+    // The waiting run relays the reply itself, so nothing new is queued.
+    assert_eq!(run_count(&runtime, "a").await, 1);
+
+    // Dismissing an approval denies it rather than leaving the run waiting.
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &run,
+        &project(),
+        "Bash",
+        json!({"command": "cargo doc"}),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&runtime, "a").await;
+    runtime
+        .command(ReactiveCommand::DismissOutbox {
+            id: item.id.clone(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(decided(task).await, deny(DENIED));
+    let dismissed = approval_item(&runtime, &item.id).await;
+    assert_eq!(dismissed.approval.unwrap().state, ApprovalState::Denied);
+}
+
+#[tokio::test]
+async fn an_unanswered_approval_expires_and_a_late_approval_resumes_with_a_one_shot_grant() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    let input = json!({"command": "cargo test"});
+    let ask = |run: &ReactiveRun, timeout| {
+        spawn_decide(
+            &runtime,
+            AccessLevel::Ask,
+            run,
+            &project(),
+            "Bash",
+            input.clone(),
+            timeout,
+        )
+    };
+    assert_eq!(decided(ask(&run, SHORT_WAIT)).await, deny(NOT_ANSWERED));
+    let [item] = approvals(&runtime, "a").await.try_into().unwrap();
+    assert_eq!(
+        item.approval.as_ref().unwrap().state,
+        ApprovalState::Expired
+    );
+    assert!(item.resolved_at.is_none() && item.is_open_approval());
+    assert_eq!(bruh_status(&runtime, "a").await, BruhStatus::NeedsYou);
+
+    finish(&runtime, &run.id, "Waiting on the owner's approval.").await;
+    let snapshot = decide_approval(&runtime, &item.id, true).await;
+    let queued: Vec<_> = snapshot
+        .runs
+        .iter()
+        .filter(|queued| queued.agent_id == "a" && queued.status == RunStatus::Queued)
+        .collect();
+    assert_eq!(queued.len(), 1);
+    assert_eq!(
+        queued[0].trigger,
+        Some(RunTrigger::Answer {
+            outbox_id: item.id.clone()
+        })
+    );
+    assert_eq!(
+        queued[0].prompt,
+        "The owner approved your request: Run cargo test. Do it now."
+    );
+    let approved = approval_item(&runtime, &item.id).await;
+    assert_eq!(approved.approval.unwrap().state, ApprovalState::Approved);
+    assert!(approved.resolved_at.is_some());
+
+    let resumed = claim_one(&runtime).await.unwrap().run;
+    assert_eq!(resumed.id, queued[0].id);
+    assert_eq!(
+        decided(ask(&resumed, LONG_WAIT)).await,
+        Some(crate::PermissionDecision::Allow)
+    );
+    assert_eq!(approvals(&runtime, "a").await.len(), 1);
+    // The grant was one shot: the same call asks again.
+    assert_eq!(decided(ask(&resumed, SHORT_WAIT)).await, deny(NOT_ANSWERED));
+    assert_eq!(approvals(&runtime, "a").await.len(), 2);
+}
+
+#[tokio::test]
+async fn a_late_denial_resumes_the_run_without_a_grant() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    let input = json!({"command": "cargo test"});
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &run,
+        &project(),
+        "Bash",
+        input.clone(),
+        SHORT_WAIT,
+    );
+    assert_eq!(decided(task).await, deny(NOT_ANSWERED));
+    let [item] = approvals(&runtime, "a").await.try_into().unwrap();
+    finish(&runtime, &run.id, "Waiting on the owner's approval.").await;
+    let snapshot = decide_approval(&runtime, &item.id, false).await;
+    let resumed = snapshot
+        .runs
+        .iter()
+        .find(|queued| queued.status == RunStatus::Queued)
+        .unwrap();
+    assert_eq!(
+        resumed.prompt,
+        "The owner denied your request: Run cargo test. Continue without it."
+    );
+    assert!(!take_grant(&runtime, "a", &approval_fingerprint("Bash", &input)).await);
+}
+
+#[tokio::test]
+async fn stop_releases_a_run_waiting_on_approval() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let waiting = claimed(&runtime, "a").await;
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &waiting,
+        &project(),
+        "Bash",
+        json!({"command": "cargo test"}),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&runtime, "a").await;
+    runtime
+        .command(ReactiveCommand::StopBruh {
+            agent_id: "a".into(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(decided(task).await, None);
+    let stopped = approval_item(&runtime, &item.id).await;
+    assert_eq!(stopped.approval.unwrap().state, ApprovalState::Denied);
+    assert!(stopped.resolved_at.is_some());
+    assert_eq!(
+        run(&runtime, &waiting.id).await.status,
+        RunStatus::Cancelled
+    );
+}
+
+#[tokio::test]
+async fn cancelling_a_waiting_run_closes_its_approval() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let waiting = claimed(&runtime, "a").await;
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &waiting,
+        &project(),
+        "Bash",
+        json!({"command": "cargo test"}),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&runtime, "a").await;
+    runtime
+        .command(ReactiveCommand::CancelRun {
+            id: waiting.id.clone(),
+        })
+        .await
+        .unwrap();
+    assert_eq!(decided(task).await, None);
+    let closed = approval_item(&runtime, &item.id).await;
+    assert_eq!(closed.approval.unwrap().state, ApprovalState::Denied);
+    assert!(closed.resolved_at.is_some());
+    assert_eq!(bruh_status(&runtime, "a").await, BruhStatus::Asleep);
+}
+
+#[tokio::test]
+async fn full_access_allows_in_folder_writes_without_an_item() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let folder = tempfile::tempdir().unwrap();
+    let project_path = folder.path().to_string_lossy().into_owned();
+    let run = claimed(&runtime, "a").await;
+    let decide = |level, tool: &str, input| {
+        spawn_decide(
+            &runtime,
+            level,
+            &run,
+            &project_path,
+            tool,
+            input,
+            SHORT_WAIT,
+        )
+    };
+    // A new file, named through the folder's canonical path, is still inside.
+    let canonical = std::fs::canonicalize(folder.path()).unwrap();
+    let new_file = canonical.join("src").join("a.rs");
+    let edit = json!({"file_path": new_file.to_string_lossy()});
+    assert_eq!(
+        decided(decide(AccessLevel::Full, "Edit", edit.clone())).await,
+        Some(crate::PermissionDecision::Allow)
+    );
+    // Claude's Full shell runs in the folder's sandbox, so it doesn't ask.
+    assert_eq!(
+        decided(decide(
+            AccessLevel::Full,
+            "Bash",
+            json!({"command": "cargo test"})
+        ))
+        .await,
+        Some(crate::PermissionDecision::Allow)
+    );
+    assert!(approvals(&runtime, "a").await.is_empty());
+    assert_eq!(
+        decided(decide(AccessLevel::ReadOnly, "Edit", edit)).await,
+        deny(READ_ONLY_DENIAL)
+    );
+    assert!(approvals(&runtime, "a").await.is_empty());
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_symlink_out_of_the_folder_or_a_network_host_still_asks() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let (folder, outside) = (tempfile::tempdir().unwrap(), tempfile::tempdir().unwrap());
+    std::os::unix::fs::symlink(outside.path(), folder.path().join("link")).unwrap();
+    std::fs::write(outside.path().join("existing.txt"), "x").unwrap();
+    let project_path = folder.path().to_string_lossy().into_owned();
+    let run = claimed(&runtime, "a").await;
+    let real = std::fs::canonicalize(outside.path()).unwrap();
+    for (tool, through_link, target) in [
+        ("Edit", "existing.txt", real.join("existing.txt")),
+        ("Write", "new/dir/file.txt", real.join("new/dir/file.txt")),
+    ] {
+        let path = folder.path().join("link").join(through_link);
+        let task = spawn_decide(
+            &runtime,
+            AccessLevel::Full,
+            &run,
+            &project_path,
+            tool,
+            json!({"file_path": path.to_string_lossy()}),
+            SHORT_WAIT,
+        );
+        assert_eq!(decided(task).await, deny(NOT_ANSWERED), "{tool}");
+        let item = approvals(&runtime, "a")
+            .await
+            .into_iter()
+            .find(|item| item.approval.as_ref().unwrap().tool == tool)
+            .unwrap();
+        // The card names the real target, not the link.
+        assert_eq!(item.message, format!("{tool} {}", target.display()));
+    }
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Full,
+        &run,
+        &project_path,
+        "SandboxNetworkAccess",
+        json!({"host": "example.com"}),
+        SHORT_WAIT,
+    );
+    assert_eq!(decided(task).await, deny(NOT_ANSWERED));
+    assert!(approvals(&runtime, "a")
+        .await
+        .iter()
+        .any(|item| item.message == "Reach example.com"));
+}
+
+#[tokio::test]
+async fn approval_items_do_not_hide_the_runs_own_update() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    let opened = run.clone();
+    let id = runtime
+        .call(move |connection| {
+            store::crew::open_approval(connection, &opened, "Bash", &json!({"command": "ls"}))
+        })
+        .await
+        .unwrap();
+    decide_approval(&runtime, &id, true).await;
+    finish(
+        &runtime,
+        &run.id,
+        "Done.\n\n```bruhs-report\n{\"outcome\":\"notify\",\"title\":\"Tests pass\",\"message\":\"All green.\"}\n```",
+    )
+    .await;
+    let outbox = runtime.snapshot().await.unwrap().outbox;
+    let mine: Vec<_> = outbox.iter().filter(|item| item.run_id == run.id).collect();
+    assert_eq!(mine.len(), 2);
+    assert!(mine.iter().any(|item| item.id == id));
+    assert!(mine
+        .iter()
+        .any(|item| item.kind == OutboxKind::Notify && item.title == "Tests pass"));
+    // A fresh session hears what it told the owner, not its approval cards.
+    chat(&runtime, "a", "Next").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    assert!(claim.context.contains("Tests pass"));
+    assert!(!claim.context.contains("Approval needed"));
+}
+
+#[tokio::test]
+async fn deciding_an_approval_changes_the_live_signal() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &run,
+        &project(),
+        "Bash",
+        json!({"command": "cargo test"}),
+        LONG_WAIT,
+    );
+    let item = waiting_approval(&runtime, "a").await;
+    let before = runtime.outbox_signal().await.unwrap();
+    assert_eq!(before.open_questions, 1);
+    assert_eq!(before.bruhs[0].status, BruhStatus::NeedsYou);
+    decide_approval(&runtime, &item.id, true).await;
+    let after = runtime.outbox_signal().await.unwrap();
+    assert_eq!(after.open_questions, 0);
+    assert_eq!(after.bruhs[0].status, BruhStatus::Working);
+    assert_eq!(decided(task).await, Some(crate::PermissionDecision::Allow));
+}
+
+#[tokio::test]
+async fn an_answer_after_expiry_resumes_even_while_the_run_wraps_up() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let wrapping = claimed(&runtime, "a").await;
+    let ask = |command: &str| {
+        spawn_decide(
+            &runtime,
+            AccessLevel::Ask,
+            &wrapping,
+            &project(),
+            "Bash",
+            json!({ "command": command }),
+            SHORT_WAIT,
+        )
+    };
+    assert_eq!(decided(ask("cargo test")).await, deny(NOT_ANSWERED));
+    assert_eq!(decided(ask("cargo build")).await, deny(NOT_ANSWERED));
+    let expired = approvals(&runtime, "a").await;
+    let test = expired
+        .iter()
+        .find(|item| item.message == "Run cargo test")
+        .unwrap();
+    let build = expired
+        .iter()
+        .find(|item| item.message == "Run cargo build")
+        .unwrap();
+    // The run is still Running, but nothing waits on these answers any more.
+    assert_eq!(run(&runtime, &wrapping.id).await.status, RunStatus::Running);
+    let snapshot = decide_approval(&runtime, &test.id, true).await;
+    let resumed: Vec<_> = snapshot
+        .runs
+        .iter()
+        .filter(|queued| queued.status == RunStatus::Queued)
+        .collect();
+    assert_eq!(resumed.len(), 1);
+    assert_eq!(
+        resumed[0].trigger,
+        Some(RunTrigger::Answer {
+            outbox_id: test.id.clone()
+        })
+    );
+    let snapshot = runtime
+        .command(ReactiveCommand::AnswerOutbox {
+            id: build.id.clone(),
+            message: "use make".into(),
+        })
+        .await
+        .unwrap();
+    let replies: Vec<_> = snapshot
+        .runs
+        .iter()
+        .filter(|queued| {
+            queued.status == RunStatus::Queued
+                && queued.trigger
+                    == Some(RunTrigger::Answer {
+                        outbox_id: build.id.clone(),
+                    })
+        })
+        .collect();
+    assert_eq!(replies.len(), 1);
+    assert!(replies[0].prompt.contains("use make"));
+    // The approval left a one-shot grant for the resumed run.
+    finish(&runtime, &wrapping.id, "Waiting on the owner's approval.").await;
+    let next = claim_one(&runtime).await.unwrap().run;
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Ask,
+        &next,
+        &project(),
+        "Bash",
+        json!({"command": "cargo test"}),
+        LONG_WAIT,
+    );
+    assert_eq!(decided(task).await, Some(crate::PermissionDecision::Allow));
+}

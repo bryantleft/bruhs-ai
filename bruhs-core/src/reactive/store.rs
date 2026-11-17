@@ -894,8 +894,8 @@ pub(super) fn command(
             ReactiveCommand::StopBruh { agent_id } => crew::stop(connection, Some(&agent_id))?,
             ReactiveCommand::ResumeBruh { agent_id } => crew::resume(connection, Some(&agent_id))?,
             ReactiveCommand::ResumeAll => crew::resume(connection, None)?,
-            ReactiveCommand::DecideApproval { .. } => {
-                return Err(ReactiveError::Conflict("Not available yet.".into()));
+            ReactiveCommand::DecideApproval { id, approve } => {
+                crew::decide_approval(connection, &id, approve)?;
             }
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;

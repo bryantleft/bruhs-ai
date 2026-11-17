@@ -2,7 +2,7 @@ use super::{sources, store, ReactiveError, ReactiveRuntime};
 use crate::{AgentTurn, AppState, OrchestratorEvent, PermissionDecision, QueryEvent};
 use bruhs_models::{
     agent::{AgentProvider, PermissionMode},
-    crew::{effective_level, run_preamble, BruhProfile},
+    crew::{effective_level, run_preamble, BruhProfile, APPROVAL_WAIT_MS},
     reactive::{ReactiveAgent, ReactiveRun, RunStatus, MAX_TEXT_CHARS, REPORT_PROTOCOL},
     secrets::SecretDecision,
     thread_link::ThreadAccess,
@@ -273,9 +273,36 @@ async fn execute(
                         }
                     }
                     OrchestratorEvent::Query(QueryEvent::Error(error)) => { failure = Some(error); }
-                    OrchestratorEvent::Query(QueryEvent::PermissionRequest { id, .. }) => {
-                        // No UI is required to keep the run safe or to decline an unexpected tool.
-                        if let Err(error) = app.resolve_permission(&id, PermissionDecision::Deny { reason: Some("Reactive turns are read-only; request a reviewable draft instead.".into()) }).await {
+                    OrchestratorEvent::Query(QueryEvent::PermissionRequest { id, tool, input, .. }) => {
+                        // The bruh's access gate answers, or the owner through an outbox approval.
+                        let decision = super::approval::decide(
+                            runtime,
+                            &bruh.access,
+                            AgentProvider::for_model(&effective_agent.model),
+                            &effective_run,
+                            &effective_agent.project_path,
+                            &tool,
+                            &input,
+                            Duration::from_millis(APPROVAL_WAIT_MS),
+                        )
+                        .await;
+                        let decision = match decision {
+                            Ok(Some(decision)) => decision,
+                            Ok(None) => {
+                                // Stopped while waiting: keep the partial output, as above.
+                                let id = run.id.clone();
+                                let partial = result.take().unwrap_or_else(|| std::mem::take(&mut output));
+                                runtime.call(move |connection| store::cancelled_output(connection, &id, partial)).await?;
+                                runtime.changed();
+                                return Ok(());
+                            }
+                            Err(error @ ReactiveError::Storage(_)) => return Err(error),
+                            Err(error) => {
+                                failure = Some(error.to_string());
+                                PermissionDecision::Deny { reason: Some("This step could not be sent for approval.".into()) }
+                            }
+                        };
+                        if let Err(error) = app.resolve_permission(&id, decision).await {
                             failure = Some(error.to_string());
                         }
                     }

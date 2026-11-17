@@ -248,6 +248,7 @@ pub fn approval_summary(tool: &str, input: &Value) -> String {
         "Bash" => input["command"]
             .as_str()
             .map(|c| format!("Run {}", c.lines().next().unwrap_or_default())),
+        "SandboxNetworkAccess" => input["host"].as_str().map(|host| format!("Reach {host}")),
         _ => None,
     }
     .unwrap_or_else(|| tool.to_string());
@@ -713,6 +714,13 @@ mod tests {
         assert_eq!(
             approval_summary("WebFetch", &serde_json::json!({})),
             "WebFetch"
+        );
+        assert_eq!(
+            approval_summary(
+                "SandboxNetworkAccess",
+                &serde_json::json!({"host": "example.com"})
+            ),
+            "Reach example.com"
         );
         assert_eq!(
             approval_fingerprint("Bash", &input),

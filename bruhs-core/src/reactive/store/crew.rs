@@ -2,26 +2,34 @@
 //! beside `reactive_agents` so a cosmetic edit never touches the agent row,
 //! its runs or its provider session.
 
-use super::{always_on, cancel_runs, decode, encode, records, required, ReactiveError};
+use super::{
+    always_on, cancel_runs, decode, enabled_agent, encode, new_run, queue_capacity, records,
+    required, run_record, save_run, ReactiveError,
+};
 use crate::reactive::clock;
 use bruhs_models::{
     agent::AgentProvider,
     crew::{
-        level_unavailable, rail_order, status_for, ApprovalState, BruhAccess, BruhLook,
-        BruhProfile, BruhState,
+        approval_fingerprint, approval_summary, level_unavailable, rail_order, status_for,
+        ApprovalRequest, ApprovalState, BruhAccess, BruhLook, BruhProfile, BruhState,
     },
     logic::run_place::claude_effort,
-    reactive::{EventSource, OutboxItem, ReactiveAgent, SourceKind, Subscription},
+    reactive::{
+        EventSource, OutboxItem, OutboxKind, ReactiveAgent, ReactiveRun, RunStatus, RunTrigger,
+        SourceKind, Subscription, SystemDelivery,
+    },
     weekly_reports::managed_preset_id,
     EpochMs,
 };
 use rusqlite::{params, Connection, OptionalExtension};
+use serde_json::Value;
 
 const ACCESS_CHANGED: &str = "Access changed. Review the new access before starting another run.";
 
 pub(in crate::reactive) fn initialize(connection: &Connection) -> Result<(), ReactiveError> {
     connection.execute_batch(
-        "CREATE TABLE IF NOT EXISTS reactive_bruhs(agent_id TEXT PRIMARY KEY,payload TEXT NOT NULL);",
+        "CREATE TABLE IF NOT EXISTS reactive_bruhs(agent_id TEXT PRIMARY KEY,payload TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS reactive_approval_grants(agent_id TEXT NOT NULL,fingerprint TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(agent_id,fingerprint));",
     )?;
     Ok(())
 }
@@ -170,7 +178,188 @@ pub(in crate::reactive) fn delete(
     agent_id: &str,
 ) -> Result<(), ReactiveError> {
     connection.execute("DELETE FROM reactive_bruhs WHERE agent_id=?1", [agent_id])?;
+    connection.execute(
+        "DELETE FROM reactive_approval_grants WHERE agent_id=?1",
+        [agent_id],
+    )?;
     Ok(())
+}
+
+// ── Approvals ──────────────────────────────────────────────────────────────
+
+/// Open an outbox approval for a tool call the run paused on; returns its id.
+/// `input` is the call as the gate saw it (paths already resolved).
+pub(in crate::reactive) fn open_approval(
+    connection: &Connection,
+    run: &ReactiveRun,
+    tool: &str,
+    input: &Value,
+) -> Result<String, ReactiveError> {
+    let settings = always_on::notification_settings(connection)?;
+    let summary = approval_summary(tool, input);
+    let item = OutboxItem {
+        id: uuid::Uuid::new_v4().to_string(),
+        agent_id: run.agent_id.clone(),
+        run_id: run.id.clone(),
+        kind: OutboxKind::Ask,
+        title: "Approval needed".into(),
+        message: summary.clone(),
+        created_at: EpochMs::now(),
+        read_at: None,
+        resolved_at: None,
+        answer: None,
+        system: if settings.wants_system(OutboxKind::Ask) {
+            SystemDelivery::Pending
+        } else {
+            SystemDelivery::NotRequested
+        },
+        approval: Some(ApprovalRequest {
+            tool: tool.into(),
+            summary,
+            fingerprint: approval_fingerprint(tool, input),
+            state: ApprovalState::Waiting,
+        }),
+    };
+    always_on::save_item(connection, &item)?;
+    Ok(item.id)
+}
+
+/// One approval item.
+pub(in crate::reactive) fn approval(
+    connection: &Connection,
+    id: &str,
+) -> Result<OutboxItem, ReactiveError> {
+    let item: OutboxItem = required(connection, "reactive_outbox", id, "approval")?;
+    if item.approval.is_none() {
+        return Err(ReactiveError::NotFound(
+            "The approval was not found.".into(),
+        ));
+    }
+    Ok(item)
+}
+
+/// The owner's answer to an approval. A run still waiting reads it directly.
+/// A run that already ended is resumed with a new run; an approval also
+/// leaves a one-shot grant so the resumed run's same call doesn't ask again.
+pub(in crate::reactive) fn decide_approval(
+    connection: &Connection,
+    id: &str,
+    approve: bool,
+) -> Result<(), ReactiveError> {
+    let mut item = approval(connection, id)?;
+    let decided = if approve {
+        ApprovalState::Approved
+    } else {
+        ApprovalState::Denied
+    };
+    let Some(request) = item.approval.as_mut() else {
+        return Err(ReactiveError::NotFound(
+            "The approval was not found.".into(),
+        ));
+    };
+    if request.state == decided {
+        return Ok(());
+    }
+    if matches!(
+        request.state,
+        ApprovalState::Approved | ApprovalState::Denied
+    ) {
+        return Err(ReactiveError::Conflict(
+            "This request was already decided.".into(),
+        ));
+    }
+    let (summary, fingerprint) = (request.summary.clone(), request.fingerprint.clone());
+    let live = run_waits_on(connection, &item)?;
+    if let Some(request) = item.approval.as_mut() {
+        request.state = decided;
+    }
+    let now = EpochMs::now();
+    if item.read_at.is_none() {
+        item.read_at = Some(now);
+    }
+    if item.system == SystemDelivery::Pending {
+        item.system = SystemDelivery::Skipped;
+    }
+    item.resolved_at = Some(now);
+    if !live {
+        let agent = enabled_agent(connection, &item.agent_id)?;
+        queue_capacity(connection)?;
+        let prompt = if approve {
+            format!("The owner approved your request: {summary}. Do it now.")
+        } else {
+            format!("The owner denied your request: {summary}. Continue without it.")
+        };
+        let mut run = new_run(connection, &agent, prompt, None, None, RunStatus::Queued, 0)?;
+        run.trigger = Some(RunTrigger::Answer {
+            outbox_id: item.id.clone(),
+        });
+        save_run(connection, &run)?;
+        if approve {
+            connection.execute(
+                "INSERT INTO reactive_approval_grants(agent_id,fingerprint,created) VALUES(?1,?2,?3) ON CONFLICT(agent_id,fingerprint) DO UPDATE SET created=excluded.created",
+                params![item.agent_id, fingerprint, now.as_millis()],
+            )?;
+        }
+    }
+    always_on::save_item(connection, &item)
+}
+
+/// Whether the item's run is still waiting on it: the approval is Waiting
+/// and the run Running. An expired approval's run may still be wrapping up,
+/// but nothing reads the answer, so it is resumed like an ended run.
+pub(in crate::reactive) fn run_waits_on(
+    connection: &Connection,
+    item: &OutboxItem,
+) -> Result<bool, ReactiveError> {
+    Ok(item
+        .approval
+        .as_ref()
+        .is_some_and(|request| request.state == ApprovalState::Waiting)
+        && run_record(connection, &item.run_id)?.status == RunStatus::Running)
+}
+
+/// The run stopped waiting; the approval stays open so a late answer resumes it.
+pub(in crate::reactive) fn expire_approval(
+    connection: &Connection,
+    id: &str,
+) -> Result<(), ReactiveError> {
+    let mut item = approval(connection, id)?;
+    match item.approval.as_mut() {
+        Some(request) if request.state == ApprovalState::Waiting => {
+            request.state = ApprovalState::Expired;
+            always_on::save_item(connection, &item)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Close an approval whose run stopped while it waited (cancelled, merged
+/// into a newer run or interrupted), so a late answer can't resume it.
+pub(in crate::reactive) fn withdraw_approval(
+    connection: &Connection,
+    id: &str,
+) -> Result<(), ReactiveError> {
+    let mut item = approval(connection, id)?;
+    match item.approval.as_mut() {
+        Some(request) if request.state == ApprovalState::Waiting && item.resolved_at.is_none() => {
+            request.state = ApprovalState::Denied;
+            item.resolved_at = Some(EpochMs::now());
+            always_on::save_item(connection, &item)
+        }
+        _ => Ok(()),
+    }
+}
+
+/// Use up a late approval's grant for this exact call, if there is one.
+pub(in crate::reactive) fn take_grant(
+    connection: &Connection,
+    agent_id: &str,
+    fingerprint: &str,
+) -> Result<bool, ReactiveError> {
+    Ok(connection.execute(
+        "DELETE FROM reactive_approval_grants WHERE agent_id=?1 AND fingerprint=?2",
+        params![agent_id, fingerprint],
+    )? > 0)
 }
 
 fn count(connection: &Connection, sql: &str, agent_id: &str) -> Result<usize, ReactiveError> {
