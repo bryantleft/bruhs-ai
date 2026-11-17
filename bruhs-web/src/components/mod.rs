@@ -15,6 +15,7 @@ pub mod command_bar;
 pub mod composer;
 pub(crate) mod connected_inbox;
 pub mod credential_settings;
+pub mod crew;
 pub mod database_panel;
 pub mod diarize_settings;
 pub mod diff_panel;

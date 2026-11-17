@@ -49,6 +49,7 @@ web-sys = { version = "0.3", features = [
     "ScriptProcessorNode",
     "Performance",
     "HtmlCanvasElement", "CanvasRenderingContext2d",
+    "IntersectionObserver", "IntersectionObserverEntry", "MediaQueryList",
 ] }
 js-sys = "0.3"
 console_error_panic_hook = "0.1"

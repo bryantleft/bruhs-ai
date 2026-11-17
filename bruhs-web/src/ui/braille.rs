@@ -2,31 +2,38 @@
 //! dots, and a level meter as one braille cell. Dot math lives in
 //! `bruhs_models::logic::dither`, shared with the desktop app.
 
-use bruhs_models::logic::dither::{bruh_dots, meter_column};
+use bruhs_models::crew::{FaceView, RING_RADIUS, RING_STROKE_PX};
+use bruhs_models::logic::dither::{bruh_dots_styled, meter_column};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::JsCast;
 
-/// A static, dithered Bruh `size` CSS pixels square. Decorative: hidden from
-/// assistive technology, and it never moves.
+/// A dithered Bruh `size` CSS pixels square, drawn as `view` says (the plain
+/// Bruh when there is none) and redrawn when `view` changes. Decorative:
+/// hidden from assistive technology.
 #[component]
-pub fn BrailleBruh(#[prop(default = 96.0)] size: f64) -> impl IntoView {
+pub fn BrailleBruh(
+    #[prop(default = 96.0)] size: f64,
+    #[prop(optional, into)] view: Option<Signal<FaceView>>,
+) -> impl IntoView {
     let canvas = NodeRef::<html::Canvas>::new();
     Effect::new(move |_| {
+        let face = view.map(|view| view.get()).unwrap_or_default();
         if let Some(canvas) = canvas.get() {
-            draw_bruh(&canvas, size);
+            draw_bruh(&canvas, size, &face);
         }
     });
     let style = format!("width:{size}px;height:{size}px");
     view! { <canvas node_ref=canvas aria-hidden="true" class="shrink-0" style=style></canvas> }
 }
 
-fn draw_bruh(canvas: &web_sys::HtmlCanvasElement, size: f64) {
+fn draw_bruh(canvas: &web_sys::HtmlCanvasElement, size: f64, face: &FaceView) {
     let scale = web_sys::window()
         .map_or(1.0, |w| w.device_pixel_ratio())
         .clamp(1.0, 2.0);
     let pixels = (size * scale).round().to_u32_saturating();
+    // Setting the size also clears the previous frame.
     canvas.set_width(pixels);
     canvas.set_height(pixels);
     let Some(ctx) = canvas
@@ -40,23 +47,34 @@ fn draw_bruh(canvas: &web_sys::HtmlCanvasElement, size: f64) {
     // Lay the dots out in CSS pixels and let the transform scale them.
     let _ = ctx.set_transform(scale, 0.0, 0.0, scale, 0.0, 0.0);
     let size_f32 = size.to_f32_lossy();
-    let dots = bruh_dots(size_f32);
-    // One path per color: the mouth blends face → mouth in five steps.
-    let mut colors: Vec<u32> = dots
-        .iter()
-        .map(bruhs_models::logic::dither::Dot::rgb)
-        .collect();
+    let dots = bruh_dots_styled(size_f32, &face.style);
+    // One path per color: the mouth blends face to mouth in five steps.
+    let mut colors: Vec<u32> = dots.iter().map(|dot| dot.rgb_in(&face.style)).collect();
     colors.sort_unstable();
     colors.dedup();
     for rgb in colors {
         ctx.begin_path();
-        for dot in dots.iter().filter(|dot| dot.rgb() == rgb) {
+        for dot in dots.iter().filter(|dot| dot.rgb_in(&face.style) == rgb) {
             let (x, y, r) = (f64::from(dot.x), f64::from(dot.y), f64::from(dot.radius));
             ctx.move_to(x + r, y);
             let _ = ctx.arc(x, y, r, 0.0, std::f64::consts::TAU);
         }
         ctx.set_fill_style_str(&format!("#{rgb:06x}"));
         ctx.fill();
+    }
+    if let Some(ring) = face.ring_rgb {
+        let half = size / 2.0;
+        ctx.begin_path();
+        let _ = ctx.arc(
+            half,
+            half,
+            size * f64::from(RING_RADIUS),
+            0.0,
+            std::f64::consts::TAU,
+        );
+        ctx.set_line_width(f64::from(RING_STROKE_PX));
+        ctx.set_stroke_style_str(&format!("#{ring:06x}"));
+        ctx.stroke();
     }
 }
 
