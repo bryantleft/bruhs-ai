@@ -374,6 +374,10 @@ fn router_with_capture_daemon(
             post(routes::coordination::command),
         )
         .route(
+            "/api/coordination/tasks/{id}/worktree",
+            get(routes::task_worktree::get),
+        )
+        .route(
             "/api/coordination/wait",
             post(routes::coordination::wait_for_child),
         )

@@ -3,6 +3,7 @@ use crate::{agent::PermissionMode, ids::ThreadId, EpochMs};
 use serde::{Deserialize, Serialize};
 
 pub mod board;
+pub mod worktree;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -105,6 +106,10 @@ pub struct CoordinatedTask {
     /// lanes but keeps its record. A new message brings it back.
     #[serde(default)]
     pub archived_at: Option<EpochMs>,
+    /// Set when the owner removed this task's worktree to free disk. Its
+    /// branch stays, and the task's next run checks it out again.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub removed_worktree: Option<worktree::RemovedWorktree>,
 }
 
 #[derive(Clone, Debug, Serialize, Deserialize)]
@@ -275,6 +280,10 @@ pub enum CoordinationCommand {
         id: ThreadId,
     },
     Unarchive {
+        id: ThreadId,
+    },
+    /// Delete a finished task's own worktree folder, keeping its branch.
+    RemoveWorktree {
         id: ThreadId,
     },
 }

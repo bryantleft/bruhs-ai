@@ -72,6 +72,11 @@ tempfile = { workspace = true }
 # portable fallback when SHA instructions are unavailable.
 sha2 = { workspace = true, features = ["asm"] }
 
+[target.'cfg(target_os = "macos")'.dependencies]
+# Pith's scanner measures what deleting a worktree frees from APFS private
+# sizes and clone counts, which `du` overstates for copy-on-write clones.
+storage-scanner = { git = "https://github.com/bryantleft/bruhs", rev = "739a4bb85a973c40f1c5f9a550f2024ce7528ab4" }
+
 [dev-dependencies]
 axum = { workspace = true, features = ["ws"] }
 tokio = { workspace = true, features = ["full", "test-util"] }

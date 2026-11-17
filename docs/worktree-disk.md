@@ -66,11 +66,88 @@ Shared blocks stay alive as long as any clone uses them. When the checkout
 later rebuilds or runs `cargo clean`, a worktree still holds the old
 artifacts it was given, and those blocks are no longer shared with the
 checkout. That is never more than the folder's size at the moment of
-cloning, and every worktree cloned at that same moment shares it. Deleting a
+cloning, and every worktree cloned at that same moment shares it. Removing a
 finished worktree releases it.
 
 `du` and Finder report a clone's full logical size, so they overstate what a
-worktree really adds. Compare `df` before and after to see the real cost.
+worktree really adds. The task panel measures what removing it really frees.
+
+## Removing a finished worktree
+
+Open a task on the Workbench board. Its **Worktree** section says what
+removing the worktree frees now, what stays shared with other folders (such
+as the checkout's build output), and what local snapshots still hold. Choose
+**Remove worktree…**, read what it deletes, then confirm.
+
+- **What is deleted:** the folder, including ignored files such as build
+  output and local `.env` files.
+- **What stays:** the branch and every commit on it, and the task's record
+  and transcript.
+- **Coming back:** the task's next message checks the branch out again at
+  the same path, with warm build folders as above. A task that shares the
+  worktree (a fork) brings it back the same way.
+
+Remove is refused when:
+- the worktree has uncommitted changes or untracked files that are not
+  ignored;
+- no branch is checked out (detached HEAD);
+- this task, or one sharing its worktree, is running, queued or still
+  stopping;
+- another checkout is inside it, which `git status` cannot see: a worktree an
+  agent added under an ignored folder such as `.claude/`, or a nested clone;
+- this task has an enabled pull-request wake, which reads its worktree;
+- the worktree has submodules;
+- the folder is outside bruhs's worktrees folder;
+- Git refuses, for example for a locked worktree.
+
+A folder that vanished outside bruhs can still be removed. That clears Git's
+record of it and keeps the branch.
+
+The removal is recorded on the task first. Then the folder is renamed aside,
+Git drops its record, and the renamed folder is deleted in the background.
+A large build folder never holds up the request, and a Git failure moves
+the folder back and clears the record.
+- **Interrupted removal:** a crash or full disk partway through still leaves
+  the task able to come back. Restore drops Git's stale record before
+  checking the branch out again.
+- **Interrupted delete:** a server that stops mid-delete finishes the job at
+  the next removal in that project.
+
+The board keeps the pull requests it last read for a removed worktree,
+without refreshing them, as it does for archived tasks.
+
+Remove is the `remove_worktree` task command, so it works from web, desktop
+and a paired phone (owners only). Agents cannot send it. Sizes are shown in
+the web and desktop apps; the phone shows Remove without them.
+
+## Measuring
+
+The size comes from a replaceable meter, set in `worktree-meter.json` in
+bruhs-ai's data directory (`~/Library/Application Support/dev.bruhs.bruhs-ai/`
+on macOS). `BRUHS_WORKTREE_METER` names another file.
+
+| `meter` | Measures with | Default on |
+| --- | --- | --- |
+| `pith` | Pith's scanner, built in: APFS private sizes and clone counts | macOS |
+| `command` | Your program | |
+| `off` | Nothing; no size is shown | Other platforms |
+
+```json
+{ "meter": "command", "command": "/Applications/Pith.app/Contents/MacOS/storage-scanner", "args": ["frees"] }
+```
+
+A `command` meter is run as `command args… <worktree folder>`, with a
+two-minute limit.
+- Its last output line must be JSON with `bytes`, and optionally `shared`,
+  `snapshots` and `unreadable`, as Pith's `frees` prints.
+- Use it to measure with a newer Pith than the built-in one, or to wrap
+  another tool.
+- On a filesystem without clones or snapshots, a script that sums allocated
+  blocks once per inode is accurate.
+
+A file that cannot be read or parsed shows its error in the task panel
+instead of a size. The built-in meter is Pith's `storage-scanner` crate
+(MIT), pinned to a commit of `bryantleft/bruhs`.
 
 ## Configuring it
 
@@ -108,6 +185,10 @@ what you meant to turn off. Builds of bruhs older than this feature reject a
 - `bruhs_core::git::clone_fs` is the platform clone. It reports
   `ErrorKind::Unsupported` rather than copying, and removes a partial clone.
 - `bruhs_models::delivery::WorktreeConfig` is the project setting.
+- `bruhs_core::coordination` (`worktrees.rs`) inspects, removes and restores
+  task worktrees; `GET /api/coordination/tasks/{id}/worktree?measure=true`
+  serves the panel.
+- `bruhs_core::worktree_meter` loads the meter and measures.
 
 The host logs which folders each worktree shares at `info` level.
 

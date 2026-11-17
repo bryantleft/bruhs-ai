@@ -49,7 +49,10 @@ mergeability), without adding a tool to every turn.
 
 Archive files a finished task away from the lanes; it keeps its record,
 transcript, worktree and branch, and Restore or a new message brings it back.
-Running or queued work cannot be archived.
+Running or queued work cannot be archived. To free disk, a finished task's
+panel can also remove its worktree: it shows what that frees, keeps the
+branch, and refuses uncommitted work. The next message checks the branch out
+again; see [Worktree disk use](worktree-disk.md#removing-a-finished-worktree).
 
 Arrow keys move between cards, Enter opens one, Escape closes the panel and
 returns to the card, and N starts a new task. The rules live in

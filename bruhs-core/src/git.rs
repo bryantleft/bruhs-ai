@@ -698,6 +698,88 @@ pub async fn seed_worktree_build_dirs(repo: &Path, dest: &Path) -> Vec<String> {
     cow::seed_build_dirs(&root, dest, &config).await
 }
 
+/// The branch checked out in `repo`'s linked worktree at `path`, from
+/// `git worktree list --porcelain -z`. `Ok(None)` when Git does not list
+/// that worktree; `Ok(Some(None))` when its HEAD is detached.
+pub async fn worktree_branch(repo: &Path, path: &Path) -> Result<Option<Option<String>>, GitError> {
+    let out = git(repo, &["worktree", "list", "--porcelain", "-z"]).await?;
+    if !out.success() {
+        return Err(out.failure());
+    }
+    let wanted = resolve(path);
+    Ok(parse_worktree_list(&out.stdout)
+        .into_iter()
+        .find(|(listed, _)| resolve(listed) == wanted)
+        .map(|(_, branch)| branch))
+}
+
+/// `path` with its nearest existing ancestor's symlinks resolved, so a
+/// folder that is gone still compares equal to Git's resolved record of it
+/// (`/var/…` and `/private/var/…` on macOS).
+fn resolve(path: &Path) -> PathBuf {
+    let mut existing = path;
+    loop {
+        if let Ok(resolved) = std::fs::canonicalize(existing) {
+            let rest = path.strip_prefix(existing).unwrap_or(Path::new(""));
+            return resolved.join(rest);
+        }
+        match existing.parent() {
+            Some(parent) => existing = parent,
+            None => return path.to_path_buf(),
+        }
+    }
+}
+
+/// Every worktree of `repo`, the main one included.
+pub async fn worktree_paths(repo: &Path) -> Result<Vec<PathBuf>, GitError> {
+    let out = git(repo, &["worktree", "list", "--porcelain", "-z"]).await?;
+    if !out.success() {
+        return Err(out.failure());
+    }
+    Ok(parse_worktree_list(&out.stdout)
+        .into_iter()
+        .map(|(path, _)| path)
+        .collect())
+}
+
+/// `(path, branch)` per entry of `git worktree list --porcelain -z`.
+pub(crate) fn parse_worktree_list(stdout: &[u8]) -> Vec<(PathBuf, Option<String>)> {
+    let mut entries = Vec::new();
+    let mut current: Option<(PathBuf, Option<String>)> = None;
+    for field in stdout.split(|byte| *byte == 0) {
+        let field = String::from_utf8_lossy(field);
+        if let Some(path) = field.strip_prefix("worktree ") {
+            entries.extend(current.take());
+            current = Some((PathBuf::from(path), None));
+        } else if let Some(branch) = field.strip_prefix("branch refs/heads/") {
+            if let Some((_, slot)) = current.as_mut() {
+                *slot = Some(branch.to_string());
+            }
+        }
+    }
+    entries.extend(current);
+    entries
+}
+
+/// Delete `repo`'s linked worktree at `path` with `git worktree remove`,
+/// without `--force`: Git refuses one with tracked changes or untracked
+/// files, and deletes ignored build output along with it. Its branch stays.
+pub async fn remove_worktree(repo: &Path, path: &Path) -> Result<(), GitError> {
+    let path = path.to_string_lossy().into_owned();
+    let out = git(repo, &["worktree", "remove", &path]).await?;
+    if out.success() {
+        Ok(())
+    } else {
+        Err(out.failure())
+    }
+}
+
+/// Delete the folder tree at `path`, first making its folders writable,
+/// since build output can contain read-only folders.
+pub fn remove_tree(path: &Path) -> std::io::Result<()> {
+    clone_fs::remove_partial(path)
+}
+
 /// Tree with no entries. `git hash-object -t tree --stdin </dev/null`.
 const EMPTY_TREE: &str = "4b825dc642cb6eb9a060e54bf8d69288fbee4904";
 

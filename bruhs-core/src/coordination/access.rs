@@ -106,6 +106,7 @@ impl CoordinationRuntime {
                 task.project_path.clear();
                 task.working_path.clear();
                 task.spec_id = None;
+                task.removed_worktree = None;
                 Ok(CoordinationSnapshot {
                     tasks: vec![task],
                     ..CoordinationSnapshot::default()

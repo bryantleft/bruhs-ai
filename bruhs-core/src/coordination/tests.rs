@@ -33,6 +33,7 @@ fn fixture(parent_id: Option<ThreadId>, state: TaskState) -> CoordinatedTask {
         auto_resume_on_limit: false,
         limit_reported: false,
         archived_at: None,
+        removed_worktree: None,
     }
 }
 
