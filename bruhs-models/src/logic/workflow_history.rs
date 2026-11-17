@@ -3,8 +3,12 @@
 //! (`components/workflow_history.rs`) and desktop
 //! (`automations_ui/history_ui.rs`). Moved from the desktop review panel,
 //! which held the only history; the web showed just the latest workflow.
+//!
+//! The workflow on show carries its own controls ([`controls`]): Run next
+//! step, Run in background, Pause, Resume and Undo transaction, whichever
+//! its job and steps allow, for any workflow in the history.
 
-use crate::{AutomationState, Workflow};
+use crate::{AutomationState, BackgroundJob, BackgroundJobStatus, Workflow};
 
 /// What the history says when there is no workflow at all.
 pub const NO_WORKFLOW_YET: &str =
@@ -75,6 +79,94 @@ impl Page<'_> {
             self.number,
             self.total
         )
+    }
+}
+
+/// Runs the next step of the workflow on show; also its accessible name.
+pub const RUN_NEXT_STEP: &str = "Run next step";
+/// Lets the job of the workflow on show run its steps on its own while the
+/// app is open; also its accessible name, which has to contain the words
+/// on the button (desktop's used to read "Run workflow in background").
+pub const RUN_IN_BACKGROUND: &str = "Run in background";
+/// Pauses the job of the workflow on show at its next step boundary.
+pub const PAUSE: &str = "Pause";
+/// [`PAUSE`]'s accessible name.
+pub const PAUSE_LABEL: &str = "Pause workflow";
+/// Resumes the paused job of the workflow on show.
+pub const RESUME: &str = "Resume";
+/// [`RESUME`]'s accessible name.
+pub const RESUME_LABEL: &str = "Resume workflow";
+/// Undoes the completed steps of the workflow on show; also its accessible
+/// name.
+pub const UNDO: &str = "Undo transaction";
+/// Why Resume did nothing: the payload changed since review, or a Write
+/// grant for a remaining step is off.
+pub const RESUME_REFUSED: &str =
+    "Recheck the reviewed payload and remaining Write grants before resuming.";
+/// Why Run in background did nothing.
+pub const BACKGROUND_REFUSED: &str =
+    "Recheck the payload and Write grants before enabling background execution.";
+
+/// The controls the workflow on show carries, the same on web and desktop.
+/// Each acts on that workflow or its own job, never on another workflow's,
+/// so an older workflow can be run, paused, resumed or undone from the
+/// history just like the newest.
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
+pub struct Controls<'a> {
+    /// The job running the workflow: Run next step, Run in background and
+    /// Pause.
+    pub running: Option<&'a BackgroundJob>,
+    /// The job paused on it: Resume.
+    pub paused: Option<&'a BackgroundJob>,
+    /// Undo transaction, while a completed step can still be undone
+    /// ([`Workflow::can_rollback`]).
+    pub undo: bool,
+}
+
+/// The controls `workflow` carries in `state` (see [`Controls`]).
+pub fn controls<'a>(state: &'a AutomationState, workflow: &Workflow) -> Controls<'a> {
+    // A workflow has at most one job; take the newest should that change.
+    let job = |status| {
+        state
+            .jobs
+            .iter()
+            .rev()
+            .find(|job| job.status == status && job.workflow_id == workflow.id)
+    };
+    Controls {
+        running: job(BackgroundJobStatus::Running),
+        paused: job(BackgroundJobStatus::Paused),
+        undo: workflow.can_rollback(),
+    }
+}
+
+impl Controls<'_> {
+    /// Whether the workflow carries any control at all.
+    pub fn any(&self) -> bool {
+        self.running.is_some() || self.paused.is_some() || self.undo
+    }
+
+    /// Whether Run in background is on already, which leaves its button
+    /// disabled.
+    pub fn in_background(&self) -> bool {
+        self.running.is_some_and(|job| job.auto_run)
+    }
+
+    /// The job's progress, such as "Running, next checkpoint 2" or "Paused,
+    /// resumes at checkpoint 1"; `None` with no running or paused job.
+    pub fn job_status(&self) -> Option<String> {
+        if let Some(job) = self.running {
+            return Some(format!(
+                "Running, next checkpoint {}",
+                job.next_step.saturating_add(1)
+            ));
+        }
+        self.paused.map(|job| {
+            format!(
+                "Paused, resumes at checkpoint {}",
+                job.next_step.saturating_add(1)
+            )
+        })
     }
 }
 

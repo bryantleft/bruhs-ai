@@ -12,6 +12,7 @@ mod review_tests;
 mod rollback;
 #[cfg(test)]
 mod suggestion_tests;
+use bruhs_models::logic::workflow_history;
 use bruhs_models::{
     agent_tool_definitions, AgentAccess, AgentDomain, BackgroundJobStatus, FinanceTransaction,
     WorkflowOperation, WorkflowStatus, WorkoutLog,
@@ -92,9 +93,7 @@ impl Workspace {
             self.automation_error = None;
             self.persist_and_notify(cx);
         } else {
-            self.automation_error = Some(
-                "Recheck the payload and Write grants before enabling background execution.".into(),
-            );
+            self.automation_error = Some(workflow_history::BACKGROUND_REFUSED.into());
             cx.notify();
         }
     }
@@ -518,9 +517,7 @@ impl Workspace {
             self.automation_error = None;
             self.persist_and_notify(cx);
         } else {
-            self.automation_error = Some(
-                "Recheck the reviewed payload and remaining Write grants before resuming.".into(),
-            );
+            self.automation_error = Some(workflow_history::RESUME_REFUSED.into());
             cx.notify();
         }
     }
@@ -920,14 +917,11 @@ impl Workspace {
                     .collect::<HashSet<_>>()
             })
             .unwrap_or_default();
-        let latest_running = self.automation_state.jobs.iter().rev().find(|job| {
-            job.status == BackgroundJobStatus::Running
-                && latest.is_some_and(|workflow| workflow.id == job.workflow_id)
-        });
-        let latest_paused = self.automation_state.jobs.iter().rev().find(|job| {
-            job.status == BackgroundJobStatus::Paused
-                && latest.is_some_and(|workflow| workflow.id == job.workflow_id)
-        });
+        // What the workflow on show can do: its own job's controls and Undo,
+        // the same rule as the web's history.
+        let controls = latest
+            .map(|workflow| workflow_history::controls(&self.automation_state, workflow))
+            .unwrap_or_default();
         let audit = self
             .automation_state
             .audit
@@ -1067,55 +1061,51 @@ impl Workspace {
                                             .child("Background execution is optional and runs only while this app is open.")
                                             .child(if !self.save_status.is_saved() {
                                                 "Changes are provisional, waiting for local save".to_string()
-                                            } else if let Some(job) = latest_running {
-                                                format!("Running, next checkpoint {}", job.next_step + 1)
-                                            } else if let Some(job) = latest_paused {
-                                                format!("Paused, resumes at checkpoint {}", job.next_step + 1)
                                             } else {
-                                                "No active job.".to_string()
+                                                controls.job_status().unwrap_or_else(|| "No active job.".to_string())
                                             })
-                                            .when_some(latest_running.map(|job| job.id.clone()), |panel, job_id| panel.child(
+                                            .when_some(controls.running.map(|job| job.id.clone()), |panel, job_id| panel.child(
                                                 web_button("automation-run-next", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved()))
                                                     .debug_selector(|| "desktop-run-workflow-step".into())
-                                                    .aria_label("Run next step")
+                                                    .aria_label(workflow_history::RUN_NEXT_STEP)
                                                     .mt_2()
-                                                    .child("Run next step")
+                                                    .child(workflow_history::RUN_NEXT_STEP)
                                                     .on_click(cx.listener(move |this, _event, _window, cx| this.run_automation_step(&job_id, cx))),
                                             ))
-                                            .when_some(latest_running.map(|job| job.id.clone()), |panel, job_id| panel.child(
-                                                web_button("automation-enable-background", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved() || latest_running.is_some_and(|job| job.auto_run)))
-                                                    .aria_label("Run workflow in background")
+                                            .when_some(controls.running.map(|job| job.id.clone()), |panel, job_id| panel.child(
+                                                web_button("automation-enable-background", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved() || controls.in_background()))
+                                                    .aria_label(workflow_history::RUN_IN_BACKGROUND)
                                                     .debug_selector(|| "desktop-enable-workflow-background".into())
                                                     .mt_2()
-                                                    .child("Run in background")
+                                                    .child(workflow_history::RUN_IN_BACKGROUND)
                                                     .on_click(cx.listener(move |this, _, _, cx| this.enable_background_automation(&job_id, cx))),
                                             ))
-                                            .when_some(latest_running.map(|job| job.id.clone()), |panel, job_id| panel.child(
+                                            .when_some(controls.running.map(|job| job.id.clone()), |panel, job_id| panel.child(
                                                 web_button("automation-pause", WebButtonVariant::Ghost, WebButtonSize::Small, ButtonState::Enabled)
-                                                    .aria_label("Pause workflow")
+                                                    .aria_label(workflow_history::PAUSE_LABEL)
                                                     .debug_selector(|| "desktop-pause-workflow".into())
                                                     .mt_2()
-                                                    .child("Pause")
+                                                    .child(workflow_history::PAUSE)
                                                     .on_click(cx.listener(move |this, _event, _window, cx| {
                                                         if this.automation_state.pause_job(&job_id, EpochMs::now().as_millis()) {
                                                             this.persist_and_notify(cx);
                                                         }
                                                     })),
                                             ))
-                                            .when_some(latest_paused.map(|job| job.id.clone()), |panel, job_id| panel.child(
+                                            .when_some(controls.paused.map(|job| job.id.clone()), |panel, job_id| panel.child(
                                                 web_button("automation-resume", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved()))
-                                                    .aria_label("Resume workflow")
+                                                    .aria_label(workflow_history::RESUME_LABEL)
                                                     .debug_selector(|| "desktop-resume-workflow".into())
                                                     .mt_2()
-                                                    .child("Resume")
+                                                    .child(workflow_history::RESUME)
                                                     .on_click(cx.listener(move |this, _, _, cx| this.resume_automation(&job_id, cx))),
                                             ))
-                                            .when_some(latest.filter(|workflow| workflow.can_rollback()).map(|workflow| workflow.id.clone()), |panel, workflow_id| panel.child(
+                                            .when_some(latest.filter(|_| controls.undo).map(|workflow| workflow.id.clone()), |panel, workflow_id| panel.child(
                                                 web_button("automation-rollback", WebButtonVariant::Destructive, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved()))
                                                     .debug_selector(|| "desktop-undo-workflow".into())
-                                                    .aria_label("Undo transaction")
+                                                    .aria_label(workflow_history::UNDO)
                                                     .mt_2()
-                                                    .child("Undo transaction")
+                                                    .child(workflow_history::UNDO)
                                                     .on_click(cx.listener(move |this, _event, _window, cx| this.rollback_reviewed_automation(&workflow_id, cx))),
                                             ))
                                             .children(workflow_rows),
