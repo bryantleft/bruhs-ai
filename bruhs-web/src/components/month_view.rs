@@ -190,6 +190,22 @@ pub fn MonthView() -> impl IntoView {
     // and clips on compact widths, so the date and "+N more" open every
     // event and due task of that day.
     let day_list = RwSignal::new(None::<f64>);
+    // 9:00 on the day, where a new event starts.
+    let create_on = move |day_ms: f64| {
+        let day = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(day_ms));
+        let start = js_sys::Date::new_with_year_month_day_hr_min_sec(
+            day.get_full_year(),
+            crate::clock::field(day.get_month()),
+            crate::clock::field(day.get_date()),
+            9,
+            0,
+            0,
+        )
+        .get_time();
+        set_event_create_start.set(Some(start));
+        set_selected_event_id.set(None);
+        set_event_create_open.set(true);
+    };
 
     view! {
         <div class="flex flex-col flex-1 overflow-hidden">
@@ -211,15 +227,15 @@ pub fn MonthView() -> impl IntoView {
                         let day_events = events_for_day(&evs, cell.day_ms);
                         let day_tasks = tasks_due_on(&items, cell.day_ms);
                         let day_ms = cell.day_ms;
+                        // A touch tap anywhere in the day opens its list,
+                        // whose rows are full-size targets; the date and
+                        // pills are too small to tap (tailwind.css).
                         let on_click_cell = move |_| {
-                            let day = js_sys::Date::new(&wasm_bindgen::JsValue::from_f64(day_ms));
-                            let start = js_sys::Date::new_with_year_month_day_hr_min_sec(
-                                day.get_full_year(), crate::clock::field(day.get_month()), crate::clock::field(day.get_date()),
-                                9, 0, 0,
-                            ).get_time();
-                            set_event_create_start.set(Some(start));
-                            set_selected_event_id.set(None);
-                            set_event_create_open.set(true);
+                            if coarse_pointer() {
+                                day_list.set(Some(day_ms));
+                            } else {
+                                create_on(day_ms);
+                            }
                         };
                         // Neighboring-month cells: muted text so the user
                         // visually focuses on in-month days.
@@ -272,7 +288,7 @@ pub fn MonthView() -> impl IntoView {
                             view! { <div class=format!("{date_class} shrink-0 self-start")>{cell.day_num}</div> }.into_any()
                         };
                         view! {
-                            <div class=class_str on:click=on_click_cell>
+                            <div class=class_str data-calendar-cell="" on:click=on_click_cell>
                                 {date_view}
                                 {
                                     let event_pills = day_events.into_iter().take(event_take).map(|e| {
@@ -443,9 +459,34 @@ pub fn MonthView() -> impl IntoView {
                             {event_rows}
                             {task_rows}
                         </ul>
+                        // On touch, the day's tap opens this list, so it also
+                        // offers what a mouse click on the day does.
+                        {coarse_pointer().then(|| view! {
+                            <div class="border-t border-longan-800 px-2 py-2">
+                                <button
+                                    type="button"
+                                    data-day-list-new-event=""
+                                    on:click=move |_| {
+                                        day_list.set(None);
+                                        create_on(day_ms);
+                                    }
+                                    class="bruhs-control flex min-h-[32px] w-full items-center gap-2 rounded-grape px-2 text-left text-label-sm text-persimmon-300 hover:bg-longan-700 cursor-pointer focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                                >
+                                    "+ New event"
+                                </button>
+                            </div>
+                        })}
                     }
                 })}
             </Dialog>
         </div>
     }
+}
+
+/// Whether the main pointer is coarse (a touch screen), as CSS
+/// `(pointer: coarse)` reads it.
+fn coarse_pointer() -> bool {
+    web_sys::window()
+        .and_then(|window| window.match_media("(pointer: coarse)").ok().flatten())
+        .is_some_and(|query| query.matches())
 }
