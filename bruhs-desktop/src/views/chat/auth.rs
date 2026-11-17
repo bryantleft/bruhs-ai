@@ -18,7 +18,8 @@ pub(super) const AUTH_BANNER_BG_OPACITY: f32 = 0.10;
 pub(super) const AUTH_BANNER_MESSAGE_OPACITY: f32 = 0.80;
 pub(super) const AUTH_BANNER_ICON_SIZE_PX: f32 = 16.0;
 pub(super) const AUTH_BANNER_ICON_TOP_OFFSET_PX: f32 = 2.0;
-pub(super) const CLAUDE_AUTH_NOT_AUTHENTICATED_LABEL: &str = "Claude Code not authenticated.";
+/// Web's wording: `cli_login::sign_in_banner_title("Claude", None)`.
+pub(super) const CLAUDE_AUTH_NOT_AUTHENTICATED_LABEL: &str = "Claude is not authenticated.";
 pub(super) const CLAUDE_LOGIN_ACTION_LABEL: &str = "Log in with Claude";
 pub(super) const CLAUDE_LOGIN_WAITING_LABEL: &str = "Waiting…";
 pub(super) const CLAUDE_LOGIN_WAITING_MESSAGE: &str =
@@ -488,7 +489,12 @@ impl ChatView {
                         provider: AgentProvider::Claude,
                         title: signed_out.error.as_ref().map_or_else(
                             || CLAUDE_AUTH_NOT_AUTHENTICATED_LABEL.to_string(),
-                            |error| format!("Could not check auth: {error}"),
+                            |error| {
+                                bruhs_models::logic::cli_login::sign_in_banner_title(
+                                    "Claude",
+                                    Some(error),
+                                )
+                            },
                         ),
                         signed_out,
                         login_label: CLAUDE_LOGIN_ACTION_LABEL,
@@ -506,7 +512,12 @@ impl ChatView {
                         provider: AgentProvider::Codex,
                         title: signed_out.error.as_ref().map_or_else(
                             || codex_auth::CODEX_AUTH_NOT_AUTHENTICATED_LABEL.to_string(),
-                            |error| format!("Could not check Codex auth: {error}"),
+                            |error| {
+                                bruhs_models::logic::cli_login::sign_in_banner_title(
+                                    "Codex",
+                                    Some(error),
+                                )
+                            },
                         ),
                         signed_out,
                         login_label: codex_auth::CODEX_LOGIN_ACTION_LABEL,
