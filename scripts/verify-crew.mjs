@@ -322,6 +322,14 @@ try {
     title: document.querySelector('#bruh-title')?.textContent.trim() ?? null,
   })`);
   record('a bruh page opened by its link loads with no stuck Loading', !loading.loading && loading.title === 'Asker', JSON.stringify(loading));
+  // Needs you has an action: the run waiting for review is a card on Chat.
+  const review = await waitFor('the review card', `(() => {
+    const card = document.querySelector('[data-crew-review]');
+    if (!card) return null;
+    const buttons = [...card.querySelectorAll('button')].map((button) => button.textContent.trim());
+    return buttons.includes('Run') && buttons.includes('Dismiss') ? buttons.join(',') : null;
+  })()`, 5000).catch(() => null);
+  record('a run awaiting review shows Run and Dismiss on Chat', !!review, `buttons ${review}`);
 
   // Screenshots: the rail with the chat bruh's Chat tab, and Settings.
   const screenshots = [];
@@ -391,6 +399,17 @@ try {
   const server7 = await snapshot();
   record('Resume all clears it', resumed && server7.bruhs.every((state) => state.status !== 'paused') && !(await evaluate(`!!document.querySelector('[data-crew-resume-all]')`)),
     `rows ${(await rowsText()).join(' | ')}`);
+
+  // 6b. Stop all in the rail header does what ⌘. does to the bruhs.
+  await click('[data-crew-stop-all]');
+  const railPaused = await waitFor('every row paused by Stop all', `(() => {
+    const rows = [...document.querySelectorAll('[data-crew-row]')];
+    return rows.length === 3 && rows.every((row) => row.textContent.includes('Paused'));
+  })()`, 8000).catch(() => false);
+  record('Stop all in the rail pauses every bruh', railPaused && (await snapshot()).bruhs.every((state) => state.status === 'paused'),
+    `rows ${(await rowsText()).join(' | ')}`);
+  await click('[data-crew-resume-all]');
+  await waitFor('no row paused again', `[...document.querySelectorAll('[data-crew-row]')].every((row) => !row.textContent.includes('Paused'))`, 8000);
 
   // 7. Reduced motion stops the sweep: no animation frames over a second.
   await command({ action: 'chat', agent_id: ids.reader, message: 'And yesterday?' });
