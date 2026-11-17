@@ -11,9 +11,10 @@ use gpui_component::text::TextView;
 use super::*;
 use bruhs_models::{
     normalize_aliases, people_copy as copy, people_page_count, people_page_of,
-    person_conversations, person_matches_query, person_meetings, relink_person,
-    restore_person_links, review_alias, unlink_person, PeopleUndo, PeopleUndoError,
-    RelationshipDue, RelationshipItem, RelationshipItemEdit, RELATIONSHIP_ITEM_KINDS,
+    person_conversations, person_matches_query, person_meetings, profile_fields, relink_person,
+    restore_person_links, review_alias, unlink_person, EditorDraft, PeopleUndo, PeopleUndoError,
+    RelationshipDrafts, RelationshipDue, RelationshipFields, RelationshipItem,
+    RelationshipItemEdit, DRAFT_LIST_LIMIT, RELATIONSHIP_ITEM_KINDS,
 };
 
 #[cfg(test)]
@@ -58,6 +59,18 @@ pub(in crate::views::workspace) struct PeoplePageState {
     pub(in crate::views::workspace) merge_recovery: Option<(usize, String)>,
     /// The person a meeting or conversation was opened from, and that view.
     pub(in crate::views::workspace) return_to: Option<(String, AppView)>,
+    /// Other contacts' unsubmitted relationship edits, kept until the app
+    /// quits (web: per tab). The loaded contact's edits live in the fields;
+    /// `relationship_drafts_now` includes them.
+    pub(in crate::views::workspace) drafts: RelationshipDrafts,
+    /// Whose details the relationship fields hold.
+    pub(in crate::views::workspace) draft_contact: Option<String>,
+    /// The saved details the loaded contact's fields were edited from.
+    pub(in crate::views::workspace) draft_baseline: RelationshipFields,
+    /// Save details refused: a field it changes was also saved elsewhere.
+    pub(in crate::views::workspace) draft_error: Option<&'static str>,
+    /// The private recovery data of every draft is shown.
+    pub(in crate::views::workspace) show_private_drafts: bool,
 }
 
 impl PeoplePageState {
@@ -142,6 +155,11 @@ impl PeoplePageState {
             pending_merge: None,
             merge_recovery: None,
             return_to: None,
+            drafts: RelationshipDrafts::default(),
+            draft_contact: None,
+            draft_baseline: RelationshipFields::default(),
+            draft_error: None,
+            show_private_drafts: false,
         }
     }
 }
@@ -149,13 +167,24 @@ impl PeoplePageState {
 /// Web's read-only "Contact merge recovery data" field: the JSON in a
 /// scrolling, selectable code block, so it can be copied.
 fn render_merge_recovery_data(json: &str, cx: &App) -> AnyElement {
+    render_recovery_data(
+        "desktop-people-merge-recovery-data",
+        "Contact merge recovery data",
+        json,
+        cx,
+    )
+}
+
+/// Private recovery JSON in a scrolling, selectable code block (web: a
+/// read-only text area), so it can be copied.
+fn render_recovery_data(id: &'static str, name: &'static str, json: &str, cx: &App) -> AnyElement {
     let longest = json.split(|c| c != '`').map(str::len).max().unwrap_or(0);
     let fence = "`".repeat(longest.max(2) + 1);
     div()
-        .id("desktop-people-merge-recovery-data")
-        .debug_selector(|| "desktop-people-merge-recovery-data".into())
+        .id(id)
+        .debug_selector(move || id.into())
         .role(Role::Region)
-        .aria_label("Contact merge recovery data")
+        .aria_label(name)
         .h(px(128.0))
         .w_full()
         .overflow_y_scrollbar()
@@ -164,7 +193,7 @@ fn render_merge_recovery_data(json: &str, cx: &App) -> AnyElement {
         .p_2()
         .child(
             TextView::markdown(
-                "desktop-people-merge-recovery-json",
+                SharedString::from(format!("{id}-json")),
                 format!("{fence}json\n{json}\n{fence}"),
             )
             .style(crate::views::chat::desktop_markdown_style(cx))
@@ -214,39 +243,127 @@ fn kind_button(
 impl Workspace {
     // ── Actions ──────────────────────────────────────────────────────────
 
+    /// Load `person_id` into the relationship editor. Like the web, the
+    /// contact that was loaded keeps its unsubmitted edits, and a contact
+    /// with a kept draft comes back with it, refreshed where untouched.
     pub(super) fn load_relationship_inputs(
         &mut self,
         person_id: &str,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let profile = self
-            .relationships
-            .iter()
-            .find(|profile| profile.person_id == person_id)
-            .cloned()
-            .unwrap_or_else(|| RelationshipProfile::new(person_id, EpochMs::now().as_millis()));
-        for (input, value) in [
-            (&self.relationship_company_input, profile.company),
-            (&self.relationship_role_input, profile.role),
-            (&self.relationship_email_input, profile.email),
-            (&self.relationship_phone_input, profile.phone),
-            (&self.relationship_location_input, profile.location),
-            (&self.relationship_notes_input, profile.notes),
-        ] {
-            input.update(cx, |input, cx| input.set_value(value, window, cx));
+        if let Some((id, draft)) = self.loaded_relationship_draft(cx) {
+            self.people_page.drafts.keep(id, draft);
         }
+        let saved = self.saved_relationship_fields(person_id);
+        let mut draft = self
+            .people_page
+            .drafts
+            .get(person_id)
+            .cloned()
+            .unwrap_or_else(|| EditorDraft::new(saved.clone()));
+        draft.reconcile(saved);
+        self.fill_relationship_editor(person_id, &draft, window, cx);
+        // The fields hold it now.
+        self.people_page.drafts.discard(person_id);
         for input in [
-            &self.relationship_item_input,
             &self.people_page.alias_input,
             &self.people_page.item_edit_input,
         ] {
             input.update(cx, |input, cx| input.set_value("", window, cx));
         }
-        self.relationship_item_kind = RelationshipItemKind::Interaction;
-        self.people_page.due_tomorrow = false;
         self.people_page.editing_item = None;
         self.people_page.alias_error = None;
+    }
+
+    fn saved_relationship_fields(&self, person_id: &str) -> RelationshipFields {
+        self.relationships
+            .iter()
+            .find(|profile| profile.person_id == person_id)
+            .map(profile_fields)
+            .unwrap_or_default()
+    }
+
+    fn relationship_field_inputs(&self) -> [&Entity<InputState>; 6] {
+        [
+            &self.relationship_company_input,
+            &self.relationship_role_input,
+            &self.relationship_email_input,
+            &self.relationship_phone_input,
+            &self.relationship_location_input,
+            &self.relationship_notes_input,
+        ]
+    }
+
+    /// The loaded contact's editor as a draft, exactly as typed.
+    fn loaded_relationship_draft(&self, cx: &App) -> Option<(String, EditorDraft)> {
+        let id = self.people_page.draft_contact.clone()?;
+        let fields = self
+            .relationship_field_inputs()
+            .map(|input| input.read(cx).value().to_string());
+        Some((
+            id,
+            EditorDraft {
+                fields,
+                baseline: self.people_page.draft_baseline.clone(),
+                item_kind: self.relationship_item_kind,
+                item_text: self.relationship_item_input.read(cx).value().to_string(),
+                due_tomorrow: self.people_page.due_tomorrow,
+            },
+        ))
+    }
+
+    /// Every contact's unsubmitted relationship edits, the loaded one's
+    /// included (web `editor_drafts`).
+    pub(in crate::views::workspace) fn relationship_drafts_now(
+        &self,
+        cx: &App,
+    ) -> RelationshipDrafts {
+        let mut drafts = self.people_page.drafts.clone();
+        if let Some((id, draft)) = self.loaded_relationship_draft(cx) {
+            drafts.keep(id, draft);
+        }
+        drafts
+    }
+
+    fn fill_relationship_editor(
+        &mut self,
+        person_id: &str,
+        draft: &EditorDraft,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let inputs = self.relationship_field_inputs().map(Entity::clone);
+        for (input, value) in inputs.iter().zip(&draft.fields) {
+            input.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
+        }
+        let text = draft.item_text.clone();
+        self.relationship_item_input
+            .update(cx, |input, cx| input.set_value(text, window, cx));
+        self.relationship_item_kind = draft.item_kind;
+        self.people_page.due_tomorrow = draft.due_tomorrow;
+        self.people_page.draft_baseline = draft.baseline.clone();
+        self.people_page.draft_contact = Some(person_id.to_string());
+        self.people_page.draft_error = None;
+    }
+
+    /// Web "Discard draft": drop a contact's unsubmitted edits; a loaded
+    /// contact's fields return to its saved details.
+    pub(in crate::views::workspace) fn discard_relationship_draft(
+        &mut self,
+        person_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.people_page.drafts.discard(person_id);
+        if self.people_page.draft_contact.as_deref() == Some(person_id) {
+            let saved = EditorDraft::new(self.saved_relationship_fields(person_id));
+            self.fill_relationship_editor(person_id, &saved, window, cx);
+        }
+        if self.people_page.drafts.is_empty() && self.relationship_drafts_now(cx).is_empty() {
+            self.people_page.show_private_drafts = false;
+        }
+        cx.notify();
     }
 
     fn relationship_profile_mut(&mut self, person_id: &str) -> &mut RelationshipProfile {
@@ -267,16 +384,30 @@ impl Workspace {
         }
     }
 
-    fn save_relationship_details(&mut self, person_id: &str, cx: &mut Context<'_, Self>) {
-        let read = |input: &Entity<InputState>, cx: &Context<'_, Self>| {
-            input.read(cx).value().trim().to_string()
+    /// Web `save_details`: only the fields edited here replace the saved
+    /// details, and a field also changed elsewhere since it was loaded
+    /// keeps the draft for review instead of overwriting.
+    pub(in crate::views::workspace) fn save_relationship_details(
+        &mut self,
+        person_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let saved = self.saved_relationship_fields(person_id);
+        if self.people_page.draft_contact.as_deref() != Some(person_id) {
+            // Fields filled without a load compare with the saved details.
+            self.people_page.draft_contact = Some(person_id.to_string());
+            self.people_page.draft_baseline = saved.clone();
+        }
+        let Some((_, mut draft)) = self.loaded_relationship_draft(cx) else {
+            return;
         };
-        let company = read(&self.relationship_company_input, cx);
-        let role = read(&self.relationship_role_input, cx);
-        let email = read(&self.relationship_email_input, cx);
-        let phone = read(&self.relationship_phone_input, cx);
-        let location = read(&self.relationship_location_input, cx);
-        let notes = read(&self.relationship_notes_input, cx);
+        let Some([company, role, email, phone, location, notes]) = draft.details_to_save(saved)
+        else {
+            self.people_page.draft_error = Some(copy::DETAILS_CHANGED);
+            cx.notify();
+            return;
+        };
         let profile = self.relationship_profile_mut(person_id);
         profile.company = company;
         profile.role = role;
@@ -285,6 +416,9 @@ impl Workspace {
         profile.location = location;
         profile.notes = notes;
         profile.updated_at_ms = EpochMs::now().as_millis();
+        // An unsubmitted item stays a draft; Save submits only details.
+        draft.reconcile(self.saved_relationship_fields(person_id));
+        self.fill_relationship_editor(person_id, &draft, window, cx);
         self.persist_and_notify(cx);
     }
 
@@ -922,6 +1056,9 @@ impl Workspace {
         if let Some(undo) = self.render_people_undo(cx) {
             page_el = page_el.child(undo);
         }
+        if let Some(drafts) = self.render_relationship_drafts(&hub.people, cx) {
+            page_el = page_el.child(drafts);
+        }
         page_el = page_el.child(
             div()
                 .flex()
@@ -1336,6 +1473,143 @@ impl Workspace {
             {
                 section = section.child(render_merge_recovery_data(json, cx));
             }
+        }
+        Some(section.into_any_element())
+    }
+
+    /// Web `RelationshipDraftStatus`: how many contacts have unsubmitted
+    /// relationship edits, each with Open and Discard, and the private
+    /// recovery data on request.
+    fn render_relationship_drafts(
+        &self,
+        people: &[Arc<PersonProfile>],
+        cx: &Context<'_, Self>,
+    ) -> Option<AnyElement> {
+        let drafts = self.relationship_drafts_now(cx);
+        if drafts.is_empty() {
+            return None;
+        }
+        let rows = drafts.listed_ids().into_iter().map(|id| {
+            let person = people.iter().find(|person| person.id == id);
+            let name = person.map_or_else(
+                || copy::draft_unavailable_contact(&id),
+                |person| person.display_name.clone(),
+            );
+            let key = element_key(&id);
+            let (open_id, discard_id) = (id.clone(), id.clone());
+            div()
+                .flex()
+                .flex_wrap()
+                .items_center()
+                .gap_2()
+                .child(div().flex_1().min_w(px(160.0)).child(label(
+                    name.clone(),
+                    LABEL_SM_PX,
+                    theme::rambutan_300(),
+                )))
+                .child(
+                    web_button(
+                        ("desktop-people-draft-open", key),
+                        WebButtonVariant::Outline,
+                        WebButtonSize::Small,
+                        ButtonState::disabled_if(person.is_none()),
+                    )
+                    .debug_selector(move || format!("desktop-people-draft-open-{key}"))
+                    .aria_label(copy::draft_open_label(&name))
+                    .child(copy::DRAFT_OPEN)
+                    .when(person.is_some(), |button| {
+                        button.on_click(cx.listener(move |this, _, window, cx| {
+                            this.open_person_profile(&open_id, window, cx);
+                        }))
+                    }),
+                )
+                .child(
+                    text_button(
+                        ("desktop-people-draft-discard", element_key(&discard_id)),
+                        copy::DRAFT_DISCARD,
+                        theme::lychee_300(),
+                        theme::lychee_200(),
+                    )
+                    .debug_selector({
+                        let key = element_key(&discard_id);
+                        move || format!("desktop-people-draft-discard-{key}")
+                    })
+                    .aria_label(copy::draft_discard_label(&name))
+                    .on_click(cx.listener(move |this, _, window, cx| {
+                        this.discard_relationship_draft(&discard_id, window, cx);
+                    })),
+                )
+        });
+        let shown = self.people_page.show_private_drafts;
+        let mut section = div()
+            .id("desktop-people-drafts")
+            .debug_selector(|| "desktop-people-drafts".into())
+            .role(Role::Region)
+            .aria_label(copy::DRAFTS_LABEL)
+            .flex()
+            .flex_col()
+            .gap_2()
+            .rounded(px(8.0))
+            .bg(theme::longan_900())
+            .border_1()
+            .border_color(theme::longan_800())
+            .p_3()
+            .child(
+                div()
+                    .id("desktop-people-drafts-status")
+                    .role(Role::Status)
+                    .child(body(
+                        copy::drafts_status(drafts.len()),
+                        BODY_SM_PX,
+                        theme::blueberry_300(),
+                    )),
+            )
+            .child(label(
+                copy::DRAFTS_KEPT_APP,
+                LABEL_SM_PX,
+                theme::rambutan_400(),
+            ))
+            .child(div().flex().flex_col().gap_1().children(rows));
+        if drafts.len() > DRAFT_LIST_LIMIT {
+            section = section.child(label(
+                copy::DRAFTS_TRUNCATED,
+                LABEL_SM_PX,
+                theme::rambutan_500(),
+            ));
+        }
+        section = section.child(
+            div().flex().child(
+                text_button(
+                    "desktop-people-drafts-private",
+                    if shown {
+                        copy::DRAFTS_HIDE
+                    } else {
+                        copy::DRAFTS_VIEW
+                    },
+                    theme::rambutan_400(),
+                    theme::rambutan_200(),
+                )
+                .debug_selector(|| "desktop-people-drafts-private".into())
+                .aria_expanded(shown)
+                .on_click(cx.listener(|this, _, _, cx| {
+                    this.people_page.show_private_drafts = !this.people_page.show_private_drafts;
+                    cx.notify();
+                })),
+            ),
+        );
+        if shown {
+            section = section
+                .child(label(
+                    copy::DRAFTS_COPY_NOTE,
+                    LABEL_SM_PX,
+                    theme::rambutan_400(),
+                ))
+                .child(render_recovery_data(
+                    "desktop-people-draft-recovery-data",
+                    copy::DRAFTS_RECOVERY_LABEL,
+                    &drafts.recovery_json(),
+                    cx,
+                ));
         }
         Some(section.into_any_element())
     }
@@ -2004,6 +2278,10 @@ impl Workspace {
             }))
         });
         let due_applies = RelationshipDue::applies_to(self.relationship_item_kind);
+        let draft_error = self
+            .people_page
+            .draft_error
+            .filter(|_| self.people_page.draft_contact.as_deref() == Some(person_id));
 
         div()
             .mt_2()
@@ -2013,6 +2291,15 @@ impl Workspace {
             .flex()
             .flex_col()
             .gap_2()
+            .when_some(draft_error, |el, message| {
+                el.child(
+                    div()
+                        .id("desktop-relationship-draft-error")
+                        .debug_selector(|| "desktop-relationship-draft-error".into())
+                        .role(Role::Alert)
+                        .child(body(message, BODY_SM_PX, theme::lychee_300())),
+                )
+            })
             .child(
                 div()
                     .flex()
@@ -2034,8 +2321,8 @@ impl Workspace {
                         .aria_label("Save details")
                         .child("Save details")
                         .on_click(cx.listener(
-                            move |this, _event, _window, cx| {
-                                this.save_relationship_details(&person_for_save, cx)
+                            move |this, _event, window, cx| {
+                                this.save_relationship_details(&person_for_save, window, cx)
                             },
                         )),
                     ),
@@ -2441,6 +2728,13 @@ impl Workspace {
                                     else {
                                         return;
                                     };
+                                    let drafts = this.relationship_drafts_now(cx);
+                                    if drafts.contains(&source) || drafts.contains(&target) {
+                                        this.people_page.notice =
+                                            Some(copy::MERGE_DRAFTS_UNSAVED.into());
+                                        cx.notify();
+                                        return;
+                                    }
                                     this.merge = None;
                                     this.people_page.notice = None;
                                     this.people_page.pending_merge =

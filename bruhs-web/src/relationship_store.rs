@@ -10,10 +10,10 @@ use crate::storage::{
     relationships,
 };
 
-mod drafts;
 mod queue;
 mod transaction;
-pub(crate) use drafts::{profile_fields, EditorDraft};
+// Shared with desktop, which keeps drafts the same way.
+pub(crate) use bruhs_models::{profile_fields, EditorDraft, RelationshipDrafts};
 use queue::{Failure, Queue};
 pub use transaction::{ExpectedRelationships, RelationshipTransaction};
 
@@ -27,7 +27,7 @@ pub struct RelationshipStore {
     saving: RwSignal<bool>,
     exclusive: RwSignal<bool>,
     merge_locks: RwSignal<std::collections::HashSet<String>>,
-    editor_drafts: RwSignal<std::collections::BTreeMap<String, EditorDraft>>,
+    editor_drafts: RwSignal<RelationshipDrafts>,
     pub(crate) draft_reset: RwSignal<u64>,
     pub status: RwSignal<SaveState>,
 }
@@ -77,29 +77,19 @@ impl RelationshipStore {
     }
 
     pub(crate) fn keep_editor_draft(self, id: String, draft: EditorDraft) {
-        let dirty = draft.dirty();
-        let unchanged = self.editor_drafts.with_untracked(|drafts| {
-            if dirty {
-                drafts.get(&id) == Some(&draft)
-            } else {
-                !drafts.contains_key(&id)
-            }
-        });
-        if unchanged {
+        if self
+            .editor_drafts
+            .with_untracked(|drafts| drafts.unchanged_by(&id, &draft))
+        {
             return;
         }
         self.editor_drafts.update(|drafts| {
-            if dirty {
-                drafts.insert(id, draft);
-            } else {
-                drafts.remove(&id);
-            }
+            drafts.keep(id, draft);
         });
     }
 
     pub(crate) fn editor_draft_ids(self) -> Vec<String> {
-        self.editor_drafts
-            .with(|drafts| drafts.keys().take(24).cloned().collect())
+        self.editor_drafts.with(RelationshipDrafts::listed_ids)
     }
 
     pub(crate) fn editor_draft_count(self) -> usize {
@@ -107,13 +97,12 @@ impl RelationshipStore {
     }
 
     pub(crate) fn editor_recovery_json(self) -> String {
-        self.editor_drafts
-            .with(|drafts| serde_json::to_string_pretty(drafts).unwrap_or_default())
+        self.editor_drafts.with(RelationshipDrafts::recovery_json)
     }
 
     pub(crate) fn discard_editor_draft(self, id: &str) {
         self.editor_drafts.update(|drafts| {
-            drafts.remove(id);
+            drafts.discard(id);
         });
         // Active editors reload only on explicit discard, never on every key.
         self.draft_reset

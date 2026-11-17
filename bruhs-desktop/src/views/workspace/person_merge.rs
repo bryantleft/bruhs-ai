@@ -218,6 +218,11 @@ impl Workspace {
         {
             return Err("A contact was merged on the server. Save or close its open profile editor, then retry contact sync. Your draft is retained.");
         }
+        // Web `begin_merge`: a kept relationship draft waits too.
+        let drafts = self.relationship_drafts_now(cx);
+        if drafts.contains(source_id) || drafts.contains(target_id) {
+            return Err("A contact was merged on the server. Save or discard its unsaved relationship draft in People, then retry contact sync. Your draft is retained.");
+        }
         if hub.person_is_pending(target_id) {
             return Err("The surviving contact has a pending local edit. Finish its sync before retrying merge recovery.");
         }

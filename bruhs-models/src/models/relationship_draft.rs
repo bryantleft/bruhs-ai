@@ -1,10 +1,22 @@
-//! Private, unsubmitted editor state. Keeping a draft never submits a write.
-use bruhs_models::{RelationshipItemKind, RelationshipProfile};
+//! A contact's unsubmitted relationship editor state. Each app keeps these
+//! while it runs (web: per tab; desktop: until it quits), so moving between
+//! contacts never loses an edit. Keeping a draft never submits a write.
+//! Moved from the web's `relationship_store/drafts.rs` so both apps keep,
+//! reconcile and save drafts the same way.
+
+use std::collections::BTreeMap;
+
 use serde::{ser::SerializeMap, Serialize, Serializer};
 
-pub(crate) type Fields = [String; 6];
+use crate::{RelationshipItemKind, RelationshipProfile};
 
-pub(crate) fn profile_fields(profile: &RelationshipProfile) -> Fields {
+/// Company, role, email, phone, location and notes, in that order.
+pub type RelationshipFields = [String; 6];
+
+/// How many drafts the unsaved list names; recovery data includes all.
+pub const DRAFT_LIST_LIMIT: usize = 24;
+
+pub fn profile_fields(profile: &RelationshipProfile) -> RelationshipFields {
     [
         profile.company.clone(),
         profile.role.clone(),
@@ -16,17 +28,21 @@ pub(crate) fn profile_fields(profile: &RelationshipProfile) -> Fields {
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
-pub(crate) struct EditorDraft {
+pub struct EditorDraft {
     #[serde(serialize_with = "serialize_fields")]
-    pub fields: Fields,
+    pub fields: RelationshipFields,
+    /// The saved values the fields were edited from.
     #[serde(serialize_with = "serialize_fields")]
-    pub baseline: Fields,
+    pub baseline: RelationshipFields,
     pub item_kind: RelationshipItemKind,
     pub item_text: String,
     pub due_tomorrow: bool,
 }
 
-fn serialize_fields<S: Serializer>(fields: &Fields, serializer: S) -> Result<S::Ok, S::Error> {
+fn serialize_fields<S: Serializer>(
+    fields: &RelationshipFields,
+    serializer: S,
+) -> Result<S::Ok, S::Error> {
     let mut map = serializer.serialize_map(Some(6))?;
     for (name, field) in ["company", "role", "email", "phone", "location", "notes"]
         .into_iter()
@@ -38,7 +54,7 @@ fn serialize_fields<S: Serializer>(fields: &Fields, serializer: S) -> Result<S::
 }
 
 impl EditorDraft {
-    pub fn new(fields: Fields) -> Self {
+    pub fn new(fields: RelationshipFields) -> Self {
         Self {
             baseline: fields.clone(),
             fields,
@@ -58,7 +74,7 @@ impl EditorDraft {
 
     /// Refresh untouched fields without replacing a conflicting private edit or
     /// its original comparison point. A matching commit acknowledges that field.
-    pub fn reconcile(&mut self, saved: Fields) {
+    pub fn reconcile(&mut self, saved: RelationshipFields) {
         for ((field, baseline), saved) in self.fields.iter_mut().zip(&mut self.baseline).zip(saved)
         {
             if field.trim() == baseline.trim() || field.trim() == saved.trim() {
@@ -70,7 +86,7 @@ impl EditorDraft {
 
     /// Only edited fields replace current data. Conflicting changes to the same
     /// field require review; unrelated newer fields are retained.
-    pub fn details_to_save(&self, mut current: Fields) -> Option<Fields> {
+    pub fn details_to_save(&self, mut current: RelationshipFields) -> Option<RelationshipFields> {
         for ((field, baseline), current) in self.fields.iter().zip(&self.baseline).zip(&mut current)
         {
             if field.trim() == baseline.trim() {
@@ -85,11 +101,71 @@ impl EditorDraft {
     }
 }
 
+/// Every contact's kept draft, by person id.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct RelationshipDrafts(BTreeMap<String, EditorDraft>);
+
+impl RelationshipDrafts {
+    pub fn get(&self, id: &str) -> Option<&EditorDraft> {
+        self.0.get(id)
+    }
+
+    pub fn contains(&self, id: &str) -> bool {
+        self.0.contains_key(id)
+    }
+
+    /// Whether [`Self::keep`] would leave the drafts as they are.
+    pub fn unchanged_by(&self, id: &str, draft: &EditorDraft) -> bool {
+        if draft.dirty() {
+            self.0.get(id) == Some(draft)
+        } else {
+            !self.0.contains_key(id)
+        }
+    }
+
+    /// Keep a draft with unsaved edits; a clean one drops the contact's
+    /// draft. Returns whether anything changed.
+    pub fn keep(&mut self, id: String, draft: EditorDraft) -> bool {
+        if self.unchanged_by(&id, &draft) {
+            return false;
+        }
+        if draft.dirty() {
+            self.0.insert(id, draft);
+        } else {
+            self.0.remove(&id);
+        }
+        true
+    }
+
+    pub fn discard(&mut self, id: &str) -> bool {
+        self.0.remove(id).is_some()
+    }
+
+    pub fn len(&self) -> usize {
+        self.0.len()
+    }
+
+    pub fn is_empty(&self) -> bool {
+        self.0.is_empty()
+    }
+
+    /// The contacts the unsaved list names: the first [`DRAFT_LIST_LIMIT`].
+    pub fn listed_ids(&self) -> Vec<String> {
+        self.0.keys().take(DRAFT_LIST_LIMIT).cloned().collect()
+    }
+
+    /// Every draft, with its original comparison fields, as private
+    /// recovery data to copy before discarding.
+    pub fn recovery_json(&self) -> String {
+        serde_json::to_string_pretty(&self.0).unwrap_or_default()
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn fields(company: &str, notes: &str) -> Fields {
+    fn fields(company: &str, notes: &str) -> RelationshipFields {
         [
             company.into(),
             "".into(),
@@ -169,5 +245,32 @@ mod tests {
         assert_eq!(recovery["fields"]["notes"], "Private edit");
         assert_eq!(recovery["baseline"]["notes"], "Notes");
         assert_eq!(recovery["fields"]["company"], "Original");
+    }
+
+    #[test]
+    fn drafts_keep_only_unsaved_edits_and_list_the_first_ones() {
+        let mut drafts = RelationshipDrafts::default();
+        let clean = EditorDraft::new(fields("Original", "Notes"));
+        assert!(!drafts.keep("ada".into(), clean.clone()));
+        let mut edited = clean.clone();
+        edited.fields[5] = "Edit".into();
+        assert!(drafts.keep("ada".into(), edited.clone()));
+        assert!(!drafts.keep("ada".into(), edited));
+        assert!(drafts.contains("ada"));
+        assert!(drafts.keep("ada".into(), clean), "a clean draft drops it");
+        assert!(drafts.is_empty());
+
+        for index in 0..30 {
+            let mut draft = EditorDraft::new(fields("", ""));
+            draft.item_text = format!("Item {index}");
+            drafts.keep(format!("p{index:02}"), draft);
+        }
+        assert_eq!(drafts.len(), 30);
+        assert_eq!(drafts.listed_ids().len(), DRAFT_LIST_LIMIT);
+        assert_eq!(drafts.listed_ids()[0], "p00");
+        let recovery: serde_json::Value = serde_json::from_str(&drafts.recovery_json()).unwrap();
+        assert_eq!(recovery.as_object().map(serde_json::Map::len), Some(30));
+        assert!(drafts.discard("p00"));
+        assert!(!drafts.discard("p00"));
     }
 }
