@@ -139,8 +139,8 @@ tags `v<version>`. Asset names carry no version, so
 - `BRUHS_RELEASE_VERSION`, set by the bundle script, makes a build a release:
   it then updates from GitHub releases instead of git.
 - The icon is `packaging/macos/AppIcon.icns`, generated from
-  `packaging/macos/AppIcon.svg` (written by `bruhs-site/brand/logo.mjs`) by
-  `packaging/macos/make-icon.sh`.
+  `packaging/macos/AppIcon.svg` and `AppIcon-small.svg` (written by
+  `bruhs-site/brand/logo.mjs`) by `packaging/macos/make-icon.sh`.
 - gpui's `sum_tree` depends on zed's GPL-3.0 `ztracing`; the workspace patches
   it to the no-op `third_party/ztracing-noop` so the shipped binaries stay
   MIT.

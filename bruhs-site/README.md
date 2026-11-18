@@ -16,13 +16,13 @@ The hero mascot is drawn in dithered braille dots by `src/scripts/braille.js`.
 
 ## Brand assets
 
-The bruhs.ai mark is the Bruh itself, bruhs.svg's face with its eye slits and
-red mouth, drawn as a dotted sphere: solid in the middle, breaking into rings
-of dots toward the rim. It still reads as the Bruh at a 16px favicon. The app
-uses it too: sidebar, web favicon and Mac icon.
+The bruhs.ai mark is the hero's dot Bruh, 1:1: the same `bruhDots` halftone,
+looking straight ahead. Each file is generated at the radius it is shown at, so
+it has the grid the site would draw there. The app uses it too: sidebar, web
+favicon and Mac icon.
 
 ```
-node brand/logo.mjs             # site logo/favicon, bruhs-web bruhs.svg/favicon.svg, Mac AppIcon.svg
+node brand/logo.mjs             # site logo/favicon, bruhs-web bruhs.svg/favicon.svg, Mac AppIcon{,-small}.svg
 brand/render.sh                 # public/og.png, apple-touch-icon.png and the Mac disk image background, via Chrome
 packaging/macos/make-icon.sh    # (repo root) AppIcon.icns, plus the server's tasks icon and the mobile icon
 ```

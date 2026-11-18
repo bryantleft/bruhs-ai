@@ -1,78 +1,82 @@
-// The bruhs.ai mark: the Bruh itself (bruhs.svg's face, eyes and mouth
-// exactly) as a dotted sphere. The ball is solid yellow to 78% of its radius,
-// then breaks into three rings of dots that shrink outward and toward the
-// shadow side, lit like the site's dot Bruh (src/scripts/braille.js `shade`).
-// The rings are concentric, so the outline stays a true circle, and the face
-// keeps the mascot's crisp features, so it still reads as the Bruh at a 16px
-// favicon.
+// The bruhs.ai mark: the site's dot Bruh, 1:1. Every dot comes from the same
+// bruhDots as the hero (src/scripts/braille.js), looking straight ahead, and
+// the mouth takes drawBruh's five yellow-to-red steps.
 //
 //   node brand/logo.mjs
 //
-// One source for every copy of the mark, site and app:
-// - logo.svg / bruhs.svg / favicon.svg: transparent (site nav, app sidebars,
-//   browser tabs on the site and the web app)
-// - packaging/macos/AppIcon.svg: on a longan-950 tile, since a Mac icon needs
-//   its own background; packaging/macos/make-icon.sh builds AppIcon.icns from it.
+// bruhDots picks its grid from the Bruh's radius in pixels: 9 dots per radius
+// up to r 90, 15 from r 150. An SVG scales, so each file is generated at the
+// radius it is shown at, which makes it the same dots the site would draw
+// there:
+// - small (r 80, 9 per radius): logo.svg / bruhs.svg / favicon.svg, shown at
+//   16 to 52px (site nav, app sidebars, browser tabs), and AppIcon-small.svg
+//   for Mac icon sizes up to 256px, where the art's radius stays under 90px.
+// - large (r 200, 15 per radius): AppIcon.svg for the 512 and 1024px sizes.
+// packaging/macos/make-icon.sh builds AppIcon.icns from the two AppIcon SVGs,
+// whose longan-950 tile a Mac icon needs as its own background.
 
 import { writeFileSync } from "node:fs";
-import { shade } from "../src/scripts/braille.js";
+import { bruhDots, pitchFor } from "../src/scripts/braille.js";
 
-const FACE = "#fada5e"; // bruh-base
-const MOUTH = "#fc4141"; // bruh-mouth
-const EYE = "#2e2e29"; // bruh-eye in bruhs.svg
+// The site's BRUH_COLORS (src/scripts/site.js).
+const FACE = "#fada5e";
+const MOUTH = "#fc4141";
 const TILE = "#141210"; // longan-950
-
-// Share of the radius that stays solid, and the rings of dots outside it.
-const CORE = 0.78;
-const RINGS = 3;
+const SMALL = 80;
+const LARGE = 200;
 
 const round = (n) => Math.round(n * 100) / 100;
 
-/** The Bruh in bruhs.svg's 600-unit box (center 300,300, radius 300). */
-function bruh() {
-  const gap = (1 - CORE) / RINGS;
-  let dots = `<circle cx="300" cy="300" r="${round(CORE * 300)}"/>`;
-  for (let ring = 1; ring <= RINGS; ring++) {
-    const radius = CORE + (ring - 0.5) * gap;
-    // Dots about a ring gap apart, each ring staggered half a step.
-    const count = Math.round((2 * Math.PI * radius) / (gap * 1.1));
-    const phase = ring % 2 ? 0 : Math.PI / count;
-    for (let i = 0; i < count; i++) {
-      const a = phase + (i / count) * 2 * Math.PI;
-      const dx = radius * Math.cos(a);
-      const dy = radius * Math.sin(a);
-      const light = shade(dx, dy) ?? 0;
-      // Smaller per ring outward, and smaller where the light falls off.
-      const size = (gap / 2) * (1 - (ring - 1) / (RINGS + 0.6)) * Math.min(1, Math.sqrt(light) * 1.5);
-      if (size < gap * 0.08) continue;
-      dots += `<circle cx="${round(300 + dx * 300)}" cy="${round(300 + dy * 300)}" r="${round(size * 300)}"/>`;
-    }
-  }
-  const features =
-    `<ellipse cx="198" cy="223" rx="40" ry="10" fill="${EYE}"/>` +
-    `<ellipse cx="401" cy="223" rx="40" ry="10" fill="${EYE}"/>` +
-    `<ellipse cx="307" cy="378" rx="120" ry="10" fill="${MOUTH}"/>`;
-  return `<g fill="${FACE}">${dots}</g>${features}`;
+/**
+ * drawBruh's mouth blend: `#rrggbb` between `from` and `to`, `t` of the way.
+ * @param {string} from @param {string} to @param {number} t
+ */
+function mixHex(from, to, t) {
+  if (t <= 0) return from;
+  if (t >= 1) return to;
+  const a = Number.parseInt(from.slice(1), 16);
+  const b = Number.parseInt(to.slice(1), 16);
+  /** @param {number} shift */
+  const channel = (shift) => Math.round(((a >> shift) & 255) + (((b >> shift) & 255) - ((a >> shift) & 255)) * t);
+  return `#${((channel(16) << 16) | (channel(8) << 8) | channel(0)).toString(16).padStart(6, "0")}`;
 }
 
-/** @param {boolean} tile */
-function svg(tile) {
-  // On the tile the Bruh spans 84% of it, the share the earlier mark had.
-  const body = tile
-    ? `<rect width="600" height="600" rx="131.25" fill="${TILE}"/><g transform="translate(48 48) scale(.84)">${bruh()}</g>`
-    : bruh();
-  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 600 600">${body}</svg>\n`;
+/**
+ * The Bruh at radius `r`, centered in a `box`-unit square: one group per
+ * mouth step, like drawBruh's one path per color.
+ * @param {number} r @param {number} box
+ */
+function bruh(r, box) {
+  const steps = ["", "", "", "", ""];
+  for (const dot of bruhDots(box, box, { cx: box / 2, cy: box / 2, r })) {
+    const step = Math.round(dot.mix * 4);
+    steps[step] += `<circle cx="${round(dot.x)}" cy="${round(dot.y)}" r="${round(dot.radius)}"/>`;
+  }
+  return steps.map((dots, i) => (dots ? `<g fill="${mixHex(FACE, MOUTH, i / 4)}">${dots}</g>` : "")).join("");
+}
+
+/**
+ * Transparent: the Bruh fills the box like bruhs.svg, with half a dot pitch
+ * spare on each side so the rim's dots stay whole. On the tile it spans 84%
+ * of it, the share the earlier mark had.
+ * @param {number} r @param {boolean} tile
+ */
+function svg(r, tile) {
+  const box = round(tile ? (2 * r) / 0.84 : 2 * r + pitchFor(r));
+  const bg = tile ? `<rect width="${box}" height="${box}" rx="${round((box * 14) / 64)}" fill="${TILE}"/>` : "";
+  return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${box} ${box}">${bg}${bruh(r, box)}</svg>\n`;
 }
 
 const site = new URL("../public/", import.meta.url);
 const app = new URL("../../bruhs-web/", import.meta.url);
 const mac = new URL("../../packaging/macos/", import.meta.url);
 const files = [
-  [new URL("logo.svg", site), svg(false)],
-  [new URL("favicon.svg", site), svg(false)],
-  [new URL("bruhs.svg", app), svg(false)],
-  [new URL("favicon.svg", app), svg(false)],
-  [new URL("AppIcon.svg", mac), svg(true)],
+  [new URL("logo.svg", site), svg(SMALL, false)],
+  [new URL("favicon.svg", site), svg(SMALL, false)],
+  [new URL("bruhs.svg", app), svg(SMALL, false)],
+  [new URL("favicon.svg", app), svg(SMALL, false)],
+  [new URL("AppIcon-small.svg", mac), svg(SMALL, true)],
+  [new URL("AppIcon.svg", mac), svg(LARGE, true)],
 ];
 for (const [url, text] of files) writeFileSync(url, text);
 console.log(`wrote ${files.map(([url]) => url.pathname.split("/").slice(-2).join("/")).join(", ")}`);
