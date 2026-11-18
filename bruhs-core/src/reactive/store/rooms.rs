@@ -356,8 +356,10 @@ fn queued_run(
 
 /// Hand `message` to each of `agent_ids` that is a member. A paused or off
 /// bruh gets a System line instead. A bruh with a run queued in this room
-/// already keeps that one run, now answering `message`: an owner post
-/// restarts its hop count, a bruh's line never lowers it.
+/// already keeps that one run: an owner post becomes the line it answers
+/// and restarts its hop count. A bruh's line never lowers the count, and
+/// takes over as the line answered only from another bruh's line; under
+/// an owner post it reads as context.
 pub(in crate::reactive) fn hand_to(
     connection: &Connection,
     room: &Room,
@@ -390,26 +392,39 @@ pub(in crate::reactive) fn hand_to(
             )?;
             continue;
         }
-        let prompt = room_prompt(room, &names, &agent.name, &history, &message.id);
         if let Some(mut run) = queued_run(connection, &agent.id, &room.id)? {
+            let mut trigger_id = message.id.clone();
             if let Some(RunTrigger::Room {
                 message_id,
                 hop: queued_hop,
                 ..
             }) = run.trigger.as_mut()
             {
-                *message_id = message.id.clone();
-                *queued_hop = if message.author == RoomAuthor::Owner {
-                    0
+                if message.author == RoomAuthor::Owner {
+                    *queued_hop = 0;
                 } else {
-                    (*queued_hop).max(hop)
-                };
+                    *queued_hop = (*queued_hop).max(hop);
+                    let queued_for =
+                        get::<RoomMessage>(connection, "reactive_room_messages", message_id)?;
+                    if queued_for.is_some_and(|queued| queued.author == RoomAuthor::Owner) {
+                        trigger_id = message_id.clone();
+                    }
+                }
+                message_id.clone_from(&trigger_id);
             }
-            run.prompt = prompt;
+            let owner_history;
+            let context = if trigger_id == message.id {
+                &history
+            } else {
+                owner_history = prompt_history(connection, &room.id, &trigger_id)?;
+                &owner_history
+            };
+            run.prompt = room_prompt(room, &names, &agent.name, context, &trigger_id);
             run.updated_at = EpochMs::now();
             save_run(connection, &run)?;
             continue;
         }
+        let prompt = room_prompt(room, &names, &agent.name, &history, &message.id);
         queue_capacity(connection)?;
         let mut run = new_run(connection, agent, prompt, None, None, RunStatus::Queued, 0)?;
         run.trigger = Some(RunTrigger::Room {
