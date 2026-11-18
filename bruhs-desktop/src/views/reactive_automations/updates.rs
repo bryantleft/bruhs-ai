@@ -288,7 +288,7 @@ impl ReactiveAutomations {
                     if this.reply.as_ref().is_some_and(|(open, _)| *open == id) {
                         this.reply = None;
                     } else {
-                        let input = edit_input("", true, window, cx);
+                        let input = edit_area("", window, cx);
                         this.reply_watch =
                             Some(cx.subscribe(&input, |_, _, event: &InputEvent, cx| {
                                 if matches!(event, InputEvent::Change) {

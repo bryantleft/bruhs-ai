@@ -1,83 +1,130 @@
-# Vendored: gpui-component
+# Vendored: gpui-component (GPUI Kit)
 
 | | |
 |---|---|
-| Upstream | https://github.com/longbridge/gpui-component |
+| Upstream | https://github.com/longbridge/gpui-component (now published as GPUI Kit) |
 | License | Apache-2.0 (see `LICENSE-APACHE`; Longbridge) |
-| Version | `gpui-component` 0.5.2, `gpui-component-macros` 0.5.1, `gpui-component-assets` 0.5.1 |
-| Upstream commit | `0775df394083c1ed74f36f846b78868d1267398f` (2026-07-10, "settings: Improves sidebar/resizable behavior in the settings UI. (#2540)") |
+| Version | `gpui-base`, `gpui-component`, `gpui-component-macros`, `gpui-kit-assets` 0.10.0 |
+| Upstream commit | `3fbbaec1cd13fa558d996f02721850093898e95e` (2026-11-18, "root: Make Tab work before anything is focused (#4017)") |
 
-Upstream did not tag this version. In the original 375-file import, 367 files
-were byte-identical to upstream at `0775df3`; subsequent local changes include
-the adaptations listed below. Upstream's `v0.5.1` tag (`0f0ab35`) is older;
-0.5.2 was an unreleased `main` version when this was vendored.
+Four upstream crates are kept, unformatted, so a diff against upstream shows
+only the local changes:
 
-The crate is **excluded** from the Cargo workspace (`exclude` in the root
-`Cargo.toml`) and consumed by path from `bruhs-desktop`:
-`../third_party/gpui-component/crates/ui`. Only `crates/ui`, `crates/macros`,
-and `crates/assets` are kept.
+- `crates/base` (`gpui-base`): behavior. It owns input, text, scroll,
+  resizable and `Root`.
+- `crates/component` (`gpui-component`): the styled components and the theme.
+- `crates/component-macros`.
+- `crates/assets` (`gpui-kit-assets`).
+
+`kit`, `shell`, `fps`, `webview`, `story` and the examples are not vendored.
+`crates/base/examples` is dropped as well.
+
+The crates are **excluded** from the Cargo workspace (`exclude` in the root
+`Cargo.toml`). `bruhs-desktop` and `bruhs-ui` use `crates/component` by path.
+The desktop's tests also use `crates/base` directly, for
+`TextSelection::selected_text`.
+
+The previous copy was 0.5.2 at `0775df3`, a single `crates/ui` crate. The
+upgrade to 0.10.0 brought:
+
+- Multi-line inputs became their own type (`TextareaState`, rendered with
+  `Textarea`).
+- The theme split into a styled `gpui_component::Theme` and a
+  `gpui_base::Theme` projection for scrollbars and resize handles. Call
+  `Theme::sync_base` after editing fields directly.
+- `ScrollbarShow` became `ScrollbarMode`.
 
 ## Local changes
 
-Changes relative to upstream `0775df3`:
+Every local change is marked `bruhs:` in the source.
 
-The UI scrollbar work is recorded in the `scroll/scrollbar.rs` and
-`scroll/scrollable.rs` entries. The remaining entries document other local
-adaptations.
+- `Cargo.toml` (workspace):
+  - gpui comes from zed git at the rev the root workspace pins, not from
+    upstream's `gpui-pre` crates.io snapshots. 0.3.12, upstream's pin, is a
+    repackage of the same zed commit with no patches. See "gpui pins" below.
+  - `sum-tree` and `reqwest` point at zed's crates and zed's reqwest fork.
+- `crates/*/Cargo.toml`:
+  - Upstream's optional `gpui-fast` backend is removed. Its `gpui-fast`
+    feature stays, empty, so upstream's `cfg`s still parse. Do not enable it.
+- `crates/component-macros/src/crate_path.rs`: `IntoPlot` also accepts zed's
+  own `gpui` package.
+- `crates/base/src/lib.rs`, `root.rs`, `crates/component/src/input/content_type.rs`:
+  - The macOS-native window paths (accessibility hit-test forwarder, text
+    content type) are gated on `not(any(test, feature = "test-support"))`.
+    Upstream uses `not(test)`.
+  - `cfg(test)` only reaches this crate's own tests, so without this
+    `bruhs-desktop`'s tests would reach the native paths with test windows.
+- `crates/base/src/input`: app-owned plain-text ghost completions on
+  `TextareaState`. Upstream offers inline completions only to the code
+  editor.
+  - `set_inline_completion_text` and `inline_completion_text` are new.
+  - `TextareaExtras` stores the item, and the shared renderer paints it.
+  - Edits and caret moves clear it. Selection and IME suppress it.
+  - The empty placeholder is hidden while a completion shows.
+  - The chat composer's prompt suggestions use it.
+- `crates/component/src/input/textarea.rs`: `Textarea::focus_bordered`,
+  forwarded to the `Input` it renders. The composer turns the focus border
+  off.
+- `crates/base/src/resizable/mod.rs`: `ResizableState::is_resizing`, so the
+  desktop's docked right panel can keep its remembered width (as the web does)
+  except while its handle is dragged.
+- `crates/base/src/scrollbar.rs`: only the primary button drags the thumb or
+  jumps the track. A right-click on a scrollbar no longer starts a drag.
+- `crates/base/src/text/state.rs`: `TextViewState::parsed_content_eq`
+  (`test-support` only). The desktop's streaming tests compare a streamed
+  Markdown/HTML prefix with a fresh parse.
+- `crates/component/src/title_bar.rs`:
+  - `TITLE_BAR_HEIGHT` 34 -> 44.
+  - macOS `TITLE_BAR_LEFT_PADDING` 80 -> 88.
+  - Traffic lights at (12, 15). Upstream has (9, 9).
+- `crates/base/src/zoom.rs`, `crates/component/src/zoom.rs` (new), and every
+  module that sizes with `px`: page zoom for bruhs-desktop's ⌘+ / ⌘− / ⌘0,
+  without patching gpui.
+  - Modules import `crate::zoom::px` in place of `gpui::px`, so design
+    lengths are CSS pixels drawn at the zoom.
+  - Lengths measured from the window use `window_px`: bounds, mouse
+    positions, scroll offsets, text layout, plot coordinates.
+  - `css_px` converts a measurement for comparison with a design length.
+  - `gpui_component::zoom::set_zoom` rescales the styled theme's font sizes
+    and radii and re-syncs the base theme. `Root` sets the rem size from the
+    font size, so rem-based styles follow.
+  - Window chrome stays in window points, as a browser keeps its own, using
+    `gpui::px`: the scrollbar, window border, resize handles, caret, title
+    bar and popover edge constants.
+  - Test modules are left on gpui's `px`. Tests run at 100%, where the two
+    agree.
 
-- `Cargo.toml` (workspace): `gpui`, `gpui_platform`, `gpui_web`, `gpui_macros`,
-  `reqwest_client` pin `zed-industries/zed` by `rev` (see "gpui pins" below).
-- `crates/ui/Cargo.toml`: adds a `test-support = []` feature.
-- `crates/ui/src/lib.rs`, `root.rs`, `input/native.rs`, `input/content_type.rs`:
-  the macOS-native input path is gated on `not(feature = "test-support")`
-  (upstream: `not(test)` / unconditional) so `bruhs-desktop`'s tests can use it.
-- `crates/ui/src/input/input.rs`: adds `Input::aria_label`.
-- `input/lsp/completions.rs`: app-owned plain-text ghost completions use the
-  existing renderer without an LSP request. Selection and IME suppress them.
-  `input/element.rs` hides the empty placeholder while a completion is present.
-- `crates/ui/src/title_bar.rs`: `TITLE_BAR_HEIGHT` 34 -> 44,
-  `TITLE_BAR_LEFT_PADDING` 80 -> 88, traffic-light position (9, 9) -> (12, 15).
-- `crates/ui/src/resizable/resize_handle.rs`: a 4px hover strip, matching
-  the web app.
-- `crates/ui/src/resizable/mod.rs`: adds `ResizableState::is_resizing`, so
-  the desktop's docked right panel can hold its remembered width (as the web
-  does) except while its handle is dragged.
-- `scroll/scrollbar.rs`: during an active primary-button drag, applies the
-  release position before clearing drag state so frame throttling cannot
-  discard the final movement. Desktop tests
-  `themed_scrollbar_drag_reveals_the_last_row` and
-  `themed_scrollbar_drag_reveals_the_last_column` cover fast release on each axis.
-- `scroll/scrollable.rs`: maximum size constraints stay on the viewport and
-  are removed from content along the scrolling axis. Bounded dropdowns can
-  reveal their final rows. Native color-menu and permission-review tests
-  verify scrolling to the end.
-- The whole tree is formatted with the workspace's rustfmt settings.
-- `text/state/replacement.rs` reuses a separated Markdown paragraph tail on
-  append-only full-value updates. Containers, definitions, HTML and extensions
-  retain complete parsing. Background appends carry deltas with a parsed base
-  after a synchronous replacement. `NodeContext` retains reference
-  metadata; native integration tests compare streamed prefixes with fresh parses.
-- `text/inline/geometry.rs` walks visible shaped lines for selection geometry,
-  avoiding a full preceding-line search for every character on every paint.
-  Native integration tests compare its clipped carets with the complete scan.
-- `crates/ui/src/zoom.rs` (new) and every module that sizes with `px`: page
-  zoom for bruhs-desktop's ⌘+ / ⌘− / ⌘0 without patching gpui. Modules import
-  `crate::zoom::px` in place of `gpui::px`, so design lengths are CSS pixels
-  drawn at the zoom; lengths measured from the window (bounds, mouse
-  positions, scroll offsets, text layout, plot coordinates) use `window_px`,
-  and `css_px` converts a measurement for comparison with a design length.
-  `zoom::set_zoom` rescales the theme's font size and radii, and `Root` sets
-  the rem size from the font size, so rem-based styles follow. Window chrome
-  stays in window points, as a browser keeps its own: the scrollbar, window
-  border, resize handles, caret, title bar and popover edge constants use
-  `gpui::px`.
+These earlier local changes are now upstream, so they were dropped:
+
+- `Input::aria_label`.
+- The scrollbar applying the release position before it clears drag state.
+- Scrollable maximum sizes staying on the viewport.
+- Markdown append-only parsing.
+- LSP inline completions.
+
+Two other earlier changes were dropped:
+
+- The visible-lines inline selection geometry walk. Upstream's own text
+  layout replaces that code. The desktop test that compared it with a full
+  scan went with it.
+- The 4px resize-handle strip. Upstream now takes a handle renderer, so
+  `bruhs_ui::resize_handle::handle_appearance` draws it from the app.
 
 ## gpui pins
 
-This directory is not a workspace member, so it keeps its own copy of the gpui
-git pins in `Cargo.toml`, all at the same `zed-industries/zed` rev as the root
-workspace: `gpui`, `gpui_platform`, `gpui_web`, `gpui_macros`,
-`reqwest_client` (rev `2b9b3c7ea21293c9f271d993503e6d8dba2c6891`). The root
-`Cargo.toml` `[workspace.dependencies]` states that rev once for the rest of the
-repo. When moving gpui forward, bump the root rev **and** the five pins here so
-Cargo resolves a single gpui.
+This directory is not a workspace member, so `Cargo.toml` here keeps its own
+copy of the gpui git pins: `gpui`, `gpui_platform`, `gpui_web`, `gpui_macros`,
+`reqwest_client` and `sum-tree`. All are at zed rev
+`d2a4fb6ded7c470be25d1541281da3882495b65b`, the commit upstream's `gpui-pre`
+0.3.12 was cut from. The root `Cargo.toml` states the same rev once for the
+rest of the repo, and `third_party/gpui-windows` carries it too.
+
+When moving gpui forward:
+
+- Bump all three.
+- Move to the `gpui-pre` version upstream pins.
+- Keep `version = "0.2"` on `gpui`. Without it, Cargo can fall back to zed's
+  `tooling/lints/test_fixture/gpui` (0.0.0) when gpui's own dependencies
+  conflict, and the error then names the wrong crate.
+
+Zed at this rev needs Rust 1.98 (see `rust-toolchain.toml`).

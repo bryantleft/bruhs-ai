@@ -245,7 +245,7 @@ fn check_sent_button(cx: &mut VisualTestContext) -> gpui::Bounds<gpui::Pixels> {
     let feedback = cx
         .debug_bounds("desktop-compose-feedback")
         .expect("real draft feedback");
-    cx.simulate_event(gpui::ScrollWheelEvent {
+    cx.simulate_event(gpui::ScrollEvent {
         position: feedback.origin + gpui::point(gpui::px(8.0), gpui::px(8.0)),
         delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.0), gpui::px(-100_000.0))),
         ..Default::default()

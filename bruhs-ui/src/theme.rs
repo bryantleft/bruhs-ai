@@ -2,7 +2,7 @@
 // Approximates the OKLCH values from https://design.bruhs.dev/llms.txt
 
 use gpui::{hsla, rgb, App, FontFeatures, Hsla};
-use gpui_component::{scroll::ScrollbarShow, Theme, ThemeTokens};
+use gpui_component::{scroll::ScrollbarMode, Theme, ThemeTokens};
 use std::sync::Arc;
 
 /// bruhs label/UI face (web: `Monaspace Argon`).
@@ -438,7 +438,7 @@ pub fn apply_bruhs_theme(cx: &mut App) {
 
     // Misc
     theme.skeleton = longan_800();
-    theme.scrollbar_show = ScrollbarShow::Always;
+    theme.scrollbar_mode = ScrollbarMode::Always;
     theme.scrollbar = hsla(0.0, 0.0, 0.0, 0.0);
     theme.scrollbar_thumb = rambutan_500();
     theme.scrollbar_thumb_hover = rambutan_400();
@@ -461,6 +461,10 @@ pub fn apply_bruhs_theme(cx: &mut App) {
     // Widgets that paint from `tokens` (Checkbox's checked fill, for one) look
     // unthemed until it is re-derived.
     theme.tokens = ThemeTokens::from(&theme.colors);
+
+    // Scrollbars and resize handles paint from gpui-base's copy of the
+    // theme, which a direct field edit does not reach.
+    Theme::sync_base(cx);
 }
 
 #[cfg(test)]

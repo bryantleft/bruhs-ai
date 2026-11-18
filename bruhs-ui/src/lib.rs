@@ -31,6 +31,8 @@ pub mod motion;
 pub mod native_blur;
 pub mod page_header;
 pub mod press;
+pub mod resize_handle;
 pub mod switch;
+pub mod text_field;
 pub mod theme;
 pub mod zoom;

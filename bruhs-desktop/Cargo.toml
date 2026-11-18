@@ -9,8 +9,9 @@ publish = false
 default-run = "bruhs-desktop"
 
 [features]
-native-performance = []
-whiteboard-benchmark = []
+# gpui's frame timings sit behind its `profiler` feature.
+native-performance = ["gpui/profiler"]
+whiteboard-benchmark = ["gpui/profiler"]
 
 [[bin]]
 name = "bruhs-whiteboard-performance"
@@ -45,7 +46,7 @@ futures-util = { workspace = true, features = ["std"] }
 # gpui comes from upstream zed, pinned once in the root Cargo.toml
 # ([workspace.dependencies]); see the note there before bumping the rev.
 gpui = { workspace = true }
-gpui-component = { path = "../third_party/gpui-component/crates/ui" }
+gpui-component = { path = "../third_party/gpui-component/crates/component" }
 gpui_platform = { workspace = true, features = ["font-kit"] }
 image = { version = "=0.25.10", default-features = false, features = ["png", "jpeg", "webp", "gif"] }
 markdown = "1"
@@ -96,5 +97,6 @@ raw-window-handle = "0.6"
 bruhs-core = { workspace = true, features = ["test-support"] }
 bruhs-ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
-gpui-component = { path = "../third_party/gpui-component/crates/ui", features = ["test-support"] }
+gpui-component = { path = "../third_party/gpui-component/crates/component", features = ["test-support"] }
+gpui-base = { path = "../third_party/gpui-component/crates/base", features = ["test-support"] }
 tempfile = { workspace = true }

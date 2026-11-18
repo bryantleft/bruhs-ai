@@ -6,7 +6,7 @@
 
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{Input, InputEvent, InputState, TextareaState};
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::zoom::px;
 use gpui_component::ActiveTheme;
@@ -1487,18 +1487,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
-    ) -> (Entity<InputState>, Entity<InputState>) {
+    ) -> (Entity<TextareaState>, Entity<TextareaState>) {
         let global_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
+            TextareaState::new(window, cx)
                 .placeholder("prefix: Bug\nmax 48")
                 .default_value(global)
         });
-        let project_instructions = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
-                .placeholder("prefix: Bug")
-        });
+        let project_instructions =
+            cx.new(|cx| TextareaState::new(window, cx).placeholder("prefix: Bug"));
         subscriptions.push(cx.subscribe_in(
             &global_input,
             window,

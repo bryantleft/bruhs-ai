@@ -2,7 +2,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::input::Input;
+use gpui_component::input::{Input, Textarea};
 use gpui_component::zoom::px;
 
 /// Web `<BrailleBruh size=96.0 />` in Settings → About.
@@ -946,7 +946,7 @@ impl Workspace {
                         .w(px(288.0))
                         .h(px(96.0))
                         .child(
-                            Input::new(&self.title_instructions_input)
+                            Textarea::new(&self.title_instructions_input)
                                 .aria_label("Thread title instructions")
                                 .h_full(),
                         )
@@ -968,7 +968,7 @@ impl Workspace {
                         .when(!self.title_project.is_empty(), |el| {
                             el.child(
                                 div().h(px(80.0)).child(
-                                    Input::new(&self.title_project_instructions_input)
+                                    Textarea::new(&self.title_project_instructions_input)
                                         .aria_label("Project thread title instructions")
                                         .h_full(),
                                 ),

@@ -1,5 +1,5 @@
 use super::*;
-use crate::views::workspace::{form_textarea, InputEvent, InputState};
+use crate::views::workspace::{form_textarea, InputEvent, InputState, Textarea, TextareaState};
 use bruhs_models::EpochMs;
 use bruhs_models::{MeetingNote, MeetingNoteDraft};
 use bruhs_ui::press::on_press_view;
@@ -8,7 +8,7 @@ use gpui_component::zoom::px;
 pub(in crate::views::workspace) struct NoteEditor {
     draft: MeetingNoteDraft,
     pub(in crate::views::workspace) title: Entity<InputState>,
-    pub(in crate::views::workspace) body: Entity<InputState>,
+    pub(in crate::views::workspace) body: Entity<TextareaState>,
     message: Option<String>,
     failed: bool,
     _subscriptions: [Subscription; 2],
@@ -96,26 +96,27 @@ impl Workspace {
             .map_or_else(|| MeetingNoteDraft::new(None), MeetingNoteDraft::edit);
         let title = cx.new(|cx| InputState::new(window, cx).default_value(draft.title.clone()));
         let content = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
+            TextareaState::new(window, cx)
                 .rows(10)
                 .default_value(draft.body.clone())
         });
-        let subscriptions = [&title, &content].map(|input| {
-            cx.subscribe_in(
-                input,
-                window,
-                |this: &mut Self, _, event: &InputEvent, _, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        if let Some(editor) = &mut this.note_editor {
-                            editor.message = None;
-                            editor.failed = false;
-                        }
-                        cx.notify();
-                    }
-                },
-            )
-        });
+        let edited = |this: &mut Self, event: &InputEvent, cx: &mut Context<'_, Self>| {
+            if matches!(event, InputEvent::Change) {
+                if let Some(editor) = &mut this.note_editor {
+                    editor.message = None;
+                    editor.failed = false;
+                }
+                cx.notify();
+            }
+        };
+        let subscriptions = [
+            cx.subscribe_in(&title, window, move |this, _, event, _, cx| {
+                edited(this, event, cx)
+            }),
+            cx.subscribe_in(&content, window, move |this, _, event, _, cx| {
+                edited(this, event, cx)
+            }),
+        ];
         self.note_editor = Some(NoteEditor {
             draft,
             title,
@@ -277,7 +278,9 @@ impl Workspace {
                     .aria_label("Meeting note title"),
             )
             .child(label("Notes", LABEL_SM_PX, theme::rambutan_300()))
-            .child(form_textarea(Input::new(&editor.body), 220.0).aria_label("Meeting note text"))
+            .child(
+                form_textarea(Textarea::new(&editor.body), 220.0).aria_label("Meeting note text"),
+            )
             .when_some(editor.draft.recording_id.as_ref(), |el, id| {
                 el.child(body(
                     format!("Linked recording: {id}"),

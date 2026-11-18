@@ -20,7 +20,8 @@ workspace = true
 async-channel = "2"
 bruhs-models = { workspace = true }
 gpui = { workspace = true }
-gpui-component = { path = "../third_party/gpui-component/crates/ui" }
+gpui-component = { path = "../third_party/gpui-component/crates/component" }
+gpui-base = { path = "../third_party/gpui-component/crates/base" }
 tracing = { workspace = true }
 
 [target.'cfg(target_os = "macos")'.dependencies]
@@ -32,4 +33,4 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
-gpui-component = { path = "../third_party/gpui-component/crates/ui", features = ["test-support"] }
+gpui-component = { path = "../third_party/gpui-component/crates/component", features = ["test-support"] }

@@ -13,8 +13,7 @@ use bruhs_models::{
     RelationshipItemKind, RelationshipProfile,
 };
 use gpui::{
-    point, Bounds, Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext,
-    VisualTestContext,
+    point, Bounds, Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext,
 };
 use gpui_component::zoom::px;
 use std::sync::Arc;
@@ -59,7 +58,7 @@ fn scroll_people_page_to(cx: &mut VisualTestContext, selector: &'static str) {
     let page = cx
         .debug_bounds("desktop-people-page")
         .expect("Missing desktop-people-page");
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: page.center(),
         delta: ScrollDelta::Pixels(point(px(0.0), px(-100_000.0))),
         ..Default::default()

@@ -1,7 +1,7 @@
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_component::resizable::{
     h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
 };
@@ -62,6 +62,7 @@ use bruhs_models::{
     TodaySnapshot, WorkItem, WorkItemPlanning,
 };
 use bruhs_ui::press::on_press_view;
+use bruhs_ui::text_field::TextInput;
 
 mod app_links;
 mod automations_ui;
@@ -648,8 +649,8 @@ pub(crate) fn provider_mark(provider: AgentProvider, _cx: &App) -> AnyElement {
 }
 
 /// Redraw the workspace whenever `input` is edited.
-fn redraw_on_edit(
-    input: &Entity<InputState>,
+fn redraw_on_edit<T: EventEmitter<InputEvent>>(
+    input: &Entity<T>,
     window: &mut Window,
     cx: &mut Context<'_, Workspace>,
 ) -> Subscription {
@@ -1079,7 +1080,7 @@ fn form_text_input(input: Input) -> Input {
         .text_size(px(FORM_INPUT_TEXT_SIZE_PX))
 }
 
-fn form_textarea(input: Input, height_px: f32) -> Input {
+fn form_textarea<E: Styled>(input: E, height_px: f32) -> E {
     input
         .h(px(height_px))
         .px(px(FORM_INPUT_X_PADDING_PX))
@@ -1288,10 +1289,10 @@ pub struct Workspace {
     sidebar_working_section: bool,
     title_instructions: String,
     title_instructions_by_project: BTreeMap<String, String>,
-    title_instructions_input: Entity<InputState>,
+    title_instructions_input: Entity<TextareaState>,
     /// The project whose title instructions Settings shows; empty for none.
     title_project: String,
-    title_project_instructions_input: Entity<InputState>,
+    title_project_instructions_input: Entity<TextareaState>,
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
     keybinding_index: usize,
     keybinding_key_input: Entity<InputState>,
@@ -1395,11 +1396,11 @@ pub struct Workspace {
 
     // Child views
     command_input: Entity<InputState>,
-    capture_input: Entity<InputState>,
+    capture_input: Entity<TextareaState>,
     capture_cancel_focus: FocusHandle,
     capture_submit_focus: FocusHandle,
     knowledge_title_input: Entity<InputState>,
-    knowledge_body_input: Entity<InputState>,
+    knowledge_body_input: Entity<TextareaState>,
     knowledge_tags_input: Entity<InputState>,
     clip_title_input: Entity<InputState>,
     clip_url_input: Entity<InputState>,
@@ -1407,7 +1408,7 @@ pub struct Workspace {
     clip_author_input: Entity<InputState>,
     clip_published_input: Entity<InputState>,
     clip_tags_input: Entity<InputState>,
-    clip_excerpt_input: Entity<InputState>,
+    clip_excerpt_input: Entity<TextareaState>,
     /// The Knowledge library's search.
     knowledge: knowledge_ui::KnowledgeState,
     clip_create_visible: bool,
@@ -1423,8 +1424,8 @@ pub struct Workspace {
     inbox_import_source: InboxSource,
     inbox_sender_input: Entity<InputState>,
     inbox_subject_input: Entity<InputState>,
-    inbox_body_input: Entity<InputState>,
-    inbox_reply_input: Entity<InputState>,
+    inbox_body_input: Entity<TextareaState>,
+    inbox_reply_input: Entity<TextareaState>,
     relationship_company_input: Entity<InputState>,
     relationship_role_input: Entity<InputState>,
     relationship_email_input: Entity<InputState>,
@@ -1447,19 +1448,19 @@ pub struct Workspace {
     life_health: life_ui::HealthForms,
     /// Each finance card's form (web `finance_tab`).
     life_finance: life_ui::FinanceForms,
-    life_csv_input: Entity<InputState>,
+    life_csv_input: Entity<TextareaState>,
     task_create_title_input: Entity<InputState>,
-    task_create_description_input: Entity<InputState>,
+    task_create_description_input: Entity<TextareaState>,
     task_create_due_input: Entity<InputState>,
     task_detail_title_input: Entity<InputState>,
-    task_detail_description_input: Entity<InputState>,
+    task_detail_description_input: Entity<TextareaState>,
     task_detail_due_input: Entity<InputState>,
     task_detail_cycle_input: Entity<InputState>,
     task_detail_waiting_input: Entity<InputState>,
     event_create_title_input: Entity<InputState>,
     event_create_start_input: Entity<InputState>,
     event_create_end_input: Entity<InputState>,
-    event_create_notes_input: Entity<InputState>,
+    event_create_notes_input: Entity<TextareaState>,
     tasks_panel: Entity<TasksPanelView>,
     diff_panel: Entity<DiffPanelView>,
     /// Meetings / people / Google-sync state from bruhs-server.
@@ -2694,6 +2695,7 @@ impl Workspace {
                 // draggable split whose height is remembered.
                 if self.terminal_drawer_open {
                     let split = v_resizable("chat-terminal-split")
+                        .with_handle_appearance(bruhs_ui::resize_handle::handle_appearance())
                         .with_state(&self.terminal_split_state)
                         .child(resizable_panel().child(main))
                         .child(
@@ -3036,6 +3038,9 @@ impl Render for Workspace {
                         .min_h_0()
                         .child(
                             h_resizable("chat-panel-split")
+                                .with_handle_appearance(
+                                    bruhs_ui::resize_handle::handle_appearance(),
+                                )
                                 .with_state(&self.right_panel_split_state)
                                 .child(resizable_panel().child(main_column))
                                 .child(

@@ -1,0 +1,25 @@
+[package]
+name = "mathjax-svg-rs"
+version = "0.4.0"
+edition = "2024"
+repository = "https://github.com/sevenc-nanashi/mathjax-svg-rs"
+license = "MIT"
+description = "Very thin wrapper around MathJax to render TeX to SVG, using QuickJS-ng as the JavaScript engine."
+include = [
+  "src/**/*",
+  "Cargo.toml",
+  "./README.md",
+  "js/dist/*",
+  "!js/node_modules",
+]
+
+[dependencies]
+boa_engine = "0.21.1"
+include-zstd = "0.1.0"
+log = "0.4.29"
+serde_json = "1.0.149"
+
+[dev-dependencies]
+clap = { version = "4.5.51", features = ["derive"] }
+env_logger = "0.11.10"
+resvg = "0.47.0"

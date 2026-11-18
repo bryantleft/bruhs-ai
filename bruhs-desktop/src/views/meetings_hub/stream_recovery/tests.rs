@@ -1,5 +1,5 @@
 use super::*;
-use gpui::{AppContext, TestAppContext};
+use gpui::TestAppContext;
 mod support;
 use support::*;
 

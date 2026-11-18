@@ -838,7 +838,7 @@ impl Workspace {
                                     })
                                     .child(
                                         form_textarea(
-                                            Input::new(&self.task_detail_description_input),
+                                            Textarea::new(&self.task_detail_description_input),
                                             FORM_FIVE_ROW_TEXTAREA_HEIGHT_PX,
                                         )
                                         .aria_label("Task description"),
@@ -1363,7 +1363,7 @@ impl Workspace {
                     .child(self.task_create_field_label("Description"))
                     .child(
                         form_textarea(
-                            Input::new(&self.task_create_description_input),
+                            Textarea::new(&self.task_create_description_input),
                             FORM_THREE_ROW_TEXTAREA_HEIGHT_PX,
                         )
                         .aria_label("Task description"),
@@ -1551,10 +1551,10 @@ impl Workspace {
 /// The new-task dialog and task-detail fields.
 pub(super) struct TaskFormInputs {
     pub(super) task_create_title_input: Entity<InputState>,
-    pub(super) task_create_description_input: Entity<InputState>,
+    pub(super) task_create_description_input: Entity<TextareaState>,
     pub(super) task_create_due_input: Entity<InputState>,
     pub(super) task_detail_title_input: Entity<InputState>,
-    pub(super) task_detail_description_input: Entity<InputState>,
+    pub(super) task_detail_description_input: Entity<TextareaState>,
     pub(super) task_detail_due_input: Entity<InputState>,
     pub(super) task_detail_cycle_input: Entity<InputState>,
     pub(super) task_detail_waiting_input: Entity<InputState>,
@@ -1584,9 +1584,8 @@ impl Workspace {
             },
         ));
         let task_create_description_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder(TASK_CREATE_DESCRIPTION_PLACEHOLDER)
-                .multi_line(true)
                 .rows(TASK_CREATE_DESCRIPTION_ROWS)
         });
         subscriptions.push(redraw_on_edit(&task_create_description_input, window, cx));
@@ -1606,9 +1605,8 @@ impl Workspace {
             },
         ));
         let task_detail_description_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder(TASK_DETAIL_DESCRIPTION_PLACEHOLDER)
-                .multi_line(true)
                 .rows(TASK_DETAIL_DESCRIPTION_ROWS)
         });
         subscriptions.push(cx.subscribe_in(

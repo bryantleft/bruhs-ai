@@ -545,7 +545,7 @@ fn ObservationsByKind(observations: Vec<PersonObservation>) -> impl IntoView {
         };
         by_kind.entry(key).or_default().push(obs);
     }
-    for (_k, v) in by_kind.iter_mut() {
+    for v in by_kind.values_mut() {
         v.sort_by_key(|o| Reverse(o.created_at));
     }
     let buckets: Vec<(&'static str, Vec<PersonObservation>)> = by_kind.into_iter().collect();

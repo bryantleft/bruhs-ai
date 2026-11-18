@@ -468,7 +468,7 @@ fn the_csv_box_is_web_height(cx: &mut gpui::TestAppContext) {
 
 /// A full key press. GPUI clicks a focused control on key up, which
 /// `simulate_keystrokes` never sends.
-fn press_key(cx: &mut VisualTestContext, key: &str) {
+fn press_key(cx: &mut VisualTestContext, key: &'static str) {
     let keystroke = gpui::Keystroke::parse(key).expect("test keystroke should parse");
     cx.simulate_event(gpui::KeyDownEvent {
         keystroke: keystroke.clone(),

@@ -24,7 +24,7 @@ use bruhs_models::crew::{
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use bruhs_ui::press::on_press_view;
-use bruhs_ui::{press::Interactivity, switch::switch};
+use bruhs_ui::{press::Interactivity, switch::switch, text_field::TextInput};
 use gpui_component::scroll::{ScrollableElement, Scrollbar};
 use std::cell::Cell;
 
@@ -155,7 +155,7 @@ struct SettingsForm {
     /// What the form was last filled from.
     shown: BruhSettings,
     name: Entity<InputState>,
-    job: Entity<InputState>,
+    job: Entity<TextareaState>,
     model: Entity<InputState>,
     effort: Option<String>,
     effort_open: bool,
@@ -173,21 +173,17 @@ impl SettingsForm {
         window: &mut Window,
         cx: &mut Context<'_, ReactiveAutomations>,
     ) -> Self {
-        let name = edit_input(&settings.name, false, window, cx);
-        let job = edit_input(&settings.instructions, true, window, cx);
-        let model = edit_input(&settings.model, false, window, cx);
-        let redraw = |_: &mut ReactiveAutomations,
-                      _: &Entity<InputState>,
-                      event: &InputEvent,
-                      _: &mut Window,
-                      cx: &mut Context<'_, ReactiveAutomations>| {
+        let name = edit_input(&settings.name, window, cx);
+        let job = edit_area(&settings.instructions, window, cx);
+        let model = edit_input(&settings.model, window, cx);
+        let redraw = |event: &InputEvent, cx: &mut Context<'_, ReactiveAutomations>| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
             }
         };
         let subscriptions = vec![
-            cx.subscribe_in(&name, window, redraw),
-            cx.subscribe_in(&job, window, redraw),
+            cx.subscribe_in(&name, window, move |_, _, event, _, cx| redraw(event, cx)),
+            cx.subscribe_in(&job, window, move |_, _, event, _, cx| redraw(event, cx)),
             // The model is committed when the field loses focus: a model
             // that can't run the chosen level drops it to Read only, which
             // the service would otherwise refuse.
@@ -238,13 +234,14 @@ impl SettingsForm {
     }
 
     fn fill(&mut self, settings: &BruhSettings, window: &mut Window, cx: &mut App) {
-        for (input, text) in [
+        let fields: [(&dyn TextInput, &String); 3] = [
             (&self.name, &settings.name),
             (&self.job, &settings.instructions),
             (&self.model, &settings.model),
-        ] {
-            if value(input, cx) != *text {
-                input.update(cx, |input, cx| input.set_value(text, window, cx));
+        ];
+        for (input, text) in fields {
+            if *input.text_value(cx) != **text {
+                input.set_text_value(text.clone().into(), window, cx);
             }
         }
         self.effort.clone_from(&settings.effort);
@@ -268,7 +265,7 @@ impl SettingsForm {
 pub(super) struct BruhPage {
     agent_id: String,
     tab: BruhTab,
-    message: Option<Entity<InputState>>,
+    message: Option<Entity<TextareaState>>,
     runs: RunsPage,
     runs_requested: bool,
     runs_revision: u64,
@@ -276,7 +273,7 @@ pub(super) struct BruhPage {
     newest_request: Option<Task<()>>,
     earlier_request: Option<Task<()>>,
     /// Reply fields of open question cards, by outbox id.
-    replies: HashMap<String, (Entity<InputState>, gpui::Subscription)>,
+    replies: HashMap<String, (Entity<TextareaState>, gpui::Subscription)>,
     settings: Option<SettingsForm>,
     scroll: ScrollHandle,
     /// The last transcript line drawn; a new one scrolls into view.
@@ -629,8 +626,7 @@ impl ReactiveAutomations {
         page.built_for = Some(stamp);
         if page.message.is_none() {
             let message = cx.new(|cx| {
-                InputState::new(window, cx)
-                    .multi_line(true)
+                TextareaState::new(window, cx)
                     .submit_on_enter(true)
                     .placeholder("Message")
             });
@@ -668,7 +664,7 @@ impl ReactiveAutomations {
         });
         for item in outbox.iter().filter(|item| open_question(item, &agent_id)) {
             if !page.replies.contains_key(&item.id) {
-                let input = cx.new(|cx| InputState::new(window, cx).multi_line(true));
+                let input = cx.new(|cx| TextareaState::new(window, cx));
                 let watch = cx.subscribe_in(&input, window, |_, _, event: &InputEvent, _, cx| {
                     if matches!(event, InputEvent::Change) {
                         cx.notify();
@@ -1205,7 +1201,7 @@ impl ReactiveAutomations {
                                 .min_w_0()
                                 .flex_1()
                                 .child(
-                                    Input::new(message)
+                                    Textarea::new(message)
                                         .aria_label("Message")
                                         .disabled(blocked.is_some())
                                         .h(px(TWO_ROWS_PX))
@@ -1551,7 +1547,7 @@ impl ReactiveAutomations {
         let empty = value(input, cx).trim().is_empty();
         let id = item.id.clone();
         card.child(
-            Input::new(input)
+            Textarea::new(input)
                 .aria_label(format!("Reply to {}", item.title))
                 .h(px(TWO_ROWS_PX))
                 .px(px(FIELD_X_PADDING_PX))
@@ -1640,7 +1636,7 @@ impl ReactiveAutomations {
             ))
             .child(labelled(
                 "Job",
-                Input::new(&form.job)
+                Textarea::new(&form.job)
                     .aria_label("Job")
                     .h(px(FIVE_ROWS_PX))
                     .px(px(FIELD_X_PADDING_PX))
@@ -2328,7 +2324,7 @@ mod tests {
             editor
                 .source_mut()
                 .value
-                .update(cx, |input, cx| input.set_value("/tmp/scans", window, cx));
+                .set_value("/tmp/scans", window, cx);
             panel.review_automation(cx);
             let Some(Editor::Automation(editor)) = &panel.editor else {
                 panic!("automation editor");

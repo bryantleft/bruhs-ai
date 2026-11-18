@@ -95,7 +95,8 @@ pub fn life_record_detail(
                         ),
                     ],
                 )
-            } else if let Some(r) = finance.holdings.iter().find(|r| &r.id == id) {
+            } else {
+                let r = finance.holdings.iter().find(|r| &r.id == id)?;
                 (
                     r.symbol.clone(),
                     "Holding",
@@ -117,8 +118,6 @@ pub fn life_record_detail(
                         ("Updated", date(r.updated_at_ms)),
                     ],
                 )
-            } else {
-                return None;
             }
         }
         LifeSection::Health => {
@@ -161,7 +160,8 @@ pub fn life_record_detail(
                         ("Note", optional(r.note.as_deref())),
                     ],
                 )
-            } else if let Some(r) = health.habits.iter().find(|r| &r.id == id) {
+            } else {
+                let r = health.habits.iter().find(|r| &r.id == id)?;
                 (
                     r.title.clone(),
                     "Habit",
@@ -177,8 +177,6 @@ pub fn life_record_detail(
                         ),
                     ],
                 )
-            } else {
-                return None;
             }
         }
     };

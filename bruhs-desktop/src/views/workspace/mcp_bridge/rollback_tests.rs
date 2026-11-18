@@ -33,7 +33,7 @@ async fn click(workspace: &Entity<Workspace>, cx: &mut VisualTestContext, select
         cx.update(|window, _| gpui::Bounds::new(gpui::Point::default(), window.viewport_size()));
     if !viewport.contains(&bounds.center()) {
         // A pending undo review can push the final action below the fold.
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position: gpui::point(bounds.center().x, viewport.bottom() - gpui::px(64.0)),
             delta: gpui::ScrollDelta::Pixels(gpui::point(
                 gpui::px(0.0),

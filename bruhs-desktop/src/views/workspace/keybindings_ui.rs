@@ -9,8 +9,9 @@
 
 use gpui::prelude::*;
 use gpui::{
-    div, Action, AnyElement, App, Context, Entity, Focusable, KeyBinding, Keystroke,
-    KeystrokeEvent, Role, SharedString, Subscription, Unbind, WeakEntity, Window,
+    div, Action, AnyElement, App, Context, Entity, Focusable, KeyBinding,
+    KeyBindingContextPredicate, Keystroke, KeystrokeEvent, OperatingSystem, Role, SharedString,
+    Subscription, Unbind, WeakEntity, Window,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::zoom::px;
@@ -281,14 +282,15 @@ impl Workspace {
     pub(super) fn sync_keybindings(&mut self, cx: &mut Context<'_, Self>) {
         let mut remove = Vec::new();
         for installed in &self.keybinding_installed {
-            if Keystroke::parse(&installed.shortcut).is_err() {
+            if !parses(&installed.shortcut) {
                 continue;
             }
-            remove.push(KeyBinding::new(
-                &installed.shortcut,
-                Unbind(installed.action.into()),
-                None,
-            ));
+            let unbind = Box::new(Unbind(installed.action.into()));
+            if let Ok(binding) =
+                KeyBinding::load(&installed.shortcut, unbind, None, false, None, cx)
+            {
+                remove.push(binding);
+            }
         }
         if !remove.is_empty() {
             cx.bind_keys(remove);
@@ -298,6 +300,10 @@ impl Workspace {
         for rule in &self.keybindings {
             push_rule_bindings(rule, &mut add, &mut installed);
         }
+        let add: Vec<KeyBinding> = add
+            .into_iter()
+            .filter_map(|pending| pending.load(cx))
+            .collect();
         if !add.is_empty() {
             cx.bind_keys(add);
         }
@@ -708,13 +714,13 @@ fn plain_text_key(event: &KeystrokeEvent) -> bool {
 
 fn push_rule_bindings(
     rule: &Keybinding,
-    add: &mut Vec<KeyBinding>,
+    add: &mut Vec<PendingBinding>,
     installed: &mut Vec<InstalledBinding>,
 ) {
     let Some(shortcut) = gpui_shortcut(&rule.key) else {
         return;
     };
-    if Keystroke::parse(&shortcut).is_err() {
+    if !parses(&shortcut) {
         return;
     }
     let names = binding_names(&rule.command);
@@ -830,12 +836,46 @@ fn push_rule_bindings(
     }
 }
 
+/// A user shortcut, kept as text until a context can load it: gpui only
+/// parses `&'static str` shortcuts without one.
+struct PendingBinding {
+    shortcut: String,
+    action: Box<dyn Action>,
+    context: Option<String>,
+}
+
+impl PendingBinding {
+    fn load(self, cx: &App) -> Option<KeyBinding> {
+        let context = match self.context.as_deref() {
+            Some(context) => Some(KeyBindingContextPredicate::parse(context).ok()?.into()),
+            None => None,
+        };
+        KeyBinding::load(&self.shortcut, self.action, context, false, None, cx).ok()
+    }
+}
+
+/// The host OS, which resolves `secondary-` in a shortcut.
+fn host_os() -> OperatingSystem {
+    if cfg!(target_os = "macos") {
+        OperatingSystem::Mac
+    } else if cfg!(target_os = "windows") {
+        OperatingSystem::Windows
+    } else {
+        OperatingSystem::Linux
+    }
+}
+
+/// Whether `shortcut` is a keystroke gpui accepts.
+fn parses(shortcut: &str) -> bool {
+    Keystroke::parse_with_os(shortcut, host_os()).is_ok()
+}
+
 fn bind(
     shortcut: &str,
     action: impl Action,
     name: &'static str,
     context: Option<&str>,
-    add: &mut Vec<KeyBinding>,
+    add: &mut Vec<PendingBinding>,
     installed: &mut Vec<InstalledBinding>,
 ) {
     bind_action(shortcut, action, name, context, add, installed);
@@ -846,10 +886,14 @@ fn bind_action(
     action: impl Action,
     name: &'static str,
     context: Option<&str>,
-    add: &mut Vec<KeyBinding>,
+    add: &mut Vec<PendingBinding>,
     installed: &mut Vec<InstalledBinding>,
 ) {
-    add.push(KeyBinding::new(shortcut, action, context));
+    add.push(PendingBinding {
+        shortcut: shortcut.to_string(),
+        action: Box::new(action),
+        context: context.map(str::to_string),
+    });
     installed.push(InstalledBinding {
         shortcut: shortcut.to_string(),
         action: name,
@@ -866,7 +910,7 @@ mod tests {
     use crate::views::diff_panel::FindInDiff;
     use ::core::prelude::v1::test;
     use bruhs_models::logic::keybindings::{default_keybindings, gpui_shortcut};
-    use gpui::{Action, Keystroke};
+    use gpui::Action;
 
     #[test]
     fn every_default_command_is_bound_or_is_sidebar_undo() {
@@ -888,11 +932,7 @@ mod tests {
                 continue;
             }
             let shortcut = gpui_shortcut(&rule.key).unwrap_or_else(|| panic!("{}", rule.key));
-            assert!(
-                Keystroke::parse(&shortcut).is_ok(),
-                "{shortcut} from {}",
-                rule.key
-            );
+            assert!(super::parses(&shortcut), "{shortcut} from {}", rule.key);
         }
     }
 

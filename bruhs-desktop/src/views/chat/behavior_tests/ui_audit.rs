@@ -1,7 +1,7 @@
 use super::chat_window;
 use crate::views::chat::{DesktopMentionItem, DesktopPermissionRequest};
 use gpui::{
-    point, size, ScrollDelta, ScrollHandle, ScrollWheelEvent, TestAppContext, VisualTestContext,
+    point, size, ScrollDelta, ScrollEvent, ScrollHandle, TestAppContext, VisualTestContext,
 };
 use gpui_component::zoom::px;
 use serde_json::json;
@@ -49,7 +49,7 @@ fn assert_model_picker_clear_of_chrome(cx: &mut VisualTestContext, width: f32) {
 
 fn scroll_options_to_lower_actions(cx: &mut VisualTestContext) {
     let panel = cx.debug_bounds("desktop-composer-options-panel").unwrap();
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: panel.center(),
         delta: ScrollDelta::Pixels(point(px(0.0), -panel.size.height)),
         ..Default::default()
@@ -98,7 +98,7 @@ fn model_picker_fits_a_short_window_and_reveals_keyboard_selection(cx: &mut Test
         assert!(chat.model_picker_scroll.offset().y < px(0.0));
     });
     let offset = chat.read_with(cx, |chat, _| chat.model_picker_scroll.offset().y);
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: list.center(),
         delta: ScrollDelta::Pixels(point(px(0.0), list.size.height)),
         ..Default::default()
@@ -374,7 +374,7 @@ fn permission_review_keeps_full_arguments_and_actions_in_a_short_window(cx: &mut
     assert!(review.size.height <= px(120.0));
     let content = cx.debug_bounds("desktop-permission-input-content").unwrap();
     assert!(content.bottom() > review.bottom());
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: review.center(),
         delta: ScrollDelta::Pixels(point(px(0.0), -content.size.height)),
         ..Default::default()
@@ -689,7 +689,7 @@ fn scroll_to_end_is_a_centered_pill_like_the_web(cx: &mut TestAppContext) {
     cx.run_until_parked();
     assert!(cx.debug_bounds("desktop-scroll-to-bottom").is_none());
 
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: point(px(450.0), px(250.0)),
         delta: ScrollDelta::Pixels(point(px(0.0), px(4_000.0))),
         ..Default::default()

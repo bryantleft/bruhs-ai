@@ -327,7 +327,7 @@ pub(super) const TASK_CARD_TITLE_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const TASK_CARD_DUE_TEXT_SIZE_PX: f32 = 12.0;
 
 pub(super) fn set_task_detail_inputs(
-    inputs: [&Entity<InputState>; 5],
+    inputs: [&dyn TextInput; 5],
     item: &DesktopWorkItem,
     window: &mut Window,
     cx: &mut Context<'_, Workspace>,
@@ -341,7 +341,7 @@ pub(super) fn set_task_detail_inputs(
     ];
 
     for (input, value) in inputs.into_iter().zip(values) {
-        input.update(cx, |input, cx| input.set_value(value, window, cx));
+        input.set_text_value(value.into(), window, cx);
     }
 }
 

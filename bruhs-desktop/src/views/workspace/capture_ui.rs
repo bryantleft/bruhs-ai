@@ -290,8 +290,11 @@ impl Workspace {
                             .child(selected.label()),
                     )
                     .child(
-                        form_textarea(Input::new(&self.capture_input), CAPTURE_TEXTAREA_HEIGHT_PX)
-                            .aria_label("Capture text"),
+                        form_textarea(
+                            Textarea::new(&self.capture_input),
+                            CAPTURE_TEXTAREA_HEIGHT_PX,
+                        )
+                        .aria_label("Capture text"),
                     )
                     .when_some(self.capture_error.clone(), |element, error| {
                         element.child(
@@ -375,11 +378,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
-    ) -> Entity<InputState> {
+    ) -> Entity<TextareaState> {
         let capture_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder(CaptureKind::Task.placeholder())
-                .multi_line(true)
                 .rows(5)
         });
         subscriptions.push(cx.subscribe_in(

@@ -148,9 +148,9 @@ impl ReactiveAutomations {
             system_notify: base.system_notify,
             system_ask: base.system_ask,
             quiet: base.quiet_hours.is_some(),
-            start: edit_input(&start, false, window, cx),
-            end: edit_input(&end, false, window, cx),
-            time_zone: edit_input(&time_zone, false, window, cx),
+            start: edit_input(&start, window, cx),
+            end: edit_input(&end, window, cx),
+            time_zone: edit_input(&time_zone, window, cx),
             base,
         });
     }

@@ -113,6 +113,7 @@ impl BoardPainter {
                     );
                     if let Err(error) = window.paint_image(
                         Bounds::from_corners(a, b),
+                        Bounds::from_corners(a, b),
                         Corners::default(),
                         layer.image.clone(),
                         0,
@@ -150,6 +151,7 @@ impl BoardPainter {
                                 area.origin,
                             );
                             if let Err(error) = window.paint_image(
+                                Bounds::from_corners(a, b),
                                 Bounds::from_corners(a, b),
                                 Corners::default(),
                                 image.clone(),

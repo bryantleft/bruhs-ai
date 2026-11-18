@@ -3,7 +3,7 @@ use super::*;
 use bruhs_models::num::ToIntSaturating;
 use bruhs_models::TranscriptSegment;
 use bruhs_ui::press::on_press_view;
-use gpui_component::scroll::{Scrollbar, ScrollbarShow};
+use gpui_component::scroll::{Scrollbar, ScrollbarMode};
 use gpui_component::zoom::px;
 
 pub(super) const LIVE_ROW_OFFSET: usize = bruhs_models::MAX_TRANSCRIPT_SEGMENTS + 1;
@@ -356,7 +356,7 @@ impl Workspace {
         };
         let state = TranscriptViewport::prepare(slot, meeting_id, count, detail, cx);
         let keyboard = state.clone();
-        let scrollbar = Scrollbar::vertical(&state).scrollbar_show(ScrollbarShow::Hover);
+        let scrollbar = Scrollbar::vertical(&state).mode(ScrollbarMode::Hover);
         let id = meeting_id.to_owned();
         let rows = list(
             state,

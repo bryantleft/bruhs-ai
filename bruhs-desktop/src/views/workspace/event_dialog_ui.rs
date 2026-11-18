@@ -637,7 +637,7 @@ impl Workspace {
                     .child(self.event_create_field_label("Notes"))
                     .child(
                         form_textarea(
-                            Input::new(&self.event_create_notes_input).disabled(read_only),
+                            Textarea::new(&self.event_create_notes_input).disabled(read_only),
                             FORM_THREE_ROW_TEXTAREA_HEIGHT_PX,
                         )
                         .aria_label("Event notes"),
@@ -882,7 +882,7 @@ pub(super) struct EventFormInputs {
     pub(super) event_create_title_input: Entity<InputState>,
     pub(super) event_create_start_input: Entity<InputState>,
     pub(super) event_create_end_input: Entity<InputState>,
-    pub(super) event_create_notes_input: Entity<InputState>,
+    pub(super) event_create_notes_input: Entity<TextareaState>,
 }
 
 impl Workspace {
@@ -899,9 +899,8 @@ impl Workspace {
         let event_create_end_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(EVENT_DATETIME_PLACEHOLDER));
         let event_create_notes_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder(EVENT_NOTES_PLACEHOLDER)
-                .multi_line(true)
                 .rows(EVENT_NOTES_ROWS)
         });
         subscriptions.push(cx.subscribe_in(

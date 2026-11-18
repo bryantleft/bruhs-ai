@@ -329,7 +329,9 @@ fn unhex(value: &str) -> Option<Vec<u8>> {
     }
     value
         .as_bytes()
-        .chunks_exact(2)
+        .as_chunks::<2>()
+        .0
+        .iter()
         .map(|b| {
             u8::try_from(char::from(b[0]).to_digit(16)? * 16 + char::from(b[1]).to_digit(16)?).ok()
         })

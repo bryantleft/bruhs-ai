@@ -33,7 +33,7 @@ pub(super) const ERROR_FILL_OPACITY: f32 = 0.10;
 /// The dialog's state while it is open.
 pub(super) struct CreateBruh {
     name: Entity<InputState>,
-    job: Entity<InputState>,
+    job: Entity<TextareaState>,
     folder: Entity<InputState>,
     roles: Vec<ResolvedRole>,
     role: String,
@@ -112,19 +112,12 @@ impl ReactiveAutomations {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let input = |placeholder: &'static str,
-                     multiline: bool,
-                     window: &mut Window,
-                     cx: &mut Context<'_, Self>| {
-            cx.new(|cx| {
-                InputState::new(window, cx)
-                    .multi_line(multiline)
-                    .placeholder(placeholder)
-            })
+        let input = |placeholder: &'static str, window: &mut Window, cx: &mut Context<'_, Self>| {
+            cx.new(|cx| InputState::new(window, cx).placeholder(placeholder))
         };
-        let name = input("", false, window, cx);
-        let job = input("What this bruh does", true, window, cx);
-        let folder = input("Optional", false, window, cx);
+        let name = input("", window, cx);
+        let job = cx.new(|cx| TextareaState::new(window, cx).placeholder("What this bruh does"));
+        let folder = input("Optional", window, cx);
         // Enter in a one-line field creates, like the web form's submit.
         let submit = |this: &mut Self,
                       _: &Entity<InputState>,
@@ -407,7 +400,7 @@ impl ReactiveAutomations {
                 ))
                 .child(labelled(
                     "Job",
-                    Input::new(&create.job)
+                    Textarea::new(&create.job)
                         .aria_label("Job")
                         .disabled(disabled)
                         .h(px(JOB_FIELD_PX))

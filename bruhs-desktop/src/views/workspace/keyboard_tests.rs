@@ -46,7 +46,7 @@ fn open(
 }
 
 /// A key press as the app gets it: gpui clicks a focused button on key up.
-fn press(cx: &mut VisualTestContext, key: &str) {
+fn press(cx: &mut VisualTestContext, key: &'static str) {
     let keystroke = gpui::Keystroke::parse(key).expect("keystroke");
     cx.simulate_event(gpui::KeyDownEvent {
         keystroke: keystroke.clone(),

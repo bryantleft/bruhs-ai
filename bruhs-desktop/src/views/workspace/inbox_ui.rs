@@ -2,8 +2,6 @@
 //! triage semantics as the web surface.
 
 use bruhs_models::{InboxCard, InboxDirectory, InboxFilter, INBOX_PAGE_SIZE};
-use gpui::prelude::*;
-use gpui::*;
 use gpui_component::input::{Input, InputEvent};
 use gpui_component::zoom::px;
 
@@ -49,12 +47,13 @@ impl Workspace {
     }
 
     pub(super) fn start_inbox_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        for input in [
+        let inputs: [&dyn TextInput; 3] = [
             &self.inbox_sender_input,
             &self.inbox_subject_input,
             &self.inbox_body_input,
-        ] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
+        ];
+        for input in inputs {
+            input.set_text_value("".into(), window, cx);
         }
         self.active_view = AppView::Inbox;
         self.inbox_import_visible = true;
@@ -665,7 +664,8 @@ impl Workspace {
                                     .aria_label("Conversation subject"),
                             )
                             .child(
-                                Input::new(&self.inbox_body_input).aria_label("Message, required"),
+                                Textarea::new(&self.inbox_body_input)
+                                    .aria_label("Message, required"),
                             )
                             .when_some(self.persistence_error.clone(), |element, error| {
                                 element.child(
@@ -1000,7 +1000,7 @@ impl Workspace {
                                 div()
                                     .debug_selector(|| "desktop-inbox-reply-box".to_string())
                                     .child(
-                                        Input::new(&self.inbox_reply_input)
+                                        Textarea::new(&self.inbox_reply_input)
                                             .h(px(REPLY_BOX_HEIGHT_PX))
                                             .aria_label("Reply draft"),
                                     ),
@@ -1153,8 +1153,8 @@ pub(super) struct InboxInputs {
     pub(super) inbox_search_input: Entity<InputState>,
     pub(super) inbox_sender_input: Entity<InputState>,
     pub(super) inbox_subject_input: Entity<InputState>,
-    pub(super) inbox_body_input: Entity<InputState>,
-    pub(super) inbox_reply_input: Entity<InputState>,
+    pub(super) inbox_body_input: Entity<TextareaState>,
+    pub(super) inbox_reply_input: Entity<TextareaState>,
 }
 
 impl Workspace {
@@ -1184,16 +1184,14 @@ impl Workspace {
             cx.new(|cx| InputState::new(window, cx).placeholder("Subject (optional)"));
         subscriptions.push(redraw_on_edit(&inbox_subject_input, window, cx));
         let inbox_body_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder("Paste the message…")
-                .multi_line(true)
                 .rows(8)
         });
         subscriptions.push(redraw_on_edit(&inbox_body_input, window, cx));
         let inbox_reply_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder("Write a reply…")
-                .multi_line(true)
                 .rows(4)
         });
         subscriptions.push(redraw_on_edit(&inbox_reply_input, window, cx));

@@ -196,7 +196,9 @@ unsafe fn f32_samples<'a>(data: *const u8, byte_len: usize) -> Cow<'a, [f32]> {
         let bytes = unsafe { std::slice::from_raw_parts(data, count * SIZE) };
         Cow::Owned(
             bytes
-                .chunks_exact(SIZE)
+                .as_chunks::<SIZE>()
+                .0
+                .iter()
                 .map(|b| f32::from_ne_bytes([b[0], b[1], b[2], b[3]]))
                 .collect(),
         )

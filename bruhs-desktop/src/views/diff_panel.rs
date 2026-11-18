@@ -1770,7 +1770,7 @@ mod tests {
 
     #[gpui::test]
     fn unwrapped_diff_lines_remain_horizontally_scrollable(cx: &mut gpui::TestAppContext) {
-        use gpui::{point, px, size, Modifiers, ScrollDelta, ScrollWheelEvent, TouchPhase};
+        use gpui::{point, px, size, Modifiers, ScrollDelta, ScrollEvent, TouchPhase};
         cx.update(|cx| {
             gpui_component::init(cx);
             crate::theme::apply_bruhs_theme(cx);
@@ -1806,11 +1806,12 @@ mod tests {
             before.size.width > px(640.0),
             "the complete line must retain its width"
         );
-        cx.simulate_event(ScrollWheelEvent {
+        cx.simulate_event(ScrollEvent {
             position: point(px(320.0), before.center().y),
             delta: ScrollDelta::Pixels(point(px(-1000.0), px(0.0))),
             modifiers: Modifiers::default(),
             touch_phase: TouchPhase::Moved,
+            source: gpui::ScrollSource::Pointer,
         });
         cx.run_until_parked();
         let after = cx.debug_bounds(selector).expect("scrolled diff body");

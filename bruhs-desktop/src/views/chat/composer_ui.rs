@@ -8,7 +8,7 @@
 
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::Input;
+use gpui_component::input::{Input, Textarea};
 use gpui_component::scroll::ScrollableElement as _;
 use gpui_component::tooltip::Tooltip;
 use gpui_component::zoom::px;
@@ -1094,12 +1094,11 @@ impl ChatView {
                 }
             }))
             .child(
-                Input::new(&self.input_state)
+                Textarea::new(&self.input_state)
                     .aria_label("Message")
                     .appearance(false)
                     .bordered(false)
                     .focus_bordered(false)
-                    .cleanable(false)
                     .font_family(theme::CODE_FONT_FAMILY)
                     .text_size(px(theme::APP_INPUT_TEXT_SIZE_PX))
                     .disabled(
