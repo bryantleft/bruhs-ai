@@ -10,8 +10,9 @@ use bruhs_models::{
     crew::{
         room::{
             check_room, handoff_failed_line, handoff_stopped_line, left_line, recipients,
-            room_next_hop, room_order, room_prompt, skipped_line, stopped_line, Room, RoomAuthor,
-            RoomMember, RoomMessage, RoomState, FORMER_BRUH, ROOM_CONTEXT_MESSAGES,
+            room_next_hop, room_order, room_prompt, room_reply_text, skipped_line, stopped_line,
+            Room, RoomAuthor, RoomMember, RoomMessage, RoomState, FORMER_BRUH,
+            ROOM_CONTEXT_MESSAGES,
         },
         BruhStatus, STOPPED_LINE,
     },
@@ -431,7 +432,7 @@ pub(in crate::reactive) fn on_run_saved(
         agent_id: run.agent_id.clone(),
     };
     let (author, text, failed) = match run.status {
-        RunStatus::Completed => (me(), reply_text(run), false),
+        RunStatus::Completed => (me(), room_reply_text(run), false),
         RunStatus::Failed | RunStatus::Interrupted => (me(), failure_text(run), true),
         RunStatus::Cancelled => {
             // However it was cancelled, a late answer must not resume it.
@@ -503,21 +504,6 @@ pub(in crate::reactive) fn on_run_saved(
 
 fn said(text: &str) -> Option<String> {
     (!text.trim().is_empty()).then(|| text.to_owned())
-}
-
-/// What a finished room run says: its reply or, when it wrote none, what its
-/// report tells the owner (a room run's update gets no card of its own).
-fn reply_text(run: &ReactiveRun) -> String {
-    run.result
-        .as_deref()
-        .and_then(said)
-        .or_else(|| {
-            run.report
-                .as_ref()
-                .filter(|report| report.outcome != RunOutcome::Silent)
-                .and_then(|report| said(&report.message).or_else(|| said(&report.title)))
-        })
-        .unwrap_or_else(|| STOPPED_LINE.to_owned())
 }
 
 /// The run wrote no reply, only a question, and the room already shows that

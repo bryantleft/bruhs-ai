@@ -4,7 +4,8 @@
 
 use serde::{Deserialize, Serialize};
 
-use super::BruhStatus;
+use super::{BruhStatus, STOPPED_LINE};
+use crate::reactive::{OutboxItem, OutboxKind, ReactiveRun, RunOutcome};
 use crate::thread_link::{self, MAX_HOPS, MAX_TITLE_CHARS};
 use crate::EpochMs;
 
@@ -347,6 +348,42 @@ pub fn check_room(room: &Room, eligible: &[&str]) -> Result<(), &'static str> {
         return Err("The lead must be a member.");
     }
     Ok(())
+}
+
+fn said(text: &str) -> Option<&str> {
+    (!text.trim().is_empty()).then_some(text)
+}
+
+/// What a finished room run says in the room: its reply or, when it wrote
+/// none, what its report tells the owner (a room run's update gets no card
+/// of its own), else [`STOPPED_LINE`].
+#[must_use]
+pub fn room_reply_text(run: &ReactiveRun) -> String {
+    run.result
+        .as_deref()
+        .and_then(said)
+        .or_else(|| {
+            run.report
+                .as_ref()
+                .filter(|report| report.outcome != RunOutcome::Silent)
+                .and_then(|report| said(&report.message).or_else(|| said(&report.title)))
+        })
+        .unwrap_or(STOPPED_LINE)
+        .to_owned()
+}
+
+/// A finished room run that wrote no reply, only a question `outbox` shows
+/// as its card: the room and the bruh's chat show the card and no line.
+#[must_use]
+pub fn asked_only(run: &ReactiveRun, outbox: &[OutboxItem]) -> bool {
+    run.result.as_deref().and_then(said).is_none()
+        && run
+            .report
+            .as_ref()
+            .is_some_and(|report| report.outcome == RunOutcome::Ask)
+        && outbox
+            .iter()
+            .any(|item| item.run_id == run.id && item.kind == OutboxKind::Ask)
 }
 
 /// A member that was not given a message because of its status.

@@ -121,7 +121,18 @@ pub fn transcript(
             });
             continue;
         }
+        let room_reply = run.status == RunStatus::Completed
+            && run.trigger.as_ref().and_then(RunTrigger::room_id).is_some()
+            && run
+                .result
+                .as_deref()
+                .is_none_or(|text| text.trim().is_empty());
+        if room_reply && super::room::asked_only(run, outbox) {
+            continue;
+        }
         let (text, failed) = match (&run.result, &run.error) {
+            // A room run that wrote no reply says what the room shows.
+            _ if room_reply => (super::room::room_reply_text(run), false),
             (Some(result), _) => (result.clone(), false),
             (None, Some(error))
                 if matches!(run.status, RunStatus::Failed | RunStatus::Interrupted) =>
@@ -472,6 +483,78 @@ mod tests {
                 ("c2", STOPPED_LINE, false),
                 ("e2", "Access changed.", false),
             ]
+        );
+    }
+
+    #[test]
+    fn a_room_run_without_a_reply_reads_as_what_the_room_shows() {
+        use crate::reactive::{RunOutcome, RunReport};
+        let room = |id: &str, result: Option<&str>, report: Option<(RunOutcome, &str, &str)>| {
+            let mut r = run(id, "a", "completed", 1, 2);
+            r.trigger = Some(RunTrigger::Room {
+                room_id: "room".into(),
+                message_id: "m".into(),
+                hop: 0,
+                resumed: false,
+            });
+            r.result = result.map(str::to_string);
+            r.report = report.map(|(outcome, title, message)| RunReport {
+                outcome,
+                title: title.into(),
+                message: message.into(),
+                ..RunReport::default()
+            });
+            r
+        };
+        let runs = [
+            room(
+                "n",
+                Some(""),
+                Some((RunOutcome::Notify, "Hi", "Hello back.")),
+            ),
+            room(
+                "t",
+                Some("  "),
+                Some((RunOutcome::Notify, "Only a title", "")),
+            ),
+            room("s", Some(""), None),
+            room(
+                "x",
+                None,
+                Some((RunOutcome::Silent, "Quiet", "Nothing to say.")),
+            ),
+            room(
+                "q",
+                Some(""),
+                Some((RunOutcome::Ask, "Which?", "Work or personal?")),
+            ),
+            room(
+                "r",
+                Some("Done."),
+                Some((RunOutcome::Notify, "Hi", "Hello back.")),
+            ),
+        ];
+        let mut question = item("i1", "a", OutboxKind::Ask, 2);
+        question.run_id = "q".into();
+        let got = transcript("a", &runs, &[question]);
+        let mut lines: Vec<_> = got
+            .iter()
+            .filter_map(|item| match item {
+                TranscriptItem::Bruh { run_id, text, .. } => Some((run_id.as_str(), text.as_str())),
+                _ => None,
+            })
+            .collect();
+        lines.sort_unstable();
+        assert_eq!(
+            lines,
+            vec![
+                ("n", "Hello back."),
+                ("r", "Done."),
+                ("s", STOPPED_LINE),
+                ("t", "Only a title"),
+                ("x", STOPPED_LINE),
+            ],
+            "a question shows as its card only"
         );
     }
 
