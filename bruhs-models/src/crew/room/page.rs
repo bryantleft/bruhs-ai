@@ -1115,7 +1115,7 @@ mod tests {
         // Opening reads nothing out: there was no newest line before.
         assert_eq!(room_announcement(&lines, None, &bruhs), None);
         // Load earlier puts lines above the newest: nothing new.
-        let mut all = shown.clone();
+        let mut all = shown;
         merge_messages(&mut all, vec![msg(1, RoomAuthor::Owner, "a")]);
         let earlier = room_lines(&all, &[], &[], "r");
         assert_eq!(room_announcement(&earlier, Some("m4"), &bruhs), None);
