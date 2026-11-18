@@ -56,7 +56,7 @@ fn public_ip(ip: IpAddr) -> bool {
     }
 }
 
-fn validate_url(url: &url::Url) -> Result<(), RichError> {
+pub(crate) fn validate_url(url: &url::Url) -> Result<(), RichError> {
     if !matches!(url.scheme(), "http" | "https")
         || !url.username().is_empty()
         || url.password().is_some()
@@ -83,7 +83,7 @@ fn validate_url(url: &url::Url) -> Result<(), RichError> {
     Ok(())
 }
 
-fn client() -> Result<&'static reqwest::Client, RichError> {
+pub(crate) fn client() -> Result<&'static reqwest::Client, RichError> {
     static CLIENT: OnceLock<Result<reqwest::Client, String>> = OnceLock::new();
     CLIENT
         .get_or_init(|| {

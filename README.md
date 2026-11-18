@@ -64,6 +64,12 @@ See [agent runtimes and models](docs/agent-providers.md) for setup and access mo
 - **Private credentials.** When an agent needs a secret, it asks through a
   separate form; the value goes to the OS keychain and never into the chat.
   See [credential requests](docs/secure-credential-requests.md).
+- **Website reading.** In interactive turns with MCP-capable harnesses, agents
+  can use the built-in Rust `read_url` tool to read public docs as Markdown or
+  discover links with `view: "links"`. Long results include a character offset
+  for the next read. To manage the reader independently, set
+  `BRUHS_WEBSITE_READER_COMMAND` in the app host environment to the absolute
+  path of a compatible stdio MCP executable exposing `read_url`.
 - **MCP.** `bruhs-mcp` exposes the workspace to MCP clients as typed tools
   that propose changes for you to approve. See
   [local MCP setup](docs/local-mcp-workspace.md).

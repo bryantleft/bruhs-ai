@@ -2,6 +2,8 @@ pub mod agent;
 pub mod agent_extensions;
 pub mod api_client;
 pub mod api_client_tools;
+mod harness_mcp;
+pub mod website_reader;
 pub mod artifact_tools;
 pub mod artifacts;
 pub mod capture_client;

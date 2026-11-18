@@ -122,6 +122,17 @@ fn main() {
         }
         return;
     }
+    if bruhs_core::website_reader::is_mcp_helper() {
+        let result = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .and_then(|runtime| runtime.block_on(bruhs_core::website_reader::run_mcp_helper()));
+        if let Err(error) = result {
+            eprintln!("Local website reader failed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if bruhs_core::artifact_tools::is_mcp_helper() {
         let result = tokio::runtime::Builder::new_current_thread()
             .enable_all()
