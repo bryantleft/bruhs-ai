@@ -73,7 +73,16 @@ pub fn web_button(
         .when(!disabled, |el| el.tab_index(0))
         .border_1()
         .border_color(gpui::transparent_black())
-        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        // A persimmon ring vanishes on a persimmon button: the web draws its
+        // ring outside the button, so the desktop's 1px inner ring turns
+        // light on Primary instead.
+        .focus_visible(move |el| {
+            el.border_color(if matches!(variant, WebButtonVariant::Primary) {
+                theme::rambutan_100()
+            } else {
+                theme::persimmon_400()
+            })
+        })
         .flex()
         .items_center()
         .justify_center()
