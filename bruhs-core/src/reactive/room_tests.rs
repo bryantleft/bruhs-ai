@@ -212,7 +212,7 @@ async fn an_owner_post_queues_one_room_run_per_recipient_with_hop_zero() {
     assert!(queued[0].prompt.contains("You are Bo."));
     assert!(queued[0]
         .prompt
-        .contains("Owner (to you): @Bo and @cy look"));
+        .contains("Owner (to you):\n> @Bo and @cy look"));
     assert!(queued[1].prompt.contains("You are Cy."));
 }
 
@@ -767,8 +767,8 @@ async fn a_queued_room_run_sees_messages_posted_while_it_waited() {
 
     let claim = claim_one(&runtime).await.unwrap();
     assert_eq!(claim.run.id, queued.id);
-    assert!(claim.run.prompt.contains("Owner (to you): @Agent a first"));
-    assert!(claim.run.prompt.contains("\nOwner: and also this\n"));
+    assert!(claim.run.prompt.contains("Owner (to you):\n> @Agent a first"));
+    assert!(claim.run.prompt.contains("\nOwner:\n> and also this\n"));
     assert_eq!(run(&runtime, &queued.id).await.prompt, claim.run.prompt);
 }
 
