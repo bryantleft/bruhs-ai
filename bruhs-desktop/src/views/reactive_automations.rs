@@ -126,7 +126,7 @@ const BACKGROUND_REFRESH: Duration = Duration::from_secs(15);
 /// Web's `lg` breakpoint: Notifications and Background service side by side.
 const SETTINGS_TWO_COLUMNS_PX: f32 = 1024.0;
 /// Web `bg-longan-950/60 inset-ring-longan-700/50` around Delete agent's
-/// question.
+/// and Delete room's questions.
 const CONFIRM_FILL_OPACITY: f32 = 0.6;
 const CONFIRM_RING_OPACITY: f32 = 0.5;
 

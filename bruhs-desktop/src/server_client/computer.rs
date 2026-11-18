@@ -26,7 +26,9 @@ pub(crate) enum ScreencastEvent {
     Frame(Vec<u8>),
     State(ComputerState),
     Error(String),
-    /// The socket closed; open another to go on watching.
+    /// The socket closed; open another to go on watching. A closed
+    /// channel (`events.recv()` failing) means the same, since this last
+    /// event is dropped when the queue is full.
     Closed,
 }
 
@@ -163,7 +165,7 @@ async fn pump(
         tokio::select! {
             message = read.next() => {
                 let event = match message {
-                    Some(Ok(Message::Binary(frame))) => ScreencastEvent::Frame(frame.to_vec()),
+                    Some(Ok(Message::Binary(frame))) => ScreencastEvent::Frame(Vec::from(frame)),
                     Some(Ok(Message::Text(text))) => {
                         match serde_json::from_str::<ScreencastMessage>(&text) {
                             Ok(ScreencastMessage::State(state)) => ScreencastEvent::State(state),

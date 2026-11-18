@@ -107,6 +107,22 @@ pub fn computer_unavailable(level: AccessLevel, provider: AgentProvider) -> Opti
     }
 }
 
+/// Whether the Computer switch in a bruh's Settings should follow the
+/// stored value: while it is `off`, while the owner hasn't changed it since
+/// the form was filled (`switch == filled`), or once the owner's value
+/// matches the stored one. `Some` is then the value to show and to count as
+/// filled from. Save sends SetComputer only for a change made there, so it
+/// never puts back a value another app replaced. Both apps use this rule.
+#[must_use]
+pub fn computer_switch_follows(
+    switch: bool,
+    filled: bool,
+    stored: bool,
+    off: bool,
+) -> Option<bool> {
+    (off || switch == filled || switch == stored).then_some(stored)
+}
+
 /// Why the Computer switch in a bruh's Settings is off, if it is: the
 /// model or level first, since the owner can change those there, then an
 /// older service. Both apps show this one reason.
@@ -878,6 +894,24 @@ mod tests {
             computer_reason(Some(2)),
             Some(ServiceNotice::ServingOld.message())
         );
+    }
+
+    /// Another app turned the Computer on while the owner had other edits:
+    /// the switch follows it, so Save can't turn it off again.
+    #[test]
+    fn a_computer_switch_left_alone_never_puts_back_an_older_value() {
+        let (on, off) = (true, false);
+        // Left alone: it follows the stored value.
+        assert_eq!(computer_switch_follows(off, off, on, false), Some(on));
+        // Changed here: the owner's value stays.
+        assert_eq!(computer_switch_follows(on, off, off, false), None);
+        // Off: always the stored value.
+        assert_eq!(computer_switch_follows(on, off, off, true), Some(off));
+        // The owner turned it on, then another app did too: that becomes
+        // what the form was filled from, so one click turns it off again
+        // and stays off.
+        assert_eq!(computer_switch_follows(on, off, on, false), Some(on));
+        assert_eq!(computer_switch_follows(off, on, on, false), None);
     }
 
     #[test]

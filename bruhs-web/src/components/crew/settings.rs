@@ -3,9 +3,9 @@
 
 use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::{
-    access_options, clamp_level, computer_switch_reason, current_settings, settings_commands,
-    AccessLevel, BruhAccess, BruhLook, BruhSettings, COMPUTER_HINT, COMPUTER_SWITCH,
-    SEND_AS_ME_HINT,
+    access_options, clamp_level, computer_switch_follows, computer_switch_reason, current_settings,
+    settings_commands, AccessLevel, BruhAccess, BruhLook, BruhSettings, COMPUTER_HINT,
+    COMPUTER_SWITCH, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use bruhs_models::reactive::ReactiveCommand;
@@ -119,15 +119,30 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
     });
     let computer_off =
         Signal::derive(move || computer_block.get().is_some() || !data.computer_ready());
+    // It also follows the stored value while the owner hasn't changed it
+    // since the fill, even with other edits unsaved, and once the owner's
+    // value matches it (`computer_switch_follows`). Tracked, so a change
+    // from elsewhere shows at once and a Save made here can't put a stale
+    // value back.
     Effect::new(move |_| {
-        if !computer_off.get() {
+        let off = computer_off.get();
+        let Some(stored) = saved.with(|saved| saved.as_ref().map(|saved| saved.computer)) else {
             return;
-        }
-        // Tracked, so a change from elsewhere shows at once and a Save made
-        // here can't put a stale value back.
-        let stored = saved.with(|saved| saved.as_ref().is_some_and(|saved| saved.computer));
-        if computer.get_untracked() != stored {
-            computer.set(stored);
+        };
+        let Some(filled) = shown.with_value(|shown| shown.as_ref().map(|shown| shown.computer))
+        else {
+            return;
+        };
+        let switch = computer.get();
+        if let Some(stored) = computer_switch_follows(switch, filled, stored, off) {
+            shown.update_value(|shown| {
+                if let Some(shown) = shown.as_mut() {
+                    shown.computer = stored;
+                }
+            });
+            if switch != stored {
+                computer.set(stored);
+            }
         }
     });
 

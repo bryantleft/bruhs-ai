@@ -21,10 +21,10 @@ use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
     access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level, composer_block,
-    computer_switch_reason, current_settings, job_line, line_key, may_have_more, merge_runs,
-    settings_commands, status_line, transcript, AccessLevel, BruhAccess, BruhLook, BruhSettings,
-    BruhStatus, TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH, PAGE_FACE_PX, RAIL_FACE_PX,
-    SEND_AS_ME_HINT,
+    computer_switch_follows, computer_switch_reason, current_settings, job_line, line_key,
+    may_have_more, merge_runs, settings_commands, status_line, transcript, AccessLevel, BruhAccess,
+    BruhLook, BruhSettings, BruhStatus, TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH,
+    PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
@@ -280,13 +280,13 @@ impl SettingsForm {
         (reason, reason.is_some() || !ready)
     }
 
-    /// The switch shows the stored value while it is off, or while the
-    /// owner hasn't changed it since the form was filled. Save then sends
-    /// SetComputer only for a change made here, so it never puts back a
-    /// value another app replaced.
+    /// The switch follows the stored value where the owner can't or didn't
+    /// change it (`computer_switch_follows`).
     fn sync_computer(&mut self, stored: bool, protocol: Option<u32>, cx: &App) {
         let (_, off) = self.computer_block(protocol, cx);
-        if off || self.computer == self.shown.computer {
+        if let Some(stored) =
+            computer_switch_follows(self.computer, self.shown.computer, stored, off)
+        {
             self.computer = stored;
             self.shown.computer = stored;
         }
@@ -2350,6 +2350,37 @@ mod tests {
         assert!(
             matches!(&sent[..], [ReactiveCommand::SetBruh { look, .. }] if look.face == BruhColor::Pandan),
             "{sent:?}"
+        );
+    }
+
+    /// The owner turned the switch on, then another app did too: one click
+    /// turns it off, and Save sends that.
+    #[gpui::test]
+    fn one_click_turns_off_a_switch_another_app_also_turned_on(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(computer_snapshot(AccessLevel::Full, CREW_PROTOCOL, false)),
+            BruhTab::Settings,
+        );
+        click(cx, "desktop-bruh-face-swatch-Pandan");
+        click(cx, "desktop-bruh-computer");
+        panel.update(cx, |panel, cx| {
+            panel.set_snapshot(
+                computer_snapshot(AccessLevel::Full, CREW_PROTOCOL, true),
+                cx,
+            );
+            cx.notify();
+        });
+        cx.run_until_parked();
+        click(cx, "desktop-bruh-computer");
+        assert_eq!(computer_switch(&panel, cx), (false, None), "it stays off");
+        click(cx, "desktop-bruh-save");
+        assert_eq!(
+            sent(&panel, cx).last(),
+            Some(&ReactiveCommand::SetComputer {
+                agent_id: "a".into(),
+                on: false
+            })
         );
     }
 
