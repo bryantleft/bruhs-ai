@@ -3,7 +3,8 @@
 //! rules; with a room, Delete room asks once inline before it sends.
 
 use bruhs_models::crew::room::{
-    room_command, Room, RoomForm, DELETE_ROOM_CONFIRM, NEW_ROOM, NO_LEAD, ROOM_SETTINGS,
+    room_command, Room, RoomForm, CREATE_ROOM, DELETE_ROOM, DELETE_ROOM_CONFIRM, DELETE_ROOM_NO,
+    DELETE_ROOM_YES, NEW_ROOM, NO_LEAD, ROOM_LEAD, ROOM_MEMBERS, ROOM_SETTINGS, SAVE_ROOM,
 };
 use bruhs_models::crew::{BruhState, RAIL_FACE_PX};
 use bruhs_models::reactive::ReactiveCommand;
@@ -192,6 +193,26 @@ pub fn RoomDialog(
         pending.set(Some(Pending::Delete));
         data.send.run(ReactiveCommand::DeleteRoom { id });
     };
+    // The confirm swaps the button that opened it for its own, so focus
+    // moves along with it: to Keep, the safe choice, and back to Delete
+    // room on Keep. Focus never drops out of the dialog.
+    let delete_room_ref = NodeRef::<leptos::html::Button>::new();
+    let keep_ref = NodeRef::<leptos::html::Button>::new();
+    let focus_after_render = move |target: NodeRef<leptos::html::Button>| {
+        request_animation_frame(move || {
+            if let Some(Some(button)) = target.try_get_untracked() {
+                let _ = button.focus();
+            }
+        });
+    };
+    let ask_delete = move |_| {
+        confirming.set(true);
+        focus_after_render(keep_ref);
+    };
+    let keep = move |_| {
+        confirming.set(false);
+        focus_after_render(delete_room_ref);
+    };
     let submit_disabled = Signal::derive(move || {
         pending.with(Option::is_some) || data.busy.get() || !data.rooms_ready()
     });
@@ -220,10 +241,12 @@ pub fn RoomDialog(
                         />
                     </label>
                     <div class=LABEL>
-                        <span id="room-dialog-members">"Members"</span>
-                        {move || bruhs.with(Vec::is_empty).then(|| view! {
-                            <p class="text-label-sm text-rambutan-500">"No bruhs yet."</p>
-                        })}
+                        <span id="room-dialog-members">{ROOM_MEMBERS}</span>
+                        // No empty list for a screen reader to announce.
+                        <Show
+                            when=move || bruhs.with(|bruhs| !bruhs.is_empty())
+                            fallback=|| view! { <p class="text-label-sm text-rambutan-500">"No bruhs yet."</p> }
+                        >
                         <ul role="list" aria-labelledby="room-dialog-members" class="m-0 max-h-[30vh] min-h-0 list-none space-y-0.5 overflow-y-auto p-0">
                             <For
                                 each=move || bruhs.get()
@@ -273,14 +296,15 @@ pub fn RoomDialog(
                                 }
                             />
                         </ul>
+                        </Show>
                     </div>
                     <div class=LABEL>
-                        <span>"Lead"</span>
+                        <span>{ROOM_LEAD}</span>
                         <Dropdown
                             options=Signal::derive(move || bruhs.with(|bruhs| form.with(|form| lead_options(form, bruhs))))
                             value=Signal::derive(move || form.with(|form| form.lead.clone().unwrap_or_default()))
                             on_change=Callback::new(move |value: String| form.update(|form| form.lead = Some(value).filter(|value| !value.is_empty())))
-                            label="Lead"
+                            label=ROOM_LEAD
                             class="w-full"
                         />
                     </div>
@@ -294,8 +318,10 @@ pub fn RoomDialog(
                         <div data-room-delete-confirm="" class="space-y-2 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50">
                             <p class="text-body-sm text-rambutan-200">{DELETE_ROOM_CONFIRM}</p>
                             <div class="flex flex-wrap items-center gap-2">
-                                <Button variant=ButtonVariant::Destructive size=ButtonSize::Small disabled=submit_disabled on_click=Callback::new(delete)>"Delete"</Button>
-                                <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| confirming.set(false))>"Keep"</Button>
+                                // Stays enabled while the delete is on its way, so
+                                // focus stays on it; `delete` sends only once.
+                                <button type="button" class=button_class(ButtonVariant::Destructive, ButtonSize::Small, "") disabled=move || !data.rooms_ready() on:click=delete>{DELETE_ROOM_YES}</button>
+                                <button type="button" node_ref=keep_ref data-room-delete-keep="" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") on:click=keep>{DELETE_ROOM_NO}</button>
                             </div>
                         </div>
                     </Show>
@@ -303,14 +329,14 @@ pub fn RoomDialog(
                 <div class="flex items-center gap-2 border-t border-longan-800 bg-longan-900/40 px-4 py-3">
                     {editing.then(|| view! {
                         <Show when=move || !confirming.get()>
-                            <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=submit_disabled on_click=Callback::new(move |_| confirming.set(true))>"Delete room"</Button>
+                            <button type="button" node_ref=delete_room_ref data-room-delete="" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") disabled=move || submit_disabled.get() on:click=ask_delete>{DELETE_ROOM}</button>
                         </Show>
                     })}
                     <span class="flex-1"></span>
                     <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| close.run(()))>"Cancel"</Button>
                     // The form's submit button, so Enter in a field saves.
                     <button type="submit" class=button_class(ButtonVariant::Primary, ButtonSize::Small, "") disabled=move || submit_disabled.get()>
-                        {if editing { "Save" } else { "Create room" }}
+                        {if editing { SAVE_ROOM } else { CREATE_ROOM }}
                     </button>
                 </div>
             </form>

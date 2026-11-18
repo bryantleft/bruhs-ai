@@ -410,7 +410,7 @@ pub fn CrewRail(
                     class="bruhs-control inline-flex size-control-sm shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50"
                     on:click=move |_| creating.set(true)
                 >
-                    <Icon name="plus" size=16 />
+                    <Icon name="user-plus" size=16 />
                 </button>
                 <button
                     type="button"
@@ -484,13 +484,16 @@ pub fn CrewRail(
                                 children=move |bruh: BruhState| rail_row(bruh.agent_id, rows, active_view, open_bruh)
                             />
                         </ul>
-                        <ul role="list" aria-label="Rooms" class="m-0 list-none space-y-0.5 p-0">
-                            <For
-                                each=move || rooms.get()
-                                key=|room| room.id.clone()
-                                children=move |room: RoomRow| room_row(room.id, rooms, active_view, open_room)
-                            />
-                        </ul>
+                        // No empty list for a screen reader to announce.
+                        <Show when=move || rooms.with(|rooms| !rooms.is_empty())>
+                            <ul role="list" aria-label="Rooms" class="m-0 list-none space-y-0.5 p-0">
+                                <For
+                                    each=move || rooms.get()
+                                    key=|room| room.id.clone()
+                                    children=move |room: RoomRow| room_row(room.id, rooms, active_view, open_room)
+                                />
+                            </ul>
+                        </Show>
                     </div>
                 </div>
             </Show>

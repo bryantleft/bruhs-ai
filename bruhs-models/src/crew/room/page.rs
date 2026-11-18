@@ -22,6 +22,20 @@ pub const NO_MEMBERS: &str = "Add a bruh in Room settings to start.";
 pub const DELETE_ROOM_CONFIRM: &str = "Delete this room and its messages? The bruhs stay.";
 /// Shown on an approval card once the owner has decided it.
 pub const APPROVAL_DECIDED: &str = "Decided";
+/// The room form's member checklist.
+pub const ROOM_MEMBERS: &str = "Members";
+/// The room form's lead picker.
+pub const ROOM_LEAD: &str = "Lead";
+/// Saves a new room.
+pub const CREATE_ROOM: &str = "Create room";
+/// Saves an existing room's settings.
+pub const SAVE_ROOM: &str = "Save";
+/// Opens the inline delete confirm in Room settings.
+pub const DELETE_ROOM: &str = "Delete room";
+/// Confirms [`DELETE_ROOM_CONFIRM`].
+pub const DELETE_ROOM_YES: &str = "Delete";
+/// Backs out of [`DELETE_ROOM_CONFIRM`].
+pub const DELETE_ROOM_NO: &str = "Keep";
 /// Why New room is off while the crew is empty.
 pub const ADD_A_BRUH_FIRST: &str = "Add a bruh first.";
 
