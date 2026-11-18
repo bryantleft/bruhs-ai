@@ -2,8 +2,8 @@ use std::{path::Path, sync::Arc, time::Duration};
 
 use bruhs_models::crew::{
     handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, COMPUTERS_FULL, COMPUTER_OFF_DENIAL,
-    LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, TAKE_CONTROL_FIRST,
-    TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+    LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED,
+    TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
 };
 use bruhs_models::local_tools::{
     BrowserAction, ComputerInput, ComputerRequest, Control, GrantRequest, MouseButton, MouseKind,
@@ -364,6 +364,102 @@ async fn an_open_page_that_does_not_answer_is_on_an_unknown_page() {
     // The page answers nothing now; where it was last doesn't count.
     fake.close_window("a");
     assert_eq!(host.page_url("a").await, None);
+}
+
+#[tokio::test]
+async fn bruh_input_runs_only_on_the_page_it_was_allowed_on() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.bruh_command("a", navigate("https://shop.test/cart"))
+        .await
+        .unwrap();
+    let click = || BrowserAction::Click {
+        selector: "#buy".into(),
+    };
+    let allowed_on = Some("https://shop.test/");
+    host.bruh_command_on("a", click(), allowed_on)
+        .await
+        .unwrap();
+    // The page moved itself to GitHub after the gate looked.
+    fake.set_url("a", "https://github.com/o/r/pull/1");
+    let refused = |result: Result<_, ToolError>| matches!(result, Err(ToolError::Refused(message)) if message == PAGE_CHANGED);
+    assert!(refused(
+        host.bruh_command_on("a", click(), allowed_on).await
+    ));
+    // Reads and navigation don't act on the page, so they still run.
+    host.bruh_command_on("a", BrowserAction::Snapshot, allowed_on)
+        .await
+        .unwrap();
+    // Input allowed on GitHub runs there.
+    host.bruh_command_on("a", click(), Some("https://github.com/o/r"))
+        .await
+        .unwrap();
+    // A page that doesn't say where it is takes no input.
+    fake.close_window("a");
+    assert!(refused(
+        host.bruh_command_on("a", click(), Some("https://github.com/o/r"))
+            .await
+    ));
+    let clicks = fake
+        .actions("a")
+        .into_iter()
+        .filter(|action| *action == click())
+        .count();
+    assert_eq!(clicks, 2);
+}
+
+#[tokio::test]
+async fn the_command_route_can_repeat_the_hosts_refusals() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    let evaluate = BrowserAction::Evaluate {
+        expression: "1".into(),
+    };
+    let refusal = |result: Result<(), ToolError>| match result {
+        Err(ToolError::Refused(message)) => message,
+        other => panic!("expected a refusal, got {other:?}"),
+    };
+    assert_eq!(
+        refusal(host.check_bruh_command("a", &BrowserAction::Snapshot)),
+        COMPUTER_OFF_DENIAL
+    );
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    assert_eq!(
+        refusal(host.check_bruh_command("a", &evaluate)),
+        NOT_FOR_BRUHS
+    );
+    assert_eq!(
+        refusal(host.check_bruh_command("a", &navigate("http://127.0.0.1:1"))),
+        LOCAL_HOST_DENIAL
+    );
+    assert!(matches!(
+        host.check_bruh_command("a", &BrowserAction::ClickAt { x: 5000.0, y: 1.0 }),
+        Err(ToolError::Invalid(_))
+    ));
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    assert_eq!(
+        refusal(host.check_bruh_command("a", &BrowserAction::Snapshot)),
+        OWNER_HAS_COMPUTER
+    );
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    host.check_bruh_command("a", &BrowserAction::Snapshot)
+        .unwrap();
+    host.sync_bruhs(vec![BruhComputer {
+        paused: true,
+        ..bruh_in(home.path(), "a")
+    }])
+    .await;
+    assert_eq!(
+        refusal(host.check_bruh_command("a", &BrowserAction::Snapshot)),
+        ACTION_STOPPED
+    );
+    // Checking runs nothing.
+    assert!(fake.actions("a").is_empty());
 }
 
 #[tokio::test]

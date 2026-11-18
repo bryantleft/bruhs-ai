@@ -115,6 +115,31 @@ impl ReactiveRuntime {
         .await
     }
 
+    /// Claim the next queued run as a worker would, without running it.
+    /// For route tests outside this crate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn claim_run_for_tests(&self) -> Result<Option<ReactiveRun>, ReactiveError> {
+        Ok(self.claim_next().await?.map(|claim| claim.run))
+    }
+
+    /// Let `command` through for `run`, on `page_url`, as the gate does for
+    /// an allowed browser call. For route tests outside this crate.
+    #[cfg(any(test, feature = "test-support"))]
+    pub fn allow_browser_step_for_tests(
+        &self,
+        run: &ReactiveRun,
+        command: Value,
+        page_url: Option<String>,
+    ) {
+        self.allowances.record(BrowserAllowance {
+            agent_id: run.agent_id.clone(),
+            run_id: run.id.clone(),
+            command,
+            page_url,
+            expires: Instant::now() + ALLOWANCE_TTL,
+        });
+    }
+
     /// Claim the next queued run, forgetting the allowances its earlier
     /// attempts left, under the same database lock.
     pub(super) async fn claim_next(&self) -> Result<Option<store::Claim>, ReactiveError> {

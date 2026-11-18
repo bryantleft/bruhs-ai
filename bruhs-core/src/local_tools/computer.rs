@@ -16,9 +16,10 @@ use std::{
 use async_trait::async_trait;
 use bruhs_models::{
     crew::{
-        handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS, COMPUTERS_FULL,
-        COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, MAX_COMPUTERS,
-        NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+        handed_back_note, same_page_host, ACTION_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS,
+        COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL,
+        MAX_COMPUTERS, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED, TAKE_CONTROL_FIRST,
+        TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
@@ -406,6 +407,22 @@ impl Slot {
     }
 }
 
+/// Which page a bruh's step may act on.
+#[derive(Clone, Copy)]
+enum StepPage<'a> {
+    /// Any page (tests).
+    #[cfg_attr(
+        not(any(test, feature = "test-support")),
+        expect(
+            dead_code,
+            reason = "only the test-only bruh_command skips the page check"
+        )
+    )]
+    Unchecked,
+    /// Input only on the host of the page the gate allowed it on.
+    AllowedOn(Option<&'a str>),
+}
+
 /// `reply` with `note` beside its value.
 fn with_note(mut reply: ToolReply, note: String) -> ToolReply {
     if let serde_json::Value::Object(value) = &mut reply.value {
@@ -542,12 +559,19 @@ impl LocalToolsHost {
         .await;
     }
 
-    /// One action from a bruh's own browser tool.
-    pub async fn bruh_command(
+    /// The refusals a bruh's browser step meets before it runs, without
+    /// running it: Computer off, an action bruhs don't get, an invalid
+    /// action, a stopped bruh, or the owner holding the computer. The
+    /// command route repeats them, so a step it can't run says why.
+    pub fn check_bruh_command(
         &self,
         agent_id: &str,
-        action: BrowserAction,
-    ) -> Result<ToolReply, ToolError> {
+        action: &BrowserAction,
+    ) -> Result<(), ToolError> {
+        self.checked_slot(agent_id, action).map(drop)
+    }
+
+    fn checked_slot(&self, agent_id: &str, action: &BrowserAction) -> Result<Arc<Slot>, ToolError> {
         let slot = self
             .computer_slot(agent_id)
             .ok_or_else(|| ToolError::Refused(COMPUTER_OFF_DENIAL.into()))?;
@@ -556,13 +580,49 @@ impl LocalToolsHost {
         }
         // Navigate's check refuses a host on this computer.
         let viewport = slot.state.borrow().viewport;
-        validate_action(&action, viewport).map_err(invalid)?;
+        validate_action(action, viewport).map_err(invalid)?;
         if slot.paused() {
             return Err(ToolError::Refused(ACTION_STOPPED.into()));
         }
         if slot.control() == Control::Owner {
             return Err(ToolError::Refused(OWNER_HAS_COMPUTER.into()));
         }
+        Ok(slot)
+    }
+
+    /// One action from a bruh's own browser tool, with no page check. For
+    /// tests; the command route uses [`Self::bruh_command_on`].
+    #[cfg(any(test, feature = "test-support"))]
+    pub async fn bruh_command(
+        &self,
+        agent_id: &str,
+        action: BrowserAction,
+    ) -> Result<ToolReply, ToolError> {
+        self.bruh_step(agent_id, action, StepPage::Unchecked).await
+    }
+
+    /// One action from a bruh's own browser tool, which the gate allowed on
+    /// `allowed_on`. Input runs only while the live page is on that host,
+    /// checked under the page lock right before it is sent: a page that
+    /// moved, or that doesn't say where it is, is refused with
+    /// [`PAGE_CHANGED`].
+    pub async fn bruh_command_on(
+        &self,
+        agent_id: &str,
+        action: BrowserAction,
+        allowed_on: Option<&str>,
+    ) -> Result<ToolReply, ToolError> {
+        self.bruh_step(agent_id, action, StepPage::AllowedOn(allowed_on))
+            .await
+    }
+
+    async fn bruh_step(
+        &self,
+        agent_id: &str,
+        action: BrowserAction,
+        page_check: StepPage<'_>,
+    ) -> Result<ToolReply, ToolError> {
+        let slot = self.checked_slot(agent_id, &action)?;
         let mut revoked = slot.grant.revoked.subscribe();
         let mut interrupt = slot.interrupt.subscribe();
         if *revoked.borrow_and_update() {
@@ -592,6 +652,17 @@ impl LocalToolsHost {
                 .open
                 .as_mut()
                 .ok_or_else(|| ToolError::Unavailable("The bruh's browser didn't open.".into()))?;
+            if let StepPage::AllowedOn(allowed_on) = page_check {
+                if action.kind() == BrowserActionKind::Input {
+                    let live = tokio::time::timeout(PAGE_URL_WAIT, open.page.url())
+                        .await
+                        .ok()
+                        .flatten();
+                    if live.is_none() || !same_page_host(allowed_on, live.as_deref()) {
+                        return Err(ToolError::Refused(PAGE_CHANGED.into()));
+                    }
+                }
+            }
             let reply =
                 tokio::time::timeout(self.policy.timeout, open.page.run(action, self.policy))
                     .await

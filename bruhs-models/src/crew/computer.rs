@@ -45,6 +45,11 @@ pub const CLOSED_BY_OWNER: &str =
 pub const ACTION_STOPPED: &str = "Stopped by the owner.";
 pub const PAGE_CHANGED: &str =
     "The page changed while the owner decided. Take a snapshot and try again.";
+/// The command route got a step the gate never let through, or one that
+/// already ran.
+pub const STEP_NOT_APPROVED: &str = "This browser step wasn't approved.";
+/// The command route got a step from a web page, not the bruh's helper.
+pub const STEP_FROM_A_PAGE: &str = "Only the bruh's own browser tool can send its steps.";
 
 /// What the bruh's next browser call learns after the owner hands back.
 #[must_use]
@@ -74,6 +79,12 @@ pub const USE_THE_WINDOW: &str = "Use the window.";
 pub const COMPUTERS_FULL: &str = "Four bruh browsers are open. Close one in its Computer tab.";
 pub const VIEWERS_FULL: &str = "Four live views are open for this browser. Close one first.";
 pub const LIVE_VIEW_ENDED: &str = "This live view has ended. Open the browser again.";
+/// The live view didn't acknowledge a frame within the tool deadline.
+pub const LIVE_VIEW_STALLED: &str = "The live view stopped showing frames. Open it again.";
+/// A page from another site asked for a live view.
+pub const LIVE_VIEW_FOREIGN_PAGE: &str = "This page can't open the live view.";
+/// The live view sent something other than an acknowledgement or input.
+pub const LIVE_VIEW_UNREADABLE: &str = "The live view sent a message the server can't read.";
 pub const TURN_ON_IN_SETTINGS: &str = "Turn on Computer in the bruh's Settings.";
 
 pub const NEEDS_CLAUDE: &str = "Computer needs a Claude model.";
