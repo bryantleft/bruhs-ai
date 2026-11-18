@@ -278,10 +278,12 @@ async fn execute(
                     OrchestratorEvent::Query(QueryEvent::Error(error)) => { failure = Some(error); }
                     OrchestratorEvent::Query(QueryEvent::PermissionRequest { id, tool, input, .. }) => {
                         // The bruh's access gate answers, or the owner through an outbox approval.
+                        let provider = AgentProvider::for_model(&effective_agent.model);
                         let decision = super::approval::decide(
                             runtime,
                             &bruh.access,
-                            AgentProvider::for_model(&effective_agent.model),
+                            provider,
+                            computer_on(bruh.computer, &bruh.access, provider),
                             &effective_run,
                             &effective_agent.project_path,
                             &tool,

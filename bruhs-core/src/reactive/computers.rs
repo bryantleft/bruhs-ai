@@ -312,6 +312,7 @@ struct WeakRuntime {
     notifier: Weak<std::sync::RwLock<super::Notifier>>,
     computers: Weak<OnceLock<Arc<LocalToolsHost>>>,
     syncing: Weak<std::sync::atomic::AtomicBool>,
+    allowances: Weak<super::approval::Allowances>,
 }
 
 impl WeakRuntime {
@@ -325,6 +326,7 @@ impl WeakRuntime {
             notifier: Arc::downgrade(&runtime.notifier),
             computers: Arc::downgrade(&runtime.computers),
             syncing: Arc::downgrade(&runtime.syncing),
+            allowances: Arc::downgrade(&runtime.allowances),
         }
     }
 
@@ -338,6 +340,7 @@ impl WeakRuntime {
             notifier: self.notifier.upgrade()?,
             computers: self.computers.upgrade()?,
             syncing: self.syncing.upgrade()?,
+            allowances: self.allowances.upgrade()?,
         })
     }
 }

@@ -43,6 +43,8 @@ pub const CONTROL_WAIT_EXPIRED: &str =
 pub const CLOSED_BY_OWNER: &str =
     "The owner closed your browser. It opens again on your next step.";
 pub const ACTION_STOPPED: &str = "Stopped by the owner.";
+pub const PAGE_CHANGED: &str =
+    "The page changed while the owner decided. Take a snapshot and try again.";
 
 /// What the bruh's next browser call learns after the owner hands back.
 #[must_use]
@@ -74,7 +76,7 @@ pub const VIEWERS_FULL: &str = "Four live views are open for this browser. Close
 pub const LIVE_VIEW_ENDED: &str = "This live view has ended. Open the browser again.";
 pub const TURN_ON_IN_SETTINGS: &str = "Turn on Computer in the bruh's Settings.";
 
-const NEEDS_CLAUDE: &str = "Computer needs a Claude model.";
+pub const NEEDS_CLAUDE: &str = "Computer needs a Claude model.";
 const NEEDS_ASK_OR_FULL: &str = "Computer needs Ask first or Full access.";
 
 /// Why a bruh at `level` on `provider` can't have a Computer, if it can't.
@@ -138,6 +140,13 @@ fn page_host(url: &str) -> Option<String> {
         authority.split(':').next().unwrap_or_default()
     };
     (!host.is_empty()).then(|| host.to_ascii_lowercase())
+}
+
+/// Whether two page URLs are on the same host, as the gate tells pages
+/// apart. Two pages whose host is unknown count as the same.
+#[must_use]
+pub fn same_page_host(a: Option<&str>, b: Option<&str>) -> bool {
+    a.and_then(page_host) == b.and_then(page_host)
 }
 
 /// The gate for one browser call of a bruh run. `input` is the tool's input
@@ -386,6 +395,19 @@ mod tests {
             &access(AccessLevel::Full, false, false),
             Codex
         ));
+    }
+
+    #[test]
+    fn pages_are_told_apart_by_host() {
+        let pull = Some("https://github.com/o/r/pull/1");
+        assert!(same_page_host(
+            pull,
+            Some("https://GitHub.com:443/o/r/pull/2")
+        ));
+        assert!(!same_page_host(pull, Some("https://shop.test/")));
+        assert!(!same_page_host(pull, None));
+        assert!(same_page_host(None, Some("")));
+        assert!(same_page_host(None, None));
     }
 
     #[test]

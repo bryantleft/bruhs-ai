@@ -865,21 +865,21 @@ impl LocalToolsHost {
             .map(|slot| slot.state.subscribe())
     }
 
-    /// The address the bruh's page is on now: asked of the open page, else
-    /// where it was last.
+    /// The address the bruh's page is on now, asked of the open page. A
+    /// closed browser reopens where it was last. An open page that doesn't
+    /// answer in time is on an unknown page, never on its last address.
     pub async fn page_url(&self, agent_id: &str) -> Option<String> {
         let slot = self.computer_slot(agent_id)?;
-        let asked = tokio::time::timeout(PAGE_URL_WAIT, async {
+        tokio::time::timeout(PAGE_URL_WAIT, async {
             let mut page = slot.page.lock().await;
             match page.open.as_mut() {
                 Some(open) => open.page.url().await,
-                None => None,
+                None => page.last_url.clone(),
             }
         })
         .await
         .ok()
-        .flatten();
-        asked.or_else(|| slot.state.borrow().url.clone())
+        .flatten()
     }
 
     /// Closes bruh browsers idle for [`COMPUTER_IDLE_MS`]. The task ends

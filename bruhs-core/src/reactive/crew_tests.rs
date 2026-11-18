@@ -1039,10 +1039,10 @@ fn the_worker_turns_computer_on_only_when_available() {
 
 // ── Approvals ──────────────────────────────────────────────────────────────
 
-const LONG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
-const SHORT_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+pub(super) const LONG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(super) const SHORT_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
 const DENIED: &str = "The owner denied this. Continue without it.";
-const NOT_ANSWERED: &str =
+pub(super) const NOT_ANSWERED: &str =
     "The owner has not answered yet. Stop here and say you are waiting on their approval.";
 
 fn access(level: AccessLevel) -> BruhAccess {
@@ -1060,7 +1060,7 @@ async fn claimed(runtime: &ReactiveRuntime, agent_id: &str) -> ReactiveRun {
     claim.run
 }
 
-type Decision = Result<Option<crate::PermissionDecision>, ReactiveError>;
+pub(super) type Decision = Result<Option<crate::PermissionDecision>, ReactiveError>;
 
 /// `approval::decide` on a Claude bruh run, in the background.
 fn spawn_decide(
@@ -1079,6 +1079,7 @@ fn spawn_decide(
             &runtime,
             &access(level),
             bruhs_models::agent::AgentProvider::Claude,
+            false,
             &run,
             &project_path,
             &tool,
@@ -1089,7 +1090,9 @@ fn spawn_decide(
     })
 }
 
-async fn decided(task: tokio::task::JoinHandle<Decision>) -> Option<crate::PermissionDecision> {
+pub(super) async fn decided(
+    task: tokio::task::JoinHandle<Decision>,
+) -> Option<crate::PermissionDecision> {
     tokio::time::timeout(std::time::Duration::from_secs(5), task)
         .await
         .expect("the approval wait should end")
@@ -1097,13 +1100,13 @@ async fn decided(task: tokio::task::JoinHandle<Decision>) -> Option<crate::Permi
         .unwrap()
 }
 
-fn deny(reason: &str) -> Option<crate::PermissionDecision> {
+pub(super) fn deny(reason: &str) -> Option<crate::PermissionDecision> {
     Some(crate::PermissionDecision::Deny {
         reason: Some(reason.into()),
     })
 }
 
-async fn approvals(runtime: &ReactiveRuntime, agent_id: &str) -> Vec<OutboxItem> {
+pub(super) async fn approvals(runtime: &ReactiveRuntime, agent_id: &str) -> Vec<OutboxItem> {
     runtime
         .snapshot()
         .await
@@ -1123,7 +1126,7 @@ async fn approval_item(runtime: &ReactiveRuntime, id: &str) -> OutboxItem {
 }
 
 /// The newest waiting approval for `agent_id`, once the worker has opened it.
-async fn waiting_approval(runtime: &ReactiveRuntime, agent_id: &str) -> OutboxItem {
+pub(super) async fn waiting_approval(runtime: &ReactiveRuntime, agent_id: &str) -> OutboxItem {
     let mut changes = runtime.watch_changes();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
@@ -1140,7 +1143,11 @@ async fn waiting_approval(runtime: &ReactiveRuntime, agent_id: &str) -> OutboxIt
     .expect("an approval should open")
 }
 
-async fn decide_approval(runtime: &ReactiveRuntime, id: &str, approve: bool) -> ReactiveSnapshot {
+pub(super) async fn decide_approval(
+    runtime: &ReactiveRuntime,
+    id: &str,
+    approve: bool,
+) -> ReactiveSnapshot {
     runtime
         .command(ReactiveCommand::DecideApproval {
             id: id.into(),

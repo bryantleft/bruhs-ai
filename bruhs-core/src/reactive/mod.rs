@@ -63,6 +63,7 @@ pub struct SourceEmission {
     pub payload: Value,
 }
 
+pub use approval::BrowserAllowance;
 pub use notify::{system_notifier, Notifier};
 
 #[derive(Clone)]
@@ -80,6 +81,8 @@ pub struct ReactiveRuntime {
     computers: Arc<OnceLock<Arc<crate::local_tools::LocalToolsHost>>>,
     /// Whether the computer sync loop runs; there is one per runtime.
     syncing: Arc<AtomicBool>,
+    /// Browser steps the gate let through, until the command route runs them.
+    allowances: Arc<approval::Allowances>,
 }
 
 /// A bruh's work folder and the directories this call created for it.
@@ -209,6 +212,7 @@ impl ReactiveRuntime {
             notifier: Arc::new(std::sync::RwLock::new(system_notifier())),
             computers: Arc::new(OnceLock::new()),
             syncing: Arc::new(AtomicBool::new(false)),
+            allowances: Arc::default(),
         })
     }
 

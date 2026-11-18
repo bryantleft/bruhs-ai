@@ -354,6 +354,19 @@ async fn the_page_url_comes_from_the_open_page() {
 }
 
 #[tokio::test]
+async fn an_open_page_that_does_not_answer_is_on_an_unknown_page() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.bruh_command("a", navigate("https://a.test/1"))
+        .await
+        .unwrap();
+    // The page answers nothing now; where it was last doesn't count.
+    fake.close_window("a");
+    assert_eq!(host.page_url("a").await, None);
+}
+
+#[tokio::test]
 async fn a_proxy_the_guard_cannot_use_stops_the_launch() {
     let home = tempfile::tempdir().unwrap();
     let (host, fake) = LocalToolsHost::with_fake_pages_and_network(|| {
