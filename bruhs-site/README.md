@@ -23,7 +23,7 @@ uses it too: sidebar, web favicon and Mac icon.
 
 ```
 node brand/logo.mjs             # site logo/favicon, bruhs-web bruhs.svg/favicon.svg, Mac AppIcon.svg
-brand/render.sh                 # public/og.png (social card) and apple-touch-icon.png, via Chrome
+brand/render.sh                 # public/og.png, apple-touch-icon.png and the Mac disk image background, via Chrome
 packaging/macos/make-icon.sh    # (repo root) AppIcon.icns, plus the server's tasks icon and the mobile icon
 ```
 

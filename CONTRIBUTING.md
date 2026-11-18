@@ -122,6 +122,12 @@ tags `v<version>`. Asset names carry no version, so
 - `scripts/bundle-macos.sh <version>` alone builds an ad-hoc-signed
   `dist/Bruhs.app` to try locally; `--sign` adds the Developer ID signature
   and `--notarize` Apple's notarization.
+- The disk image opens on a Bruhs install window that
+  `packaging/macos/make-dmg.sh` lays out through Finder, so the first build
+  asks to let the terminal control Finder. Its art,
+  `packaging/macos/dmg-background.tiff`, comes from
+  `bruhs-site/brand/dmg.html` via `bruhs-site/brand/render.sh`; the icon spots
+  in both files have to match.
 - Signing uses the first "Developer ID Application" identity in the keychain
   (`BRUHS_SIGN_IDENTITY` overrides). Notarization uses the notarytool
   profile `bruhs-notary` (`BRUHS_NOTARY_PROFILE`); create it once with

@@ -1,0 +1,82 @@
+<!doctype html>
+<!-- Source of packaging/macos/dmg-background.tiff (640×420, 1x + 2x): run
+     brand/render.sh. The icon spots and name tags line up with the layout
+     packaging/macos/make-dmg.sh gives Finder; change both together.
+     Finder draws icon labels black in light mode and white in dark mode, so
+     each label sits on a tag whose tone reads 4.5:1 against either. The
+     window shows the top 400pt; the last 20 cover taller or shorter title
+     bars across macOS versions. -->
+<meta charset="utf-8">
+<style>
+  @font-face { font-family: Xenon; src: url(/public/fonts/MonaspaceXenonVariable.woff2) format("woff2"); font-weight: 200 800; }
+  @font-face { font-family: Argon; src: url(/public/fonts/MonaspaceArgonVariable.woff2) format("woff2"); font-weight: 200 800; }
+  :root {
+    /* longan-900, a step above the canvas tone: the app icon's own tile is
+       longan-950 and would vanish on it. */
+    --bg: oklch(22% .011 65);
+    /* Between longan-600 and 500 on purpose: 4.59:1 against black labels and
+       4.58:1 against white. No longan step reaches 4.5:1 against both
+       (600: 4.01 vs black, 500: 3.66 vs white). */
+    --tag: oklch(56.5% .022 64);
+    --text: #f5ede7;                 /* rambutan-100 */
+    --muted: #c3afa1;                /* rambutan-400 */
+    --dot: oklch(26.5% .012 65);     /* longan-800 */
+  }
+  html, body { margin: 0; width: 640px; height: 420px; overflow: hidden; background: var(--bg); }
+  .card { position: relative; width: 640px; height: 420px; }
+  .brand { position: absolute; left: 28px; top: 24px; display: flex; align-items: center; gap: 10px; font: 600 15px/1 Xenon, monospace; color: var(--text); }
+  .brand img { width: 22px; height: 22px; }
+  .hint { position: absolute; right: 28px; top: 29px; font: 500 12px/1 Argon, monospace; color: var(--muted); }
+  /* Icon spots: Finder places icon centers at (180,190) and (460,190), 112px,
+     and centers 13px labels on y 265. */
+  .tag { position: absolute; width: 128px; height: 22px; border-radius: 8px; background: var(--tag); box-shadow: inset 0 0 0 1px oklch(100% 0 0 / .1); }
+  canvas { position: absolute; }
+  .rule { position: absolute; left: 0; right: 132px; top: 371px; height: 7px; background: radial-gradient(circle, var(--dot) 1px, transparent 1.5px) 0 50% / 7px 7px repeat-x; }
+</style>
+<div class="card">
+  <div class="brand"><img src="/public/logo.svg" alt="">bruhs.ai</div>
+  <div class="hint">Drag Bruhs to Applications</div>
+  <div class="tag" style="left:116px; top:254px"></div>
+  <div class="tag" style="left:396px; top:254px"></div>
+  <canvas id="arrow" style="left:256px; top:164px"></canvas>
+  <canvas id="bruh" style="left:520px; top:300px"></canvas>
+  <div class="rule"></div>
+</div>
+<script type="module">
+  import { drawBruh } from "/src/scripts/braille.js";
+  const dpr = devicePixelRatio;
+  const sized = (id, w, h) => {
+    const canvas = document.getElementById(id);
+    canvas.style.width = `${w}px`; canvas.style.height = `${h}px`;
+    canvas.width = w * dpr; canvas.height = h * dpr;
+    const ctx = canvas.getContext("2d");
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    return ctx;
+  };
+
+  // The arrow: a row of yellow dots that grow toward Applications, ending in
+  // a dot chevron. 128×52, its centerline on the icon centers (y 190), with
+  // room above and below so the chevron's tips are whole.
+  const arrow = sized("arrow", 128, 52);
+  const mid = 26;
+  const yellow = (a) => `oklch(89.24% .1454 94.78 / ${a})`;
+  const dot = (x, y, r, a) => { arrow.fillStyle = yellow(a); arrow.beginPath(); arrow.arc(x, y, r, 0, Math.PI * 2); arrow.fill(); };
+  const shaft = 9;
+  for (let i = 0; i < shaft; i++) {
+    const t = i / (shaft - 1);
+    dot(8 + i * 10, mid, 1.6 + t * 1.4, 0.25 + t * 0.75);
+  }
+  for (let k = 1; k <= 3; k++) {
+    dot(118 - k * 6, mid - k * 6, 3, 1);
+    dot(118 - k * 6, mid + k * 6, 3, 1);
+  }
+  dot(118, mid, 3, 1);
+
+  // The Bruh peeks up from the bottom right corner, watching the drag.
+  const peek = 120;
+  const bruh = sized("bruh", peek, 120);
+  drawBruh(bruh, peek, 120, { cx: 62, cy: 70, r: 48, lookX: -0.35, lookY: -0.15 },
+    { colors: { face: "#fada5e", mouth: "#fc4141" } });
+  await document.fonts.ready;
+  document.title = "ready";
+</script>

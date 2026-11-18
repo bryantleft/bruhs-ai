@@ -8,7 +8,7 @@
 #
 # Output in dist/:
 #   Bruhs.app
-#   Bruhs-macOS-<arch>.dmg   what people download (Applications shortcut inside)
+#   Bruhs-macOS-<arch>.dmg   what people download (drag-to-Applications window)
 #   Bruhs-macOS-<arch>.zip   what installed apps update themselves from
 #   SHA256SUMS               checksums the in-app updater verifies
 #
@@ -133,12 +133,8 @@ step "update zip $zip"
 ditto -c -k --keepParent "$app" "$zip"
 
 step "disk image $dmg"
-stage="$dist/dmg"
-mkdir -p "$stage"
-cp -R "$app" "$stage/"
-ln -s /Applications "$stage/Applications"
-hdiutil create -quiet -volname "Bruhs" -srcfolder "$stage" -fs HFS+ -format UDZO "$dmg"
-rm -rf "$stage"
+# Lays out the Bruhs install window through Finder (asks once to allow it).
+packaging/macos/make-dmg.sh "$app" "$dmg"
 if (( sign )); then
   codesign --force --timestamp --sign "$identity" "$dmg"
 fi
