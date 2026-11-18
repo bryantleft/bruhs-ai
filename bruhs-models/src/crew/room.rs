@@ -227,7 +227,9 @@ fn quoted(label: &str, text: &str) -> String {
 /// The prompt a bruh gets for one room message: who is here, the recent
 /// transcript, and which line is for it. The trigger is never clipped;
 /// earlier and later lines are taken newest first within the budgets.
-/// Each message is quoted under its author ([`quoted`]).
+/// Each message is quoted under its author ([`quoted`]). `names` holds
+/// every bruh that may have written a line, members or not; the members
+/// listed are the room's, in room order.
 pub fn room_prompt(
     room: &Room,
     names: &[RoomMember<'_>],
@@ -244,8 +246,10 @@ pub fn room_prompt(
             .to_string(),
         RoomAuthor::System => "Note".to_string(),
     };
-    let who: Vec<String> = names
+    let who: Vec<String> = room
+        .members
         .iter()
+        .filter_map(|id| names.iter().find(|m| m.agent_id == id))
         .map(|m| {
             if room.lead.as_deref() == Some(m.agent_id) {
                 format!("{} (lead)", m.name)
@@ -513,6 +517,18 @@ mod tests {
             "hi".into(),
         )];
         assert!(room_prompt(&room, &names, "Ada", &former, "x").contains("\nFormer bruh:\n> hi\n"));
+        // A bruh that left the room but not the crew keeps its name.
+        let crew = [m("c", "Cy"), m("b", "Bo"), m("a", "Ada")];
+        let left = [line(
+            1,
+            RoomAuthor::Bruh {
+                agent_id: "c".into(),
+            },
+            "hi".into(),
+        )];
+        let prompt = room_prompt(&room, &crew, "Ada", &left, "x");
+        assert!(prompt.starts_with("[Room \"Launch\" with Ada and Bo. You are Ada."));
+        assert!(prompt.contains("\nCy:\n> hi\n"));
     }
 
     #[test]

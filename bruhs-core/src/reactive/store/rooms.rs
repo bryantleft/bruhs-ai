@@ -361,7 +361,8 @@ pub(in crate::reactive) fn hand_to(
     hop: u32,
 ) -> Result<(), ReactiveError> {
     let crew = members(connection, room)?;
-    let names = names(&crew);
+    let everyone = records::<ReactiveAgent>(connection, "reactive_agents")?;
+    let names = names(&everyone);
     let history = prompt_history(connection, &room.id, &message.id)?;
     for id in agent_ids {
         let Some(agent) = crew.iter().find(|agent| agent.id == *id) else {
@@ -577,9 +578,10 @@ pub(in crate::reactive) fn prompt_for(
     if !history.iter().any(|message| message.id == *message_id) {
         return Ok(run.prompt.clone());
     }
+    let everyone = records::<ReactiveAgent>(connection, "reactive_agents")?;
     Ok(room_prompt(
         &room,
-        &names(&crew),
+        &names(&everyone),
         &me.name,
         &history,
         message_id,

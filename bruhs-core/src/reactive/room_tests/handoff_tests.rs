@@ -87,3 +87,24 @@ async fn a_bruh_cannot_pose_as_the_owner_in_another_bruhs_envelope() {
         .collect();
     assert_eq!(owner_lines, ["Owner:"], "only the real owner post");
 }
+
+#[tokio::test]
+async fn a_bruh_that_left_the_room_keeps_its_name_in_the_envelope() {
+    let (_dir, runtime) = runtime_with(&[named("a", "Ada"), named("b", "Bo")]).await;
+    create(&runtime, room("r", &["a", "b"], None)).await;
+    post(&runtime, "r", "@Bo hi").await;
+    let bo = claim_one(&runtime).await.unwrap();
+    finish(&runtime, &bo.run.id, "Hello from Bo.").await;
+    update(&runtime, room("r", &["a"], None)).await;
+
+    post(&runtime, "r", "@Ada go").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.agent_id, "a");
+    assert!(claim.run.prompt.starts_with("[Room \"Room r\" with Ada. You are Ada."));
+    assert!(
+        claim.run.prompt.contains("\nBo:\n> Hello from Bo.\n"),
+        "{}",
+        claim.run.prompt
+    );
+    assert!(!claim.run.prompt.contains(FORMER_BRUH));
+}
