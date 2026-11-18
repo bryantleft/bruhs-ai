@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
 # Regenerate packaging/macos/AppIcon.icns from packaging/macos/AppIcon.svg
-# (the bruhs.ai dot mark on its longan tile; bruhs-site/brand/logo.mjs writes it).
+# (the dotted Bruh on its longan tile; bruhs-site/brand/logo.mjs writes it).
+# Its 512px render is also the server's tasks icon and the mobile app icon.
 # macOS icons draw their art inside ~80% of the canvas (824 of 1024), so each
 # size is rendered smaller and centered. Needs rsvg-convert and
 # ImageMagick (`brew install librsvg imagemagick`).
@@ -23,4 +24,7 @@ for base in 16 32 128 256 512; do
   render $(( base * 2 )) "icon_${base}x${base}@2x.png"
 done
 iconutil -c icns "$set_dir" -o "$out"
-echo "wrote $out"
+for copy in bruhs-server/src/routes/coordination/icon-512.png bruhs-mobile/assets/icon.png; do
+  cp "$set_dir/icon_256x256@2x.png" "$copy"
+done
+echo "wrote $out, bruhs-server/src/routes/coordination/icon-512.png and bruhs-mobile/assets/icon.png"

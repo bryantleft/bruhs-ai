@@ -24,7 +24,7 @@ uses it too: sidebar, web favicon and Mac icon.
 ```
 node brand/logo.mjs             # site logo/favicon, bruhs-web bruhs.svg/favicon.svg, Mac AppIcon.svg
 brand/render.sh                 # public/og.png (social card) and apple-touch-icon.png, via Chrome
-packaging/macos/make-icon.sh    # (repo root) AppIcon.icns from packaging/macos/AppIcon.svg
+packaging/macos/make-icon.sh    # (repo root) AppIcon.icns, plus the server's tasks icon and the mobile icon
 ```
 
 ## Deploys
