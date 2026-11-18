@@ -226,6 +226,14 @@ impl Browser {
                     self.cdp.call("Runtime.evaluate", json!({"expression":"void 0"})).await?;
                     json!({"events":self.cdp.network})
                 }
+                BrowserAction::ClickAt { .. }
+                | BrowserAction::Type { .. }
+                | BrowserAction::Key { .. }
+                | BrowserAction::Scroll { .. } => {
+                    return Err(ToolError::Invalid(
+                        "This browser action is not available yet.".into(),
+                    ))
+                }
             };
             Ok(ToolReply { value, image: None })
         };
