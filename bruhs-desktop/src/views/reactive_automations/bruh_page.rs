@@ -420,6 +420,22 @@ fn page_switch(
     }
 }
 
+/// An open question card's reply field, which redraws the page as it
+/// changes so Reply turns on and off. A bruh's chat and a room keep one per
+/// open card.
+pub(super) fn reply_field(
+    window: &mut Window,
+    cx: &mut Context<'_, ReactiveAutomations>,
+) -> (Entity<InputState>, gpui::Subscription) {
+    let input = cx.new(|cx| InputState::new(window, cx).multi_line(true));
+    let watch = cx.subscribe_in(&input, window, |_, _, event: &InputEvent, _, cx| {
+        if matches!(event, InputEvent::Change) {
+            cx.notify();
+        }
+    });
+    (input, watch)
+}
+
 pub(super) fn small_text(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
         .min_w_0()
@@ -761,13 +777,8 @@ impl ReactiveAutomations {
         });
         for item in outbox.iter().filter(|item| open_question(item, &agent_id)) {
             if !page.replies.contains_key(&item.id) {
-                let input = cx.new(|cx| InputState::new(window, cx).multi_line(true));
-                let watch = cx.subscribe_in(&input, window, |_, _, event: &InputEvent, _, cx| {
-                    if matches!(event, InputEvent::Change) {
-                        cx.notify();
-                    }
-                });
-                page.replies.insert(item.id.clone(), (input, watch));
+                page.replies
+                    .insert(item.id.clone(), reply_field(window, cx));
             }
         }
         page.lines = Rc::new(transcript(&agent_id, &page.runs.runs, outbox));

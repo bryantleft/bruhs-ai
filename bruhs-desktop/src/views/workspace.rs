@@ -116,6 +116,7 @@ mod project_picker_tests;
 mod project_picker_ui;
 mod record_picker_ui;
 mod role_settings_ui;
+mod room_ui;
 mod save_queue;
 mod save_status;
 mod scheduling_ui;
