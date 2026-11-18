@@ -58,10 +58,6 @@ impl CrewData {
     }
 
     /// Why rooms are off, once the version is known to be older.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the room pages use it in a later change")
-    )]
     pub fn rooms_reason(&self) -> Option<&'static str> {
         if self.rooms_ready() {
             return None;
@@ -171,11 +167,13 @@ fn new_crew_data() -> CrewData {
         }
     });
 
-    // Load now, and again whenever the service reports a change to the crew.
+    // Load now, and again whenever the service reports a change to the crew
+    // or its rooms.
     let updates = use_context::<AgentUpdates>();
     if let Some(updates) = updates {
         Effect::new(move |_| {
             updates.bruhs.track();
+            updates.rooms.track();
             reload.run(());
         });
     } else {

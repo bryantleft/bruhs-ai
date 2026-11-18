@@ -2,7 +2,7 @@
 //! lines, the rail's order and status, the `@` list and the settings form.
 
 use super::{check_room, join_names, Room, RoomAuthor, RoomMessage, RoomState, FORMER_BRUH};
-use crate::crew::BruhState;
+use crate::crew::{rooms_ready, service_notice, BruhState};
 use crate::reactive::{OutboxItem, ReactiveCommand, ReactiveRun, RunStatus};
 use crate::EpochMs;
 
@@ -22,6 +22,22 @@ pub const NO_MEMBERS: &str = "Add a bruh in Room settings to start.";
 pub const DELETE_ROOM_CONFIRM: &str = "Delete this room and its messages? The bruhs stay.";
 /// Shown on an approval card once the owner has decided it.
 pub const APPROVAL_DECIDED: &str = "Decided";
+/// Why New room is off while the crew is empty.
+pub const ADD_A_BRUH_FIRST: &str = "Add a bruh first.";
+
+/// Why New room is off, or `None` when it works. An unknown service
+/// version counts as not yet, titled plainly with [`NEW_ROOM`]; an older
+/// service gives its update notice; an empty crew asks for a bruh first.
+#[must_use]
+pub fn new_room_block(protocol: Option<u32>, bruhs: usize) -> Option<&'static str> {
+    let Some(protocol) = protocol else {
+        return Some(NEW_ROOM);
+    };
+    if !rooms_ready(protocol) {
+        return Some(service_notice(protocol, None).map_or(NEW_ROOM, |notice| notice.message()));
+    }
+    (bruhs == 0).then_some(ADD_A_BRUH_FIRST)
+}
 
 /// The line shown while a bruh has a run in the room.
 #[must_use]
@@ -556,6 +572,22 @@ mod tests {
         };
         assert_eq!(names("bo"), ["Bobby", "Abo"]);
         assert_eq!(names(""), ["Cy", "Bobby", "Abo"]);
+    }
+
+    #[test]
+    fn new_room_is_off_until_the_service_takes_rooms_and_there_is_a_bruh() {
+        use crate::crew::{ServiceNotice, CREW_PROTOCOL};
+        assert_eq!(
+            new_room_block(Some(1), 2),
+            Some(ServiceNotice::ServingOld.message())
+        );
+        assert_eq!(
+            new_room_block(Some(CREW_PROTOCOL), 0),
+            Some("Add a bruh first.")
+        );
+        assert_eq!(new_room_block(Some(CREW_PROTOCOL), 1), None);
+        // Unknown: off, titled plainly.
+        assert_eq!(new_room_block(None, 1), Some("New room"));
     }
 
     #[test]
