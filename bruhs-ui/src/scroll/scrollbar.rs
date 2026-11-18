@@ -455,7 +455,19 @@ impl Element for Scrollbar {
                 inner.last_scroll = Some(Instant::now());
             });
         }
-        let bars = bars(viewport, self.handle.content_size(), offset, self.axis);
+        // How far the content scrolls, from the handle's own viewport (the
+        // overlay can differ from it by a border), applied to the overlay.
+        let handle_viewport = self.handle.viewport_bounds().size;
+        let content = self.handle.content_size();
+        let scrollable = size(
+            (content.width - handle_viewport.width).max(Pixels::ZERO),
+            (content.height - handle_viewport.height).max(Pixels::ZERO),
+        );
+        let content = size(
+            viewport.size.width + scrollable.width,
+            viewport.size.height + scrollable.height,
+        );
+        let bars = bars(viewport, content, offset, self.axis);
         let hitboxes = window.with_content_mask(Some(ContentMask { bounds: viewport }), |window| {
             bars.iter()
                 .map(|bar| window.insert_hitbox(bar.track, HitboxBehavior::Normal))
