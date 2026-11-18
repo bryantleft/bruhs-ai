@@ -16,6 +16,13 @@ yanked = "deny"
 ignore = [
     { id = "RUSTSEC-2026-0194", reason = "quick-xml 0.39 only via Linux-only gpui_linux -> zbus_xml; not built here" },
     { id = "RUSTSEC-2026-0195", reason = "quick-xml 0.39 only via Linux-only gpui_linux -> zbus_xml; not built here" },
+    # chrono and chrono-tz are unmaintained (no fix, no vulnerability). gpui and
+    # zed's scheduler depend on chrono too, so moving our crates to jiff would
+    # not drop it from the build. chrono-tz (only bruhs-core's reactive clock)
+    # works on chrono types and should move with it. Remove these once gpui
+    # leaves chrono, then migrate ours.
+    { id = "RUSTSEC-2026-0543", reason = "chrono unmaintained, informational only; gpui depends on it, revisit when gpui moves off chrono" },
+    { id = "RUSTSEC-2026-0555", reason = "chrono-tz unmaintained, informational only; moves with chrono" },
 ]
 
 [licenses]
