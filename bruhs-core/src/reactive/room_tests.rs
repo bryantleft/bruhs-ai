@@ -767,7 +767,10 @@ async fn a_queued_room_run_sees_messages_posted_while_it_waited() {
 
     let claim = claim_one(&runtime).await.unwrap();
     assert_eq!(claim.run.id, queued.id);
-    assert!(claim.run.prompt.contains("Owner (to you):\n> @Agent a first"));
+    assert!(claim
+        .run
+        .prompt
+        .contains("Owner (to you):\n> @Agent a first"));
     assert!(claim.run.prompt.contains("\nOwner:\n> and also this\n"));
     assert_eq!(run(&runtime, &queued.id).await.prompt, claim.run.prompt);
 }

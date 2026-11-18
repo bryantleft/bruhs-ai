@@ -100,7 +100,10 @@ async fn a_bruh_that_left_the_room_keeps_its_name_in_the_envelope() {
     post(&runtime, "r", "@Ada go").await;
     let claim = claim_one(&runtime).await.unwrap();
     assert_eq!(claim.run.agent_id, "a");
-    assert!(claim.run.prompt.starts_with("[Room \"Room r\" with Ada. You are Ada."));
+    assert!(claim
+        .run
+        .prompt
+        .starts_with("[Room \"Room r\" with Ada. You are Ada."));
     assert!(
         claim.run.prompt.contains("\nBo:\n> Hello from Bo.\n"),
         "{}",
