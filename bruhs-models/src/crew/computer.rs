@@ -103,6 +103,18 @@ pub fn computer_unavailable(level: AccessLevel, provider: AgentProvider) -> Opti
     }
 }
 
+/// Why the Computer switch in a bruh's Settings is off, if it is: the
+/// model or level first, since the owner can change those there, then an
+/// older service. Both apps show this one reason.
+#[must_use]
+pub fn computer_switch_reason(
+    level: AccessLevel,
+    provider: AgentProvider,
+    protocol: Option<u32>,
+) -> Option<&'static str> {
+    computer_unavailable(level, provider).or_else(|| computer_reason(protocol))
+}
+
 /// Whether a bruh's Computer is on: switched on, and available to it.
 #[must_use]
 pub fn computer_on(on: bool, access: &BruhAccess, provider: AgentProvider) -> bool {
@@ -341,6 +353,10 @@ pub fn delete_bruh_confirm(name: &str) -> String {
         "Delete {name}? Its chat, memory, browser and private work folder go with it. A folder you chose stays."
     )
 }
+
+/// The confirm's buttons: Delete goes ahead, Keep is the safe choice.
+pub const DELETE_BRUH_YES: &str = "Delete";
+pub const DELETE_BRUH_NO: &str = "Keep";
 
 /// How a proposal to delete an agent reads.
 #[must_use]
@@ -858,6 +874,39 @@ mod tests {
             computer_reason(Some(2)),
             Some(ServiceNotice::ServingOld.message())
         );
+    }
+
+    #[test]
+    fn the_computer_switch_says_why_it_is_off() {
+        use crate::crew::{ServiceNotice, CREW_PROTOCOL};
+        let current = Some(CREW_PROTOCOL);
+        let claude = AgentProvider::Claude;
+        assert_eq!(
+            computer_switch_reason(AccessLevel::ReadOnly, claude, current),
+            Some("Computer needs Ask first or Full access.")
+        );
+        assert_eq!(
+            computer_switch_reason(AccessLevel::Full, AgentProvider::Codex, current),
+            Some(NEEDS_CLAUDE)
+        );
+        assert_eq!(
+            computer_switch_reason(AccessLevel::Full, claude, Some(2)),
+            Some(ServiceNotice::ServingOld.message())
+        );
+        // The reason the owner can fix in Settings comes first.
+        assert_eq!(
+            computer_switch_reason(AccessLevel::ReadOnly, claude, Some(2)),
+            Some("Computer needs Ask first or Full access.")
+        );
+        assert_eq!(
+            computer_switch_reason(AccessLevel::Full, claude, current),
+            None
+        );
+        assert_eq!(
+            computer_switch_reason(AccessLevel::Ask, claude, current),
+            None
+        );
+        assert_eq!(computer_switch_reason(AccessLevel::Ask, claude, None), None);
     }
 
     #[test]

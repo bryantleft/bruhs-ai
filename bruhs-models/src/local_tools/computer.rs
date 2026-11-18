@@ -218,6 +218,22 @@ pub fn screencast_path(session_id: &str) -> String {
     )
 }
 
+/// The live view's WebSocket address on the API at `base`: `http` becomes
+/// `ws` and `https` becomes `wss`, and a trailing slash is dropped. Both
+/// apps build the address here so they never differ.
+#[must_use]
+pub fn screencast_url(base: &str, session_id: &str) -> String {
+    let base = base.trim_end_matches('/');
+    let ws_base = if let Some(rest) = base.strip_prefix("https://") {
+        format!("wss://{rest}")
+    } else if let Some(rest) = base.strip_prefix("http://") {
+        format!("ws://{rest}")
+    } else {
+        base.to_string()
+    };
+    format!("{ws_base}{}", screencast_path(session_id))
+}
+
 /// CDP's modifier bits, as `Input.dispatchKeyEvent` and
 /// `Input.dispatchMouseEvent` take them.
 pub const MODIFIER_ALT: u8 = 1;
@@ -382,6 +398,22 @@ pub fn to_viewport(x: f64, y: f64, shown: (f64, f64), viewport: Viewport) -> Opt
 mod tests {
     use super::*;
     use crate::local_tools::{AGENT_KEYS, MAX_SCROLL_PX, MAX_TYPE_CHARS};
+
+    #[test]
+    fn screencast_urls_use_the_api_origin_with_ws() {
+        assert_eq!(
+            screencast_url("http://127.0.0.1:3001", "s1"),
+            "ws://127.0.0.1:3001/api/local-tools/browser/s1/screencast"
+        );
+        assert_eq!(
+            screencast_url("https://api.bruhs.localhost", "s1"),
+            "wss://api.bruhs.localhost/api/local-tools/browser/s1/screencast"
+        );
+        assert_eq!(
+            screencast_url("http://127.0.0.1:3001/", "a b"),
+            "ws://127.0.0.1:3001/api/local-tools/browser/a%20b/screencast"
+        );
+    }
 
     #[test]
     fn every_agent_key_maps_to_cdp() {

@@ -209,6 +209,22 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
     // The agent whose Delete is asking first. It lives here, not in the
     // card, so a snapshot that redraws the cards keeps the question open.
     let deleting = RwSignal::new(None::<String>);
+    // Once the agent has gone, its card and buttons have too: the question
+    // closes and focus moves to New agent, never to another Delete.
+    let new_agent_ref = NodeRef::<leptos::html::Button>::new();
+    Effect::new(move |_| {
+        let Some(id) = deleting.get() else {
+            return;
+        };
+        let gone = snapshot.with(|s| {
+            s.as_ref()
+                .is_some_and(|s| !s.agents.iter().any(|agent| agent.id == id))
+        });
+        if gone {
+            deleting.set(None);
+            focus_after_render(new_agent_ref);
+        }
+    });
     let edit_agent = Callback::new(move |agent: ReactiveAgent| {
         agent_id.set(Some(agent.id.clone()));
         name.set(agent.name);
@@ -352,9 +368,9 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                 </Show>
                 <details class=CARD><summary class="cursor-pointer text-label text-rambutan-300">"Advanced settings"</summary><p class="mt-2 text-label-sm text-rambutan-500">"Manage separate agents, sources, and subscriptions, or inspect private integration credentials."</p><div class="mt-3 space-y-4">
                 <div class="flex flex-wrap gap-2">
-                    <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| {
+                    <button type="button" node_ref=new_agent_ref data-new-agent="" class=button_class(ButtonVariant::Outline, ButtonSize::Small, "") on:click=move |_| {
                         agent_id.set(None); name.set(String::new()); instructions.set(String::new()); memory.set(String::new()); enabled.set(false); agent_open.set(true);
-                    })>"New agent"</Button>
+                    }>"New agent"</button>
                     <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| {
                         source_id.set(None); source_name.set("Scans".into()); source_type.set("folder".into()); source_value.set(String::new()); pattern.set("*.pdf".into()); source_enabled.set(false); source_open.set(true);
                     })>"Watch scans"</Button>
@@ -401,10 +417,10 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                         </div></div>
                         {move || asking.get().then(|| { let delete = delete.clone(); view! {
                             <div data-agent-delete-confirm="" class="mt-2 space-y-2 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50">
-                                <p class="text-body-sm text-rambutan-200">{confirm.clone()}</p>
+                                <p id="agent-delete-question" class="text-body-sm text-rambutan-200">{confirm.clone()}</p>
                                 <div class="flex flex-wrap items-center gap-2">
-                                    <button type="button" data-agent-delete-yes="" class=button_class(ButtonVariant::Destructive, ButtonSize::Small, "") on:click=move |_| send.run(delete.clone())>"Delete"</button>
-                                    <button type="button" node_ref=keep_ref data-agent-delete-keep="" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") on:click=move |_| { deleting.set(None); focus_after_render(delete_ref); }>"Keep"</button>
+                                    <button type="button" data-agent-delete-yes="" class=button_class(ButtonVariant::Destructive, ButtonSize::Small, "") on:click=move |_| send.run(delete.clone())>{bruhs_models::crew::DELETE_BRUH_YES}</button>
+                                    <button type="button" node_ref=keep_ref data-agent-delete-keep="" aria-describedby="agent-delete-question" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") on:click=move |_| { deleting.set(None); focus_after_render(delete_ref); }>{bruhs_models::crew::DELETE_BRUH_NO}</button>
                                 </div>
                             </div>
                         } })}

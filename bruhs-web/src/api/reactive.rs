@@ -1,7 +1,7 @@
 //! Server-owned event agents; these records never enter browser metadata storage.
 use super::{get_json, segment, send_json, ApiError, BASE_URL};
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
-use bruhs_models::local_tools::{screencast_path, ComputerRequest, ComputerState};
+use bruhs_models::local_tools::{ComputerRequest, ComputerState};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveRun, ReactiveSnapshot};
 use bruhs_models::weekly_reports::{EngineeringReport, WeeklyReportCommand, WeeklyReportsSnapshot};
 use gloo_net::http::Method;
@@ -100,21 +100,7 @@ pub async fn computer_request(
 )]
 /// The live view's WebSocket address for a browser session.
 pub fn screencast_url(session_id: &str) -> String {
-    screencast_ws_url(BASE_URL, session_id)
-}
-
-/// The live view's address on the API at `base`: `http` becomes `ws` and
-/// `https` becomes `wss`, as the terminal's socket does.
-fn screencast_ws_url(base: &str, session_id: &str) -> String {
-    let base = base.trim_end_matches('/');
-    let ws_base = if let Some(rest) = base.strip_prefix("https://") {
-        format!("wss://{rest}")
-    } else if let Some(rest) = base.strip_prefix("http://") {
-        format!("ws://{rest}")
-    } else {
-        base.to_string()
-    };
-    format!("{ws_base}{}", screencast_path(session_id))
+    bruhs_models::local_tools::screencast_url(BASE_URL, session_id)
 }
 
 pub async fn reactive_hook_token(source_id: &str) -> Result<ReactiveHookToken, ApiError> {
@@ -134,21 +120,4 @@ pub async fn set_background_service(
     action: BackgroundServiceAction,
 ) -> Result<BackgroundService, ApiError> {
     send_json(Method::POST, "/api/service", Some(&action)).await
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn screencast_urls_use_the_api_origin_with_ws() {
-        assert_eq!(
-            screencast_ws_url("http://127.0.0.1:3001", "s1"),
-            "ws://127.0.0.1:3001/api/local-tools/browser/s1/screencast"
-        );
-        assert_eq!(
-            screencast_ws_url("https://bruhs.localhost/", "a b"),
-            "wss://bruhs.localhost/api/local-tools/browser/a%20b/screencast"
-        );
-    }
 }
