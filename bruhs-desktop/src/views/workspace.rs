@@ -2987,7 +2987,12 @@ impl Render for Workspace {
                     .when(!booking, |el| {
                         el.child(self.render_workspace_navigation(sidebar_drawer, cx))
                     })
-                    // Web: under the navigation, above the page.
+                    // Under the navigation, above the page, as the web places
+                    // its notices: never under the macOS window buttons.
+                    .when_some(self.render_save_status(cx), |el, status| el.child(status))
+                    .when_some(self.persistence_error.clone(), |el, error| {
+                        el.child(self.render_persistence_error(error, cx))
+                    })
                     .when_some(self.render_workflow_status(cx), |el, status| {
                         el.child(status)
                     })
@@ -3214,10 +3219,6 @@ impl Render for Workspace {
             .text_color(cx.theme().foreground)
             .flex()
             .flex_col()
-            .when_some(self.render_save_status(cx), |el, status| el.child(status))
-            .when_some(self.persistence_error.clone(), |el, error| {
-                el.child(self.render_persistence_error(error, cx))
-            })
             .child(body)
             .when_some(self.overlay.clone(), |el, overlay| {
                 el.child(match overlay {
