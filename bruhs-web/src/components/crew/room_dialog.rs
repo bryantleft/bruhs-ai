@@ -4,8 +4,8 @@
 
 use bruhs_models::crew::room::{
     lead_choices, room_command, room_form_for, RoomForm, CREATE_ROOM, DELETE_ROOM,
-    DELETE_ROOM_CONFIRM, DELETE_ROOM_NO, DELETE_ROOM_YES, NEW_ROOM, ROOM_LEAD, ROOM_MEMBERS,
-    ROOM_SETTINGS, SAVE_ROOM,
+    DELETE_ROOM_CONFIRM, DELETE_ROOM_NO, DELETE_ROOM_YES, NEW_ROOM, NO_BRUHS_YET, ROOM_LEAD,
+    ROOM_MEMBERS, ROOM_SETTINGS, SAVE_ROOM,
 };
 use bruhs_models::crew::{BruhState, RAIL_FACE_PX};
 use bruhs_models::reactive::ReactiveCommand;
@@ -223,7 +223,7 @@ pub fn RoomDialog(
                         // No empty list for a screen reader to announce.
                         <Show
                             when=move || bruhs.with(|bruhs| !bruhs.is_empty())
-                            fallback=|| view! { <p class="text-label-sm text-rambutan-500">"No bruhs yet."</p> }
+                            fallback=|| view! { <p class="text-label-sm text-rambutan-500">{NO_BRUHS_YET}</p> }
                         >
                         <ul role="list" aria-labelledby="room-dialog-members" class="m-0 max-h-[30vh] min-h-0 list-none space-y-0.5 overflow-y-auto p-0">
                             <For

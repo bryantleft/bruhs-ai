@@ -4,6 +4,7 @@
 
 use std::collections::VecDeque;
 
+use bruhs_models::crew::room::rooms_reason;
 use bruhs_models::crew::{crew_commands_ready, rooms_ready, service_notice};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
 use leptos::prelude::*;
@@ -59,12 +60,7 @@ impl CrewData {
 
     /// Why rooms are off, once the version is known to be older.
     pub fn rooms_reason(&self) -> Option<&'static str> {
-        if self.rooms_ready() {
-            return None;
-        }
-        self.protocol()
-            .and_then(|protocol| service_notice(protocol, None))
-            .map(|notice| notice.message())
+        rooms_reason(self.protocol())
     }
 }
 

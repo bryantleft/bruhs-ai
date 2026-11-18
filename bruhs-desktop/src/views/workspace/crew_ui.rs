@@ -8,7 +8,9 @@ use super::*;
 use crate::views::crew_face::bruh_face;
 use crate::views::reactive_automations::local_time;
 use crate::views::web_button::on_press;
-use bruhs_models::crew::room::{new_room_block, room_order, room_status_line, RoomState, NEW_ROOM};
+use bruhs_models::crew::room::{
+    new_room_block, room_rail_rows, RoomRailRow, NEW_ROOM, NO_BRUHS_YET,
+};
 use bruhs_models::crew::{
     rail_order, status_line, BruhState, BruhStatus, ServiceNotice, RAIL_FACE_PX,
 };
@@ -50,28 +52,6 @@ fn rail_rows(bruhs: &[BruhState]) -> Vec<BruhState> {
     let mut rows = bruhs.to_vec();
     rail_order(&mut rows);
     rows
-}
-
-/// One room as the rail draws it.
-#[derive(Debug, Clone, PartialEq)]
-struct RoomRow {
-    id: String,
-    name: String,
-    line: String,
-}
-
-/// The rooms in rail order, each with who is working or who is in it.
-fn room_rows(rooms: &[RoomState], bruhs: &[BruhState]) -> Vec<RoomRow> {
-    let mut rooms = rooms.to_vec();
-    room_order(&mut rooms);
-    rooms
-        .iter()
-        .map(|state| RoomRow {
-            id: state.room.id.clone(),
-            name: state.room.name.clone(),
-            line: room_status_line(state, bruhs),
-        })
-        .collect()
 }
 
 /// The line under a bruh's name, with its next wake in local time.
@@ -308,7 +288,7 @@ impl Workspace {
                     );
                 }
             } else if rows.is_empty() {
-                body = body.child(crew_text("No bruhs yet.").px(px(CREW_INNER_X_PADDING_PX)));
+                body = body.child(crew_text(NO_BRUHS_YET).px(px(CREW_INNER_X_PADDING_PX)));
             }
             if let Some(message) = panel.crew_error() {
                 body = body.child(
@@ -321,7 +301,7 @@ impl Workspace {
                         .child(message.to_string()),
                 );
             }
-            let rooms = room_rows(panel.rooms(), panel.crew());
+            let rooms = room_rail_rows(panel.rooms(), panel.crew());
             // One scroll region for both lists, rooms under the bruhs.
             body.child(
                 div()
@@ -566,7 +546,7 @@ impl Workspace {
 
     /// One room's row: the room icon in a face's width, its name and who is
     /// working or who is in it.
-    fn render_room_row(&self, row: &RoomRow, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_room_row(&self, row: &RoomRailRow, cx: &Context<'_, Self>) -> AnyElement {
         let room_id = row.id.clone();
         let current = matches!(
             &self.active_view,

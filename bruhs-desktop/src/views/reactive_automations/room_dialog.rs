@@ -10,7 +10,8 @@ use crate::views::dropdown::{dropdown, DropdownGroup, DropdownOption, Listbox};
 use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     lead_choices, room_command, room_form_for, Room, RoomForm, RoomState, DELETE_ROOM_CONFIRM,
-    DELETE_ROOM_NO, DELETE_ROOM_YES, NEW_ROOM, ROOM_LEAD, ROOM_MEMBERS, ROOM_SETTINGS,
+    DELETE_ROOM_NO, DELETE_ROOM_YES, NEW_ROOM, NO_BRUHS_YET, ROOM_LEAD, ROOM_MEMBERS,
+    ROOM_SETTINGS,
 };
 use bruhs_models::crew::RAIL_FACE_PX;
 use gpui_component::scroll::ScrollableElement;
@@ -476,7 +477,7 @@ impl ReactiveAutomations {
         let dialog = self.room_dialog.as_ref()?;
         let bruhs = &self.crew.bruhs;
         let members = if bruhs.is_empty() {
-            hint("No bruhs yet.").into_any_element()
+            hint(NO_BRUHS_YET).into_any_element()
         } else {
             div()
                 .id("desktop-room-members")

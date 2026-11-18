@@ -5,7 +5,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
-use bruhs_models::crew::room::{new_room_block, room_order, room_status_line, RoomState, NEW_ROOM};
+use bruhs_models::crew::room::{
+    new_room_block, room_rail_rows, RoomRailRow, NEW_ROOM, NO_BRUHS_YET,
+};
 use bruhs_models::crew::{
     rail_order, service_notice, status_line, BruhState, BruhStatus, ServiceNotice, RAIL_FACE_PX,
 };
@@ -86,28 +88,6 @@ fn row_status(state: &BruhState) -> String {
     status_line(state.status, wake.as_deref())
 }
 
-/// One room as the rail draws it.
-#[derive(Debug, Clone, PartialEq)]
-struct RoomRow {
-    id: String,
-    name: String,
-    line: String,
-}
-
-/// The rooms in rail order, each with who is working or who is in it.
-fn room_rows(rooms: &[RoomState], bruhs: &[BruhState]) -> Vec<RoomRow> {
-    let mut rooms = rooms.to_vec();
-    room_order(&mut rooms);
-    rooms
-        .iter()
-        .map(|state| RoomRow {
-            id: state.room.id.clone(),
-            name: state.room.name.clone(),
-            line: room_status_line(state, bruhs),
-        })
-        .collect()
-}
-
 /// Why New room is off. Until the crew has loaded, nobody knows whether it
 /// has a bruh, so it is off and titled plainly, as for an unknown service.
 fn room_block_for(protocol: Option<u32>, bruhs: Option<usize>) -> Option<&'static str> {
@@ -185,7 +165,7 @@ fn rail_row(
 /// One room's row, kept current from `rows` by its id.
 fn room_row(
     room_id: String,
-    rows: Memo<Vec<RoomRow>>,
+    rows: Memo<Vec<RoomRailRow>>,
     active_view: Option<ReadSignal<AppView>>,
     open_room: Callback<String>,
 ) -> impl IntoView {
@@ -249,7 +229,7 @@ pub fn CrewRail(
         data.snapshot.with(|snapshot| {
             snapshot
                 .as_ref()
-                .map(|snapshot| room_rows(&snapshot.rooms, &snapshot.bruhs))
+                .map(|snapshot| room_rail_rows(&snapshot.rooms, &snapshot.bruhs))
                 .unwrap_or_default()
         })
     });
@@ -468,7 +448,7 @@ pub fn CrewRail(
                             </div>
                         }.into_any()),
                         Some(true) => Some(view! {
-                            <p class="px-1 text-label-sm text-rambutan-500">"No bruhs yet."</p>
+                            <p class="px-1 text-label-sm text-rambutan-500">{NO_BRUHS_YET}</p>
                         }.into_any()),
                         Some(false) => None,
                     }}
@@ -490,7 +470,7 @@ pub fn CrewRail(
                                 <For
                                     each=move || rooms.get()
                                     key=|room| room.id.clone()
-                                    children=move |room: RoomRow| room_row(room.id, rooms, active_view, open_room)
+                                    children=move |room: RoomRailRow| room_row(room.id, rooms, active_view, open_room)
                                 />
                             </ul>
                         </Show>
@@ -506,7 +486,7 @@ pub fn CrewRail(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use bruhs_models::crew::room::Room;
+    use bruhs_models::crew::room::{Room, RoomState};
     use bruhs_models::crew::{BruhAccess, BruhLook, CREW_PROTOCOL};
     use bruhs_models::EpochMs;
 
@@ -634,7 +614,7 @@ mod tests {
     fn rooms_sit_under_the_bruhs_by_name_with_their_status_line() {
         let mut ada = bruh("Ada", BruhStatus::Working);
         ada.agent_id = "x".into();
-        let rows = room_rows(
+        let rows = room_rail_rows(
             &[room("b", "beta", &[]), room("a", "Alpha", &["x"])],
             &[ada],
         );

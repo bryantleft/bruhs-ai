@@ -1438,13 +1438,7 @@ impl ReactiveAutomations {
     }
     /// Why rooms are off, once the service is known to be older.
     pub(crate) fn rooms_reason(&self) -> Option<&'static str> {
-        if self.rooms_ready() {
-            return None;
-        }
-        self.crew
-            .protocol
-            .and_then(|protocol| service_notice(protocol, None))
-            .map(ServiceNotice::message)
+        bruhs_models::crew::room::rooms_reason(self.crew.protocol)
     }
     /// Which older service to update, once the serving protocol is known.
     pub(crate) fn crew_notice(&self) -> Option<ServiceNotice> {

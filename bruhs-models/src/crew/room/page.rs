@@ -65,6 +65,38 @@ pub fn new_room_block(protocol: Option<u32>, bruhs: usize) -> Option<&'static st
     (bruhs == 0).then_some(ADD_A_BRUH_FIRST)
 }
 
+/// Why rooms are off: an older service's update notice once its version
+/// is known, and `None` while rooms work or the version is still unknown.
+#[must_use]
+pub fn rooms_reason(protocol: Option<u32>) -> Option<&'static str> {
+    let protocol = protocol.filter(|protocol| !rooms_ready(*protocol))?;
+    service_notice(protocol, None).map(|notice| notice.message())
+}
+
+/// One room as the rail draws it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RoomRailRow {
+    pub id: String,
+    pub name: String,
+    /// Who is working, else who is in it.
+    pub line: String,
+}
+
+/// The rooms in rail order, each with its status line.
+#[must_use]
+pub fn room_rail_rows(rooms: &[RoomState], bruhs: &[BruhState]) -> Vec<RoomRailRow> {
+    let mut rooms = rooms.to_vec();
+    room_order(&mut rooms);
+    rooms
+        .iter()
+        .map(|state| RoomRailRow {
+            id: state.room.id.clone(),
+            name: state.room.name.clone(),
+            line: room_status_line(state, bruhs),
+        })
+        .collect()
+}
+
 /// The line shown while a bruh has a run in the room.
 #[must_use]
 pub fn working_line(name: &str) -> String {
@@ -948,6 +980,37 @@ mod tests {
             drawn,
             [None, Some("**Food** and drinks"), None, None, None],
             "owner, system, failed and working lines stay plain"
+        );
+    }
+
+    #[test]
+    fn rail_rows_and_the_rooms_off_reason_are_one_rule() {
+        let bruhs = [state("a", "Ada"), state("b", "Bo")];
+        let rooms = [
+            rs("2", "beta", &["a"], &["a"]),
+            rs("1", "Alpha", &["a", "b"], &[]),
+        ];
+        assert_eq!(
+            room_rail_rows(&rooms, &bruhs),
+            [
+                RoomRailRow {
+                    id: "1".into(),
+                    name: "Alpha".into(),
+                    line: "Ada and Bo".into(),
+                },
+                RoomRailRow {
+                    id: "2".into(),
+                    name: "beta".into(),
+                    line: "Ada is working".into(),
+                },
+            ]
+        );
+        use crate::crew::{ServiceNotice, CREW_PROTOCOL};
+        assert_eq!(rooms_reason(None), None, "unknown: nothing to say yet");
+        assert_eq!(rooms_reason(Some(CREW_PROTOCOL)), None);
+        assert_eq!(
+            rooms_reason(Some(1)),
+            Some(ServiceNotice::ServingOld.message())
         );
     }
 }
