@@ -195,6 +195,7 @@ use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;
 mod calendar_zones;
+mod dialog_focus;
 mod inbox_acceptance;
 mod keys;
 mod launch;

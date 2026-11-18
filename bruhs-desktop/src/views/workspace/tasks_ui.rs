@@ -861,7 +861,8 @@ impl Workspace {
     /// window too compact for the project sidebar.
     pub(super) fn open_task_projects(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.open_overlay(Overlay::TaskProjects);
-        self.focus_first_modal_tab_stop(window, cx);
+        // The web dialog's first control is its Close.
+        self.focus_modal_close_button(window, cx);
         cx.notify();
     }
 

@@ -5468,7 +5468,9 @@ impl<M: InputModeKind> Render for InputBaseState<M> {
         // `Self` is concrete enough to name its own entity type.
         M::register_actions(element, &entity, window)
             .test_support()
-            .track_focus(&self.focus_handle)
+            // bruhs: a disabled input leaves the Tab order, as a disabled
+            // `<input>` does on the web; a click still focuses it.
+            .track_focus(&self.focus_handle.clone().tab_stop(!self.disabled))
     }
 }
 

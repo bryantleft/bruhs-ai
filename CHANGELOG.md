@@ -304,6 +304,26 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   example, that a focus block had changed after the Undo had gone through.
 - The workflow notice counts one saved step as "1 step saved", in both
   apps.
+- In the desktop app, a dialog opened from the keyboard puts focus on its
+  first control, as the web does, instead of on the dialog itself: a delete
+  confirmation on Cancel, a month's day list on its first record, Snooze
+  until on its date, New bruh on its name, and a read-only Google event on
+  Open in Google Calendar. Tasks' Projects starts on its close button.
+- In the desktop app, a disabled text field is no longer a Tab stop, as on
+  the web.
+- In the desktop Inbox, Cancel and Escape close the import form and put
+  focus back on Import conversation, as the web's dialog does. Import
+  conversation in the command bar now closes the command bar instead of
+  leaving it over the form.
+- The desktop import form offers each provider as its own button, as the
+  web does, instead of one button that cycled through them.
+- Screen readers hear the desktop Inbox as they hear the web's: the filters
+  and providers are pressed or not, a row reads its sender, date, subject,
+  preview and source, the search field is a search field, and the list,
+  the messages and the titles are named.
+- When the desktop app's saved data cannot be decoded, the Inbox says
+  "Conversations could not be loaded", as the web does, instead of "Your
+  inbox is clear."
 - In the desktop app, a failed save now reads like the web's: "Not saved",
   why, Retry save and Copy recovery data, under the page's top bar instead
   of under the window's close and minimize buttons.

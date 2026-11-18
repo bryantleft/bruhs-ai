@@ -1390,6 +1390,7 @@ pub struct Workspace {
     palette_return_focus: Option<(AppView, FocusHandle)>,
     modal_start_focus_handle: FocusHandle,
     modal_end_focus_handle: FocusHandle,
+    modal_focus: modal_ui::ModalFocus,
     modal_scroll: ScrollHandle,
     /// The dialogs' backdrop blur, which lives in native views, not gpui's.
     blur_scrim: BlurScrimHandle,
@@ -1416,7 +1417,14 @@ pub struct Workspace {
     /// The Knowledge library's search.
     knowledge: knowledge_ui::KnowledgeState,
     clip_create_visible: bool,
+    /// False when the state file could not be read and no backup restored
+    /// it: the Inbox then says its conversations could not be loaded.
+    saved_records_loaded: bool,
     inbox_import_visible: bool,
+    /// The Inbox's Import conversation button, where closing the import form
+    /// returns focus when the button opened it.
+    inbox_import_focus: FocusHandle,
+    inbox_import_returns_focus: bool,
     inbox_mail_visible: bool,
     connected_inbox: Entity<connected_inbox::ConnectedInbox>,
     inbox_page: usize,
@@ -1559,6 +1567,7 @@ impl Workspace {
         let permission_mode = initial_permission_mode_from_persisted(persisted.as_ref());
         // A missing file is a new workspace with no plan to recover.
         let day_plan_loaded = persisted.is_some() || persistence_error.is_none();
+        let saved_records_loaded = day_plan_loaded;
         let mut subscriptions = Vec::new();
         let command_input = Self::new_command_input(window, cx, &mut subscriptions);
         let import_input = Self::new_import_input(window, cx, &mut subscriptions);
@@ -2111,6 +2120,7 @@ impl Workspace {
             modal_start_focus_handle,
             blur_scrim: BlurScrimHandle::default(),
             modal_end_focus_handle,
+            modal_focus: modal_ui::ModalFocus::new(cx),
             modal_scroll: ScrollHandle::new(),
             import_picker: import_ui::ImportPicker::default(),
             import_input,
@@ -2130,7 +2140,10 @@ impl Workspace {
             clip_excerpt_input,
             knowledge,
             clip_create_visible: false,
+            saved_records_loaded,
             inbox_import_visible: false,
+            inbox_import_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            inbox_import_returns_focus: false,
             inbox_mail_visible: false,
             connected_inbox,
             inbox_page: 0,
@@ -2866,6 +2879,7 @@ impl Render for Workspace {
         self.sync_thread_catalog(cx);
         self.sync_create_bruh(cx);
         self.sync_bruh_page(cx);
+        self.schedule_modal_first_control(window, cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
         if !self.overlay_open() {

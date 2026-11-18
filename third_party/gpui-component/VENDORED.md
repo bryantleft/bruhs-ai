@@ -65,6 +65,11 @@ Every local change is marked `bruhs:` in the source.
 - `crates/component/src/input/textarea.rs`: `Textarea::focus_bordered`,
   forwarded to the `Input` it renders. The composer turns the focus border
   off.
+- `crates/base/src/input/base/state.rs`: a disabled input is not a Tab stop,
+  as a disabled `<input>` is not on the web. A click still focuses it.
+  Upstream keeps every input in the Tab order. The desktop test
+  `dialogs_open_on_their_first_control` counts a read-only event dialog's
+  stops without its disabled fields.
 - `crates/base/src/resizable/mod.rs`: `ResizableState::is_resizing`, so the
   desktop's docked right panel can keep its remembered width (as the web does)
   except while its handle is dragged.

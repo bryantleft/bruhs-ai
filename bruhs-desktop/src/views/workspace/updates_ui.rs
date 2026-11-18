@@ -612,7 +612,7 @@ impl Workspace {
         )
     }
 
-    fn activate_sidebar_update(
+    pub(super) fn activate_sidebar_update(
         &mut self,
         can_update: bool,
         window: &mut Window,
