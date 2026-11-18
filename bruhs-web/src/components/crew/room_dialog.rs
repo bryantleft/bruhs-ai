@@ -110,6 +110,7 @@ pub fn RoomDialog(
                     .is_some_and(|snapshot| snapshot.rooms.iter().any(|state| state.room.id == id))
             });
             if made {
+                super::room::focus_when_shown(id.clone());
                 if let Some(set_view) = set_view {
                     set_view.set(AppView::Room { room_id: id });
                 }

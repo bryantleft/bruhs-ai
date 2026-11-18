@@ -162,7 +162,13 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
     ) {
         match open {
-            Some(room_id) => self.activate_sidebar_view(AppView::Room { room_id }, window, cx),
+            Some(room_id) => {
+                self.reactive_automations.update(cx, |panel, cx| {
+                    panel.focus_room_when_shown(room_id.clone());
+                    cx.notify();
+                });
+                self.activate_sidebar_view(AppView::Room { room_id }, window, cx);
+            }
             None => {
                 if matches!(self.overlay, Some(Overlay::RoomDialog)) {
                     self.close_transient_surfaces();

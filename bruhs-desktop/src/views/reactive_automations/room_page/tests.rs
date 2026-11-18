@@ -353,6 +353,38 @@ fn posting_sends_post_room_and_clears(cx: &mut gpui::TestAppContext) {
     assert_eq!(draft(&panel, cx), "");
 }
 
+/// The service refused the post: its words come back to write again, unless
+/// the owner has started a new one; a post that went through stays gone.
+#[gpui::test]
+fn a_refused_post_comes_back_into_the_composer(cx: &mut gpui::TestAppContext) {
+    let (panel, cx) = open(
+        cx,
+        snapshot(
+            CREW_PROTOCOL,
+            vec![named("a", "Ada")],
+            vec![room(&["a"], Some("a"))],
+        ),
+    );
+    type_in(&panel, cx, "Pack the van");
+    press(cx, "enter");
+    assert_eq!(draft(&panel, cx), "");
+    panel.update(cx, |panel, cx| {
+        panel.command_failed_for_test("The service is busy.");
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_eq!(draft(&panel, cx), "Pack the van");
+    // Sent again and taken: a later failure leaves the composer alone.
+    press(cx, "enter");
+    panel.update(cx, |panel, cx| {
+        panel.room_posted_for_test(cx);
+        panel.command_failed_for_test("The service is busy.");
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert_eq!(draft(&panel, cx), "");
+}
+
 /// Web `px-3 pt-2.5` on the textarea: the text sits 12px in and 10px
 /// down from the composer's ring, with no field padding on top.
 #[gpui::test]

@@ -1424,6 +1424,12 @@ mod tests {
                 }
             );
         });
+        cx.run_until_parked();
+        // The new room's composer, not the New room button, has focus.
+        workspace.update_in(cx, |workspace, window, cx| {
+            let panel = workspace.reactive_automations.read(cx);
+            assert!(panel.room_composer_focused_for_test(window, cx));
+        });
     }
 
     #[gpui::test]

@@ -17,8 +17,8 @@ use crate::views::crew_face::bruh_face;
 use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     author_name, member_hits, member_states, members_line, mention_query, merge_messages,
-    room_composer_block, room_composer_hint, room_follow_key, room_line_key, room_lines,
-    room_markdown, room_post, working_line, Room, RoomLine, RoomMessage, RoomState,
+    refused_draft, room_composer_block, room_composer_hint, room_follow_key, room_line_key,
+    room_lines, room_markdown, room_post, working_line, Room, RoomLine, RoomMessage, RoomState,
     APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM, LOAD_EARLIER, ROOM_GONE, ROOM_LEAD, ROOM_LOADING,
     ROOM_SETTINGS,
 };
@@ -56,6 +56,11 @@ pub(super) struct RoomPage {
     newest_request: Option<Task<()>>,
     earlier_request: Option<Task<()>>,
     composer: Option<Entity<InputState>>,
+    /// The last post's text and chips until the service takes it, so a
+    /// refused post can come back to write again.
+    posted: Option<(String, Vec<ContextChip>)>,
+    /// The service refused `posted`: put it back before the next frame.
+    refused: bool,
     /// The bruh chips in the draft, placed against `draft`.
     chips: Vec<ContextChip>,
     draft: String,
@@ -105,6 +110,8 @@ impl RoomPage {
             newest_request: None,
             earlier_request: None,
             composer: None,
+            posted: None,
+            refused: false,
             chips: Vec::new(),
             draft: String::new(),
             mention: None,
@@ -305,6 +312,12 @@ impl ReactiveAutomations {
         if page.composer.is_none() {
             composer::make_room_composer(page, window, cx);
         }
+        if self.focus_room.as_deref() == Some(page.room_id.as_str()) && !gone {
+            self.focus_room = None;
+            if let Some(composer) = page.composer.as_ref() {
+                composer.update(cx, |input, cx| input.focus(window, cx));
+            }
+        }
         // A room deleted from its own settings takes the button focus went
         // back to; focus lands on the notice instead.
         if gone && !dialog_open {
@@ -370,9 +383,57 @@ impl ReactiveAutomations {
             page.error.is_some(),
             page.loaded && page.lines.is_empty()
         ));
+        let refused = std::mem::take(&mut page.refused);
+        if let Some((text, chips)) = refused
+            .then(|| refused_draft(&page.draft, page.posted.take()))
+            .flatten()
+        {
+            let caret = text.len();
+            self.set_room_draft(text, chips, caret, window, cx);
+        }
         if reload {
             self.reload_room_messages(cx);
         }
+    }
+
+    /// Room `room_id` was just made: focus its composer when its page shows,
+    /// rather than the New room button the dialog closed back to.
+    pub(crate) fn focus_room_when_shown(&mut self, room_id: String) {
+        self.focus_room = Some(room_id);
+    }
+
+    /// The service took the room's last post.
+    pub(super) fn room_posted(&mut self) {
+        if let Some(page) = self.room.as_mut() {
+            page.posted = None;
+        }
+    }
+
+    /// A command failed while the room's last post was on its way or
+    /// queued: put the post back in the composer.
+    pub(super) fn room_post_failed(&mut self) {
+        if let Some(page) = self.room.as_mut().filter(|page| page.posted.is_some()) {
+            page.refused = true;
+        }
+    }
+
+    /// Whether the open room's composer has focus.
+    #[cfg(test)]
+    pub(crate) fn room_composer_focused_for_test(&self, window: &Window, cx: &App) -> bool {
+        self.room
+            .as_ref()
+            .and_then(|page| page.composer.as_ref())
+            .is_some_and(|input| input.focus_handle(cx).is_focused(window))
+    }
+
+    #[cfg(test)]
+    pub(super) fn command_failed_for_test(&mut self, message: &str) {
+        self.command_failed(Scope::General, message.to_string());
+    }
+
+    #[cfg(test)]
+    pub(super) fn room_posted_for_test(&mut self, cx: &mut Context<'_, Self>) {
+        self.apply_effect(Effect::RoomPosted, cx);
     }
 
     /// The room page: header, transcript and composer, or why it can't show.

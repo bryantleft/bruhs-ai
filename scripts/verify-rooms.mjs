@@ -431,6 +431,8 @@ try {
     await press('Enter');
     launch = await until('Launch is created', async () => (await snapshot()).rooms.find((state) => state.room.name === 'Launch')?.room, 5000);
     const opened = await waitFor('the Launch page', `location.hash === ${js(`#/rooms/${launch.id}`)} && document.querySelector('#room-title')?.textContent.trim() === 'Launch'`, 5000).catch(() => false);
+    const focused = await waitFor('focus in the new room', `document.activeElement?.id === 'room-input'`, 3000).catch(() => false);
+    record('Create room puts focus in the new room\'s composer', !!focused, js(await active()));
     record('New room by keyboard creates Launch with Ada as lead and Bo, and opens it',
       checked.length === 2 && launch.lead === ids.Ada && launch.members.length === 2 && launch.members.includes(ids.Ada) && launch.members.includes(ids.Bo) && !!opened,
       `checked ${checked.join(',')}; room ${JSON.stringify(launch)}; hash ${await evaluate('location.hash')}`);
@@ -488,6 +490,8 @@ try {
     const before = (await messages(launch.id)).length;
     await click(sendButton, 'Send');
     const cleared = await waitFor('the composer clears', `document.querySelector(${js(composer)}).value === ''`, 3000).catch(() => false);
+    const refocused = await waitFor('focus back in the composer', `document.activeElement?.id === 'room-input'`, 3000).catch(() => false);
+    record('clicking Send puts focus back in the composer', !!refocused, js(await active()));
     const posted = await until('the post lands', async () =>
       (await messages(launch.id)).slice(before).find((message) => message.author.type === 'owner'), 5000).catch(() => null);
     const reached = posted && await until('Bo gets it', async () =>

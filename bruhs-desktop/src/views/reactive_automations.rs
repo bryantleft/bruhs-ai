@@ -243,6 +243,8 @@ pub(crate) struct ReactiveAutomations {
     bruh: Option<bruh_page::BruhPage>,
     /// The room page on screen, while the workspace shows one.
     room: Option<room_page::RoomPage>,
+    /// A room just made: its composer takes focus once its page shows.
+    focus_room: Option<String>,
     /// Commands waiting for the one in flight, sent in order; a failure
     /// drops them, since they assumed it would apply.
     queued: VecDeque<(ReactiveCommand, Scope)>,
@@ -435,6 +437,8 @@ enum Effect {
     OpenBruh(String),
     /// A room was made, saved or deleted: close the dialog that asked.
     RoomDone(String),
+    /// A post reached the room: its draft won't come back.
+    RoomPosted,
     None,
 }
 impl Effect {
@@ -445,6 +449,7 @@ impl Effect {
                 Self::RoomDone(room.id.clone())
             }
             ReactiveCommand::DeleteRoom { id } => Self::RoomDone(id.clone()),
+            ReactiveCommand::PostRoom { .. } => Self::RoomPosted,
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAutomation { .. },
             } => Self::CloseAutomation,
@@ -554,6 +559,7 @@ impl ReactiveAutomations {
             room_dialog: None,
             bruh: None,
             room: None,
+            focus_room: None,
             queued: VecDeque::new(),
             snapshot_rev: 0,
             #[cfg(test)]
@@ -755,6 +761,8 @@ impl ReactiveAutomations {
     /// the dialog that sent it try again, and show why where it was sent.
     fn command_failed(&mut self, scope: Scope, message: String) {
         self.queued.clear();
+        // A post that failed, or was dropped from the queue, comes back.
+        self.room_post_failed();
         if scope == Scope::CreateBruh {
             self.create_failed();
         }
@@ -786,6 +794,7 @@ impl ReactiveAutomations {
         match effect {
             Effect::OpenBruh(agent_id) => self.created_bruh(agent_id, cx),
             Effect::RoomDone(room_id) => self.room_done(&room_id, cx),
+            Effect::RoomPosted => self.room_posted(),
             Effect::CloseAutomation => self.editor = None,
             Effect::CloseReply(id) => {
                 if self.reply.as_ref().is_some_and(|(open, _)| *open == id) {

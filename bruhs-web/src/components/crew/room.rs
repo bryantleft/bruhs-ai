@@ -3,7 +3,7 @@
 //! and a composer whose `@` lists only the room's members.
 
 use bruhs_models::crew::room::{
-    author_name, member_states, members_line, merge_messages, room_composer_block,
+    author_name, member_states, members_line, merge_messages, refused_draft, room_composer_block,
     room_composer_hint, room_follow_key, room_line_key, room_lines, room_markdown, room_post,
     working_line, Room, RoomLine, RoomMessage, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM,
     LOAD_EARLIER, ROOM_GONE, ROOM_LOADING, ROOM_SETTINGS,
@@ -11,6 +11,7 @@ use bruhs_models::crew::room::{
 use bruhs_models::crew::{may_have_more, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
 use leptos::html;
 use leptos::prelude::*;
+use wasm_bindgen::JsCast;
 
 use super::chat::{approval_card, question_card, CARD};
 use super::data::{use_crew_snapshot, CrewData};
@@ -21,10 +22,32 @@ use super::room_dialog::RoomDialog;
 use crate::components::mention_editor::MentionEditor;
 use crate::state::{ChipRetargetGuard, ComposerChips};
 use crate::ui::{BrailleBruh, Button, ButtonSize, ButtonVariant};
+use bruhs_models::logic::context_chip::ContextChip;
 
 const ERROR: &str = "rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200";
 const OWNER: &str = "min-w-0 max-w-[80%] whitespace-pre-wrap break-words rounded-grape bg-longan-800 px-3 py-2 text-body text-rambutan-100";
 const FAILED: &str = "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-lychee-500/10 px-3 py-2 text-body text-lychee-200";
+
+thread_local! {
+    /// A room just made: its composer takes focus once its page shows,
+    /// rather than the New room button the dialog closed back to.
+    static FOCUS_WHEN_SHOWN: std::cell::RefCell<Option<String>> = const { std::cell::RefCell::new(None) };
+}
+
+/// Focus `room_id`'s composer when its page next shows.
+pub(super) fn focus_when_shown(room_id: String) {
+    FOCUS_WHEN_SHOWN.with(|pending| *pending.borrow_mut() = Some(room_id));
+}
+
+/// Put focus in the room's composer, when it is there.
+fn focus_composer() {
+    if let Some(input) = document()
+        .get_element_by_id("room-input")
+        .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok())
+    {
+        let _ = input.focus();
+    }
+}
 
 #[component]
 pub fn RoomPage(room_id: String) -> impl IntoView {
@@ -419,6 +442,9 @@ fn room_composer(
         })
         .filter(|_| blocked.get().is_none())
     };
+    // The last post's draft until the service takes it: a refused post
+    // comes back to write again.
+    let posted = StoredValue::new(None::<(String, Vec<ContextChip>)>);
     let send = move || {
         if blocked.get_untracked().is_some() {
             return;
@@ -429,11 +455,42 @@ fn room_composer(
         let Some(command) = command else {
             return;
         };
+        posted.set_value(Some((draft.get_untracked(), chips.get_untracked())));
         data.send.run(command);
         guard.set_value(true);
         chips.set(Vec::new());
         set_draft.set(String::new());
+        // Clicking Send leaves focus on a button that turns off; writing
+        // the next message starts in the composer again.
+        focus_composer();
     };
+    Effect::new(move |_| {
+        let refused = data.error.with(Option::is_some);
+        let busy = data.busy.get();
+        if refused {
+            let back = posted
+                .try_update_value(Option::take)
+                .flatten()
+                .and_then(|post| refused_draft(&draft.get_untracked(), Some(post)));
+            if let Some((text, kept)) = back {
+                guard.set_value(true);
+                chips.set(kept);
+                set_draft.set(text);
+            }
+        } else if !busy {
+            posted.set_value(None);
+        }
+    });
+    // A room just made opens with focus in its composer.
+    Effect::new(move |_| {
+        let shown = room.with(|room| matches!(room, Some(Some(_))));
+        let wanted = FOCUS_WHEN_SHOWN
+            .with(|pending| id.with_value(|id| pending.borrow().as_deref() == Some(id.as_str())));
+        if shown && wanted {
+            FOCUS_WHEN_SHOWN.with(|pending| pending.borrow_mut().take());
+            request_animation_frame(focus_composer);
+        }
+    });
 
     view! {
         <div class="shrink-0 border-t border-longan-800/50">

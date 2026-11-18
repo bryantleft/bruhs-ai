@@ -420,6 +420,17 @@ pub fn room_post(room_id: &str, text: &str, chips: &[ContextChip]) -> Option<Rea
     })
 }
 
+/// The draft to put back after the service refused the post made from
+/// `posted` (its text and chips): the post, unless the owner has written
+/// something new since.
+#[must_use]
+pub fn refused_draft(
+    draft: &str,
+    posted: Option<(String, Vec<ContextChip>)>,
+) -> Option<(String, Vec<ContextChip>)> {
+    posted.filter(|_| draft.trim().is_empty())
+}
+
 /// The room settings form.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RoomForm {
@@ -1012,5 +1023,21 @@ mod tests {
             rooms_reason(Some(1)),
             Some(ServiceNotice::ServingOld.message())
         );
+    }
+
+    #[test]
+    fn a_post_the_service_refused_comes_back_into_an_empty_draft() {
+        let posted = ("@Ada go".to_string(), Vec::<ContextChip>::new());
+        assert_eq!(
+            refused_draft("", Some(posted.clone())),
+            Some(posted.clone())
+        );
+        assert_eq!(refused_draft("  \n", Some(posted.clone())), Some(posted));
+        // Typed again meanwhile: the new words stay.
+        assert_eq!(
+            refused_draft("next", Some(("@Ada go".into(), Vec::new()))),
+            None
+        );
+        assert_eq!(refused_draft("", None), None);
     }
 }

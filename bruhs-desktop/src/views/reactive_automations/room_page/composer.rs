@@ -250,7 +250,7 @@ impl ReactiveAutomations {
     }
 
     /// Write the draft, its chips and the caret, and close the `@` list.
-    fn set_room_draft(
+    pub(super) fn set_room_draft(
         &mut self,
         text: String,
         chips: Vec<ContextChip>,
@@ -292,7 +292,11 @@ impl ReactiveAutomations {
         let Some(command) = room_post(&page.room_id, &text, &page.chips) else {
             return;
         };
+        let posted = (text, page.chips.clone());
         self.send_all(vec![command], Scope::General, cx);
+        if let Some(page) = self.room.as_mut() {
+            page.posted = Some(posted);
+        }
         self.set_room_draft(String::new(), Vec::new(), 0, window, cx);
     }
 
