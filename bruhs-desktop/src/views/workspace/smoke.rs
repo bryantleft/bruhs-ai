@@ -166,6 +166,65 @@ impl Workspace {
             "search" => self.activate_sidebar_view(AppView::Search, window, cx),
             // Agent workflows with the MCP connection on, to compare with the
             // web (PARITY-05); a client then connects through its file.
+            "workbench" => self.activate_sidebar_view(AppView::Workbench, window, cx),
+            // Verification's Use in composer pressed inside the embedded
+            // Workbench page (PARITY-04): the draft must reach the composer
+            // through the page's own `window.ipc` relay.
+            "workbench-use-draft" => {
+                let script = r#"(() => {
+  location.hash = '#verification';
+  const deadline = Date.now() + 20000;
+  (function step() {
+    const doc = document.getElementById('panel').contentDocument;
+    const box = doc && doc.getElementById('draft');
+    const use = doc && doc.getElementById('use-draft');
+    if (box && use && !use.hidden) {
+      box.value = 'Ship the launch post on Friday.';
+      use.click();
+      return;
+    }
+    if (Date.now() < deadline) setTimeout(step, 200);
+  })();
+})();"#;
+                let result = self
+                    .workbench_panel
+                    .as_ref()
+                    .ok_or_else(|| "Workbench is not open".to_string())
+                    .and_then(|panel| panel.read(cx).smoke_evaluate(script, cx));
+                eprintln!("BRUHS_DESKTOP_SMOKE workbench-use-draft {result:?}");
+            }
+            // A change that must be saved, and the save strip's Retry: for the
+            // failed-save comparison (PARITY-04).
+            "smoke-edit" => {
+                let on = self.automation_state.permissions.allows(
+                    bruhs_models::AgentDomain::Tasks,
+                    bruhs_models::AgentAccess::Write,
+                );
+                self.automation_state.permissions.set(
+                    bruhs_models::AgentDomain::Tasks,
+                    bruhs_models::AgentAccess::Write,
+                    !on,
+                );
+                self.persist_and_notify(cx);
+            }
+            "retry-save" => self.persist_and_notify(cx),
+            "save-report" => eprintln!(
+                "BRUHS_DESKTOP_SMOKE save status={:?} tasks_write={}",
+                self.save_status,
+                self.automation_state.permissions.allows(
+                    bruhs_models::AgentDomain::Tasks,
+                    bruhs_models::AgentAccess::Write
+                )
+            ),
+            "composer-report" => {
+                let text = self
+                    .smoke_active_chat()
+                    .map(|chat| chat.read(cx).input_state.read(cx).value().to_string());
+                eprintln!(
+                    "BRUHS_DESKTOP_SMOKE composer view={:?} text={text:?}",
+                    self.active_view
+                );
+            }
             // The foot of Agent workflows' cards (jobs, audit, safety and
             // history) where the web page ends, above desktop's Phone access.
             "automations-grid-bottom" => {
