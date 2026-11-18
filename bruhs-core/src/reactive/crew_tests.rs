@@ -1005,6 +1005,38 @@ fn each_run_names_the_bruh_and_its_access() {
     assert_eq!(codex_ask.unattended_access.level, AccessLevel::ReadOnly);
 }
 
+#[test]
+fn the_worker_turns_computer_on_only_when_available() {
+    const BROWSER_LINE: &str = "You have your own browser, the local_browser tool.";
+    let run = queued_run("Look it up.");
+    let with_computer = |level, on| BruhProfile {
+        computer: on,
+        ..profile(level, None)
+    };
+    for level in [AccessLevel::Ask, AccessLevel::Full] {
+        let turn = worker::turn(&agent("a"), &with_computer(level, true), &run, "");
+        assert_eq!(turn.computer.as_deref(), Some("a"), "{level:?}");
+        assert!(turn.prompt.contains(BROWSER_LINE), "{level:?}");
+    }
+    let codex = ReactiveAgent {
+        model: "gpt-5.3-codex".into(),
+        ..agent("a")
+    };
+    for (agent, profile) in [
+        (agent("a"), with_computer(AccessLevel::ReadOnly, true)),
+        (agent("a"), with_computer(AccessLevel::Full, false)),
+        (codex, with_computer(AccessLevel::Full, true)),
+    ] {
+        let turn = worker::turn(&agent, &profile, &run, "");
+        assert_eq!(
+            turn.computer, None,
+            "{} {:?}",
+            agent.model, profile.access.level
+        );
+        assert!(!turn.prompt.contains(BROWSER_LINE));
+    }
+}
+
 // ── Approvals ──────────────────────────────────────────────────────────────
 
 const LONG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);

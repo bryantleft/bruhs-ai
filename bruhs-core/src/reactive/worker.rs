@@ -2,7 +2,7 @@ use super::{sources, store, ReactiveError, ReactiveRuntime};
 use crate::{AgentTurn, AppState, OrchestratorEvent, PermissionDecision, QueryEvent};
 use bruhs_models::{
     agent::{AgentProvider, PermissionMode},
-    crew::{effective_level, run_preamble, BruhProfile, APPROVAL_WAIT_MS},
+    crew::{computer_on, effective_level, run_preamble, BruhProfile, APPROVAL_WAIT_MS},
     reactive::{ReactiveAgent, ReactiveRun, RunStatus, MAX_TEXT_CHARS, REPORT_PROTOCOL},
     secrets::SecretDecision,
     thread_link::ThreadAccess,
@@ -99,11 +99,12 @@ pub(super) fn turn(
     // Instructions stay identical across runs so providers can cache them;
     // the name, access, memory and history that change ride in the run's
     // own message.
+    let computer = computer_on(bruh.computer, &bruh.access, provider);
     let mut prompt = run_preamble(
         &agent.name,
         &bruh.access,
         effective_level(bruh.access.level, provider),
-        false,
+        computer,
     );
     prompt.push_str("\n\n");
     if !context.is_empty() {
@@ -123,7 +124,8 @@ pub(super) fn turn(
     .thread_access(ThreadAccess::Off)
     .instructions(Some(instructions))
     .effort(bruh.effort.as_deref())
-    .unattended_with(bruh.access.clone());
+    .unattended_with(bruh.access.clone())
+    .computer(computer.then(|| agent.id.clone()));
     // `resume(None)` otherwise falls back to the orchestrator's in-memory session.
     if run.session_id.is_none() {
         turn.fresh()

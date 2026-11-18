@@ -87,6 +87,9 @@ pub struct AgentTurn {
     /// What an unattended turn may do, at the effective level for
     /// [`AgentTurn::provider`] (see [`AgentTurn::unattended_with`]).
     pub unattended_access: BruhAccess,
+    /// The bruh whose own browser this turn may use, by agent id (see
+    /// [`AgentTurn::computer`]). Only unattended Claude turns use it.
+    pub computer: Option<String>,
 }
 
 impl AgentTurn {
@@ -116,6 +119,7 @@ impl AgentTurn {
             instructions: None,
             unattended: false,
             unattended_access: BruhAccess::default(),
+            computer: None,
         }
     }
 
@@ -153,6 +157,14 @@ impl AgentTurn {
         self.unattended = true;
         self.thread_access = ThreadAccess::Off;
         self.lean = true;
+        self
+    }
+
+    /// Give an unattended turn the bruh `agent_id`'s own browser: the
+    /// workbench helper's `local_browser` bound to that bruh, and nothing
+    /// else. The caller decides with [`bruhs_models::crew::computer_on`].
+    pub fn computer(mut self, agent_id: Option<String>) -> Self {
+        self.computer = agent_id;
         self
     }
 
@@ -662,6 +674,7 @@ impl AgentOrchestrator {
             instructions,
             unattended,
             unattended_access,
+            computer,
         } = turn;
         // The thread's own context first (a meeting's transcript), then what
         // its role asks of it.
@@ -738,9 +751,13 @@ impl AgentOrchestrator {
             .then_some(lean_file)
             .flatten();
         apply_lean_context(&mut query_options, lean);
+        // Only an unattended turn gets a bruh's browser.
+        let computer = computer.filter(|_| unattended);
         if unattended {
-            restrict_unattended(&mut query_options, &unattended_access);
+            restrict_unattended(&mut query_options, &unattended_access, computer.is_some());
         }
+        let bruh_browser = computer
+            .map(|agent_id| crate::workbench_tools::configure_bruh(&mut query_options, &agent_id));
 
         let artifact_project = project_path.clone();
         let (tx, rx) = mpsc::channel::<OrchestratorEvent>(256);
@@ -784,6 +801,11 @@ impl AgentOrchestrator {
         tokio::spawn(async move {
             let _secrets = producer_secrets;
             let _threads = producer_threads;
+            if let Some(Err(error)) = bruh_browser {
+                turn.send_start_error(format!("Could not configure the bruh's browser: {error}"))
+                    .await;
+                return;
+            }
             let app_tools = query_options.supports_mcp();
             let broker = match if unattended || !app_tools {
                 Ok(None)
@@ -1037,8 +1059,15 @@ pub(crate) fn unattended_shell_confined(access: &BruhAccess, provider: AgentProv
 fn unattended_claude_settings(
     access: &BruhAccess,
     files: &[serde_json::Value],
+    computer: bool,
 ) -> serde_json::Value {
-    let mut deny = vec![serde_json::json!("mcp__*")];
+    // With its Computer on, the bruh's one MCP server is its browser (see
+    // `workbench_tools::configure_bruh`), and each call reaches the gate.
+    let mut deny = if computer {
+        Vec::new()
+    } else {
+        vec![serde_json::json!("mcp__*")]
+    };
     for file in files {
         deny.extend(
             file["permissions"]["deny"]
@@ -1076,13 +1105,14 @@ fn unattended_claude_settings(
     settings
 }
 
-/// Limit an unattended turn to `access` (already the effective level for
-/// its provider): a filtered environment, no settings files, hooks or MCP
-/// servers, and the tools, permission mode and sandbox for the level.
-fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess) {
-    // Event content must not gain access to the daemon's integration tokens
-    // through a shell's environment. Provider logins remain on disk.
-    let environment: Vec<_> = [
+/// What an unattended turn's environment keeps, read with `get`: logins,
+/// locale, temp folders, certificates and the owner's proxies (both cases,
+/// as tools differ on which they read). Nothing else, so event content
+/// can't reach the daemon's integration tokens through a shell.
+pub(crate) fn unattended_environment(
+    get: impl Fn(&str) -> Option<String>,
+) -> Vec<(String, String)> {
+    [
         "PATH",
         "HOME",
         // Claude's macOS keychain lookup uses USER to locate the signed-in account.
@@ -1105,16 +1135,28 @@ fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess) 
         "HTTP_PROXY",
         "HTTPS_PROXY",
         "NO_PROXY",
+        "ALL_PROXY",
+        "http_proxy",
+        "https_proxy",
+        "no_proxy",
+        "all_proxy",
         "SystemRoot",
         "WINDIR",
     ]
     .into_iter()
-    .filter_map(|key| {
-        std::env::var(key)
-            .ok()
-            .map(|value| (key.to_string(), value))
-    })
-    .collect();
+    .filter_map(|key| get(key).map(|value| (key.to_string(), value)))
+    .collect()
+}
+
+/// Limit an unattended turn to `access` (already the effective level for
+/// its provider): a filtered environment, no settings files, hooks or MCP
+/// servers, and the tools, permission mode and sandbox for the level.
+/// `computer` lets app tools through the deny rules, for the bruh browser
+/// server `workbench_tools::configure_bruh` adds next.
+fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess, computer: bool) {
+    // Event content must not gain access to the daemon's integration tokens
+    // through a shell's environment. Provider logins remain on disk.
+    let environment = unattended_environment(|key| std::env::var(key).ok());
     match options {
         ProviderQueryOptions::Claude(options) => {
             options.inherit_env = false;
@@ -1143,11 +1185,13 @@ fn restrict_unattended(options: &mut ProviderQueryOptions, access: &BruhAccess) 
             options.tools = tools;
             options.permission_mode = Some(mode);
             options.setting_sources = Some(Vec::new());
-            options.settings =
-                Some(unattended_claude_settings(access, &user_claude_settings()).to_string());
+            options.settings = Some(
+                unattended_claude_settings(access, &user_claude_settings(), computer).to_string(),
+            );
             // Start no MCP servers: not the user's, claude.ai connectors, or a
             // `.mcp.json` a Full bruh wrote into its folder, whose command
-            // would run outside the shell sandbox.
+            // would run outside the shell sandbox. The bruh's browser server
+            // is the only one `configure_bruh` may add after this.
             options.mcp_config = None;
             options.strict_mcp_config = true;
         }
@@ -1975,7 +2019,7 @@ mod tests {
                 None,
                 None,
             );
-            restrict_unattended(&mut options, &BruhAccess::default());
+            restrict_unattended(&mut options, &BruhAccess::default(), false);
             let environment = match &options {
                 ProviderQueryOptions::Claude(options) => &options.env,
                 ProviderQueryOptions::Codex(options) => &options.env,
@@ -2043,7 +2087,7 @@ mod tests {
             PermissionMode::BypassPermissions,
             None,
         );
-        restrict_unattended(&mut options, access);
+        restrict_unattended(&mut options, access, false);
         let options = claude(options);
         let settings = serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
         (options, settings)
@@ -2219,6 +2263,133 @@ mod tests {
         );
     }
 
+    /// A bruh with its Computer on starts one MCP server, the workbench
+    /// helper bound to it, and nothing pre-approves its tool: every browser
+    /// call reaches the permission handler and the gate.
+    #[test]
+    fn a_bruh_turn_with_computer_gets_only_the_browser_server_and_no_preapproval() {
+        let full = bruh_access(AccessLevel::Full, true);
+        let mut options = options(
+            AgentProvider::Claude,
+            PermissionMode::BypassPermissions,
+            None,
+        );
+        restrict_unattended(&mut options, &full, true);
+        crate::workbench_tools::configure_bruh(&mut options, "a").unwrap();
+        let options = claude(options);
+        let config: serde_json::Value =
+            serde_json::from_str(options.mcp_config.as_deref().unwrap()).unwrap();
+        let servers = config["mcpServers"].as_object().unwrap();
+        assert_eq!(servers.keys().collect::<Vec<_>>(), ["bruhs_workbench"]);
+        let server = &servers["bruhs_workbench"];
+        assert_eq!(server["env"]["BRUHS_WORKBENCH_BRUH"], "a");
+        assert_eq!(server["args"], serde_json::json!(["--workbench-mcp"]));
+        // Only the endpoint and the bruh: no thread, project or mode scope.
+        let mut env: Vec<_> = server["env"].as_object().unwrap().keys().collect();
+        env.sort();
+        assert_eq!(env, ["BRUHS_WORKBENCH_BRUH", "BRUHS_WORKBENCH_URL"]);
+        assert!(options.strict_mcp_config);
+        assert_eq!(
+            options.tools,
+            claude_sdk_rs::Tools::Allow(UNATTENDED_READ_TOOLS.map(String::from).to_vec())
+        );
+        let settings: serde_json::Value =
+            serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
+        assert!(!settings["permissions"]["deny"]
+            .as_array()
+            .unwrap()
+            .contains(&serde_json::json!("mcp__*")));
+        // A Computer needs Claude: other providers get no browser server.
+        let mut codex = self::options(
+            AgentProvider::Codex,
+            PermissionMode::BypassPermissions,
+            None,
+        );
+        restrict_unattended(&mut codex, &full, true);
+        let error = crate::workbench_tools::configure_bruh(&mut codex, "a").unwrap_err();
+        assert_eq!(error.to_string(), "Computer needs a Claude model.");
+        assert!(codex_mcp_servers(&codex).is_empty());
+    }
+
+    /// The `mcp_servers.*` overrides a Codex turn carries.
+    fn codex_mcp_servers(options: &ProviderQueryOptions) -> Vec<String> {
+        match options {
+            ProviderQueryOptions::Codex(o) => o
+                .config
+                .iter()
+                .map(|entry| entry.key().to_string())
+                .filter(|key| key.starts_with("mcp_servers."))
+                .collect(),
+            _ => Vec::new(),
+        }
+    }
+
+    #[test]
+    fn without_computer_a_bruh_turn_starts_no_servers_and_denies_app_tools() {
+        for level in [AccessLevel::Ask, AccessLevel::Full] {
+            let mut options = options(
+                AgentProvider::Claude,
+                PermissionMode::BypassPermissions,
+                None,
+            );
+            restrict_unattended(&mut options, &bruh_access(level, true), false);
+            let options = claude(options);
+            assert!(options.mcp_config.is_none(), "{level:?}");
+            assert!(options.strict_mcp_config, "{level:?}");
+            let settings: serde_json::Value =
+                serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
+            assert!(
+                settings["permissions"]["deny"]
+                    .as_array()
+                    .unwrap()
+                    .contains(&serde_json::json!("mcp__*")),
+                "{level:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn unattended_turns_keep_every_proxy_variable() {
+        let env = unattended_environment(|key| {
+            matches!(
+                key,
+                "http_proxy"
+                    | "HTTPS_PROXY"
+                    | "no_proxy"
+                    | "ALL_PROXY"
+                    | "SECRET_TOKEN"
+                    | "https_proxy"
+                    | "all_proxy"
+                    | "HTTP_PROXY"
+                    | "NO_PROXY"
+                    | "PATH"
+            )
+            .then(|| format!("v-{key}"))
+        });
+        let keys: Vec<_> = env.iter().map(|(key, _)| key.as_str()).collect();
+        for key in [
+            "http_proxy",
+            "https_proxy",
+            "no_proxy",
+            "all_proxy",
+            "HTTP_PROXY",
+            "HTTPS_PROXY",
+            "NO_PROXY",
+            "ALL_PROXY",
+            "PATH",
+        ] {
+            assert!(keys.contains(&key), "{key}");
+        }
+        assert!(!keys.contains(&"SECRET_TOKEN"));
+        assert!(env.iter().all(|(key, value)| value == &format!("v-{key}")));
+        // Nothing else that looks like a proxy rides along.
+        let proxies: Vec<_> = keys
+            .iter()
+            .filter(|key| key.to_ascii_lowercase().contains("proxy"))
+            .collect();
+        assert_eq!(proxies.len(), 8, "{proxies:?}");
+    }
+
     #[test]
     fn unattended_full_codex_writes_only_in_its_workspace() {
         let sandbox = |level| {
@@ -2227,7 +2398,7 @@ mod tests {
                 PermissionMode::BypassPermissions,
                 None,
             );
-            restrict_unattended(&mut options, &bruh_access(level, true));
+            restrict_unattended(&mut options, &bruh_access(level, true), false);
             codex(options).access
         };
         assert_eq!(
