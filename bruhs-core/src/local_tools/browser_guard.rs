@@ -90,7 +90,6 @@ impl BrowserGuard {
     /// guard would otherwise kill it as soon as `Browser.close` drops the
     /// guard's connection, before Chrome writes its profile. Returns once the
     /// guard task can no longer kill.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
     pub async fn disarm(&mut self) {
         self.armed = false;
         self.task.abort();

@@ -206,7 +206,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .layer(axum::Extension(coordination.clone()))
         .layer(axum::Extension(board_links.clone()))
-        .layer(axum::Extension(tools))
+        .layer(axum::Extension(tools.clone()))
         .layer(axum::Extension(databases))
         .layer(axum::Extension(api_client));
     if let Ok(bind) = std::env::var("BRUHS_TASK_BIND") {
@@ -226,6 +226,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("bruhs-server listening on http://{addr}");
     let result = serve(listener, app).await;
     remote_hosts.shutdown();
+    // Bruh browsers keep profiles; a graceful close writes their cookies.
+    tools.close_all().await;
     result?;
     Ok(())
 }

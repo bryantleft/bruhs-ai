@@ -835,6 +835,17 @@ fn the_interface_list_is_read_again_once_stale() {
     );
     assert!(flaky.contains("192.168.77.5".parse().unwrap()));
     assert!(flaky.contains("192.168.77.5".parse().unwrap()));
+
+    // Without a first good read, nothing starts.
+    let broken = OwnAddresses::new(
+        || Err(std::io::Error::other("no interfaces")),
+        addresses::MAX_AGE,
+    );
+    assert!(broken.primed().is_err());
+    let primed = OwnAddresses::new(|| Ok(vec!["10.7.7.7".parse().unwrap()]), addresses::MAX_AGE)
+        .primed()
+        .unwrap();
+    assert!(primed.contains("10.7.7.7".parse().unwrap()));
 }
 
 #[test]

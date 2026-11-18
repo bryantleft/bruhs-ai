@@ -52,6 +52,9 @@ use super::ToolError;
 mod addresses;
 use addresses::OwnAddresses;
 
+const NO_ADDRESSES: &str =
+    "Bruhs couldn't read this computer's network addresses, so it won't open a bruh's browser.";
+
 pub(super) const SOCKS_UNSUPPORTED: &str =
     "Bruhs can't use a SOCKS or HTTPS proxy for a bruh's browser yet. Set HTTPS_PROXY to an http:// proxy.";
 
@@ -59,8 +62,8 @@ pub(super) const SOCKS_UNSUPPORTED: &str =
 /// hyper's read buffer stops a head at about this size, and [`head_size`]
 /// holds it to exactly this.
 const MAX_HEAD: usize = 16 * 1024;
-/// Open client connections, tunnels included. Chrome keeps at most 32
-/// sockets per proxy, and at most `MAX_COMPUTERS` (4) browsers share a guard.
+/// Open client connections, tunnels included. Each bruh browser has its own
+/// guard, and Chrome keeps at most 32 sockets per proxy.
 const MAX_CONNECTIONS: usize = 256;
 const HEAD_TIMEOUT: Duration = Duration::from_secs(15);
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(10);
@@ -204,7 +207,6 @@ pub(super) struct Upstream {
 }
 
 impl Upstream {
-    #[cfg_attr(test, expect(dead_code, reason = "used from Task 5"))]
     pub(super) fn from_env() -> Result<Self, ToolError> {
         Self::from_vars(|key| std::env::var(key).ok())
     }
@@ -357,10 +359,14 @@ impl Shared {
 
 impl NetworkGuard {
     /// Starts the guard on `127.0.0.1` with the system resolver and the
-    /// production rule.
+    /// production rule. It fails closed: without a first read of this
+    /// computer's addresses it doesn't start.
     pub(super) fn start(upstream: Upstream) -> Result<Self, ToolError> {
-        let refuse = this_computer(Arc::new(OwnAddresses::system()));
-        Self::start_with(upstream, system_resolver(), refuse)
+        let own = OwnAddresses::system().primed().map_err(|error| {
+            tracing::warn!(%error, "network guard couldn't read interface addresses");
+            ToolError::Unavailable(NO_ADDRESSES.into())
+        })?;
+        Self::start_with(upstream, system_resolver(), this_computer(Arc::new(own)))
     }
 
     pub(super) fn start_with(

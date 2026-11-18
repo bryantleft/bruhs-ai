@@ -137,6 +137,8 @@ pub(super) struct Browser {
     pub info: BrowserSession,
     child: Arc<Mutex<Child>>,
     _profile: Profile,
+    /// A kept profile's pid file, removed when the browser closes.
+    pid_file: Option<PathBuf>,
     logs: tokio::task::JoinHandle<()>,
     guard: BrowserGuard,
     cdp: Cdp,
@@ -167,6 +169,9 @@ impl Browser {
         let executable = browser_executable()?;
         let user_agent = browser_user_agent(&executable, policy).await?;
         let profile = Profile::open(options.profile.as_deref()).await?;
+        if let Some(kept) = options.profile.as_deref() {
+            release_profile(kept, policy).await?;
+        }
         let mut child = Command::new(executable)
             .args(launch_args(options, profile.path(), &user_agent))
             .stdin(Stdio::null())
@@ -251,6 +256,12 @@ impl Browser {
             )
             .await?;
             cdp.call("Log.enable", json!({})).await?;
+            if options.profile.is_some() {
+                // Only bruhs keep a profile. Their browsers never write files
+                // to this computer behind the owner's back.
+                cdp.call("Browser.setDownloadBehavior", json!({"behavior":"deny"}))
+                    .await?;
+            }
             let viewport = if options.headless {
                 cdp.call(
                     "Emulation.setDeviceMetricsOverride",
@@ -280,6 +291,10 @@ impl Browser {
                     });
                 }
             };
+        let pid_file = match options.profile.as_deref() {
+            Some(kept) => write_pid_file(kept, &child).await,
+            None => None,
+        };
         Ok(Self {
             info: BrowserSession {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -288,6 +303,7 @@ impl Browser {
             },
             child,
             _profile: profile,
+            pid_file,
             logs,
             guard,
             cdp,
@@ -300,7 +316,6 @@ impl Browser {
 
     /// The page target's debugging socket, for a second connection such as
     /// the live view's.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
     pub fn page_socket(&self) -> &str {
         &self.page_socket
     }
@@ -317,7 +332,6 @@ impl Browser {
 
     /// Ask Chrome to quit, so it writes cookies and the rest of the profile
     /// to disk, and kill it if it hasn't exited within `grace`.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
     pub async fn close(&mut self, grace: Duration) -> Result<(), ToolError> {
         // The guard kills Chrome as soon as its connection drops, which
         // `Browser.close` does first.
@@ -339,6 +353,9 @@ impl Browser {
         }
         drop(child);
         self.logs.abort();
+        if let Some(pid_file) = self.pid_file.take() {
+            let _ = tokio::fs::remove_file(pid_file).await;
+        }
         Ok(())
     }
 
@@ -373,7 +390,6 @@ impl Browser {
     }
 
     /// The page's address now (`location.href`).
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
     pub async fn current_url(&mut self) -> Result<String, ToolError> {
         self.guard.check()?;
         let href = tokio::time::timeout(self.policy.timeout, self.cdp.evaluate("location.href"))
@@ -388,7 +404,6 @@ impl Browser {
 
     /// One input from the owner's live view. Navigation follows the agent's
     /// URL rules.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
     pub async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError> {
         validate_input(input, self.viewport).map_err(|error| ToolError::Invalid(error.into()))?;
         self.guard.check()?;
@@ -422,6 +437,124 @@ impl Browser {
             self.info.url.clone_from(url);
         }
         Ok(())
+    }
+}
+
+/// What a launch on a bruh's profile says when a Chrome Bruhs didn't start
+/// holds it.
+pub(super) const PROFILE_IN_USE: &str =
+    "Another Chrome is using this bruh's profile. Quit it and try again.";
+
+/// A kept profile's pid file: `<home>/bruhs/<id>/browser.pid` beside
+/// `<home>/bruhs/<id>/browser`.
+fn pid_file(profile: &Path) -> PathBuf {
+    profile.with_extension("pid")
+}
+
+/// Records the browser's pid beside its kept profile, so a Bruhs that crashed
+/// can stop it at the next launch. A failure only loses that recovery.
+async fn write_pid_file(profile: &Path, child: &Mutex<Child>) -> Option<PathBuf> {
+    let pid = child.lock().await.id()?;
+    let path = pid_file(profile);
+    match tokio::fs::write(&path, pid.to_string()).await {
+        Ok(()) => Some(path),
+        Err(error) => {
+            tracing::warn!(%error, "couldn't record the bruh browser's pid");
+            None
+        }
+    }
+}
+
+/// Before a kept profile opens. A Chrome that a crashed Bruhs left running on
+/// it (named by the pid file, with this profile on its command line) is
+/// stopped. Any other live Chrome holding the profile's lock is an error:
+/// a new launch would hand its URL to that Chrome and exit.
+#[cfg(unix)]
+pub(super) async fn release_profile(
+    profile: &Path,
+    policy: ProcessPolicy,
+) -> Result<(), ToolError> {
+    let pid_file = pid_file(profile);
+    if let Some(pid) = tokio::fs::read_to_string(&pid_file)
+        .await
+        .ok()
+        .and_then(|text| process_id(text.trim()))
+    {
+        if alive(pid) && uses_profile(pid, profile, policy).await == Some(true) {
+            stop_process(pid).await;
+        }
+        let _ = tokio::fs::remove_file(&pid_file).await;
+    }
+    // Chrome's lock is a symlink to `<hostname>-<pid>`.
+    let holder = std::fs::read_link(profile.join("SingletonLock"))
+        .ok()
+        .and_then(|target| {
+            let target = target.to_string_lossy().into_owned();
+            target.rsplit_once('-').and_then(|(_, pid)| process_id(pid))
+        });
+    if let Some(pid) = holder {
+        if alive(pid) && uses_profile(pid, profile, policy).await != Some(false) {
+            return Err(ToolError::Unavailable(PROFILE_IN_USE.into()));
+        }
+    }
+    Ok(())
+}
+
+#[cfg(not(unix))]
+pub(super) async fn release_profile(
+    _profile: &Path,
+    _policy: ProcessPolicy,
+) -> Result<(), ToolError> {
+    Ok(())
+}
+
+/// A pid that names one ordinary process: never 0, 1 or a negative value,
+/// which `kill` reads as a process group or every process.
+#[cfg(unix)]
+fn process_id(text: &str) -> Option<libc::pid_t> {
+    text.parse::<libc::pid_t>().ok().filter(|pid| *pid > 1)
+}
+
+#[cfg(unix)]
+fn alive(pid: libc::pid_t) -> bool {
+    // SAFETY: signal 0 sends nothing; it only checks that `pid` exists.
+    let found = unsafe { libc::kill(pid, 0) } == 0;
+    found || std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
+}
+
+/// Whether `pid` runs with `--user-data-dir=<profile>`, or `None` when its
+/// command line can't be read.
+#[cfg(unix)]
+async fn uses_profile(pid: libc::pid_t, profile: &Path, policy: ProcessPolicy) -> Option<bool> {
+    let args = ["-ww", "-o", "command=", "-p"].map(String::from);
+    let mut args = args.to_vec();
+    args.push(pid.to_string());
+    let output = process::run("ps", &args, policy).await.ok()?;
+    let line = String::from_utf8_lossy(&output);
+    let flag = format!("--user-data-dir={}", profile.display());
+    Some(line.match_indices(&flag).any(|(at, _)| {
+        line[at + flag.len()..]
+            .chars()
+            .next()
+            .is_none_or(char::is_whitespace)
+    }))
+}
+
+/// SIGTERM, so Chrome writes its profile, then SIGKILL after the close grace.
+#[cfg(unix)]
+async fn stop_process(pid: libc::pid_t) {
+    let grace = Duration::from_millis(bruhs_models::crew::CLOSE_GRACE_MS);
+    for signal in [libc::SIGTERM, libc::SIGKILL] {
+        // SAFETY: `pid` is a single process (`process_id` refuses group and
+        // broadcast values) whose command line names this bruh's profile.
+        unsafe { libc::kill(pid, signal) };
+        let deadline = tokio::time::Instant::now() + grace;
+        while alive(pid) && tokio::time::Instant::now() < deadline {
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        if !alive(pid) {
+            return;
+        }
     }
 }
 

@@ -10,14 +10,17 @@ use tokio::sync::watch;
 use uuid::Uuid;
 
 mod browser;
+mod computer;
 mod devices;
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
 mod network;
 mod process;
 #[cfg(test)]
 mod tests;
 mod video;
 
+pub use computer::BruhComputer;
+#[cfg(any(test, feature = "test-support"))]
+pub use computer::{FakePages, PageLaunch};
 pub use process::ProcessPolicy;
 pub use video::DeviceVideo;
 
@@ -29,6 +32,12 @@ pub enum ToolError {
     Invalid(String),
     #[error("{0}")]
     Unavailable(String),
+    /// The host refuses this, whatever the request's shape (403).
+    #[error("{0}")]
+    Refused(String),
+    /// What the request names doesn't exist (404).
+    #[error("{0}")]
+    NotFound(String),
     #[error("Local tool I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("Browser connection failed: {0}")]
@@ -54,6 +63,12 @@ pub struct LocalToolsHost {
     browsers: tokio::sync::Mutex<BrowserSessions>,
     opening: Mutex<HashSet<String>>,
     video: Mutex<HashSet<String>>,
+    /// Bruh computers. Their grants and pages never enter `grants` or
+    /// `browsers`, so Verification and the thread routes can't see them.
+    computers: computer::Computers,
+    launcher: computer::Launcher,
+    /// The owner's upstream proxies, read at each bruh browser launch.
+    network: fn() -> Result<network::Upstream, ToolError>,
     client: reqwest::Client,
     policy: ProcessPolicy,
 }
@@ -64,6 +79,20 @@ impl LocalToolsHost {
     }
 
     pub fn with_policy(policy: ProcessPolicy) -> Result<Arc<Self>, ToolError> {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
+            .build()?;
+        let launcher = computer::browser_launcher(client.clone(), policy);
+        Self::with_parts(policy, client, launcher, network::Upstream::from_env)
+    }
+
+    fn with_parts(
+        policy: ProcessPolicy,
+        client: reqwest::Client,
+        launcher: computer::Launcher,
+        network: fn() -> Result<network::Upstream, ToolError>,
+    ) -> Result<Arc<Self>, ToolError> {
         if policy.timeout.is_zero() || policy.max_output_bytes == 0 {
             return Err(ToolError::Invalid(
                 "Local tools need a nonzero command deadline and capture budget.".into(),
@@ -74,20 +103,26 @@ impl LocalToolsHost {
             browsers: tokio::sync::Mutex::new(HashMap::new()),
             opening: Mutex::new(HashSet::new()),
             video: Mutex::new(HashSet::new()),
-            client: reqwest::Client::builder()
-                .no_proxy()
-                .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
-                .build()?,
+            computers: computer::Computers::default(),
+            launcher,
+            network,
+            client,
             policy,
         }))
     }
 
     /// Only user-facing permission controls call this, never agent tools.
+    /// A bruh's browser comes from its Computer switch, never from a grant.
     pub fn grant(&self, request: GrantRequest) -> Result<ToolGrant, ToolError> {
         let principal = request.principal.trim();
         if principal.is_empty() || principal.chars().any(char::is_control) {
             return Err(ToolError::Invalid(
                 "Choose a named task or user before allowing tools.".into(),
+            ));
+        }
+        if principal.starts_with(BRUH_PRINCIPAL_PREFIX) {
+            return Err(ToolError::Invalid(
+                bruhs_models::crew::TURN_ON_IN_SETTINGS.into(),
             ));
         }
         let mut grants = self.grants.lock().map_err(|_| {

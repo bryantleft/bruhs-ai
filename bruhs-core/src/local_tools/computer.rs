@@ -1,0 +1,774 @@
+//! Bruh computers: one persistent headless browser per bruh with Computer
+//! on, started on first use, closed when idle, behind its own network guard.
+//!
+//! A bruh's grant and page live only in its slot. They never enter the
+//! host's thread grants or browser sessions, so Verification doesn't list
+//! them and the thread routes can't reach them.
+
+use std::{
+    collections::{HashMap, HashSet},
+    net::SocketAddr,
+    path::PathBuf,
+    sync::{Arc, Mutex, PoisonError, Weak},
+    time::Duration,
+};
+
+use async_trait::async_trait;
+use bruhs_models::{
+    crew::{
+        ACTION_STOPPED, CLOSE_GRACE_MS, COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL,
+        LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS, TURN_ON_IN_SETTINGS,
+    },
+    local_tools::{
+        validate_action, BrowserAction, BrowserSession, BrowserStart, ComputerInput, ComputerState,
+        Principal, ToolGrant, ToolReply, ToolScope, COMPUTER_VIEWPORT,
+    },
+};
+use futures_util::future::{join_all, BoxFuture};
+use tokio::{sync::watch, time::Instant};
+use uuid::Uuid;
+
+use super::{
+    browser::{Browser, LaunchOptions},
+    network::NetworkGuard,
+    GrantState, LocalToolsHost, ProcessPolicy, ToolError,
+};
+
+#[cfg(test)]
+#[path = "computer_tests.rs"]
+mod tests;
+
+/// How often the idle reaper looks for browsers to close.
+const REAP_EVERY: Duration = Duration::from_secs(30);
+/// How long asking an open page for its address may take.
+const PAGE_URL_WAIT: Duration = Duration::from_secs(2);
+const ACTION_TIMED_OUT: &str = "Browser action timed out. Check the page and retry.";
+
+/// A bruh whose Computer is on, as the reactive store lists it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BruhComputer {
+    pub agent_id: String,
+    pub name: String,
+    pub paused: bool,
+    /// `<home>/bruhs/<agent_id>/browser`, from the store's agent id.
+    pub profile_dir: PathBuf,
+}
+
+/// An open bruh page: a real [`Browser`] or a test fake.
+#[async_trait]
+pub(super) trait ComputerPage: Send {
+    fn session(&self) -> &BrowserSession;
+    /// The page target's debugging socket, for the live view.
+    #[expect(dead_code, reason = "used from Task 7")]
+    fn page_socket(&self) -> Option<String>;
+    async fn run(
+        &mut self,
+        action: BrowserAction,
+        policy: ProcessPolicy,
+    ) -> Result<ToolReply, ToolError>;
+    #[expect(dead_code, reason = "used from Task 6")]
+    async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError>;
+    async fn url(&mut self) -> Option<String>;
+    /// A graceful close: Chrome writes its profile, then exits.
+    async fn close(&mut self);
+}
+
+#[async_trait]
+impl ComputerPage for Browser {
+    fn session(&self) -> &BrowserSession {
+        &self.info
+    }
+
+    fn page_socket(&self) -> Option<String> {
+        Some(Browser::page_socket(self).to_owned())
+    }
+
+    async fn run(
+        &mut self,
+        action: BrowserAction,
+        policy: ProcessPolicy,
+    ) -> Result<ToolReply, ToolError> {
+        self.command(action, policy).await
+    }
+
+    async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError> {
+        Browser::owner_input(self, input).await
+    }
+
+    async fn url(&mut self) -> Option<String> {
+        self.current_url().await.ok()
+    }
+
+    async fn close(&mut self) {
+        if let Err(error) = Browser::close(self, Duration::from_millis(CLOSE_GRACE_MS)).await {
+            tracing::warn!(%error, "bruh browser didn't close cleanly");
+        }
+    }
+}
+
+/// What the host asks a launcher to open.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PageLaunch {
+    pub agent_id: String,
+    /// The bruh grant's id, which the session carries.
+    pub grant_id: String,
+    pub profile_dir: PathBuf,
+    pub url: String,
+    pub headless: bool,
+    /// The browser's network guard.
+    pub proxy: SocketAddr,
+}
+
+pub(super) type Launcher = Arc<
+    dyn Fn(PageLaunch) -> BoxFuture<'static, Result<Box<dyn ComputerPage>, ToolError>>
+        + Send
+        + Sync,
+>;
+
+/// The production launcher: Chrome on the bruh's kept profile.
+pub(super) fn browser_launcher(client: reqwest::Client, policy: ProcessPolicy) -> Launcher {
+    Arc::new(move |launch: PageLaunch| {
+        let client = client.clone();
+        Box::pin(async move {
+            let options = LaunchOptions {
+                profile: Some(launch.profile_dir),
+                headless: launch.headless,
+                proxy: Some(launch.proxy),
+            };
+            let request = BrowserStart {
+                grant_id: launch.grant_id,
+                url: launch.url,
+            };
+            let browser = Browser::start(&client, request, policy, &options).await?;
+            Ok(Box::new(browser) as Box<dyn ComputerPage>)
+        })
+    })
+}
+
+/// Every synced bruh's slot, and the seats that cap open browsers.
+#[derive(Default)]
+pub(super) struct Computers {
+    slots: Mutex<HashMap<String, Arc<Slot>>>,
+    /// Grant ids of launching and open pages, at most [`MAX_COMPUTERS`].
+    seats: Arc<Mutex<HashSet<String>>>,
+}
+
+struct Slot {
+    agent_id: String,
+    profile_dir: PathBuf,
+    grant: GrantState,
+    meta: Mutex<Meta>,
+    /// Bumped when the bruh is stopped; an in-flight action ends.
+    interrupt: watch::Sender<u64>,
+    state: watch::Sender<ComputerState>,
+    page: tokio::sync::Mutex<PageSlot>,
+}
+
+struct Meta {
+    name: String,
+    paused: bool,
+}
+
+#[derive(Default)]
+struct PageSlot {
+    open: Option<OpenPage>,
+    /// Where the browser reopens. In memory only.
+    last_url: Option<String>,
+    last_used: Option<Instant>,
+    error: Option<String>,
+}
+
+/// A running page with the guard its traffic goes through and its seat.
+/// Dropping it stops the guard and frees the seat.
+struct OpenPage {
+    page: Box<dyn ComputerPage>,
+    _guard: NetworkGuard,
+    _seat: Seat,
+}
+
+struct Seat {
+    seats: Arc<Mutex<HashSet<String>>>,
+    id: String,
+}
+
+impl Seat {
+    fn take(seats: &Arc<Mutex<HashSet<String>>>, id: &str) -> Result<Self, ToolError> {
+        let mut taken = seats.lock().unwrap_or_else(PoisonError::into_inner);
+        if taken.len() >= MAX_COMPUTERS && !taken.contains(id) {
+            return Err(ToolError::Refused(COMPUTERS_FULL.into()));
+        }
+        taken.insert(id.into());
+        drop(taken);
+        Ok(Self {
+            seats: Arc::clone(seats),
+            id: id.into(),
+        })
+    }
+}
+
+impl Drop for Seat {
+    fn drop(&mut self) {
+        self.seats
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.id);
+    }
+}
+
+impl Slot {
+    fn new(computer: BruhComputer) -> Self {
+        let grant = ToolGrant {
+            id: Uuid::new_v4().to_string(),
+            principal: Principal::Bruh(computer.agent_id.clone()).wire(),
+            scope: ToolScope::Browser,
+        };
+        let (revoked, _) = watch::channel(false);
+        let (state, _) = watch::channel(ComputerState {
+            agent_id: computer.agent_id.clone(),
+            ..ComputerState::default()
+        });
+        Self {
+            agent_id: computer.agent_id,
+            profile_dir: computer.profile_dir,
+            grant: GrantState { grant, revoked },
+            meta: Mutex::new(Meta {
+                name: computer.name,
+                paused: computer.paused,
+            }),
+            interrupt: watch::channel(0).0,
+            state,
+            page: tokio::sync::Mutex::new(PageSlot::default()),
+        }
+    }
+
+    fn meta(&self) -> std::sync::MutexGuard<'_, Meta> {
+        self.meta.lock().unwrap_or_else(PoisonError::into_inner)
+    }
+
+    fn update(&self, computer: &BruhComputer) {
+        let mut meta = self.meta();
+        meta.name.clone_from(&computer.name);
+        let stopped = computer.paused && !meta.paused;
+        meta.paused = computer.paused;
+        drop(meta);
+        if stopped {
+            self.interrupt
+                .send_modify(|count| *count = count.wrapping_add(1));
+        }
+    }
+
+    fn paused(&self) -> bool {
+        self.meta().paused
+    }
+
+    fn publish(&self, page: &PageSlot) {
+        self.state.send_modify(|state| {
+            state.session_id = page
+                .open
+                .as_ref()
+                .map(|open| open.page.session().id.clone());
+            state.url.clone_from(&page.last_url);
+            state.error.clone_from(&page.error);
+        });
+    }
+
+    /// Close the page, if open, and publish that.
+    async fn shut(&self, page: &mut PageSlot) {
+        if let Some(mut open) = page.open.take() {
+            let name = self.meta().name.clone();
+            tracing::debug!(bruh = %name, "closing bruh browser");
+            // It reopens where it was, which a click may have changed.
+            if let Ok(Some(url)) = tokio::time::timeout(PAGE_URL_WAIT, open.page.url()).await {
+                page.last_url = Some(url);
+            }
+            open.page.close().await;
+        }
+        self.publish(page);
+    }
+}
+
+impl LocalToolsHost {
+    fn computer_slot(&self, agent_id: &str) -> Option<Arc<Slot>> {
+        self.computers
+            .slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .get(agent_id)
+            .cloned()
+    }
+
+    fn computer_slots(&self) -> Vec<Arc<Slot>> {
+        self.computers
+            .slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .values()
+            .cloned()
+            .collect()
+    }
+
+    /// Adds and updates the listed bruhs' slots, and takes out the rest.
+    fn update_slots(&self, computers: Vec<BruhComputer>) -> Vec<Arc<Slot>> {
+        let mut slots = self
+            .computers
+            .slots
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        let listed: HashSet<&str> = computers.iter().map(|c| c.agent_id.as_str()).collect();
+        let gone: Vec<String> = slots
+            .keys()
+            .filter(|id| !listed.contains(id.as_str()))
+            .cloned()
+            .collect();
+        let removed = gone.iter().filter_map(|id| slots.remove(id)).collect();
+        for computer in computers {
+            match slots.get(&computer.agent_id) {
+                Some(slot) => slot.update(&computer),
+                None => {
+                    slots.insert(computer.agent_id.clone(), Arc::new(Slot::new(computer)));
+                }
+            }
+        }
+        drop(slots);
+        removed
+    }
+
+    /// Make the host's bruh computers match `computers`: new bruhs get a
+    /// slot (no browser yet), stopped bruhs' in-flight actions end, and the
+    /// browsers of bruhs not listed close. Returns once those have closed.
+    pub async fn sync_bruhs(&self, computers: Vec<BruhComputer>) {
+        let removed = self.update_slots(computers);
+        for slot in &removed {
+            slot.grant.revoked.send_replace(true);
+        }
+        join_all(removed.iter().map(|slot| async move {
+            let mut page = slot.page.lock().await;
+            slot.shut(&mut page).await;
+        }))
+        .await;
+    }
+
+    pub async fn computer_state(&self, agent_id: &str) -> Result<ComputerState, ToolError> {
+        let slot = self
+            .computer_slot(agent_id)
+            .ok_or_else(|| ToolError::NotFound(TURN_ON_IN_SETTINGS.into()))?;
+        let state = slot.state.borrow().clone();
+        Ok(state)
+    }
+
+    /// The owner opens a bruh's browser.
+    pub async fn open_computer(&self, agent_id: &str) -> Result<ComputerState, ToolError> {
+        let slot = self
+            .computer_slot(agent_id)
+            .ok_or_else(|| ToolError::NotFound(TURN_ON_IN_SETTINGS.into()))?;
+        let mut page = slot.page.lock().await;
+        self.ensure_open(&slot, &mut page).await?;
+        page.last_used = Some(Instant::now());
+        drop(page);
+        let state = slot.state.borrow().clone();
+        Ok(state)
+    }
+
+    /// The owner closes a bruh's browser. Its profile stays.
+    pub async fn close_computer(&self, agent_id: &str) -> Result<ComputerState, ToolError> {
+        let slot = self
+            .computer_slot(agent_id)
+            .ok_or_else(|| ToolError::NotFound(TURN_ON_IN_SETTINGS.into()))?;
+        let mut page = slot.page.lock().await;
+        slot.shut(&mut page).await;
+        drop(page);
+        let state = slot.state.borrow().clone();
+        Ok(state)
+    }
+
+    /// Close every bruh browser, as the server stops.
+    pub async fn close_all(&self) {
+        join_all(self.computer_slots().iter().map(|slot| async move {
+            let mut page = slot.page.lock().await;
+            slot.shut(&mut page).await;
+        }))
+        .await;
+    }
+
+    /// One action from a bruh's own browser tool.
+    pub async fn bruh_command(
+        &self,
+        agent_id: &str,
+        action: BrowserAction,
+    ) -> Result<ToolReply, ToolError> {
+        let slot = self
+            .computer_slot(agent_id)
+            .ok_or_else(|| ToolError::Refused(COMPUTER_OFF_DENIAL.into()))?;
+        if !action.for_bruhs() {
+            return Err(ToolError::Refused(NOT_FOR_BRUHS.into()));
+        }
+        // Navigate's check refuses a host on this computer.
+        let viewport = slot.state.borrow().viewport;
+        validate_action(&action, viewport).map_err(|error| {
+            if error == LOCAL_HOST_DENIAL {
+                ToolError::Refused(error.into())
+            } else {
+                ToolError::Invalid(error.into())
+            }
+        })?;
+        if slot.paused() {
+            return Err(ToolError::Refused(ACTION_STOPPED.into()));
+        }
+        let mut revoked = slot.grant.revoked.subscribe();
+        let mut interrupt = slot.interrupt.subscribe();
+        if *revoked.borrow_and_update() {
+            return Err(ToolError::Refused(COMPUTER_OFF_DENIAL.into()));
+        }
+        let work = async {
+            let mut page = slot.page.lock().await;
+            self.ensure_open(&slot, &mut page).await?;
+            let navigated = match &action {
+                BrowserAction::Navigate { url } => Some(url.clone()),
+                _ => None,
+            };
+            let open = page
+                .open
+                .as_mut()
+                .ok_or_else(|| ToolError::Unavailable("The bruh's browser didn't open.".into()))?;
+            let reply =
+                tokio::time::timeout(self.policy.timeout, open.page.run(action, self.policy))
+                    .await
+                    .unwrap_or_else(|_| Err(ToolError::Unavailable(ACTION_TIMED_OUT.into())));
+            let url = tokio::time::timeout(PAGE_URL_WAIT, open.page.url())
+                .await
+                .ok()
+                .flatten();
+            if let Some(url) = url.or(navigated.filter(|_| reply.is_ok())) {
+                page.last_url = Some(url);
+            }
+            page.last_used = Some(Instant::now());
+            slot.publish(&page);
+            drop(page);
+            reply
+        };
+        tokio::select! {
+            biased;
+            _ = revoked.changed() => Err(ToolError::Refused(COMPUTER_OFF_DENIAL.into())),
+            _ = interrupt.changed() => Err(ToolError::Refused(ACTION_STOPPED.into())),
+            reply = work => reply,
+        }
+    }
+
+    /// The address the bruh's page is on now: asked of the open page, else
+    /// where it was last.
+    pub async fn page_url(&self, agent_id: &str) -> Option<String> {
+        let slot = self.computer_slot(agent_id)?;
+        let asked = tokio::time::timeout(PAGE_URL_WAIT, async {
+            let mut page = slot.page.lock().await;
+            match page.open.as_mut() {
+                Some(open) => open.page.url().await,
+                None => None,
+            }
+        })
+        .await
+        .ok()
+        .flatten();
+        asked.or_else(|| slot.state.borrow().url.clone())
+    }
+
+    /// Closes bruh browsers idle for [`COMPUTER_IDLE_MS`]. The task ends
+    /// with the host.
+    pub fn start_idle_reaper(self: &Arc<Self>) -> tokio::task::JoinHandle<()> {
+        let host: Weak<Self> = Arc::downgrade(self);
+        tokio::spawn(async move {
+            let mut tick = tokio::time::interval(REAP_EVERY);
+            tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
+            loop {
+                tick.tick().await;
+                let Some(host) = host.upgrade() else {
+                    return;
+                };
+                host.close_idle().await;
+            }
+        })
+    }
+
+    async fn close_idle(&self) {
+        let idle = Duration::from_millis(COMPUTER_IDLE_MS);
+        join_all(self.computer_slots().iter().map(|slot| async move {
+            // A page in use isn't idle.
+            let Ok(mut page) = slot.page.try_lock() else {
+                return;
+            };
+            let expired = page.last_used.is_some_and(|used| used.elapsed() >= idle);
+            if page.open.is_some() && expired {
+                slot.shut(&mut page).await;
+            }
+        }))
+        .await;
+    }
+
+    /// Launch the slot's page if it isn't open. A failure lands in the
+    /// state's `error`.
+    async fn ensure_open(&self, slot: &Slot, page: &mut PageSlot) -> Result<(), ToolError> {
+        if page.open.is_some() {
+            return Ok(());
+        }
+        let launched = self.launch(slot, page.last_url.clone()).await;
+        let result = match launched {
+            Ok(open) => {
+                page.open = Some(open);
+                page.error = None;
+                page.last_used = Some(Instant::now());
+                Ok(())
+            }
+            Err(error) => {
+                page.error = Some(error.to_string());
+                Err(error)
+            }
+        };
+        slot.publish(page);
+        result
+    }
+
+    async fn launch(&self, slot: &Slot, url: Option<String>) -> Result<OpenPage, ToolError> {
+        let seat = Seat::take(&self.computers.seats, &slot.grant.grant.id)?;
+        // One guard per browser, so one page can't starve another bruh's.
+        let guard = NetworkGuard::start((self.network)()?)?;
+        let url = url
+            .filter(|url| {
+                validate_action(
+                    &BrowserAction::Navigate { url: url.clone() },
+                    COMPUTER_VIEWPORT,
+                )
+                .is_ok()
+            })
+            .unwrap_or_else(|| "about:blank".into());
+        let page = (self.launcher)(PageLaunch {
+            agent_id: slot.agent_id.clone(),
+            grant_id: slot.grant.grant.id.clone(),
+            profile_dir: slot.profile_dir.clone(),
+            url,
+            headless: true,
+            proxy: guard.addr(),
+        })
+        .await?;
+        Ok(OpenPage {
+            page,
+            _guard: guard,
+            _seat: seat,
+        })
+    }
+
+    /// The bruh grant's principal and id.
+    #[cfg(test)]
+    fn bruh_grant(&self, agent_id: &str) -> Option<(String, String)> {
+        let slot = self.computer_slot(agent_id)?;
+        let grant = &slot.grant.grant;
+        Some((grant.principal.clone(), grant.id.clone()))
+    }
+}
+
+#[cfg(any(test, feature = "test-support"))]
+pub use fake::FakePages;
+
+#[cfg(any(test, feature = "test-support"))]
+mod fake {
+    use std::{
+        collections::HashMap,
+        path::PathBuf,
+        sync::{Arc, Mutex, PoisonError},
+    };
+
+    use async_trait::async_trait;
+    use bruhs_models::local_tools::{BrowserAction, BrowserSession, ComputerInput, ToolReply};
+    use tokio::sync::Notify;
+
+    use super::{ComputerPage, Launcher, LocalToolsHost, PageLaunch};
+    use crate::local_tools::{network::Upstream, ProcessPolicy, ToolError};
+
+    /// What the fake launcher and its pages saw. Clones share it.
+    #[derive(Clone, Default)]
+    pub struct FakePages {
+        seen: Arc<Mutex<Seen>>,
+    }
+
+    #[derive(Default)]
+    struct Seen {
+        launches: Vec<PageLaunch>,
+        sessions: HashMap<String, BrowserSession>,
+        actions: HashMap<String, Vec<BrowserAction>>,
+        inputs: HashMap<String, Vec<ComputerInput>>,
+        closes: HashMap<String, Vec<bool>>,
+        urls: HashMap<String, String>,
+        holds: HashMap<String, Arc<Notify>>,
+    }
+
+    impl FakePages {
+        fn seen(&self) -> std::sync::MutexGuard<'_, Seen> {
+            self.seen.lock().unwrap_or_else(PoisonError::into_inner)
+        }
+
+        pub fn launches(&self) -> Vec<PageLaunch> {
+            self.seen().launches.clone()
+        }
+
+        /// The session of the bruh's latest launch.
+        pub fn session(&self, agent_id: &str) -> Option<BrowserSession> {
+            self.seen().sessions.get(agent_id).cloned()
+        }
+
+        pub fn actions(&self, agent_id: &str) -> Vec<BrowserAction> {
+            self.seen()
+                .actions
+                .get(agent_id)
+                .cloned()
+                .unwrap_or_default()
+        }
+
+        pub fn inputs(&self, agent_id: &str) -> Vec<ComputerInput> {
+            self.seen()
+                .inputs
+                .get(agent_id)
+                .cloned()
+                .unwrap_or_default()
+        }
+
+        pub fn closes(&self, agent_id: &str) -> usize {
+            self.seen().closes.get(agent_id).map_or(0, Vec::len)
+        }
+
+        /// For each close, whether the profile folder still existed.
+        pub fn closed_with_tree(&self, agent_id: &str) -> Vec<bool> {
+            self.seen()
+                .closes
+                .get(agent_id)
+                .cloned()
+                .unwrap_or_default()
+        }
+
+        /// The page's address, as if it navigated by itself.
+        pub fn set_url(&self, agent_id: &str, url: &str) {
+            self.seen().urls.insert(agent_id.into(), url.into());
+        }
+
+        /// The bruh's next action waits until the returned `Notify` is
+        /// notified.
+        pub fn hold_next_action(&self, agent_id: &str) -> Arc<Notify> {
+            let notify = Arc::new(Notify::new());
+            self.seen()
+                .holds
+                .insert(agent_id.into(), Arc::clone(&notify));
+            notify
+        }
+
+        fn launcher(&self) -> Launcher {
+            let pages = self.clone();
+            Arc::new(move |launch: PageLaunch| {
+                let pages = pages.clone();
+                Box::pin(async move {
+                    std::fs::create_dir_all(&launch.profile_dir)?;
+                    std::fs::write(launch.profile_dir.join("Cookies"), b"fake")?;
+                    let session = BrowserSession {
+                        id: uuid::Uuid::new_v4().to_string(),
+                        grant_id: launch.grant_id.clone(),
+                        url: launch.url.clone(),
+                    };
+                    let page = FakePage {
+                        agent_id: launch.agent_id.clone(),
+                        profile_dir: launch.profile_dir.clone(),
+                        session: session.clone(),
+                        pages: pages.clone(),
+                    };
+                    let mut seen = pages.seen();
+                    seen.urls
+                        .insert(launch.agent_id.clone(), launch.url.clone());
+                    seen.sessions.insert(launch.agent_id.clone(), session);
+                    seen.launches.push(launch);
+                    drop(seen);
+                    Ok(Box::new(page) as Box<dyn ComputerPage>)
+                })
+            })
+        }
+    }
+
+    struct FakePage {
+        agent_id: String,
+        profile_dir: PathBuf,
+        session: BrowserSession,
+        pages: FakePages,
+    }
+
+    #[async_trait]
+    impl ComputerPage for FakePage {
+        fn session(&self) -> &BrowserSession {
+            &self.session
+        }
+
+        fn page_socket(&self) -> Option<String> {
+            None
+        }
+
+        async fn run(
+            &mut self,
+            action: BrowserAction,
+            _policy: ProcessPolicy,
+        ) -> Result<ToolReply, ToolError> {
+            let hold = {
+                let mut seen = self.pages.seen();
+                seen.actions
+                    .entry(self.agent_id.clone())
+                    .or_default()
+                    .push(action.clone());
+                seen.holds.remove(&self.agent_id)
+            };
+            if let Some(hold) = hold {
+                hold.notified().await;
+            }
+            if let BrowserAction::Navigate { url } = action {
+                self.pages.seen().urls.insert(self.agent_id.clone(), url);
+            }
+            Ok(ToolReply {
+                value: serde_json::json!({"ok": true}),
+                image: None,
+            })
+        }
+
+        async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError> {
+            self.pages
+                .seen()
+                .inputs
+                .entry(self.agent_id.clone())
+                .or_default()
+                .push(input.clone());
+            Ok(())
+        }
+
+        async fn url(&mut self) -> Option<String> {
+            self.pages.seen().urls.get(&self.agent_id).cloned()
+        }
+
+        async fn close(&mut self) {
+            let tree = self.profile_dir.exists();
+            self.pages
+                .seen()
+                .closes
+                .entry(self.agent_id.clone())
+                .or_default()
+                .push(tree);
+        }
+    }
+
+    impl LocalToolsHost {
+        /// A host whose bruh browsers are fakes, with no upstream proxy.
+        pub fn with_fake_pages() -> (Arc<Self>, FakePages) {
+            Self::with_fake_pages_and_network(|| Ok(Upstream::default()))
+        }
+
+        pub(in crate::local_tools) fn with_fake_pages_and_network(
+            network: fn() -> Result<Upstream, ToolError>,
+        ) -> (Arc<Self>, FakePages) {
+            let pages = FakePages::default();
+            let client = reqwest::Client::new();
+            let host =
+                Self::with_parts(ProcessPolicy::default(), client, pages.launcher(), network)
+                    .unwrap_or_else(|error| panic!("the fake host has a valid policy: {error}"));
+            (host, pages)
+        }
+    }
+}

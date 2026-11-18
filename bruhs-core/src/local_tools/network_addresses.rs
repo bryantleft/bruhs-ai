@@ -40,6 +40,18 @@ impl OwnAddresses {
         Self::new(interface_addresses, MAX_AGE)
     }
 
+    /// Reads the addresses once now, so a guard with no good copy fails to
+    /// start instead of refusing only loopback.
+    pub(super) fn primed(self) -> io::Result<Self> {
+        let addresses = (self.read)()?;
+        let addresses = Arc::new(addresses.into_iter().map(|ip| ip.to_canonical()).collect());
+        *self
+            .cache
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some((Instant::now(), addresses));
+        Ok(self)
+    }
+
     /// Whether `ip` is one of this computer's addresses (an IPv4-mapped form
     /// counts as its IPv4 address).
     pub(super) fn contains(&self, ip: IpAddr) -> bool {
