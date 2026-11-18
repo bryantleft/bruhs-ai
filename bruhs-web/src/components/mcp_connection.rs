@@ -1,7 +1,7 @@
 //! Agent workflows → MCP workspace connection (`crate::workspace_bridge`):
 //! the notes, buttons and copied config desktop's panel has.
 
-use bruhs_models::workspace_bridge::{SESSION_ACTIVE_NOTE, SESSION_OFF_NOTE};
+use bruhs_models::workspace_bridge::{COPIED_NOTE, SESSION_ACTIVE_NOTE, SESSION_OFF_NOTE};
 use leptos::prelude::*;
 
 use crate::ui::{button_class, ButtonSize, ButtonVariant};
@@ -70,7 +70,7 @@ pub fn McpConnectionPanel() -> impl IntoView {
             </div>
             <Show when=move || copied.get() && connected()>
                 <p role="status" class="mt-2 text-label-sm text-pandan-300">
-                    "Copied. The config names a private connection file; the session token stays in that file."
+                    {COPIED_NOTE}
                 </p>
             </Show>
         </section>
