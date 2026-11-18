@@ -3,12 +3,11 @@
 //! and a composer whose `@` lists only the room's members.
 
 use bruhs_models::crew::room::{
-    author_name, members_line, merge_messages, room_line_key, room_lines, working_line, Room,
-    RoomLine, RoomMessage, APPROVAL_DECIDED, EMPTY_ROOM, NO_LEAD_HINT, NO_MEMBERS, ROOM_SETTINGS,
+    author_name, member_states, members_line, merge_messages, room_composer_block,
+    room_composer_hint, room_line_key, room_lines, room_post, working_line, Room, RoomLine,
+    RoomMessage, APPROVAL_DECIDED, EMPTY_ROOM, ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
-use bruhs_models::logic::context_chip::{expand_prompt, ContextChip};
-use bruhs_models::reactive::ReactiveCommand;
 use leptos::html;
 use leptos::prelude::*;
 
@@ -25,46 +24,6 @@ const ERROR: &str = "rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee
 const OWNER: &str = "min-w-0 max-w-[80%] whitespace-pre-wrap break-words rounded-grape bg-longan-800 px-3 py-2 text-body text-rambutan-100";
 const BRUH: &str = "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-longan-900 px-3 py-2 text-body text-rambutan-200 inset-ring inset-ring-longan-700/50";
 const FAILED: &str = "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-lychee-500/10 px-3 py-2 text-body text-lychee-200";
-
-/// The post a draft sends: its text with each chip read out, or `None`
-/// for a blank draft. The owner's words are sent as written.
-fn post_command(room_id: &str, text: &str, chips: &[ContextChip]) -> Option<ReactiveCommand> {
-    if text.trim().is_empty() {
-        return None;
-    }
-    Some(ReactiveCommand::PostRoom {
-        room_id: room_id.to_string(),
-        text: expand_prompt(text, chips),
-    })
-}
-
-/// Why the composer is off, or `None` while it posts. An older service
-/// gives its reason (empty while the version is still unknown); a room
-/// without members asks for one.
-fn composer_block(
-    rooms_ready: bool,
-    rooms_reason: Option<&'static str>,
-    members: usize,
-) -> Option<&'static str> {
-    if !rooms_ready {
-        return Some(rooms_reason.unwrap_or_default());
-    }
-    (members == 0).then_some(NO_MEMBERS)
-}
-
-/// The hint under the composer: a room with members but no lead only
-/// hands work to the bruhs a post names.
-fn composer_hint(room: &Room) -> Option<&'static str> {
-    (!room.members.is_empty() && room.lead.is_none()).then_some(NO_LEAD_HINT)
-}
-
-/// The room's members who are still in the crew, in room order.
-fn member_states(room: &Room, bruhs: &[BruhState]) -> Vec<BruhState> {
-    room.members
-        .iter()
-        .filter_map(|id| bruhs.iter().find(|bruh| bruh.agent_id == *id).cloned())
-        .collect()
-}
 
 #[component]
 pub fn RoomPage(room_id: String) -> impl IntoView {
@@ -429,7 +388,7 @@ fn room_composer(
     });
     let lead = Signal::derive(move || room.get().flatten().and_then(|room| room.lead));
     let blocked = Memo::new(move |_| {
-        composer_block(
+        room_composer_block(
             data.rooms_ready(),
             data.rooms_reason(),
             members.with(Vec::len),
@@ -439,7 +398,7 @@ fn room_composer(
         room.with(|room| {
             room.as_ref()
                 .and_then(Option::as_ref)
-                .and_then(composer_hint)
+                .and_then(room_composer_hint)
         })
         .filter(|_| blocked.get().is_none())
     };
@@ -448,7 +407,7 @@ fn room_composer(
             return;
         }
         let command = chips.with_untracked(|chips| {
-            draft.with_untracked(|text| id.with_value(|id| post_command(id, text, chips)))
+            draft.with_untracked(|text| id.with_value(|id| room_post(id, text, chips)))
         });
         let Some(command) = command else {
             return;
@@ -491,85 +450,5 @@ fn room_composer(
                 {move || hint().map(|hint| view! { <p data-room-hint="" class="text-label-sm text-rambutan-500">{hint}</p> })}
             </div>
         </div>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bruhs_models::crew::rooms_ready;
-    use bruhs_models::logic::context_chip::{insert_chip, ChipKind};
-
-    #[test]
-    fn a_post_is_the_draft_with_its_chips_expanded() {
-        let (text, _, chips) = insert_chip(
-            "ask  now",
-            &[],
-            4,
-            "c1",
-            ChipKind::Bruh {
-                agent_id: "a".into(),
-                name: "Ada".into(),
-            },
-        );
-        assert_eq!(text, "ask @Ada now");
-        assert_eq!(
-            post_command("r", &text, &chips),
-            Some(ReactiveCommand::PostRoom {
-                room_id: "r".into(),
-                text: "ask @Ada now".into(),
-            })
-        );
-        assert_eq!(post_command("r", "  \n", &[]), None);
-    }
-
-    #[test]
-    fn the_composer_is_off_on_an_older_service_and_in_an_empty_room() {
-        use bruhs_models::crew::{ServiceNotice, CREW_PROTOCOL};
-        assert!(rooms_ready(CREW_PROTOCOL));
-        let old = Some(ServiceNotice::ServingOld.message());
-        assert_eq!(composer_block(false, old, 2), old);
-        // Unknown version: off, with nothing to say yet.
-        assert_eq!(composer_block(false, None, 2), Some(""));
-        assert_eq!(composer_block(true, None, 0), Some(NO_MEMBERS));
-        assert_eq!(composer_block(true, None, 1), None);
-    }
-
-    #[test]
-    fn the_no_lead_hint_shows_only_in_a_room_with_members_and_no_lead() {
-        let room = |members: &[&str], lead: Option<&str>| Room {
-            id: "r".into(),
-            name: "R".into(),
-            members: members.iter().map(|id| (*id).to_string()).collect(),
-            lead: lead.map(str::to_string),
-        };
-        assert_eq!(composer_hint(&room(&["a"], None)), Some(NO_LEAD_HINT));
-        assert_eq!(composer_hint(&room(&["a"], Some("a"))), None);
-        assert_eq!(composer_hint(&room(&[], None)), None);
-    }
-
-    #[test]
-    fn the_header_shows_members_still_in_the_crew_in_room_order() {
-        let state = |id: &str, name: &str| BruhState {
-            agent_id: id.into(),
-            name: name.into(),
-            look: BruhLook::default(),
-            access: Default::default(),
-            effort: None,
-            status: BruhStatus::Asleep,
-            next_wake_ms: None,
-            unread: 0,
-        };
-        let room = Room {
-            id: "r".into(),
-            name: "R".into(),
-            members: vec!["b".into(), "gone".into(), "a".into()],
-            lead: None,
-        };
-        let names: Vec<String> = member_states(&room, &[state("a", "Ada"), state("b", "Bo")])
-            .into_iter()
-            .map(|bruh| bruh.name)
-            .collect();
-        assert_eq!(names, ["Bo", "Ada"]);
     }
 }

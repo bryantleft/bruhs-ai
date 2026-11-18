@@ -15,7 +15,7 @@ use crate::views::crew_face::bruh_face;
 use crate::views::dropdown::{
     dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler,
 };
-use crate::views::web_button::is_web_button_activation_key;
+use crate::views::web_button::on_press;
 use bruhs_models::agent::ModelId;
 use bruhs_models::crew::{
     access_options, approval_outcome, clamp_level, composer_block, current_settings, job_line,
@@ -28,13 +28,13 @@ use gpui_component::scroll::{ScrollableElement, Scrollbar};
 use std::cell::Cell;
 
 /// Web `text-h3`.
-const TITLE_TEXT_PX: f32 = 18.0;
+pub(super) const TITLE_TEXT_PX: f32 = 18.0;
 /// Web `text-body`.
-const BODY_TEXT_PX: f32 = 14.0;
+pub(super) const BODY_TEXT_PX: f32 = 14.0;
 /// Web `text-body-sm` and `text-label`.
-const SMALL_TEXT_PX: f32 = 13.0;
+pub(super) const SMALL_TEXT_PX: f32 = 13.0;
 /// Web `text-label-sm`.
-const LABEL_TEXT_PX: f32 = 12.0;
+pub(super) const LABEL_TEXT_PX: f32 = 12.0;
 /// Web `max-w-3xl`.
 const COLUMN_MAX_PX: f32 = 768.0;
 /// Web `p-4`, and `sm:px-6` from the `sm` breakpoint.
@@ -43,14 +43,14 @@ const PAGE_WIDE_PADDING_PX: f32 = 24.0;
 const SM_BREAKPOINT_PX: f32 = 640.0;
 /// Web `max-w-[80%]` on chat bubbles and cards.
 const BUBBLE_SHARE: f32 = 0.8;
-const RADIUS_GRAPE_PX: f32 = 8.0;
+pub(super) const RADIUS_GRAPE_PX: f32 = 8.0;
 /// Web `max-h-64` on an approval's full request.
 const DETAIL_MAX_PX: f32 = 256.0;
 const RADIUS_SEED_PX: f32 = 4.0;
 /// Web `border-longan-800/50` hairlines.
-const HAIRLINE_OPACITY: f32 = 0.5;
+pub(super) const HAIRLINE_OPACITY: f32 = 0.5;
 /// Web `inset-ring-longan-700/50` on bruh bubbles and settings sections.
-const SOFT_RING_OPACITY: f32 = 0.5;
+pub(super) const SOFT_RING_OPACITY: f32 = 0.5;
 /// Web `bg-longan-950/60` on settings sections.
 const SECTION_FILL_OPACITY: f32 = 0.6;
 /// Web `py-1.5` around the tabs.
@@ -327,25 +327,11 @@ fn press(
     action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
         + 'static,
 ) -> Stateful<Div> {
-    let action = Rc::new(action);
-    let key = Rc::clone(&action);
-    el.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-        if !event.is_keyboard() {
-            cx.stop_propagation();
-            action(this, window, cx);
-        }
-    }))
-    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-            window.prevent_default();
-            cx.stop_propagation();
-            key(this, window, cx);
-        }
-    }))
+    on_press(el, cx, action)
 }
 
 /// A web `Button`: handlers only while enabled.
-fn page_button(
+pub(super) fn page_button(
     id: impl Into<SharedString>,
     text: &'static str,
     variant: WebButtonVariant,
@@ -433,7 +419,7 @@ fn page_switch(
     }
 }
 
-fn small_text(text: impl Into<SharedString>, color: Hsla) -> Div {
+pub(super) fn small_text(text: impl Into<SharedString>, color: Hsla) -> Div {
     div()
         .min_w_0()
         .text_size(px(LABEL_TEXT_PX))
@@ -442,7 +428,7 @@ fn small_text(text: impl Into<SharedString>, color: Hsla) -> Div {
         .child(text.into())
 }
 
-fn alert(id: &'static str, message: impl Into<SharedString>) -> Stateful<Div> {
+pub(super) fn alert(id: &'static str, message: impl Into<SharedString>) -> Stateful<Div> {
     div()
         .id(id)
         .debug_selector(move || id.to_string())
@@ -457,7 +443,7 @@ fn alert(id: &'static str, message: impl Into<SharedString>) -> Stateful<Div> {
         .child(message.into())
 }
 
-fn bubble(max_width: f32) -> Div {
+pub(super) fn bubble(max_width: f32) -> Div {
     div()
         .min_w_0()
         .max_w(px(max_width))
@@ -471,15 +457,15 @@ fn bubble(max_width: f32) -> Div {
 
 /// The page's measured layout: the centred column and its padding.
 #[derive(Clone, Copy)]
-struct Layout {
+pub(super) struct Layout {
     column: f32,
-    padding: f32,
+    pub(super) padding: f32,
     /// Web `sm:`, a media query: the window, not the page, is 640px or wider.
     wide: bool,
 }
 
 impl Layout {
-    fn of(width: f32, viewport: f32) -> Self {
+    pub(super) fn of(width: f32, viewport: f32) -> Self {
         let wide = viewport >= SM_BREAKPOINT_PX;
         Self {
             column: width.min(COLUMN_MAX_PX),
@@ -492,18 +478,26 @@ impl Layout {
         }
     }
 
+    /// The layout of a page last measured at `measured` CSS px wide (0
+    /// before its first frame, when the window's width stands in).
+    pub(super) fn measured(measured: f32, window: &Window) -> Self {
+        let viewport = gpui_component::zoom::css_px(window.viewport_size().width);
+        let width = if measured > 0.0 { measured } else { viewport };
+        Self::of(width, viewport)
+    }
+
     /// The content width inside the column's padding.
     fn inner(self) -> f32 {
         (self.column - self.padding * 2.0).max(0.0)
     }
 
-    fn bubble(self) -> f32 {
+    pub(super) fn bubble(self) -> f32 {
         self.inner() * BUBBLE_SHARE
     }
 
     /// Web `mx-auto w-full max-w-3xl min-w-0 p-4 sm:px-6`. A px width,
     /// because percentages inside a scroll container measure as indefinite.
-    fn column(self) -> Div {
+    pub(super) fn column(self) -> Div {
         div()
             .w(px(self.column))
             .min_w_0()
@@ -513,6 +507,29 @@ impl Layout {
             .flex()
             .flex_col()
     }
+}
+
+/// Measures the page it fills into `width` as it is drawn, redrawing the
+/// panel when the width changes.
+pub(super) fn measure_width(
+    width: Rc<Cell<f32>>,
+    cx: &Context<'_, ReactiveAutomations>,
+) -> impl IntoElement {
+    let entity = cx.entity_id();
+    canvas(
+        move |bounds, _, cx| {
+            let measured = gpui_component::zoom::css_px(bounds.size.width);
+            if (width.get() - measured).abs() > 0.5 {
+                width.set(measured);
+                cx.notify(entity);
+            }
+        },
+        |_, _, _, _| {},
+    )
+    .absolute()
+    .top_0()
+    .left_0()
+    .size_full()
 }
 
 impl ReactiveAutomations {
@@ -789,11 +806,15 @@ impl ReactiveAutomations {
         cx.notify();
     }
 
-    fn answer_bruh_question(&mut self, id: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let Some((input, _)) = self.bruh.as_ref().and_then(|page| page.replies.get(id)) else {
-            return;
-        };
-        let input = input.clone();
+    /// Reply to question `id` with what `input` holds, from a bruh's chat
+    /// or a room.
+    pub(super) fn answer_question(
+        &mut self,
+        id: &str,
+        input: Entity<InputState>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
         let text = value(&input, cx);
         if text.trim().is_empty() || self.busy {
             return;
@@ -901,10 +922,10 @@ impl ReactiveAutomations {
         window: &Window,
         cx: &Context<'_, Self>,
     ) -> Div {
-        let measured = self.bruh.as_ref().map_or(0.0, |page| page.width.get());
-        let viewport = gpui_component::zoom::css_px(window.viewport_size().width);
-        let width = if measured > 0.0 { measured } else { viewport };
-        let layout = Layout::of(width, viewport);
+        let layout = Layout::measured(
+            self.bruh.as_ref().map_or(0.0, |page| page.width.get()),
+            window,
+        );
         let root = div()
             .debug_selector(|| "desktop-bruh-page".to_string())
             .relative()
@@ -918,24 +939,7 @@ impl ReactiveAutomations {
             .text_color(theme::rambutan_300())
             .line_height(relative(1.5))
             .when_some(self.bruh.as_ref(), |root, page| {
-                let measured = page.width.clone();
-                let entity = cx.entity_id();
-                root.child(
-                    canvas(
-                        move |bounds, _, cx| {
-                            let width = gpui_component::zoom::css_px(bounds.size.width);
-                            if (measured.get() - width).abs() > 0.5 {
-                                measured.set(width);
-                                cx.notify(entity);
-                            }
-                        },
-                        |_, _, _, _| {},
-                    )
-                    .absolute()
-                    .top_0()
-                    .left_0()
-                    .size_full(),
-                )
+                root.child(measure_width(page.width.clone(), cx))
             });
         let Some(snapshot) = &self.snapshot else {
             let pending = match &self.load_error {
@@ -1418,7 +1422,14 @@ impl ReactiveAutomations {
             TranscriptItem::Card { item } if item.approval.is_some() => {
                 self.render_bruh_approval(&item, layout, cx)
             }
-            TranscriptItem::Card { item } => self.render_bruh_question(&item, layout, cx),
+            TranscriptItem::Card { item } => {
+                let reply = self
+                    .bruh
+                    .as_ref()
+                    .and_then(|page| page.replies.get(&item.id))
+                    .map(|(input, _)| input);
+                self.render_bruh_question(&item, reply, layout, cx)
+            }
             TranscriptItem::Review {
                 run_id,
                 trigger,
@@ -1498,7 +1509,13 @@ impl ReactiveAutomations {
             .into_any_element()
     }
 
-    fn render_bruh_card(&self, id: &str, aria: &'static str, layout: Layout) -> Stateful<Div> {
+    /// A question, approval or review card at the chat's card width.
+    pub(super) fn render_bruh_card(
+        &self,
+        id: &str,
+        aria: &'static str,
+        layout: Layout,
+    ) -> Stateful<Div> {
         div()
             .id(SharedString::from(format!("desktop-bruh-card-{id}")))
             .role(Role::Article)
@@ -1515,7 +1532,8 @@ impl ReactiveAutomations {
             .gap_2()
     }
 
-    fn render_bruh_approval(
+    /// An approval card (web `approval_card`), decided inline.
+    pub(super) fn render_bruh_approval(
         &self,
         item: &OutboxItem,
         layout: Layout,
@@ -1590,9 +1608,12 @@ impl ReactiveAutomations {
         card.into_any_element()
     }
 
-    fn render_bruh_question(
+    /// A question card (web `question_card`): the reply field is `reply`,
+    /// which the page showing the card keeps.
+    pub(super) fn render_bruh_question(
         &self,
         item: &OutboxItem,
+        reply: Option<&Entity<InputState>>,
         layout: Layout,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
@@ -1627,15 +1648,12 @@ impl ReactiveAutomations {
             }
             .into_any_element();
         }
-        let Some((input, _)) = self
-            .bruh
-            .as_ref()
-            .and_then(|page| page.replies.get(&item.id))
-        else {
+        let Some(input) = reply else {
             return card.into_any_element();
         };
         let empty = value(input, cx).trim().is_empty();
         let id = item.id.clone();
+        let answer = input.clone();
         card.child(
             Input::new(input)
                 .aria_label(format!("Reply to {}", item.title))
@@ -1650,7 +1668,7 @@ impl ReactiveAutomations {
             WebButtonVariant::Primary,
             self.busy || empty,
             cx,
-            move |this, window, cx| this.answer_bruh_question(&id, window, cx),
+            move |this, window, cx| this.answer_question(&id, answer.clone(), window, cx),
         )))
         .into_any_element()
     }

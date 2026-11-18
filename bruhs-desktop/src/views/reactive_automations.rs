@@ -20,6 +20,7 @@ mod face_editor;
 mod memory;
 mod notifications;
 mod room_dialog;
+mod room_page;
 mod runs;
 mod setup;
 mod updates;
@@ -29,6 +30,7 @@ pub(crate) use create_bruh::ReactiveBruhCreated;
 use gpui::{prelude::*, *};
 use gpui_component::input::{Input, InputEvent, InputState};
 pub(crate) use room_dialog::ReactiveRoomDone;
+pub(crate) use room_page::ReactiveOpenRoomSettings;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
@@ -238,6 +240,8 @@ pub(crate) struct ReactiveAutomations {
     room_dialog: Option<room_dialog::RoomDialog>,
     /// The bruh page on screen, while the workspace shows one.
     bruh: Option<bruh_page::BruhPage>,
+    /// The room page on screen, while the workspace shows one.
+    room: Option<room_page::RoomPage>,
     /// Commands waiting for the one in flight, sent in order; a failure
     /// drops them, since they assumed it would apply.
     queued: VecDeque<(ReactiveCommand, Scope)>,
@@ -548,6 +552,7 @@ impl ReactiveAutomations {
             create: None,
             room_dialog: None,
             bruh: None,
+            room: None,
             queued: VecDeque::new(),
             snapshot_rev: 0,
             #[cfg(test)]
@@ -1667,8 +1672,9 @@ impl ReactiveAutomations {
             self.crew.rooms = signal.rooms;
             cx.notify();
         }
-        // A bruh page reads the crew again on every change, like the web's.
-        if self.bruh.is_some() {
+        // A bruh or room page reads the crew again on every change, like
+        // the web's.
+        if self.bruh.is_some() || self.room.is_some() {
             self.refresh_snapshot(cx);
         }
         self.note_crew_protocol(signal.protocol, cx);
@@ -1777,6 +1783,7 @@ impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
 impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
 impl EventEmitter<ReactiveRoomDone> for ReactiveAutomations {}
 impl EventEmitter<ReactiveOpenAutomations> for ReactiveAutomations {}
+impl EventEmitter<ReactiveOpenRoomSettings> for ReactiveAutomations {}
 impl EventEmitter<ReactiveCrewChanged> for ReactiveAutomations {}
 
 /// A live crew frame changed some bruh's state, so a run may have ended.
@@ -1796,6 +1803,12 @@ impl Render for ReactiveAutomations {
             self.ensure_bruh_page(_window, cx);
             return self
                 .render_bruh_page(&agent_id, _window, cx)
+                .into_any_element();
+        }
+        if let Some(room_id) = self.room_page_id().map(str::to_string) {
+            self.ensure_room_page(_window, cx);
+            return self
+                .render_room_page(&room_id, _window, cx)
                 .into_any_element();
         }
         let disabled = self.busy || self.snapshot.is_none();

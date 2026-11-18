@@ -1900,6 +1900,17 @@ impl Workspace {
                         this.activate_sidebar_view(AppView::Automations, window, cx)
                     },
                 ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
+                     event: &crate::views::reactive_automations::ReactiveOpenRoomSettings,
+                     window,
+                     cx| {
+                        this.open_room_dialog(Some(event.room_id.clone()), window, cx)
+                    },
+                ));
                 // A crew change can end a held `message_bruh` call.
                 subscriptions.push(cx.subscribe(
                     &panel,

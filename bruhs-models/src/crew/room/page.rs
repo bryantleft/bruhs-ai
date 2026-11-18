@@ -3,6 +3,7 @@
 
 use super::{check_room, join_names, Room, RoomAuthor, RoomMessage, RoomState, FORMER_BRUH};
 use crate::crew::{rooms_ready, service_notice, BruhState};
+use crate::logic::context_chip::{expand_prompt, ContextChip};
 use crate::reactive::{OutboxItem, ReactiveCommand, ReactiveRun, RunStatus};
 use crate::EpochMs;
 
@@ -297,6 +298,50 @@ pub fn member_hits<'a>(room: &Room, bruhs: &'a [BruhState], query: &str) -> Vec<
                 .filter(|bruh| !prefix(bruh) && contains(bruh)),
         )
         .collect()
+}
+
+/// The room's members who are still in the crew, in room order.
+#[must_use]
+pub fn member_states(room: &Room, bruhs: &[BruhState]) -> Vec<BruhState> {
+    room.members
+        .iter()
+        .filter_map(|id| bruhs.iter().find(|bruh| bruh.agent_id == *id).cloned())
+        .collect()
+}
+
+/// Why the room composer is off, or `None` while it posts. An older
+/// service gives its reason (empty while the version is still unknown); a
+/// room without members asks for one.
+#[must_use]
+pub fn room_composer_block(
+    rooms_ready: bool,
+    rooms_reason: Option<&'static str>,
+    members: usize,
+) -> Option<&'static str> {
+    if !rooms_ready {
+        return Some(rooms_reason.unwrap_or_default());
+    }
+    (members == 0).then_some(NO_MEMBERS)
+}
+
+/// The hint under the room composer: a room with members but no lead only
+/// hands work to the bruhs a post names.
+#[must_use]
+pub fn room_composer_hint(room: &Room) -> Option<&'static str> {
+    (!room.members.is_empty() && room.lead.is_none()).then_some(NO_LEAD_HINT)
+}
+
+/// The post a room draft sends: its text with each chip read out, or
+/// `None` for a blank draft. The owner's words are sent as written.
+#[must_use]
+pub fn room_post(room_id: &str, text: &str, chips: &[ContextChip]) -> Option<ReactiveCommand> {
+    if text.trim().is_empty() {
+        return None;
+    }
+    Some(ReactiveCommand::PostRoom {
+        room_id: room_id.to_string(),
+        text: expand_prompt(text, chips),
+    })
 }
 
 /// The room settings form.
@@ -726,5 +771,69 @@ mod tests {
             ..room
         };
         assert_eq!(room_form_for(Some(&kept), &crew).lead.as_deref(), Some("b"));
+    }
+
+    #[test]
+    fn a_post_is_the_draft_with_its_chips_expanded() {
+        use crate::logic::context_chip::{insert_chip, ChipKind};
+        let (text, _, chips) = insert_chip(
+            "ask  now",
+            &[],
+            4,
+            "c1",
+            ChipKind::Bruh {
+                agent_id: "a".into(),
+                name: "Ada".into(),
+            },
+        );
+        assert_eq!(text, "ask @Ada now");
+        assert_eq!(
+            room_post("r", &text, &chips),
+            Some(ReactiveCommand::PostRoom {
+                room_id: "r".into(),
+                text: "ask @Ada now".into(),
+            })
+        );
+        assert_eq!(room_post("r", "  \n", &[]), None);
+    }
+
+    #[test]
+    fn the_composer_is_off_on_an_older_service_and_in_an_empty_room() {
+        use crate::crew::{ServiceNotice, CREW_PROTOCOL};
+        assert!(rooms_ready(CREW_PROTOCOL));
+        let old = Some(ServiceNotice::ServingOld.message());
+        assert_eq!(room_composer_block(false, old, 2), old);
+        // Unknown version: off, with nothing to say yet.
+        assert_eq!(room_composer_block(false, None, 2), Some(""));
+        assert_eq!(room_composer_block(true, None, 0), Some(NO_MEMBERS));
+        assert_eq!(room_composer_block(true, None, 1), None);
+    }
+
+    #[test]
+    fn the_no_lead_hint_shows_only_in_a_room_with_members_and_no_lead() {
+        let room = |members: &[&str], lead: Option<&str>| Room {
+            id: "r".into(),
+            name: "R".into(),
+            members: members.iter().map(|id| (*id).to_string()).collect(),
+            lead: lead.map(str::to_string),
+        };
+        assert_eq!(room_composer_hint(&room(&["a"], None)), Some(NO_LEAD_HINT));
+        assert_eq!(room_composer_hint(&room(&["a"], Some("a"))), None);
+        assert_eq!(room_composer_hint(&room(&[], None)), None);
+    }
+
+    #[test]
+    fn the_header_shows_members_still_in_the_crew_in_room_order() {
+        let room = Room {
+            id: "r".into(),
+            name: "R".into(),
+            members: vec!["b".into(), "gone".into(), "a".into()],
+            lead: None,
+        };
+        let names: Vec<String> = member_states(&room, &[state("a", "Ada"), state("b", "Bo")])
+            .into_iter()
+            .map(|bruh| bruh.name)
+            .collect();
+        assert_eq!(names, ["Bo", "Ada"]);
     }
 }

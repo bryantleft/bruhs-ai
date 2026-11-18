@@ -1740,6 +1740,70 @@ mod tests {
         assert!(!room_dialog_open(&workspace, cx), "it closes once deleted");
     }
 
+    /// A room opens its own page, not Automations; Room settings there
+    /// opens the room dialog, and deleting the room leaves a notice with
+    /// focus on it.
+    #[gpui::test]
+    fn a_room_row_opens_the_room_page_and_its_settings(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        let crew = vec![named("a", "Ada")];
+        show_rooms(
+            &workspace,
+            cx,
+            crew.clone(),
+            vec![room("Beta", &["a"])],
+            CREW_PROTOCOL,
+        );
+        click(cx, "desktop-crew-room-Beta");
+        workspace.update(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.active_view,
+                bruhs_models::AppView::Room {
+                    room_id: "Beta".into()
+                }
+            );
+            let panel = workspace.reactive_automations.read(cx);
+            assert_eq!(panel.room_page_id(), Some("Beta"));
+            assert_eq!(panel.bruh_page_agent(), None);
+        });
+        assert!(
+            cx.debug_bounds("desktop-room-page").is_some(),
+            "its page shows"
+        );
+        assert!(cx.debug_bounds("reactive-introduction").is_none());
+        click(cx, "desktop-room-settings");
+        assert!(room_dialog_open(&workspace, cx));
+        workspace.update(cx, |workspace, cx| {
+            assert!(workspace
+                .reactive_automations
+                .read(cx)
+                .room_dialog_editing());
+        });
+        click(cx, "desktop-room-delete");
+        click(cx, "desktop-room-delete-yes");
+        answer(&workspace, cx, snapshot(CREW_PROTOCOL, crew, Vec::new()));
+        assert!(!room_dialog_open(&workspace, cx));
+        assert!(cx.debug_bounds("desktop-room-gone").is_some());
+        assert!(cx.debug_bounds("desktop-room-settings").is_none());
+        assert!(cx.debug_bounds("desktop-room-composer").is_none());
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert!(workspace
+                .reactive_automations
+                .read(cx)
+                .room_gone_focused_for_test(window));
+        });
+        // Leaving the room closes its page; Automations draws the panel again.
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.activate_sidebar_view(bruhs_models::AppView::Automations, window, cx);
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-room-page").is_none());
+        workspace.update(cx, |workspace, cx| {
+            assert_eq!(workspace.reactive_automations.read(cx).room_page_id(), None);
+        });
+    }
+
     #[test]
     fn rows_put_whoever_needs_you_first_and_say_when_a_sleeper_wakes() {
         let rows = rail_rows(&[

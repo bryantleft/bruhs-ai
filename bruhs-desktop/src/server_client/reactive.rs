@@ -75,10 +75,6 @@ impl ServerClient {
     }
 
     /// One room's messages, newest first; `before` is the id of the last message already shown.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the room transcript (Task 13) reads it")
-    )]
     pub async fn room_messages(
         &self,
         room_id: &str,
@@ -144,9 +140,3 @@ impl ServerClient {
         Self::decode(response, request).await
     }
 }
-
-/// Keeps `room_messages` live in test builds until the room transcript reads it.
-#[cfg(test)]
-const _: fn() = || {
-    let _ = ServerClient::room_messages;
-};
