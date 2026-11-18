@@ -21,6 +21,20 @@ impl ChatView {
         cx.notify();
     }
 
+    /// A finished reply that uses every Markdown block and inline style, to
+    /// compare the prose renderer with the web's.
+    pub(crate) fn smoke_seed_prose(&mut self, cx: &mut Context<'_, Self>) {
+        self.thread_title = "Markdown prose".into();
+        let mut message = Message::assistant_streaming(1, None);
+        message.content = SMOKE_PROSE.into();
+        message.state = TurnState::Finished;
+        self.messages = vec![message];
+        self.is_streaming = false;
+        self.scroll_messages_to_bottom();
+        cx.emit(ChatViewEvent::MessagesChanged);
+        cx.notify();
+    }
+
     /// Put `text` in the composer and press Enter, through the same path a
     /// key press takes.
     pub(crate) fn smoke_enter(
@@ -75,3 +89,11 @@ impl ChatView {
             .unwrap_or_default()
     }
 }
+
+/// [`ChatView::smoke_seed_prose`]'s reply.
+const SMOKE_PROSE: &str = "# Release notes\n\nThis build makes **text views** our own, with *emphasis*, ~~old~~ \
+markers, `inline code` and [a link](https://bruhs.ai).\n\n## What changed\n\n- Paragraphs, \
+headings and lists\n- Code blocks that scroll sideways\n  - nested items\n- [x] task lists\n\n1. First\n\
+2. Second\n\n> A quote, muted and set off by a rule.\n\n```rust\nfn main() {\n    println!(\"hello\");\n}\n```\n\n\
+| Piece | Owner | Status |\n|---|:-:|--:|\n| Text view | bruhs-ui | done |\n| Input | bruhs-ui | next |\n\n---\n\n\
+A final paragraph after the rule.";

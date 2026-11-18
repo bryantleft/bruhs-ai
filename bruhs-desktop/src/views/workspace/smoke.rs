@@ -518,6 +518,7 @@ impl Workspace {
                 self.set_settings_section(section, cx);
             }
             "transcript"
+            | "transcript-prose"
             | "transcript-diff"
             | "transcript-tasks"
             | "transcript-preview"
@@ -531,6 +532,8 @@ impl Workspace {
                     chat.update(cx, |chat, cx| {
                         if scene.starts_with("transcript-rich") {
                             chat.smoke_seed_rich_response(cx);
+                        } else if scene == "transcript-prose" {
+                            chat.smoke_seed_prose(cx);
                         } else {
                             chat.smoke_seed_transcript(cx);
                         }
