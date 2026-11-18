@@ -1,4 +1,5 @@
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 #[derive(Clone, Copy)]
@@ -22,7 +23,6 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let id = meeting_id.to_string();
-        let key_id = id.clone();
         web_button(
             selector,
             WebButtonVariant::Ghost,
@@ -33,16 +33,9 @@ impl Workspace {
         .min_h(px(theme::CONTROL_PX))
         .aria_label(title)
         .when(!disabled, |el| {
-            el.on_click(
-                cx.listener(move |this, _, _, cx| {
-                    this.invoke_meeting_action(id.clone(), action, cx)
-                }),
-            )
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    this.invoke_meeting_action(key_id.clone(), action, cx);
-                }
-            }))
+            on_press_view(el, cx, move |this, _window, cx| {
+                this.invoke_meeting_action(id.clone(), action, cx);
+            })
         })
         .child(title)
         .into_any_element()

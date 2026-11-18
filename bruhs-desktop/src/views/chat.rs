@@ -1,7 +1,5 @@
 use crate::views::task_registry_subscription::TaskRegistrySubscription;
-use crate::views::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::views::workspace::{provider_label, provider_mark};
 use crate::{
     app_state::{spawn_tokio, DesktopState},

@@ -25,10 +25,7 @@ const WEB_BUTTON_ICON_SMALL_PADDING_PX: f32 = 6.0;
 const WEB_BUTTON_ICON_SMALL_TEXT_SIZE_PX: f32 = 12.0;
 const WEB_BUTTON_OUTLINE_RING_OPACITY: f32 = 0.15;
 
-/// Enter and Space press a focused button, like a native `<button>`.
-pub fn is_web_button_activation_key(key: &str) -> bool {
-    matches!(key, "enter" | "space")
-}
+pub use crate::press::is_activation_key as is_web_button_activation_key;
 
 /// Whether a button takes clicks, focus and hover styling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]

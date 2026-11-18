@@ -3,6 +3,7 @@
 use super::*;
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::reactive::NOTIFICATIONS_NOTE;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 pub(super) struct NotificationForm {
@@ -325,17 +326,9 @@ impl ReactiveAutomations {
                             self.service.pending,
                             true,
                         )
-                        .on_click(cx.listener(move |this, _, _, cx| this.apply_service(action, cx)))
-                        .on_key_down(cx.listener(
-                            move |this, event: &KeyDownEvent, _, cx| {
-                                if super::super::web_button::is_web_button_activation_key(
-                                    event.keystroke.key.as_str(),
-                                ) {
-                                    cx.stop_propagation();
-                                    this.apply_service(action, cx);
-                                }
-                            },
-                        )),
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, _, cx| this.apply_service(action, cx))
+                        }),
                     ),
                 );
             }

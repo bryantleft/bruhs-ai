@@ -7,7 +7,9 @@
 //! reaches into the app that hosts it.
 //!
 //! * [`theme`] — design tokens and the gpui-component theme they configure.
+//! * [`press`] — focus, naming and one action per click, Enter or Space.
 //! * [`button`] — the web's `Button` variants and sizes.
+//! * [`switch`] — the web's `Switch`.
 //! * [`dropdown`] — a trigger and inline listbox with keyboard navigation.
 //! * [`menu_popover`] — a menu placed under (or above) the button that
 //!   opened it.
@@ -28,5 +30,7 @@ pub mod menu_popover;
 pub mod motion;
 pub mod native_blur;
 pub mod page_header;
+pub mod press;
+pub mod switch;
 pub mod theme;
 pub mod zoom;

@@ -13,13 +13,14 @@ use gpui_component::checkbox::Checkbox;
 use gpui_component::input::Input;
 use gpui_component::zoom::px;
 
-use super::{is_web_button_activation_key, Workspace, SETTINGS_ROW_CONTROL_WIDTH_PX};
+use super::{Workspace, SETTINGS_ROW_CONTROL_WIDTH_PX};
 use crate::views::dropdown::{dropdown, DropdownGroup, DropdownOption};
 use crate::views::meetings_hub::MeetingPrefs;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{assets, theme};
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_models::EpochMs;
+use bruhs_ui::press::{on_press_view, Interactivity};
 use gpui_component::input::{InputEvent, InputState};
 
 pub(super) const SETTINGS_WHISPER_DROPDOWN_ID: &str = "desktop-whisper-model";
@@ -36,12 +37,6 @@ const BODY_SM_PX: f32 = 14.0;
 const CODE_SM_PX: f32 = 12.0;
 /// Web `Switch`: `h-6 w-11` (24×44, the 24px target floor), `size-5` thumb
 /// at `translate-x-0.5` / `1.375rem`.
-const SWITCH_WIDTH_PX: f32 = 44.0;
-const SWITCH_HEIGHT_PX: f32 = 24.0;
-const SWITCH_THUMB_PX: f32 = 20.0;
-const SWITCH_THUMB_OFF_X_PX: f32 = 2.0;
-const SWITCH_THUMB_ON_X_PX: f32 = 22.0;
-const SWITCH_DISABLED_OPACITY: f32 = 0.5;
 /// Web `Stepper`: `h-8`, `w-8` side buttons, `w-12` value, `rounded-grape`.
 const STEPPER_HEIGHT_PX: f32 = theme::CONTROL_PX;
 const STEPPER_SIDE_WIDTH_PX: f32 = theme::CONTROL_PX;
@@ -219,17 +214,9 @@ fn code_text(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
 /// Click + Enter/Space activation, like the web's `<button>`s.
 fn activate<F>(el: Stateful<Div>, cx: &Context<'_, Workspace>, action: F) -> Stateful<Div>
 where
-    F: Fn(&mut Workspace, &mut Window, &mut Context<'_, Workspace>) + Clone + 'static,
+    F: Fn(&mut Workspace, &mut Window, &mut Context<'_, Workspace>) + 'static,
 {
-    let key_action = action.clone();
-    el.on_click(cx.listener(move |this, _ev: &ClickEvent, window, cx| action(this, window, cx)))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
-                key_action(this, window, cx);
-            }
-        }))
+    on_press_view(el, cx, action)
 }
 
 /// Web `Switch`: persimmon track when on, longan tone-step with a
@@ -245,55 +232,14 @@ pub(super) fn switch<F>(
 where
     F: Fn(&mut Workspace, &mut Window, &mut Context<'_, Workspace>) + Clone + 'static,
 {
-    // Reserve the focus border in both states; the thumb sits inside it.
-    let border = 1.0;
-    let thumb_x = if checked {
-        SWITCH_THUMB_ON_X_PX
-    } else {
-        SWITCH_THUMB_OFF_X_PX
-    } - border;
-    let thumb_y = (SWITCH_HEIGHT_PX - SWITCH_THUMB_PX) / 2.0 - border;
-    div()
-        .id(id)
-        .debug_selector(move || id.to_string())
-        .relative()
-        .flex_shrink_0()
-        .w(px(SWITCH_WIDTH_PX))
-        .h(px(SWITCH_HEIGHT_PX))
-        .rounded_full()
-        .border_1()
-        .border_color(gpui::transparent_black())
-        .map(|el| {
-            if checked {
-                el.bg(theme::persimmon_500())
-            } else {
-                el.bg(theme::longan_700())
-                    .border_color(gpui::white().opacity(0.10))
-            }
-        })
-        .role(Role::Switch)
-        .aria_label(aria_label)
-        .aria_toggled(checked.into())
-        .when(disabled, |el| {
-            el.opacity(SWITCH_DISABLED_OPACITY).cursor_not_allowed()
-        })
-        .when(!disabled, |el| {
-            activate(
-                el.cursor_pointer().tab_index(0).focus_visible(focus_ring),
-                cx,
-                action,
-            )
-        })
-        .child(
-            div()
-                .absolute()
-                .left(px(thumb_x))
-                .top(px(thumb_y))
-                .size(px(SWITCH_THUMB_PX))
-                .rounded_full()
-                .bg(theme::rambutan_100()),
-        )
-        .into_any_element()
+    bruhs_ui::switch::switch(
+        id,
+        aria_label,
+        checked,
+        Interactivity::disabled_if(disabled),
+    )
+    .when(!disabled, |el| activate(el, cx, action))
+    .into_any_element()
 }
 
 /// The two numeric steppers in the Recording section.

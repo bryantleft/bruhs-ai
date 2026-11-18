@@ -257,21 +257,11 @@ impl ReactiveButton for Stateful<Div> {
         action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
             + 'static,
     ) -> Self {
-        let action = Rc::new(action);
-        let click = Rc::clone(&action);
-        self.on_click(cx.listener(move |this, _, window, cx| {
+        bruhs_ui::press::on_press_view(self, cx, move |this, window, cx| {
             if !this.busy {
-                click(this, window, cx);
-            }
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if !this.busy
-                && super::web_button::is_web_button_activation_key(event.keystroke.key.as_str())
-            {
-                cx.stop_propagation();
                 action(this, window, cx);
             }
-        }))
+        })
     }
 }
 

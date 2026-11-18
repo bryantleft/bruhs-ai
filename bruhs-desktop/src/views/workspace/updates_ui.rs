@@ -12,6 +12,7 @@ use bruhs_models::updates::{
     ProviderUpdate, ProviderUpdateState, ReleaseUpdate, UpdatesReport, POLL_INTERVAL_MS,
     RUN_POLL_INTERVAL_MS, SUCCESS_VISIBLE_MS,
 };
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 use std::collections::HashSet;
 
@@ -427,17 +428,12 @@ impl Workspace {
                     .tab_index(0)
                     .cursor_pointer()
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, |this, window, cx| {
                             this.open_updates_settings(window, cx);
-                        }
-                    }))
+                        })
+                    })
                     .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        this.open_updates_settings(window, cx);
-                    }))
                     .child(update_spinner(cx))
                     .child(
                         div()
@@ -471,22 +467,17 @@ impl Workspace {
                         .border_1()
                         .border_color(gpui::transparent_black())
                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                cx.stop_propagation();
+                        .map(|el| {
+                            on_press_view(el, cx, |this, window, cx| {
                                 this.open_updates_settings(window, cx);
-                            }
-                        }))
+                            })
+                        })
                         .flex_1()
                         .min_w_0()
                         .flex()
                         .items_center()
                         .gap(px(8.0))
                         .cursor_pointer()
-                        .on_click(cx.listener(|this, _, window, cx| {
-                            this.open_updates_settings(window, cx);
-                        }))
                         .child(if failed {
                             icon_svg(
                                 assets::ALERT_TRIANGLE_ICON_PATH,
@@ -509,16 +500,12 @@ impl Workspace {
                             .border_1()
                             .border_color(gpui::transparent_black())
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.updates
-                                            .update(cx, |updates, cx| updates.dismiss(id, cx));
-                                    }
-                                },
-                            ))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, _window, cx| {
+                                    this.updates
+                                        .update(cx, |updates, cx| updates.dismiss(id, cx));
+                                })
+                            })
                             .size(px(24.0))
                             .rounded(px(6.0))
                             .flex()
@@ -530,11 +517,6 @@ impl Workspace {
                                 Tooltip::new("Dismiss until provider status changes")
                                     .build(window, cx)
                             })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                cx.stop_propagation();
-                                this.updates
-                                    .update(cx, |updates, cx| updates.dismiss(id, cx));
-                            }))
                             .child(icon_svg(
                                 assets::CLOSE_ICON_PATH,
                                 theme::ICON_PX,
@@ -561,17 +543,11 @@ impl Workspace {
                     })
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-                    .on_click(cx.listener(|this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.open_restart_confirm(window, cx);
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, |this, window, cx| {
                             this.open_restart_confirm(window, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(icon_svg(
                         assets::REFRESH_ICON_PATH,
                         theme::ICON_PX,
@@ -604,17 +580,11 @@ impl Workspace {
                     })
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.activate_sidebar_update(can_update, window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
                             this.activate_sidebar_update(can_update, window, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(icon_svg(
                         assets::DOWNLOAD_ICON_PATH,
                         theme::ICON_PX,

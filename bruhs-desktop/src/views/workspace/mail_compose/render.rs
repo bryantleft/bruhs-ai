@@ -76,8 +76,10 @@ impl MailComposer {
         .debug_selector(move || debug)
         .aria_label(label.clone())
         .child(label)
-        .on_click(cx.listener(move |this, _, window, cx| {
-            if enabled {
+        // Keys act on key down below (and skip shortcuts), so gpui's
+        // keyboard click on key up must not act again.
+        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+            if enabled && !event.is_keyboard() {
                 this.action(action.clone(), window, cx);
             }
         }))

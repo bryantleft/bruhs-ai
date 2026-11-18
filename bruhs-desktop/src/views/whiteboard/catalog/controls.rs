@@ -1,10 +1,8 @@
 use super::*;
-use crate::views::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 use gpui_component::{input::Input, scroll::ScrollableElement};
-use std::rc::Rc;
 
 impl WhiteboardLibrary {
     fn command(&mut self, command: BoardCommand, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -735,16 +733,7 @@ impl Activate for Stateful<Div> {
         cx: &Context<'_, WhiteboardLibrary>,
         f: impl Fn(&mut WhiteboardLibrary, &mut Window, &mut Context<'_, WhiteboardLibrary>) + 'static,
     ) -> Self {
-        let f = Rc::new(f);
-        let click = f.clone();
-        self.on_click(cx.listener(move |this, _, w, cx| click(this, w, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, w, cx| {
-                if is_web_button_activation_key(&event.keystroke.key) {
-                    w.prevent_default();
-                    cx.stop_propagation();
-                    f(this, w, cx);
-                }
-            }))
+        on_press_view(self, cx, f)
     }
 }
 

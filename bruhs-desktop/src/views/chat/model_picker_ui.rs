@@ -6,6 +6,7 @@ use bruhs_models::runtime_models::{
     highlighted_id, listed_models, listing_error_line, reanchor_highlight, replace_listing,
     ModelChoice, RuntimeModels,
 };
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 /// A runtime's model listing as a future the desktop's tokio runtime drives.
@@ -372,7 +373,6 @@ impl ChatView {
                 let is_highlighted = index == highlighted;
                 let key = element_key(&model.id);
                 let model_id = model.id.clone();
-                let model_id_for_key = model.id.clone();
                 rows.push(
                     div()
                         .id(("desktop-model-picker-option", key))
@@ -400,17 +400,11 @@ impl ChatView {
                                 cx.notify();
                             }
                         }))
-                        .on_click(cx.listener(move |this, _ev, window, cx| {
-                            cx.stop_propagation();
-                            this.select_model_from_picker(model_id.clone(), window, cx);
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                this.select_model_from_picker(model_id_for_key.clone(), window, cx);
-                            }
-                        }))
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, window, cx| {
+                                this.select_model_from_picker(model_id.clone(), window, cx);
+                            })
+                        })
                         .child(
                             div()
                                 .min_w_0()
@@ -465,7 +459,6 @@ impl ChatView {
         }
         if let Some(id) = custom.as_ref() {
             let id_click = id.clone();
-            let id_key = id.clone();
             let index = matches.len();
             rows.push(
                 div()
@@ -493,17 +486,11 @@ impl ChatView {
                             cx.notify();
                         }
                     }))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        cx.stop_propagation();
-                        this.select_model_from_picker(id_click.clone(), window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.select_model_from_picker(id_key.clone(), window, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
+                            this.select_model_from_picker(id_click.clone(), window, cx);
+                        })
+                    })
                     .child(
                         svg()
                             .path(assets::BOT_ICON_PATH)

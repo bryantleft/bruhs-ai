@@ -155,3 +155,30 @@ fn the_keyboard_reaches_a_projects_delete_button_like_web(cx: &mut TestAppContex
     let two = tab_cycle(cx);
     assert_eq!(two, one + 2, "a project's row and its Delete");
 }
+
+/// gpui clicks a focused button on key up, after its Enter/Space key-down
+/// handler has run, so a button that answered both moved Previous by two
+/// months for one Enter.
+#[gpui::test]
+fn one_enter_on_previous_moves_the_calendar_back_once(cx: &mut TestAppContext) {
+    let state: PersistedWorkspaceState = serde_json::from_value(serde_json::json!({
+        "active_view": AppView::Calendar.route(),
+    }))
+    .expect("state");
+    let (workspace, cx) = open(cx, Some(state));
+    let previous = cx
+        .debug_bounds("desktop-calendar-prev")
+        .expect("Previous is drawn")
+        .center();
+    // A click focuses the button and moves back one month.
+    cx.simulate_click(previous, gpui::Modifiers::default());
+    cx.run_until_parked();
+    let after_click = workspace.read_with(cx, |workspace, _| workspace.calendar_anchor);
+    press(cx, "enter");
+    let after_enter = workspace.read_with(cx, |workspace, _| workspace.calendar_anchor);
+    assert_eq!(
+        super::calendar_ui::shift_month(after_click, -1),
+        after_enter,
+        "one Enter, one month"
+    );
+}

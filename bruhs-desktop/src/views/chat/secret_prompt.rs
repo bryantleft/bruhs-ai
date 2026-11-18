@@ -2,6 +2,7 @@
 
 use super::*;
 use bruhs_models::secrets::{SecretDecision, SecretRequest};
+use bruhs_ui::press::on_press_view;
 use gpui_component::input::InputContentType;
 use gpui_component::zoom::px;
 
@@ -183,13 +184,11 @@ impl SecretPrompt {
         .min_h(px(theme::CONTROL_PX))
         .aria_label(label)
         .child(label)
-        .on_click(cx.listener(move |this, _, window, cx| this.respond(action, window, cx)))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                cx.stop_propagation();
-                this.respond(action, window, cx);
-            }
-        }))
+        .map(|el| {
+            on_press_view(el, cx, move |this, window, cx| {
+                this.respond(action, window, cx)
+            })
+        })
     }
 }
 

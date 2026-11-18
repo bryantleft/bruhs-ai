@@ -1,4 +1,5 @@
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 fn note(text: impl Into<SharedString>) -> Div {
     div()
@@ -44,16 +45,7 @@ impl Activate for Stateful<Div> {
         cx: &Context<'_, Workspace>,
         f: impl Fn(&mut Workspace, &mut Window, &mut Context<'_, Workspace>) + 'static,
     ) -> Self {
-        let f = Rc::new(f);
-        let click = f.clone();
-        self.on_click(cx.listener(move |this, _, window, cx| click(this, window, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    f(this, window, cx);
-                }
-            }))
+        on_press_view(self, cx, f)
     }
 }
 impl Workspace {

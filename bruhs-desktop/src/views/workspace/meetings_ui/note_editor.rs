@@ -2,6 +2,7 @@ use super::*;
 use crate::views::workspace::{form_textarea, InputEvent, InputState};
 use bruhs_models::EpochMs;
 use bruhs_models::{MeetingNote, MeetingNoteDraft};
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 pub(in crate::views::workspace) struct NoteEditor {
@@ -56,7 +57,6 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement {
         let id = meeting_id.to_string();
-        let key_id = id.clone();
         web_button(
             "desktop-new-linked-note",
             WebButtonVariant::Ghost,
@@ -66,14 +66,11 @@ impl Workspace {
         .debug_selector(|| "desktop-new-linked-note".into())
         .aria_label("New linked note")
         .min_h(px(theme::CONTROL_PX))
-        .on_click(cx.listener(move |this, _, window, cx| this.begin_linked_note(&id, window, cx)))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
-                this.begin_linked_note(&key_id, window, cx);
-            }
-        }))
+        .map(|el| {
+            on_press_view(el, cx, move |this, window, cx| {
+                this.begin_linked_note(&id, window, cx);
+            })
+        })
         .child("New linked note")
     }
     pub(in crate::views::workspace) fn begin_note_edit(
@@ -216,16 +213,11 @@ impl Workspace {
         .debug_selector(move || id.into())
         .aria_label(title)
         .min_h(px(theme::CONTROL_PX))
-        .on_click(
-            cx.listener(move |this, _, window, cx| this.note_editor_action(action, window, cx)),
-        )
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
+        .map(|el| {
+            on_press_view(el, cx, move |this, window, cx| {
                 this.note_editor_action(action, window, cx);
-            }
-        }))
+            })
+        })
         .child(title)
     }
 
@@ -244,18 +236,11 @@ impl Workspace {
         .debug_selector(move || id.into())
         .flex_shrink_0()
         .aria_label("New meeting note")
-        .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-            if !event.is_keyboard() {
-                this.note_editor_action(EditorAction::New, window, cx)
-            }
-        }))
-        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
+        .map(|el| {
+            on_press_view(el, cx, |this, window, cx| {
                 this.note_editor_action(EditorAction::New, window, cx);
-            }
-        }))
+            })
+        })
         .child("New meeting note")
     }
 

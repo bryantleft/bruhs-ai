@@ -15,6 +15,7 @@ use bruhs_models::logic::booking::{
     BOOKING_NOT_SAVED, BOOKING_NO_SLOTS, BOOKING_SAVING, BOOKING_UNAVAILABLE_DETAIL,
     BOOKING_UNAVAILABLE_TITLE,
 };
+use bruhs_ui::press::on_press_view;
 
 /// Web `px-4 py-10` around a `max-w-xl` card with `p-5`.
 const BOOKING_PAGE_X_PADDING_PX: f32 = 16.0;
@@ -185,24 +186,11 @@ impl Workspace {
                                 .cursor_pointer()
                                 .hover(|el| el.text_color(theme::rambutan_300()))
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .on_click(cx.listener(|this, _ev, window, cx| {
-                                    this.activate_primary_view(AppView::Calendar, window, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.activate_primary_view(
-                                                AppView::Calendar,
-                                                window,
-                                                cx,
-                                            );
-                                        }
-                                    },
-                                ))
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        this.activate_primary_view(AppView::Calendar, window, cx);
+                                    })
+                                })
                                 .child(BOOKING_BACK),
                         ),
                     )
@@ -316,7 +304,6 @@ impl Workspace {
     ) -> AnyElement {
         let label = booking_slot_label(slot.0, local_offset_minutes_east);
         let click_slug = slug.to_string();
-        let key_slug = slug.to_string();
         div()
             .id(("desktop-booking-slot", index))
             .debug_selector(move || format!("desktop-booking-slot-{index}"))
@@ -334,16 +321,11 @@ impl Workspace {
             .cursor_pointer()
             .hover(|el| el.bg(theme::blueberry_500().opacity(BOOKING_SLOT_HOVER_OPACITY)))
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                this.book_slot(&click_slug, slot, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.book_slot(&key_slug, slot, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| {
+                    this.book_slot(&click_slug, slot, cx);
+                })
+            })
             .child(label)
             .into_any_element()
     }

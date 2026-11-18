@@ -1,20 +1,19 @@
 //! Native controls for the same server-owned connections and read policy as the web.
-use super::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use super::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{
     app_state::spawn_tokio,
     server_client::{ServerClient, ServerError},
     theme,
 };
 use bruhs_models::{database::*, num::ToFloatLossy};
+use bruhs_ui::press::on_press_view;
 use gpui::{prelude::*, *};
 use gpui_component::zoom::px;
 use gpui_component::{
     input::{Input, InputEvent, InputState},
     scroll::ScrollableElement,
 };
-use std::{collections::BTreeSet, future::Future, rc::Rc};
+use std::{collections::BTreeSet, future::Future};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -135,16 +134,7 @@ impl Action for Stateful<Div> {
         cx: &Context<'_, DatabasePanel>,
         f: impl Fn(&mut DatabasePanel, &mut Window, &mut Context<'_, DatabasePanel>) + 'static,
     ) -> Self {
-        let f = Rc::new(f);
-        let click = Rc::clone(&f);
-        self.on_click(cx.listener(move |this, _, window, cx| click(this, window, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    f(this, window, cx);
-                }
-            }))
+        on_press_view(self, cx, f)
     }
 }
 impl DatabasePanel {

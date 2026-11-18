@@ -10,6 +10,7 @@ use bruhs_models::logic::record_picker::{
     match_count_label, navigate, page_label, page_start, RecordIndex, PAGE_SIZE, PICKER_EMPTY,
     PICKER_KEY_HINT, PICKER_SEARCH_PLACEHOLDER,
 };
+use bruhs_ui::press::on_press_view;
 
 /// Web `sm:max-w-xl`.
 const RECORD_PICKER_WIDTH_PX: f32 = 576.0;
@@ -239,16 +240,11 @@ impl Workspace {
             .cursor_pointer()
             .hover(|el| el.bg(gpui::white().opacity(RECORD_PICKER_TRIGGER_HOVER_BG_OPACITY)))
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                this.open_record_picker(target, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
                     this.open_record_picker(target, window, cx);
-                }
-            }))
+                })
+            })
             .child(div().min_w_0().truncate().child(target.placeholder()))
             .child(
                 svg()
@@ -480,19 +476,12 @@ impl Workspace {
                             .cursor_pointer()
                             .hover(|el| el.bg(theme::longan_700()))
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                cx.stop_propagation();
-                                this.close_transient_surfaces();
-                                cx.notify();
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
                                     this.close_transient_surfaces();
                                     cx.notify();
-                                }
-                            }))
+                                })
+                            })
                             .child(
                                 svg()
                                     .path(assets::CLOSE_ICON_PATH)

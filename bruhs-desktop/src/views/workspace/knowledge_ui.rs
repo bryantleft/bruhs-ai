@@ -20,6 +20,7 @@ use super::knowledge_storage::{self, attachment_path as knowledge_attachment_pat
 use super::library_pages_ui::LibraryPage;
 use super::record_picker_ui::RecordPickerTarget;
 use super::*;
+use bruhs_ui::press::on_press_view;
 
 // The web knowledge library's 24-card budget. The native action fixture
 // measures libraries through 10,000 records; paging never truncates stored text.
@@ -912,7 +913,6 @@ impl Workspace {
     /// body and its tags.
     fn render_document_card(&self, card: &Card, cx: &Context<'_, Self>) -> AnyElement {
         let id = card.id.clone();
-        let keyboard_id = id.clone();
         let id_key = element_key(&id);
         // Web: each tag as `#tag`, so a search by tag shows why it matched.
         let tags = card
@@ -940,14 +940,11 @@ impl Workspace {
                     .border_color(theme::longan_700())
             })
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _event, window, cx| {
-                this.select_knowledge_document(&id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    this.select_knowledge_document(&keyboard_id, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.select_knowledge_document(&id, window, cx);
+                })
+            })
             .child(
                 div()
                     .flex()
@@ -1000,7 +997,6 @@ impl Workspace {
     /// host and the start of its excerpt.
     fn render_source_card(&self, card: &Card, cx: &Context<'_, Self>) -> AnyElement {
         let id = card.id.clone();
-        let keyboard_id = id.clone();
         let key = element_key(&id);
         div()
             .id(("knowledge-source", key))
@@ -1021,14 +1017,11 @@ impl Workspace {
             .aria_label(format!("Open source {}", card.title))
             .hover(|element| element.bg(theme::longan_900().opacity(0.7)))
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _event, window, cx| {
-                this.select_source_clip(&id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    this.select_source_clip(&keyboard_id, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.select_source_clip(&id, window, cx);
+                })
+            })
             .child(
                 library_mark(
                     move || format!("desktop-knowledge-source-mark-{key}"),

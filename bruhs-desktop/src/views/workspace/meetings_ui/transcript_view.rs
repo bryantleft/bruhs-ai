@@ -2,6 +2,7 @@
 use super::*;
 use bruhs_models::num::ToIntSaturating;
 use bruhs_models::TranscriptSegment;
+use bruhs_ui::press::on_press_view;
 use gpui_component::scroll::{Scrollbar, ScrollbarShow};
 use gpui_component::zoom::px;
 
@@ -537,25 +538,25 @@ impl Workspace {
             words.into_any_element()
         } else {
             let segment_id = segment.id.clone();
-            let toggle_id = segment_id.clone();
+            // Web: a `<button>` named by its text, with a persimmon
+            // focus-visible outline.
             words
                 .id(("desktop-live-chunk", index))
                 .role(Role::Button)
+                .aria_label(segment.text.clone())
                 .tab_index(0)
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
                 .rounded(px(6.0))
                 .hover(|el| el.bg(theme::longan_800()))
                 .when(selected, |el| el.bg(theme::longan_800()))
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.toggle_live_chunk(segment_id.clone(), cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.toggle_live_chunk(toggle_id.clone(), cx);
-                    }
-                }))
+                .map(|el| {
+                    on_press_view(el, cx, move |this, _, cx| {
+                        this.toggle_live_chunk(segment_id.clone(), cx);
+                    })
+                })
                 .into_any_element()
         };
         row = row.child(words);
@@ -573,16 +574,7 @@ impl Workspace {
                             ButtonState::Enabled,
                         )
                         .child("Copy")
-                        .on_click(cx.listener(|this, _, _, cx| this.copy_live_chunk(cx)))
-                        .on_key_down(cx.listener(
-                            |this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                    this.copy_live_chunk(cx);
-                                }
-                            },
-                        )),
+                        .map(|el| on_press_view(el, cx, |this, _, cx| this.copy_live_chunk(cx))),
                     )
                     .child(
                         web_button(
@@ -592,16 +584,7 @@ impl Workspace {
                             ButtonState::Enabled,
                         )
                         .child("Delete")
-                        .on_click(cx.listener(|this, _, _, cx| this.remove_live_chunk(cx)))
-                        .on_key_down(cx.listener(
-                            |this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                    this.remove_live_chunk(cx);
-                                }
-                            },
-                        )),
+                        .map(|el| on_press_view(el, cx, |this, _, cx| this.remove_live_chunk(cx))),
                     ),
             );
         }

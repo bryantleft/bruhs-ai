@@ -14,6 +14,7 @@ use bruhs_models::logic::portable::{
     ImportedThread, PortableMessage, PortablePart, PortableToolCall, IMPORT_CONTEXT_MAX_CHARS,
 };
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 use gpui_component::Sizable as _;
 use std::time::Duration;
@@ -717,18 +718,11 @@ impl Workspace {
                                         })
                                 }
                             })
-                            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                this.set_import_source(tab, cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.set_import_source(tab, cx);
-                                    }
-                                },
-                            ))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, _window, cx| {
+                                    this.set_import_source(tab, cx);
+                                })
+                            })
                             .child(tab.label())
                     }),
             )
@@ -994,22 +988,12 @@ impl Workspace {
                                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| el.text_color(theme::rambutan_300()))
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.close_transient_surfaces();
-                                        cx.notify();
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.close_transient_surfaces();
-                                                cx.notify();
-                                            }
-                                        },
-                                    ))
+                                    .map(|el| {
+                                        on_press_view(el, cx, |this, _window, cx| {
+                                            this.close_transient_surfaces();
+                                            cx.notify();
+                                        })
+                                    })
                                     .child("Cancel"),
                             ),
                     )

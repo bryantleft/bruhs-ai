@@ -1,13 +1,12 @@
 use crate::{
     assets, theme,
     views::task_registry_subscription::TaskRegistrySubscription,
-    views::web_button::{
-        is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-    },
+    views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant},
 };
 use bruhs_core::{AppState, BackgroundTask, TaskStatus};
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_models::EpochMs;
+use bruhs_ui::press::on_press_view;
 use gpui::prelude::*;
 use gpui::*;
 use gpui_component::scroll::ScrollableElement;
@@ -227,9 +226,7 @@ impl TasksPanelView {
     ) -> Div {
         let is_expanded = self.expanded_task_id.as_deref() == Some(task.id.as_str());
         let task_id_for_expand = task.id.clone();
-        let task_id_for_expand_key = task.id.clone();
         let task_id_for_dismiss = task.id.clone();
-        let task_id_for_dismiss_key = task.id.clone();
         let task_key = element_key(&task.id);
         let timestamp = tasks_panel_timestamp_like_web(&task, EpochMs::now());
         let success = desktop_task_success_like_web(task.exit_code);
@@ -276,21 +273,11 @@ impl TasksPanelView {
                             .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
-                            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                this.toggle_task_expansion(task_id_for_expand.clone(), cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.toggle_task_expansion(
-                                            task_id_for_expand_key.clone(),
-                                            cx,
-                                        );
-                                    }
-                                },
-                            ))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, _window, cx| {
+                                    this.toggle_task_expansion(task_id_for_expand.clone(), cx);
+                                })
+                            })
                             .child(render_task_status_indicator(&status, success))
                             .child(
                                 div()
@@ -330,21 +317,11 @@ impl TasksPanelView {
                                 .tab_index(0)
                                 .role(Role::Button)
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                    cx.stop_propagation();
-                                    this.dismiss_task(&task_id_for_dismiss, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.dismiss_task(&task_id_for_dismiss_key, cx);
-                                        }
-                                    },
-                                ))
+                                .map(|el| {
+                                    on_press_view(el, cx, move |this, _window, cx| {
+                                        this.dismiss_task(&task_id_for_dismiss, cx);
+                                    })
+                                })
                                 .child(
                                     svg()
                                         .path(assets::CLOSE_ICON_PATH)
@@ -441,16 +418,11 @@ impl Render for TasksPanelView {
                             .tooltip(|window, cx| {
                                 Tooltip::new(TASKS_PANEL_CLOSE_LABEL).build(window, cx)
                             })
-                            .on_click(cx.listener(|_this, _ev, _window, cx| {
-                                cx.emit(TasksPanelEvent::CloseRequested);
-                            }))
-                            .on_key_down(cx.listener(|_this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, |_this, _window, cx| {
                                     cx.emit(TasksPanelEvent::CloseRequested);
-                                }
-                            }))
+                                })
+                            })
                             .child(
                                 svg()
                                     .path(assets::CLOSE_ICON_PATH)

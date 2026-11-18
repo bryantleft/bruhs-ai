@@ -4,9 +4,4 @@
 //! The namespace stays `workspace` so existing key bindings
 //! (`workspace::CloseOverlays`) keep working.
 
-gpui::actions!(
-    workspace,
-    [
-        CloseOverlays
-    ]
-);
+gpui::actions!(workspace, [CloseOverlays]);
