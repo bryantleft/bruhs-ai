@@ -346,7 +346,8 @@ impl Workspace {
                 .aria_label(if editing { "Save capture" } else { "Capture" })
                 .track_focus(&self.capture_submit_focus.clone().tab_stop(!empty))
                 .debug_selector(|| "desktop-capture-submit".to_string())
-                .map(|el| {
+                // Disabled while empty, like web's `<button disabled>`.
+                .when(!empty, |el| {
                     on_press_view(el, cx, |this, window, cx| {
                         this.submit_capture(window, cx);
                     })
