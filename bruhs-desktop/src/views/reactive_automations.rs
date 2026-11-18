@@ -15,6 +15,7 @@ use bruhs_models::local_tools::{ComputerInput, ComputerRequest, ComputerState};
 use bruhs_models::reactive::*;
 use gpui_component::zoom::px;
 mod bruh_page;
+mod computer_view;
 mod create_bruh;
 mod editor_fields;
 mod face_editor;
@@ -1603,10 +1604,6 @@ impl ReactiveAutomations {
             .is_some_and(bruhs_models::crew::computer_ready)
     }
     /// Why Computers are off, once the service is known to be older.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Computer tab (Task 15) shows it")
-    )]
     pub(crate) fn computer_reason(&self) -> Option<&'static str> {
         bruhs_models::crew::computer_reason(self.crew.protocol)
     }
@@ -1614,10 +1611,6 @@ impl ReactiveAutomations {
     /// browser, take or hand back control, or open it in a window. `None`
     /// when the service doesn't run Computers, so nothing is sent; the task
     /// ends with the new state or why it failed.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Computer tab (Task 15) sends them")
-    )]
     pub(crate) fn computer_request(
         &mut self,
         agent_id: &str,
@@ -1649,10 +1642,6 @@ impl ReactiveAutomations {
         }
     }
     /// Pass the owner's input to the live view, when one is open.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the Computer tab (Task 15) sends it")
-    )]
     pub(crate) fn screencast_input(
         &mut self,
         screencast: Option<&Screencast>,

@@ -4,6 +4,7 @@
 //! the panel for `AppView::Bruh` and tells it which bruh; the panel owns the
 //! page's state. Save sends `settings_commands`, so a face edit never
 //! touches the agent.
+use super::computer_view::ComputerView;
 use super::create_bruh::{
     hint, labelled, text_field, ERROR_FILL_OPACITY, FIELD_RADIUS_PX, FIELD_TEXT_PX,
     FIELD_X_PADDING_PX,
@@ -24,7 +25,7 @@ use bruhs_models::crew::{
     computer_switch_follows, computer_switch_reason, current_settings, job_line, line_key,
     may_have_more, merge_runs, settings_commands, status_line, transcript, AccessLevel, BruhAccess,
     BruhLook, BruhSettings, BruhStatus, TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH,
-    PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
+    COMPUTER_TAB, PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
@@ -77,14 +78,16 @@ const DELIVER_NEEDS_FULL: &str = "Needs Full access.";
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum BruhTab {
     Chat,
+    Computer,
     Memory,
     Routines,
     Settings,
 }
 
 impl BruhTab {
-    const ALL: [BruhTab; 4] = [
+    const ALL: [BruhTab; 5] = [
         BruhTab::Chat,
+        BruhTab::Computer,
         BruhTab::Memory,
         BruhTab::Routines,
         BruhTab::Settings,
@@ -93,6 +96,7 @@ impl BruhTab {
     fn label(self) -> &'static str {
         match self {
             BruhTab::Chat => "Chat",
+            BruhTab::Computer => COMPUTER_TAB,
             BruhTab::Memory => "Memory",
             BruhTab::Routines => "Routines",
             BruhTab::Settings => "Settings",
@@ -102,6 +106,7 @@ impl BruhTab {
     fn key(self) -> &'static str {
         match self {
             BruhTab::Chat => "chat",
+            BruhTab::Computer => "computer",
             BruhTab::Memory => "memory",
             BruhTab::Routines => "routines",
             BruhTab::Settings => "settings",
@@ -320,6 +325,11 @@ pub(super) struct BruhPage {
     built_for: Option<(u64, u64)>,
     /// The page's width, measured as it is drawn.
     width: Rc<Cell<f32>>,
+    /// The Computer tab, while it shows: its live view watches the
+    /// browser only then.
+    computer: Option<Entity<ComputerView>>,
+    /// The Computer tab takes control once it can (a smoke scene).
+    hold_computer: bool,
     _subscriptions: Vec<gpui::Subscription>,
 }
 
@@ -343,6 +353,8 @@ impl BruhPage {
             prose: HashMap::new(),
             built_for: None,
             width: Rc::new(Cell::new(0.0)),
+            computer: None,
+            hold_computer: false,
             _subscriptions: Vec::new(),
         }
     }
@@ -586,6 +598,22 @@ impl ReactiveAutomations {
         self.set_bruh_tab(BruhTab::Settings, cx);
     }
 
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=bruh-computer:<id>`: the Computer tab;
+    /// `bruh-computer-held:<id>` also takes control.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_show_bruh_computer(
+        &mut self,
+        agent_id: &str,
+        take_control: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.show_bruh(Some(agent_id.to_string()), cx);
+        self.set_bruh_tab(BruhTab::Computer, cx);
+        if let Some(page) = self.bruh.as_mut() {
+            page.hold_computer = take_control;
+        }
+    }
+
     /// The open page's bruh name, as the snapshot has it.
     #[cfg(debug_assertions)]
     pub(crate) fn smoke_bruh_name(&self) -> Option<String> {
@@ -596,6 +624,11 @@ impl ReactiveAutomations {
             .iter()
             .find(|bruh| bruh.agent_id == agent_id)?;
         Some(state.name.clone())
+    }
+
+    #[cfg(test)]
+    pub(super) fn computer_view_for_test(&self) -> Option<Entity<ComputerView>> {
+        self.bruh.as_ref()?.computer.clone()
     }
 
     #[cfg(test)]
@@ -743,9 +776,24 @@ impl ReactiveAutomations {
     /// The page's inputs and data, made before it draws. The work runs only
     /// when the snapshot or the runs changed since the last frame.
     pub(super) fn ensure_bruh_page(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let client = self.client.clone();
+        let panel = cx.weak_entity();
         let Some(page) = self.bruh.as_mut() else {
             return;
         };
+        if page.tab != BruhTab::Computer {
+            page.computer = None;
+        } else if page.computer.is_none() {
+            let agent_id = page.agent_id.clone();
+            let hold = std::mem::take(&mut page.hold_computer);
+            page.computer = Some(cx.new(|cx| {
+                let mut view = ComputerView::new(agent_id, client, panel, window, cx);
+                if hold {
+                    view.take_control_when_ready();
+                }
+                view
+            }));
+        }
         page.list.sync_header(format!(
             "{}:{}:{}",
             page.runs.more,
@@ -1094,6 +1142,10 @@ impl ReactiveAutomations {
             .unwrap_or_default();
         let body = match tab {
             BruhTab::Chat => self.render_bruh_chat(state, layout, cx),
+            BruhTab::Computer => div().flex_1().min_h_0().flex().flex_col().when_some(
+                self.bruh.as_ref().and_then(|page| page.computer.clone()),
+                |body, view| body.child(view),
+            ),
             BruhTab::Memory => self.render_bruh_scroll(
                 "desktop-bruh-memory",
                 layout
@@ -2642,6 +2694,15 @@ mod tests {
         assert!(cx.debug_bounds("desktop-bruh-loading").is_none());
         assert!(cx.debug_bounds("desktop-bruh-load-error").is_some());
         assert!(cx.debug_bounds("desktop-bruh-retry").is_some());
+    }
+
+    #[test]
+    fn the_computer_tab_sits_after_chat() {
+        assert_eq!(
+            BruhTab::ALL.map(BruhTab::label),
+            ["Chat", "Computer", "Memory", "Routines", "Settings"]
+        );
+        assert_eq!(BruhTab::Computer.key(), "computer");
     }
 
     #[gpui::test]

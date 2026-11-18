@@ -11,10 +11,6 @@
 #[path = "server_client/api_client.rs"]
 mod api_client;
 #[path = "server_client/computer.rs"]
-#[cfg_attr(
-    not(test),
-    expect(dead_code, reason = "the Computer tab (Task 15) opens the live view")
-)]
 mod computer;
 #[path = "server_client/database.rs"]
 mod database;
@@ -29,7 +25,6 @@ mod rich_response_io;
 #[path = "server_client/workbench.rs"]
 mod workbench;
 pub(crate) use computer::Screencast;
-#[expect(unused_imports, reason = "the Computer tab (Task 15) reads the events")]
 pub(crate) use computer::ScreencastEvent;
 pub use reactive::ReactiveHookToken;
 
