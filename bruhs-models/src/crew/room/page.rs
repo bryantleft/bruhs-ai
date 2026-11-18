@@ -201,11 +201,21 @@ pub fn room_line_key(line: &RoomLine) -> String {
 }
 
 /// What a transcript follows: it scrolls to its newest line whenever this
-/// changes. A room's first messages load above any working line, which
-/// stays last, so the count changes even when the last line does not.
+/// changes. It is the newest message's id and the last line's key: a
+/// room's first messages load above any working line, which stays last,
+/// so the newest message changes even when the last line does not, while
+/// Load earlier puts messages above and changes neither.
 #[must_use]
-pub fn room_follow_key(lines: &[RoomLine]) -> (usize, Option<String>) {
-    (lines.len(), lines.last().map(room_line_key))
+pub fn room_follow_key(lines: &[RoomLine]) -> (Option<String>, Option<String>) {
+    let newest = lines.iter().rev().find_map(|line| match line {
+        RoomLine::Owner { message_id, .. }
+        | RoomLine::Bruh { message_id, .. }
+        | RoomLine::System { message_id, .. }
+        | RoomLine::Card { message_id, .. }
+        | RoomLine::Asked { message_id, .. } => Some(message_id.clone()),
+        RoomLine::Working { .. } => None,
+    });
+    (newest, lines.last().map(room_line_key))
 }
 
 /// Puts a page of messages into those shown, replacing repeats by id, in
@@ -627,7 +637,27 @@ mod tests {
             loaded,
             room_follow_key(&room_lines(&replied, &done, &[], "r"))
         );
-        assert_eq!(room_follow_key(&[]), (0, None));
+        assert_eq!(room_follow_key(&[]), (None, None));
+    }
+
+    #[test]
+    fn load_earlier_does_not_move_what_the_transcript_follows() {
+        let runs = [run("run1", "a", "running", 5, "r")];
+        let newest = vec![msg(3, RoomAuthor::Owner, "c"), msg(4, bruh("a"), "d")];
+        let before = room_follow_key(&room_lines(&newest, &runs, &[], "r"));
+        let mut shown = newest;
+        merge_messages(
+            &mut shown,
+            vec![msg(1, RoomAuthor::Owner, "a"), msg(2, bruh("a"), "b")],
+        );
+        assert_eq!(
+            before,
+            room_follow_key(&room_lines(&shown, &runs, &[], "r")),
+            "older messages load above, so the newest line is the same"
+        );
+        // Without a working line too.
+        let before = room_follow_key(&room_lines(&shown[2..], &[], &[], "r"));
+        assert_eq!(before, room_follow_key(&room_lines(&shown, &[], &[], "r")));
     }
 
     #[test]

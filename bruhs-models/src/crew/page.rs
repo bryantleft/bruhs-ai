@@ -83,6 +83,20 @@ pub fn line_key(item: &TranscriptItem) -> String {
     }
 }
 
+/// What a bruh's chat follows, as rooms do (`room::room_follow_key`): the
+/// newest run's line and the last line's key. Open cards come from the
+/// crew and can stay last while the runs page loads above them; Load
+/// earlier puts runs above and changes neither.
+#[must_use]
+pub fn chat_follow_key(lines: &[TranscriptItem]) -> (Option<String>, Option<String>) {
+    let newest = lines
+        .iter()
+        .rev()
+        .find(|line| !matches!(line, TranscriptItem::Card { .. }))
+        .map(line_key);
+    (newest, lines.last().map(line_key))
+}
+
 /// Each access level in display order, with why `model` can't run it.
 #[must_use]
 pub fn access_options(model: &str) -> Vec<(AccessLevel, Option<&'static str>)> {
@@ -125,8 +139,8 @@ pub fn current_settings(snapshot: &ReactiveSnapshot, agent_id: &str) -> Option<B
 #[cfg(test)]
 mod tests {
     use super::{
-        access_options, approval_outcome, clamp_level, composer_block, current_settings, job_line,
-        line_key, may_have_more, merge_runs,
+        access_options, approval_outcome, chat_follow_key, clamp_level, composer_block,
+        current_settings, job_line, line_key, may_have_more, merge_runs,
     };
     use crate::agent::AgentProvider;
     use crate::crew::{
@@ -301,5 +315,41 @@ mod tests {
             None,
             "an agent with no bruh"
         );
+    }
+
+    #[test]
+    fn a_chat_opened_under_an_open_card_follows_the_runs_that_load_above_it() {
+        let mut card: OutboxItem = serde_json::from_value(serde_json::json!({
+            "id": "q1", "agent_id": "a", "run_id": "r3", "kind": "ask",
+            "title": "Which?", "message": "", "created_at": 9,
+        }))
+        .unwrap();
+        card.resolved_at = None;
+        let at = |id: &str, status: &str, created: i64| {
+            let mut run = run(id, status);
+            run.created_at = EpochMs::saturating_from_i64(created);
+            run.updated_at = run.created_at;
+            run.result = (status == "completed").then(|| format!("{id} done"));
+            run.trigger = Some(crate::reactive::RunTrigger::Chat);
+            run.owner_message = Some(format!("{id} asks"));
+            run
+        };
+        let lines =
+            |runs: &[ReactiveRun]| crate::crew::transcript("a", runs, std::slice::from_ref(&card));
+        // Opened mid-run: only the open card until the runs page loads.
+        let opened = chat_follow_key(&lines(&[]));
+        let newest = [at("r3", "running", 8), at("r2", "completed", 5)];
+        let loaded = chat_follow_key(&lines(&newest));
+        assert_eq!(
+            lines(&newest).last().map(line_key),
+            lines(&[]).last().map(line_key),
+            "the card stays last"
+        );
+        assert_ne!(opened, loaded);
+        // Load earlier puts older runs above: nothing to follow.
+        let mut shown = newest.to_vec();
+        merge_runs(&mut shown, vec![at("r1", "completed", 2)]);
+        assert_eq!(loaded, chat_follow_key(&lines(&shown)));
+        assert_eq!(chat_follow_key(&[]), (None, None));
     }
 }

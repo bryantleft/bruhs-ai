@@ -2,8 +2,8 @@
 //! approvals inline, older runs a page at a time, and a composer.
 
 use bruhs_models::crew::{
-    approval_outcome, composer_block, line_key, may_have_more, merge_runs, transcript, BruhLook,
-    BruhStatus, TranscriptItem, RAIL_FACE_PX,
+    approval_outcome, chat_follow_key, composer_block, line_key, may_have_more, merge_runs,
+    transcript, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
 };
 use bruhs_models::reactive::{OutboxItem, ReactiveCommand, ReactiveRun};
 use leptos::html;
@@ -104,16 +104,17 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
         runs.with(|runs| id.with_value(|id| transcript(id, runs, &outbox)))
     });
 
-    // Follow the conversation: a new last line scrolls it into view.
+    // Follow the conversation, as a room does: a new line scrolls it into
+    // view, runs loading above an open card too, and Load earlier does not.
     let scroller = NodeRef::<html::Div>::new();
-    Effect::new(move |previous: Option<Option<String>>| {
-        let last = lines.with(|lines| lines.last().map(line_key));
-        if previous.as_ref() != Some(&last) {
+    Effect::new(move |previous: Option<(Option<String>, Option<String>)>| {
+        let shown = lines.with(|lines| chat_follow_key(lines));
+        if previous.as_ref() != Some(&shown) {
             if let Some(element) = scroller.get_untracked() {
                 element.set_scroll_top(element.scroll_height());
             }
         }
-        last
+        shown
     });
 
     let blocked = Memo::new(move |_| composer_block(state.get().map(|state| state.status)));

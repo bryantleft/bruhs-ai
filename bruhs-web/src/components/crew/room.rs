@@ -245,9 +245,9 @@ fn room_transcript(
         })
     });
 
-    // Follow the room: a new line scrolls it into view.
+    // Follow the room: a new line scrolls it into view; Load earlier does not.
     let scroller = NodeRef::<html::Div>::new();
-    Effect::new(move |previous: Option<(usize, Option<String>)>| {
+    Effect::new(move |previous: Option<(Option<String>, Option<String>)>| {
         let shown = lines.with(|lines| room_follow_key(lines));
         if previous.as_ref() != Some(&shown) {
             if let Some(element) = scroller.get_untracked() {

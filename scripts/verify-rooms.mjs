@@ -2,9 +2,10 @@
 // docs/web-desktop-parity-goal-2026-11-15.md): the rail's rooms, New room
 // by keyboard, who a post reaches, hand-offs and their limit, paused
 // members, approval and question cards in a room, Stop all, Room settings
-// (rename, Delete room and its confirm), phone-size touch targets and
-// reduced motion. Any panic in the page fails the run. Every check prints
-// ok or FAIL; the exit status is 0 only when all pass.
+// (rename, Delete room and its confirm), phone-size touch targets, Load
+// earlier and reduced motion. Any panic in
+// the page fails the run. Every check prints ok or FAIL; the exit status is
+// 0 only when all pass.
 //
 //   cargo build -p bruhs-server
 //   (cd bruhs-web && BRUHS_API_URL=http://127.0.0.1:43041 trunk build --dist "$TMPDIR/bruhs-rooms-dist")
@@ -756,7 +757,44 @@ try {
     record('Deny on a room approval card resumes Cy without the change', deny >= 1 && !!skipped, `Deny buttons ${deny}; answered ${!!skipped}`);
   });
 
-  // 12. Reduced motion: a working bruh's face stops on the room page.
+  // 12. A long room: Load earlier keeps the reader where they were. Sixty
+  // messages go straight into the room's table, the newest Bo's.
+  const archive = 'room-archive';
+  await check('Load earlier shows the older messages without jumping to the newest line', async () => {
+    await command({ action: 'create_room', room: { id: archive, name: 'Archive', members: [ids.Bo], lead: null } });
+    const rows = [];
+    for (let seq = 1; seq <= 60; seq++) {
+      const bo = seq === 60;
+      const message = {
+        id: `seed-archive-${seq}`, room_id: archive, seq,
+        author: bo ? { type: 'bruh', agent_id: ids.Bo } : { type: 'owner' },
+        text: bo ? 'Packed:\n\n- **Food** and drinks\n- [the list](https://example.com/list) and [notes](notes/plan.md)\n\n```rust\nfn main() {}\n```' : `Archive message ${seq}`,
+        run_id: null, outbox_id: null, failed: false, created_at: Date.now() - (60 - seq) * 1000,
+      };
+      rows.push(`('${message.id}','${archive}',${seq},NULL,'${JSON.stringify(message).replaceAll("'", "''")}')`);
+    }
+    const insert = spawnSync(sqlite, [database, '.timeout 5000', `INSERT INTO reactive_room_messages(id,room_id,seq,result_of,payload) VALUES ${rows.join(',')};`], { encoding: 'utf8' });
+    if (insert.status !== 0) throw new Error(`seeding the archive failed: ${insert.stderr}`);
+    await openRoom(archive, 'Archive');
+    const log = '[role="log"][aria-label="Room messages"]';
+    await waitFor('the newest page', `document.querySelectorAll(${js(`${log} [data-room-line]`)}).length === 50`, 8000);
+    await sleep(400);
+    const where = () => evaluate(`(() => {
+      const scroller = document.querySelector(${js(log)}).closest('.overflow-y-auto');
+      return { top: Math.round(scroller.scrollTop), bottom: Math.round(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop) };
+    })()`);
+    const opened = await where();
+    await click('button', 'Load earlier');
+    await waitFor('the older page', `document.querySelectorAll(${js(`${log} [data-room-line]`)}).length === 60`, 8000);
+    await sleep(400);
+    const after = await where();
+    const first = await evaluate(`document.querySelector(${js(`${log} [data-room-line]`)})?.textContent.trim()`);
+    record('Load earlier shows the older messages without jumping to the newest line',
+      opened.bottom <= 2 && after.bottom > 200 && first === 'Archive message 1',
+      `opened ${js(opened)}; after ${js(after)}; first line ${js(first)}`);
+  });
+
+  // 13. Reduced motion: a working bruh's face stops on the room page.
   await check('reduced motion leaves no animation frames on the room page', async () => {
     hold('Fay');
     await openRoom(rooms.cards, 'Cards');

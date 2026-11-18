@@ -98,7 +98,7 @@ pub(super) struct RoomPage {
     built_for: Option<(u64, u64)>,
     scroll: ScrollHandle,
     /// What the transcript last followed; a new line scrolls into view.
-    followed: (usize, Option<String>),
+    followed: (Option<String>, Option<String>),
     width: Rc<Cell<f32>>,
     /// Room settings, so focus can leave it when the room is deleted.
     settings_focus: FocusHandle,
@@ -134,7 +134,7 @@ impl RoomPage {
             lines: Rc::new(Vec::new()),
             built_for: None,
             scroll: ScrollHandle::new(),
-            followed: (0, None),
+            followed: (None, None),
             width: Rc::new(Cell::new(0.0)),
             settings_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             gone_focus: cx.focus_handle(),
@@ -296,6 +296,13 @@ impl ReactiveAutomations {
     pub(super) fn show_room_messages_for_test(&mut self, messages: Vec<RoomMessage>) {
         if let Some(page) = self.room.as_mut() {
             page.take_newest(messages);
+        }
+    }
+
+    #[cfg(test)]
+    pub(super) fn show_earlier_room_messages_for_test(&mut self, messages: Vec<RoomMessage>) {
+        if let Some(page) = self.room.as_mut() {
+            page.take_earlier(messages);
         }
     }
 
@@ -1711,6 +1718,55 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(lines(&panel, cx).len(), 1, "a new snapshot rebuilds them");
+    }
+
+    #[gpui::test]
+    fn load_earlier_leaves_the_reader_where_they_were(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            snapshot(
+                CREW_PROTOCOL,
+                vec![named("a", "Ada")],
+                vec![room(&["a"], Some("a"))],
+            ),
+        );
+        let page_of = |seqs: std::ops::RangeInclusive<u64>| -> Vec<RoomMessage> {
+            seqs.rev()
+                .map(|seq| message(seq, RoomAuthor::Owner, &format!("Message {seq}")))
+                .collect()
+        };
+        let offset = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| {
+                panel.room.as_ref().unwrap().scroll.offset().y
+            })
+        };
+        panel.update(cx, |panel, cx| {
+            panel.show_room_messages_for_test(page_of(51..=100));
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(
+            offset(&panel, cx) < gpui::px(0.0),
+            "opens on the newest line"
+        );
+        // The reader goes up to Load earlier.
+        panel.update(cx, |panel, cx| {
+            let page = panel.room.as_ref().unwrap();
+            page.scroll
+                .set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));
+            cx.notify();
+        });
+        cx.run_until_parked();
+        panel.update(cx, |panel, cx| {
+            panel.show_earlier_room_messages_for_test(page_of(1..=50));
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(
+            panel.read_with(cx, |panel, _| panel.room.as_ref().unwrap().lines.len()),
+            100
+        );
+        assert_eq!(offset(&panel, cx), gpui::px(0.0), "still at the top");
     }
 
     #[gpui::test]

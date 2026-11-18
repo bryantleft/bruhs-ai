@@ -18,10 +18,10 @@ use crate::views::dropdown::{
 use crate::views::web_button::on_press;
 use bruhs_models::agent::ModelId;
 use bruhs_models::crew::{
-    access_options, approval_outcome, clamp_level, composer_block, current_settings, job_line,
-    line_key, may_have_more, merge_runs, settings_commands, status_line, transcript, AccessLevel,
-    BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem, PAGE_FACE_PX, RAIL_FACE_PX,
-    SEND_AS_ME_HINT,
+    access_options, approval_outcome, chat_follow_key, clamp_level, composer_block,
+    current_settings, job_line, may_have_more, merge_runs, settings_commands, status_line,
+    transcript, AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem,
+    PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use gpui_component::scroll::{ScrollableElement, Scrollbar};
@@ -284,8 +284,9 @@ pub(super) struct BruhPage {
     replies: HashMap<String, (Entity<InputState>, gpui::Subscription)>,
     settings: Option<SettingsForm>,
     scroll: ScrollHandle,
-    /// The last transcript line drawn; a new one scrolls into view.
-    last_line: Option<String>,
+    /// What the transcript last followed (`chat_follow_key`); a new line
+    /// scrolls into view.
+    followed: (Option<String>, Option<String>),
     /// The conversation, built when the snapshot or the runs change rather
     /// than on every frame (a sweeping face redraws the page often).
     lines: Rc<Vec<TranscriptItem>>,
@@ -311,7 +312,7 @@ impl BruhPage {
             replies: HashMap::new(),
             settings: None,
             scroll: ScrollHandle::new(),
-            last_line: None,
+            followed: (None, None),
             lines: Rc::new(Vec::new()),
             built_for: None,
             width: Rc::new(Cell::new(0.0)),
@@ -770,10 +771,10 @@ impl ReactiveAutomations {
             }
         }
         page.lines = Rc::new(transcript(&agent_id, &page.runs.runs, outbox));
-        let last = page.lines.last().map(line_key);
-        if last != page.last_line {
+        let shown = chat_follow_key(&page.lines);
+        if shown != page.followed {
             page.scroll.scroll_to_bottom();
-            page.last_line = last;
+            page.followed = shown;
         }
         if !page.runs_requested {
             self.reload_bruh_runs(cx);
