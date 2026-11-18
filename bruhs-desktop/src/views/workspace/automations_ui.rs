@@ -197,7 +197,7 @@ impl Workspace {
                                         })
                                         .child(review::PAUSE_BACKGROUND)
                                         .on_click(
-                                            cx.listener(|this, _, _, cx| {
+                                            cx.listener(|this, _, window, cx| {
                                                 let ids: Vec<_> = this
                                                     .automation_state
                                                     .jobs
@@ -221,6 +221,10 @@ impl Workspace {
                                                         );
                                                     }
                                                 }
+                                                // Pause goes once its step settles and
+                                                // takes the button with it: focus moves
+                                                // to Open workflows, as on the web.
+                                                this.workflow_notice_open_focus.focus(window, cx);
                                                 this.persist_and_notify(cx);
                                             }),
                                         ),
@@ -232,6 +236,7 @@ impl Workspace {
                                         review::OPEN_WORKFLOWS,
                                         theme::persimmon_300(),
                                     )
+                                    .track_focus(&self.workflow_notice_open_focus)
                                     .debug_selector(|| "desktop-open-workflows".into())
                                     .child(review::OPEN_WORKFLOWS)
                                     .on_click(cx.listener(

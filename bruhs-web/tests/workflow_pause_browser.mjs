@@ -200,6 +200,7 @@ try {
   check(evidence.keyboardFocus.focusVisible === true, 'keyboard: Pause shows its focus', evidence.keyboardFocus);
   await page.press('Enter');
   evidence.keyboard = await pausedAfter(page, 2, 'keyboard');
+  check(evidence.keyboard.focusAfter.text === 'Open workflows', 'keyboard: Pause hands focus to Open workflows, which stays, as on desktop', evidence.keyboard.focusAfter);
   check(JSON.stringify(await made(page)) === JSON.stringify({ tasks: 1, events: 1, captures: 0 }), 'keyboard: steps 1 and 2 made one record each', await made(page));
   await page.screenshot(path.join(output, 'paused-keyboard.png'));
   await reloadKeepsPaused(page, 2, 'keyboard');

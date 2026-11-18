@@ -1222,6 +1222,15 @@ pub struct Workspace {
     workflow_disclosures: HashSet<String>,
     /// The app-wide workflow notice put away, until it changes.
     dismissed_workflow_notice: Option<String>,
+    /// The workflow notice's Open workflows, which Pause hands focus to.
+    workflow_notice_open_focus: FocusHandle,
+    /// The conversation page's Back to Inbox, which an opened row focuses.
+    inbox_back_focus: FocusHandle,
+    /// Each Inbox row's focus, kept while the list is hidden (an element's
+    /// own handle goes with it), so Back to Inbox can return to the row.
+    inbox_row_focus: RefCell<std::collections::HashMap<String, FocusHandle>>,
+    /// The conversation Back to Inbox returns focus to.
+    inbox_return_row: Option<String>,
     mobile: mobile::MobileUi,
     local_servers: Vec<LocalServer>,
     local_servers_loading: bool,
@@ -1940,6 +1949,10 @@ impl Workspace {
             dry_run_workflow_id: None,
             workflow_disclosures: HashSet::new(),
             dismissed_workflow_notice: None,
+            workflow_notice_open_focus: cx.focus_handle().tab_stop(true),
+            inbox_back_focus: cx.focus_handle().tab_stop(true),
+            inbox_row_focus: RefCell::new(std::collections::HashMap::new()),
+            inbox_return_row: None,
             mobile: mobile::MobileUi::new(window, cx),
             local_servers: Vec::new(),
             local_servers_loading: false,

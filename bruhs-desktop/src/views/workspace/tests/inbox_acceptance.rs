@@ -615,6 +615,48 @@ async fn closing_the_import_form_returns_focus_to_its_opener(cx: &mut gpui::Test
     assert!(on_page, "focus is on the page");
 }
 
+/// INBOX-11: opening a conversation from its row lands on Back to Inbox,
+/// and Back returns to that row, as on the web (focus used to stay on the
+/// page both ways).
+#[gpui::test]
+async fn opening_a_conversation_and_going_back_keep_the_keyboard_s_place(
+    cx: &mut gpui::TestAppContext,
+) {
+    init(cx);
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let path = files.path().join("state.json");
+    let (workspace, cx) = launch(cx, &path);
+    workspace.update(cx, |workspace, _| {
+        workspace.inbox_conversations = vec![
+            conversation("launch", "Launch review", "Ada", 2),
+            conversation("invoice", "Invoice 1042", "Billing", 1),
+        ];
+    });
+    show_inbox(&workspace, cx);
+    let row = focus_handle_of(cx, card("invoice"));
+    focus_page(&workspace, cx);
+    tab_to(cx, &row, "the Invoice row");
+    press(cx, "enter");
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.active_view, conversation_view("invoice"));
+    });
+    let back = workspace.read_with(cx, |workspace, _| workspace.inbox_back_focus.clone());
+    assert!(
+        focused(cx).as_ref() == Some(&back),
+        "focus is on Back to Inbox"
+    );
+    press(cx, "enter");
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.active_view, AppView::Inbox);
+    });
+    // The row keeps its handle while the list is hidden, so this is the
+    // handle learned before opening it.
+    assert!(
+        focused(cx).as_ref() == Some(&row),
+        "focus is back on the Invoice row"
+    );
+}
+
 /// INBOX-13: before the first import, each filter's empty view, a search
 /// with no match and an empty Inbox beside a full All say what the web says
 /// and offer its next step.

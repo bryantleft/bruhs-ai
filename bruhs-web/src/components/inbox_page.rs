@@ -125,6 +125,9 @@ fn InboxLibrary() -> impl IntoView {
         set_active_view.set(AppView::ConversationDetail {
             conversation_id: id,
         });
+        // The import's conversation opens with focus on Back to Inbox, as
+        // an opened row does (the dialog's opener is gone with the list).
+        super::record_focus::focus_record(INBOX_BACK_DOM_ID.to_string());
     };
 
     view! {
@@ -189,13 +192,26 @@ fn InboxLibrary() -> impl IntoView {
     }
 }
 
+/// The conversation page's Back to Inbox, which an opened row focuses.
+const INBOX_BACK_DOM_ID: &str = "inbox-back";
+
+/// A row's DOM id, which Back to Inbox focuses again.
+fn inbox_row_dom_id(conversation_id: &str) -> String {
+    format!("inbox-row-{conversation_id}")
+}
+
 #[component]
 fn InboxRow(card: InboxCard) -> impl IntoView {
     let set_active_view = expect_context::<SetActiveView>().0;
     let (date, full_date) = inbox_date(card.message_at_ms);
     let id = card.id;
+    let row_id = inbox_row_dom_id(&id);
     view! {
-        <button type="button" data-inbox-row="" class="group flex w-full items-start gap-3 border-b border-longan-800/80 px-3 py-3 text-left last:border-b-0 hover:bg-longan-800/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400 cursor-pointer" on:click=move |_| set_active_view.set(AppView::ConversationDetail { conversation_id: id.clone() })>
+        <button type="button" id=row_id data-inbox-row="" class="group flex w-full items-start gap-3 border-b border-longan-800/80 px-3 py-3 text-left last:border-b-0 hover:bg-longan-800/60 focus-visible:outline-2 focus-visible:-outline-offset-2 focus-visible:outline-persimmon-400 cursor-pointer" on:click=move |_| {
+            set_active_view.set(AppView::ConversationDetail { conversation_id: id.clone() });
+            // Opening a conversation lands on Back to Inbox, as on desktop.
+            super::record_focus::focus_record(INBOX_BACK_DOM_ID.to_string());
+        }>
             <span aria-hidden="true" class=if card.unread { "mt-2 size-2 shrink-0 rounded-full bg-blueberry-400" } else { "mt-2 size-2 shrink-0 rounded-full bg-longan-700" }></span>
             <span class="sr-only">{if card.unread { "Unread conversation: " } else { "Read conversation: " }}</span>
             <span class="min-w-0 flex-1">
@@ -320,7 +336,11 @@ fn ConversationDetail(conversation_id: String) -> impl IntoView {
                 view! {
                     <div class="flex h-full min-h-0 flex-col overflow-y-auto bg-longan-950 text-rambutan-300" data-inbox-detail="">
                         <header class="flex shrink-0 flex-wrap items-center gap-2 border-b border-longan-800 px-3 py-2.5 sm:px-5">
-                            <button type="button" aria-label="Back to Inbox" class="bruhs-control min-h-[32px] rounded-seed px-2 py-1.5 text-label text-rambutan-400 hover:bg-longan-800 cursor-pointer" on:click=move |_| set_active_view.set(AppView::Inbox)>"← Inbox"</button>
+                            <button type="button" id=INBOX_BACK_DOM_ID aria-label="Back to Inbox" class="bruhs-control min-h-[32px] rounded-seed px-2 py-1.5 text-label text-rambutan-400 hover:bg-longan-800 cursor-pointer" on:click=move |_| {
+                                set_active_view.set(AppView::Inbox);
+                                // Back lands on the row this conversation was opened from.
+                                super::record_focus::focus_record(inbox_row_dom_id(&id.get_value()));
+                            }>"← Inbox"</button>
                             <crate::components::people_page::BackToPeople />
                             <div class="min-w-0 flex-1"><h1 class="truncate text-h4 text-rambutan-100">{conversation.subject.clone()}</h1><p class="truncate text-label-sm text-rambutan-500">{conversation.source_and_participants()}</p></div>
                             <div class="flex flex-wrap gap-1">

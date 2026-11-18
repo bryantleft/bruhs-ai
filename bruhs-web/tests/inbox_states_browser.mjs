@@ -422,6 +422,7 @@ try {
     check(await page.waitFor(`!!document.querySelector('[data-inbox-detail]')`), 'Enter on a row opens it');
     await sleep(300);
     evidence.openedConversationFocus = await page.focused();
+    check(evidence.openedConversationFocus.label === 'Back to Inbox', 'an opened conversation focuses Back to Inbox, as on desktop', evidence.openedConversationFocus);
     evidence.trees.conversation = await saveTree(page, 'conversation', node => node.role === 'main');
     await shot('conversation');
 
@@ -439,6 +440,8 @@ try {
     await page.waitFor(`!!${LABELED('Search inbox')}`);
     await sleep(300);
     evidence.afterBack = await page.focused();
+    // The row's own label is its sender, date, subject and preview.
+    check(evidence.afterBack.tag === 'button' && /Fay Focus/.test(evidence.afterBack.text), 'Back to Inbox returns focus to the row it opened, as on desktop', evidence.afterBack);
     for (const [name, tree] of Object.entries(evidence.trees)) check(tree.scoped > 0, `the ${name} tree was saved`, tree);
   });
 } finally {

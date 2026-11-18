@@ -77,6 +77,19 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
+    /// Back to Inbox: the list, with focus on the row the conversation was
+    /// opened from when it was opened from one (web: the same).
+    pub(super) fn back_to_inbox(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let row = self
+            .inbox_return_row
+            .take()
+            .and_then(|id| self.inbox_row_focus.borrow().get(&id).cloned());
+        self.open_inbox_view(window, cx);
+        if let Some(row) = row {
+            row.focus(window, cx);
+        }
+    }
+
     pub(super) fn start_inbox_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let inputs: [&dyn TextInput; 3] = [
             &self.inbox_sender_input,
@@ -548,12 +561,18 @@ impl Workspace {
         let sender = conversation.sender.clone();
         let preview = conversation.preview.clone();
         let key = element_key(&id);
+        let focus = self
+            .inbox_row_focus
+            .borrow_mut()
+            .entry(id.clone())
+            .or_insert_with(|| cx.focus_handle().tab_stop(true))
+            .clone();
         div()
             .id(("inbox-card", key))
             .debug_selector(move || format!("desktop-inbox-card-{key}"))
             .role(Role::Button)
             .aria_label(inbox_row_label(conversation))
-            .tab_index(0)
+            .track_focus(&focus)
             .cursor_pointer()
             .w_full()
             .min_w_0()
@@ -566,7 +585,11 @@ impl Workspace {
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
             .map(|el| {
                 on_press_view(el, cx, move |this, window, cx| {
+                    // Opening a row lands on Back to Inbox, which returns
+                    // here, as on the web.
+                    this.inbox_return_row = Some(id.clone());
                     this.select_inbox_conversation(&id, window, cx);
+                    this.inbox_back_focus.focus(window, cx);
                 })
             })
             .flex()
@@ -891,7 +914,7 @@ impl Workspace {
                             .id("back-to-inbox")
                             .debug_selector(|| "desktop-inbox-back".to_string())
                             .role(Role::Button)
-                            .tab_index(0)
+                            .track_focus(&self.inbox_back_focus)
                             .aria_label("Back to Inbox")
                             .flex_shrink_0()
                             .min_h(px(theme::CONTROL_PX))
@@ -911,7 +934,7 @@ impl Workspace {
                             .whitespace_nowrap()
                             .child("← Inbox")
                             .on_click(cx.listener(|this, _event, window, cx| {
-                                this.open_inbox_view(window, cx)
+                                this.back_to_inbox(window, cx)
                             })),
                     )
                     .child(
