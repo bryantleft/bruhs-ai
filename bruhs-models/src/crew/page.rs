@@ -147,6 +147,7 @@ pub fn current_settings(snapshot: &ReactiveSnapshot, agent_id: &str) -> Option<B
         effort: state.effort.clone(),
         look: state.look.clone(),
         access: state.access.clone(),
+        computer: state.computer,
     })
 }
 
@@ -306,6 +307,7 @@ mod tests {
             status: BruhStatus::Asleep,
             next_wake_ms: None,
             unread: 0,
+            computer: false,
         };
         let mut snapshot = ReactiveSnapshot {
             agents: vec![agent],

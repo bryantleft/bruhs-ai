@@ -516,6 +516,7 @@ mod tests {
             status,
             next_wake_ms: None,
             unread: 0,
+            computer: false,
         }
     }
 

@@ -219,10 +219,11 @@ pub struct BruhSettings {
     pub effort: Option<String>,
     pub look: BruhLook,
     pub access: BruhAccess,
+    pub computer: bool,
 }
 
-/// The commands a settings edit needs: the agent first, then the bruh. A look
-/// only edit never touches the agent.
+/// The commands a settings edit needs: the agent first, then the bruh, then
+/// its Computer. A look only edit never touches the agent.
 #[must_use]
 pub fn settings_commands(
     agent: &ReactiveAgent,
@@ -251,6 +252,12 @@ pub fn settings_commands(
             look: edited.look.clone(),
             access: edited.access.clone(),
             effort: edited.effort.clone(),
+        });
+    }
+    if state.computer != edited.computer {
+        commands.push(ReactiveCommand::SetComputer {
+            agent_id: agent.id.clone(),
+            on: edited.computer,
         });
     }
     commands
@@ -651,6 +658,7 @@ mod tests {
             status: BruhStatus::Asleep,
             next_wake_ms: None,
             unread: 0,
+            computer: false,
         };
         let edited = BruhSettings {
             name: "Bill".into(),
@@ -659,6 +667,7 @@ mod tests {
             effort: None,
             look: BruhLook::default(),
             access: BruhAccess::default(),
+            computer: false,
         };
         (agent, state, edited)
     }

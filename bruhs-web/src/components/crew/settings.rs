@@ -61,6 +61,9 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             send_as_me: send_as_me.get(),
             can_deliver: can_deliver.get(),
         },
+        // No switch yet: Save keeps the stored value, so it never sends
+        // SetComputer.
+        computer: saved.with(|saved| saved.as_ref().is_some_and(|saved| saved.computer)),
     };
 
     // Fill the form from the service, unless the owner has unsaved edits.

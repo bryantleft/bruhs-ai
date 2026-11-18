@@ -2675,6 +2675,7 @@ mod crew_tests {
             status: BruhStatus::Working,
             next_wake_ms: None,
             unread: 2,
+            computer: false,
         };
         panel.update(cx, |panel, cx| {
             assert_eq!(panel.crew_protocol(), None);

@@ -935,6 +935,11 @@ pub(super) fn command(
             ReactiveCommand::DecideApproval { id, approve } => {
                 crew::decide_approval(connection, &id, approve)?;
             }
+            ReactiveCommand::SetComputer { .. } => {
+                return Err(ReactiveError::Invalid(
+                    "Computer is not available yet.".into(),
+                ))
+            }
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
                 if run.status == RunStatus::Queued {

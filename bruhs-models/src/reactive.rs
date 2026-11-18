@@ -373,6 +373,12 @@ pub enum ReactiveCommand {
         id: String,
         approve: bool,
     },
+    /// Turn a bruh's Computer on or off. Cancels no runs; off closes the
+    /// browser and keeps its profile.
+    SetComputer {
+        agent_id: String,
+        on: bool,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

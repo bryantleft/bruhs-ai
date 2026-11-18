@@ -538,6 +538,7 @@ pub(in crate::reactive) fn bruh_states(
             effort: profile.effort,
             next_wake_ms,
             unread,
+            computer: profile.computer,
         });
     }
     rail_order(&mut states);

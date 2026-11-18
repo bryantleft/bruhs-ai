@@ -4,7 +4,8 @@
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use super::{AccessLevel, BruhAccess};
+use super::computer::{browser_detail, browser_summary};
+use super::{AccessLevel, BruhAccess, BRUH_BROWSER_TOOL};
 use crate::agent::AgentProvider;
 
 /// How long a run waits for the owner to answer an approval.
@@ -270,13 +271,23 @@ pub fn is_local_host(host: &str) -> bool {
     if bare == "localhost" || bare.ends_with(".localhost") {
         return true;
     }
-    let local_v4 = |ip: std::net::Ipv4Addr| ip.is_loopback() || ip.octets()[0] == 0;
     if let Ok(ip) = bare.parse::<std::net::Ipv6Addr>() {
-        return ip.is_loopback()
-            || ip.is_unspecified()
-            || ip.to_ipv4_mapped().is_some_and(local_v4);
+        return is_local_ip(ip.into());
     }
-    loose_ipv4(bare).is_some_and(local_v4)
+    loose_ipv4(bare).is_some_and(|ip| is_local_ip(ip.into()))
+}
+
+/// Whether an address is this computer: loopback, unspecified, `0.0.0.0/8`,
+/// or the IPv4-mapped IPv6 form of one of those.
+#[must_use]
+pub fn is_local_ip(ip: std::net::IpAddr) -> bool {
+    let local_v4 = |ip: std::net::Ipv4Addr| ip.is_loopback() || ip.octets()[0] == 0;
+    match ip {
+        std::net::IpAddr::V4(ip) => local_v4(ip),
+        std::net::IpAddr::V6(ip) => {
+            ip.is_loopback() || ip.is_unspecified() || ip.to_ipv4_mapped().is_some_and(local_v4)
+        }
+    }
 }
 
 /// An IPv4 address in the forms `inet_aton` accepts: one to four parts,
@@ -393,6 +404,7 @@ pub fn approval_summary(tool: &str, input: &Value) -> String {
             input["host"].as_str().map(|host| format!("Reach {host}")),
             0,
         ),
+        BRUH_BROWSER_TOOL => (browser_summary(input), 0),
         _ => (None, 0),
     };
     let summary = summary.unwrap_or_else(|| tool.to_string());
@@ -432,6 +444,7 @@ pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
             command.to_string()
         }
         "SandboxNetworkAccess" => return None,
+        BRUH_BROWSER_TOOL => browser_detail(input)?,
         "Write" => input["content"].as_str()?.to_string(),
         "Edit" => edit_text(input),
         "MultiEdit" => input["edits"]
@@ -474,15 +487,19 @@ pub fn approval_fingerprint(tool: &str, input: &Value) -> String {
     format!("{:x}", Sha256::digest(format!("{tool}\n{input}")))
 }
 
-/// The opening lines of every bruh run: its name and what it may do.
+/// The opening lines of every bruh run: its name, what it may do and, when
+/// its Computer is on, its browser.
 #[must_use]
-pub fn run_preamble(name: &str, access: &BruhAccess, level: AccessLevel) -> String {
+pub fn run_preamble(name: &str, access: &BruhAccess, level: AccessLevel, computer: bool) -> String {
     let access_line = match level {
         AccessLevel::ReadOnly => "Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.",
         AccessLevel::Ask => "Access: ask first. You may edit files and run commands in your working folder. Each change waits for the owner's approval; if one is denied, continue without it and say so.",
         AccessLevel::Full => "Access: full. You may edit files and run commands in your working folder without asking.",
     };
     let mut lines = vec![format!("Your name is {name}."), access_line.to_string()];
+    if computer {
+        lines.push("You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back.".to_string());
+    }
     if gate(access, level, GatedAction::Delivery) != Gate::Allow {
         lines.push("Never push, merge or open pull requests.".to_string());
     }
@@ -1134,15 +1151,17 @@ mod tests {
 
     #[test]
     fn the_preamble_names_the_bruh_and_its_access() {
-        let text = run_preamble("Penny", &full(false), AccessLevel::Full);
+        let text = run_preamble("Penny", &full(false), AccessLevel::Full, false);
         assert!(text.starts_with("Your name is Penny."));
         assert!(
             text.contains("without asking")
                 && text.contains("Never push, merge or open pull requests.")
         );
-        assert!(!run_preamble("Penny", &full(true), AccessLevel::Full).contains("Never push"));
+        assert!(
+            !run_preamble("Penny", &full(true), AccessLevel::Full, false).contains("Never push")
+        );
         assert_eq!(
-            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly),
+            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly, false),
             "Your name is Penny.\n\
              Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.\n\
              Never push, merge or open pull requests.\n\
@@ -1156,9 +1175,44 @@ mod tests {
                 ..Default::default()
             },
             AccessLevel::Ask,
+            false,
         );
         assert!(ask.contains("Access: ask first.") && ask.contains("Never push"));
-        assert!(run_preamble("Penny", &full(true), AccessLevel::Full)
+        assert!(run_preamble("Penny", &full(true), AccessLevel::Full, false)
             .ends_with("Never send messages in the owner's name."));
+    }
+
+    #[test]
+    fn local_addresses_include_mapped_and_unspecified_forms() {
+        for ip in [
+            "127.0.0.1",
+            "::1",
+            "0.0.0.0",
+            "::",
+            "::ffff:127.0.0.1",
+            "0.1.2.3",
+        ] {
+            assert!(is_local_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["10.0.0.1", "192.168.1.2", "8.8.8.8", "2001:db8::1"] {
+            assert!(!is_local_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn the_run_preamble_mentions_the_browser_only_when_on() {
+        let full = BruhAccess {
+            level: AccessLevel::Full,
+            ..Default::default()
+        };
+        let on = run_preamble("Ada", &full, AccessLevel::Full, true);
+        assert!(on.contains("the local_browser tool"));
+        let lines: Vec<&str> = on.lines().collect();
+        assert!(lines[1].starts_with("Access: full."), "{on}");
+        assert_eq!(
+            lines[2],
+            "You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back."
+        );
+        assert!(!run_preamble("Ada", &full, AccessLevel::Full, false).contains("local_browser"));
     }
 }

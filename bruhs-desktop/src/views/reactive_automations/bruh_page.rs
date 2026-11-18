@@ -168,6 +168,7 @@ struct SettingsForm {
     level: AccessLevel,
     send_as_me: bool,
     can_deliver: bool,
+    computer: bool,
     look: BruhLook,
     invalid: Option<String>,
     _subscriptions: Vec<gpui::Subscription>,
@@ -218,6 +219,7 @@ impl SettingsForm {
             level: settings.access.level,
             send_as_me: settings.access.send_as_me,
             can_deliver: settings.access.can_deliver,
+            computer: settings.computer,
             look: settings.look.clone(),
             invalid: None,
             _subscriptions: subscriptions,
@@ -236,6 +238,7 @@ impl SettingsForm {
                 send_as_me: self.send_as_me,
                 can_deliver: self.can_deliver,
             },
+            computer: self.computer,
         }
     }
 
@@ -254,6 +257,7 @@ impl SettingsForm {
         self.level = settings.access.level;
         self.send_as_me = settings.access.send_as_me;
         self.can_deliver = settings.access.can_deliver;
+        self.computer = settings.computer;
         self.look = settings.look.clone();
         self.shown = settings.clone();
     }
@@ -2043,6 +2047,7 @@ mod tests {
             status,
             next_wake_ms: None,
             unread: 0,
+            computer: false,
         }
     }
 
