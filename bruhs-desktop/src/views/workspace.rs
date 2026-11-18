@@ -458,6 +458,8 @@ enum Overlay {
     },
     /// The crew rail's "New bruh" (web `CreateBruhDialog`).
     CreateBruh,
+    /// New room or Room settings (web `RoomDialog`).
+    RoomDialog,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1273,6 +1275,8 @@ pub struct Workspace {
     /// The crew rail's first row and its New bruh button, so ⌘⇧B can focus them.
     crew_row_focus: FocusHandle,
     crew_new_focus: FocusHandle,
+    /// The crew rail's one scroll region, bruhs then rooms.
+    crew_scroll: ScrollHandle,
     /// On unless this device saved it off.
     sidebar_working_section: bool,
     title_instructions: String,
@@ -1879,6 +1883,17 @@ impl Workspace {
                     window,
                     |this,
                      _,
+                     event: &crate::views::reactive_automations::ReactiveRoomDone,
+                     window,
+                     cx| {
+                        this.room_dialog_done(event.open.clone(), window, cx)
+                    },
+                ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
                      _: &crate::views::reactive_automations::ReactiveOpenAutomations,
                      window,
                      cx| {
@@ -2014,6 +2029,7 @@ impl Workspace {
             keybinding_installed: keybindings_ui::startup_bindings(),
             crew_row_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             crew_new_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            crew_scroll: ScrollHandle::new(),
             thread_menu_id: None,
             thread_menu_items: (0..sidebar_ui::THREAD_MENU_MAX_ITEMS)
                 .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
@@ -2734,7 +2750,7 @@ impl Workspace {
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
             AppView::Bruh { .. } => self.render_bruh_page(),
-            AppView::Room { .. } => div().flex_1().h_full(),
+            AppView::Room { .. } => self.render_bruh_page(),
             AppView::Workbench => div()
                 .flex_1()
                 .h_full()
@@ -2852,6 +2868,7 @@ impl Render for Workspace {
         self.page_history.visit(&page_key(&self.active_view));
         self.sync_thread_catalog(cx);
         self.sync_create_bruh(cx);
+        self.sync_room_dialog(cx);
         self.sync_bruh_page(cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
@@ -3239,6 +3256,7 @@ impl Render for Workspace {
                     Overlay::RestartConfirm => self.render_restart_confirm(window, cx),
                     Overlay::SnoozeCustom { .. } => self.render_snooze_custom(window, cx),
                     Overlay::CreateBruh => self.render_create_bruh(window, cx),
+                    Overlay::RoomDialog => self.render_room_dialog(window, cx),
                 })
             })
             // Drawn after the form dialog so it sits on top of it.

@@ -19,6 +19,7 @@ mod editor_fields;
 mod face_editor;
 mod memory;
 mod notifications;
+mod room_dialog;
 mod runs;
 mod setup;
 mod updates;
@@ -27,6 +28,7 @@ pub(crate) use bruh_page::ReactiveOpenAutomations;
 pub(crate) use create_bruh::ReactiveBruhCreated;
 use gpui::{prelude::*, *};
 use gpui_component::input::{Input, InputEvent, InputState};
+pub(crate) use room_dialog::ReactiveRoomDone;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
@@ -96,6 +98,8 @@ fn service_update(notice: ServiceNotice, bundled: bool) -> Option<ServiceUpdate>
 #[derive(Default)]
 struct CrewState {
     bruhs: Vec<BruhState>,
+    /// Every room, as the service last reported them.
+    rooms: Vec<bruhs_models::crew::room::RoomState>,
     /// The serving service's crew protocol, once a frame or snapshot says.
     protocol: Option<u32>,
     /// The installed login service's protocol; `None` when none is installed.
@@ -187,6 +191,8 @@ enum Scope {
     Crew,
     /// The create bruh dialog.
     CreateBruh,
+    /// New room and Room settings.
+    Room,
 }
 
 #[derive(Clone)]
@@ -228,6 +234,8 @@ pub(crate) struct ReactiveAutomations {
     awareness: Option<gpui::Subscription>,
     crew: CrewState,
     create: Option<create_bruh::CreateBruh>,
+    /// New room or Room settings, while open.
+    room_dialog: Option<room_dialog::RoomDialog>,
     /// The bruh page on screen, while the workspace shows one.
     bruh: Option<bruh_page::BruhPage>,
     /// Commands waiting for the one in flight, sent in order; a failure
@@ -420,12 +428,18 @@ enum Effect {
     ResetNotifications,
     /// Open the bruh this dialog made.
     OpenBruh(String),
+    /// A room was made, saved or deleted: close the dialog that asked.
+    RoomDone(String),
     None,
 }
 impl Effect {
     fn of(command: &ReactiveCommand) -> Self {
         match command {
             ReactiveCommand::CreateBruh { agent, .. } => Self::OpenBruh(agent.id.clone()),
+            ReactiveCommand::CreateRoom { room } | ReactiveCommand::UpdateRoom { room } => {
+                Self::RoomDone(room.id.clone())
+            }
+            ReactiveCommand::DeleteRoom { id } => Self::RoomDone(id.clone()),
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAutomation { .. },
             } => Self::CloseAutomation,
@@ -532,6 +546,7 @@ impl ReactiveAutomations {
             awareness: None,
             crew: CrewState::default(),
             create: None,
+            room_dialog: None,
             bruh: None,
             queued: VecDeque::new(),
             snapshot_rev: 0,
@@ -613,6 +628,7 @@ impl ReactiveAutomations {
     /// Every snapshot passes through here so arrivals are detected exactly once.
     fn set_snapshot(&mut self, snapshot: ReactiveSnapshot, cx: &mut Context<'_, Self>) {
         self.crew.bruhs.clone_from(&snapshot.bruhs);
+        self.crew.rooms.clone_from(&snapshot.rooms);
         self.note_crew_protocol(snapshot.protocol, cx);
         self.agent_names = snapshot
             .agents
@@ -728,6 +744,9 @@ impl ReactiveAutomations {
                         if scope == Scope::CreateBruh {
                             this.create_failed();
                         }
+                        if scope == Scope::Room {
+                            this.room_failed();
+                        }
                         if scope == Scope::General {
                             this.error = Some(message);
                         } else {
@@ -758,6 +777,7 @@ impl ReactiveAutomations {
     fn apply_effect(&mut self, effect: Effect, cx: &mut Context<'_, Self>) {
         match effect {
             Effect::OpenBruh(agent_id) => self.created_bruh(agent_id, cx),
+            Effect::RoomDone(room_id) => self.room_done(&room_id, cx),
             Effect::CloseAutomation => self.editor = None,
             Effect::CloseReply(id) => {
                 if self.reply.as_ref().is_some_and(|(open, _)| *open == id) {
@@ -1409,10 +1429,6 @@ impl ReactiveAutomations {
         self.crew.protocol.is_some_and(rooms_ready)
     }
     /// Why rooms are off, once the service is known to be older.
-    #[cfg_attr(
-        not(test),
-        expect(dead_code, reason = "the room pages use it in a later change")
-    )]
     pub(crate) fn rooms_reason(&self) -> Option<&'static str> {
         if self.rooms_ready() {
             return None;
@@ -1587,6 +1603,21 @@ impl ReactiveAutomations {
     pub(crate) fn sent_for_test(&self) -> &[ReactiveCommand] {
         &self.sent
     }
+    /// Answer the last command sent as the service would on success:
+    /// `snapshot`, then what the command closes or opens.
+    #[cfg(test)]
+    pub(crate) fn answer_last_for_test(
+        &mut self,
+        snapshot: ReactiveSnapshot,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.set_snapshot(snapshot, cx);
+        if let Some(command) = self.sent.last() {
+            let effect = Effect::of(command);
+            self.apply_effect(effect, cx);
+        }
+        cx.notify();
+    }
 
     /// Follow the service's live crew frames for as long as the panel lives.
     fn start_crew_stream(&mut self, cx: &mut Context<'_, Self>) {
@@ -1621,6 +1652,10 @@ impl ReactiveAutomations {
         if self.crew.bruhs != signal.bruhs {
             self.crew.bruhs = signal.bruhs;
             cx.emit(ReactiveCrewChanged);
+            cx.notify();
+        }
+        if self.crew.rooms != signal.rooms {
+            self.crew.rooms = signal.rooms;
             cx.notify();
         }
         // A bruh page reads the crew again on every change, like the web's.
@@ -1731,6 +1766,7 @@ impl EventEmitter<ReactivePreview> for ReactiveAutomations {}
 impl EventEmitter<ReactiveProjectOpened> for ReactiveAutomations {}
 impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
 impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
+impl EventEmitter<ReactiveRoomDone> for ReactiveAutomations {}
 impl EventEmitter<ReactiveOpenAutomations> for ReactiveAutomations {}
 impl EventEmitter<ReactiveCrewChanged> for ReactiveAutomations {}
 
