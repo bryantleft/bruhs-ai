@@ -303,6 +303,13 @@ impl Workspace {
         let Some(target) = self.current_record_delete_target() else {
             return;
         };
+        // Like the web dialog, Cancel or Escape returns focus to the
+        // control that asked (the record's Delete).
+        if !self.modal_start_focus_handle.contains_focused(window, cx) {
+            self.palette_return_focus = window
+                .focused(cx)
+                .map(|focus| (self.active_view.clone(), focus));
+        }
         self.open_overlay(Overlay::RecordDeleteConfirm { target });
         self.focus_first_modal_tab_stop(window, cx);
         cx.notify();
@@ -368,6 +375,7 @@ impl Workspace {
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
+                            .debug_selector(|| "desktop-record-delete-cancel".into())
                             .aria_label("Cancel deletion")
                             .child("Cancel")
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -382,6 +390,7 @@ impl Workspace {
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
+                            .debug_selector(|| "desktop-record-delete-confirm".into())
                             .aria_label("Confirm deletion")
                             .child("Delete")
                             .on_click(cx.listener(

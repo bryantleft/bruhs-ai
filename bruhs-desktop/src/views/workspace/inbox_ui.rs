@@ -353,11 +353,7 @@ impl Workspace {
             .into_iter()
             .map(|card| self.render_inbox_card(&card, cx))
             .collect::<Vec<_>>();
-        let empty = if !query.trim().is_empty() {
-            "No matching conversations."
-        } else {
-            self.inbox_filter.empty_message()
-        };
+        let (empty, next_step) = inbox_empty_state(&query, self.inbox_filter);
 
         div().debug_selector(|| "desktop-inbox-page".into())
             .flex_1().h_full().min_w_0().bg(cx.theme().background).flex().flex_col()
@@ -377,6 +373,7 @@ impl Workspace {
                         }
                     })))
                 .child(web_button("desktop-import-conversation", WebButtonVariant::Primary, WebButtonSize::Small, ButtonState::Enabled)
+                    .debug_selector(|| "desktop-import-conversation".into())
                     .aria_label("Import conversation").child("Import conversation")
                     .on_click(cx.listener(|this, _, window, cx| this.start_inbox_import(window, cx))))))
             .child(div().flex_1().min_h_0().overflow_y_scrollbar().p_4().flex().justify_center()
@@ -389,7 +386,7 @@ impl Workspace {
                         .when(total == 0, |element| element.child(div().py_12().px_4().text_center()
                             .child(div().id("desktop-inbox-empty").debug_selector(|| "desktop-inbox-empty".into()).role(Role::Status).text_size(px(13.0)).text_color(theme::rambutan_300()).child(empty))
                             .child(div().mt_1().text_size(px(12.0)).text_color(theme::rambutan_500())
-                                .child(if !query.trim().is_empty() { "Try another search or choose All." } else { "Import a message or choose another view." })))))
+                                .child(next_step)))))
                     .child(div().id("desktop-inbox-counts").role(Role::Status).aria_label("Inbox counts").flex().flex_wrap().gap_4().text_size(px(12.0)).text_color(theme::rambutan_400())
                         .child(format!("{} open", counts.open)).child(format!("{} unread", counts.unread))
                         .child(format!("{} need reply", counts.needs_reply)).child(format!("{} snoozed", counts.snoozed)))
@@ -709,6 +706,7 @@ impl Workspace {
                                     WebButtonSize::Default,
                                     ButtonState::Enabled,
                                 )
+                                .debug_selector(|| "desktop-inbox-import-submit".into())
                                 .aria_label("Import")
                                 .child("Import")
                                 .on_click(cx.listener(
@@ -1062,6 +1060,9 @@ impl Workspace {
                                                 )
                                                 .border_color(theme::longan_700())
                                                 .text_color(theme::rambutan_300())
+                                                .debug_selector(|| {
+                                                    "desktop-inbox-save-draft".into()
+                                                })
                                                 .aria_label("Save draft")
                                                 .child("Save draft")
                                                 .on_click(cx.listener(
@@ -1083,6 +1084,7 @@ impl Workspace {
                                                             .is_empty(),
                                                     ),
                                                 )
+                                                .debug_selector(|| "desktop-inbox-log-reply".into())
                                                 .aria_label("Log reply")
                                                 .child("Log reply")
                                                 .on_click(cx.listener(
@@ -1095,6 +1097,23 @@ impl Workspace {
                             ),
                     ),
             )
+    }
+}
+
+/// What an empty conversation list says and the next step it offers, in
+/// the web Inbox's words: a search with no match, or the filter's own
+/// empty view.
+pub(super) fn inbox_empty_state(query: &str, filter: InboxFilter) -> (&'static str, &'static str) {
+    if query.trim().is_empty() {
+        (
+            filter.empty_message(),
+            "Import a message or choose another view.",
+        )
+    } else {
+        (
+            "No matching conversations.",
+            "Try another search or choose All.",
+        )
     }
 }
 

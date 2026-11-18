@@ -196,6 +196,8 @@ use gpui_component::zoom::px;
 use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;
+mod inbox_acceptance;
+mod launch;
 mod parity_rows;
 mod today_acceptance;
 

@@ -52,6 +52,11 @@ enum KeyDecision {
     /// Tab (true: Shift+Tab) in an open thread menu: close it and move on
     /// from its "…" button, before gpui-component's Tab binding runs.
     CloseThreadMenu(bool),
+    /// Tab (true: Shift+Tab) in an open dialog: step within it, as the web
+    /// dialog's focus trap does. gpui-component's Tab binding runs before
+    /// the dialog's own key handler and would move focus to the page
+    /// behind the dialog.
+    DialogFocus(bool),
     Swallow,
     Pass,
 }
@@ -255,6 +260,10 @@ fn intercept_keybinding(
                 cx.notify();
             });
         }
+        KeyDecision::DialogFocus(backwards) => {
+            cx.stop_propagation();
+            workspace.update(cx, |this, cx| this.step_modal_focus(backwards, window, cx));
+        }
         KeyDecision::SidebarFocus(backwards) => {
             workspace.update(cx, |this, cx| {
                 if this.sidebar_viewport.borrow().tab(backwards, window, cx) {
@@ -316,6 +325,16 @@ impl Workspace {
                 .any(|item| item.is_focused(window))
         {
             return KeyDecision::CloseThreadMenu(modifiers.shift);
+        }
+        // Only while focus is in this window's open dialog.
+        if event.keystroke.key == "tab"
+            && !modifiers.platform
+            && !modifiers.control
+            && !modifiers.alt
+            && self.overlay_open()
+            && self.modal_start_focus_handle.contains_focused(window, cx)
+        {
+            return KeyDecision::DialogFocus(modifiers.shift);
         }
         let chord = chord_from_event(
             "",
