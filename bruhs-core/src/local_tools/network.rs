@@ -1,9 +1,11 @@
 //! The network guard: an HTTP proxy on loopback that every bruh browser goes
 //! through (Decision D7). It refuses this computer by name and by every
 //! address a name resolves to, then connects to the address it checked, so
-//! DNS rebinding can't slip in between the check and the connection. LAN
-//! addresses pass, as in the shell rule. It chains to the owner's http://
-//! upstream proxy and honours `no_proxy`.
+//! DNS rebinding can't slip in between the check and the connection. This
+//! computer's own interface addresses and `fe80::/10` are refused too; other
+//! LAN hosts pass. It chains to the owner's http:// upstream proxy and honours
+//! `no_proxy`. An upstream on this computer would resolve names itself, so it
+//! gets the checked address instead of the name.
 //!
 //! The guard asks no credential of its clients. Chrome can't carry proxy
 //! credentials in `--proxy-server`; it would answer a 407 challenge only
@@ -46,6 +48,10 @@ use tokio::{
 
 use super::ToolError;
 
+#[path = "network_addresses.rs"]
+mod addresses;
+use addresses::OwnAddresses;
+
 pub(super) const SOCKS_UNSUPPORTED: &str =
     "Bruhs can't use a SOCKS or HTTPS proxy for a bruh's browser yet. Set HTTPS_PROXY to an http:// proxy.";
 
@@ -58,10 +64,28 @@ const MAX_HEAD: usize = 16 * 1024;
 const MAX_CONNECTIONS: usize = 256;
 const HEAD_TIMEOUT: Duration = Duration::from_secs(15);
 const RESOLVE_TIMEOUT: Duration = Duration::from_secs(10);
+/// Lookups in flight. A lookup holds its slot until the resolver returns,
+/// even after its request gave up, so stalled name servers can't pile up
+/// blocking threads.
+const MAX_LOOKUPS: usize = 32;
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const RESPONSE_TIMEOUT: Duration = Duration::from_secs(60);
 /// A connection or tunnel with no bytes either way for this long is closed.
 const IDLE: Duration = Duration::from_secs(300);
+
+/// The bounds a guard runs with; tests shrink them.
+#[derive(Debug, Clone, Copy)]
+struct Limits {
+    connections: usize,
+    idle: Duration,
+    resolve: Duration,
+}
+
+const LIMITS: Limits = Limits {
+    connections: MAX_CONNECTIONS,
+    idle: IDLE,
+    resolve: RESOLVE_TIMEOUT,
+};
 /// The proxy port curl assumes when a proxy URL names none.
 const DEFAULT_PROXY_PORT: u16 = 1080;
 
@@ -180,6 +204,7 @@ pub(super) struct Upstream {
 }
 
 impl Upstream {
+    #[cfg_attr(test, expect(dead_code, reason = "used from Task 5"))]
     pub(super) fn from_env() -> Result<Self, ToolError> {
         Self::from_vars(|key| std::env::var(key).ok())
     }
@@ -253,22 +278,35 @@ pub(super) type Resolver =
     Arc<dyn Fn(String, u16) -> BoxFuture<'static, io::Result<Vec<SocketAddr>>> + Send + Sync>;
 
 /// Whether to refuse a destination, given its name and the addresses it
-/// resolved to (none yet on the first check). Production is [`refused`].
+/// resolved to (none yet on the first check). Production is
+/// [`this_computer`].
 pub(super) type Refusal = Arc<dyn Fn(&str, &[SocketAddr]) -> bool + Send + Sync>;
 
-/// The guard's rule: this computer by name ([`is_local_host`]) or any
-/// resolved address on it ([`is_local_ip`], plus the deprecated
-/// IPv4-compatible IPv6 form of one).
+/// The guard's fixed rule: this computer by name ([`is_local_host`]), a host
+/// with a `%` (an IPv6 zone id), or any resolved address that is loopback,
+/// unspecified or in 0/8 ([`is_local_ip`], plus the deprecated
+/// IPv4-compatible IPv6 form of one) or link-local IPv6 (`fe80::/10`).
 pub(super) fn refused(host: &str, addrs: &[SocketAddr]) -> bool {
-    is_local_host(host) || addrs.iter().any(|addr| local_address(addr.ip()))
+    host.contains('%') || is_local_host(host) || addrs.iter().any(|addr| local_address(addr.ip()))
 }
 
 fn local_address(ip: IpAddr) -> bool {
     is_local_ip(ip)
         || match ip {
-            IpAddr::V6(ip) => ip.to_ipv4().is_some_and(|ip| is_local_ip(ip.into())),
+            IpAddr::V6(ip) => {
+                ip.to_ipv4().is_some_and(|ip| is_local_ip(ip.into()))
+                    || ip.segments()[0] & 0xffc0 == 0xfe80
+            }
             IpAddr::V4(_) => false,
         }
+}
+
+/// The production refusal: [`refused`], and any address on one of this
+/// computer's interfaces.
+fn this_computer(own: Arc<OwnAddresses>) -> Refusal {
+    Arc::new(move |host: &str, addrs: &[SocketAddr]| {
+        refused(host, addrs) || addrs.iter().any(|addr| own.contains(addr.ip()))
+    })
 }
 
 fn system_resolver() -> Resolver {
@@ -299,6 +337,8 @@ struct Shared {
     upstream: Upstream,
     resolver: Resolver,
     refuse: Refusal,
+    limits: Limits,
+    lookups: Arc<Semaphore>,
     shutdown: watch::Receiver<()>,
 }
 
@@ -319,13 +359,23 @@ impl NetworkGuard {
     /// Starts the guard on `127.0.0.1` with the system resolver and the
     /// production rule.
     pub(super) fn start(upstream: Upstream) -> Result<Self, ToolError> {
-        Self::start_with(upstream, system_resolver(), Arc::new(refused))
+        let refuse = this_computer(Arc::new(OwnAddresses::system()));
+        Self::start_with(upstream, system_resolver(), refuse)
     }
 
     pub(super) fn start_with(
         upstream: Upstream,
         resolver: Resolver,
         refuse: Refusal,
+    ) -> Result<Self, ToolError> {
+        Self::launch(upstream, resolver, refuse, LIMITS)
+    }
+
+    fn launch(
+        upstream: Upstream,
+        resolver: Resolver,
+        refuse: Refusal,
+        limits: Limits,
     ) -> Result<Self, ToolError> {
         tokio::runtime::Handle::try_current().map_err(|_| {
             ToolError::Unavailable("The network guard needs a Tokio runtime.".into())
@@ -339,6 +389,8 @@ impl NetworkGuard {
             upstream,
             resolver,
             refuse,
+            limits,
+            lookups: Arc::new(Semaphore::new(MAX_LOOKUPS)),
             shutdown: receiver,
         });
         let accept = tokio::spawn(accept(listener, shared));
@@ -355,7 +407,7 @@ impl NetworkGuard {
 }
 
 async fn accept(listener: TcpListener, shared: Arc<Shared>) {
-    let slots = Arc::new(Semaphore::new(MAX_CONNECTIONS));
+    let slots = Arc::new(Semaphore::new(shared.limits.connections));
     loop {
         let Ok(permit) = slots.clone().acquire_owned().await else {
             return;
@@ -376,6 +428,7 @@ async fn accept(listener: TcpListener, shared: Arc<Shared>) {
 }
 
 async fn serve(socket: TcpStream, shared: Arc<Shared>, permit: Arc<OwnedSemaphorePermit>) {
+    let idle = shared.limits.idle;
     let service = service_fn(move |request| {
         let (shared, permit) = (shared.clone(), permit.clone());
         async move {
@@ -390,7 +443,7 @@ async fn serve(socket: TcpStream, shared: Arc<Shared>, permit: Arc<OwnedSemaphor
         .timer(TokioTimer::new())
         .header_read_timeout(HEAD_TIMEOUT)
         .max_buf_size(MAX_HEAD)
-        .serve_connection(TokioIo::new(Idle::new(socket)), service)
+        .serve_connection(TokioIo::new(Idle::new(socket, idle)), service)
         .with_upgrades()
         .await;
 }
@@ -466,44 +519,93 @@ fn head_size<B>(request: &Request<B>) -> usize {
 enum Route {
     /// Connect to these addresses, each already checked.
     Direct(Vec<SocketAddr>),
-    /// Hand the name to the owner's upstream.
-    Upstream(ProxyUrl),
+    /// Through the owner's upstream, reached at `at`.
+    Upstream {
+        proxy: ProxyUrl,
+        at: Vec<SocketAddr>,
+        /// The checked address to hand the upstream instead of the name, when
+        /// the upstream is on this computer.
+        checked: Option<SocketAddr>,
+    },
 }
 
 /// Checks a destination by name, resolves it, and checks every address.
-/// Through an upstream the name is still resolved here when it can be:
+///
+/// Through a remote upstream the name is still resolved here when it can be:
 /// refused if any address is local, passed on by name if it doesn't resolve.
+/// An upstream on this computer would resolve the name again and could reach
+/// this computer, so there a name that doesn't resolve (or times out) is
+/// refused, and the upstream gets the checked address.
 async fn check(shared: &Shared, host: &str, port: u16, tls: bool) -> Result<Route, Failure> {
     if (shared.refuse)(host, &[]) {
         return Err(Failure::denied());
     }
-    let name = host
-        .strip_prefix('[')
-        .and_then(|rest| rest.strip_suffix(']'))
-        .unwrap_or(host);
-    let resolved = resolve(&shared.resolver, name, port).await;
+    let name = bare_host(host);
+    let resolved = resolve(shared, name, port).await;
     if let Ok(addrs) = &resolved {
         if (shared.refuse)(host, addrs) {
             return Err(Failure::denied());
         }
     }
-    match (shared.upstream.route(name, tls), resolved) {
-        (Some(proxy), _) => Ok(Route::Upstream(proxy.clone())),
-        (None, Ok(addrs)) => Ok(Route::Direct(addrs)),
-        (None, Err(failure)) => Err(failure),
-    }
+    let Some(proxy) = shared.upstream.route(name, tls) else {
+        return resolved.map(Route::Direct);
+    };
+    let at = resolve(shared, &proxy.host, proxy.port).await?;
+    let checked = if (shared.refuse)(&proxy.host, &at) {
+        Some(
+            resolved?
+                .first()
+                .copied()
+                .ok_or_else(Failure::unreachable)?,
+        )
+    } else {
+        None
+    };
+    Ok(Route::Upstream {
+        proxy: proxy.clone(),
+        at,
+        checked,
+    })
 }
 
-async fn resolve(resolver: &Resolver, name: &str, port: u16) -> Result<Vec<SocketAddr>, Failure> {
+/// `host` without the brackets of an IPv6 literal.
+fn bare_host(host: &str) -> &str {
+    host.strip_prefix('[')
+        .and_then(|rest| rest.strip_suffix(']'))
+        .unwrap_or(host)
+}
+
+/// Resolves `name`, or reads it as an IP literal. Each lookup runs in its own
+/// task holding a [`MAX_LOOKUPS`] slot until the resolver returns.
+async fn resolve(shared: &Shared, name: &str, port: u16) -> Result<Vec<SocketAddr>, Failure> {
     if let Ok(ip) = name.parse::<IpAddr>() {
         return Ok(vec![SocketAddr::new(ip, port)]);
     }
-    match tokio::time::timeout(RESOLVE_TIMEOUT, resolver(name.to_owned(), port)).await {
+    let (lookups, resolver, name) = (
+        shared.lookups.clone(),
+        shared.resolver.clone(),
+        name.to_owned(),
+    );
+    let lookup = async move {
+        let slot = lookups
+            .acquire_owned()
+            .await
+            .map_err(|_| Failure::unreachable())?;
+        let task = tokio::spawn(async move {
+            let _slot = slot;
+            resolver(name, port).await
+        });
+        match task.await {
+            Ok(Ok(addrs)) => Ok(addrs),
+            _ => Err(Failure::unreachable()),
+        }
+    };
+    match tokio::time::timeout(shared.limits.resolve, lookup).await {
         Ok(Ok(addrs)) => Ok(addrs
             .into_iter()
             .map(|addr| SocketAddr::new(addr.ip(), port))
             .collect()),
-        Ok(Err(_)) => Err(Failure::unreachable()),
+        Ok(Err(failure)) => Err(failure),
         Err(_) => Err(Failure::timed_out()),
     }
 }
@@ -529,11 +631,6 @@ async fn connect(addrs: &[SocketAddr]) -> Result<TcpStream, Failure> {
     Err(failure)
 }
 
-/// The owner's upstream is not checked: the owner configured it, not a page.
-async fn connect_upstream(shared: &Shared, proxy: &ProxyUrl) -> Result<TcpStream, Failure> {
-    connect(&resolve(&shared.resolver, &proxy.host, proxy.port).await?).await
-}
-
 /// `CONNECT host:port`, for https and WebSockets.
 async fn tunnel(
     request: Request<Incoming>,
@@ -545,15 +642,21 @@ async fn tunnel(
     let host = authority.host().to_owned();
     let (stream, early) = match check(shared, &host, port, true).await? {
         Route::Direct(addrs) => (connect(&addrs).await?, Vec::new()),
-        Route::Upstream(proxy) => upstream_connect(shared, &proxy, &host, port).await?,
+        Route::Upstream { proxy, at, checked } => {
+            // `host` came from a parsed authority, so it holds no spaces or
+            // line breaks.
+            let target = checked.map_or_else(|| format!("{host}:{port}"), |addr| addr.to_string());
+            upstream_connect(&proxy, &at, &target).await?
+        }
     };
+    let idle = shared.limits.idle;
     shared.spawn(async move {
         let _permit = permit;
         let Ok(upgraded) = hyper::upgrade::on(request).await else {
             return;
         };
         let mut client = TokioIo::new(upgraded);
-        let mut stream = Idle::new(stream);
+        let mut stream = Idle::new(stream, idle);
         if !early.is_empty() && client.write_all(&early).await.is_err() {
             return;
         }
@@ -566,17 +669,16 @@ async fn tunnel(
     ))
 }
 
-/// Opens a tunnel through the owner's upstream. Returns the stream and any
-/// bytes the upstream sent after its `200`, which belong to the tunnel.
+/// Opens a tunnel to `target` through the owner's upstream, reached at `at`
+/// (not checked: the owner configured it, not a page). Returns the stream
+/// and any bytes the upstream sent after its `200`, which belong to the
+/// tunnel.
 async fn upstream_connect(
-    shared: &Shared,
     proxy: &ProxyUrl,
-    host: &str,
-    port: u16,
+    at: &[SocketAddr],
+    target: &str,
 ) -> Result<(TcpStream, Vec<u8>), Failure> {
-    let mut stream = connect_upstream(shared, proxy).await?;
-    // `host` came from a parsed authority, so it holds no spaces or line breaks.
-    let target = format!("{host}:{port}");
+    let mut stream = connect(at).await?;
     let mut head = format!("CONNECT {target} HTTP/1.1\r\nHost: {target}\r\n");
     if let Some(authorization) = &proxy.authorization {
         head.push_str(&format!("Proxy-Authorization: {authorization}\r\n"));
@@ -626,6 +728,8 @@ async fn read_response_head(stream: &mut TcpStream) -> io::Result<(u16, Vec<u8>)
 
 /// An absolute-form `http://` request: checked like a tunnel, then sent
 /// origin-form to the checked address, or absolute-form to the upstream.
+/// `Host` and the upstream's target are rebuilt from the checked parts, so
+/// the client's `Host` and any userinfo never pass on.
 async fn forward(
     mut request: Request<Incoming>,
     shared: &Arc<Shared>,
@@ -638,24 +742,17 @@ async fn forward(
     };
     let host = authority.host();
     let port = authority.port_u16().unwrap_or(80);
+    let named = match authority.port() {
+        Some(port) => format!("{host}:{port}"),
+        None => host.to_owned(),
+    };
+    let path = uri.path_and_query().map_or("/", |path| path.as_str());
     strip_hop_headers(request.headers_mut());
-    let stream = match check(shared, host, port, false).await? {
-        Route::Direct(addrs) => {
-            let stream = connect(&addrs).await?;
-            let path = uri.path_and_query().map_or("/", |path| path.as_str());
-            *request.uri_mut() = path.parse::<Uri>().map_err(|_| Failure::bad_request())?;
-            if !request.headers().contains_key(header::HOST) {
-                let value = match authority.port() {
-                    Some(port) => format!("{host}:{port}"),
-                    None => host.to_owned(),
-                };
-                let value = HeaderValue::from_str(&value).map_err(|_| Failure::bad_request())?;
-                request.headers_mut().insert(header::HOST, value);
-            }
-            stream
-        }
-        Route::Upstream(proxy) => {
-            let stream = connect_upstream(shared, &proxy).await?;
+    let host_header = HeaderValue::from_str(&named).map_err(|_| Failure::bad_request())?;
+    request.headers_mut().insert(header::HOST, host_header);
+    let (target, at) = match check(shared, host, port, false).await? {
+        Route::Direct(addrs) => (path.to_owned(), addrs),
+        Route::Upstream { proxy, at, checked } => {
             if let Some(authorization) = &proxy.authorization {
                 let value =
                     HeaderValue::from_str(authorization).map_err(|_| Failure::unreachable())?;
@@ -663,11 +760,14 @@ async fn forward(
                     .headers_mut()
                     .insert(header::PROXY_AUTHORIZATION, value);
             }
-            stream
+            let to = checked.map_or(named, |addr| addr.to_string());
+            (format!("http://{to}{path}"), at)
         }
     };
+    *request.uri_mut() = target.parse::<Uri>().map_err(|_| Failure::bad_request())?;
+    let stream = connect(&at).await?;
     let (mut sender, connection) =
-        hyper::client::conn::http1::handshake(TokioIo::new(Idle::new(stream)))
+        hyper::client::conn::http1::handshake(TokioIo::new(Idle::new(stream, shared.limits.idle)))
             .await
             .map_err(|_| Failure::unreachable())?;
     shared.spawn(async move {
@@ -702,17 +802,20 @@ fn strip_hop_headers(headers: &mut HeaderMap) {
     }
 }
 
-/// Closes a connection with no bytes either way for [`IDLE`].
+/// Closes a connection with no bytes either way for its idle time ([`IDLE`]
+/// in production).
 struct Idle<T> {
     inner: T,
+    idle: Duration,
     timer: Pin<Box<Sleep>>,
 }
 
 impl<T> Idle<T> {
-    fn new(inner: T) -> Self {
+    fn new(inner: T, idle: Duration) -> Self {
         Self {
             inner,
-            timer: Box::pin(tokio::time::sleep(IDLE)),
+            idle,
+            timer: Box::pin(tokio::time::sleep(idle)),
         }
     }
 
@@ -729,7 +832,7 @@ impl<T> Idle<T> {
     }
 
     fn touched(&mut self) {
-        self.timer.as_mut().reset(Instant::now() + IDLE);
+        self.timer.as_mut().reset(Instant::now() + self.idle);
     }
 }
 
