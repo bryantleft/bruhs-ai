@@ -566,6 +566,27 @@ impl ReactiveAutomations {
         self.set_room_draft(next, chips, caret, window, cx);
     }
 
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=room-draft:<text>`: type `text` into the
+    /// open room's composer, as the owner would, so the `@` list can be
+    /// captured.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_room_draft(
+        &mut self,
+        text: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let Some(composer) = self.room.as_ref().and_then(|page| page.composer.clone()) else {
+            return;
+        };
+        composer.update(cx, |input, cx| {
+            input.set_value(text, window, cx);
+            input.set_selected_range(text.len()..text.len(), cx);
+            input.focus(window, cx);
+        });
+        self.room_draft_changed(cx);
+    }
+
     /// Write the draft, its chips and the caret, and close the `@` list.
     fn set_room_draft(
         &mut self,

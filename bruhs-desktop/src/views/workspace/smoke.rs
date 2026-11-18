@@ -186,6 +186,12 @@ impl Workspace {
                 let room_id = scene.trim_start_matches("room:").to_string();
                 self.activate_sidebar_view(AppView::Room { room_id }, window, cx);
             }
+            // Text typed into the open room's composer (the `@` list).
+            scene if scene.starts_with("room-draft:") => {
+                let text = scene.trim_start_matches("room-draft:").to_string();
+                self.reactive_automations
+                    .update(cx, |panel, cx| panel.smoke_room_draft(&text, window, cx));
+            }
             scene if scene.starts_with("room-settings:") => {
                 let room_id = scene.trim_start_matches("room-settings:").to_string();
                 self.open_room_dialog(Some(room_id), window, cx);
