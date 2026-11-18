@@ -51,7 +51,9 @@ impl Default for TextViewStyle {
             muted_color: theme::rambutan_500(),
             link_color: theme::persimmon_300(),
             inline_code_color: theme::rambutan_200(),
-            inline_code_background: theme::longan_900().opacity(0.5),
+            // The web's chip is longan-900/50 inside a longan-800/50 border;
+            // a run cannot draw a border, so the fill takes the border's tone.
+            inline_code_background: theme::longan_800().opacity(0.6),
             quote_color: theme::rambutan_400(),
             border_color: theme::longan_800(),
             table_text_color: theme::rambutan_300(),

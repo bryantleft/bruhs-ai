@@ -142,7 +142,18 @@ impl TextViewState {
             if segment != start.segment {
                 out.push('\n');
             }
-            out.push_str(text.get(from..to).unwrap_or_default());
+            // Drawn padding is not text.
+            let pads = self
+                .document
+                .pads
+                .get(segment)
+                .map_or(&[][..], Vec::as_slice);
+            let mut at = from;
+            for pad in pads.iter().filter(|pad| pad.end > from && pad.start < to) {
+                out.push_str(text.get(at..pad.start.max(at)).unwrap_or_default());
+                at = pad.end.min(to);
+            }
+            out.push_str(text.get(at..to).unwrap_or_default());
         }
         out
     }
@@ -244,6 +255,23 @@ mod tests {
             },
         ));
         assert_eq!(state.selected_text(), "para\nsecond");
+    }
+
+    #[test]
+    fn a_code_chip_copies_without_its_padding() {
+        let mut state = state("run `cargo` now");
+        let len = state.document.segments[0].len();
+        state.selection = Some((
+            TextPosition {
+                segment: 0,
+                offset: 0,
+            },
+            TextPosition {
+                segment: 0,
+                offset: len,
+            },
+        ));
+        assert_eq!(state.selected_text(), "run cargo now");
     }
 
     #[test]

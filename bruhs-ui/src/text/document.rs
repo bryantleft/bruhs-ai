@@ -34,6 +34,9 @@ pub struct Inline {
     pub segment: usize,
     pub text: String,
     pub spans: Vec<(Range<usize>, InlineStyle)>,
+    /// Byte ranges of padding drawn but not part of the source: the thin
+    /// spaces that give a code span its chip's sides.
+    pub pads: Vec<Range<usize>>,
 }
 
 impl Inline {
@@ -103,8 +106,10 @@ pub enum Block {
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
 pub struct Document {
     pub blocks: Vec<Block>,
-    /// Each segment's text, by segment number.
+    /// Each segment's drawn text, by segment number.
     pub segments: Vec<String>,
+    /// Each segment's [`Inline::pads`].
+    pub pads: Vec<Vec<Range<usize>>>,
 }
 
 impl Document {
@@ -112,6 +117,9 @@ impl Document {
         self.segments.len()
     }
 }
+
+/// A thin space: half a code chip's horizontal padding.
+const CODE_PAD: &str = "\u{2009}";
 
 /// Builds blocks from a stream of block and inline events.
 #[derive(Default)]
@@ -122,6 +130,7 @@ struct Builder {
     inline: Option<Inline>,
     styles: Vec<InlineStyle>,
     segments: Vec<String>,
+    pads: Vec<Vec<Range<usize>>>,
     code: Option<(Option<SharedString>, String)>,
     table: Option<TableBuilder>,
 }
@@ -174,6 +183,7 @@ impl Builder {
     fn numbered(&mut self, mut inline: Inline) -> Inline {
         inline.segment = self.segments.len();
         self.segments.push(inline.text.clone());
+        self.pads.push(inline.pads.clone());
         inline
     }
 
@@ -374,7 +384,16 @@ impl Builder {
             Event::Code(code) => {
                 let mut style = self.style();
                 style.code = true;
-                self.inline().push(&code, &style);
+                let inline = self.inline();
+                // The chip's sides: a thin space each side, in the chip's
+                // background (a run cannot carry padding).
+                for part in [CODE_PAD, &code, CODE_PAD] {
+                    let start = inline.text.len();
+                    inline.push(part, &style);
+                    if part == CODE_PAD {
+                        inline.pads.push(start..inline.text.len());
+                    }
+                }
             }
             // Raw HTML and math show as their source text.
             Event::Html(html) | Event::InlineHtml(html) => self.text(&html),
@@ -412,6 +431,7 @@ impl Builder {
         Document {
             blocks: self.blocks,
             segments: self.segments,
+            pads: self.pads,
         }
     }
 }
@@ -599,7 +619,11 @@ mod tests {
         let Block::Paragraph(p) = &doc.blocks[1] else {
             panic!()
         };
-        assert_eq!(p.text, "Some bold and it with code and a link.");
+        assert_eq!(
+            p.text,
+            "Some bold and it with \u{2009}code\u{2009} and a link."
+        );
+        assert_eq!(p.pads.len(), 2);
         let bold = p.spans.iter().find(|(_, s)| s.strong).unwrap();
         assert_eq!(&p.text[bold.0.clone()], "bold");
         assert_eq!(

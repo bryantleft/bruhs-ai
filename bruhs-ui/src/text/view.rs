@@ -25,6 +25,9 @@ type LinkFilter = Arc<dyn Fn(&Link, &App) -> Option<Link> + Send + Sync>;
 type Registry = Rc<RefCell<Vec<(usize, TextLayout)>>>;
 
 const LIST_INDENT_PX: f32 = 18.0;
+const LIST_MARKER_GAP_PX: f32 = 5.0;
+const TASK_BOX_PX: f32 = 13.0;
+const TASK_CHECK_PX: f32 = 10.0;
 const QUOTE_BORDER_PX: f32 = 2.0;
 const QUOTE_PADDING_PX: f32 = 12.0;
 const TABLE_CELL_X_PX: f32 = 10.0;
@@ -32,6 +35,7 @@ const TABLE_CELL_Y_PX: f32 = 6.0;
 const TABLE_TEXT_PX: f32 = 14.0;
 const HEADING_LINE_HEIGHT: f32 = 1.3;
 const HEADING_GAP_REM: f32 = 0.75;
+const HEADING_BOTTOM_REM: f32 = 0.25;
 const BLOCK_GAP_REM: f32 = 0.5;
 const ITEM_GAP_REM: f32 = 0.125;
 const RULE_GAP_REM: f32 = 0.75;
@@ -154,7 +158,7 @@ impl RenderOnce for TextView {
             registry: Rc::new(RefCell::new(Vec::new())),
         };
         let document = state.read(cx).document().clone();
-        let blocks = render_blocks(&document.blocks, &frame, None, cx);
+        let blocks = render_blocks(&document.blocks, &frame, None, true, cx);
         let registry = frame.registry.clone();
         let link_filter = frame.link_filter.clone();
 
@@ -370,19 +374,46 @@ fn segment_at(segments: &[String], at: TextPosition) -> (TextPosition, TextPosit
     )
 }
 
+/// A block's own top margin (in rems), which the web gives headings, code,
+/// quotes, tables and rules wherever they are, and the margin it leaves
+/// below itself.
+fn own_margins(block: &Block) -> (Option<f32>, f32) {
+    match block {
+        Block::Heading(..) => (Some(HEADING_GAP_REM), HEADING_BOTTOM_REM),
+        Block::CodeBlock { .. } | Block::Quote(_) | Block::Table { .. } => {
+            (Some(BLOCK_GAP_REM), 0.0)
+        }
+        Block::Rule => (Some(RULE_GAP_REM), RULE_GAP_REM),
+        Block::Paragraph(_) | Block::List { .. } => (None, 0.0),
+    }
+}
+
+/// `top_level` blocks are the view's own children: the web spaces those
+/// by the paragraph gap (`.prose-msg > * + *`); blocks nested in a list
+/// item or a quote touch, as `p` and `ul` do there.
 fn render_blocks(
     blocks: &[Block],
     frame: &Frame,
     color: Option<Hsla>,
+    top_level: bool,
     cx: &App,
 ) -> Vec<AnyElement> {
+    let mut below_previous = 0.0_f32;
     blocks
         .iter()
         .enumerate()
         .map(|(ix, block)| {
-            let first = ix == 0;
-            let gap = |el: gpui::Div, rem: f32| if first { el } else { el.mt(rems(rem)) };
             let paragraph_gap = frame.style.paragraph_gap.0;
+            let (own_top, own_bottom) = own_margins(block);
+            let generic = if top_level && ix > 0 {
+                paragraph_gap
+            } else {
+                0.0
+            };
+            // Adjacent margins collapse to the larger, as in CSS.
+            let top = own_top.unwrap_or(generic).max(below_previous);
+            below_previous = own_bottom;
+            let gap = |el: gpui::Div, _rem: f32| if top > 0.0 { el.mt(rems(top)) } else { el };
             match block {
                 Block::Paragraph(inline) => gap(div(), paragraph_gap)
                     .child(segment(inline, frame, color, None, cx))
@@ -408,54 +439,61 @@ fn render_blocks(
                     let mut font = frame.base_font.clone();
                     font.family =
                         code_family.unwrap_or_else(|| frame.style.code_font_family.clone());
-                    let mut block = gap(div(), BLOCK_GAP_REM);
+                    // Like the web's `pre`: the box (background, border,
+                    // corners) holds still and its lines scroll sideways
+                    // inside it without wrapping, padding and all.
+                    let mut refinement = refinement;
+                    let padding = std::mem::take(&mut refinement.padding);
+                    let mut block = gap(div(), BLOCK_GAP_REM).w_full();
                     block.style().refine(&refinement);
-                    // Like the web's `pre`: lines do not wrap; the block
-                    // scrolls sideways.
+                    let mut lines = div().whitespace_nowrap();
+                    lines.style().padding = padding;
                     block
-                        .w_full()
-                        .overflow_x_scrollbar()
                         .child(
-                            div()
-                                .whitespace_nowrap()
-                                .child(code_segment(code, frame, font, code_color, cx)),
+                            div().w_full().overflow_x_scrollbar().child(
+                                lines.child(code_segment(code, frame, font, code_color, cx)),
+                            ),
                         )
                         .into_any_element()
                 }
-                Block::List { start, items } => gap(div(), paragraph_gap)
-                    .flex()
-                    .flex_col()
-                    .children(items.iter().enumerate().map(|(ix, item)| {
-                        let marker: SharedString = match (item.task, start) {
-                            (Some(true), _) => "☑".into(),
-                            (Some(false), _) => "☐".into(),
-                            (None, Some(start)) => {
-                                let ix = u64::try_from(ix).unwrap_or(u64::MAX);
-                                format!("{}.", start.saturating_add(ix)).into()
-                            }
-                            (None, None) => "•".into(),
-                        };
-                        div()
-                            .when(ix > 0, |el| el.mt(rems(ITEM_GAP_REM)))
-                            .flex()
-                            .flex_row()
-                            .child(
-                                div()
-                                    .flex_none()
-                                    .w(px(LIST_INDENT_PX))
-                                    .text_color(frame.style.muted_color)
-                                    .child(marker),
-                            )
-                            .child(
-                                div()
-                                    .flex_1()
-                                    .min_w_0()
-                                    .flex()
-                                    .flex_col()
-                                    .children(render_blocks(&item.blocks, frame, color, cx)),
-                            )
-                    }))
-                    .into_any_element(),
+                Block::List { start, items } => {
+                    gap(div(), paragraph_gap)
+                        .flex()
+                        .flex_col()
+                        .children(items.iter().enumerate().map(|(ix, item)| {
+                            let marker = match (item.task, start) {
+                                (Some(checked), _) => task_box(checked, frame),
+                                (None, Some(start)) => {
+                                    let ix = u64::try_from(ix).unwrap_or(u64::MAX);
+                                    marker_text(format!("{}.", start.saturating_add(ix)), frame)
+                                }
+                                (None, None) => marker_text("•", frame),
+                            };
+                            // `li { margin-top: 0.125rem }`, the first one too.
+                            div()
+                                .mt(rems(ITEM_GAP_REM))
+                                .flex()
+                                .flex_row()
+                                .child(
+                                    // The marker sits in the 18px indent, ending
+                                    // a little before the text, as `outside`
+                                    // markers do; a long number overhangs left.
+                                    div()
+                                        .flex_none()
+                                        .w(px(LIST_INDENT_PX))
+                                        .pr(px(LIST_MARKER_GAP_PX))
+                                        .flex()
+                                        .justify_end()
+                                        .child(marker),
+                                )
+                                .child(
+                                    div().flex_1().min_w_0().flex().flex_col().children(
+                                        render_blocks(&item.blocks, frame, color, false, cx),
+                                    ),
+                                )
+                        }))
+                        .into_any_element()
+                }
                 Block::Quote(blocks) => gap(div(), BLOCK_GAP_REM)
                     .flex()
                     .flex_col()
@@ -466,6 +504,7 @@ fn render_blocks(
                         blocks,
                         frame,
                         Some(frame.style.quote_color),
+                        false,
                         cx,
                     ))
                     .into_any_element(),
@@ -521,8 +560,7 @@ fn render_blocks(
                         )
                         .into_any_element()
                 }
-                Block::Rule => div()
-                    .my(rems(RULE_GAP_REM))
+                Block::Rule => gap(div(), RULE_GAP_REM)
                     .h(px(1.0))
                     .w_full()
                     .bg(frame.style.border_color)
@@ -530,6 +568,48 @@ fn render_blocks(
             }
         })
         .collect()
+}
+
+fn marker_text(text: impl Into<SharedString>, frame: &Frame) -> AnyElement {
+    div()
+        .flex_none()
+        .whitespace_nowrap()
+        .text_color(frame.style.muted_color)
+        .child(text.into())
+        .into_any_element()
+}
+
+/// A task item's box: the web's disabled checkbox, in the bruhs tones.
+fn task_box(checked: bool, frame: &Frame) -> AnyElement {
+    // Centred on the first line of the item's text.
+    div()
+        .flex_none()
+        .h(rems(frame.style.line_height * 0.8125))
+        .flex()
+        .items_center()
+        .child(
+            div()
+                .size(px(TASK_BOX_PX))
+                .rounded(px(3.0))
+                .flex()
+                .items_center()
+                .justify_center()
+                .map(|el| {
+                    if checked {
+                        el.bg(crate::theme::persimmon_500()).child(
+                            gpui::svg()
+                                .path(crate::icons::CHECK)
+                                .size(px(TASK_CHECK_PX))
+                                .text_color(crate::theme::longan_950()),
+                        )
+                    } else {
+                        el.bg(gpui::white().opacity(0.05))
+                            .border_1()
+                            .border_color(gpui::white().opacity(0.15))
+                    }
+                }),
+        )
+        .into_any_element()
 }
 
 /// One segment of inline text, styled span by span.
