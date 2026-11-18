@@ -67,9 +67,12 @@ Every local change is marked `bruhs:` in the source.
   off.
 - `crates/base/src/resizable/mod.rs`: `ResizableState::is_resizing`, so the
   desktop's docked right panel can keep its remembered width (as the web does)
-  except while its handle is dragged.
+  except while its handle is dragged. Requested upstream as
+  [gpui-kit#4037](https://github.com/longbridge/gpui-kit/issues/4037).
 - `crates/base/src/scrollbar.rs`: only the primary button drags the thumb or
   jumps the track. A right-click on a scrollbar no longer starts a drag.
+  Reported upstream as
+  [gpui-kit#4036](https://github.com/longbridge/gpui-kit/issues/4036).
 - `crates/base/src/text/state.rs`, streamed Markdown:
   - Upstream's append path re-parses only the last block, with a fresh
     reference table. That can disagree with a full parse:
