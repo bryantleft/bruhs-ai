@@ -17,7 +17,7 @@ use super::chat::{approval_card, question_card, CARD};
 use super::data::{use_crew_snapshot, CrewData};
 use super::face::BruhFace;
 use super::face_editor::still_view;
-use super::prose::{install_crew_prose, PROSE_BUBBLE};
+use super::prose::{install_crew_prose, stick_to_bottom, PROSE_BUBBLE};
 use super::room_dialog::RoomDialog;
 use crate::components::mention_editor::MentionEditor;
 use crate::state::{ChipRetargetGuard, ComposerChips};
@@ -234,10 +234,14 @@ fn room_transcript(
             }
         });
     });
+    // Whether the reader is at the newest line, so rows that grow after
+    // they draw keep it in view; Load earlier means reading up.
+    let following = StoredValue::new(true);
     let load_earlier = move |_| {
         let Some(before) = oldest.get_untracked() else {
             return;
         };
+        following.set_value(false);
         loading_earlier.set(true);
         let room = id.get_value();
         wasm_bindgen_futures::spawn_local(async move {
@@ -303,9 +307,11 @@ fn room_transcript(
 
     // Follow the room: a new line scrolls it into view; Load earlier does not.
     let scroller = NodeRef::<html::Div>::new();
+    let on_scroll = stick_to_bottom(scroller, following);
     Effect::new(move |previous: Option<(Option<String>, Option<String>)>| {
         let shown = lines.with(|lines| room_follow_key(lines));
         if previous.as_ref() != Some(&shown) {
+            following.set_value(true);
             if let Some(element) = scroller.get_untracked() {
                 element.set_scroll_top(element.scroll_height());
             }
@@ -314,8 +320,7 @@ fn room_transcript(
     });
 
     view! {
-        <div node_ref=scroller class="min-h-0 flex-1 overflow-y-auto">
-            <p class="sr-only" aria-live="polite" data-room-announce="">{move || announced.get()}</p>
+        <div node_ref=scroller class="min-h-0 flex-1 overflow-y-auto" on:scroll=on_scroll>
             <div class="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 p-4 sm:px-6" role="log" aria-live="off" aria-label="Room messages">
                 <Show when=move || more.get()>
                     <div class="flex justify-center">
@@ -332,6 +337,7 @@ fn room_transcript(
                     children=move |line| room_line(line, bruhs, data)
                 />
             </div>
+            <p class="sr-only" aria-live="polite" data-room-announce="">{move || announced.get()}</p>
         </div>
     }
 }

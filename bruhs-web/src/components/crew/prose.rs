@@ -87,6 +87,56 @@ pub(super) fn install_crew_prose(texts: impl Fn() -> Vec<String> + 'static) {
     on_cleanup(move || listener.remove());
 }
 
+/// Keep a transcript that follows its newest line at the bottom while its
+/// rows grow after they draw (highlighted code, fonts), as the thread chat
+/// does. `following` is whether the reader is at the bottom: the returned
+/// handler updates it on each scroll, and Load earlier clears it.
+pub(super) fn stick_to_bottom(
+    scroller: NodeRef<leptos::html::Div>,
+    following: StoredValue<bool>,
+) -> impl Fn(leptos::ev::Event) + Copy + 'static {
+    let observer = StoredValue::new_local(
+        None::<(
+            web_sys::ResizeObserver,
+            wasm_bindgen::closure::Closure<dyn FnMut()>,
+        )>,
+    );
+    Effect::new(move |_| {
+        let Some(element) = scroller.get() else {
+            return;
+        };
+        let Some(content) = element.first_element_child() else {
+            return;
+        };
+        let callback = wasm_bindgen::closure::Closure::wrap(Box::new(move || {
+            if following.try_get_value() == Some(true) {
+                if let Some(element) = scroller.get_untracked() {
+                    element.set_scroll_top(element.scroll_height());
+                }
+            }
+        }) as Box<dyn FnMut()>);
+        if let Ok(resize) = web_sys::ResizeObserver::new(callback.as_ref().unchecked_ref()) {
+            resize.observe(&content);
+            observer.update_value(|value| {
+                if let Some((old, _)) = value.replace((resize, callback)) {
+                    old.disconnect();
+                }
+            });
+        }
+    });
+    on_cleanup(move || {
+        if let Some((resize, _callback)) = observer.try_update_value(Option::take).flatten() {
+            resize.disconnect();
+        }
+    });
+    move |_| {
+        if let Some(element) = scroller.get_untracked() {
+            let below = element.scroll_height() - element.client_height() - element.scroll_top();
+            following.set_value(below <= 2);
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::crew_link;
