@@ -7,8 +7,8 @@
 
 use std::rc::Rc;
 
+use crate::resizable::{ResizeHandleRenderer, ResizeHandleState};
 use gpui::{div, Axis, IntoElement, Styled};
-use gpui_base::{ResizeHandleRenderer, ResizeHandleState};
 
 use crate::theme;
 
