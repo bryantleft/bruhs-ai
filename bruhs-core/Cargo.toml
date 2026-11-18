@@ -60,7 +60,9 @@ tokio-postgres = "=0.7.18"
 sqlparser = { version = "=0.64.0", features = ["visitor"] }
 tokio-rustls = { version = "=0.26.4", default-features = false, features = ["ring", "tls12"] }
 qrcodegen = "=1.8.0"
-hyper = { version = "1", features = ["server", "http1"] }
+hyper = { version = "1", features = ["server", "client", "http1"] }
+# The network guard streams forwarded bodies and answers its own refusals.
+http-body-util = "0.1"
 hyper-util = { version = "0.1", features = ["tokio"] }
 tower = { version = "0.5", features = ["util"] }
 # Fresh empty working directory for the summary CLI.

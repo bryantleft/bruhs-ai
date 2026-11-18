@@ -11,6 +11,8 @@ use uuid::Uuid;
 
 mod browser;
 mod devices;
+#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
+mod network;
 mod process;
 #[cfg(test)]
 mod tests;

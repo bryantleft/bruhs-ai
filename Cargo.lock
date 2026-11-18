@@ -1201,6 +1201,7 @@ dependencies = [
  "futures-util",
  "hmac 0.12.1",
  "html5ever 0.27.0",
+ "http-body-util",
  "hyper",
  "hyper-util",
  "iana-time-zone",
