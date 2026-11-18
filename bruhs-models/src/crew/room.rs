@@ -256,7 +256,7 @@ fn quoted(label: &str, text: &str) -> String {
 /// The prompt a bruh gets for one room message: who is here, the recent
 /// transcript, and which line is for it. The trigger is never clipped;
 /// earlier and later lines are taken newest first within the budgets.
-/// Each message is quoted under its author ([`quoted`]). `names` holds
+/// Each message is quoted under its author (`quoted`). `names` holds
 /// every bruh that may have written a line, members or not; the members
 /// listed are the room's, in room order.
 pub fn room_prompt(
