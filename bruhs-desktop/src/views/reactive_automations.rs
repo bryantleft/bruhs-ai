@@ -241,6 +241,9 @@ pub(crate) struct ReactiveAutomations {
     /// What each stop command of ⌘. fails with in a test.
     #[cfg(test)]
     stop_failure: Option<String>,
+    /// What `send_now` fails with in a test.
+    #[cfg(test)]
+    send_failure: Option<String>,
 }
 
 trait ReactiveButton {
@@ -536,6 +539,8 @@ impl ReactiveAutomations {
             sent: Vec::new(),
             #[cfg(test)]
             stop_failure: None,
+            #[cfg(test)]
+            send_failure: None,
         };
         if cfg!(not(test)) {
             panel.start_crew_stream(cx);
@@ -1468,7 +1473,7 @@ impl ReactiveAutomations {
         {
             let _ = cx;
             self.sent.push(command);
-            Task::ready(Ok(()))
+            Task::ready(self.send_failure.clone().map_or(Ok(()), Err))
         }
         #[cfg(not(test))]
         {
@@ -1551,6 +1556,11 @@ impl ReactiveAutomations {
     #[cfg(test)]
     pub(crate) fn set_busy_for_test(&mut self, busy: bool) {
         self.busy = busy;
+    }
+    /// Make every `send_now` fail with `error`.
+    #[cfg(test)]
+    pub(crate) fn fail_sends_for_test(&mut self, error: &str) {
+        self.send_failure = Some(error.to_string());
     }
     /// Make every stop command of ⌘. fail with `error`.
     #[cfg(test)]

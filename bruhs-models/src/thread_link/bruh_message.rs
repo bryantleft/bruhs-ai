@@ -13,10 +13,16 @@ use super::{
     Answer, ThreadReply, ANSWER_CHARS, MIN_PREFIX_CHARS, READ_MESSAGE_CHARS,
 };
 use crate::crew::{BruhState, BruhStatus, STOPPED_LINE};
-use crate::reactive::{ReactiveRun, RunStatus};
+use crate::ids::ThreadId;
+use crate::reactive::{ReactiveRun, RunStatus, HISTORY_LIMIT};
 
 /// How often an app reads a waited-for bruh run while it has no news.
 pub const BRUH_WAIT_POLL_MS: u32 = 2_000;
+
+/// What `message_bruh` says when the service is older than rooms (or not
+/// known yet): it would drop the run id, so a wait could never find the run.
+pub const BRUH_SERVICE_OLD: &str =
+    "Not sent: the background service is older and can't take messages for bruhs. Tell the user to update it.";
 
 /// One `message_bruh` call, as the app sees it.
 #[derive(Debug, Clone, Copy)]
@@ -181,6 +187,70 @@ pub fn chat_answer<'a>(runs: &'a [ReactiveRun], run_id: &str) -> Option<Answer<'
         }
     }
     None
+}
+
+/// A `message_bruh` call held until the bruh's chat run `run_id` ends.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct BruhWait {
+    pub request_id: String,
+    /// The thread whose turn waits.
+    pub caller: ThreadId,
+    pub agent_id: String,
+    /// The bruh's name, for the reply.
+    pub name: String,
+    pub run_id: String,
+    /// A page of the bruh's runs has shown the run, so one that no longer
+    /// does may have gone.
+    pub seen: bool,
+}
+
+/// Take the bruh waits that are over, each with its reply.
+///
+/// `pages` holds the newest runs of each bruh that could be read, a page of
+/// at most [`HISTORY_LIMIT`] (the service's page size), read after every
+/// page passed before. A wait ends when its run has ended, when the bruh
+/// has left the crew, or when its run, shown once, is missing from a page
+/// that is not full (a full page may only have pushed it past its end). A
+/// bruh with no page keeps its waits until the next read.
+pub fn due_bruh_answers(
+    waits: &mut Vec<BruhWait>,
+    crew: &[BruhState],
+    pages: &[(String, Vec<ReactiveRun>)],
+) -> Vec<(BruhWait, ThreadReply)> {
+    let mut due = Vec::new();
+    waits.retain_mut(|wait| {
+        let reply = if crew.iter().all(|bruh| bruh.agent_id != wait.agent_id) {
+            Some(bruh_answer_reply(&wait.name, Answer::Removed))
+        } else if let Some((_, runs)) = pages.iter().find(|(id, _)| *id == wait.agent_id) {
+            match chat_answer(runs, &wait.run_id) {
+                Some(answer) => Some(bruh_answer_reply(&wait.name, answer)),
+                None if runs.iter().any(|run| run.id == wait.run_id) => {
+                    wait.seen = true;
+                    None
+                }
+                None if wait.seen && runs.len() < HISTORY_LIMIT => {
+                    Some(bruh_answer_reply(&wait.name, Answer::Removed))
+                }
+                None => None,
+            }
+        } else {
+            None
+        };
+        match reply {
+            Some(reply) => {
+                due.push((wait.clone(), reply));
+                false
+            }
+            None => true,
+        }
+    });
+    due
+}
+
+/// Forget the bruh waits of `caller`, whose turn is over: the broker has
+/// already ended its calls.
+pub fn forget_bruh_waits_of(waits: &mut Vec<BruhWait>, caller: &str) {
+    waits.retain(|wait| wait.caller.as_str() != caller);
 }
 
 #[cfg(test)]
@@ -462,6 +532,121 @@ mod tests {
         assert_eq!(
             bruh_op("Bo", "m".repeat(MAX_MESSAGE_CHARS + 1)).validate(),
             Err("message is too long.")
+        );
+    }
+
+    fn bruh_wait(caller: &ThreadId, run_id: &str) -> BruhWait {
+        BruhWait {
+            request_id: format!("ask-{run_id}"),
+            caller: caller.clone(),
+            agent_id: "b9".into(),
+            name: "Bo".into(),
+            run_id: run_id.into(),
+            seen: false,
+        }
+    }
+
+    fn done(id: &str, result: &str) -> ReactiveRun {
+        let mut run = run(id, RunStatus::Completed);
+        run.result = Some(result.into());
+        run
+    }
+
+    #[test]
+    fn a_held_bruh_wait_answers_once_from_the_run_page() {
+        let caller = ThreadId::new_v4();
+        let mut waits = vec![bruh_wait(&caller, "r-done"), bruh_wait(&caller, "r-busy")];
+        let bruhs = crew();
+        let pages = [(
+            "b9".to_string(),
+            vec![
+                run("r-busy", RunStatus::Running),
+                done("r-done", "All green."),
+            ],
+        )];
+        let due = due_bruh_answers(&mut waits, &bruhs, &pages);
+        assert_eq!(due.len(), 1, "only the completed run answers");
+        assert_eq!(due[0].0.request_id, "ask-r-done");
+        assert!(due[0].1.ok);
+        assert_eq!(due[0].1.text, "Bo answered:\n\nAll green.");
+        // The running one still waits, and the answered one never answers twice.
+        assert_eq!(waits.len(), 1);
+        assert_eq!(waits[0].run_id, "r-busy");
+        assert!(due_bruh_answers(&mut waits, &bruhs, &pages).is_empty());
+        // No page for its bruh (the read failed): nothing changes.
+        assert!(due_bruh_answers(&mut waits, &bruhs, &[]).is_empty());
+        assert_eq!(waits.len(), 1);
+    }
+
+    #[test]
+    fn a_bruh_wait_ends_as_removed_when_the_bruh_leaves_the_crew() {
+        let caller = ThreadId::new_v4();
+        let mut waits = vec![bruh_wait(&caller, "r-1")];
+        let others = [bruh(ADA, "Ada", BruhStatus::Asleep)];
+        // No page is needed, and a page still showing the run doesn't help.
+        let page = [("b9".to_string(), vec![run("r-1", RunStatus::Running)])];
+        let due = due_bruh_answers(&mut waits, &others, &page);
+        assert_eq!(due.len(), 1);
+        assert!(!due[0].1.ok);
+        assert_eq!(due[0].1.text, "Bo never ran the message.");
+        assert!(waits.is_empty());
+    }
+
+    #[test]
+    fn a_bruh_wait_ends_as_removed_when_a_run_it_saw_is_gone() {
+        let caller = ThreadId::new_v4();
+        let bruhs = crew();
+        let mut waits = vec![bruh_wait(&caller, "r-1")];
+        let empty = [("b9".to_string(), Vec::new())];
+        // A run not shown yet may still be on its way.
+        assert!(due_bruh_answers(&mut waits, &bruhs, &empty).is_empty());
+        assert!(!waits[0].seen);
+        // Once shown it counts as seen; missing after that, the wait ends.
+        let shown = [("b9".to_string(), vec![run("r-1", RunStatus::Queued)])];
+        assert!(due_bruh_answers(&mut waits, &bruhs, &shown).is_empty());
+        assert!(waits[0].seen);
+        let due = due_bruh_answers(&mut waits, &bruhs, &empty);
+        assert_eq!(due.len(), 1);
+        assert!(!due[0].1.ok);
+        assert_eq!(due[0].1.text, "Bo never ran the message.");
+        assert!(waits.is_empty());
+    }
+
+    #[test]
+    fn a_seen_run_missing_from_a_full_page_still_waits() {
+        let caller = ThreadId::new_v4();
+        let bruhs = crew();
+        let mut waits = vec![bruh_wait(&caller, "r-1")];
+        let shown = [("b9".to_string(), vec![run("r-1", RunStatus::Running)])];
+        assert!(due_bruh_answers(&mut waits, &bruhs, &shown).is_empty());
+        // A full page of newer runs may only have pushed it past the end.
+        let newer: Vec<ReactiveRun> = (0..HISTORY_LIMIT)
+            .map(|n| run(&format!("n-{n}"), RunStatus::Completed))
+            .collect();
+        let full = [("b9".to_string(), newer.clone())];
+        assert!(due_bruh_answers(&mut waits, &bruhs, &full).is_empty());
+        assert_eq!(waits.len(), 1);
+        // One short of full, the page is the bruh's whole history: gone.
+        let short = [("b9".to_string(), newer[1..].to_vec())];
+        assert_eq!(due_bruh_answers(&mut waits, &bruhs, &short).len(), 1);
+    }
+
+    #[test]
+    fn a_turn_that_ends_drops_its_bruh_waits() {
+        let ended = ThreadId::new_v4();
+        let other = ThreadId::new_v4();
+        let mut waits = vec![
+            bruh_wait(&ended, "r-1"),
+            bruh_wait(&other, "r-2"),
+            bruh_wait(&ended, "r-3"),
+        ];
+        forget_bruh_waits_of(&mut waits, ended.as_str());
+        assert_eq!(
+            waits
+                .iter()
+                .map(|wait| wait.run_id.as_str())
+                .collect::<Vec<_>>(),
+            ["r-2"]
         );
     }
 }
