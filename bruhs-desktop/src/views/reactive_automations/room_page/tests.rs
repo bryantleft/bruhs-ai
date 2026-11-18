@@ -51,6 +51,7 @@ fn snapshot(protocol: u32, bruhs: Vec<BruhState>, rooms: Vec<RoomState>) -> Reac
 
 fn message(seq: u64, author: RoomAuthor, text: &str) -> RoomMessage {
     RoomMessage {
+        question: false,
         id: seq.to_string(),
         room_id: "r".into(),
         seq,

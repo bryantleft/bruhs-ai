@@ -16,11 +16,10 @@ use crate::views::braille::braille_face;
 use crate::views::crew_face::bruh_face;
 use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
-    author_name, member_hits, member_states, members_line, mention_query, merge_messages,
-    refused_draft, room_composer_block, room_composer_hint, room_follow_key, room_line_key,
-    room_lines, room_markdown, room_post, working_line, Room, RoomLine, RoomMessage, RoomState,
-    APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM, LOAD_EARLIER, ROOM_GONE, ROOM_LEAD, ROOM_LOADING,
-    ROOM_SETTINGS,
+    asked_words, author_name, member_hits, member_states, members_line, mention_query,
+    merge_messages, refused_draft, room_composer_block, room_composer_hint, room_follow_key,
+    room_line_key, room_lines, room_markdown, room_post, working_line, Room, RoomLine, RoomMessage,
+    RoomState, EMPTY_ROOM, LOAD_EARLIER, ROOM_GONE, ROOM_LEAD, ROOM_LOADING, ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhStatus, RAIL_FACE_PX};
 use bruhs_models::logic::context_chip::{
@@ -819,10 +818,13 @@ impl ReactiveAutomations {
                 message_id,
                 agent_id,
                 summary,
+                question,
             } => {
+                let (heading, closing) = asked_words(*question);
+                let label = if *question { "Question" } else { "Approval" };
                 let card = self
-                    .render_bruh_card(message_id, "Approval", layout)
-                    .child(small_text(APPROVAL_WANTS, theme::rambutan_400()))
+                    .render_bruh_card(message_id, label, layout)
+                    .child(small_text(heading, theme::rambutan_400()))
                     .child(
                         div()
                             .font_family(theme::CODE_FONT_FAMILY)
@@ -830,7 +832,7 @@ impl ReactiveAutomations {
                             .text_color(theme::rambutan_100())
                             .child(summary.clone()),
                     )
-                    .child(small_text(APPROVAL_DECIDED, theme::rambutan_400()))
+                    .child(small_text(closing, theme::rambutan_400()))
                     .into_any_element();
                 self.render_room_author(
                     format!("room-line-asked-{message_id}"),

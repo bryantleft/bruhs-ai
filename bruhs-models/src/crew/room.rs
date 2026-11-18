@@ -64,6 +64,10 @@ pub struct RoomMessage {
     pub outbox_id: Option<String>,
     #[serde(default)]
     pub failed: bool,
+    /// A card line (`outbox_id`) for a question rather than an approval,
+    /// so it still reads as one once its outbox item is gone.
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub question: bool,
     pub created_at: EpochMs,
 }
 
@@ -513,6 +517,7 @@ mod tests {
 
     fn line(i: usize, author: RoomAuthor, text: String) -> RoomMessage {
         RoomMessage {
+            question: false,
             id: format!("id{i}"),
             room_id: "r".into(),
             seq: u64::try_from(i).unwrap(),

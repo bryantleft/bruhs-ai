@@ -29,6 +29,10 @@ pub const NO_MEMBERS: &str = "Add a bruh in Room settings to start.";
 pub const DELETE_ROOM_CONFIRM: &str = "Delete this room and its messages? The bruhs stay.";
 /// Shown on an approval card once the owner has decided it.
 pub const APPROVAL_DECIDED: &str = "Decided";
+/// Heads a question whose card is gone, before what the bruh asked.
+pub const QUESTION_ASKED: &str = "Asked";
+/// Shown under a question whose card is gone.
+pub const QUESTION_ANSWERED: &str = "Answered";
 /// The room form's member checklist.
 pub const ROOM_MEMBERS: &str = "Members";
 /// The room form's lead picker.
@@ -97,6 +101,17 @@ pub fn room_rail_rows(rooms: &[RoomState], bruhs: &[BruhState]) -> Vec<RoomRailR
         .collect()
 }
 
+/// The heading and closing words of a card whose outbox item is gone, and
+/// its accessible name: a question's or an approval's.
+#[must_use]
+pub fn asked_words(question: bool) -> (&'static str, &'static str) {
+    if question {
+        (QUESTION_ASKED, QUESTION_ANSWERED)
+    } else {
+        (APPROVAL_WANTS, APPROVAL_DECIDED)
+    }
+}
+
 /// The line shown while a bruh has a run in the room.
 #[must_use]
 pub fn working_line(name: &str) -> String {
@@ -140,6 +155,8 @@ pub enum RoomLine {
         message_id: String,
         agent_id: String,
         summary: String,
+        /// A question, not an approval ([`asked_words`]).
+        question: bool,
     },
     /// A bruh with a queued or running run in this room.
     Working {
@@ -186,6 +203,7 @@ pub fn room_lines(
                                 message_id,
                                 agent_id,
                                 summary: message.text.clone(),
+                                question: message.question,
                             },
                         },
                         None => RoomLine::Bruh {
@@ -586,6 +604,7 @@ mod tests {
 
     fn msg(seq: u64, author: RoomAuthor, text: &str) -> RoomMessage {
         RoomMessage {
+            question: false,
             id: format!("m{seq}"),
             room_id: "r".into(),
             seq,
@@ -1120,5 +1139,37 @@ mod tests {
         );
         assert_eq!(room_announcement(&later, Some("m7"), &bruhs), None);
         assert_eq!(room_announcement(&later, Some("gone"), &bruhs), None);
+    }
+
+    #[test]
+    fn a_question_whose_card_is_gone_reads_as_answered_not_decided() {
+        let mut asked = msg(1, bruh("a"), "Which folder?");
+        asked.outbox_id = Some("gone".into());
+        asked.question = true;
+        let mut approval = msg(2, bruh("a"), "Run ls");
+        approval.outbox_id = Some("gone too".into());
+        let lines = room_lines(&[asked, approval], &[], &[], "r");
+        let words: Vec<(&str, &str)> = lines
+            .iter()
+            .filter_map(|line| match line {
+                RoomLine::Asked { question, .. } => Some(asked_words(*question)),
+                _ => None,
+            })
+            .collect();
+        assert_eq!(
+            words,
+            [
+                (QUESTION_ASKED, QUESTION_ANSWERED),
+                (APPROVAL_WANTS, APPROVAL_DECIDED)
+            ]
+        );
+        // An older service's message has no kind: it reads as before.
+        let old: RoomMessage = serde_json::from_value(serde_json::json!({
+            "id": "m", "room_id": "r", "seq": 1, "author": {"type": "owner"},
+            "text": "t", "created_at": 1,
+        }))
+        .unwrap();
+        assert!(!old.question);
+        assert!(!serde_json::to_string(&old).unwrap().contains("question"));
     }
 }

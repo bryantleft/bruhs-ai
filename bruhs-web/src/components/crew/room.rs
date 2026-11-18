@@ -3,10 +3,10 @@
 //! and a composer whose `@` lists only the room's members.
 
 use bruhs_models::crew::room::{
-    author_name, member_states, members_line, merge_messages, refused_draft, room_announcement,
-    room_composer_block, room_composer_hint, room_follow_key, room_line_key, room_lines,
-    room_markdown, room_post, working_line, Room, RoomLine, RoomMessage, APPROVAL_DECIDED,
-    APPROVAL_WANTS, EMPTY_ROOM, LOAD_EARLIER, ROOM_GONE, ROOM_LOADING, ROOM_SETTINGS,
+    asked_words, author_name, member_states, members_line, merge_messages, refused_draft,
+    room_announcement, room_composer_block, room_composer_hint, room_follow_key, room_line_key,
+    room_lines, room_markdown, room_post, working_line, Room, RoomLine, RoomMessage, EMPTY_ROOM,
+    LOAD_EARLIER, ROOM_GONE, ROOM_LOADING, ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
 use leptos::html;
@@ -406,19 +406,26 @@ fn room_line(line: RoomLine, bruhs: Memo<Vec<BruhState>>, data: CrewData) -> Any
             by_bruh(agent_id, bruhs, card)
         }
         RoomLine::Asked {
-            agent_id, summary, ..
-        } => by_bruh(
             agent_id,
-            bruhs,
-            view! {
-                <article class=CARD aria-label="Approval" data-room-line="asked">
-                    <p class="text-label-sm text-rambutan-400">{APPROVAL_WANTS}</p>
-                    <p class="whitespace-pre-wrap break-words text-body text-rambutan-100">{summary}</p>
-                    <p class="text-label-sm text-rambutan-400">{APPROVAL_DECIDED}</p>
-                </article>
-            }
-            .into_any(),
-        ),
+            summary,
+            question,
+            ..
+        } => {
+            let (heading, closing) = asked_words(question);
+            let label = if question { "Question" } else { "Approval" };
+            by_bruh(
+                agent_id,
+                bruhs,
+                view! {
+                    <article class=CARD aria-label=label data-room-line="asked">
+                        <p class="text-label-sm text-rambutan-400">{heading}</p>
+                        <p class="whitespace-pre-wrap break-words text-body text-rambutan-100">{summary}</p>
+                        <p class="text-label-sm text-rambutan-400">{closing}</p>
+                    </article>
+                }
+                .into_any(),
+            )
+        }
         RoomLine::Working { agent_id, .. } => {
             let id = StoredValue::new(agent_id);
             let look = look_of(id, bruhs);

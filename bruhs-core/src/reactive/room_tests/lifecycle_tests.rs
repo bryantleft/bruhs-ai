@@ -89,6 +89,7 @@ async fn an_approval_from_a_room_run_shows_in_the_room_and_the_bruhs_chat() {
     assert_eq!(card.outbox_id.as_deref(), Some(id.as_str()));
     assert_eq!(card.run_id.as_deref(), Some(claim.run.id.as_str()));
     assert!(!card.failed);
+    assert!(!card.question, "an approval's card");
     let snapshot = runtime.snapshot().await.unwrap();
     let approval = snapshot.outbox.iter().find(|item| item.id == id).unwrap();
     assert!(!approval.message.is_empty());
@@ -150,6 +151,7 @@ async fn a_question_from_a_room_run_shows_in_the_room() {
             Some(claim.run.id.as_str())
         )
     );
+    assert!(card.question, "a question's card says so");
     assert_eq!(
         (kept[2].text.as_str(), kept[2].outbox_id.as_deref()),
         ("Done.", None)

@@ -43,6 +43,8 @@ pub(in crate::reactive) struct Extra {
     pub(in crate::reactive) run_id: Option<String>,
     pub(in crate::reactive) outbox_id: Option<String>,
     pub(in crate::reactive) failed: bool,
+    /// The card is a question, not an approval.
+    pub(in crate::reactive) question: bool,
     pub(in crate::reactive) result_of: Option<String>,
 }
 
@@ -173,6 +175,7 @@ pub(in crate::reactive) fn ask_opened(
         Extra {
             run_id: Some(run.id.clone()),
             outbox_id: Some(item.id.clone()),
+            question: item.approval.is_none(),
             ..Extra::default()
         },
     )?;
@@ -281,6 +284,7 @@ pub(in crate::reactive) fn append(
         run_id: extra.run_id,
         outbox_id: extra.outbox_id,
         failed: extra.failed,
+        question: extra.question,
         created_at: EpochMs::now(),
     };
     connection.execute(
