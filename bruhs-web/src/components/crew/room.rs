@@ -96,10 +96,12 @@ pub fn RoomPage(room_id: String) -> impl IntoView {
     let present = Memo::new(move |_| room.with(|room| matches!(room, Some(Some(_)))));
 
     // A room deleted from its own settings takes the button focus would go
-    // back to, so focus lands on the notice instead of the page body.
+    // back to, so focus lands on the notice instead of the page body. The
+    // room can go before the dialog closes, so closing checks again.
     let gone_ref = NodeRef::<html::H1>::new();
     Effect::new(move |_| {
-        if !room.with(|room| matches!(room, Some(None))) {
+        let dialog_open = settings_open.get();
+        if dialog_open || !room.with(|room| matches!(room, Some(None))) {
             return;
         }
         request_animation_frame(move || {
@@ -118,12 +120,12 @@ pub fn RoomPage(room_id: String) -> impl IntoView {
                 None => match data.error.get() {
                     Some(message) => view! {
                         <div class="space-y-3 p-6">
-                            <p role="alert" class=ERROR>{message}</p>
+                            <p id="room-title" role="alert" class=ERROR>{message}</p>
                             <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| data.reload.run(()))>"Retry"</Button>
                         </div>
                     }.into_any(),
                     None => view! {
-                        <p role="status" class="p-6 text-body-sm text-rambutan-400">"Loading this room…"</p>
+                        <p id="room-title" role="status" class="p-6 text-body-sm text-rambutan-400">"Loading this room…"</p>
                     }.into_any(),
                 },
                 Some(false) => view! {
@@ -340,7 +342,8 @@ fn by_bruh(agent_id: String, bruhs: Memo<Vec<BruhState>>, body: AnyView) -> AnyV
     view! {
         <div class="flex min-w-0 items-start gap-2" data-room-author=move || id.get_value()>
             <BrailleBruh size=f64::from(RAIL_FACE_PX) view=Signal::derive(move || look.with(|look| still_view(look, BruhStatus::Working))) />
-            <div class="flex min-w-0 max-w-[80%] flex-1 flex-col items-start gap-1">
+            // The column holds the chat's 80%; a card in it takes the column's width.
+            <div class="flex min-w-0 max-w-[80%] flex-1 flex-col items-start gap-1 [&>article]:max-w-none">
                 <span class="text-label-sm text-rambutan-400">{name}</span>
                 {body}
             </div>
@@ -399,7 +402,8 @@ fn room_line(line: RoomLine, bruhs: Memo<Vec<BruhState>>, data: CrewData) -> Any
             let look = look_of(id, bruhs);
             let text = move || id.with_value(|id| bruhs.with(|bruhs| working_line(&author_name(id, bruhs))));
             view! {
-                <div role="status" class="flex min-w-0 items-center gap-2" data-room-line="working">
+                // The log announces it; no live region of its own.
+                <div class="flex min-w-0 items-center gap-2" data-room-line="working">
                     <BruhFace size=f64::from(RAIL_FACE_PX) look=look status=BruhStatus::Working />
                     <span class="text-label-sm text-rambutan-400">{text}</span>
                 </div>
