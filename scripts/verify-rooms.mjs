@@ -452,6 +452,10 @@ try {
     record('a post with no mention reaches the lead, whose reply shows with her face',
       ada.name && ada.face && runs.some((run) => run.agent_id === ids.Ada && run.status === 'completed'),
       `face ${ada.face}; name ${ada.name}; runs ${runs.map((run) => `${run.agent_id}:${run.status}`).join(',')}`);
+    const heard = await waitFor('the reply read out', `document.querySelector('[data-room-announce]')?.textContent.includes('Ada: @Bo can you check the notes?') ? document.querySelector('[data-room-announce]').textContent : null`, 3000).catch(() => null);
+    record('a new line is read out on its own, and the log itself stays quiet',
+      !!heard && await evaluate(`document.querySelector('[role="log"][aria-label="Room messages"]').getAttribute('aria-live') === 'off'`),
+      js(heard));
   });
 
   // 4. Ada's @Bo hands off; Bo's chat shows the run marked Room.
@@ -796,9 +800,11 @@ try {
     await sleep(400);
     const after = await where();
     const first = await evaluate(`document.querySelector(${js(`${log} [data-room-line]`)})?.textContent.trim()`);
+    const heard = await evaluate(`document.querySelector('[data-room-announce]')?.textContent ?? null`);
     record('Load earlier shows the older messages without jumping to the newest line',
       opened.bottom <= 2 && after.bottom > 200 && first === 'Archive message 1',
       `opened ${js(opened)}; after ${js(after)}; first line ${js(first)}`);
+    record('opening a room and Load earlier read nothing out', heard === '', js(heard));
   });
 
   await check("a bruh's Markdown renders as prose, and its links never leave the app", async () => {

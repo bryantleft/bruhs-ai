@@ -244,14 +244,11 @@ pub fn room_line_key(line: &RoomLine) -> String {
 /// Load earlier puts messages above and changes neither.
 #[must_use]
 pub fn room_follow_key(lines: &[RoomLine]) -> (Option<String>, Option<String>) {
-    let newest = lines.iter().rev().find_map(|line| match line {
-        RoomLine::Owner { message_id, .. }
-        | RoomLine::Bruh { message_id, .. }
-        | RoomLine::System { message_id, .. }
-        | RoomLine::Card { message_id, .. }
-        | RoomLine::Asked { message_id, .. } => Some(message_id.clone()),
-        RoomLine::Working { .. } => None,
-    });
+    let newest = lines
+        .iter()
+        .rev()
+        .find_map(line_message_id)
+        .map(str::to_string);
     (newest, lines.last().map(room_line_key))
 }
 
@@ -267,6 +264,56 @@ pub fn room_markdown(line: &RoomLine) -> Option<&str> {
             ..
         } => Some(text),
         _ => None,
+    }
+}
+
+/// What a screen reader should hear when the transcript changes: the
+/// lines below `newest`, the newest message it showed before, apart from
+/// the owner's own and the working lines. `None` on opening (no `newest`
+/// yet), when lines only loaded above it, or when nothing new is worth
+/// reading.
+#[must_use]
+pub fn room_announcement(
+    lines: &[RoomLine],
+    newest: Option<&str>,
+    bruhs: &[BruhState],
+) -> Option<String> {
+    let newest = newest?;
+    let at = lines
+        .iter()
+        .position(|line| line_message_id(line) == Some(newest))?;
+    let said: Vec<String> = lines[at + 1..]
+        .iter()
+        .filter_map(|line| match line {
+            RoomLine::Bruh { agent_id, text, .. } => {
+                Some(format!("{}: {text}", author_name(agent_id, bruhs)))
+            }
+            RoomLine::System { text, .. } => Some(text.clone()),
+            RoomLine::Card { agent_id, item, .. } => {
+                let asked = item
+                    .approval
+                    .as_ref()
+                    .map_or(item.title.as_str(), |approval| approval.summary.as_str());
+                Some(format!("{}: {asked}", author_name(agent_id, bruhs)))
+            }
+            RoomLine::Asked {
+                agent_id, summary, ..
+            } => Some(format!("{}: {summary}", author_name(agent_id, bruhs))),
+            RoomLine::Owner { .. } | RoomLine::Working { .. } => None,
+        })
+        .collect();
+    (!said.is_empty()).then(|| said.join("\n"))
+}
+
+/// The message a line draws, or `None` for a working line.
+fn line_message_id(line: &RoomLine) -> Option<&str> {
+    match line {
+        RoomLine::Owner { message_id, .. }
+        | RoomLine::Bruh { message_id, .. }
+        | RoomLine::System { message_id, .. }
+        | RoomLine::Card { message_id, .. }
+        | RoomLine::Asked { message_id, .. } => Some(message_id),
+        RoomLine::Working { .. } => None,
     }
 }
 
@@ -1039,5 +1086,39 @@ mod tests {
             None
         );
         assert_eq!(refused_draft("", None), None);
+    }
+
+    #[test]
+    fn only_lines_that_arrive_below_the_newest_are_read_out() {
+        let bruhs = [state("a", "Ada")];
+        let shown = vec![msg(3, RoomAuthor::Owner, "c"), msg(4, bruh("a"), "d")];
+        let lines = room_lines(&shown, &[], &[], "r");
+        // Opening reads nothing out: there was no newest line before.
+        assert_eq!(room_announcement(&lines, None, &bruhs), None);
+        // Load earlier puts lines above the newest: nothing new.
+        let mut all = shown.clone();
+        merge_messages(&mut all, vec![msg(1, RoomAuthor::Owner, "a")]);
+        let earlier = room_lines(&all, &[], &[], "r");
+        assert_eq!(room_announcement(&earlier, Some("m4"), &bruhs), None);
+        // New lines below the newest are read out, but not the owner's own.
+        merge_messages(
+            &mut all,
+            vec![
+                msg(5, RoomAuthor::Owner, "mine"),
+                msg(6, bruh("a"), "On it"),
+                msg(
+                    7,
+                    RoomAuthor::System,
+                    "Bo is paused, so it did not get this message.",
+                ),
+            ],
+        );
+        let later = room_lines(&all, &[run("w", "a", "running", 9, "r")], &[], "r");
+        assert_eq!(
+            room_announcement(&later, Some("m4"), &bruhs).as_deref(),
+            Some("Ada: On it\nBo is paused, so it did not get this message.")
+        );
+        assert_eq!(room_announcement(&later, Some("m7"), &bruhs), None);
+        assert_eq!(room_announcement(&later, Some("gone"), &bruhs), None);
     }
 }

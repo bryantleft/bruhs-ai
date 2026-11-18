@@ -3,10 +3,10 @@
 //! and a composer whose `@` lists only the room's members.
 
 use bruhs_models::crew::room::{
-    author_name, member_states, members_line, merge_messages, refused_draft, room_composer_block,
-    room_composer_hint, room_follow_key, room_line_key, room_lines, room_markdown, room_post,
-    working_line, Room, RoomLine, RoomMessage, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM,
-    LOAD_EARLIER, ROOM_GONE, ROOM_LOADING, ROOM_SETTINGS,
+    author_name, member_states, members_line, merge_messages, refused_draft, room_announcement,
+    room_composer_block, room_composer_hint, room_follow_key, room_line_key, room_lines,
+    room_markdown, room_post, working_line, Room, RoomLine, RoomMessage, APPROVAL_DECIDED,
+    APPROVAL_WANTS, EMPTY_ROOM, LOAD_EARLIER, ROOM_GONE, ROOM_LOADING, ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
 use leptos::html;
@@ -279,6 +279,28 @@ fn room_transcript(
         })
     });
 
+    // A screen reader hears only the lines that arrive below the newest,
+    // never the history on opening or on Load earlier; the log itself is
+    // quiet.
+    let announced = RwSignal::new(String::new());
+    Effect::new(move |previous: Option<Option<Option<String>>>| {
+        let newest = lines.with(|lines| room_follow_key(lines).0);
+        if !loaded.get() {
+            return None;
+        }
+        if let Some(Some(before)) = previous.flatten() {
+            if newest.as_ref() != Some(&before) {
+                let said = lines.with_untracked(|lines| {
+                    bruhs.with_untracked(|bruhs| room_announcement(lines, Some(&before), bruhs))
+                });
+                if let Some(said) = said {
+                    announced.set(said);
+                }
+            }
+        }
+        Some(newest)
+    });
+
     // Follow the room: a new line scrolls it into view; Load earlier does not.
     let scroller = NodeRef::<html::Div>::new();
     Effect::new(move |previous: Option<(Option<String>, Option<String>)>| {
@@ -293,7 +315,8 @@ fn room_transcript(
 
     view! {
         <div node_ref=scroller class="min-h-0 flex-1 overflow-y-auto">
-            <div class="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 p-4 sm:px-6" role="log" aria-label="Room messages">
+            <p class="sr-only" aria-live="polite" data-room-announce="">{move || announced.get()}</p>
+            <div class="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 p-4 sm:px-6" role="log" aria-live="off" aria-label="Room messages">
                 <Show when=move || more.get()>
                     <div class="flex justify-center">
                         <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move || loading_earlier.get()) on_click=Callback::new(load_earlier)>{LOAD_EARLIER}</Button>
