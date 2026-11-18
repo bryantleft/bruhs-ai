@@ -550,6 +550,12 @@ fn allow() -> Option<PermissionDecision> {
 
 const PULL: &str = "https://github.com/o/r/pull/1";
 
+/// A click whose command carries a `page_url` of its own, which nothing
+/// reads.
+fn lie_command() -> Value {
+    json!({"action": "click", "selector": "#merge", "page_url": "https://shop.test/"})
+}
+
 #[tokio::test]
 async fn a_gated_call_waits_while_the_owner_has_the_computer() {
     let (_dir, runtime, host, _fake) = open_computer().await;
@@ -636,16 +642,17 @@ async fn browser_calls_are_gated_on_the_page_they_act_on() {
     let (_dir, runtime, _host, fake) = open_computer().await;
     let run = running(&runtime, "a").await;
     fake.set_url("a", PULL);
-    // A page the model names never counts: the page is asked.
-    let mut lie = click();
-    lie["page_url"] = "https://shop.test/".into();
+    // A page the model names, beside the command or inside it, never
+    // counts for the gate or the card: the page is asked.
+    let lie = json!({"command": lie_command(), "page_url": "https://shop.test/"});
     let task = browse(&runtime, &run, lie, LONG_WAIT);
     let item = waiting_approval(&runtime, "a").await;
     assert_eq!(item.message, "Click #merge on github.com");
     assert_eq!(approvals(&runtime, "a").await.len(), 1);
     decide_approval(&runtime, &item.id, true).await;
     assert_eq!(decided(task).await, allow());
-    let command = &click()["command"];
+    // The allowance is the exact command the model sent, nested field and all.
+    let command = &lie_command();
     let allowance = runtime
         .consume_browser_allowance("a", command)
         .await
@@ -854,4 +861,65 @@ async fn an_allowance_is_one_shot_per_call_and_ends_with_its_run() {
         None,
         "a stopped run's allowance is gone"
     );
+}
+
+#[tokio::test]
+async fn a_retried_run_never_gets_its_old_allowances_back() {
+    let (_dir, runtime, _host, fake) = open_computer().await;
+    let run = running(&runtime, "a").await;
+    fake.set_url("a", "https://shop.test/");
+    assert_eq!(
+        decided(browse(&runtime, &run, click(), LONG_WAIT)).await,
+        allow()
+    );
+    runtime
+        .command(ReactiveCommand::CancelRun { id: run.id.clone() })
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::RetryRun { id: run.id.clone() })
+        .await
+        .unwrap();
+    // The retry reuses the run id, and its new attempt is Running again.
+    let retried = claim_one(&runtime).await.unwrap().run;
+    assert_eq!(retried.id, run.id);
+    let command = &click()["command"];
+    assert_eq!(
+        runtime
+            .consume_browser_allowance("a", command)
+            .await
+            .unwrap(),
+        None,
+        "the cancelled attempt's allowance stays gone"
+    );
+    // The new attempt's own steps still go through.
+    assert_eq!(
+        decided(browse(&runtime, &retried, click(), LONG_WAIT)).await,
+        allow()
+    );
+    assert!(runtime
+        .consume_browser_allowance("a", command)
+        .await
+        .unwrap()
+        .is_some());
+}
+
+#[tokio::test]
+async fn the_newest_allowance_for_a_step_is_used_first() {
+    let (_dir, runtime, _host, fake) = open_computer().await;
+    let run = running(&runtime, "a").await;
+    for page in ["https://shop.test/old", "https://shop.test/new"] {
+        fake.set_url("a", page);
+        assert_eq!(
+            decided(browse(&runtime, &run, click(), LONG_WAIT)).await,
+            allow()
+        );
+    }
+    let command = &click()["command"];
+    let mut taken = Vec::new();
+    for _ in 0..2 {
+        let allowance = runtime.consume_browser_allowance("a", command).await;
+        taken.push(allowance.unwrap().unwrap().page_url.unwrap());
+    }
+    assert_eq!(taken, ["https://shop.test/new", "https://shop.test/old"]);
 }

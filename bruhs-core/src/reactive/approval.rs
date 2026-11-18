@@ -20,7 +20,7 @@ use rusqlite::Connection;
 use serde_json::Value;
 use std::{
     path::{Path, PathBuf},
-    sync::{Mutex, PoisonError},
+    sync::{Arc, Mutex, PoisonError},
     time::Duration,
 };
 use tokio::time::Instant;
@@ -64,15 +64,21 @@ impl Allowances {
         list.push(allowance);
     }
 
-    /// Take one allowance for `agent_id`'s exact `command` that is still
-    /// good at `now`. Expired ones go.
+    /// Take the newest allowance for `agent_id`'s exact `command` that is
+    /// still good at `now`. Expired ones go.
     fn take(&self, agent_id: &str, command: &Value, now: Instant) -> Option<BrowserAllowance> {
         let mut list = self.list();
         list.retain(|kept| kept.expires > now);
         let index = list
             .iter()
-            .position(|kept| kept.agent_id == agent_id && &kept.command == command)?;
+            .rposition(|kept| kept.agent_id == agent_id && &kept.command == command)?;
         Some(list.remove(index))
+    }
+
+    /// Drop every allowance of `run_id`'s attempts so far. A claim calls it
+    /// as the run starts (again), since a retry keeps the run's id.
+    pub(super) fn forget_run(&self, run_id: &str) {
+        self.list().retain(|kept| kept.run_id != run_id);
     }
 }
 
@@ -85,22 +91,42 @@ impl ReactiveRuntime {
         agent_id: &str,
         command: &Value,
     ) -> Result<Option<BrowserAllowance>, ReactiveError> {
-        while let Some(allowance) = self.allowances.take(agent_id, command, Instant::now()) {
-            let run_id = allowance.run_id.clone();
-            let status = self
-                .call(
-                    move |connection| match store::run_record(connection, &run_id) {
-                        Ok(run) => Ok(Some(run.status)),
-                        Err(ReactiveError::NotFound(_)) => Ok(None),
-                        Err(error) => Err(error),
-                    },
-                )
-                .await?;
-            if status == Some(RunStatus::Running) {
-                return Ok(Some(allowance));
+        let (allowances, agent_id, command) = (
+            Arc::clone(&self.allowances),
+            agent_id.to_owned(),
+            command.clone(),
+        );
+        // Taken and checked under the database lock, which a claim holds
+        // while it forgets a retried run's old allowances: an old one can't
+        // be taken before that and found Running after it.
+        self.call(move |connection| {
+            while let Some(allowance) = allowances.take(&agent_id, &command, Instant::now()) {
+                let status = match store::run_record(connection, &allowance.run_id) {
+                    Ok(run) => Some(run.status),
+                    Err(ReactiveError::NotFound(_)) => None,
+                    Err(error) => return Err(error),
+                };
+                if status == Some(RunStatus::Running) {
+                    return Ok(Some(allowance));
+                }
             }
-        }
-        Ok(None)
+            Ok(None)
+        })
+        .await
+    }
+
+    /// Claim the next queued run, forgetting the allowances its earlier
+    /// attempts left, under the same database lock.
+    pub(super) async fn claim_next(&self) -> Result<Option<store::Claim>, ReactiveError> {
+        let allowances = Arc::clone(&self.allowances);
+        self.call(move |connection| {
+            let claim = store::claim_next(connection)?;
+            if let Some(claim) = &claim {
+                allowances.forget_run(&claim.run.id);
+            }
+            Ok(claim)
+        })
+        .await
     }
 }
 
@@ -289,6 +315,10 @@ enum Opened {
 /// answer, a late approval's one-shot grant, or the owner's answer to a new
 /// approval. Every call first waits while the owner has the bruh's
 /// computer. `None` means the run stopped while it waited.
+///
+/// The owner's hold and the approval are separate waits, each bounded by
+/// `timeout`, so one call waits at most twice `timeout`: an approval asked
+/// after a long hold still gets its whole time.
 #[expect(
     clippy::too_many_arguments,
     reason = "one call site in the worker passes the run's fixed context"

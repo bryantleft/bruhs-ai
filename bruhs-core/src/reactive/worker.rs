@@ -36,7 +36,7 @@ pub(super) async fn run(runtime: ReactiveRuntime, app: Arc<AppState>) {
         }
         // Fill free lanes; each claim takes one agent's queued work.
         loop {
-            match runtime.call(store::claim_next).await {
+            match runtime.claim_next().await {
                 Ok(Some(claim)) => {
                     runtime.changed();
                     let (runtime, app, halted) = (runtime.clone(), app.clone(), halted.clone());
@@ -45,6 +45,8 @@ pub(super) async fn run(runtime: ReactiveRuntime, app: Arc<AppState>) {
                             tracing::error!("Reactive run could not be recorded: {error}");
                             halted.store(true, std::sync::atomic::Ordering::Release);
                         }
+                        // The run has left Running: its steps can't be sent.
+                        runtime.allowances.forget_run(&claim.run.id);
                         runtime.changed();
                     });
                 }

@@ -39,7 +39,7 @@ pub(super) async fn runtime_with(agents: &[ReactiveAgent]) -> (tempfile::TempDir
 }
 
 pub(super) async fn claim_one(runtime: &ReactiveRuntime) -> Option<store::Claim> {
-    runtime.call(store::claim_next).await.unwrap()
+    runtime.claim_next().await.unwrap()
 }
 
 pub(super) async fn finish(runtime: &ReactiveRuntime, id: &str, answer: &str) {
