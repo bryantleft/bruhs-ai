@@ -31,17 +31,23 @@ pub fn page_header(title: impl Into<SharedString>, subtitle: Option<SharedString
                 .debug_selector(|| "desktop-page-title".to_string())
                 .min_w_0()
                 .child(
+                    // Web `text-h3`: Xenon 18px, weight 500.
                     div()
                         .font_family(theme::HEADING_FONT_FAMILY)
-                        .text_size(px(16.0))
+                        .text_size(px(18.0))
                         .font_weight(FontWeight::MEDIUM)
+                        .line_height(relative(1.5))
                         .text_color(theme::rambutan_100())
                         .child(title.into()),
                 )
                 .when_some(subtitle, |header, subtitle| {
+                    // Web `mt-0.5 text-body-sm`: Neon 13px.
                     header.child(
                         div()
-                            .text_size(px(11.0))
+                            .mt(px(2.0))
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_500())
                             .child(subtitle),
                     )

@@ -120,7 +120,8 @@ const REFRESH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" 
 
 pub struct DesktopAssets;
 
-/// Monaspace static faces at Regular/Medium/SemiBold/Bold (SIL OFL, see `assets/fonts/LICENSE`), matching
+/// Monaspace static faces at Regular/Medium/SemiBold/Bold, plus Regular and
+/// Medium italics (SIL OFL, see `assets/fonts/LICENSE`), matching
 /// the families the web theme serves: Argon (labels/UI), Neon (body/code),
 /// Xenon (headings), Krypton (display), Radon (callouts).
 pub fn embedded_fonts() -> Vec<Cow<'static, [u8]>> {
@@ -135,6 +136,17 @@ pub fn embedded_fonts() -> Vec<Cow<'static, [u8]>> {
         Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceArgonTracked-Medium.ttf")[..]),
         Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceArgonTracked-SemiBold.ttf")[..]),
         Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceArgonTracked-Bold.ttf")[..]),
+        // Slanted instances (`slnt` -11) of the variable fonts the web
+        // serves, for italic text: the web synthesizes it, and gpui draws
+        // upright text when a family has no italic face.
+        Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceArgon-Italic.ttf")[..]),
+        Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceArgon-MediumItalic.ttf")[..]),
+        Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceArgonTracked-Italic.ttf")[..]),
+        Cow::Borrowed(
+            &include_bytes!("../assets/fonts/MonaspaceArgonTracked-MediumItalic.ttf")[..],
+        ),
+        Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceNeon-Italic.ttf")[..]),
+        Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceNeon-MediumItalic.ttf")[..]),
         Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceNeon-Regular.otf")[..]),
         Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceNeon-Medium.otf")[..]),
         Cow::Borrowed(&include_bytes!("../assets/fonts/MonaspaceNeon-SemiBold.otf")[..]),
