@@ -118,6 +118,7 @@ mod project_picker_tests;
 mod project_picker_ui;
 mod record_picker_ui;
 mod role_settings_ui;
+mod room_ui;
 mod save_queue;
 mod save_status;
 mod scheduling_ui;
@@ -461,6 +462,8 @@ enum Overlay {
     },
     /// The crew rail's "New bruh" (web `CreateBruhDialog`).
     CreateBruh,
+    /// New room or Room settings (web `RoomDialog`).
+    RoomDialog,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -1285,6 +1288,8 @@ pub struct Workspace {
     /// The crew rail's first row and its New bruh button, so ⌘⇧B can focus them.
     crew_row_focus: FocusHandle,
     crew_new_focus: FocusHandle,
+    /// The crew rail's one scroll region, bruhs then rooms.
+    crew_scroll: ScrollHandle,
     /// On unless this device saved it off.
     sidebar_working_section: bool,
     title_instructions: String,
@@ -1334,6 +1339,8 @@ pub struct Workspace {
     thread_hops: u32,
     /// Tool calls held until another thread has replied.
     thread_waits: Vec<thread_link_ui::ThreadWait>,
+    /// `message_bruh` calls held until the bruh's run has ended.
+    bruh_waits: thread_link_ui::BruhWaits,
     /// Named model setups an agent can start a thread with.
     roles: bruhs_models::roles::RoleBook,
     /// Models for the jobs that are not threads.
@@ -1889,10 +1896,39 @@ impl Workspace {
                     window,
                     |this,
                      _,
+                     event: &crate::views::reactive_automations::ReactiveRoomDone,
+                     window,
+                     cx| {
+                        this.room_dialog_done(event.open.clone(), window, cx)
+                    },
+                ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
                      _: &crate::views::reactive_automations::ReactiveOpenAutomations,
                      window,
                      cx| {
                         this.activate_sidebar_view(AppView::Automations, window, cx)
+                    },
+                ));
+                subscriptions.push(cx.subscribe_in(
+                    &panel,
+                    window,
+                    |this,
+                     _,
+                     event: &crate::views::reactive_automations::ReactiveOpenRoomSettings,
+                     window,
+                     cx| {
+                        this.open_room_dialog(Some(event.room_id.clone()), window, cx)
+                    },
+                ));
+                // A crew change can end a held `message_bruh` call.
+                subscriptions.push(cx.subscribe(
+                    &panel,
+                    |this, _, _: &crate::views::reactive_automations::ReactiveCrewChanged, cx| {
+                        this.check_bruh_waits(cx)
                     },
                 ));
                 subscriptions.push(cx.subscribe(
@@ -2021,6 +2057,7 @@ impl Workspace {
             keybinding_installed: keybindings_ui::startup_bindings(),
             crew_row_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             crew_new_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            crew_scroll: ScrollHandle::new(),
             thread_menu_id: None,
             thread_menu_items: (0..sidebar_ui::THREAD_MENU_MAX_ITEMS)
                 .map(|_| cx.focus_handle().tab_index(0).tab_stop(true))
@@ -2043,6 +2080,7 @@ impl Workspace {
             thread_access,
             thread_hops,
             thread_waits: Vec::new(),
+            bruh_waits: thread_link_ui::BruhWaits::default(),
             roles,
             task_models,
             meeting_suggestions,
@@ -2731,6 +2769,7 @@ impl Workspace {
             AppView::Life => self.render_life_page(window, cx),
             AppView::Automations => self.render_automations_page(window, cx),
             AppView::Bruh { .. } => self.render_bruh_page(),
+            AppView::Room { .. } => self.render_bruh_page(),
             AppView::Workbench => div()
                 .flex_1()
                 .h_full()
@@ -2854,6 +2893,7 @@ impl Render for Workspace {
         self.forget_left_people_return();
         self.sync_thread_catalog(cx);
         self.sync_create_bruh(cx);
+        self.sync_room_dialog(cx);
         self.sync_bruh_page(cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
@@ -2973,7 +3013,7 @@ impl Render for Workspace {
                         .min_w(px(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX))
                         .h_full()
                         .flex_shrink_0()
-                        .child(self.render_sidebar(cx)),
+                        .child(self.render_sidebar(window, cx)),
                 )
             })
             .child({
@@ -3085,7 +3125,7 @@ impl Render for Workspace {
                         .max_w_full()
                         .h_full()
                         .occlude()
-                        .child(self.render_sidebar(cx)),
+                        .child(self.render_sidebar(window, cx)),
                 )
             })
             .when(right_panel_drawer && chat_panel_open, |el| {
@@ -3246,6 +3286,7 @@ impl Render for Workspace {
                     Overlay::RestartConfirm => self.render_restart_confirm(window, cx),
                     Overlay::SnoozeCustom { .. } => self.render_snooze_custom(window, cx),
                     Overlay::CreateBruh => self.render_create_bruh(window, cx),
+                    Overlay::RoomDialog => self.render_room_dialog(window, cx),
                 })
             })
             // Drawn after the form dialog so it sits on top of it.

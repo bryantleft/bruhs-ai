@@ -296,6 +296,23 @@ impl Workspace {
             // The crew: a bruh's page on its Chat or Settings tab, and the
             // New bruh dialog (web-vs-desktop crew comparison).
             "bruh-create" => self.open_create_bruh_dialog(window, cx),
+            // A room's page, New room and a room's settings (web-vs-desktop
+            // room page and dialog).
+            "room-new" => self.open_room_dialog(None, window, cx),
+            scene if scene.starts_with("room:") => {
+                let room_id = scene.trim_start_matches("room:").to_string();
+                self.activate_sidebar_view(AppView::Room { room_id }, window, cx);
+            }
+            // Text typed into the open room's composer (the `@` list).
+            scene if scene.starts_with("room-draft:") => {
+                let text = scene.trim_start_matches("room-draft:").to_string();
+                self.reactive_automations
+                    .update(cx, |panel, cx| panel.smoke_room_draft(&text, window, cx));
+            }
+            scene if scene.starts_with("room-settings:") => {
+                let room_id = scene.trim_start_matches("room-settings:").to_string();
+                self.open_room_dialog(Some(room_id), window, cx);
+            }
             scene if scene.starts_with("bruh:") || scene.starts_with("bruh-settings:") => {
                 let (kind, agent_id) = scene.split_once(':').unwrap_or_default();
                 self.activate_sidebar_view(

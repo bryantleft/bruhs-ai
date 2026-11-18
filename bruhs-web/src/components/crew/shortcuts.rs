@@ -1,7 +1,7 @@
 //! What the crew's two shortcuts do on the web: ⌘. stops every bruh and
 //! ⌘⇧B moves focus into the rail.
 
-use bruhs_models::crew::{send_stop_commands, service_is_current, stop_all_result, stop_commands};
+use bruhs_models::crew::{crew_commands_ready, send_stop_commands, stop_all_result, stop_commands};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
 use leptos::prelude::*;
 
@@ -15,7 +15,7 @@ pub fn stop_plan(
     protocol: Option<u32>,
     fetched: Option<&ReactiveSnapshot>,
 ) -> Option<Vec<ReactiveCommand>> {
-    if let Some(protocol) = protocol.filter(|protocol| service_is_current(*protocol)) {
+    if let Some(protocol) = protocol.filter(|protocol| crew_commands_ready(*protocol)) {
         return Some(stop_commands(protocol, &[]));
     }
     fetched.map(|snapshot| stop_commands(snapshot.protocol, &snapshot.runs))

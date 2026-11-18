@@ -25,6 +25,7 @@ pub mod handoff;
 pub mod keybindings;
 pub mod knowledge_library;
 pub mod layout;
+pub mod link_scheme;
 pub mod menu;
 pub mod pages;
 pub mod portable;

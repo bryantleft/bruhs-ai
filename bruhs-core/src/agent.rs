@@ -749,7 +749,11 @@ impl AgentOrchestrator {
             .turn(thread_id.clone(), project_path.into(), tx.clone());
         let consumer_secrets = secrets.guard();
         let producer_secrets = secrets.guard();
-        let threads = self.thread_links.turn(thread_id.clone(), &tx);
+        let threads = self.thread_links.turn(
+            thread_id.clone(),
+            &tx,
+            permission_mode == PermissionMode::BypassPermissions,
+        );
         let consumer_threads = threads.guard();
         let producer_threads = threads.guard();
         // A Plan turn changes nothing, and Codex cannot ask first, so both

@@ -16,13 +16,20 @@ mod face;
 pub use face::*;
 mod page;
 pub use page::*;
+pub mod room;
 mod transcript;
 pub use transcript::*;
 #[cfg(test)]
 mod wire_tests;
 
 /// Version of the crew wire format the background service speaks.
-pub const CREW_PROTOCOL: u32 = 1;
+pub const CREW_PROTOCOL: u32 = 2;
+
+/// First version that has Stop, access and the other crew commands.
+pub const CREW_COMMANDS_PROTOCOL: u32 = 1;
+
+/// First version that has rooms.
+pub const ROOMS_PROTOCOL: u32 = 2;
 
 /// Which way a bruh looks.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -312,6 +319,18 @@ pub fn service_is_current(protocol: u32) -> bool {
     protocol >= CREW_PROTOCOL
 }
 
+/// Whether a service understands the crew commands (Stop, access, chat).
+#[must_use]
+pub fn crew_commands_ready(protocol: u32) -> bool {
+    protocol >= CREW_COMMANDS_PROTOCOL
+}
+
+/// Whether a service understands rooms.
+#[must_use]
+pub fn rooms_ready(protocol: u32) -> bool {
+    protocol >= ROOMS_PROTOCOL
+}
+
 /// Which older service the person should update.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ServiceNotice {
@@ -324,10 +343,10 @@ impl ServiceNotice {
     pub fn message(self) -> &'static str {
         match self {
             Self::ServingOld => {
-                "The background service runs an older Bruhs. Update it so Stop and access work."
+                "The background service runs an older Bruhs. Update it so every crew feature works."
             }
             Self::InstalledOld => {
-                "The installed background service is older than this app. Update it so Stop and access keep working after you quit."
+                "The installed background service is older than this app. Update it so every crew feature keeps working after you quit."
             }
         }
     }

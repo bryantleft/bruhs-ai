@@ -74,6 +74,26 @@ impl ServerClient {
         Self::decode(response, request).await
     }
 
+    /// One room's messages, newest first; `before` is the id of the last message already shown.
+    pub async fn room_messages(
+        &self,
+        room_id: &str,
+        before: Option<&str>,
+    ) -> Result<Vec<bruhs_models::crew::room::RoomMessage>, ServerError> {
+        let mut url = reqwest::Url::parse(&self.base)
+            .map_err(|_| ServerError::Invalid("Invalid local server URL"))?;
+        url.path_segments_mut()
+            .map_err(|()| ServerError::Invalid("Invalid local server URL"))?
+            .pop_if_empty()
+            .extend(["api", "reactive", "rooms", room_id, "messages"]);
+        if let Some(before) = before {
+            url.query_pairs_mut().append_pair("before", before);
+        }
+        let request = "Read room messages";
+        let response = Self::check(self.http()?.get(url).send().await, request).await?;
+        Self::decode(response, request).await
+    }
+
     pub async fn reactive_command(
         &self,
         command: &ReactiveCommand,

@@ -157,7 +157,10 @@ impl ChatView {
         if has_local {
             self.check_rich_response_host(cx);
         }
-        let mut element = div().min_w_0().w_full();
+        let mut element = div()
+            .debug_selector(move || format!("desktop-prose-{message}-{block}"))
+            .min_w_0()
+            .w_full();
         if !remote.is_empty() {
             element = element.child(
                 runtime::action_button(
@@ -183,7 +186,7 @@ impl ChatView {
         }
         element
             .child(
-                TextView::markdown(
+                untrusted_markdown(
                     desktop_block_id("desktop-assistant-markdown", message, block),
                     markdown,
                 )

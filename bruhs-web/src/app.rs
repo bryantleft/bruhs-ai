@@ -31,9 +31,10 @@ pub fn App() -> impl IntoView {
     crate::workflow_executor::WorkflowExecutor::install();
     crate::thread_catalog::ThreadCatalog::install();
     crate::whiteboard::host::WhiteboardHost::install();
+    // Before ThreadLink, which reads the crew for list_threads.
+    crate::agent_updates::AgentUpdates::install();
     crate::thread_link::ThreadLink::install();
     crate::meeting_actions::MeetingActions::install();
-    crate::agent_updates::AgentUpdates::install();
     crate::meeting_suggestions::MeetingSuggestions::install();
     crate::workspace_bridge::WorkspaceBridge::install();
 

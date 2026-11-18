@@ -295,6 +295,95 @@ async fn foreign_pages_cannot_read_bruh_runs() {
     }
 }
 
+fn room_command(id: &str) -> Value {
+    json!({"action":"create_room","room":{"id":id,"name":"Room","members":["a"]}})
+}
+
+#[tokio::test]
+async fn room_messages_route_pages_one_rooms_messages() {
+    let fixture = Fixture::new().await;
+    fixture
+        .command(bruh("a", "A", fixture.directory.path()))
+        .await;
+    fixture.command(room_command("r")).await;
+    for n in 0..51 {
+        fixture
+            .command(json!({"action":"post_room","room_id":"r","text":format!("m{n}")}))
+            .await;
+    }
+    let get = |room: &'static str, query: String| {
+        let url = format!("{}/api/reactive/rooms/{room}/messages{query}", fixture.base);
+        let client = fixture.client.clone();
+        async move {
+            let response = client.get(url).send().await.unwrap();
+            assert_eq!(response.status(), StatusCode::OK);
+            assert_eq!(
+                response.headers()[axum::http::header::CACHE_CONTROL],
+                "no-store"
+            );
+            response
+                .json::<Vec<bruhs_models::crew::room::RoomMessage>>()
+                .await
+                .unwrap()
+        }
+    };
+    let page = get("r", String::new()).await;
+    assert_eq!(page.len(), 50);
+    assert!(page.iter().all(|message| message.room_id == "r"));
+    assert_eq!(page[0].text, "m50");
+    let older = get("r", format!("?before={}", page[49].id)).await;
+    assert_eq!(older.len(), 1);
+    assert_eq!(older[0].text, "m0");
+    assert!(get("nobody", String::new()).await.is_empty());
+    let native =
+        crate::desktop_server_client::ServerClient::new(&fixture.base, "http://127.0.0.1:9")
+            .unwrap();
+    let first = native.room_messages("r", None).await.unwrap();
+    assert_eq!(first, page);
+    let older = native.room_messages("r", Some(&page[49].id)).await.unwrap();
+    assert_eq!(older.len(), 1);
+}
+
+#[tokio::test]
+async fn foreign_pages_cannot_read_room_messages() {
+    let fixture = Fixture::new().await;
+    let response = fixture
+        .client
+        .get(format!("{}/api/reactive/rooms/r/messages", fixture.base))
+        .header("origin", "https://untrusted.example")
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::FORBIDDEN);
+}
+
+#[tokio::test]
+async fn the_reactive_stream_sends_room_states() {
+    let fixture = Fixture::new().await;
+    fixture
+        .command(bruh("a", "A", fixture.directory.path()))
+        .await;
+    fixture.command(room_command("r")).await;
+    let mut response = fixture
+        .client
+        .get(format!("{}/api/reactive/stream", fixture.base))
+        .send()
+        .await
+        .unwrap();
+    assert_eq!(response.status(), StatusCode::OK);
+    let mut text = String::new();
+    let frame = loop {
+        let chunk = response.chunk().await.unwrap().expect("stream ended");
+        text.push_str(&String::from_utf8_lossy(&chunk));
+        if let Some(data) = text.lines().find_map(|line| line.strip_prefix("data:")) {
+            break data.trim().to_string();
+        }
+    };
+    let signal: bruhs_models::reactive::OutboxSignal = serde_json::from_str(&frame).unwrap();
+    assert_eq!(signal.rooms.len(), 1);
+    assert_eq!(signal.rooms[0].room.id, "r");
+}
+
 #[tokio::test]
 async fn oversized_hook_does_not_advance_an_event_receipt() {
     let fixture = Fixture::new().await;

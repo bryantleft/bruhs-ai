@@ -1,5 +1,6 @@
 //! Durable event-driven agents shared by the local server and both clients.
 
+use crate::crew::room::{Room, RoomState};
 use crate::crew::{BruhAccess, BruhLook, BruhState};
 use crate::{ids::ThreadId, EpochMs};
 use serde::{Deserialize, Serialize};
@@ -269,6 +270,24 @@ pub enum ReactiveCommand {
     Chat {
         agent_id: String,
         message: String,
+        /// The id the sender picks for the run this message starts, so a
+        /// `message_bruh` sender that waits can read that run until it
+        /// ends. Only sent to a service that speaks rooms.
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        run_id: Option<String>,
+    },
+    CreateRoom {
+        room: Room,
+    },
+    UpdateRoom {
+        room: Room,
+    },
+    DeleteRoom {
+        id: String,
+    },
+    PostRoom {
+        room_id: String,
+        text: String,
     },
     ApproveRun {
         id: String,
@@ -387,6 +406,9 @@ pub struct ReactiveSnapshot {
     /// Every bruh as the rail shows it.
     #[serde(default)]
     pub bruhs: Vec<BruhState>,
+    /// Every room with its recent messages.
+    #[serde(default)]
+    pub rooms: Vec<RoomState>,
     /// Crew wire version the service speaks; 0 from an older service.
     #[serde(default)]
     pub protocol: u32,

@@ -63,10 +63,10 @@ fn conversation_view(id: &str) -> AppView {
     }
 }
 
-fn input_handle(
+fn input_handle<T: gpui::Focusable>(
     workspace: &Entity<Workspace>,
     cx: &mut gpui::VisualTestContext,
-    input: impl Fn(&Workspace) -> &Entity<gpui_component::input::InputState>,
+    input: impl Fn(&Workspace) -> &Entity<T>,
 ) -> gpui::FocusHandle {
     workspace.read_with(cx, |workspace, cx| {
         input(workspace).read(cx).focus_handle(cx)

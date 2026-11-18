@@ -155,6 +155,11 @@ fn DialogSurface(
     // dialog card rather than window so there's no global listener to clean
     // up — if the dialog unmounts, the handler goes with it.
     let on_key = move |ev: KeyboardEvent| {
+        // A child that handled the key, such as an open list closing on
+        // Escape, keeps it: the dialog stays open.
+        if ev.default_prevented() {
+            return;
+        }
         let key = ev.key();
         if key == "Escape" {
             if let Some(cb) = on_close {

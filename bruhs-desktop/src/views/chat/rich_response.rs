@@ -802,7 +802,7 @@ impl ChatView {
                         .w_full()
                         .min_w_0()
                         .child(
-                            TextView::markdown(
+                            untrusted_markdown(
                                 desktop_block_id("desktop-rich-source", message, index),
                                 format!("{fence}\n{source}\n{fence}"),
                             )

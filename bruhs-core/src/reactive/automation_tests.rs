@@ -223,6 +223,7 @@ async fn pausing_one_automation_keeps_shared_work_and_agent_chat_available() {
         .command(ReactiveCommand::Chat {
             agent_id: first.agent.id,
             message: "Explain this invoice.".into(),
+            run_id: None,
         })
         .await
         .unwrap();

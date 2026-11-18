@@ -1,6 +1,7 @@
 //! Assistant content: splitting markdown into prose, math and mermaid blocks, and rendering those to SVG.
 
 use super::*;
+use bruhs_models::logic::link_scheme::is_safe_link;
 use bruhs_models::logic::rich_response::{response_blocks, ResponseBlock};
 use gpui_component::zoom::px;
 pub(super) const CHAT_DIAGRAM_ERROR_FONT_FAMILY: &str = "Monaspace Argon";
@@ -51,6 +52,17 @@ pub(crate) fn desktop_markdown_style(cx: &App) -> TextViewStyle {
     style.highlight_theme = cx.theme().highlight_theme.clone();
     style.is_dark = true;
     style
+}
+
+/// `TextView::markdown` for text the app did not write (a reply, a bruh's
+/// words). A link draws, and a click opens it, only when the shared rule
+/// ([`is_safe_link`]: http, https, mailto) allows it. Any other link, such
+/// as `file:` or another app's scheme, draws as its text.
+pub(crate) fn untrusted_markdown(
+    id: impl Into<ElementId>,
+    markdown: impl Into<SharedString>,
+) -> TextView {
+    TextView::markdown(id, markdown).link(|link, _| is_safe_link(&link.url).then(|| link.clone()))
 }
 
 #[cfg(test)]
@@ -600,7 +612,7 @@ impl ChatView {
                     .child(format!("Rendering {kind}…")),
             )
             .child(
-                TextView::markdown(
+                untrusted_markdown(
                     desktop_block_id("desktop-rich-source", message_index, block_index),
                     markdown,
                 )

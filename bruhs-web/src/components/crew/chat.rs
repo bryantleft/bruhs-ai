@@ -1,9 +1,10 @@
 //! Chat with one bruh: its runs as a conversation, with its questions and
 //! approvals inline, older runs a page at a time, and a composer.
 
+use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
-    approval_outcome, composer_block, line_key, may_have_more, merge_runs, transcript, BruhLook,
-    BruhStatus, TranscriptItem, RAIL_FACE_PX,
+    approval_outcome, chat_follow_key, chat_markdown, composer_block, line_key, may_have_more,
+    merge_runs, transcript, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
 };
 use bruhs_models::reactive::{OutboxItem, ReactiveCommand, ReactiveRun};
 use leptos::html;
@@ -11,9 +12,10 @@ use leptos::prelude::*;
 
 use super::data::{use_crew_snapshot, CrewData};
 use super::face_editor::still_view;
+use super::prose::{install_crew_prose, stick_to_bottom, PROSE_BUBBLE};
 use crate::ui::{BrailleBruh, Button, ButtonSize, ButtonVariant, Textarea};
 
-const CARD: &str =
+pub(super) const CARD: &str =
     "min-w-0 max-w-[80%] space-y-2 rounded-grape bg-longan-900 p-3 inset-ring inset-ring-longan-700";
 
 #[component]
@@ -55,10 +57,14 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
             }
         });
     });
+    // Whether the reader is at the newest line, so rows that grow after
+    // they draw keep it in view; Load earlier means reading up.
+    let following = StoredValue::new(true);
     let load_earlier = move |_| {
         let Some(before) = oldest.get_untracked() else {
             return;
         };
+        following.set_value(false);
         loading_earlier.set(true);
         let agent = id.get_value();
         wasm_bindgen_futures::spawn_local(async move {
@@ -104,16 +110,30 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
         runs.with(|runs| id.with_value(|id| transcript(id, runs, &outbox)))
     });
 
-    // Follow the conversation: a new last line scrolls it into view.
+    // Code, math and diagrams in the bruh's Markdown, and its links.
+    install_crew_prose(move || {
+        lines.with(|lines| {
+            lines
+                .iter()
+                .filter_map(chat_markdown)
+                .map(str::to_string)
+                .collect()
+        })
+    });
+
+    // Follow the conversation, as a room does: a new line scrolls it into
+    // view, runs loading above an open card too, and Load earlier does not.
     let scroller = NodeRef::<html::Div>::new();
-    Effect::new(move |previous: Option<Option<String>>| {
-        let last = lines.with(|lines| lines.last().map(line_key));
-        if previous.as_ref() != Some(&last) {
+    let on_scroll = stick_to_bottom(scroller, following);
+    Effect::new(move |previous: Option<(Option<String>, Option<String>)>| {
+        let shown = lines.with(|lines| chat_follow_key(lines));
+        if previous.as_ref() != Some(&shown) {
+            following.set_value(true);
             if let Some(element) = scroller.get_untracked() {
                 element.set_scroll_top(element.scroll_height());
             }
         }
-        last
+        shown
     });
 
     let blocked = Memo::new(move |_| composer_block(state.get().map(|state| state.status)));
@@ -126,17 +146,18 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
         data.send.run(ReactiveCommand::Chat {
             agent_id: id.get_value(),
             message: text,
+            run_id: None,
         });
         message.set(String::new());
     };
 
     view! {
         <div class="flex min-h-0 flex-1 flex-col">
-            <div node_ref=scroller class="min-h-0 flex-1 overflow-y-auto">
+            <div node_ref=scroller class="min-h-0 flex-1 overflow-y-auto" on:scroll=on_scroll>
                 <div class="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 p-4 sm:px-6" role="log" aria-label="Conversation">
                     <Show when=move || more.get()>
                         <div class="flex justify-center">
-                            <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move || loading_earlier.get()) on_click=Callback::new(load_earlier)>"Load earlier"</Button>
+                            <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move || loading_earlier.get()) on_click=Callback::new(load_earlier)>{LOAD_EARLIER}</Button>
                         </div>
                     </Show>
                     {move || load_error.get().map(|message| view! { <p role="alert" class="rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200">{message}</p> })}
@@ -183,8 +204,15 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
 
 fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
     match item {
-        TranscriptItem::Owner { text, pending, .. } => view! {
+        // A message from a thread's agent names its sender, as thread chats do.
+        TranscriptItem::Owner {
+            text,
+            pending,
+            caption,
+            ..
+        } => view! {
             <div class="flex min-w-0 flex-col items-end gap-1">
+                {caption.map(|caption| view! { <span data-from-thread="" class="text-label-sm text-blueberry-400">{caption}</span> })}
                 <p class="min-w-0 max-w-[80%] whitespace-pre-wrap break-words rounded-grape bg-longan-800 px-3 py-2 text-body text-rambutan-100">{text}</p>
                 {pending.then(|| view! { <span class="text-label-sm text-rambutan-500">"Waiting for a reply"</span> })}
             </div>
@@ -200,11 +228,11 @@ fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
                 <BrailleBruh size=f64::from(RAIL_FACE_PX) view=Signal::derive(move || look.with(|look| still_view(look, BruhStatus::Working))) />
                 <div class="flex min-w-0 max-w-[80%] flex-col gap-1">
                     {trigger.map(|trigger| view! { <span class="text-label-sm text-rambutan-500">{trigger}</span> })}
-                    <p class=if failed {
-                        "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-lychee-500/10 px-3 py-2 text-body text-lychee-200"
+                    {if failed {
+                        view! { <p class="min-w-0 whitespace-pre-wrap break-words rounded-grape bg-lychee-500/10 px-3 py-2 text-body text-lychee-200">{text}</p> }.into_any()
                     } else {
-                        "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-longan-900 px-3 py-2 text-body text-rambutan-200 inset-ring inset-ring-longan-700/50"
-                    }>{text}</p>
+                        view! { <div class=PROSE_BUBBLE inner_html=crate::markdown::render_untrusted(&text)></div> }.into_any()
+                    }}
                 </div>
             </div>
         }
@@ -222,7 +250,12 @@ fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
 
 /// A run waiting for review: Run starts it, Dismiss cancels it. Both are
 /// commands every service knows, so an older one takes them too.
-fn review_card(run_id: String, trigger: &'static str, prompt: String, data: CrewData) -> AnyView {
+pub(super) fn review_card(
+    run_id: String,
+    trigger: &'static str,
+    prompt: String,
+    data: CrewData,
+) -> AnyView {
     let id = StoredValue::new(run_id);
     let disabled = Signal::derive(move || data.busy.get());
     view! {
@@ -238,7 +271,7 @@ fn review_card(run_id: String, trigger: &'static str, prompt: String, data: Crew
     .into_any()
 }
 
-fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
+pub(super) fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
     let (summary, detail) = item
         .approval
         .as_ref()
@@ -255,7 +288,7 @@ fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
     let disabled = Signal::derive(move || data.busy.get() || !data.crew_ready());
     view! {
         <article class=CARD aria-label="Approval">
-            <p class="text-label-sm text-rambutan-400">"Wants to"</p>
+            <p class="text-label-sm text-rambutan-400">{APPROVAL_WANTS}</p>
             <p class="whitespace-pre-wrap break-words text-body text-rambutan-100">{summary}</p>
             {detail.map(|detail| view! {
                 <pre data-approval-detail="" aria-label="Full request" class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-grape bg-longan-950 p-2 text-code-sm text-rambutan-300">{detail}</pre>
@@ -276,7 +309,7 @@ fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
     .into_any()
 }
 
-fn question_card(item: OutboxItem, data: CrewData) -> AnyView {
+pub(super) fn question_card(item: OutboxItem, data: CrewData) -> AnyView {
     let reply = RwSignal::new(String::new());
     let id = StoredValue::new(item.id.clone());
     let answer = move || {

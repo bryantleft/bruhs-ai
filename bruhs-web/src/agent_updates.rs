@@ -12,6 +12,7 @@
 //! retried on the next change and never blocks the UI.
 
 use bruhs_models::api::live_events::REACTIVE;
+use bruhs_models::crew::room::RoomState;
 use bruhs_models::crew::BruhState;
 use bruhs_models::reactive::{DraftOutcomeKind, OutboxItem, OutboxSignal, ReactiveCommand};
 use bruhs_models::{DraftOutcomeReport, EpochMs, WorkflowStatus};
@@ -31,6 +32,8 @@ pub struct AgentUpdates {
     pub unread: RwSignal<usize>,
     /// Every bruh's state from the latest `reactive` frame.
     pub bruhs: RwSignal<Vec<BruhState>>,
+    /// Every room's state from the latest `reactive` frame.
+    pub rooms: RwSignal<Vec<RoomState>>,
     /// The service's crew protocol; `None` until the first frame arrives.
     pub protocol: RwSignal<Option<u32>>,
 }
@@ -41,6 +44,7 @@ impl AgentUpdates {
         provide_context(Self {
             unread: RwSignal::new(0),
             bruhs: RwSignal::new(Vec::new()),
+            rooms: RwSignal::new(Vec::new()),
             protocol: RwSignal::new(None),
         });
         if let Some(AutomationStateSignal(automation)) = use_context::<AutomationStateSignal>() {
@@ -111,6 +115,9 @@ pub fn subscribe(live: &mut LiveEvents) {
         updates.unread.set(signal.unread);
         if updates.bruhs.with_untracked(|bruhs| *bruhs != signal.bruhs) {
             updates.bruhs.set(signal.bruhs.clone());
+        }
+        if updates.rooms.with_untracked(|rooms| *rooms != signal.rooms) {
+            updates.rooms.set(signal.rooms.clone());
         }
         if updates.protocol.get_untracked() != Some(signal.protocol) {
             updates.protocol.set(Some(signal.protocol));
@@ -243,6 +250,7 @@ mod tests {
             open_questions: 0,
             latest_unread: latest,
             bruhs: Vec::new(),
+            rooms: Vec::new(),
             protocol: 0,
         }
     }

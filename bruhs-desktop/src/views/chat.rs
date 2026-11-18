@@ -61,6 +61,8 @@ actions!(
 mod assistant_content;
 /// Chat replies' Markdown style, which Knowledge previews reuse.
 pub(crate) use assistant_content::desktop_markdown_style;
+/// Markdown whose links follow the shared allowlist, which crew prose reuses.
+pub(crate) use assistant_content::untrusted_markdown;
 mod auth;
 #[cfg(test)]
 mod behavior_tests;
@@ -738,6 +740,12 @@ pub struct ChatView {
 impl EventEmitter<ChatViewEvent> for ChatView {}
 
 impl ChatView {
+    /// The turn streaming now, told apart from the thread's earlier and
+    /// later turns, or `None` while none is.
+    pub(crate) fn streaming_turn(&self) -> Option<u64> {
+        self.is_streaming.then_some(self.turn_generation)
+    }
+
     #[cfg(test)]
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         Self::new_with_project_path(current_dir_string(), window, cx)

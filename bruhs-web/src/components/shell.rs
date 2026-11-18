@@ -828,6 +828,7 @@ pub fn Shell() -> impl IntoView {
                     AppView::Search => view! { <SearchPage /> }.into_any(),
                     AppView::Terminal => view! { <TerminalPage /> }.into_any(),
                     AppView::Bruh { agent_id } => view! { <crate::components::crew::page::BruhPage agent_id=agent_id /> }.into_any(),
+                    AppView::Room { room_id } => view! { <crate::components::crew::room::RoomPage room_id=room_id /> }.into_any(),
                 }}
                 // Notifications float over the view below its header row, so
                 // the page and the composer stay put as they come and go.

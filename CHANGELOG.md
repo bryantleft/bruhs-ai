@@ -21,6 +21,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   Resume work per bruh or for all, and ⌘. stops everything. ⌘⇧B opens the
   crew rail. An older background service shows a notice with Update service;
   see `docs/crew.md`.
+- Rooms: group chats with your bruhs. Mention a bruh with @ to hand it work,
+  and a bruh's reply that mentions another hands the work on, up to 6 times
+  in a row. Approvals show in the room. Agents in your threads can message a
+  bruh with message_bruh. See `docs/crew.md`.
 - The desktop app zooms like a browser: ⌘+ and ⌘− (or View → Zoom In and
   Zoom Out) step from 67% to 300%, ⌘0 returns to 100%, and the level is
   remembered. Pages reflow for the larger text at the web's widths.

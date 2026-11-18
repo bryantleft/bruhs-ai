@@ -103,6 +103,20 @@ pub async fn agent_runs(
     ))
 }
 
+/// `GET /api/reactive/rooms/{id}/messages?before=<message id>`: one room's
+/// messages, newest first. An unknown room has none.
+pub async fn room_messages(
+    value: Option<Extension<ReactiveRuntime>>,
+    Path(id): Path<String>,
+    Query(page): Query<RunPage>,
+) -> Result<impl axum::response::IntoResponse, AppError> {
+    let messages = runtime(value)?.room_messages(id, page.before).await?;
+    Ok((
+        [(axum::http::header::CACHE_CONTROL, "no-store")],
+        Json(messages),
+    ))
+}
+
 /// `GET /api/reactive/stream`: unnamed frames of `OutboxSignal`, the same
 /// producer as the combined stream's `reactive` frame.
 pub async fn stream(
