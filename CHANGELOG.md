@@ -304,6 +304,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   example, that a focus block had changed after the Undo had gone through.
 - The workflow notice counts one saved step as "1 step saved", in both
   apps.
+- Keyboard focus keeps its place on both apps: opening an Inbox
+  conversation lands on Back to Inbox and Back returns to its row, and the
+  workflow notice's Pause hands focus to Open workflows. The web notice no
+  longer drops keyboard focus each time a step is saved.
+- On the desktop, primary buttons show a visible focus ring, and page titles
+  are headings for screen readers.
 - In the desktop app, a dialog opened from the keyboard puts focus on its
   first control, as the web does, instead of on the dialog itself: a delete
   confirmation on Cancel, a month's day list on its first record, Snooze
