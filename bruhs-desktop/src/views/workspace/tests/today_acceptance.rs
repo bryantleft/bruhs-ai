@@ -67,6 +67,13 @@ fn launch<'a>(
     });
     let workspace = cell.borrow().clone().expect("workspace entity");
     workspace.update_in(cx, |workspace, _window, cx| {
+        // A closed loopback port, never a bruhs-server on this machine.
+        workspace.meetings_hub.update(cx, |hub, _| {
+            hub.set_people_test_client(
+                crate::server_client::ServerClient::new("http://127.0.0.1:9", "http://127.0.0.1:9")
+                    .expect("a loopback client"),
+            );
+        });
         workspace.persistence_test_path = Some(path.to_path_buf());
         workspace.day_plan_test_now = Some(morning());
         workspace.active_view = AppView::Today;

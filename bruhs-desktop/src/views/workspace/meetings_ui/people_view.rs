@@ -19,6 +19,8 @@ use bruhs_models::{
 };
 
 #[cfg(test)]
+mod linked_records_tests;
+#[cfg(test)]
 mod parity_tests;
 
 /// One relationship item being edited in place.
@@ -706,6 +708,20 @@ impl Workspace {
             *self.people_page.seen_expanded.borrow_mut() = None;
         }
         self.activate_sidebar_view(AppView::People, window, cx);
+    }
+
+    /// Web `BackToPeople`: the way back lasts while the record opened from
+    /// the profile stays open. Leaving it any other way forgets it, so the
+    /// same record opened later from Meetings or Inbox has no Back to People.
+    pub(in crate::views::workspace) fn forget_left_people_return(&mut self) {
+        if self
+            .people_page
+            .return_to
+            .as_ref()
+            .is_some_and(|(_, view)| *view != self.active_view)
+        {
+            self.people_page.return_to = None;
+        }
     }
 
     /// Return to People with the person the detail was opened from.
@@ -2097,7 +2113,7 @@ impl Workspace {
             .map(|(index, meeting)| {
                 let person_id = profile.id.clone();
                 let meeting_id = meeting.id.clone();
-                let title = meeting.title.clone();
+                let title = copy::meeting_link_title(&meeting.title).to_string();
                 div()
                     .flex()
                     .flex_wrap()
@@ -2244,13 +2260,13 @@ impl Workspace {
             .iter()
             .map(|conversation| conversation.id.as_str())
             .collect::<HashSet<_>>();
-        let suggestions = bruhs_models::suggested_follow_ups(
+        let suggestions = bruhs_models::person_follow_ups(
+            person_id,
             &self.relationships,
             &self.inbox_conversations,
             EpochMs::now().as_millis(),
         )
         .into_iter()
-        .filter(|suggestion| suggestion.person_id == person_id)
         .enumerate()
         .map(|(index, suggestion)| {
             let conversation = suggestion
@@ -2352,7 +2368,27 @@ impl Workspace {
                     .child(Input::new(&self.relationship_location_input))
                     .child(Input::new(&self.relationship_notes_input)),
             )
-            .children(suggestions)
+            .when(!suggestions.is_empty(), |el| {
+                // Web: a blueberry note headed Suggested follow ups.
+                el.child(
+                    div()
+                        .debug_selector(|| "desktop-follow-ups".into())
+                        .rounded(px(8.0))
+                        .border_1()
+                        .border_color(theme::blueberry_500().opacity(0.2))
+                        .bg(theme::blueberry_500().opacity(0.08))
+                        .p(px(10.0))
+                        .flex()
+                        .flex_col()
+                        .gap_1()
+                        .child(label(
+                            copy::FOLLOW_UPS_HEADING.to_uppercase(),
+                            LABEL_SM_PX,
+                            theme::blueberry_300(),
+                        ))
+                        .children(suggestions),
+                )
+            })
             .child(div().flex().flex_wrap().gap_1().children(kinds))
             .child(
                 div()

@@ -131,6 +131,13 @@ fn meeting(id: &str, started: f64) -> Meeting {
 }
 
 #[test]
+fn a_linked_meeting_without_a_title_reads_untitled() {
+    assert_eq!(people_copy::meeting_link_title("Roadmap"), "Roadmap");
+    assert_eq!(people_copy::meeting_link_title("  "), "Untitled meeting");
+    assert_eq!(people_copy::meeting_link_title(""), "Untitled meeting");
+}
+
+#[test]
 fn person_meetings_join_speakers_action_items_and_observation_sources() {
     let mut ada = person("ada", "Ada", &[]);
     ada.observations.push(PersonObservation {
