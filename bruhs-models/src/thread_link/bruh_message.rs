@@ -235,9 +235,10 @@ pub struct BruhWait {
 /// `pages` holds the newest runs of each bruh that could be read, a page of
 /// at most [`HISTORY_LIMIT`] (the service's page size), read after every
 /// page passed before. A wait ends when its run has ended, when the bruh
-/// has left the crew, or when its run, shown once, is missing from a page
-/// that is not full (a full page may only have pushed it past its end). A
-/// bruh with no page keeps its waits until the next read.
+/// has left a crew that still has bruhs (an empty one may not have loaded),
+/// or when its run, shown once, is missing from a page that is not full (a
+/// full page may only have pushed it past its end). A bruh with no page
+/// keeps its waits until the next read.
 pub fn due_bruh_answers(
     waits: &mut Vec<BruhWait>,
     crew: &[BruhState],
@@ -245,7 +246,10 @@ pub fn due_bruh_answers(
 ) -> Vec<(BruhWait, ThreadReply)> {
     let mut due = Vec::new();
     waits.retain_mut(|wait| {
-        let reply = if crew.iter().all(|bruh| bruh.agent_id != wait.agent_id) {
+        // An empty crew is one not read yet as often as one that lost its
+        // last bruh, so it ends nothing on its own.
+        let left = !crew.is_empty() && crew.iter().all(|bruh| bruh.agent_id != wait.agent_id);
+        let reply = if left {
             Some(bruh_answer_reply(&wait.name, Answer::Removed))
         } else if let Some((_, runs)) = pages.iter().find(|(id, _)| *id == wait.agent_id) {
             match chat_answer(runs, &wait.run_id) {
@@ -654,6 +658,20 @@ mod tests {
         assert!(!due[0].1.ok);
         assert_eq!(due[0].1.text, "Bo never ran the message.");
         assert!(waits.is_empty());
+    }
+
+    #[test]
+    fn an_empty_crew_ends_no_wait_on_its_own() {
+        let caller = ThreadId::new_v4();
+        let mut waits = vec![bruh_wait(&caller, "r-1")];
+        // A crew that has not loaded reads as empty: nobody has left it.
+        assert!(due_bruh_answers(&mut waits, &[], &[]).is_empty());
+        let page = [("b9".to_string(), vec![run("r-1", RunStatus::Running)])];
+        assert!(due_bruh_answers(&mut waits, &[], &page).is_empty());
+        assert_eq!(waits.len(), 1);
+        // Its own run still answers it.
+        let page = [("b9".to_string(), vec![done("r-1", "Done.")])];
+        assert_eq!(due_bruh_answers(&mut waits, &[], &page).len(), 1);
     }
 
     #[test]
