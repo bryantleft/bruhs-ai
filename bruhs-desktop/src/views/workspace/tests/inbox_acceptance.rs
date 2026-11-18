@@ -6,6 +6,7 @@
 //! control that opened a dialog (INBOX-11), and empty views use the web's
 //! wording and next step (INBOX-13).
 
+use super::keys::{focus_handle_of, focus_page, focused, in_dialog, press, tab_to};
 use super::launch::{init, launch, quit, saved};
 use super::*;
 use crate::views::workspace::inbox_ui::inbox_empty_state;
@@ -60,56 +61,6 @@ fn conversation_view(id: &str) -> AppView {
     AppView::ConversationDetail {
         conversation_id: id.into(),
     }
-}
-
-/// A key press as the app gets it: gpui clicks a focused button on key up.
-fn press(cx: &mut gpui::VisualTestContext, key: &str) {
-    let keystroke = gpui::Keystroke::parse(key).expect("keystroke");
-    cx.simulate_event(gpui::KeyDownEvent {
-        keystroke: keystroke.clone(),
-        is_held: false,
-        prefer_character_input: false,
-    });
-    cx.simulate_event(gpui::KeyUpEvent { keystroke });
-    cx.run_until_parked();
-}
-
-fn focused(cx: &mut gpui::VisualTestContext) -> Option<gpui::FocusHandle> {
-    cx.update(|window, cx| window.focused(cx))
-}
-
-/// Tabs forward until `target` has focus.
-fn tab_to(cx: &mut gpui::VisualTestContext, target: &gpui::FocusHandle, name: &str) {
-    for _ in 0..300 {
-        if focused(cx).as_ref() == Some(target) {
-            return;
-        }
-        cx.simulate_keystrokes("tab");
-    }
-    panic!("Tab never reached {name}");
-}
-
-/// A control's focus handle, found by pressing the pointer on it and
-/// releasing away from it: focus moves there and nothing is clicked. The
-/// test then reaches the control again with Tab.
-fn focus_handle_of(cx: &mut gpui::VisualTestContext, selector: &'static str) -> gpui::FocusHandle {
-    let target = rendered_bounds(cx, selector).center();
-    cx.simulate_mouse_down(target, gpui::MouseButton::Left, gpui::Modifiers::default());
-    cx.simulate_mouse_up(
-        gpui::point(px(640.0), px(4.0)),
-        gpui::MouseButton::Left,
-        gpui::Modifiers::default(),
-    );
-    cx.run_until_parked();
-    focused(cx).unwrap_or_else(|| panic!("{selector} takes focus"))
-}
-
-/// Focus at the top of the page, where a navigation leaves it.
-fn focus_page(workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext) {
-    workspace.update_in(cx, |workspace, window, cx| {
-        workspace.workspace_focus_handle.focus(window, cx);
-    });
-    cx.run_until_parked();
 }
 
 fn input_handle(
@@ -430,12 +381,7 @@ async fn the_inbox_works_from_the_keyboard(cx: &mut gpui::TestAppContext) {
             Some(Overlay::RecordDeleteConfirm { .. })
         ));
     });
-    let in_dialog = workspace.update_in(cx, |workspace, window, cx| {
-        workspace
-            .modal_start_focus_handle
-            .contains_focused(window, cx)
-    });
-    assert!(in_dialog, "focus moved into the dialog");
+    assert!(in_dialog(&workspace, cx), "focus moved into the dialog");
     cx.simulate_keystrokes("escape");
     cx.run_until_parked();
     workspace.read_with(cx, |workspace, _| assert!(workspace.overlay.is_none()));
@@ -453,12 +399,10 @@ async fn the_inbox_works_from_the_keyboard(cx: &mut gpui::TestAppContext) {
     let mut stops = 1;
     loop {
         cx.simulate_keystrokes("tab");
-        let in_dialog = workspace.update_in(cx, |workspace, window, cx| {
-            workspace
-                .modal_start_focus_handle
-                .contains_focused(window, cx)
-        });
-        assert!(in_dialog, "Tab left the dialog after {stops} stops");
+        assert!(
+            in_dialog(&workspace, cx),
+            "Tab left the dialog after {stops} stops"
+        );
         if focused(cx).as_ref() == Some(&close) {
             break;
         }

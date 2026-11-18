@@ -1840,8 +1840,24 @@ impl Workspace {
         (events, tasks)
     }
 
-    pub(super) fn open_calendar_day_list(&mut self, date: NaiveDate, cx: &mut Context<'_, Self>) {
+    /// Web "Calendar day" dialog: focus moves into it, and closing it
+    /// returns focus to the day number or +N more that opened it.
+    pub(super) fn open_calendar_day_list(
+        &mut self,
+        date: NaiveDate,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.overlay == Some(Overlay::CalendarDay { date }) {
+            return;
+        }
+        if !self.modal_start_focus_handle.contains_focused(window, cx) {
+            self.palette_return_focus = window
+                .focused(cx)
+                .map(|focus| (self.active_view.clone(), focus));
+        }
         self.open_overlay(Overlay::CalendarDay { date });
+        self.focus_first_modal_tab_stop(window, cx);
         cx.notify();
     }
 
@@ -1867,15 +1883,15 @@ impl Workspace {
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
+            .on_click(cx.listener(move |this, _ev, window, cx| {
                 cx.stop_propagation();
-                this.open_calendar_day_list(date, cx);
+                this.open_calendar_day_list(date, window, cx);
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
                 if is_web_button_activation_key(event.keystroke.key.as_str()) {
                     window.prevent_default();
                     cx.stop_propagation();
-                    this.open_calendar_day_list(date, cx);
+                    this.open_calendar_day_list(date, window, cx);
                 }
             }))
     }
