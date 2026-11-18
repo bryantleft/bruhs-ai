@@ -50,7 +50,18 @@ impl<K: FieldKind> Element for EditorElement<K> {
         window: &mut Window,
         cx: &mut App,
     ) -> (LayoutId, Self::RequestLayoutState) {
-        let (text_id, text_state) = self.text.request_layout(id, inspector, window, cx);
+        // One line keeps its line: the text never wraps, the field scrolls.
+        let (text_id, text_state) = if K::MULTI_LINE {
+            self.text.request_layout(id, inspector, window, cx)
+        } else {
+            let nowrap = gpui::TextStyleRefinement {
+                white_space: Some(gpui::WhiteSpace::Nowrap),
+                ..Default::default()
+            };
+            window.with_text_style(Some(nowrap), |window| {
+                self.text.request_layout(id, inspector, window, cx)
+            })
+        };
         let mut style = Style::default();
         style.size.width = gpui::relative(1.).into();
         // One line keeps its line; many lines wrap to the field's width.
@@ -103,7 +114,8 @@ impl<K: FieldKind> Element for EditorElement<K> {
             if K::MULTI_LINE {
                 // Keep the caret's line inside the scroll viewport.
                 let viewport = state.scroll.bounds();
-                if viewport.size.height > Pixels::ZERO && state.caret_visible {
+                if viewport.size.height > Pixels::ZERO && state.reveal_pending {
+                    state.reveal_pending = false;
                     let line_height = layout.line_height();
                     let offset = state.scroll.offset();
                     let top = caret_point.y;
@@ -124,7 +136,8 @@ impl<K: FieldKind> Element for EditorElement<K> {
                         }
                     }
                 }
-            } else {
+            } else if state.reveal_pending {
+                state.reveal_pending = false;
                 // Scroll sideways so the caret stays in view.
                 let width = bounds.size.width;
                 let x = caret_point.x - text_bounds.left();
@@ -135,13 +148,26 @@ impl<K: FieldKind> Element for EditorElement<K> {
                     scroll = x;
                 }
                 let max = (laid_out.size.width - width + px(CARET_WIDTH_PX)).max(Pixels::ZERO);
-                scroll = scroll.clamp(Pixels::ZERO, max);
-                if scroll != state.scroll_x {
-                    state.scroll_x = scroll;
-                    cx.notify();
-                }
+                state.scroll_x = scroll.clamp(Pixels::ZERO, max);
             }
         });
+
+        // A single-line field whose scroll just moved lays its text out again
+        // at the new offset, so this frame already shows the caret.
+        let mut text_bounds = text_bounds;
+        if !K::MULTI_LINE {
+            let scroll = self.state.read(cx).scroll_x;
+            if scroll != scroll_x {
+                text_bounds.origin.x = laid_out.origin.x - scroll;
+                self.text
+                    .prepaint(id, inspector, text_bounds, text_state, window, cx);
+                self.state.update(cx, |state, _| {
+                    if let Some(drawn) = state.drawn.as_mut() {
+                        drawn.text_bounds = text_bounds;
+                    }
+                });
+            }
+        }
 
         Prepainted {
             hitbox,
@@ -213,8 +239,25 @@ impl<K: FieldKind> Element for EditorElement<K> {
                 );
             });
         });
+        let menu = self.state.clone();
+        let menu_hitbox = prepainted.hitbox.clone();
+        window.on_mouse_event(move |event: &MouseDownEvent, phase, window, cx| {
+            if !phase.bubble()
+                || event.button != MouseButton::Right
+                || !menu_hitbox.is_hovered(window)
+            {
+                return;
+            }
+            cx.stop_propagation();
+            menu.update(cx, |state, cx| {
+                state.context_click(event.position, window, cx)
+            });
+        });
         let moving = self.state.clone();
-        window.on_mouse_event(move |event: &MouseMoveEvent, _, _, cx| {
+        window.on_mouse_event(move |event: &MouseMoveEvent, phase, _, cx| {
+            if !phase.bubble() || !moving.read(cx).selecting {
+                return;
+            }
             if event.pressed_button != Some(MouseButton::Left) {
                 moving.update(cx, |state, _| state.mouse_up());
                 return;
@@ -222,8 +265,8 @@ impl<K: FieldKind> Element for EditorElement<K> {
             moving.update(cx, |state, cx| state.mouse_drag(event.position, cx));
         });
         let up = self.state.clone();
-        window.on_mouse_event(move |event: &MouseUpEvent, _, _, cx| {
-            if event.button == MouseButton::Left {
+        window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+            if phase.bubble() && event.button == MouseButton::Left && up.read(cx).selecting {
                 up.update(cx, |state, _| state.mouse_up());
             }
         });

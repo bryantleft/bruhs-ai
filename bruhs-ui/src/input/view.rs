@@ -80,6 +80,7 @@ struct Chrome {
     aria_label: Option<SharedString>,
     tab_index: isize,
     role: Option<Role>,
+    content_type: Option<InputContentType>,
 }
 
 impl Default for Chrome {
@@ -94,6 +95,7 @@ impl Default for Chrome {
             aria_label: None,
             tab_index: 0,
             role: None,
+            content_type: None,
         }
     }
 }
@@ -214,25 +216,39 @@ fn frame<K: FieldKind>(
         .tab_stop(!chrome.disabled && chrome.tab_index >= 0);
     let focused = focus.contains_focused(window, cx);
     let s = state.read(cx);
-    let value = if s.masked {
+    // A password never reaches assistive tech, shown or hidden.
+    let secret = s.masked
+        || matches!(
+            chrome.content_type,
+            Some(InputContentType::Password | InputContentType::NewPassword)
+        );
+    let value = if secret {
         SharedString::default()
     } else {
         s.value()
     };
     let placeholder = s.placeholder.clone();
+    // Unnamed, a field is called by its placeholder, as a web input is.
+    let label = chrome
+        .aria_label
+        .clone()
+        .or_else(|| (!placeholder.is_empty()).then(|| placeholder.clone()));
     let role = chrome.role.unwrap_or(if K::MULTI_LINE {
         Role::MultilineTextInput
+    } else if secret {
+        Role::PasswordInput
     } else {
         Role::TextInput
     });
     let mut el = div()
         .id(id)
         .key_context(CONTEXT)
-        .track_focus(&focus)
+        // A disabled field takes no focus, so its keys never resolve.
+        .when(!chrome.disabled, |el| el.track_focus(&focus))
         .role(role)
         .aria_value(value)
         .aria_placeholder(placeholder)
-        .when_some(chrome.aria_label.clone(), |el, label| el.aria_label(label))
+        .when_some(label, |el, label| el.aria_label(label))
         .flex()
         .w_full()
         .line_height(rems(LINE_HEIGHT_REM))
@@ -287,7 +303,10 @@ fn frame<K: FieldKind>(
             .on_action(window.listener_for(state, EditorState::enter))
             .on_action(window.listener_for(state, EditorState::escape))
             .on_action(window.listener_for(state, EditorState::tab))
-            .on_action(window.listener_for(state, EditorState::shift_tab));
+            .on_action(window.listener_for(state, EditorState::shift_tab))
+            .on_action(window.listener_for(state, EditorState::character_palette))
+            .on_action(window.listener_for(state, EditorState::page_up))
+            .on_action(window.listener_for(state, EditorState::page_down));
     }
     el
 }
@@ -315,6 +334,80 @@ fn icon_button(
     .into_any_element()
 }
 
+/// The edit menu a right click opens, at the pointer.
+fn edit_menu<K: FieldKind>(state: &Entity<EditorState<K>>, cx: &App) -> Option<AnyElement> {
+    let s = state.read(cx);
+    let at = s.context_menu?;
+    let can_copy = s.can_copy();
+    let entity = state.entity_id();
+    let item = |id: &'static str,
+                label: &'static str,
+                enabled: bool,
+                run: fn(
+        &mut EditorState<K>,
+        &mut Window,
+        &mut gpui::Context<'_, EditorState<K>>,
+    )| {
+        let state = state.clone();
+        let row = div()
+            .id((id, entity))
+            .role(Role::MenuItem)
+            .aria_label(label)
+            .px(css_px(8.0))
+            .py(css_px(4.0))
+            .rounded(css_px(4.0))
+            .text_size(css_px(12.0))
+            .child(label);
+        if !enabled {
+            return row.text_color(theme::rambutan_500()).into_any_element();
+        }
+        crate::press::on_press(
+            row.text_color(theme::rambutan_100())
+                .cursor_pointer()
+                .hover(|el| el.bg(gpui::white().opacity(0.05))),
+            move |window, cx| {
+                state.update(cx, |state, cx| {
+                    state.close_context_menu(cx);
+                    run(state, window, cx);
+                });
+            },
+        )
+        .into_any_element()
+    };
+    let close = state.clone();
+    let menu = div()
+        .id(("edit-menu", entity))
+        .role(Role::Menu)
+        .min_w(css_px(140.0))
+        .p(css_px(4.0))
+        .flex()
+        .flex_col()
+        .rounded(css_px(8.0))
+        .bg(theme::longan_700())
+        .border_1()
+        .border_color(theme::ring_floating())
+        .on_mouse_down_out(move |_, _, cx| {
+            close.update(cx, |state, cx| state.close_context_menu(cx))
+        })
+        .child(item("edit-cut", "Cut", can_copy, |s, w, cx| {
+            s.cut(&Cut, w, cx)
+        }))
+        .child(item("edit-copy", "Copy", can_copy, |s, w, cx| {
+            s.copy(&Copy, w, cx)
+        }))
+        .child(item("edit-paste", "Paste", true, |s, w, cx| {
+            s.paste(&Paste, w, cx)
+        }))
+        .child(item("edit-select-all", "Select All", true, |s, w, cx| {
+            s.select_all(&SelectAll, w, cx)
+        }));
+    Some(
+        gpui::deferred(gpui::anchored().position(at).child(menu))
+            .with_priority(2)
+            .into_any_element(),
+    )
+}
+
 /// A single-line text field drawing an [`InputState`].
 #[derive(IntoElement)]
 pub struct Input {
@@ -322,7 +415,6 @@ pub struct Input {
     chrome: Chrome,
     cleanable: bool,
     mask_toggle: bool,
-    content_type: Option<InputContentType>,
 }
 
 impl Input {
@@ -332,7 +424,6 @@ impl Input {
             chrome: Chrome::default(),
             cleanable: false,
             mask_toggle: false,
-            content_type: None,
         }
     }
 
@@ -387,7 +478,7 @@ impl Input {
 
     /// What it holds, for platform autofill.
     pub fn content_type(mut self, content_type: InputContentType) -> Self {
-        self.content_type = Some(content_type);
+        self.chrome.content_type = Some(content_type);
         self
     }
 }
@@ -465,7 +556,7 @@ impl RenderOnce for Input {
         }
         // The caller's styles win over the size's.
         el.style().refine(&self.chrome.style);
-        el
+        el.children(edit_menu(&state, cx))
     }
 }
 
@@ -582,6 +673,14 @@ impl RenderOnce for Textarea {
                 el.min_h(min).when_some(max, |el, max| el.max_h(max))
             })
             .when(fixed_height, |el| el.h_full())
+            .on_mouse_down(gpui::MouseButton::Left, {
+                let state = state.clone();
+                move |event, window, cx| {
+                    state.update(cx, |state, cx| {
+                        state.click_below_text(event.position, window, cx)
+                    });
+                }
+            })
             .child(lines)
             .child(crate::scroll::Scrollbar::vertical(&scroll));
         let mut el = frame(
@@ -594,6 +693,6 @@ impl RenderOnce for Textarea {
         .flex_col()
         .child(area);
         el.style().refine(&self.chrome.style);
-        el
+        el.children(edit_menu(&state, cx))
     }
 }

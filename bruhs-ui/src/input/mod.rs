@@ -13,6 +13,8 @@ mod element;
 mod state;
 mod view;
 
+#[cfg(test)]
+use gpui::Pixels;
 use gpui::{App, FocusHandle, Global, WeakFocusHandle, Window};
 
 pub use actions::{
@@ -62,4 +64,112 @@ impl WindowExt for Window {
 /// Bind the fields' editing keys.
 pub fn init(cx: &mut App) {
     actions::bind_keys(cx);
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use gpui::prelude::*;
+    use gpui::{
+        div, px, size, Context, Entity, EntityInputHandler as _, TestAppContext, VisualTestContext,
+    };
+    use std::cell::RefCell;
+    use std::rc::Rc;
+
+    struct Form {
+        field: Entity<InputState>,
+    }
+
+    impl Render for Form {
+        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+            div().w(px(120.)).child(Input::new(&self.field))
+        }
+    }
+
+    fn form(
+        cx: &mut TestAppContext,
+    ) -> (
+        Entity<InputState>,
+        Rc<RefCell<Vec<InputEvent>>>,
+        &mut VisualTestContext,
+    ) {
+        cx.update(crate::init);
+        let events = Rc::new(RefCell::new(Vec::new()));
+        let seen = events.clone();
+        let (view, cx) = cx.add_window_view(|window, cx| {
+            let field = cx.new(|cx| InputState::new(window, cx));
+            cx.subscribe(&field, move |_, _, event: &InputEvent, _| {
+                seen.borrow_mut().push(event.clone());
+            })
+            .detach();
+            Form { field }
+        });
+        cx.simulate_resize(size(px(400.), px(200.)));
+        let field = cx.read(|cx| view.read(cx).field.clone());
+        cx.update(|window, cx| field.update(cx, |field, cx| field.focus(window, cx)));
+        cx.run_until_parked();
+        (field, events, cx)
+    }
+
+    #[gpui::test]
+    fn a_composition_undoes_in_one_step(cx: &mut TestAppContext) {
+        let (field, _, cx) = form(cx);
+        cx.update(|window, cx| {
+            field.update(cx, |field, cx| {
+                field.replace_text_in_range(None, "hi ", window, cx);
+                for step in ["n", "ni", "nih", "niha", "nihao"] {
+                    field.replace_and_mark_text_in_range(None, step, None, window, cx);
+                }
+                field.replace_text_in_range(None, "你好", window, cx);
+                assert_eq!(field.value(), "hi 你好");
+                field.undo(&Undo, window, cx);
+                assert_eq!(field.value(), "hi ");
+            })
+        });
+    }
+
+    #[gpui::test]
+    fn an_edit_mid_composition_drops_its_mark(cx: &mut TestAppContext) {
+        let (field, _, cx) = form(cx);
+        cx.update(|window, cx| {
+            field.update(cx, |field, cx| {
+                field.replace_text_in_range(None, "日本", window, cx);
+                field.replace_and_mark_text_in_range(None, "nihao", None, window, cx);
+                field.undo(&Undo, window, cx);
+                assert!(field.marked_text_range(window, cx).is_none());
+            })
+        });
+        // Drawing after the undo must not cut a run inside a character.
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+    }
+
+    #[gpui::test]
+    fn set_value_is_quiet_and_typing_is_not(cx: &mut TestAppContext) {
+        let (field, events, cx) = form(cx);
+        cx.update(|window, cx| field.update(cx, |field, cx| field.set_value("abc", window, cx)));
+        assert!(!events.borrow().contains(&InputEvent::Change));
+        cx.simulate_input("d");
+        assert_eq!(cx.read(|cx| field.read(cx).value()), "abcd");
+        assert!(events.borrow().contains(&InputEvent::Change));
+    }
+
+    #[gpui::test]
+    fn a_long_value_stays_on_one_line(cx: &mut TestAppContext) {
+        let (field, _, cx) = form(cx);
+        cx.simulate_input("a long line of text that is much wider than the field");
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            let _ = window.draw(cx);
+        });
+        let (lines, scroll) = cx.read(|cx| {
+            let state = field.read(cx);
+            let drawn = state.drawn.as_ref().expect("drawn");
+            (drawn.layout.line_layouts().len(), state.scroll_x)
+        });
+        assert_eq!(lines, 1);
+        assert!(scroll > Pixels::ZERO, "the field scrolls to the caret");
+    }
 }

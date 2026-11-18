@@ -106,12 +106,18 @@ impl EditCore {
         &self.text[self.selection.range()]
     }
 
-    /// Replace `range` with `new`, leaving the caret after it.
-    pub fn replace(&mut self, range: Range<usize>, new: &str, kind: EditKind) {
+    /// Replace `range` with `new`, leaving the caret after it. Returns the
+    /// range the new text now covers, or `None` when nothing changed.
+    pub fn replace(
+        &mut self,
+        range: Range<usize>,
+        new: &str,
+        kind: EditKind,
+    ) -> Option<Range<usize>> {
         let range = self.clamp_offset(range.start)..self.clamp_offset(range.end);
         let range = range.start.min(range.end)..range.start.max(range.end);
-        if range.is_empty() && new.is_empty() {
-            return;
+        if self.text[range.clone()] == *new {
+            return None;
         }
         let now = Instant::now();
         let space = new.contains(char::is_whitespace);
@@ -136,6 +142,18 @@ impl EditCore {
         self.text.replace_range(range.clone(), new);
         self.selection = Selection::caret(range.start + new.len());
         self.last_edit = Some((now, kind));
+        Some(range.start..range.start + new.len())
+    }
+
+    /// [`Self::replace`] without an undo step: an IME composition updating
+    /// text it already took a step for.
+    pub fn replace_in_place(&mut self, range: Range<usize>, new: &str) -> Range<usize> {
+        let range = self.clamp_offset(range.start)..self.clamp_offset(range.end);
+        let range = range.start.min(range.end)..range.start.max(range.end);
+        self.text.replace_range(range.clone(), new);
+        self.selection = Selection::caret(range.start + new.len());
+        self.last_edit = None;
+        range.start..range.start + new.len()
     }
 
     pub fn undo(&mut self) -> bool {
@@ -252,7 +270,11 @@ fn is_word(c: char) -> bool {
 
 /// Byte offsets to UTF-16 offsets and back, for the platform's text input.
 pub fn to_utf16(text: &str, offset: usize) -> usize {
-    text[..offset.min(text.len())].encode_utf16().count()
+    let mut offset = offset.min(text.len());
+    while !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
+    text[..offset].encode_utf16().count()
 }
 
 pub fn from_utf16(text: &str, offset16: usize) -> usize {
@@ -275,12 +297,12 @@ mod tests {
         let mut core = EditCore::new("");
         for c in ["h", "e", "y"] {
             let at = core.selection.range();
-            core.replace(at, c, EditKind::Type);
+            let _ = core.replace(at, c, EditKind::Type);
         }
         let at = core.selection.range();
-        core.replace(at, " ", EditKind::Type);
+        let _ = core.replace(at, " ", EditKind::Type);
         let at = core.selection.range();
-        core.replace(at, "x", EditKind::Type);
+        let _ = core.replace(at, "x", EditKind::Type);
         assert_eq!(core.text, "hey x");
         assert!(core.undo());
         assert_eq!(core.text, "hey ");

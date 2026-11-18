@@ -43,6 +43,10 @@ actions!(
         Paste,
         Undo,
         Redo,
+        /// The system emoji and symbols picker.
+        ShowCharacterPalette,
+        MovePageUp,
+        MovePageDown,
         /// Tab in a field. A field never traps it: unhandled, it moves focus.
         IndentInline,
         /// Shift-Tab in a field.
@@ -102,6 +106,8 @@ pub(super) fn bind_keys(cx: &mut App) {
         KeyBinding::new("ctrl-shift-end", SelectToEnd, ctx),
         KeyBinding::new("tab", IndentInline, ctx),
         KeyBinding::new("shift-tab", OutdentInline, ctx),
+        KeyBinding::new("pageup", MovePageUp, ctx),
+        KeyBinding::new("pagedown", MovePageDown, ctx),
         KeyBinding::new(
             "enter",
             Enter {
@@ -155,6 +161,7 @@ pub(super) fn bind_keys(cx: &mut App) {
             KeyBinding::new("cmd-v", Paste, ctx),
             KeyBinding::new("cmd-z", Undo, ctx),
             KeyBinding::new("cmd-shift-z", Redo, ctx),
+            KeyBinding::new("ctrl-cmd-space", ShowCharacterPalette, ctx),
         ]);
     } else {
         bindings.extend([

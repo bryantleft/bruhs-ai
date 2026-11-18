@@ -85,6 +85,10 @@ pub(super) struct DisplayMap {
 
 impl DisplayMap {
     fn base(&self, offset: usize) -> usize {
+        let mut offset = offset.min(self.value.len());
+        while !self.value.is_char_boundary(offset) {
+            offset -= 1;
+        }
         if self.masked {
             self.value[..offset].chars().count() * MASK.len_utf8()
         } else {
@@ -152,6 +156,11 @@ pub struct EditorState<K: FieldKind> {
     pub(super) scroll: ScrollHandle,
     pub(super) selecting: bool,
     pub(super) caret_visible: bool,
+    /// An edit or a caret move asks the next frame to bring the caret into
+    /// view; a wheel scroll leaves it be.
+    pub(super) reveal_pending: bool,
+    /// Where a right click opened the edit menu.
+    pub(super) context_menu: Option<Point<Pixels>>,
     blink: Option<Task<()>>,
     /// The caret's x on a vertical move, kept across lines.
     preferred_x: Option<Pixels>,
@@ -200,6 +209,8 @@ impl<K: FieldKind> EditorState<K> {
             scroll: ScrollHandle::new(),
             selecting: false,
             caret_visible: false,
+            reveal_pending: false,
+            context_menu: None,
             blink: None,
             preferred_x: None,
             _subscriptions: subscriptions,
@@ -242,6 +253,8 @@ impl<K: FieldKind> EditorState<K> {
         let caret = if K::MULTI_LINE { 0 } else { value.len() };
         self.core.reset(&value, Selection::caret(caret));
         self.marked = None;
+        self.inline_completion = None;
+        self.preferred_x = None;
         self.scroll_x = Pixels::ZERO;
         if K::MULTI_LINE {
             self.scroll.set_offset(Point::default());
@@ -270,8 +283,9 @@ impl<K: FieldKind> EditorState<K> {
             return;
         }
         let len = self.core.text.len();
-        self.core.replace(0..len, "", EditKind::Other);
-        self.after_edit(window, cx);
+        if self.core.replace(0..len, "", EditKind::Other).is_some() {
+            self.after_edit(window, cx);
+        }
     }
 
     /// Insert `text` at the selection, as typing would: an undoable edit
@@ -284,8 +298,9 @@ impl<K: FieldKind> EditorState<K> {
     ) {
         let text = Self::clean_text(text.as_ref());
         let range = self.core.selection.range();
-        self.core.replace(range, &text, EditKind::Other);
-        self.after_edit(window, cx);
+        if self.core.replace(range, &text, EditKind::Other).is_some() {
+            self.after_edit(window, cx);
+        }
     }
 
     /// Replace the whole text as an edit (undoable, reported), unlike
@@ -298,15 +313,17 @@ impl<K: FieldKind> EditorState<K> {
     ) {
         let text = Self::clean_text(text.as_ref());
         let len = self.core.text.len();
-        self.core.replace(0..len, &text, EditKind::Other);
-        self.after_edit(window, cx);
+        if self.core.replace(0..len, &text, EditKind::Other).is_some() {
+            self.after_edit(window, cx);
+        }
     }
 
     /// Where the last frame drew the text in `range` (on its first line).
     pub fn range_to_bounds(&self, range: &Range<usize>) -> Option<Bounds<Pixels>> {
         let drawn = self.drawn.as_ref()?;
-        let start = drawn.map.to_display(range.start);
-        let end = drawn.map.to_display(range.end);
+        let map = self.display_map();
+        let start = map.to_display(range.start);
+        let end = map.to_display(range.end);
         let from = drawn.layout.position_for_index(start)?;
         let to = drawn.layout.position_for_index(end).unwrap_or(from);
         let height = drawn.layout.line_height();
@@ -383,6 +400,9 @@ impl<K: FieldKind> EditorState<K> {
 
     /// Report an edit the person made.
     fn after_edit(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        // Any edit that is not the composition's own ends it: its range
+        // would point into text that has changed.
+        self.marked = None;
         self.clear_inline_completion();
         self.preferred_x = None;
         window.notify_text_input_changed(&self.focus_handle);
@@ -393,6 +413,7 @@ impl<K: FieldKind> EditorState<K> {
     /// Show the caret steadily (a blink restarts after an edit or move).
     fn reveal_caret(&mut self, cx: &mut Context<'_, Self>) {
         self.caret_visible = true;
+        self.reveal_pending = true;
         if self.blink.is_some() {
             self.start_blink(cx);
         }
@@ -421,12 +442,17 @@ impl<K: FieldKind> EditorState<K> {
         } else {
             EditKind::Other
         };
-        let range = self
-            .marked
-            .take()
-            .unwrap_or_else(|| self.core.selection.range());
-        self.core.replace(range, &text, kind);
-        self.after_edit(window, cx);
+        // Committing a composition replaces its text in place: the step was
+        // taken when the composition started.
+        if let Some(marked) = self.marked.take() {
+            self.core.replace_in_place(marked, &text);
+            self.after_edit(window, cx);
+            return;
+        }
+        let range = self.core.selection.range();
+        if self.core.replace(range, &text, kind).is_some() {
+            self.after_edit(window, cx);
+        }
     }
 
     fn move_to(&mut self, offset: usize, select: bool, cx: &mut Context<'_, Self>) {
@@ -453,8 +479,9 @@ impl<K: FieldKind> EditorState<K> {
         if range.is_empty() {
             return;
         }
-        self.core.replace(range, "", EditKind::Other);
-        self.after_edit(window, cx);
+        if self.core.replace(range, "", EditKind::Other).is_some() {
+            self.after_edit(window, cx);
+        }
     }
 
     /// The range a deletion covers: the selection, or `extent` from the caret.
@@ -681,7 +708,11 @@ impl<K: FieldKind> EditorState<K> {
         _: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let to = self.core.prev_word(self.core.selection.head);
+        let to = if self.masked {
+            0
+        } else {
+            self.core.prev_word(self.core.selection.head)
+        };
         self.move_to(to, false, cx);
     }
 
@@ -691,7 +722,11 @@ impl<K: FieldKind> EditorState<K> {
         _: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let to = self.core.next_word(self.core.selection.head);
+        let to = if self.masked {
+            self.core.text.len()
+        } else {
+            self.core.next_word(self.core.selection.head)
+        };
         self.move_to(to, false, cx);
     }
 
@@ -795,8 +830,9 @@ impl<K: FieldKind> EditorState<K> {
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             let text = Self::clean_text(&text);
             let range = self.core.selection.range();
-            self.core.replace(range, &text, EditKind::Other);
-            self.after_edit(window, cx);
+            if self.core.replace(range, &text, EditKind::Other).is_some() {
+                self.after_edit(window, cx);
+            }
         }
     }
 
@@ -833,7 +869,12 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     pub(super) fn escape(&mut self, _: &Escape, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.inline_completion.take().is_some() {
+        if self.context_menu.take().is_some() {
+            cx.notify();
+            return;
+        }
+        if self.inline_completion_text().is_some() {
+            self.inline_completion = None;
             cx.notify();
             return;
         }
@@ -842,6 +883,55 @@ impl<K: FieldKind> EditorState<K> {
             cx.notify();
         }
         cx.propagate();
+    }
+
+    pub(super) fn character_palette(
+        &mut self,
+        _: &ShowCharacterPalette,
+        window: &mut Window,
+        _: &mut Context<'_, Self>,
+    ) {
+        window.show_character_palette();
+    }
+
+    /// The caret a visible page up or down; one line goes on to the holder.
+    fn page(&mut self, direction: i32, cx: &mut Context<'_, Self>) {
+        if !K::MULTI_LINE {
+            cx.propagate();
+            return;
+        }
+        let lines = self.drawn.as_ref().map_or(1, |drawn| {
+            let visible = self
+                .scroll
+                .bounds()
+                .size
+                .height
+                .max(drawn.layout.line_height());
+            let count = (visible / drawn.layout.line_height()).floor();
+            // Whole lines, at least one; a page is never huge.
+            (1..=200)
+                .rev()
+                .find(|n| n.to_f32_lossy() <= count)
+                .unwrap_or(1)
+        });
+        if let Some(to) = self.vertical(direction * lines) {
+            let keep = self.preferred_x;
+            self.move_to(to, false, cx);
+            self.preferred_x = keep;
+        }
+    }
+
+    pub(super) fn page_up(&mut self, _: &MovePageUp, _: &mut Window, cx: &mut Context<'_, Self>) {
+        self.page(-1, cx);
+    }
+
+    pub(super) fn page_down(
+        &mut self,
+        _: &MovePageDown,
+        _: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.page(1, cx);
     }
 
     /// Tab never edits a field: focus moves on, like a web field's.
@@ -863,13 +953,16 @@ impl<K: FieldKind> EditorState<K> {
         let drawn = self.drawn.as_ref()?;
         let bounds = drawn.text_bounds;
         let clamped = gpui::point(
-            point.x.clamp(bounds.left(), bounds.right()),
-            point.y.clamp(bounds.top(), bounds.bottom() - gpui::px(1.0)),
+            point.x.max(bounds.left()).min(bounds.right()),
+            point
+                .y
+                .min(bounds.bottom() - gpui::px(1.0))
+                .max(bounds.top()),
         );
         let ix = match drawn.layout.index_for_position(clamped) {
             Ok(ix) | Err(ix) => ix,
         };
-        Some(drawn.map.to_value(ix))
+        Some(self.core.clamp_offset(drawn.map.to_value(ix)))
     }
 
     pub(super) fn mouse_down(
@@ -885,6 +978,11 @@ impl<K: FieldKind> EditorState<K> {
             return;
         };
         let selection = match click_count {
+            // A masked field is one word: its spaces stay hidden.
+            2 if self.masked => Selection {
+                anchor: 0,
+                head: self.core.text.len(),
+            },
             2 => {
                 let word = self.core.word_range(at);
                 Selection {
@@ -924,6 +1022,56 @@ impl<K: FieldKind> EditorState<K> {
 
     pub(super) fn mouse_up(&mut self) {
         self.selecting = false;
+    }
+
+    /// A right click: the caret moves there unless it lands in the
+    /// selection, and the edit menu opens.
+    pub(super) fn context_click(
+        &mut self,
+        point: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        window.focus(&self.focus_handle, cx);
+        if let Some(at) = self.offset_at(point) {
+            if !self.core.selection.range().contains(&at) {
+                self.core.set_selection(Selection::caret(at));
+            }
+        }
+        self.context_menu = Some(point);
+        cx.notify();
+    }
+
+    pub(super) fn close_context_menu(&mut self, cx: &mut Context<'_, Self>) {
+        if self.context_menu.take().is_some() {
+            cx.notify();
+        }
+    }
+
+    /// A click in a text area's empty space below its text focuses it with
+    /// the caret at the end, as a web textarea does.
+    pub(super) fn click_below_text(
+        &mut self,
+        point: Point<Pixels>,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let below = self
+            .drawn
+            .as_ref()
+            .is_some_and(|drawn| point.y > drawn.text_bounds.bottom());
+        if !below {
+            return;
+        }
+        window.focus(&self.focus_handle, cx);
+        let end = self.core.text.len();
+        self.move_to(end, false, cx);
+    }
+
+    /// Whether the edit menu can cut or copy: something is selected and the
+    /// field is not masked.
+    pub(super) fn can_copy(&self) -> bool {
+        !self.core.selection.is_empty() && !self.masked
     }
 }
 
@@ -1035,19 +1183,29 @@ impl<K: FieldKind> EntityInputHandler for EditorState<K> {
             .or_else(|| self.marked.clone())
             .unwrap_or_else(|| self.core.selection.range());
         let new_text = Self::clean_text(new_text);
-        self.core.replace(range.clone(), &new_text, EditKind::Other);
-        self.marked = (!new_text.is_empty()).then(|| range.start..range.start + new_text.len());
+        // A composition is one undo step: taken when it starts, then its
+        // text is updated in place.
+        let applied = if self.marked.is_some() {
+            self.core.replace_in_place(range, &new_text)
+        } else {
+            let start = self.core.clamp_offset(range.start.min(range.end));
+            self.core
+                .replace(range, &new_text, EditKind::Other)
+                .unwrap_or(start..start + new_text.len())
+        };
+        self.marked = (!new_text.is_empty()).then(|| applied.clone());
         if let Some(selected) = new_selected {
-            let start = range.start + from_utf16(&new_text, selected.start);
-            let end = range.start + from_utf16(&new_text, selected.end);
+            let start = applied.start + from_utf16(&new_text, selected.start);
+            let end = applied.start + from_utf16(&new_text, selected.end);
             self.core.set_selection(Selection {
                 anchor: start,
                 head: end,
             });
         }
         self.clear_inline_completion();
+        self.preferred_x = None;
+        window.notify_text_input_changed(&self.focus_handle);
         cx.emit(InputEvent::Change);
-        let _ = window;
         self.reveal_caret(cx);
     }
 
@@ -1060,8 +1218,9 @@ impl<K: FieldKind> EntityInputHandler for EditorState<K> {
     ) -> Option<Bounds<Pixels>> {
         let drawn = self.drawn.as_ref()?;
         let text = &self.core.text;
-        let start = drawn.map.to_display(from_utf16(text, range.start));
-        let end = drawn.map.to_display(from_utf16(text, range.end));
+        let map = self.display_map();
+        let start = map.to_display(from_utf16(text, range.start));
+        let end = map.to_display(from_utf16(text, range.end));
         let line_height = drawn.layout.line_height();
         let from = drawn.layout.position_for_index(start)?;
         let to = drawn.layout.position_for_index(end).unwrap_or(from);
