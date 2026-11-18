@@ -14,7 +14,6 @@ use super::transcript_list::{transcript_view, TranscriptList};
 use super::*;
 use crate::views::braille::braille_face;
 use crate::views::crew_face::bruh_face;
-use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     asked_words, author_name, member_hits, member_states, members_line, mention_query,
     merge_messages, refused_draft, room_composer_block, room_composer_hint, room_follow_key,
@@ -26,6 +25,7 @@ use bruhs_models::logic::context_chip::{
     backspace_chip, delete_forward_chip, insert_chip, replace_range, retarget, ChipKind,
     ContextChip,
 };
+use bruhs_ui::press::on_press_view;
 use gpui_component::tooltip::Tooltip;
 use std::cell::Cell;
 use std::collections::hash_map::Entry;
@@ -55,7 +55,7 @@ pub(super) struct RoomPage {
     newest_revision: u64,
     newest_request: Option<Task<()>>,
     earlier_request: Option<Task<()>>,
-    composer: Option<Entity<InputState>>,
+    composer: Option<Entity<TextareaState>>,
     /// The last post's text and chips until the service takes it, so a
     /// refused post can come back to write again.
     posted: Option<(String, Vec<ContextChip>)>,
@@ -74,7 +74,7 @@ pub(super) struct RoomPage {
     selected: usize,
     hits_scroll: ScrollHandle,
     /// Reply fields of open question cards, by outbox id.
-    replies: HashMap<String, (Entity<InputState>, gpui::Subscription)>,
+    replies: HashMap<String, (Entity<TextareaState>, gpui::Subscription)>,
     /// The transcript, built when the snapshot or the messages change rather
     /// than on every frame (a sweeping face redraws the page often).
     lines: Rc<Vec<RoomLine>>,
@@ -520,7 +520,7 @@ impl ReactiveAutomations {
     ) -> Div {
         let members = member_states(room, &self.crew.bruhs);
         let room_id = room.id.clone();
-        let settings = on_press(
+        let settings = on_press_view(
             web_button(
                 "desktop-room-settings",
                 WebButtonVariant::Outline,

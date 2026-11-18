@@ -816,7 +816,6 @@ impl ChatView {
                 .into_any_element(),
         };
         let click_source = source.to_string();
-        let key_source = click_source.clone();
         div()
             .flex()
             .flex_col()
@@ -830,24 +829,13 @@ impl ChatView {
                     crate::views::web_button::ButtonState::Enabled,
                 )
                 .child("Open as board")
-                .on_click(cx.listener(move |_, _, _, cx| {
-                    cx.emit(ChatViewEvent::OpenWhiteboard {
-                        source: click_source.clone(),
+                .map(|el| {
+                    bruhs_ui::press::on_press_view(el, cx, move |_, _window, cx| {
+                        cx.emit(ChatViewEvent::OpenWhiteboard {
+                            source: click_source.clone(),
+                        });
                     })
-                }))
-                .on_key_down(cx.listener(
-                    move |_, event: &KeyDownEvent, window, cx| {
-                        if crate::views::web_button::is_web_button_activation_key(
-                            &event.keystroke.key,
-                        ) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            cx.emit(ChatViewEvent::OpenWhiteboard {
-                                source: key_source.clone(),
-                            });
-                        }
-                    },
-                )),
+                }),
             )
             .into_any_element()
     }

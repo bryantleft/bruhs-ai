@@ -21,7 +21,7 @@ fn shown(cx: &mut VisualTestContext, selector: &'static str) -> bool {
 
 /// A full key press. GPUI clicks a focused control on key up, which
 /// `simulate_keystrokes` never sends.
-fn press_key(cx: &mut VisualTestContext, key: &str) {
+fn press_key(cx: &mut VisualTestContext, key: &'static str) {
     let keystroke = gpui::Keystroke::parse(key).expect("test keystroke should parse");
     cx.simulate_event(gpui::KeyDownEvent {
         keystroke: keystroke.clone(),

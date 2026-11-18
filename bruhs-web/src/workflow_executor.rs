@@ -69,6 +69,10 @@ pub struct WorkflowExecutor {
     pub ready: RwSignal<bool>,
     pub loading: RwSignal<bool>,
     pub load_error: RwSignal<Option<String>>,
+    /// The workflow notice's Pause: honored as soon as the store settles,
+    /// before the next background step starts (a step holds the store, so
+    /// a change made during one would be refused).
+    pub pause_requested: RwSignal<bool>,
 }
 
 impl WorkflowExecutor {
@@ -102,6 +106,7 @@ impl WorkflowExecutor {
             people_refreshing: RwSignal::new(false),
             people_refresh_again: RwSignal::new(false),
             people_refresh_deferred: RwSignal::new(false),
+            pause_requested: RwSignal::new(false),
             person_refreshes: RwSignal::new(Default::default()),
             person_refresh_running: RwSignal::new(false),
             merge_record: RwSignal::new(None),
@@ -143,6 +148,23 @@ impl WorkflowExecutor {
         });
         Effect::new(move |_| {
             if !executor.ready.get() || !executor.automation.settled() {
+                return;
+            }
+            if executor.pause_requested.get() {
+                executor.pause_requested.set(false);
+                let now = crate::clock::now_ms();
+                executor.automation.update(|state| {
+                    let running: Vec<String> = state
+                        .jobs
+                        .iter()
+                        .filter(|job| job.auto_run && job.status == BackgroundJobStatus::Running)
+                        .map(|job| job.id.clone())
+                        .collect();
+                    for id in running {
+                        // Refused only when it finished meanwhile.
+                        let _ = state.pause_job(&id, now);
+                    }
+                });
                 return;
             }
             let next = executor.automation.with(|state| {

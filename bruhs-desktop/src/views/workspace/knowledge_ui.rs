@@ -9,8 +9,6 @@ use std::collections::BTreeSet;
 use bruhs_models::logic::knowledge_library::{self as library, document_copy, source_host, Card};
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::num::ToFloatLossy;
-use gpui::prelude::*;
-use gpui::*;
 use gpui_component::input::{Input, InputEvent};
 use gpui_component::text::TextView;
 
@@ -20,6 +18,7 @@ use super::knowledge_storage::{self, attachment_path as knowledge_attachment_pat
 use super::library_pages_ui::LibraryPage;
 use super::record_picker_ui::RecordPickerTarget;
 use super::*;
+use bruhs_ui::press::on_press_view;
 
 // The web knowledge library's 24-card budget. The native action fixture
 // measures libraries through 10,000 records; paging never truncates stored text.
@@ -197,7 +196,7 @@ impl Workspace {
     }
 
     pub(super) fn start_source_clip(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        for input in [
+        let inputs: [&dyn TextInput; 7] = [
             &self.clip_title_input,
             &self.clip_url_input,
             &self.clip_source_name_input,
@@ -205,8 +204,9 @@ impl Workspace {
             &self.clip_published_input,
             &self.clip_tags_input,
             &self.clip_excerpt_input,
-        ] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
+        ];
+        for input in inputs {
+            input.set_text_value("".into(), window, cx);
         }
         self.active_view = AppView::Knowledge;
         self.clip_create_visible = true;
@@ -912,7 +912,6 @@ impl Workspace {
     /// body and its tags.
     fn render_document_card(&self, card: &Card, cx: &Context<'_, Self>) -> AnyElement {
         let id = card.id.clone();
-        let keyboard_id = id.clone();
         let id_key = element_key(&id);
         // Web: each tag as `#tag`, so a search by tag shows why it matched.
         let tags = card
@@ -940,14 +939,11 @@ impl Workspace {
                     .border_color(theme::longan_700())
             })
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _event, window, cx| {
-                this.select_knowledge_document(&id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    this.select_knowledge_document(&keyboard_id, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.select_knowledge_document(&id, window, cx);
+                })
+            })
             .child(
                 div()
                     .flex()
@@ -1000,7 +996,6 @@ impl Workspace {
     /// host and the start of its excerpt.
     fn render_source_card(&self, card: &Card, cx: &Context<'_, Self>) -> AnyElement {
         let id = card.id.clone();
-        let keyboard_id = id.clone();
         let key = element_key(&id);
         div()
             .id(("knowledge-source", key))
@@ -1021,14 +1016,11 @@ impl Workspace {
             .aria_label(format!("Open source {}", card.title))
             .hover(|element| element.bg(theme::longan_900().opacity(0.7)))
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _event, window, cx| {
-                this.select_source_clip(&id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    this.select_source_clip(&keyboard_id, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.select_source_clip(&id, window, cx);
+                })
+            })
             .child(
                 library_mark(
                     move || format!("desktop-knowledge-source-mark-{key}"),
@@ -1393,7 +1385,7 @@ impl Workspace {
                                             // Web's body field: at least 384px tall.
                                             .h(px(DOCUMENT_BODY_HEIGHT_PX))
                                             .child(
-                                                Input::new(&self.knowledge_body_input)
+                                                Textarea::new(&self.knowledge_body_input)
                                                     .aria_label("Document body")
                                                     .w_full()
                                                     // A multi-line field sizes to the
@@ -1748,7 +1740,7 @@ impl Workspace {
                                     .child("Excerpt or note"),
                             )
                             .child(
-                                Input::new(&self.clip_excerpt_input)
+                                Textarea::new(&self.clip_excerpt_input)
                                     .aria_label("Source excerpt")
                                     .w_full()
                                     // Web's 12-row excerpt field.
@@ -1945,7 +1937,7 @@ fn mime_guess_from_name(file_name: &str) -> &'static str {
 /// The document editor and web-clip form fields.
 pub(super) struct KnowledgeInputs {
     pub(super) knowledge_title_input: Entity<InputState>,
-    pub(super) knowledge_body_input: Entity<InputState>,
+    pub(super) knowledge_body_input: Entity<TextareaState>,
     pub(super) knowledge_tags_input: Entity<InputState>,
     pub(super) clip_title_input: Entity<InputState>,
     pub(super) clip_url_input: Entity<InputState>,
@@ -1953,7 +1945,7 @@ pub(super) struct KnowledgeInputs {
     pub(super) clip_author_input: Entity<InputState>,
     pub(super) clip_published_input: Entity<InputState>,
     pub(super) clip_tags_input: Entity<InputState>,
-    pub(super) clip_excerpt_input: Entity<InputState>,
+    pub(super) clip_excerpt_input: Entity<TextareaState>,
 }
 
 impl Workspace {
@@ -1967,9 +1959,8 @@ impl Workspace {
             cx.new(|cx| InputState::new(window, cx).placeholder("Document title"));
         subscriptions.push(redraw_on_edit(&knowledge_title_input, window, cx));
         let knowledge_body_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder("Write Markdown…")
-                .multi_line(true)
                 .rows(18)
         });
         subscriptions.push(redraw_on_edit(&knowledge_body_input, window, cx));
@@ -1992,9 +1983,8 @@ impl Workspace {
             cx.new(|cx| InputState::new(window, cx).placeholder("research, product"));
         subscriptions.push(redraw_on_edit(&clip_tags_input, window, cx));
         let clip_excerpt_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder("Excerpt or note")
-                .multi_line(true)
                 .rows(10)
         });
         subscriptions.push(redraw_on_edit(&clip_excerpt_input, window, cx));

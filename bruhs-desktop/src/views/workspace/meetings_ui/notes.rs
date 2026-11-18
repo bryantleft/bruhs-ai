@@ -1,4 +1,5 @@
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 const PAGE_SIZE: usize = 50;
@@ -71,7 +72,6 @@ impl Workspace {
                         .children(self.meeting_notes.iter().skip(start).take(PAGE_SIZE).map(
                             |note| {
                                 let id = note.id.clone();
-                                let key_id = id.clone();
                                 let key = element_key(&id);
                                 web_button(
                                     ("meeting-note", key),
@@ -84,20 +84,12 @@ impl Workspace {
                                 .justify_start()
                                 .w_full()
                                 .aria_label(note.title.clone())
-                                .on_click(cx.listener(move |this, _, _, cx| {
-                                    this.selected_meeting_note_id = Some(id.clone());
-                                    cx.notify();
-                                }))
-                                .on_key_down(cx.listener(
-                                    move |this, event: &KeyDownEvent, _, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            this.selected_meeting_note_id = Some(key_id.clone());
-                                            cx.notify();
-                                        }
-                                    },
-                                ))
+                                .map(|el| {
+                                    on_press_view(el, cx, move |this, _, cx| {
+                                        this.selected_meeting_note_id = Some(id.clone());
+                                        cx.notify();
+                                    })
+                                })
                                 .child(note.title.clone())
                             },
                         )),
@@ -137,7 +129,6 @@ impl Workspace {
             })
             .when_some(selected, |el, note| {
                 let id = note.id.clone();
-                let key_id = id.clone();
                 el.child(
                     div()
                         .id("desktop-meeting-note-content")
@@ -164,16 +155,11 @@ impl Workspace {
                     .debug_selector(|| "desktop-open-selected-note".into())
                     .aria_label("Open note")
                     .min_h(px(theme::CONTROL_PX))
-                    .on_click(cx.listener(move |this, _, window, cx| {
-                        this.open_local_meeting_note(id.clone(), window, cx)
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.open_local_meeting_note(key_id.clone(), window, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
+                            this.open_local_meeting_note(id.clone(), window, cx)
+                        })
+                    })
                     .child("Open note"),
                 )
             })
@@ -198,16 +184,10 @@ impl Workspace {
         .min_h(px(theme::CONTROL_PX))
         .aria_label(title)
         .when(!disabled, |el| {
-            el.on_click(cx.listener(move |this, _, _, cx| {
+            on_press_view(el, cx, move |this, _, cx| {
                 this.meeting_notes_page = page;
                 cx.notify();
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    this.meeting_notes_page = page;
-                    cx.notify();
-                }
-            }))
+            })
         })
         .child(title)
         .into_any_element()

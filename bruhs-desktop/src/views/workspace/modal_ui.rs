@@ -3,6 +3,7 @@
 //! modal shell.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 pub(super) const DESKTOP_MODAL_FOCUS_TRAP_KEY: &str = "tab";
 pub(super) const DESKTOP_MODAL_FOCUS_START_TAB_INDEX: isize = 0;
@@ -303,6 +304,13 @@ impl Workspace {
         let Some(target) = self.current_record_delete_target() else {
             return;
         };
+        // Like the web dialog, Cancel or Escape returns focus to the
+        // control that asked (the record's Delete).
+        if !self.modal_start_focus_handle.contains_focused(window, cx) {
+            self.palette_return_focus = window
+                .focused(cx)
+                .map(|focus| (self.active_view.clone(), focus));
+        }
         self.open_overlay(Overlay::RecordDeleteConfirm { target });
         self.focus_first_modal_tab_stop(window, cx);
         cx.notify();
@@ -368,6 +376,7 @@ impl Workspace {
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
+                            .debug_selector(|| "desktop-record-delete-cancel".into())
                             .aria_label("Cancel deletion")
                             .child("Cancel")
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -382,6 +391,7 @@ impl Workspace {
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
+                            .debug_selector(|| "desktop-record-delete-confirm".into())
                             .aria_label("Confirm deletion")
                             .child("Delete")
                             .on_click(cx.listener(
@@ -443,18 +453,11 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.cancel_project_delete(cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.cancel_project_delete(cx);
-                                    }
-                                },
-                            )),
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
+                                    this.cancel_project_delete(cx);
+                                })
+                            }),
                         )
                         .child(
                             web_button(
@@ -469,18 +472,11 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.confirm_project_delete(cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.confirm_project_delete(cx);
-                                    }
-                                },
-                            )),
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
+                                    this.confirm_project_delete(cx);
+                                })
+                            }),
                         ),
                 ),
             None,
@@ -681,22 +677,12 @@ impl Workspace {
                                 .tab_index(0)
                                 .role(Role::Button)
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .on_click(cx.listener(|this, _ev, _window, cx| {
-                                    this.close_transient_surfaces();
-                                    cx.notify();
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.close_transient_surfaces();
-                                            cx.notify();
-                                        }
-                                    },
-                                )),
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, _window, cx| {
+                                        this.close_transient_surfaces();
+                                        cx.notify();
+                                    })
+                                }),
                             ),
                     )
                     .child(

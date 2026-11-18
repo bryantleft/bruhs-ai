@@ -7,7 +7,6 @@
 use super::*;
 use crate::views::crew_face::bruh_face;
 use crate::views::reactive_automations::local_time;
-use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     new_room_block, room_rail_rows, RoomRailRow, NEW_ROOM, NO_BRUHS_YET,
 };
@@ -15,6 +14,7 @@ use bruhs_models::crew::{
     rail_order, status_line, BruhState, BruhStatus, ServiceNotice, RAIL_FACE_PX,
 };
 use bruhs_models::reactive::ReactiveCommand;
+use bruhs_ui::press::on_press_view;
 
 const CREW_TITLE: &str = "Crew";
 const NEW_BRUH_LABEL: &str = "New bruh";
@@ -143,7 +143,7 @@ impl Workspace {
             .items_center()
             .gap_1()
             .flex_shrink_0()
-            .child(on_press(
+            .child(on_press_view(
                 div()
                     .id("desktop-crew-toggle")
                     .debug_selector(|| "desktop-crew-toggle".to_string())
@@ -211,7 +211,7 @@ impl Workspace {
                     )
                     .map(|el| {
                         if ready {
-                            on_press(
+                            on_press_view(
                                 el.track_focus(&self.crew_new_focus)
                                     .tab_index(0)
                                     .cursor_pointer()
@@ -247,7 +247,7 @@ impl Workspace {
                     .gap_1();
                 // Stop all, as ⌘. stops the bruhs: it works on an older service too.
                 if any_awake {
-                    actions = actions.child(on_press(
+                    actions = actions.child(on_press_view(
                         small_action("desktop-crew-stop-all", "Stop all", false),
                         cx,
                         |this, _window, cx| this.stop_crew(cx),
@@ -255,7 +255,7 @@ impl Workspace {
                 }
                 if any_paused {
                     actions = actions.child(if ready && !panel.crew_busy() {
-                        on_press(
+                        on_press_view(
                             small_action("desktop-crew-resume-all", "Resume all", false),
                             cx,
                             |this, _window, cx| {
@@ -279,7 +279,7 @@ impl Workspace {
                             .items_center()
                             .gap_2()
                             .child(crew_text("Couldn't load the crew."))
-                            .child(on_press(
+                            .child(on_press_view(
                                 small_action("desktop-crew-retry", "Retry", false),
                                 cx,
                                 |this, _window, cx| {
@@ -371,7 +371,7 @@ impl Workspace {
     fn render_crew_notice(&self, notice: ServiceNotice, cx: &Context<'_, Self>) -> Div {
         let panel = self.reactive_automations.read(cx);
         let action = if panel.can_update_service() {
-            on_press(
+            on_press_view(
                 small_action("desktop-crew-update-service", "Update service", false),
                 cx,
                 |this, _window, cx| {
@@ -417,7 +417,7 @@ impl Workspace {
             AppView::Bruh { agent_id: open } if *open == agent_id
         );
         let selector = format!("desktop-crew-row-{agent_id}");
-        on_press(
+        on_press_view(
             div()
                 // Keyed by the bruh, so focus stays on it when the rail
                 // re-sorts.
@@ -539,7 +539,7 @@ impl Workspace {
             )
             .map(|el| {
                 if block.is_none() {
-                    on_press(
+                    on_press_view(
                         el.tab_index(0)
                             .cursor_pointer()
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -565,7 +565,7 @@ impl Workspace {
         );
         let selector = format!("desktop-crew-room-{room_id}");
         let icon_selector = format!("desktop-crew-room-icon-{room_id}");
-        on_press(
+        on_press_view(
             div()
                 // Keyed by the room, so focus stays on it when the rail re-sorts.
                 .id(SharedString::from(selector.clone()))
@@ -728,7 +728,7 @@ impl Workspace {
         let (fields, disabled) = self.reactive_automations.update(cx, |panel, cx| {
             (panel.render_create_bruh(cx), panel.create_bruh_disabled())
         });
-        let cancel = on_press(
+        let cancel = on_press_view(
             web_button(
                 "desktop-create-bruh-cancel",
                 WebButtonVariant::Ghost,
@@ -760,7 +760,7 @@ impl Workspace {
         let create = if disabled {
             create
         } else {
-            on_press(
+            on_press_view(
                 create
                     .tab_index(0)
                     .focus_visible(|el| el.border_color(theme::persimmon_400())),
@@ -1316,7 +1316,7 @@ mod tests {
 
     /// A key press as the app gets it, without the newline the test
     /// platform would also type into a one-line field.
-    fn press(cx: &mut VisualTestContext, key: &str) {
+    fn press(cx: &mut VisualTestContext, key: &'static str) {
         let keystroke = gpui::Keystroke::parse(key).expect("keystroke");
         cx.simulate_event(gpui::KeyDownEvent {
             keystroke: keystroke.clone(),

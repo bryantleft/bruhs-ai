@@ -27,9 +27,10 @@ mod transcript_list;
 mod updates;
 mod weekly_reports;
 pub(crate) use bruh_page::ReactiveOpenAutomations;
+use bruhs_ui::text_field::{TextField, TextInput};
 pub(crate) use create_bruh::ReactiveBruhCreated;
 use gpui::{prelude::*, *};
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 pub(crate) use room_dialog::ReactiveRoomDone;
 pub(crate) use room_page::ReactiveOpenRoomSettings;
 use std::{
@@ -127,16 +128,16 @@ const SETTINGS_TWO_COLUMNS_PX: f32 = 1024.0;
 struct AgentEditor {
     agent: ReactiveAgent,
     name: Entity<InputState>,
-    instructions: Entity<InputState>,
+    instructions: Entity<TextareaState>,
     model: Entity<InputState>,
     path: Entity<InputState>,
-    memory: Entity<InputState>,
+    memory: Entity<TextareaState>,
 }
 struct SourceEditor {
     source: EventSource,
     name: Entity<InputState>,
     kind: &'static str,
-    value: Entity<InputState>,
+    value: TextField,
     cwd: Entity<InputState>,
     pattern: Entity<InputState>,
     interval: Entity<InputState>,
@@ -149,7 +150,7 @@ struct SourceEditor {
 }
 struct SubscriptionEditor {
     subscription: bruhs_models::reactive::Subscription,
-    instructions: Entity<InputState>,
+    instructions: Entity<TextareaState>,
     debounce: Entity<InputState>,
     throttle: Entity<InputState>,
 }
@@ -160,12 +161,12 @@ enum Editor {
     Subscription(SubscriptionEditor),
     Chat {
         agent_id: String,
-        message: Entity<InputState>,
+        message: Entity<TextareaState>,
     },
     Publish {
         source_id: String,
         key: Entity<InputState>,
-        payload: Entity<InputState>,
+        payload: Entity<TextareaState>,
     },
 }
 
@@ -225,7 +226,7 @@ pub(crate) struct ReactiveAutomations {
     agent_names: HashMap<String, String>,
     /// Unread outbox ids already seen; `None` until the first snapshot.
     outbox_seen: Option<HashSet<String>>,
-    reply: Option<(String, Entity<InputState>)>,
+    reply: Option<(String, Entity<TextareaState>)>,
     /// Redraws while the reply is typed, so Send tracks whether it is empty.
     reply_watch: Option<gpui::Subscription>,
     memory_edit: Option<memory::MemoryEdit>,
@@ -276,9 +277,7 @@ impl ReactiveButton for Stateful<Div> {
         action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
             + 'static,
     ) -> Self {
-        // The shared press helper runs the action once per click or key
-        // press; the click a key press also makes is ignored.
-        super::web_button::on_press(self, cx, move |this, window, cx| {
+        bruhs_ui::press::on_press_view(self, cx, move |this, window, cx| {
             if !this.busy {
                 action(this, window, cx);
             }
@@ -286,20 +285,31 @@ impl ReactiveButton for Stateful<Div> {
     }
 }
 
-fn edit_input(
-    text: &str,
-    multiline: bool,
-    window: &mut Window,
-    cx: &mut App,
-) -> Entity<InputState> {
+fn edit_input(text: &str, window: &mut Window, cx: &mut App) -> Entity<InputState> {
     cx.new(|cx| {
-        let mut input = InputState::new(window, cx).multi_line(multiline);
+        let mut input = InputState::new(window, cx);
         input.set_value(text, window, cx);
         input
     })
 }
-fn value(input: &Entity<InputState>, cx: &App) -> String {
-    input.read(cx).value().to_string()
+/// An [`edit_input`] or [`edit_area`] chosen at run time.
+fn edit_field(text: &str, multiline: bool, window: &mut Window, cx: &mut App) -> TextField {
+    if multiline {
+        edit_area(text, window, cx).into()
+    } else {
+        edit_input(text, window, cx).into()
+    }
+}
+/// A multi-line [`edit_input`].
+fn edit_area(text: &str, window: &mut Window, cx: &mut App) -> Entity<TextareaState> {
+    cx.new(|cx| {
+        let mut input = TextareaState::new(window, cx);
+        input.set_value(text, window, cx);
+        input
+    })
+}
+fn value(input: &impl TextInput, cx: &App) -> String {
+    input.text_value(cx).to_string()
 }
 fn apply(change: ReactiveChange) -> ReactiveCommand {
     ReactiveCommand::Apply { change }
@@ -383,7 +393,7 @@ fn heading(text: impl Into<SharedString>) -> Div {
         .text_color(theme::rambutan_100())
         .child(text.into())
 }
-fn field(label: &'static str, input: &Entity<InputState>, multiline: bool, disabled: bool) -> Div {
+fn field(label: &'static str, input: &impl TextInput, multiline: bool, disabled: bool) -> Div {
     div()
         .min_w_0()
         .w_full()
@@ -392,11 +402,10 @@ fn field(label: &'static str, input: &Entity<InputState>, multiline: bool, disab
         .gap_1()
         .child(muted(label))
         .child(
-            Styled::h(
-                Input::new(input).aria_label(label).disabled(disabled),
-                px(if multiline { 96.0 } else { 32.0 }),
-            )
-            .text_size(px(14.0)),
+            input
+                .text_element(label.into(), disabled)
+                .h(px(if multiline { 96.0 } else { 32.0 }))
+                .text_size(px(14.0)),
         )
 }
 fn reactive_error(error: ServerError) -> String {
@@ -879,11 +888,11 @@ impl ReactiveAutomations {
             enabled: false,
         });
         self.editor = Some(Editor::Agent(AgentEditor {
-            name: edit_input(&agent.name, false, window, cx),
-            instructions: edit_input(&agent.instructions, true, window, cx),
-            model: edit_input(&agent.model, false, window, cx),
-            path: edit_input(&agent.project_path, false, window, cx),
-            memory: edit_input(&agent.memory, true, window, cx),
+            name: edit_input(&agent.name, window, cx),
+            instructions: edit_area(&agent.instructions, window, cx),
+            model: edit_input(&agent.model, window, cx),
+            path: edit_input(&agent.project_path, window, cx),
+            memory: edit_area(&agent.memory, window, cx),
             agent,
         }));
         self.error = None;
@@ -913,18 +922,18 @@ impl ReactiveAutomations {
         });
         let mut editor = SourceEditor {
             source: source.clone(),
-            name: edit_input(&source.name, false, window, cx),
+            name: edit_input(&source.name, window, cx),
             kind: "folder",
-            value: edit_input("", false, window, cx),
-            cwd: edit_input("", false, window, cx),
-            pattern: edit_input("*.pdf", false, window, cx),
-            interval: edit_input("5", false, window, cx),
-            settle: edit_input("2", false, window, cx),
-            timeout: edit_input("30", false, window, cx),
+            value: edit_field("", false, window, cx),
+            cwd: edit_input("", window, cx),
+            pattern: edit_input("*.pdf", window, cx),
+            interval: edit_input("5", window, cx),
+            settle: edit_input("2", window, cx),
+            timeout: edit_input("30", window, cx),
             recursive: true,
-            times: edit_input("08:00", false, window, cx),
+            times: edit_input("08:00", window, cx),
             weekdays: Vec::new(),
-            time_zone: edit_input(&editor_fields::local_zone(), false, window, cx),
+            time_zone: edit_input(&editor_fields::local_zone(), window, cx),
         };
         let (kind, text) = match &source.kind {
             SourceKind::Folder {
@@ -994,9 +1003,7 @@ impl ReactiveAutomations {
             SourceKind::Custom => ("custom", ""),
         };
         editor.kind = kind;
-        editor
-            .value
-            .update(cx, |input, cx| input.set_value(text, window, cx));
+        editor.value.set_value(text, window, cx);
         self.editor = Some(Editor::Source(editor));
         self.error = None;
         cx.notify();
@@ -1010,9 +1017,9 @@ impl ReactiveAutomations {
         self.advanced_open = true;
         let subscription=subscription.unwrap_or_else(||bruhs_models::reactive::Subscription{id:uuid::Uuid::new_v4().to_string(),agent_id:self.snapshot.as_ref().and_then(|s|s.agents.first()).map(|a|a.id.clone()).unwrap_or_default(),source_id:self.snapshot.as_ref().and_then(|s|s.sources.first()).map(|a|a.id.clone()).unwrap_or_default(),instructions:"Read each new scan and prepare a draft with the payee, amount, due date, and payment reference. Flag missing or uncertain details. Do not make payments.".into(),enabled:false,auto_run:false,debounce_ms:0,throttle_ms:0,on_busy:BusyPolicy::Queue});
         self.editor = Some(Editor::Subscription(SubscriptionEditor {
-            instructions: edit_input(&subscription.instructions, true, window, cx),
-            debounce: edit_input(&seconds(subscription.debounce_ms), false, window, cx),
-            throttle: edit_input(&seconds(subscription.throttle_ms), false, window, cx),
+            instructions: edit_area(&subscription.instructions, window, cx),
+            debounce: edit_input(&seconds(subscription.debounce_ms), window, cx),
+            throttle: edit_input(&seconds(subscription.throttle_ms), window, cx),
             subscription,
         }));
         self.error = None;
@@ -1131,7 +1138,7 @@ impl ReactiveAutomations {
     }
     /// Web's Meeting event list: the topic is picked, not typed.
     fn render_topic_picker(&self, editor: &SourceEditor, cx: &Context<'_, Self>) -> Stateful<Div> {
-        let current = editor.value.read(cx).value().to_string();
+        let current = editor.value.value(cx).to_string();
         div()
             .id("reactive-source-topics")
             .flex()
@@ -1153,9 +1160,7 @@ impl ReactiveAutomations {
                         })
                         .on_activate(cx, move |this, window, cx| {
                             if let Some(Editor::Source(editor)) = &mut this.editor {
-                                editor
-                                    .value
-                                    .update(cx, |input, cx| input.set_value(topic, window, cx));
+                                editor.value.set_value(topic, window, cx);
                             }
                             cx.notify();
                         })
@@ -1949,7 +1954,7 @@ impl Render for ReactiveAutomations {
                                             .on_activate(cx, move |this, window, cx| {
                                                 this.editor = Some(Editor::Chat {
                                                     agent_id: chat_id.clone(),
-                                                    message: edit_input("", true, window, cx),
+                                                    message: edit_area("", window, cx),
                                                 });
                                                 cx.notify();
                                             }),
@@ -2049,8 +2054,8 @@ impl Render for ReactiveAutomations {
                                 move |this, window, cx| {
                                     this.editor = Some(Editor::Publish {
                                         source_id: id.clone(),
-                                        key: edit_input("", false, window, cx),
-                                        payload: edit_input("{}", true, window, cx),
+                                        key: edit_input("", window, cx),
+                                        payload: edit_area("{}", window, cx),
                                     });
                                     cx.notify();
                                 },

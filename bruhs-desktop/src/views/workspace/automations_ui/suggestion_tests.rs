@@ -15,6 +15,8 @@ fn click(cx: &mut gpui::VisualTestContext, selector: &'static str) {
 #[gpui::test]
 fn local_suggestions_preview_dismiss_and_dry_run_like_web(cx: &mut gpui::TestAppContext) {
     let (workspace, cx) = fixture(cx);
+    // A waiting preview gets its own card above Local suggestions; room for both.
+    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(3200.0)));
     workspace.update(cx, |workspace, cx| {
         let now = EpochMs::now().as_millis();
         workspace.automation_state.suggestions =

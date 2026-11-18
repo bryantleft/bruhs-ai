@@ -1,20 +1,20 @@
 //! Native controls for the shared project API host.
-use super::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use super::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{
     app_state::{spawn_tokio, DesktopState},
     server_client::{ServerClient, ServerError},
     theme,
 };
 use bruhs_models::{api_client::*, num::ToFloatLossy};
+use bruhs_ui::press::on_press_view;
+use bruhs_ui::text_field::TextField;
 use gpui::{prelude::*, *};
 use gpui_component::zoom::px;
 use gpui_component::{
-    input::{Input, InputState},
+    input::{InputState, TextareaState},
     scroll::ScrollableElement,
 };
-use std::{collections::BTreeSet, future::Future, rc::Rc, sync::Arc};
+use std::{collections::BTreeSet, future::Future, sync::Arc};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -28,16 +28,16 @@ pub(crate) struct ApiClientPanel {
     runtime: Arc<tokio::runtime::Runtime>,
     snapshot: Option<ApiCollectionSnapshot>,
     id: Uuid,
-    name: Entity<InputState>,
-    method: Entity<InputState>,
-    url: Entity<InputState>,
-    headers: Entity<InputState>,
-    body: Entity<InputState>,
-    values: Entity<InputState>,
-    secrets: Entity<InputState>,
-    curl: Entity<InputState>,
-    credential_name: Entity<InputState>,
-    credential_value: Entity<InputState>,
+    name: TextField,
+    method: TextField,
+    url: TextField,
+    headers: TextField,
+    body: TextField,
+    values: TextField,
+    secrets: TextField,
+    curl: TextField,
+    credential_name: TextField,
+    credential_value: TextField,
     response: Option<ApiResponse>,
     response_tab: usize,
     expanded: BTreeSet<String>,
@@ -68,26 +68,20 @@ fn input(
     secret: bool,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<InputState> {
-    cx.new(|cx| {
-        let mut state = InputState::new(window, cx).multi_line(multiline);
-        if secret {
-            state = state.masked(true);
-        }
-        state.set_value(value, window, cx);
-        state
-    })
+) -> TextField {
+    let field = if multiline {
+        TextField::Area(cx.new(|cx| TextareaState::new(window, cx)))
+    } else {
+        TextField::Line(cx.new(|cx| InputState::new(window, cx).masked(secret)))
+    };
+    field.set_value(value.to_string(), window, cx);
+    field
 }
-fn value(input: &Entity<InputState>, cx: &App) -> String {
-    input.read(cx).value().to_string()
+fn value(input: &TextField, cx: &App) -> String {
+    input.value(cx).to_string()
 }
-fn set(
-    input: &Entity<InputState>,
-    value: impl Into<SharedString>,
-    window: &mut Window,
-    cx: &mut App,
-) {
-    input.update(cx, |input, cx| input.set_value(value, window, cx));
+fn set(input: &TextField, value: impl Into<SharedString>, window: &mut Window, cx: &mut App) {
+    input.set_value(value, window, cx);
 }
 fn text(value: impl Into<SharedString>) -> Div {
     div()
@@ -97,7 +91,7 @@ fn text(value: impl Into<SharedString>) -> Div {
         .text_color(theme::rambutan_400())
         .child(value.into())
 }
-fn field(label: &'static str, input: &Entity<InputState>, multiline: bool, disabled: bool) -> Div {
+fn field(label: &'static str, input: &TextField, multiline: bool, disabled: bool) -> Div {
     div()
         .w_full()
         .min_w_0()
@@ -106,11 +100,10 @@ fn field(label: &'static str, input: &Entity<InputState>, multiline: bool, disab
         .gap_1()
         .child(text(label))
         .child(
-            Styled::h(
-                Input::new(input).aria_label(label).disabled(disabled),
-                px(if multiline { 96.0 } else { 32.0 }),
-            )
-            .text_size(px(14.0)),
+            input
+                .element(label, disabled)
+                .h(px(if multiline { 96.0 } else { 32.0 }))
+                .text_size(px(14.0)),
         )
 }
 fn control(
@@ -143,16 +136,7 @@ impl Action for Stateful<Div> {
         cx: &Context<'_, ApiClientPanel>,
         f: impl Fn(&mut ApiClientPanel, &mut Window, &mut Context<'_, ApiClientPanel>) + 'static,
     ) -> Self {
-        let f = Rc::new(f);
-        let click = Rc::clone(&f);
-        self.on_click(cx.listener(move |this, _, window, cx| click(this, window, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    f(this, window, cx);
-                }
-            }))
+        on_press_view(self, cx, f)
     }
 }
 impl ApiClientPanel {

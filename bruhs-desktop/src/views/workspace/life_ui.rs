@@ -994,7 +994,7 @@ impl Workspace {
                     // A multi-line Input takes its height from itself; web
                     // `min-h-[96px]`.
                     .child(
-                        Input::new(&self.life_csv_input)
+                        Textarea::new(&self.life_csv_input)
                             .h(px(LIFE_CSV_INPUT_HEIGHT_PX))
                             .aria_label("Finance CSV rows"),
                     ),
@@ -1593,7 +1593,7 @@ impl Workspace {
 pub(super) struct LifeInputs {
     pub(super) life_health: HealthForms,
     pub(super) life_finance: FinanceForms,
-    pub(super) life_csv_input: Entity<InputState>,
+    pub(super) life_csv_input: Entity<TextareaState>,
 }
 
 impl Workspace {
@@ -1635,9 +1635,8 @@ impl Workspace {
             habit_title: health_field(health_copy::HABIT_TITLE),
         };
         let life_csv_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder("Coffee, Food, -5.25, client meeting")
-                .multi_line(true)
                 .rows(4)
         });
         subscriptions.push(redraw_on_edit(&life_csv_input, window, cx));

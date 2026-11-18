@@ -1,10 +1,9 @@
 //! Debug-only, isolated OS window acceptance. Never builds DesktopState, reads
 //! user workspace files, starts the hub, observes focus, or records anything.
-use crate::views::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::views::{meeting_dock, meetings_hub::MeetingsHub};
 use crate::{assets, theme};
+use bruhs_ui::press::on_press_view;
 use gpui::prelude::*;
 use gpui::*;
 use gpui_component::zoom::px;
@@ -81,15 +80,11 @@ impl Render for Fixture {
             .child(if ended { "Synthetic meeting ended." } else { "Synthetic meeting active." })
             .child(web_button("fixture-open", WebButtonVariant::Outline, WebButtonSize::Default, ButtonState::disabled_if(ended))
                 .min_h(px(44.0)).aria_label("Open synthetic meeting dock")
-                .on_click(cx.listener(|this, _, window, cx| this.open(window, cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) { window.prevent_default(); cx.stop_propagation(); this.open(window, cx); }
-                })).child("Open dock"))
+                .map(|el| on_press_view(el, cx, |this, window, cx| this.open(window, cx)))
+                .child("Open dock"))
             .child(web_button("fixture-end", WebButtonVariant::Outline, WebButtonSize::Default, ButtonState::disabled_if(ended))
                 .min_h(px(44.0)).aria_label("End synthetic meeting")
-                .on_click(cx.listener(|this, _, _, cx| this.end(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) { window.prevent_default(); cx.stop_propagation(); this.end(cx); }
-                })).child("End synthetic meeting"))
+                .map(|el| on_press_view(el, cx, |this, _, cx| this.end(cx)))
+                .child("End synthetic meeting"))
     }
 }

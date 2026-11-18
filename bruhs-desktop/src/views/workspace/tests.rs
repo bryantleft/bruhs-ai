@@ -196,7 +196,12 @@ use gpui_component::zoom::px;
 use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;
+mod calendar_zones;
+mod inbox_acceptance;
+mod keys;
+mod launch;
 mod parity_rows;
+mod today_acceptance;
 
 fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
     NaiveDate::from_ymd_opt(year, month, day)
@@ -279,7 +284,7 @@ fn desktop_settings_modal_focus_should_stay_trapped_like_web_dialog(cx: &mut gpu
         } else {
             -40.0
         };
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position: model_list.center(),
             delta: gpui::ScrollDelta::Pixels(gpui::point(px(0.0), px(delta))),
             ..Default::default()
@@ -2671,7 +2676,7 @@ fn thread_menu_workspace(
 
 /// A full key press. GPUI clicks a focused control on key up, which
 /// `simulate_keystrokes` never sends.
-fn press_key(cx: &mut gpui::VisualTestContext, key: &str) {
+fn press_key(cx: &mut gpui::VisualTestContext, key: &'static str) {
     let keystroke = gpui::Keystroke::parse(key).expect("test keystroke should parse");
     cx.simulate_event(gpui::KeyDownEvent {
         keystroke: keystroke.clone(),

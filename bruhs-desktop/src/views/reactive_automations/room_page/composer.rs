@@ -1,14 +1,18 @@
 //! The room composer: its draft and bruh chips, the `@` list of the
 //! room's members, and posting.
 use super::*;
+use gpui_component::Sizable as _;
 
 /// Web `rounded-[16px]` on the composer surface.
 const COMPOSER_RADIUS_PX: f32 = 16.0;
 /// Web `inset-ring-white/10`, and `focus-within:inset-ring-persimmon-400/40`.
 const COMPOSER_RING_OPACITY: f32 = 0.10;
 const COMPOSER_FOCUS_RING_OPACITY: f32 = 0.40;
-/// Web `px-3 pt-2.5 pb-1` around the composer's text.
-const COMPOSER_X_PADDING_PX: f32 = 12.0;
+/// Web `px-3 pt-2.5 pb-1` around the composer's text. The field is an
+/// extra-small [`Textarea`], which keeps 4px of its own on each side (and
+/// none above or below), so the wrapper adds the rest.
+const COMPOSER_X_PADDING_PX: f32 = 12.0 - COMPOSER_FIELD_X_PADDING_PX;
+const COMPOSER_FIELD_X_PADDING_PX: f32 = 4.0;
 const COMPOSER_TOP_PADDING_PX: f32 = 10.0;
 const COMPOSER_BOTTOM_PADDING_PX: f32 = 4.0;
 /// Web `EDITOR_MIN_HEIGHT_PX` (52) for the text area, less the 1px border
@@ -33,7 +37,7 @@ pub(super) fn make_room_composer(
     cx: &mut Context<'_, ReactiveAutomations>,
 ) {
     let composer = cx.new(|cx| {
-        InputState::new(window, cx)
+        TextareaState::new(window, cx)
             .auto_grow(COMPOSER_MIN_ROWS, COMPOSER_MAX_ROWS)
             .submit_on_enter(true)
             .placeholder("Message")
@@ -339,15 +343,15 @@ impl ReactiveAutomations {
                         .pt(px(COMPOSER_TOP_PADDING_PX))
                         .pb(px(COMPOSER_BOTTOM_PADDING_PX))
                         .child(
-                            // The wrapper holds the web textarea's padding;
-                            // the field adds none of its own.
-                            Input::new(composer)
+                            // The wrapper holds the web textarea's padding,
+                            // less the extra-small field's own 4px a side.
+                            Textarea::new(composer)
+                                .xsmall()
                                 .aria_label("Message")
                                 .p_0()
                                 .appearance(false)
                                 .bordered(false)
                                 .focus_bordered(false)
-                                .cleanable(false)
                                 .disabled(blocked.is_some())
                                 .font_family(theme::CODE_FONT_FAMILY)
                                 .text_size(px(BODY_TEXT_PX)),

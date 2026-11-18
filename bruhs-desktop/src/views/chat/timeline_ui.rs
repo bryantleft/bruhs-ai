@@ -8,6 +8,7 @@
 use crate::views::copy_feedback::CopyFeedback;
 use bruhs_models::logic::context_meter::format_tokens;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
+use bruhs_ui::press::on_press_view;
 use chrono::{Local, TimeZone};
 use gpui_component::zoom::px;
 use std::time::Duration;
@@ -19,8 +20,8 @@ use gpui_component::tooltip::Tooltip;
 #[cfg(any(test, debug_assertions))]
 use super::TurnState;
 use super::{
-    element_key, fold_duration_label, is_web_button_activation_key, turn_duration_ms,
-    turn_fold_label, ChatView, ChatViewEvent, DesktopToolCall, Message, MessageRole,
+    element_key, fold_duration_label, turn_duration_ms, turn_fold_label, ChatView, ChatViewEvent,
+    DesktopToolCall, Message, MessageRole,
 };
 use crate::views::diff_panel::{changed_files_from_tool_calls, split_path};
 use crate::{assets, theme};
@@ -822,16 +823,11 @@ impl ChatView {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.text_color(theme::rambutan_200()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.toggle_fold(index, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
                             this.toggle_fold(index, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(label)
                     .child(chevron(assets::CHEVRON_RIGHT_ICON_PATH, expanded, 1.0)),
             )
@@ -873,16 +869,11 @@ impl ChatView {
                     .aria_expanded(open)
                     .aria_label(label)
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.toggle_thinking_block(index, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
                             this.toggle_thinking_block(index, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(icon_box(assets::BRAIN_ICON_PATH, theme::rambutan_500()))
                     .child(
                         div()
@@ -954,8 +945,7 @@ impl ChatView {
             assets::HAMMER_ICON_PATH
         };
         let any_running = tools.iter().any(|t| t.state == ToolState::Running);
-        let key_for_click = key.clone();
-        let key_for_key = key;
+        let key_for_click = key;
         div()
             .pb_2()
             .child(
@@ -966,16 +956,11 @@ impl ChatView {
                     .aria_expanded(open)
                     .aria_label(summary.clone())
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.toggle_row(key_for_click.clone(), default_open, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.toggle_row(key_for_key.clone(), default_open, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
+                            this.toggle_row(key_for_click.clone(), default_open, cx);
+                        })
+                    })
                     .child(icon_box(header_icon, theme::rambutan_500()))
                     .child(
                         div()
@@ -1043,8 +1028,7 @@ impl ChatView {
             _ => tool.label.clone(),
         };
         let debug_key = element_key(&tool.call.id);
-        let key_for_click = key.clone();
-        let key_for_key = key;
+        let key_for_click = key;
         let mut row = div()
             .id(("desktop-tool-row", debug_key))
             .debug_selector(move || format!("desktop-tool-call-card-{debug_key}"))
@@ -1065,16 +1049,11 @@ impl ChatView {
                 .cursor_pointer()
                 .hover(|el| el.bg(theme::longan_800().opacity(0.3)))
                 .tooltip(move |window, cx| Tooltip::new(title.clone()).build(window, cx))
-                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                    this.toggle_row(key_for_click.clone(), false, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.toggle_row(key_for_key.clone(), false, cx);
-                    }
-                }));
+                .map(|el| {
+                    on_press_view(el, cx, move |this, _window, cx| {
+                        this.toggle_row(key_for_click.clone(), false, cx);
+                    })
+                });
         }
         row.child(
             div()
@@ -1232,8 +1211,7 @@ impl ChatView {
         let adds: usize = files.iter().map(|f| f.additions).sum();
         let dels: usize = files.iter().map(|f| f.deletions).sum();
         let count_label = format!("{n} changed file{}", if n == 1 { "" } else { "s" });
-        let key_for_click = key.clone();
-        let key_for_key = key;
+        let key_for_click = key;
         div()
             .debug_selector(move || format!("desktop-changed-files-{index}"))
             .mb_4()
@@ -1270,18 +1248,11 @@ impl ChatView {
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| el.bg(theme::longan_800().opacity(0.4)))
-                            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                this.toggle_row(key_for_click.clone(), latest, cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.toggle_row(key_for_key.clone(), latest, cx);
-                                    }
-                                },
-                            ))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, _window, cx| {
+                                    this.toggle_row(key_for_click.clone(), latest, cx);
+                                })
+                            })
                             .child({
                                 let el = icon(
                                     assets::CHEVRON_RIGHT_ICON_PATH,
@@ -1360,20 +1331,13 @@ impl ChatView {
                                 el.bg(theme::longan_800().opacity(0.6))
                                     .text_color(theme::rambutan_100())
                             })
-                            .on_click(cx.listener(move |_, _, _, cx| {
-                                cx.emit(ChatViewEvent::OpenDiff {
-                                    message_index: index,
-                                })
-                            }))
-                            .on_key_down(cx.listener(move |_, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, move |_, _window, cx| {
                                     cx.emit(ChatViewEvent::OpenDiff {
                                         message_index: index,
                                     });
-                                }
-                            }))
+                                })
+                            })
                             .child(icon(
                                 assets::FILE_DIFF_ICON_PATH,
                                 TRANSCRIPT_CHEVRON_PX,
@@ -1503,16 +1467,11 @@ impl ChatView {
                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .cursor_pointer()
                         .hover(|el| el.bg(theme::lychee_500().opacity(0.20)))
-                        .on_click(cx.listener(move |this, _ev, _window, cx| {
-                            this.retry_failed_turn(index, cx);
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                cx.stop_propagation();
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, _window, cx| {
                                 this.retry_failed_turn(index, cx);
-                            }
-                        }))
+                            })
+                        })
                         .child(icon(
                             assets::ROTATE_CCW_ICON_PATH,
                             TRANSCRIPT_CHEVRON_PX,

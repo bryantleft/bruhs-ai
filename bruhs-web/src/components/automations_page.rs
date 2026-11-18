@@ -1,3 +1,4 @@
+use bruhs_models::logic::workflow_review as review;
 use bruhs_models::{
     focus_workflow_operations as focus_operations, AgentAccess, AgentDomain, BackgroundJobStatus,
     WorkflowOperation, WorkflowPreview, WorkflowStatus, PROTECT_FOCUS_SUGGESTION_ID,
@@ -94,6 +95,14 @@ pub fn AutomationsPage() -> impl IntoView {
         }
     };
 
+    let decline_dry_run = move |_| {
+        let Some(id) = active_workflow.get_untracked() else {
+            return;
+        };
+        automation.update(|state| {
+            let _ = state.decline_workflow(&id, crate::clock::now_ms());
+        });
+    };
     let executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
     // Controls that change records wait for the store, the executor and any
     // pending save.
@@ -173,33 +182,38 @@ pub fn AutomationsPage() -> impl IntoView {
                             <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="dry-run-title">
                                 <div class="flex items-center justify-between gap-3">
                                     <div>
-                                        <h2 id="dry-run-title" class="text-h4 text-rambutan-100">"Preview changes"</h2>
-                                        <p class="text-body-sm text-rambutan-500">"Nothing below has run yet."</p>
+                                        <h2 id="dry-run-title" class="text-h4 text-rambutan-100">{review::PREVIEW_CHANGES}</h2>
+                                        <p class="text-body-sm text-rambutan-500">{review::NOTHING_RUN_YET}</p>
                                     </div>
-                                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(recheck_preview)>"Recheck grants"</Button>
+                                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(recheck_preview)>{review::RECHECK_GRANTS}</Button>
                                 </div>
                                 {move || automation.with(|state| state.workflows.iter().find(|workflow| Some(&workflow.id) == active_workflow.get().as_ref()).map(|workflow| {
                                     let operations = workflow.steps.iter().map(|step| step.operation.clone()).collect();
                                     view! { <super::workflow_payload::WorkflowPayload operations=operations /> }
                                 }))}
                                 <Show when=move || preview.get().is_some_and(|preview| !preview.allowed) fallback=|| ()>
-                                    <p role="alert" class="mt-3 text-body-sm text-durian-300">{move || preview.get().map(|preview| format!("Grant Write for: {}.", preview.blocked_domains.iter().map(|domain| domain.label()).collect::<Vec<_>>().join(", "))).unwrap_or_default()}</p>
+                                    <p role="alert" class="mt-3 text-body-sm text-durian-300">{move || preview.get().and_then(|preview| review::grant_write_for(&preview.blocked_domains)).unwrap_or_default()}</p>
                                 </Show>
-                                <div class="mt-3">
+                                <div class="mt-3 flex flex-wrap gap-2">
                                     <Button variant=ButtonVariant::Primary size=ButtonSize::Small disabled=Signal::derive(move || !preview.get().is_some_and(|preview| preview.allowed)) on_click=Callback::new(start_job)>
-                                        "Start transaction"
+                                        {review::START_TRANSACTION}
+                                    </Button>
+                                    // A dry run you decide against is declined here, so it
+                                    // never holds up an MCP client's proposal.
+                                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(decline_dry_run)>
+                                        {review::DECLINE_PROPOSAL}
                                     </Button>
                                 </div>
                             </section>
                         </Show>
 
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="jobs-title">
-                            <h2 id="jobs-title" class="text-h4 text-rambutan-100">"Background jobs"</h2>
-                            <p class="text-body-sm text-rambutan-500">"Each record and checkpoint commit together. Background runs continue across pages while the app is open and resume after reload. Run, pause, resume or undo a workflow from Workflow history."</p>
+                            <h2 id="jobs-title" class="text-h4 text-rambutan-100">{review::BACKGROUND_JOBS}</h2>
+                            <p class="text-body-sm text-rambutan-500">{review::BACKGROUND_JOBS_NOTE}</p>
                             <div class="mt-3 space-y-2">
                                 // A record of the newest jobs. Their controls are on the
                                 // workflow on show in Workflow history, as on desktop.
-                                {move || automation.with(|state| state.jobs.iter().rev().take(8).map(|job| {
+                                {move || automation.with(|state| state.jobs.iter().rev().take(review::JOBS_SHOWN).map(|job| {
                                     let status = job.status;
                                     let next_step = job.next_step;
                                     let workflow = state.workflows.iter().find(|workflow| workflow.id == job.workflow_id);
@@ -209,10 +223,10 @@ pub fn AutomationsPage() -> impl IntoView {
                                     view! {
                                         <div class="flex flex-wrap items-center justify-between gap-3 rounded-grape bg-longan-950/60 px-3 py-2">
                                             <div>
-                                                <p class="text-label text-rambutan-200">{format!("{} of {} steps", next_step, total)}</p>
+                                                <p class="text-label text-rambutan-200">{review::job_progress(next_step, total)}</p>
                                                 <p class="text-label-sm text-rambutan-500">{format!("{:?}", status)}</p>
                                             </div>
-                                            {(!active).then(|| view! { <span class="text-label-sm text-pandan-300">"Checkpointed"</span> })}
+                                            {(!active).then(|| view! { <span class="text-label-sm text-pandan-300">{review::CHECKPOINTED}</span> })}
                                             <super::workflow_payload::WorkflowReview workflow_id=review_id />
                                         </div>
                                     }
@@ -221,9 +235,9 @@ pub fn AutomationsPage() -> impl IntoView {
                         </section>
 
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="audit-title">
-                            <h2 id="audit-title" class="text-h4 text-rambutan-100">"Audit timeline"</h2>
+                            <h2 id="audit-title" class="text-h4 text-rambutan-100">{review::AUDIT_TIMELINE}</h2>
                             <div class="mt-3 space-y-2">
-                                {move || automation.with(|state| state.audit.iter().rev().take(20).cloned().map(|event| view! {
+                                {move || automation.with(|state| state.audit.iter().rev().take(review::AUDIT_SHOWN).cloned().map(|event| view! {
                                     <div class="border-l border-blueberry-500/30 pl-3">
                                         <p class="text-label-sm text-blueberry-300">{format!("{:?}", event.kind)}</p>
                                         <p class="text-body-sm text-rambutan-300">{event.message}</p>
@@ -236,8 +250,8 @@ pub fn AutomationsPage() -> impl IntoView {
                     <aside class="space-y-4">
                         <fieldset disabled=locked class="m-0 min-w-0 border-0 p-0">
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50" aria-labelledby="capabilities-title">
-                            <h2 id="capabilities-title" class="text-h4 text-rambutan-100">"Capability grants"</h2>
-                            <p class="text-body-sm text-rambutan-500">"Read and Write are independent. Finance and Health start fully off."</p>
+                            <h2 id="capabilities-title" class="text-h4 text-rambutan-100">{review::CAPABILITY_GRANTS}</h2>
+                            <p class="text-body-sm text-rambutan-500">{review::CAPABILITY_GRANTS_NOTE}</p>
                             <div class="mt-3 space-y-2">
                                 {AgentDomain::ALL.into_iter().map(|domain| view! {
                                     <div class="flex items-center justify-between gap-3">
@@ -263,12 +277,12 @@ pub fn AutomationsPage() -> impl IntoView {
                         </fieldset>
 
                         <section class="rounded-grape bg-longan-900/70 p-4 inset-ring inset-ring-longan-700/50">
-                            <p class="text-label-sm uppercase tracking-wide text-rambutan-400">"Safety contract"</p>
-                            <p class="mt-2 text-body-sm text-rambutan-300">"Writes never inherit Read access. Every workflow requires a dry run. Undo reverts completed steps, including a partial run, only if their records are unchanged."</p>
-                            <p class="mt-2 text-label-sm text-pandan-300">{move || automation.with(|state| { let n = state.workflows.len(); format!("{} typed tools, {n} {}", bruhs_models::agent_tool_definitions().len(), if n == 1 { "workflow" } else { "workflows" }) })}</p>
+                            <p class="text-label-sm uppercase tracking-wide text-rambutan-400">{review::SAFETY_CONTRACT}</p>
+                            <p class="mt-2 text-body-sm text-rambutan-300">{review::SAFETY_CONTRACT_NOTE}</p>
+                            <p class="mt-2 text-label-sm text-pandan-300">{move || automation.with(|state| review::tools_and_workflows(bruhs_models::agent_tool_definitions().len(), state.workflows.len()))}</p>
                             <p class="mt-1 text-label-sm text-rambutan-400">{move || {
                                 let count = meeting_notes.with(Vec::len) + threads.with(Vec::len) + work_items.with(Vec::len) + events.with(Vec::len) + captures.with(Vec::len) + documents.with(Vec::len) + conversations.with(Vec::len) + life.with(|life| life.finance.transactions.len() + life.health.workouts.len());
-                                format!("{count} local {} in connected workflow domains", if count == 1 { "record" } else { "records" })
+                                review::local_records(count)
                             }}</p>
                         </section>
 

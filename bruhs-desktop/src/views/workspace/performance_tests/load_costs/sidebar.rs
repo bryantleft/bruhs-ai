@@ -406,7 +406,7 @@ fn native_sidebar_viewport_scrolls_and_tabs_through_offscreen_cards(cx: &mut Tes
         );
         (scroll_max, bounds)
     });
-    visual.simulate_event(gpui::ScrollWheelEvent {
+    visual.simulate_event(gpui::ScrollEvent {
         position: viewport.center(),
         delta: gpui::ScrollDelta::Pixels(gpui::point(
             px(0.0),
@@ -414,6 +414,7 @@ fn native_sidebar_viewport_scrolls_and_tabs_through_offscreen_cards(cx: &mut Tes
         )),
         modifiers: gpui::Modifiers::default(),
         touch_phase: gpui::TouchPhase::Moved,
+        source: gpui::ScrollSource::Pointer,
     });
     visual.run_until_parked();
     let bounds = visual

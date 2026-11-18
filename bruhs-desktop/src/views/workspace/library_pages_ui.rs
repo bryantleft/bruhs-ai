@@ -1,5 +1,6 @@
 //! Bounded library pages share keyboard controls and retain their full records.
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 #[derive(Clone, Copy)]
@@ -160,19 +161,10 @@ impl Workspace {
         .aria_label(format!("{direction} {label} page"))
         .min_h(px(theme::CONTROL_PX))
         .when(!disabled, |button| {
-            button
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.library_pages.select(target, next_page);
-                    cx.notify();
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.library_pages.select(target, next_page);
-                        cx.notify();
-                    }
-                }))
+            on_press_view(button, cx, move |this, _, cx| {
+                this.library_pages.select(target, next_page);
+                cx.notify();
+            })
         })
         .child(if next { "Next" } else { "Previous" })
         .into_any_element()

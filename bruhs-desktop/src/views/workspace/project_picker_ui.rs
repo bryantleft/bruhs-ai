@@ -1,6 +1,7 @@
 //! The project picker: browsing directories off the UI thread, recents, and opening a project session.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 pub(super) const PROJECT_PICKER_BODY_FONT_FAMILY: &str = "Monaspace Neon";
@@ -363,15 +364,11 @@ impl Workspace {
         let header_path = current_path.clone();
         let select_current_path = current_path;
         let select_current_name = current_name;
-        let select_current_path_key = select_current_path.clone();
-        let select_current_name_key = select_current_name.clone();
 
         let mut recent_rows = Vec::new();
         for project in &self.recent_projects {
             let path = project.path.clone();
             let name = project.name.clone();
-            let path_for_key = project.path.clone();
-            let name_for_key = project.name.clone();
             let debug_key = element_key(&project.path);
             recent_rows.push(
                 div()
@@ -401,21 +398,11 @@ impl Workspace {
                         )
                         .text_color(theme::rambutan_200())
                     })
-                    .on_click(cx.listener(move |this, _ev, window, cx| {
-                        this.select_project_location(path.clone(), name.clone(), window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.select_project_location(
-                                path_for_key.clone(),
-                                name_for_key.clone(),
-                                window,
-                                cx,
-                            );
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
+                            this.select_project_location(path.clone(), name.clone(), window, cx);
+                        })
+                    })
                     .child(
                         svg()
                             .path(assets::FOLDER_ICON_PATH)
@@ -438,7 +425,6 @@ impl Workspace {
         let mut directory_rows = Vec::new();
         if let Some(parent_path) = &self.project_picker_parent_path {
             let parent_path = parent_path.clone();
-            let parent_path_for_key = parent_path.clone();
             directory_rows.push(
                 div()
                     .id("desktop-project-parent")
@@ -463,16 +449,11 @@ impl Workspace {
                     .hover(|el| {
                         el.bg(theme::longan_800().opacity(PROJECT_PICKER_ROW_HOVER_BG_OPACITY))
                     })
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.load_project_directory(Some(parent_path.clone()), cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.load_project_directory(Some(parent_path_for_key.clone()), cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
+                            this.load_project_directory(Some(parent_path.clone()), cx);
+                        })
+                    })
                     .child(
                         div()
                             .w(px(PROJECT_PICKER_PARENT_ICON_SLOT_WIDTH_PX))
@@ -515,6 +496,10 @@ impl Workspace {
                             .text_color(theme::rambutan_200())
                     })
                     .on_click(cx.listener(move |this, ev: &ClickEvent, window, cx| {
+                        // Enter/Space already acted on key down.
+                        if ev.is_keyboard() {
+                            return;
+                        }
                         if ev.click_count() == 2 {
                             this.select_project_location(
                                 select_path.clone(),
@@ -671,30 +656,16 @@ impl Workspace {
                                             el.bg(theme::rambutan_500()
                                                 .opacity(PROJECT_PICKER_SELECT_HOVER_BG_OPACITY))
                                         })
-                                        .on_click(cx.listener(move |this, _ev, window, cx| {
-                                            this.select_project_location(
-                                                select_current_path.clone(),
-                                                select_current_name.clone(),
-                                                window,
-                                                cx,
-                                            );
-                                        }))
-                                        .on_key_down(cx.listener(
-                                            move |this, event: &KeyDownEvent, window, cx| {
-                                                if is_web_button_activation_key(
-                                                    event.keystroke.key.as_str(),
-                                                ) {
-                                                    window.prevent_default();
-                                                    cx.stop_propagation();
-                                                    this.select_project_location(
-                                                        select_current_path_key.clone(),
-                                                        select_current_name_key.clone(),
-                                                        window,
-                                                        cx,
-                                                    );
-                                                }
-                                            },
-                                        ))
+                                        .map(|el| {
+                                            on_press_view(el, cx, move |this, window, cx| {
+                                                this.select_project_location(
+                                                    select_current_path.clone(),
+                                                    select_current_name.clone(),
+                                                    window,
+                                                    cx,
+                                                );
+                                            })
+                                        })
                                         .child("Select this folder"),
                                 )
                             }),
@@ -722,20 +693,11 @@ impl Workspace {
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                 .hover(|el| el.bg(theme::longan_800().opacity(0.5)))
                                 .cursor_pointer()
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.apply_thread_project(None, window, cx)
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.apply_thread_project(None, window, cx);
-                                        }
-                                    },
-                                ))
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        this.apply_thread_project(None, window, cx)
+                                    })
+                                })
                                 .child(
                                     svg()
                                         .path(assets::MESSAGE_SQUARE_ICON_PATH)
@@ -831,22 +793,12 @@ impl Workspace {
                                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                                     .cursor_pointer()
                                     .hover(|el| el.text_color(theme::rambutan_300()))
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.close_transient_surfaces();
-                                        cx.notify();
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.close_transient_surfaces();
-                                                cx.notify();
-                                            }
-                                        },
-                                    ))
+                                    .map(|el| {
+                                        on_press_view(el, cx, |this, _window, cx| {
+                                            this.close_transient_surfaces();
+                                            cx.notify();
+                                        })
+                                    })
                                     .child("Cancel"),
                             ),
                     )

@@ -1514,7 +1514,7 @@ fn desktop_export_reply_should_open_one_panel_like_web(cx: &mut gpui::TestAppCon
 }
 
 /// A full key press (`simulate_keystrokes` never sends the key up).
-fn press_chat_key(cx: &mut gpui::VisualTestContext, key: &str) {
+fn press_chat_key(cx: &mut gpui::VisualTestContext, key: &'static str) {
     let keystroke = gpui::Keystroke::parse(key).expect("test keystroke should parse");
     cx.simulate_event(gpui::KeyDownEvent {
         keystroke: keystroke.clone(),

@@ -1,6 +1,7 @@
 //! Tool call bodies (terminal, diff, read, question), the permission prompt, and the scroll-to-bottom control.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 pub(super) const TERMINAL_COMMAND_PREFIX: &str = "$ ";
 pub(super) const TERMINAL_OUTPUT_MAX_LINES: usize = 100;
@@ -737,20 +738,11 @@ impl ChatView {
                                             .opacity(PERMISSION_PROMPT_ACTION_HOVER_BG_OPACITY))
                                             .text_color(theme::lychee_300())
                                     })
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.respond_to_permission(false, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.respond_to_permission(false, cx);
-                                            }
-                                        },
-                                    ))
+                                    .map(|el| {
+                                        on_press_view(el, cx, |this, _window, cx| {
+                                            this.respond_to_permission(false, cx);
+                                        })
+                                    })
                                     .child(
                                         svg()
                                             .path(assets::CLOSE_ICON_PATH)
@@ -794,20 +786,11 @@ impl ChatView {
                                         el.bg(theme::pandan_400()
                                             .opacity(PERMISSION_PROMPT_ACTION_HOVER_BG_OPACITY))
                                     })
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.respond_to_permission(true, cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.respond_to_permission(true, cx);
-                                            }
-                                        },
-                                    ))
+                                    .map(|el| {
+                                        on_press_view(el, cx, |this, _window, cx| {
+                                            this.respond_to_permission(true, cx);
+                                        })
+                                    })
                                     .child(
                                         svg()
                                             .path(assets::CHECK_ICON_PATH)
@@ -872,18 +855,12 @@ impl ChatView {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.text_color(theme::rambutan_100()))
-                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                        this.scroll_messages_to_bottom();
-                        cx.notify();
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, |this, _window, cx| {
                             this.scroll_messages_to_bottom();
                             cx.notify();
-                        }
-                    }))
+                        })
+                    })
                     .child(
                         svg()
                             .path(assets::CHEVRON_DOWN_ICON_PATH)

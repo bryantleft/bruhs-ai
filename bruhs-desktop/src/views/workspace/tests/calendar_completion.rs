@@ -523,3 +523,186 @@ fn hidden_month_records_are_reachable_through_the_day_list(cx: &mut gpui::TestAp
         );
     });
 }
+
+fn due_task(id: &str, title: &str, due: &str) -> DesktopWorkItem {
+    DesktopWorkItem {
+        id: id.into(),
+        project_id: None,
+        title: title.into(),
+        description: None,
+        status: DesktopWorkItemStatus::Todo,
+        priority: DesktopPriority::Medium,
+        due_date: Some(due.into()),
+        planning: WorkItemPlanning::default(),
+        updated_at: EpochMs::UNIX_EPOCH,
+    }
+}
+
+/// CAL-16 on desktop, by keyboard alone, as the web's time grid and month
+/// do it: a time-grid block is a Tab stop that opens with Enter and with
+/// Space (a local event's editor, a Google event's read-only detail). In
+/// Month, +N more and the day number open the day list, focus moves into
+/// it, and its rows open their records with Enter and Space.
+#[gpui::test]
+fn calendar_records_open_from_the_keyboard(cx: &mut gpui::TestAppContext) {
+    use super::keys::{added_stops, focus_page, in_dialog, press, tab_stops, tab_to};
+
+    let (workspace, cx) = calendar_workspace(cx);
+    let date = NaiveDate::from_ymd_opt(2026, 5, 12).expect("a date");
+    let google_start = Local
+        .from_local_datetime(&dt(2026, 5, 12, 11, 0))
+        .earliest()
+        .expect("a local time")
+        .timestamp_millis();
+    let provider = google_event(
+        "provider",
+        "Provider sync",
+        google_start,
+        google_start + HOUR_MS,
+    );
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.active_view = AppView::Calendar;
+        workspace.calendar_mode = DesktopCalendarMode::Day;
+        workspace.calendar_anchor = date;
+        workspace.calendar_events.clear();
+        workspace.work_items.clear();
+        cx.notify();
+    });
+    cx.run_until_parked();
+
+    // Each block adds one Tab stop.
+    let empty_day = tab_stops(&workspace, cx);
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.calendar_events = vec![event(
+            "standup",
+            dt(2026, 5, 12, 9, 0),
+            dt(2026, 5, 12, 10, 0),
+        )];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let with_local = tab_stops(&workspace, cx);
+    let local = added_stops(&empty_day, &with_local);
+    assert_eq!(local.len(), 1, "the local block is one Tab stop");
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.meetings_hub.update(cx, |hub, _cx| {
+            hub.google_events = vec![provider.clone()];
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let with_google = tab_stops(&workspace, cx);
+    let google = added_stops(&with_local, &with_google);
+    assert_eq!(google.len(), 1, "the Google block is one Tab stop");
+
+    for key in ["enter", "space"] {
+        focus_page(&workspace, cx);
+        tab_to(cx, &local[0], "the local block");
+        press(cx, key);
+        workspace.update_in(cx, |workspace, window, cx| {
+            assert!(workspace.event_create_visible(), "{key} opens the block");
+            assert!(!workspace.event_dialog_read_only());
+            assert_eq!(
+                workspace.selected_calendar_event_id.as_deref(),
+                Some("standup")
+            );
+            let title = workspace.event_create_title_input.read(cx);
+            assert_eq!(title.value().as_ref(), "standup", "{key} typed nothing");
+            assert!(title.focus_handle(cx).is_focused(window), "{key}");
+        });
+        click_debug_selector(cx, "desktop-event-create-cancel");
+        cx.run_until_parked();
+
+        focus_page(&workspace, cx);
+        tab_to(cx, &google[0], "the Google block");
+        press(cx, key);
+        workspace.update_in(cx, |workspace, _window, _cx| {
+            assert!(workspace.event_create_visible(), "{key} opens the detail");
+            assert!(workspace.event_dialog_read_only());
+            assert_eq!(
+                workspace.selected_calendar_event_id.as_deref(),
+                Some("provider")
+            );
+        });
+        assert!(in_dialog(&workspace, cx), "{key}: focus is in the detail");
+        click_debug_selector(cx, "desktop-event-create-cancel");
+        cx.run_until_parked();
+    }
+
+    // Month: the day number appears with the day's first record, +N more
+    // with its fourth.
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.calendar_mode = DesktopCalendarMode::Month;
+        workspace.calendar_events.clear();
+        workspace
+            .meetings_hub
+            .update(cx, |hub, _cx| hub.google_events.clear());
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let empty_month = tab_stops(&workspace, cx);
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.calendar_events = vec![
+            event("local-0", dt(2026, 5, 12, 9, 0), dt(2026, 5, 12, 9, 30)),
+            event("local-1", dt(2026, 5, 12, 10, 0), dt(2026, 5, 12, 10, 30)),
+        ];
+        workspace.meetings_hub.update(cx, |hub, _cx| {
+            hub.google_events = vec![provider.clone()];
+        });
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let three = tab_stops(&workspace, cx);
+    let day_number = added_stops(&empty_month, &three);
+    assert_eq!(day_number.len(), 4, "the day number and three pills");
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.work_items = vec![due_task("task-due", "Due report", "2026-05-12")];
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let four = tab_stops(&workspace, cx);
+    let more = added_stops(&three, &four);
+    assert_eq!(more.len(), 1, "+N more is one Tab stop");
+
+    // +N more by Enter: focus moves into the day list; its Google row opens
+    // the read-only detail by Enter. The day list's stops are its close
+    // button, then each record in order.
+    focus_page(&workspace, cx);
+    tab_to(cx, &more[0], "+N more");
+    press(cx, "enter");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.overlay, Some(Overlay::CalendarDay { date }));
+    });
+    assert!(in_dialog(&workspace, cx), "focus moved into the day list");
+    for _ in 0..4 {
+        cx.simulate_keystrokes("tab");
+    }
+    press(cx, "enter");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert!(workspace.event_dialog_read_only());
+        assert_eq!(
+            workspace.selected_calendar_event_id.as_deref(),
+            Some("provider")
+        );
+    });
+    click_debug_selector(cx, "desktop-event-create-cancel");
+    cx.run_until_parked();
+
+    // The day number by Space: the due task's row opens it by Space.
+    focus_page(&workspace, cx);
+    tab_to(cx, &day_number[0], "the day number");
+    press(cx, "space");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.overlay, Some(Overlay::CalendarDay { date }));
+    });
+    assert!(in_dialog(&workspace, cx), "focus moved into the day list");
+    for _ in 0..5 {
+        cx.simulate_keystrokes("tab");
+    }
+    press(cx, "space");
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        assert_eq!(workspace.overlay, None);
+        assert_eq!(workspace.active_view, AppView::Tasks);
+        assert_eq!(workspace.selected_work_item_id.as_deref(), Some("task-due"));
+    });
+}

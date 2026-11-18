@@ -159,6 +159,10 @@ fn finish_frame(run: SharedRun, window: &mut Window, cx: &mut App) {
             let frames = collector
                 .collect_unseen()
                 .into_iter()
+                .filter_map(|event| match event {
+                    gpui::profiler::FrameEvent::Draw(frame) => Some(frame),
+                    gpui::profiler::FrameEvent::Present(_) => None,
+                })
                 .filter(|frame| {
                     frame.window_id == window.window_handle().window_id()
                         && frame.draw_start >= started

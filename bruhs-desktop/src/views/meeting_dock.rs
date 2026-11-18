@@ -6,11 +6,10 @@ use gpui::*;
 use gpui_component::zoom::px;
 
 use super::meetings_hub::{format_elapsed, MeetingsHub};
-use super::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use super::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::theme;
 use bruhs_models::EpochMs;
+use bruhs_ui::press::on_press_view;
 
 mod movement;
 
@@ -365,14 +364,7 @@ impl Render for MeetingDock {
                 } else {
                     "Expand meeting dock"
                 })
-                .on_click(cx.listener(|this, _, window, cx| this.expand(window, cx)))
-                .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(ev.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.expand(window, cx);
-                    }
-                }))
+                .map(|el| on_press_view(el, cx, |this, window, cx| this.expand(window, cx)))
                 .child("Open"),
             )
             .child(
@@ -399,14 +391,7 @@ impl Render for MeetingDock {
                     "Stop recording"
                 })
                 .when(!stopping, |el| {
-                    el.on_click(cx.listener(|this, _, window, cx| this.stop(window, cx)))
-                        .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(ev.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                this.stop(window, cx);
-                            }
-                        }))
+                    on_press_view(el, cx, |this, window, cx| this.stop(window, cx))
                 })
                 .child(
                     div()

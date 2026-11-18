@@ -126,7 +126,7 @@ fn decode_raster(asset: &Asset, payload: &AssetPayload) -> Result<Arc<RenderImag
         .decode()
         .map_err(|e| format!("The image could not be decoded: {e}"))?
         .to_rgba8();
-    for pixel in rgba.chunks_exact_mut(4) {
+    for pixel in rgba.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     Ok(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])))
@@ -419,7 +419,7 @@ fn png(portable: &PortableBoard) -> Result<Vec<u8>, String> {
         .as_bytes(0)
         .ok_or("PNG raster is unavailable")?
         .to_vec();
-    for pixel in bytes.chunks_exact_mut(4) {
+    for pixel in bytes.as_chunks_mut::<4>().0 {
         pixel.swap(0, 2);
     }
     let size = image.size(0);

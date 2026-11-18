@@ -8,7 +8,8 @@ use super::*;
 use bruhs_models::agent::{AgentProvider, MODEL_CATALOG};
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use bruhs_models::roles::{Role as ThreadRole, RoleOverride, MAX_ROLES};
-use gpui_component::input::Input;
+use bruhs_ui::press::on_press_view;
+use gpui_component::input::{Input, Textarea};
 use gpui_component::zoom::px;
 
 pub(super) const SETTINGS_ROLE_DROPDOWN_ID: &str = "desktop-role";
@@ -54,10 +55,10 @@ const OVERRIDE_INDENT_PX: f32 = 16.0;
 pub(super) struct RoleInputs {
     name: Entity<InputState>,
     use_for: Entity<InputState>,
-    instructions: Entity<InputState>,
+    instructions: Entity<TextareaState>,
     /// Name of the project whose override is shown; empty for none.
     project: String,
-    project_instructions: Entity<InputState>,
+    project_instructions: Entity<TextareaState>,
 }
 
 /// A dropdown value is `'static` and a project's name is not, so each
@@ -115,7 +116,7 @@ fn text_area_row(
     index: usize,
     label: &'static str,
     name: &'static str,
-    input: &Entity<InputState>,
+    input: &Entity<TextareaState>,
 ) -> AnyElement {
     divided(
         index,
@@ -126,7 +127,7 @@ fn text_area_row(
             .gap_2()
             .child(field_label(label))
             .child(
-                Input::new(input)
+                Textarea::new(input)
                     .h(px(TEXT_AREA_HEIGHT_PX))
                     .px(px(FIELD_X_PADDING_PX))
                     .text_size(px(FIELD_TEXT_PX))
@@ -355,17 +356,7 @@ fn settings_button(
                     el.bg(theme::longan_800().opacity(0.6))
                         .text_color(theme::rambutan_100())
                 })
-                .on_click(cx.listener(move |this, _ev, window, cx| {
-                    cx.stop_propagation();
-                    on_press(this, window, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        on_press(this, window, cx);
-                    }
-                }))
+                .map(|el| on_press_view(el, cx, on_press))
         })
         .child(label)
         .into_any_element()
@@ -381,16 +372,24 @@ impl Workspace {
         let use_for =
             cx.new(|cx| InputState::new(window, cx).placeholder("drafting docs and release notes"));
         let instructions = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
+            TextareaState::new(window, cx)
                 .placeholder("You write user-facing docs. Keep sentences short.")
         });
-        let project_instructions = cx.new(|cx| InputState::new(window, cx).multi_line(true));
-        let edits: [(&Entity<InputState>, RoleWrite); 3] = [
+        let project_instructions = cx.new(|cx| TextareaState::new(window, cx));
+        let edits: [(&Entity<InputState>, RoleWrite); 2] = [
             (&name, |role, value| role.name = value),
             (&use_for, |role, value| role.use_for = value),
-            (&instructions, |role, value| role.instructions = value),
         ];
+        subscriptions.push(cx.subscribe_in(
+            &instructions,
+            window,
+            |this, input, event: &InputEvent, _window, cx| {
+                if matches!(event, InputEvent::Change) {
+                    let value = input.read(cx).value().to_string();
+                    this.edit_role(cx, |role| role.instructions = value);
+                }
+            },
+        ));
         for (input, write) in edits {
             subscriptions.push(cx.subscribe_in(
                 input,
@@ -495,13 +494,13 @@ impl Workspace {
     ) {
         self.role_selected = id;
         let role = self.selected_role().cloned().unwrap_or_default();
-        let fields = [
-            (self.role_inputs.name.clone(), role.name),
-            (self.role_inputs.use_for.clone(), role.use_for),
-            (self.role_inputs.instructions.clone(), role.instructions),
+        let fields: [(&dyn TextInput, String); 3] = [
+            (&self.role_inputs.name, role.name),
+            (&self.role_inputs.use_for, role.use_for),
+            (&self.role_inputs.instructions, role.instructions),
         ];
         for (input, value) in fields {
-            input.update(cx, |field, cx| field.set_value(value, window, cx));
+            input.set_text_value(value.into(), window, cx);
         }
         self.load_role_project_instructions(window, cx);
         cx.notify();

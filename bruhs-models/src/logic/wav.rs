@@ -106,7 +106,9 @@ mod tests {
         let wav =
             encode_wav_16bit_mono(&[0.0, 1.0, -1.0, 2.0, -2.0, 0.5, f32::NAN], 8_000).unwrap();
         let samples: Vec<i16> = wav[WAV_HEADER_LEN..]
-            .chunks_exact(2)
+            .as_chunks::<2>()
+            .0
+            .iter()
             .map(|b| i16::from_le_bytes([b[0], b[1]]))
             .collect();
         assert_eq!(

@@ -26,8 +26,8 @@ use gpui_component::Disableable;
 use std::sync::Arc;
 
 use super::{
-    element_key, is_web_button_activation_key, meetings_client, redraw_on_edit, DesktopLifeTab,
-    PersistedWorkspaceState, Workspace,
+    element_key, meetings_client, redraw_on_edit, DesktopLifeTab, PersistedWorkspaceState,
+    Workspace,
 };
 use crate::app_state::DesktopState;
 use crate::views::dropdown::{
@@ -40,6 +40,7 @@ use crate::views::meetings_hub::{
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{assets, theme};
 use bruhs_models::EpochMs;
+use bruhs_ui::press::on_press_view;
 
 mod actions;
 mod note_detail;
@@ -565,7 +566,6 @@ impl Workspace {
         let rows = hub.local_focus.rows.get(meeting_id);
         let title = hub.local_focus.current_label(meeting_id);
         let key = meeting_id.to_owned();
-        let keyboard_key = key.clone();
         div()
             .id("desktop-local-focus")
             .debug_selector(|| "desktop-local-focus".into())
@@ -602,26 +602,15 @@ impl Workspace {
                             } else {
                                 "Enable local app context for this meeting"
                             })
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.meetings_hub.update(cx, |hub, cx| {
-                                    if hub.live_meeting_id.as_ref() == Some(&key) {
-                                        hub.toggle_local_focus(cx);
-                                    }
-                                });
-                            }))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.meetings_hub.update(cx, |hub, cx| {
-                                            if hub.live_meeting_id.as_ref() == Some(&keyboard_key) {
-                                                hub.toggle_local_focus(cx);
-                                            }
-                                        });
-                                    }
-                                },
-                            ))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, _, cx| {
+                                    this.meetings_hub.update(cx, |hub, cx| {
+                                        if hub.live_meeting_id.as_ref() == Some(&key) {
+                                            hub.toggle_local_focus(cx);
+                                        }
+                                    });
+                                })
+                            })
                             .child(if enabled {
                                 "Turn off app context"
                             } else {
@@ -1371,13 +1360,11 @@ impl Workspace {
                         ButtonState::Enabled,
                     )
                     .aria_label("Compact meeting dock")
-                    .on_click(cx.listener(|this, _, window, cx| this.open_meeting_dock(window, cx)))
-                    .on_key_down(cx.listener(|this, ev: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(&ev.keystroke.key) {
-                            cx.stop_propagation();
-                            this.open_meeting_dock(window, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, |this, window, cx| {
+                            this.open_meeting_dock(window, cx)
+                        })
+                    })
                     .child("Dock"),
                 )
                 .child(body(
@@ -2734,18 +2721,11 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .on_click(cx.listener(move |this, _ev, window, cx| {
-                                this.run_notice_action(action, window, cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.run_notice_action(action, window, cx);
-                                    }
-                                },
-                            ))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, window, cx| {
+                                    this.run_notice_action(action, window, cx);
+                                })
+                            })
                         }))
                         .child(
                             text_button(
@@ -2762,22 +2742,13 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .justify_center()
-                            .on_click(cx.listener(|this, _ev, window, cx| {
-                                this.workspace_focus_handle.focus(window, cx);
-                                this.meetings_hub
-                                    .update(cx, |hub, cx| hub.dismiss_notice(cx));
-                            }))
-                            .on_key_down(cx.listener(
-                                |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.workspace_focus_handle.focus(window, cx);
-                                        this.meetings_hub
-                                            .update(cx, |hub, cx| hub.dismiss_notice(cx));
-                                    }
-                                },
-                            )),
+                            .map(|el| {
+                                on_press_view(el, cx, |this, window, cx| {
+                                    this.workspace_focus_handle.focus(window, cx);
+                                    this.meetings_hub
+                                        .update(cx, |hub, cx| hub.dismiss_notice(cx));
+                                })
+                            }),
                         ),
                 )
                 .into_any_element(),

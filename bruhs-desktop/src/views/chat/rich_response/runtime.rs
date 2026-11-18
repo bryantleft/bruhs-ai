@@ -1,5 +1,6 @@
 use super::*;
 use bruhs_models::logic::rich_response::HtmlBlock;
+use bruhs_ui::press::on_press_view;
 use futures_util::FutureExt as _;
 use gpui_component::zoom::px;
 
@@ -9,8 +10,6 @@ pub(super) fn action_button(
     cx: &Context<'_, ChatView>,
     action: impl Fn(&mut ChatView, &mut Window, &mut Context<'_, ChatView>) + 'static,
 ) -> Stateful<Div> {
-    let click = Rc::new(action);
-    let keyboard = Rc::clone(&click);
     web_button(
         id,
         WebButtonVariant::Ghost,
@@ -18,20 +17,7 @@ pub(super) fn action_button(
         ButtonState::Enabled,
     )
     .child(label.into())
-    // GPUI also clicks a focused control on key up, after the key down
-    // below already ran the action; only the pointer clicks here.
-    .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-        if !event.is_keyboard() {
-            click(this, window, cx);
-        }
-    }))
-    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-        if is_web_button_activation_key(&event.keystroke.key) {
-            keyboard(this, window, cx);
-            window.prevent_default();
-            cx.stop_propagation();
-        }
-    }))
+    .map(|el| on_press_view(el, cx, action))
 }
 
 /// A labelled checkbox for the export panel (web `<input type=checkbox>`):
@@ -471,18 +457,11 @@ impl ChatView {
                         .debug_selector(move || format!("desktop-export-save-{message}"))
                         .aria_label("Save ZIP")
                         .child("Save ZIP")
-                        .on_click(cx.listener(move |this, event: &ClickEvent, _, cx| {
-                            if !event.is_keyboard() {
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, _, cx| {
                                 this.export_response_bundle(message, cx);
-                            }
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(&event.keystroke.key) {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                this.export_response_bundle(message, cx);
-                            }
-                        })),
+                            })
+                        }),
                     ),
                 )
                 .into_any_element(),

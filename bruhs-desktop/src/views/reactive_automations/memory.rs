@@ -7,7 +7,7 @@ pub(super) struct MemoryEdit {
     pub(super) agent_id: String,
     pub(super) key: String,
     kind: MemoryKind,
-    text: Entity<InputState>,
+    text: Entity<TextareaState>,
 }
 
 /// "From run 1a2b3c4d on Nov 14, 3:05 PM" or "Edited by you on …".
@@ -198,7 +198,7 @@ impl ReactiveAutomations {
                                 agent_id,
                                 key,
                                 kind,
-                                text: edit_input(&text, true, window, cx),
+                                text: edit_area(&text, window, cx),
                             });
                             cx.notify();
                         }),

@@ -3,6 +3,7 @@
 use super::*;
 use crate::app_state::spawn_tokio;
 use bruhs_models::{logic::layout, num::ToFloatLossy as _};
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -669,16 +670,11 @@ impl Workspace {
                                     .opacity(WORKSPACE_THREAD_ROW_HOVER_BG_OPACITY))
                                     .text_color(theme::rambutan_200())
                             })
-                            .on_click(cx.listener(|this, _ev, window, cx| {
-                                this.close_panel(&ClosePanel, window, cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, |this, window, cx| {
                                     this.close_panel(&ClosePanel, window, cx);
-                                }
-                            }))
+                                })
+                            })
                             .child(
                                 svg()
                                     .path(assets::CLOSE_ICON_PATH)
@@ -738,28 +734,16 @@ impl Workspace {
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, _window, cx| match surface {
-                RightPanelSurface::Diff => this.set_diff_panel_visible(true, cx),
-                RightPanelSurface::Tasks => this.set_tasks_panel_visible(true, cx),
-                RightPanelSurface::Preview => this.set_preview_panel_visible(true, cx),
-                RightPanelSurface::Files => this.set_files_panel_visible(true, cx),
-                RightPanelSurface::Pull => this.show_pull_surface(cx),
-                RightPanelSurface::File => this.show_file_surface(cx),
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    match surface {
-                        RightPanelSurface::Diff => this.set_diff_panel_visible(true, cx),
-                        RightPanelSurface::Tasks => this.set_tasks_panel_visible(true, cx),
-                        RightPanelSurface::Preview => this.set_preview_panel_visible(true, cx),
-                        RightPanelSurface::Files => this.set_files_panel_visible(true, cx),
-                        RightPanelSurface::Pull => this.show_pull_surface(cx),
-                        RightPanelSurface::File => this.show_file_surface(cx),
-                    }
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| match surface {
+                    RightPanelSurface::Diff => this.set_diff_panel_visible(true, cx),
+                    RightPanelSurface::Tasks => this.set_tasks_panel_visible(true, cx),
+                    RightPanelSurface::Preview => this.set_preview_panel_visible(true, cx),
+                    RightPanelSurface::Files => this.set_files_panel_visible(true, cx),
+                    RightPanelSurface::Pull => this.show_pull_surface(cx),
+                    RightPanelSurface::File => this.show_file_surface(cx),
+                })
+            })
             .child(
                 svg()
                     .path(icon_path)
@@ -817,16 +801,11 @@ impl Workspace {
                 .border_color(gpui::transparent_black())
                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
-                .on_click(cx.listener(|this, _ev, _window, cx| {
-                    this.show_file_surface(cx);
-                }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
+                .map(|el| {
+                    on_press_view(el, cx, |this, _window, cx| {
                         this.show_file_surface(cx);
-                    }
-                }))
+                    })
+                })
                 .child(
                     svg()
                         .path(assets::TOOL_FILE_ICON_PATH)
@@ -1034,19 +1013,12 @@ impl Workspace {
                     .child("Files")
                     .role(Role::Tab)
                     .aria_selected(self.project_tool == ProjectTool::Files)
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.project_tool = ProjectTool::Files;
-                        cx.notify();
-                    }))
-                    .on_key_down(cx.listener(
-                        |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                this.project_tool = ProjectTool::Files;
-                                cx.notify();
-                            }
-                        },
-                    )),
+                    .map(|el| {
+                        on_press_view(el, cx, |this, _window, cx| {
+                            this.project_tool = ProjectTool::Files;
+                            cx.notify();
+                        })
+                    }),
                 )
                 .child(
                     crate::views::web_button::web_button(
@@ -1058,17 +1030,11 @@ impl Workspace {
                     .child("Databases")
                     .role(Role::Tab)
                     .aria_selected(self.project_tool == ProjectTool::Databases)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.open_database_panel(window, cx)),
-                    )
-                    .on_key_down(cx.listener(
-                        |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                this.open_database_panel(window, cx);
-                            }
-                        },
-                    )),
+                    .map(|el| {
+                        on_press_view(el, cx, |this, window, cx| {
+                            this.open_database_panel(window, cx);
+                        })
+                    }),
                 )
                 .child(
                     crate::views::web_button::web_button(
@@ -1080,17 +1046,11 @@ impl Workspace {
                     .child("API")
                     .role(Role::Tab)
                     .aria_selected(self.project_tool == ProjectTool::Api)
-                    .on_click(
-                        cx.listener(|this, _, window, cx| this.open_api_client_panel(window, cx)),
-                    )
-                    .on_key_down(cx.listener(
-                        |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                this.open_api_client_panel(window, cx);
-                            }
-                        },
-                    )),
+                    .map(|el| {
+                        on_press_view(el, cx, |this, window, cx| {
+                            this.open_api_client_panel(window, cx);
+                        })
+                    }),
                 ),
         );
         if self.project_tool == ProjectTool::Api {
@@ -1312,14 +1272,11 @@ impl Workspace {
                             .text_color(theme::rambutan_100())
                     })
                 })
-                .on_click(cx.listener(|this, _, _, cx| this.show_pull_surface(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
+                .map(|el| {
+                    on_press_view(el, cx, |this, _window, cx| {
                         this.show_pull_surface(cx);
-                    }
-                }))
+                    })
+                })
                 .child(
                     svg()
                         .path(assets::GIT_BRANCH_ICON_PATH)

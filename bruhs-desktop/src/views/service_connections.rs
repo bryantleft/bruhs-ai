@@ -6,6 +6,7 @@ use crate::{
 };
 use bruhs_core::secrets::SecretManager;
 use bruhs_models::{connections::*, ids::ThreadId};
+use bruhs_ui::press::on_press_view;
 use gpui::{prelude::*, *};
 use gpui_component::zoom::px;
 
@@ -212,27 +213,16 @@ impl ServiceConnections {
         .min_h(px(theme::CONTROL_PX))
         .aria_label(format!("{label} {}", provider.name()))
         .child(label)
-        .on_click(cx.listener(move |this, _, _, cx| match action {
-            "connect" => this.connect(provider, cx),
-            "disconnect" => this.disconnect(provider, cx),
-            "cancel" => {
-                this.cancel(cx);
-            }
-            _ => this.refresh(cx),
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, _, cx| {
-            if matches!(event.keystroke.key.as_str(), "enter" | "space") {
-                cx.stop_propagation();
-                match action {
-                    "connect" => this.connect(provider, cx),
-                    "disconnect" => this.disconnect(provider, cx),
-                    "cancel" => {
-                        this.cancel(cx);
-                    }
-                    _ => this.refresh(cx),
+        .map(|el| {
+            on_press_view(el, cx, move |this, _, cx| match action {
+                "connect" => this.connect(provider, cx),
+                "disconnect" => this.disconnect(provider, cx),
+                "cancel" => {
+                    this.cancel(cx);
                 }
-            }
-        }))
+                _ => this.refresh(cx),
+            })
+        })
     }
 
     fn cancel(&mut self, cx: &mut Context<'_, Self>) {

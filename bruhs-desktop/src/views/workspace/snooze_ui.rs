@@ -4,6 +4,7 @@
 use super::date_picker_ui::{parse_iso_datetime, DatePickerTarget};
 use super::*;
 use bruhs_models::logic::sidebar::{custom_snooze_until, SnoozeUnit, SNOOZE_CUSTOM_TITLE};
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 /// Debug selector prefix of the unit dropdown.
@@ -186,14 +187,11 @@ impl Workspace {
         .tab_index(0)
         .role(Role::Button)
         .focus_visible(|el| el.border_color(theme::persimmon_400()))
-        .on_click(cx.listener(|this, _ev, window, cx| this.submit_snooze_custom(window, cx)))
-        .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
+        .map(|el| {
+            on_press_view(el, cx, |this, window, cx| {
                 this.submit_snooze_custom(window, cx);
-            }
-        }));
+            })
+        });
         let content = div()
             .debug_selector(|| "desktop-snooze-custom".to_string())
             .p_4()

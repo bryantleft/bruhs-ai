@@ -9,6 +9,7 @@ use bruhs_models::{
     connections::{ConnectionState, ServiceProvider},
     mail::*,
 };
+use bruhs_ui::text_field::TextField;
 use std::{collections::HashMap, future::Future};
 
 mod render;
@@ -84,7 +85,7 @@ pub(super) struct MailComposer {
     store_error: Option<String>,
     jobs: HashMap<String, Job>,
     active: Option<String>,
-    inputs: Vec<Entity<InputState>>,
+    inputs: Vec<TextField>,
     _subscriptions: Vec<Subscription>,
     listing: bool,
     list_scope: Option<(DeviceDraftScope, ServiceProvider)>,
@@ -142,20 +143,19 @@ impl MailComposer {
             .into_iter()
             .enumerate()
             .map(|(i, label)| {
-                cx.new(|cx| {
-                    let input = InputState::new(window, cx).placeholder(label);
-                    if i == 4 {
-                        input.multi_line(true).rows(8)
-                    } else {
-                        input
-                    }
-                })
+                if i == 4 {
+                    TextField::Area(
+                        cx.new(|cx| TextareaState::new(window, cx).placeholder(label).rows(8)),
+                    )
+                } else {
+                    TextField::Line(cx.new(|cx| InputState::new(window, cx).placeholder(label)))
+                }
             })
             .collect::<Vec<_>>();
         let mut subscriptions: Vec<Subscription> = inputs
             .iter()
             .map(|input| {
-                cx.subscribe_in(input, window, |this, _, event: &InputEvent, _, cx| {
+                input.subscribe_in(window, cx, |this, event: &InputEvent, _, cx| {
                     if matches!(event, InputEvent::Change) {
                         this.edited(cx);
                     }
@@ -306,9 +306,9 @@ impl MailComposer {
             &job.value.content.body,
         ];
         for (input, value) in self.inputs.iter().zip(values) {
-            input.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
+            input.set_value(value.clone(), window, cx);
         }
-        self.inputs[4].update(cx, |input, cx| input.focus(window, cx));
+        self.inputs[4].focus(window, cx);
     }
     fn release_current(&mut self) {
         self.active = None;
@@ -375,7 +375,7 @@ impl MailComposer {
         let values = self
             .inputs
             .iter()
-            .map(|input| input.read(cx).value().to_string())
+            .map(|input| input.value(cx).to_string())
             .collect::<Vec<_>>();
         content.to = values[0].clone();
         content.cc = values[1].clone();

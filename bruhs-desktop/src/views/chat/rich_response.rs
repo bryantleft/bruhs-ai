@@ -6,6 +6,7 @@ use bruhs_models::logic::rich_response::{
     ResponseBlock, WidgetAction, WidgetEvent, WidgetMessage, WidgetState, MAX_WIDGET_HEIGHT,
     MAX_WIDGET_STATE_BYTES, MIN_WIDGET_HEIGHT, WIDGET_PROTOCOL,
 };
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 use std::cell::RefCell;
 use std::rc::Rc;
@@ -682,7 +683,6 @@ impl ChatView {
             (entry.source_open, entry.remote_allowed, entry.error.clone())
         };
         let toggle_key = key.clone();
-        let toggle_keyboard_key = key.clone();
         let mut element = div()
             .id(desktop_block_id("desktop-rich-response", message, index))
             .debug_selector(move || format!("desktop-rich-response-{message}-{index}"))
@@ -722,20 +722,12 @@ impl ChatView {
                             format!("desktop-rich-source-toggle-{message}-{index}")
                         })
                         .child(if source_open { "Preview" } else { "Source" })
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.toggle_rich_source(&toggle_key);
-                            cx.notify();
-                        }))
-                        .on_key_down(cx.listener(
-                            move |this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(&event.keystroke.key) {
-                                    this.toggle_rich_source(&toggle_keyboard_key);
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                    cx.notify();
-                                }
-                            },
-                        )),
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, _window, cx| {
+                                this.toggle_rich_source(&toggle_key);
+                                cx.notify();
+                            })
+                        }),
                     ),
             );
         if let ResponseBlock::Media(media) = block.as_ref() {
@@ -821,7 +813,6 @@ impl ChatView {
                 .into_any_element();
         }
         if remote && !remote_allowed {
-            let keyboard_key = key.clone();
             return element
                 .child(
                     div()
@@ -838,20 +829,12 @@ impl ChatView {
                     )
                     .debug_selector(move || format!("desktop-rich-load-{message}-{index}"))
                     .child("Load external media")
-                    .on_click(cx.listener(move |this, _, _, cx| {
-                        this.approve_rich_media(&key);
-                        cx.notify();
-                    }))
-                    .on_key_down(cx.listener(
-                        move |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(&event.keystroke.key) {
-                                this.approve_rich_media(&keyboard_key);
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                cx.notify();
-                            }
-                        },
-                    )),
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
+                            this.approve_rich_media(&key);
+                            cx.notify();
+                        })
+                    }),
                 )
                 .into_any_element();
         }

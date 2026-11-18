@@ -3,6 +3,7 @@
 use super::*;
 pub(super) use crate::views::meetings_hub::local_offset_minutes_east;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 use std::collections::HashMap;
 
@@ -837,20 +838,11 @@ impl Workspace {
                                     .tooltip(|window, cx| {
                                         Tooltip::new(CALENDAR_PREVIOUS_LABEL).build(window, cx)
                                     })
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.calendar_prev(cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.calendar_prev(cx);
-                                            }
-                                        },
-                                    ))
+                                    .map(|el| {
+                                        on_press_view(el, cx, |this, _window, cx| {
+                                            this.calendar_prev(cx);
+                                        })
+                                    })
                                     .child(
                                         svg()
                                             .path(assets::CHEVRON_LEFT_ICON_PATH)
@@ -881,20 +873,11 @@ impl Workspace {
                                             .opacity(CALENDAR_NAV_HOVER_BG_OPACITY))
                                             .text_color(theme::rambutan_200())
                                     })
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.calendar_today(cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.calendar_today(cx);
-                                            }
-                                        },
-                                    ))
+                                    .map(|el| {
+                                        on_press_view(el, cx, |this, _window, cx| {
+                                            this.calendar_today(cx);
+                                        })
+                                    })
                                     .child("Today"),
                             )
                             .child(
@@ -924,20 +907,11 @@ impl Workspace {
                                     .tooltip(|window, cx| {
                                         Tooltip::new(CALENDAR_NEXT_LABEL).build(window, cx)
                                     })
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.calendar_next(cx);
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.calendar_next(cx);
-                                            }
-                                        },
-                                    ))
+                                    .map(|el| {
+                                        on_press_view(el, cx, |this, _window, cx| {
+                                            this.calendar_next(cx);
+                                        })
+                                    })
                                     .child(
                                         svg()
                                             .path(assets::CHEVRON_RIGHT_ICON_PATH)
@@ -1016,16 +990,11 @@ impl Workspace {
                             .tooltip(|window, cx| {
                                 Tooltip::new(CALENDAR_NEW_EVENT_LABEL).build(window, cx)
                             })
-                            .on_click(cx.listener(|this, _ev, window, cx| {
-                                this.open_event_create(None, window, cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, |this, window, cx| {
                                     this.open_event_create(None, window, cx);
-                                }
-                            }))
+                                })
+                            })
                             .child("+ New"),
                     ),
             )
@@ -1074,16 +1043,11 @@ impl Workspace {
                         .text_color(theme::rambutan_200())
                 })
             })
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                this.set_calendar_mode(mode, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| {
                     this.set_calendar_mode(mode, cx);
-                }
-            }))
+                })
+            })
             .child(mode.label())
             .into_any_element()
     }
@@ -1228,7 +1192,6 @@ impl Workspace {
         let visible_count = event_take + task_take;
         let extra = day.total_records.saturating_sub(visible_count);
         let date_for_new = date;
-        let date_for_new_key = date;
         let day_key = u64::from(date.num_days_from_ce().cast_unsigned());
         let day_list_label = calendar_day_list_label(day.total_records, date);
         let cell_is_last_col = index % 7 == 6;
@@ -1311,16 +1274,11 @@ impl Workspace {
                     .when(!cell_is_last_row, |el| el.border_b_1())
                     .border_color(theme::longan_800().opacity(CALENDAR_MONTH_CELL_BORDER_OPACITY)),
             )
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                this.open_event_create(Some(at_hour(date_for_new, 9)), window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.open_event_create(Some(at_hour(date_for_new_key, 9)), window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.open_event_create(Some(at_hour(date_for_new, 9)), window, cx);
+                })
+            })
             .child(date_header)
             .children(visible_events)
             .children(visible_tasks)
@@ -1351,7 +1309,6 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let item_id = item.id.clone();
-        let item_id_for_key = item.id.clone();
         let debug_key = element_key(&item.id);
         div()
             .id(("calendar-task-pill", element_key(&item.id)))
@@ -1375,17 +1332,11 @@ impl Workspace {
             .cursor_pointer()
             .hover(|el| el.text_color(theme::rambutan_400()))
             .tooltip(|window, cx| Tooltip::new(CALENDAR_TASK_DUE_LABEL).build(window, cx))
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                cx.stop_propagation();
-                this.open_calendar_task(&item_id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.open_calendar_task(&item_id_for_key, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.open_calendar_task(&item_id, window, cx);
+                })
+            })
             .child(
                 div()
                     .size(px(CALENDAR_PILL_DOT_SIZE_PX))
@@ -1404,7 +1355,6 @@ impl Workspace {
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let event_id = event.id.clone();
-        let event_id_for_key = event.id.clone();
         let debug_key = element_key(&event.id);
         div()
             .id(("calendar-event-pill", element_key(&event.id)))
@@ -1430,17 +1380,11 @@ impl Workspace {
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.text_color(theme::rambutan_200()))
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                cx.stop_propagation();
-                this.open_event_edit(event_id.clone(), window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.open_event_edit(event_id_for_key.clone(), window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.open_event_edit(event_id.clone(), window, cx);
+                })
+            })
             .child(
                 div()
                     .size(px(CALENDAR_PILL_DOT_SIZE_PX))
@@ -1579,7 +1523,6 @@ impl Workspace {
         let hour_rows: Vec<AnyElement> = (0..24)
             .map(|hour| {
                 let start_for_new = at_hour(date, hour);
-                let start_for_new_key = start_for_new;
                 div()
                     .id((
                         "calendar-timegrid-hour",
@@ -1611,16 +1554,11 @@ impl Workspace {
                         el.bg(theme::longan_800()
                             .opacity(CALENDAR_TIMEGRID_HOUR_SLOT_HOVER_BG_OPACITY))
                     })
-                    .on_click(cx.listener(move |this, _ev, window, cx| {
-                        this.open_event_create(Some(start_for_new), window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.open_event_create(Some(start_for_new_key), window, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
+                            this.open_event_create(Some(start_for_new), window, cx);
+                        })
+                    })
                     .into_any_element()
             })
             .collect();
@@ -1677,7 +1615,6 @@ impl Workspace {
     ) -> AnyElement {
         let event = laid_out.event;
         let event_id = event.id.clone();
-        let event_id_for_key = event.id.clone();
         let workspace = cx.weak_entity();
         let lane_width = 1.0 / laid_out.lanes.to_f32_lossy();
         let lane_left = lane_width * laid_out.lane.to_f32_lossy();
@@ -1753,16 +1690,11 @@ impl Workspace {
                             },
                         )
                     })
-                    .on_click(cx.listener(move |this, _ev, window, cx| {
-                        this.open_event_edit(event_id.clone(), window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, key: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(key.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.open_event_edit(event_id_for_key.clone(), window, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
+                            this.open_event_edit(event_id.clone(), window, cx);
+                        })
+                    })
                     .when(!read_only, |el| {
                         el.child(
                             div()
@@ -1840,8 +1772,24 @@ impl Workspace {
         (events, tasks)
     }
 
-    pub(super) fn open_calendar_day_list(&mut self, date: NaiveDate, cx: &mut Context<'_, Self>) {
+    /// Web "Calendar day" dialog: focus moves into it, and closing it
+    /// returns focus to the day number or +N more that opened it.
+    pub(super) fn open_calendar_day_list(
+        &mut self,
+        date: NaiveDate,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.overlay == Some(Overlay::CalendarDay { date }) {
+            return;
+        }
+        if !self.modal_start_focus_handle.contains_focused(window, cx) {
+            self.palette_return_focus = window
+                .focused(cx)
+                .map(|focus| (self.active_view.clone(), focus));
+        }
         self.open_overlay(Overlay::CalendarDay { date });
+        self.focus_first_modal_tab_stop(window, cx);
         cx.notify();
     }
 
@@ -1867,17 +1815,11 @@ impl Workspace {
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                cx.stop_propagation();
-                this.open_calendar_day_list(date, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.open_calendar_day_list(date, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.open_calendar_day_list(date, window, cx);
+                })
+            })
     }
 
     fn calendar_day_list_row(
@@ -1925,24 +1867,17 @@ impl Workspace {
             format!("Edit event {}", event.title)
         };
         let event_id = event.id.clone();
-        let event_id_for_key = event.id.clone();
         Self::calendar_day_list_row(
             ("calendar-day-list-event", key),
             format!("desktop-calendar-day-list-event-{key}"),
             label,
         )
-        .on_click(cx.listener(move |this, _ev, window, cx| {
-            this.dismiss_overlay(|overlay| matches!(overlay, Overlay::CalendarDay { .. }));
-            this.open_event_edit(event_id.clone(), window, cx);
-        }))
-        .on_key_down(cx.listener(move |this, key: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(key.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
+        .map(|el| {
+            on_press_view(el, cx, move |this, window, cx| {
                 this.dismiss_overlay(|overlay| matches!(overlay, Overlay::CalendarDay { .. }));
-                this.open_event_edit(event_id_for_key.clone(), window, cx);
-            }
-        }))
+                this.open_event_edit(event_id.clone(), window, cx);
+            })
+        })
         .child(
             div()
                 .size(px(CALENDAR_PILL_DOT_SIZE_PX))
@@ -1978,7 +1913,6 @@ impl Workspace {
     ) -> AnyElement {
         let key = element_key(&item.id);
         let item_id = item.id.clone();
-        let item_id_for_key = item.id.clone();
         Self::calendar_day_list_row(
             ("calendar-day-list-task", key),
             format!("desktop-calendar-day-list-task-{key}"),
@@ -1986,16 +1920,11 @@ impl Workspace {
         )
         .italic()
         .tooltip(|window, cx| Tooltip::new(CALENDAR_TASK_DUE_LABEL).build(window, cx))
-        .on_click(cx.listener(move |this, _ev, window, cx| {
-            this.open_calendar_task(&item_id, window, cx);
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
-                this.open_calendar_task(&item_id_for_key, window, cx);
-            }
-        }))
+        .map(|el| {
+            on_press_view(el, cx, move |this, window, cx| {
+                this.open_calendar_task(&item_id, window, cx);
+            })
+        })
         .child(
             div()
                 .size(px(CALENDAR_PILL_DOT_SIZE_PX))

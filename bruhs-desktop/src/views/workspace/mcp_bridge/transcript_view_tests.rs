@@ -286,6 +286,8 @@ fn native_transcript_stream_update_preserves_middle_anchor(cx: &mut TestAppConte
 #[gpui::test]
 fn native_transcript_keyboard_reaches_both_ends_without_mounting_history(cx: &mut TestAppContext) {
     let (workspace, cx) = fixture(cx);
+    // A full-HD window: the transcript must virtualize what is off screen.
+    cx.simulate_resize(size(px(1920.0), px(1080.0)));
     workspace.update_in(cx, |w, _, cx| {
         install(w, 10_001, cx);
         w.active_view = AppView::MeetingDetail {
@@ -312,6 +314,8 @@ fn native_transcript_keyboard_reaches_both_ends_without_mounting_history(cx: &mu
 #[gpui::test]
 fn native_transcript_editor_stays_focused_offscreen_and_keeps_draft(cx: &mut TestAppContext) {
     let (workspace, cx) = fixture(cx);
+    // A full-HD window: the transcript must virtualize what is off screen.
+    cx.simulate_resize(size(px(1920.0), px(1080.0)));
     workspace.update_in(cx, |w, _, cx| {
         install(w, 10_001, cx);
         w.active_view = AppView::MeetingDetail {

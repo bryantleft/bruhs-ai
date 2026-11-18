@@ -76,8 +76,10 @@ impl MailComposer {
         .debug_selector(move || debug)
         .aria_label(label.clone())
         .child(label)
-        .on_click(cx.listener(move |this, _, window, cx| {
-            if enabled {
+        // Keys act on key down below (and skip shortcuts), so gpui's
+        // keyboard click on key up must not act again.
+        .on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+            if enabled && !event.is_keyboard() {
                 this.action(action.clone(), window, cx);
             }
         }))
@@ -193,7 +195,7 @@ impl MailComposer {
         let files_locked = locked || job.phase == Phase::Upload;
         div().flex().flex_col().gap_3()
             .child(meta(format!("From {}",job.value.provider.name())))
-            .children(["To","Cc","Bcc","Subject","Message"].into_iter().enumerate().map(|(index,label)|div().id(("compose-field",index)).debug_selector(move ||format!("desktop-compose-field-{index}")).min_w_0().flex().flex_col().gap_1().child(meta(label)).child(Input::new(&self.inputs[index]).aria_label(format!("Email {label}")).disabled(locked || (index==3&&job.value.reply.is_some())).when(index==4,|input|input.h(px(160.0))))))
+            .children(["To","Cc","Bcc","Subject","Message"].into_iter().enumerate().map(|(index,label)|div().id(("compose-field",index)).debug_selector(move ||format!("desktop-compose-field-{index}")).min_w_0().flex().flex_col().gap_1().child(meta(label)).child(self.inputs[index].element(format!("Email {label}"), locked || (index==3&&job.value.reply.is_some())).when(index==4,|input|input.h(px(160.0))))))
             .children(job.value.files.iter().map(|file|div().id(("compose-file-row",element_key(&file.id))).role(Role::Group).aria_label("Attached file").min_w_0().flex().items_center().justify_between().gap_2().p_3().rounded(px(8.0)).bg(theme::longan_900())
                 .child(div().min_w_0().flex_1().child(div().whitespace_normal().child(gpui::Text::new(("compose-file-name",element_key(&file.id)).into(),file.file_name.clone().into()))).child(meta(format!("{}  {}",file_bytes(file.size_bytes),if file.server.is_some(){"Uploaded"}else{"Waiting to upload"}))))
                 .child(self.button(("remove-compose-file",element_key(&file.id)),"Remove",Action::Remove(file.id.clone()),!files_locked,cx))))

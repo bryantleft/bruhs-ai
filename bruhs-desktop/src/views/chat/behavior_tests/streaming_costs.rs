@@ -4,56 +4,8 @@ use gpui_component::zoom::px;
 use std::{hint::black_box, time::Instant};
 
 #[gpui::test]
-fn visible_inline_geometry_matches_complete_shaped_text(cx: &mut TestAppContext) {
-    use gpui::{point, size, Bounds, SharedString, WrappedLineLayout};
-    use gpui_component::text::inline_geometry_matches_full_scan;
-    let (_, cx) = chat_window(cx);
-    let lines: String = (0..48)
-        .map(|index| format!("Line {index}: value = café + 👩🏽‍💻;\n"))
-        .collect();
-    let fixtures = [
-        "Short café 👩‍👩‍👧‍👦 text\n\nTrailing newline\n".to_string(),
-        lines,
-        "Long wrapped words, e\u{301}, 中文 and 👩🏽‍💻. ".repeat(40),
-        "مرحبا لا الله العربية עברית mixed text 123\n".repeat(12),
-    ];
-    let mut compared = 0;
-    cx.update(|window, _| {
-        for text in fixtures {
-            for width in [px(160.), px(600.)] {
-                let shaped = window.text_system().shape_text(
-                    SharedString::from(text.clone()), px(14.),
-                    &[window.text_style().to_run(text.len())], Some(width), None,
-                ).unwrap();
-                let layouts: Vec<_> = shaped.iter().map(|line| {
-                    std::sync::Arc::new(WrappedLineLayout {
-                        unwrapped_layout: line.unwrapped_layout.clone(),
-                        wrap_boundaries: line.wrap_boundaries.clone(),
-                        wrap_width: line.wrap_width,
-                    })
-                }).collect();
-                let layout_height = px(19.25);
-                let height: gpui::Pixels = layouts.iter().map(|line| line.size(layout_height).height).sum();
-                for requested_height in [layout_height, px(28.)] {
-                    for offset in [px(-20.), px(0.), layout_height, height / 2., height - px(40.)] {
-                        let origin = point(px(120.), -offset);
-                        for mask_width in [px(180.), px(900.)] {
-                            let mask = Bounds::new(point(px(100.), px(0.)), size(mask_width, px(130.)));
-                            assert!(inline_geometry_matches_full_scan(&text, &layouts, origin, layout_height, requested_height, mask), "clipped geometry differs: width={width:?}, offset={offset:?}, height={requested_height:?}, text={text:?}");
-                            compared += 1;
-                        }
-                    }
-                }
-            }
-        }
-    });
-    println!("Compared {compared} clipped shaped-text geometries with the complete scan");
-}
-
-#[gpui::test]
 fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestAppContext) {
     use gpui::{point, Modifiers, MouseButton};
-    use gpui_component::WindowExt as _;
     let (chat, cx) = chat_window(cx);
     cx.simulate_resize(gpui::size(px(1280.), px(800.)));
     chat.update(cx, |chat, cx| {
@@ -83,7 +35,7 @@ fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestA
     cx.update(|window, cx| {
         let _ = window.draw(cx);
     });
-    let selected = cx.update(|window, cx| window.selected_text(cx));
+    let selected = cx.update(gpui_base::TextSelection::selected_text);
     assert!(
         selected.contains("value_"),
         "the drag selects visible code: {selected:?}"
@@ -94,7 +46,7 @@ fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestA
     });
     cx.run_until_parked();
     assert_eq!(
-        cx.update(|window, cx| window.selected_text(cx)),
+        cx.update(gpui_base::TextSelection::selected_text),
         selected,
         "streaming preserves selected code"
     );
@@ -104,7 +56,7 @@ fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestA
     });
     cx.run_until_parked();
     assert_eq!(
-        cx.update(|window, cx| window.selected_text(cx)),
+        cx.update(gpui_base::TextSelection::selected_text),
         selected,
         "completion preserves selected code"
     );
@@ -234,6 +186,9 @@ fn streamed_markdown_replacements_match_fresh_documents(cx: &mut TestAppContext)
                 state.set_text("", cx);
                 state.set_text(prefix, cx);
             });
+            // An append-only `set_text` parses its delta on the background
+            // worker; compare once it has landed.
+            cx.run_until_parked();
             incremental.read_with(cx, |state, cx| {
                 assert!(
                     state.parsed_content_eq(fresh.read(cx)),
@@ -244,6 +199,43 @@ fn streamed_markdown_replacements_match_fresh_documents(cx: &mut TestAppContext)
         }
     }
     println!("Compared {compared} streamed Markdown prefixes with fresh documents");
+}
+
+#[gpui::test]
+fn streamed_bursts_and_nested_definitions_match_fresh_documents(cx: &mut TestAppContext) {
+    use gpui_component::text::TextViewState;
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+    });
+    // Each case: a committed start, then chunks pushed in one burst (more
+    // than the parser coalesces at once) before anything settles.
+    let code: String = (0..40).map(|i| format!("  let v{i} = {i};\n")).collect();
+    let cases: [(&str, String); 4] = [
+        ("Intro", format!("\n\n  ```\n{code}  ```\n")),
+        ("> [x]: /u\n\nSee ", "[x] now".to_string()),
+        ("- [x]: /u\n\nSee ", "[x] now".to_string()),
+        ("[foo\nbar]: /u\n\nSee ", "[foo bar] now".to_string()),
+    ];
+    for (start, tail) in cases {
+        let streamed = cx.update(|cx| cx.new(|cx| TextViewState::markdown(start, cx)));
+        cx.run_until_parked();
+        streamed.update(cx, |state, cx| {
+            for ch in tail.chars() {
+                state.push_str(&ch.to_string(), cx);
+            }
+        });
+        cx.run_until_parked();
+        let text = format!("{start}{tail}");
+        let fresh = cx.update(|cx| cx.new(|cx| TextViewState::markdown(&text, cx)));
+        cx.run_until_parked();
+        streamed.read_with(cx, |state, cx| {
+            assert!(
+                state.parsed_content_eq(fresh.read(cx)),
+                "a streamed burst must match a fresh document: {text:?}"
+            );
+        });
+    }
 }
 
 #[gpui::test]

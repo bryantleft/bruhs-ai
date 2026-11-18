@@ -1,6 +1,7 @@
 //! The new / edit event dialog: its form state, color select, all-day toggle and save.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 pub(super) const EVENT_COLOR_OPTIONS: &[(&str, &str)] = &[
     ("persimmon", "Persimmon"),
@@ -359,9 +360,13 @@ impl Workspace {
                 el.tab_index(0)
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
-                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                        this.event_create_all_day = !this.event_create_all_day;
-                        cx.notify();
+                    // Space toggles on key down; gpui's keyboard click
+                    // would toggle it back.
+                    .on_click(cx.listener(|this, ev: &ClickEvent, _window, cx| {
+                        if !ev.is_keyboard() {
+                            this.event_create_all_day = !this.event_create_all_day;
+                            cx.notify();
+                        }
                     }))
                     .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
                         if is_web_checkbox_activation_key(event.keystroke.key.as_str()) {
@@ -436,16 +441,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.set_event_color(token, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
                             this.set_event_color(token, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(div().min_w_0().truncate().child(label))
                     .into_any_element()
             })
@@ -489,16 +489,11 @@ impl Workspace {
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
                             .cursor_pointer()
                             .hover(|el| el.border_color(theme::ring_floating()))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.toggle_event_color_menu(cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
                                     this.toggle_event_color_menu(cx);
-                                }
-                            }))
+                                })
+                            })
                     })
                     .child(
                         div()
@@ -642,7 +637,7 @@ impl Workspace {
                     .child(self.event_create_field_label("Notes"))
                     .child(
                         form_textarea(
-                            Input::new(&self.event_create_notes_input).disabled(read_only),
+                            Textarea::new(&self.event_create_notes_input).disabled(read_only),
                             FORM_THREE_ROW_TEXTAREA_HEIGHT_PX,
                         )
                         .aria_label("Event notes"),
@@ -726,20 +721,11 @@ impl Workspace {
                                         .size(px(14.0))
                                         .text_color(theme::rambutan_400()),
                                 )
-                                .on_click(cx.listener(|this, _, window, cx| {
-                                    this.close_event_create(window, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.close_event_create(window, cx);
-                                        }
-                                    },
-                                )),
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        this.close_event_create(window, cx);
+                                    })
+                                }),
                             ),
                     )
                     .child(
@@ -781,53 +767,48 @@ impl Workspace {
                                         el.child(self.render_event_record_meeting(event_id, cx))
                                     })
                                     .when_some(delete_id, |el, delete_id| {
-                                        let delete_id_for_key = delete_id.clone();
                                         el.child(
-                                    div()
-                                        .id("event-create-delete")
-                                        .debug_selector(|| {
-                                            "desktop-event-create-delete".to_string()
-                                        })
-                                        .rounded(px(FORM_CONTROL_RADIUS_PX))
-                                        .px(px(EVENT_CREATE_DELETE_X_PADDING_PX))
-                                        .py(px(EVENT_CREATE_DELETE_Y_PADDING_PX))
-                                        .font_family(EVENT_DIALOG_LABEL_FONT_FAMILY)
-                                        .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
-                                        .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(theme::lychee_400())
-                                        .tab_index(0)
-                                        .role(Role::Button)
-                                        .aria_label(EVENT_DELETE_LABEL)
-                                        .border_1()
-                                        .border_color(gpui::transparent_black())
-                                        .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                        .cursor_pointer()
-                                        .hover(|el| {
-                                            el.bg(theme::lychee_500()
-                                                .opacity(EVENT_CREATE_DELETE_HOVER_BG_OPACITY))
-                                        })
-                                        .on_click(cx.listener(move |this, _ev, window, cx| {
-                                            this.delete_calendar_event_by_id(&delete_id, cx);
-                                            this.close_event_create(window, cx);
-                                        }))
-                                        .on_key_down(cx.listener(
-                                            move |this, event: &KeyDownEvent, window, cx| {
-                                                if is_web_button_activation_key(
-                                                    event.keystroke.key.as_str(),
-                                                ) {
-                                                    window.prevent_default();
-                                                    cx.stop_propagation();
-                                                    this.delete_calendar_event_by_id(
-                                                        &delete_id_for_key,
+                                            div()
+                                                .id("event-create-delete")
+                                                .debug_selector(|| {
+                                                    "desktop-event-create-delete".to_string()
+                                                })
+                                                .rounded(px(FORM_CONTROL_RADIUS_PX))
+                                                .px(px(EVENT_CREATE_DELETE_X_PADDING_PX))
+                                                .py(px(EVENT_CREATE_DELETE_Y_PADDING_PX))
+                                                .font_family(EVENT_DIALOG_LABEL_FONT_FAMILY)
+                                                .text_size(px(EVENT_FORM_LABEL_TEXT_SIZE_PX))
+                                                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                                .font_weight(FontWeight::MEDIUM)
+                                                .text_color(theme::lychee_400())
+                                                .tab_index(0)
+                                                .role(Role::Button)
+                                                .aria_label(EVENT_DELETE_LABEL)
+                                                .border_1()
+                                                .border_color(gpui::transparent_black())
+                                                .focus_visible(|el| {
+                                                    el.border_color(theme::persimmon_400())
+                                                })
+                                                .cursor_pointer()
+                                                .hover(|el| {
+                                                    el.bg(theme::lychee_500().opacity(
+                                                        EVENT_CREATE_DELETE_HOVER_BG_OPACITY,
+                                                    ))
+                                                })
+                                                .map(|el| {
+                                                    on_press_view(
+                                                        el,
                                                         cx,
-                                                    );
-                                                    this.close_event_create(window, cx);
-                                                }
-                                            },
-                                        ))
-                                        .child(EVENT_DELETE_LABEL),
-                                )
+                                                        move |this, window, cx| {
+                                                            this.delete_calendar_event_by_id(
+                                                                &delete_id, cx,
+                                                            );
+                                                            this.close_event_create(window, cx);
+                                                        },
+                                                    )
+                                                })
+                                                .child(EVENT_DELETE_LABEL),
+                                        )
                                     }),
                             )
                             .child(
@@ -850,22 +831,11 @@ impl Workspace {
                                         .tab_index(0)
                                         .role(Role::Button)
                                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                        .on_click(cx.listener(|this, _ev, window, cx| {
-                                            this.close_event_create(window, cx);
-                                        }))
-                                        .on_key_down(
-                                            cx.listener(
-                                                |this, event: &KeyDownEvent, window, cx| {
-                                                    if is_web_button_activation_key(
-                                                        event.keystroke.key.as_str(),
-                                                    ) {
-                                                        window.prevent_default();
-                                                        cx.stop_propagation();
-                                                        this.close_event_create(window, cx);
-                                                    }
-                                                },
-                                            ),
-                                        ),
+                                        .map(|el| {
+                                            on_press_view(el, cx, |this, window, cx| {
+                                                this.close_event_create(window, cx)
+                                            })
+                                        }),
                                     )
                                     .child(
                                         // A read-only provider event has
@@ -893,22 +863,11 @@ impl Workspace {
                                         } else {
                                             EVENT_CREATE_SUBMIT_LABEL
                                         })
-                                        .on_click(cx.listener(|this, _ev, window, cx| {
-                                            this.save_event_from_form(window, cx);
-                                        }))
-                                        .on_key_down(
-                                            cx.listener(
-                                                |this, event: &KeyDownEvent, window, cx| {
-                                                    if is_web_button_activation_key(
-                                                        event.keystroke.key.as_str(),
-                                                    ) {
-                                                        window.prevent_default();
-                                                        cx.stop_propagation();
-                                                        this.save_event_from_form(window, cx);
-                                                    }
-                                                },
-                                            ),
-                                        ),
+                                        .map(|el| {
+                                            on_press_view(el, cx, |this, window, cx| {
+                                                this.save_event_from_form(window, cx)
+                                            })
+                                        }),
                                     ),
                             ),
                     )
@@ -923,7 +882,7 @@ pub(super) struct EventFormInputs {
     pub(super) event_create_title_input: Entity<InputState>,
     pub(super) event_create_start_input: Entity<InputState>,
     pub(super) event_create_end_input: Entity<InputState>,
-    pub(super) event_create_notes_input: Entity<InputState>,
+    pub(super) event_create_notes_input: Entity<TextareaState>,
 }
 
 impl Workspace {
@@ -940,9 +899,8 @@ impl Workspace {
         let event_create_end_input =
             cx.new(|cx| InputState::new(window, cx).placeholder(EVENT_DATETIME_PLACEHOLDER));
         let event_create_notes_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder(EVENT_NOTES_PLACEHOLDER)
-                .multi_line(true)
                 .rows(EVENT_NOTES_ROWS)
         });
         subscriptions.push(cx.subscribe_in(
@@ -1010,18 +968,12 @@ impl Workspace {
         link: String,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let link_for_key = link.clone();
         Self::event_dialog_link_action("event-provider-link", EVENT_PROVIDER_LINK_LABEL)
-            .on_click(cx.listener(move |_this, _ev, _window, cx| {
-                cx.open_url(&link);
-            }))
-            .on_key_down(cx.listener(move |_this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    cx.open_url(&link_for_key);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |_this, _window, cx| {
+                    cx.open_url(&link);
+                })
+            })
             .into_any_element()
     }
 
@@ -1062,18 +1014,12 @@ impl Workspace {
         task_id: String,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let task_id_for_key = task_id.clone();
         Self::event_dialog_link_action("event-open-task", EVENT_OPEN_TASK_LABEL)
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                this.open_event_source_task(&task_id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.open_event_source_task(&task_id_for_key, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.open_event_source_task(&task_id, window, cx);
+                })
+            })
             .into_any_element()
     }
 }

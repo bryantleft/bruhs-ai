@@ -1,10 +1,8 @@
 use super::*;
-use crate::views::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 use gpui_component::{input::Input, scroll::ScrollableElement};
-use std::rc::Rc;
 
 impl WhiteboardLibrary {
     fn command(&mut self, command: BoardCommand, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -199,7 +197,7 @@ impl WhiteboardLibrary {
             return;
         };
         let kind = dialog.kind;
-        let value = dialog.input.read(cx).value().to_string();
+        let value = dialog.input.value(cx).to_string();
         let link_kind = dialog.link_kind.read(cx).value().to_string();
         if matches!(kind, DialogKind::Commands) {
             let query = value.to_lowercase();
@@ -290,7 +288,7 @@ impl WhiteboardLibrary {
             .border_color(theme::longan_800())
             .child(label)
             .child(Styled::h(
-                Input::new(&dialog.input).aria_label(label),
+                dialog.input.element(label, false),
                 px(
                     if matches!(dialog.kind, DialogKind::Text | DialogKind::Mermaid) {
                         120.0
@@ -303,7 +301,7 @@ impl WhiteboardLibrary {
             panel=panel.child("Type: file, thread, task, pr, meeting, person or document. File target: relative/path.rs:10-24.").child(Input::new(&dialog.link_kind).aria_label("Link type"));
         }
         if matches!(dialog.kind, DialogKind::Commands) {
-            let query = dialog.input.read(cx).value().to_lowercase();
+            let query = dialog.input.value(cx).to_lowercase();
             let mut actions = div()
                 .max_h(px(240.0))
                 .overflow_y_scrollbar()
@@ -735,16 +733,7 @@ impl Activate for Stateful<Div> {
         cx: &Context<'_, WhiteboardLibrary>,
         f: impl Fn(&mut WhiteboardLibrary, &mut Window, &mut Context<'_, WhiteboardLibrary>) + 'static,
     ) -> Self {
-        let f = Rc::new(f);
-        let click = f.clone();
-        self.on_click(cx.listener(move |this, _, w, cx| click(this, w, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, w, cx| {
-                if is_web_button_activation_key(&event.keystroke.key) {
-                    w.prevent_default();
-                    cx.stop_propagation();
-                    f(this, w, cx);
-                }
-            }))
+        on_press_view(self, cx, f)
     }
 }
 

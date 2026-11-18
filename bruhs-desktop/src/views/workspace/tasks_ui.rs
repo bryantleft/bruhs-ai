@@ -2,6 +2,7 @@
 
 use super::library_pages_ui::LibraryPage;
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 // Match the web task list/board budgets. The native library action fixture
@@ -326,7 +327,7 @@ pub(super) const TASK_CARD_TITLE_TEXT_SIZE_PX: f32 = 12.0;
 pub(super) const TASK_CARD_DUE_TEXT_SIZE_PX: f32 = 12.0;
 
 pub(super) fn set_task_detail_inputs(
-    inputs: [&Entity<InputState>; 5],
+    inputs: [&dyn TextInput; 5],
     item: &DesktopWorkItem,
     window: &mut Window,
     cx: &mut Context<'_, Workspace>,
@@ -340,7 +341,7 @@ pub(super) fn set_task_detail_inputs(
     ];
 
     for (input, value) in inputs.into_iter().zip(values) {
-        input.update(cx, |input, cx| input.set_value(value, window, cx));
+        input.set_text_value(value.into(), window, cx);
     }
 }
 
@@ -1017,16 +1018,11 @@ impl Workspace {
                                         .text_color(theme::rambutan_300())
                                 })
                             })
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.select_project(None, cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
                                     this.select_project(None, cx);
-                                }
-                            }))
+                                })
+                            })
                             .child(TASKS_ALL_PROJECTS_LABEL),
                     )
                     .children(project_rows),
@@ -1072,16 +1068,11 @@ impl Workspace {
                             .tooltip(|window, cx| {
                                 Tooltip::new(TASKS_NEW_PROJECT_LABEL).build(window, cx)
                             })
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.create_project(cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
                                     this.create_project(cx);
-                                }
-                            }))
+                                })
+                            })
                             .child(
                                 div()
                                     .text_size(px(PROJECT_SIDEBAR_FOOTER_ICON_TEXT_SIZE_PX))
@@ -1099,9 +1090,7 @@ impl Workspace {
     ) -> AnyElement {
         let is_active = self.selected_project_id.as_deref() == Some(project.id.as_str());
         let id_for_select = project.id.clone();
-        let id_for_select_key = project.id.clone();
         let id_for_delete = project.id.clone();
-        let id_for_delete_key = project.id.clone();
         let key = element_key(&project.id);
         let hover_group: SharedString = format!("desktop-project-row-{key}").into();
 
@@ -1140,16 +1129,11 @@ impl Workspace {
                         .text_color(theme::rambutan_300())
                 })
             })
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                this.select_project(Some(id_for_select.clone()), cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.select_project(Some(id_for_select_key.clone()), cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| {
+                    this.select_project(Some(id_for_select.clone()), cx);
+                })
+            })
             .child(
                 div()
                     .min_w_0()
@@ -1187,17 +1171,11 @@ impl Workspace {
                             .text_color(theme::lychee_400())
                     })
                     .tooltip(|window, cx| Tooltip::new(PROJECT_DELETE_LABEL).build(window, cx))
-                    .on_click(cx.listener(move |this, _ev, window, cx| {
-                        cx.stop_propagation();
-                        this.request_delete_project_by_id(&id_for_delete, window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.request_delete_project_by_id(&id_for_delete_key, window, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
+                            this.request_delete_project_by_id(&id_for_delete, window, cx);
+                        })
+                    })
                     .child(
                         Icon::new(IconName::Delete).size(px(PROJECT_SIDEBAR_DELETE_ICON_SIZE_PX)),
                     ),
@@ -1294,16 +1272,11 @@ impl Workspace {
                             .tooltip(|window, cx| {
                                 Tooltip::new(TASKS_NEW_TASK_LABEL).build(window, cx)
                             })
-                            .on_click(cx.listener(|this, _ev, window, cx| {
-                                this.open_task_create(window, cx);
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, |this, window, cx| {
                                     this.open_task_create(window, cx);
-                                }
-                            }))
+                                })
+                            })
                             .child("+ New"),
                     ),
             )
@@ -1343,16 +1316,11 @@ impl Workspace {
             .when(!is_active, |el| {
                 el.hover(|el| el.text_color(theme::rambutan_400()))
             })
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                this.set_task_view_mode(mode, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| {
                     this.set_task_view_mode(mode, cx);
-                }
-            }))
+                })
+            })
             .child(mode.label())
     }
 
@@ -1481,7 +1449,6 @@ impl Workspace {
         let is_selected = self.selected_work_item_id.as_deref() == Some(item.id.as_str());
         let key = element_key(&item.id);
         let item_id = item.id.clone();
-        let item_id_for_key = item.id.clone();
         let due = item
             .due_date
             .as_deref()
@@ -1511,16 +1478,11 @@ impl Workspace {
             .when(!is_selected, |el| {
                 el.hover(|el| el.bg(theme::longan_800().opacity(TASK_ROW_HOVER_BG_OPACITY)))
             })
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                this.select_work_item_by_id(&item_id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.select_work_item_by_id(&item_id_for_key, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.select_work_item_by_id(&item_id, window, cx);
+                })
+            })
             .child(
                 div()
                     .w(px(TASK_LIST_STATUS_SLOT_WIDTH_PX))
@@ -1771,7 +1733,6 @@ impl Workspace {
         let is_selected = self.selected_work_item_id.as_deref() == Some(item.id.as_str());
         let key = element_key(&item.id);
         let item_id = item.id.clone();
-        let item_id_for_key = item.id.clone();
         let debug_item_id = item.id.clone();
         let drag = DesktopTaskDrag::new(item);
         let priority_label = item.priority.label();
@@ -1813,16 +1774,11 @@ impl Workspace {
                 cx.stop_propagation();
                 cx.new(|_| drag.clone())
             })
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                this.select_work_item_by_id(&item_id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.select_work_item_by_id(&item_id_for_key, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.select_work_item_by_id(&item_id, window, cx);
+                })
+            })
             .child(
                 div()
                     .flex()

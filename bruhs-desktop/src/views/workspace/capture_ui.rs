@@ -1,6 +1,7 @@
 //! Keyboard-first universal capture for the native workspace.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 const CAPTURE_TEXTAREA_HEIGHT_PX: f32 = 118.0;
@@ -241,24 +242,13 @@ impl Workspace {
                                     .bg(theme::longan_800())
                                     .text_color(theme::rambutan_200())
                             })
-                            .on_click(cx.listener(move |this, _event, window, cx| {
-                                if this.capture_edit_id.is_none() {
-                                    this.select_capture_kind(kind, window, cx);
-                                }
-                            }))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if this.capture_edit_id.is_none()
-                                        && is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        )
-                                    {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, window, cx| {
+                                    if this.capture_edit_id.is_none() {
                                         this.select_capture_kind(kind, window, cx);
                                     }
-                                },
-                            ))
+                                })
+                            })
                             .child(
                                 svg()
                                     .debug_selector(move || {
@@ -300,8 +290,11 @@ impl Workspace {
                             .child(selected.label()),
                     )
                     .child(
-                        form_textarea(Input::new(&self.capture_input), CAPTURE_TEXTAREA_HEIGHT_PX)
-                            .aria_label("Capture text"),
+                        form_textarea(
+                            Textarea::new(&self.capture_input),
+                            CAPTURE_TEXTAREA_HEIGHT_PX,
+                        )
+                        .aria_label("Capture text"),
                     )
                     .when_some(self.capture_error.clone(), |element, error| {
                         element.child(
@@ -338,18 +331,12 @@ impl Workspace {
                 )
                 .aria_label("Cancel capture")
                 .track_focus(&self.capture_cancel_focus)
-                .on_click(cx.listener(|this, _event, _window, cx| {
-                    this.close_transient_surfaces();
-                    cx.notify();
-                }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
+                .map(|el| {
+                    on_press_view(el, cx, |this, _window, cx| {
                         this.close_transient_surfaces();
                         cx.notify();
-                    }
-                }))
+                    })
+                })
                 .child("Cancel"),
             )
             .child(
@@ -362,16 +349,12 @@ impl Workspace {
                 .aria_label(if editing { "Save capture" } else { "Capture" })
                 .track_focus(&self.capture_submit_focus.clone().tab_stop(!empty))
                 .debug_selector(|| "desktop-capture-submit".to_string())
-                .on_click(cx.listener(|this, _event, window, cx| {
-                    this.submit_capture(window, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if !empty && is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
+                // Disabled while empty, like web's `<button disabled>`.
+                .when(!empty, |el| {
+                    on_press_view(el, cx, |this, window, cx| {
                         this.submit_capture(window, cx);
-                    }
-                }))
+                    })
+                })
                 .child(if editing { "Save" } else { "Capture" }),
             );
 
@@ -395,11 +378,10 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
-    ) -> Entity<InputState> {
+    ) -> Entity<TextareaState> {
         let capture_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder(CaptureKind::Task.placeholder())
-                .multi_line(true)
                 .rows(5)
         });
         subscriptions.push(cx.subscribe_in(

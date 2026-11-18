@@ -3,8 +3,8 @@
 //! room's page.
 
 use super::*;
-use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{CREATE_ROOM, DELETE_ROOM, SAVE_ROOM};
+use bruhs_ui::press::on_press_view;
 
 impl Workspace {
     /// New room (`room_id` `None`, once the service takes rooms and the crew
@@ -69,7 +69,7 @@ impl Workspace {
             if disabled {
                 button
             } else {
-                on_press(
+                on_press_view(
                     button
                         .tab_index(0)
                         .focus_visible(|el| el.border_color(theme::persimmon_400())),
@@ -81,7 +81,7 @@ impl Workspace {
                 )
             }
         });
-        let cancel = on_press(
+        let cancel = on_press_view(
             web_button(
                 "desktop-room-cancel",
                 WebButtonVariant::Ghost,
@@ -112,7 +112,7 @@ impl Workspace {
         let submit = if disabled {
             submit
         } else {
-            on_press(
+            on_press_view(
                 submit
                     .tab_index(0)
                     .focus_visible(|el| el.border_color(theme::persimmon_400())),

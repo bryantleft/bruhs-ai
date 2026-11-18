@@ -6,9 +6,7 @@ use bruhs_models::{AgentAccess, AgentDomain, WorkflowOperation};
 use gpui::TestAppContext;
 
 #[gpui::test]
-async fn pending_proposal_status_opens_that_review_after_history_navigation(
-    cx: &mut TestAppContext,
-) {
+async fn a_pending_proposal_keeps_its_own_card_whatever_the_history_shows(cx: &mut TestAppContext) {
     let (workspace, cx) = fixture(cx);
     let earlier = workspace.update_in(cx, |w, _, _| {
         w.automation_state
@@ -48,12 +46,21 @@ async fn pending_proposal_status_opens_that_review_after_history_navigation(
         cx.notify();
     });
     cx.run_until_parked();
+    // As on the web: Open workflows leads to the page, where the proposal
+    // waits in its own card; the history stays where the user left it.
     let open = cx.debug_bounds("desktop-open-workflows").unwrap();
     cx.simulate_click(open.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-workflow-awaiting-review")
+            .is_some(),
+        "the proposal's own card"
+    );
     workspace.update_in(cx, |w, _, _| {
+        assert_eq!(w.reviewed_workflow_id.as_deref(), Some(earlier.as_str()));
         assert_eq!(
-            w.reviewed_workflow_id.as_deref(),
-            proposal["workflow_id"].as_str()
+            bruhs_models::logic::workflow_review::awaiting_review(&w.automation_state, None),
+            vec![proposal["workflow_id"].as_str().unwrap().to_owned()]
         );
         assert_eq!(w.active_view, AppView::Automations);
         assert!(w.work_items.is_empty());

@@ -28,7 +28,7 @@ enum WeeklyEditor {
     Report {
         report: Box<EngineeringReport>,
         title: Entity<InputState>,
-        body: Entity<InputState>,
+        body: Entity<TextareaState>,
     },
 }
 
@@ -81,7 +81,7 @@ fn time(time: EpochMs) -> String {
 impl ReactiveAutomations {
     pub(super) fn ensure_weekly_inputs(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         if self.weekly.window_end.is_none() {
-            self.weekly.window_end = Some(edit_input("", false, window, cx));
+            self.weekly.window_end = Some(edit_input("", window, cx));
         }
     }
 
@@ -204,8 +204,8 @@ impl ReactiveAutomations {
             scheduled: false,
             schedule: None,
         });
-        let path = edit_input(&preset.project_path, false, window, cx);
-        let model = edit_input(&preset.model, false, window, cx);
+        let path = edit_input(&preset.project_path, window, cx);
+        let model = edit_input(&preset.model, window, cx);
         let schedule = Box::new(ScheduleEditor {
             fixed: preset.schedule.is_some(),
             weekday: preset.schedule.as_ref().map_or(1, |s| s.weekday),
@@ -214,7 +214,6 @@ impl ReactiveAutomations {
                     .schedule
                     .as_ref()
                     .map_or("09:00", |s| s.time.as_str()),
-                false,
                 window,
                 cx,
             ),
@@ -223,7 +222,6 @@ impl ReactiveAutomations {
                     .schedule
                     .as_ref()
                     .map_or_else(super::editor_fields::local_zone, |s| s.time_zone.clone()),
-                false,
                 window,
                 cx,
             ),
@@ -257,8 +255,8 @@ impl ReactiveAutomations {
                 this.weekly.busy = false;
                 match result {
                     Ok(report) => {
-                        let title = edit_input(&report.title, false, window, cx);
-                        let body = edit_input(&report.body, true, window, cx);
+                        let title = edit_input(&report.title, window, cx);
+                        let body = edit_area(&report.body, window, cx);
                         set_report_editor(&mut this.weekly, report, title, body);
                     }
                     Err(error) => this.weekly.error = Some(reactive_error(error)),
@@ -559,7 +557,7 @@ impl ReactiveAutomations {
                                 move |this, window, cx| {
                                     this.editor = Some(Editor::Chat {
                                         agent_id: format!("weekly-report-{}", open.preset_id),
-                                        message: edit_input(&open.body, true, window, cx),
+                                        message: edit_area(&open.body, window, cx),
                                     });
                                     cx.emit(ReactiveProjectOpened {
                                         path: open.project_path.clone(),
@@ -669,7 +667,7 @@ fn set_report_editor(
     state: &mut WeeklyReportsState,
     report: EngineeringReport,
     title: Entity<InputState>,
-    body: Entity<InputState>,
+    body: Entity<TextareaState>,
 ) {
     state.editor = Some(Box::new(WeeklyEditor::Report {
         report: Box::new(report),

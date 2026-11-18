@@ -17,7 +17,6 @@ use crate::views::crew_face::bruh_face;
 use crate::views::dropdown::{
     dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler,
 };
-use crate::views::web_button::on_press;
 use bruhs_models::agent::ModelId;
 use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
@@ -28,6 +27,8 @@ use bruhs_models::crew::{
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
+use bruhs_ui::press::on_press_view;
+use bruhs_ui::{press::Interactivity, switch::switch, text_field::TextInput};
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::text::TextView;
 use std::cell::Cell;
@@ -68,12 +69,6 @@ const FIVE_ROWS_PX: f32 = 118.0;
 /// Web `p-0.5` around the access segments.
 const SEGMENT_GROUP_PADDING_PX: f32 = 2.0;
 /// Web `Switch`.
-const SWITCH_WIDTH_PX: f32 = 44.0;
-const SWITCH_HEIGHT_PX: f32 = 24.0;
-const SWITCH_THUMB_PX: f32 = 20.0;
-const SWITCH_THUMB_OFF_X_PX: f32 = 2.0;
-const SWITCH_THUMB_ON_X_PX: f32 = 22.0;
-const SWITCH_RING_OPACITY: f32 = 0.10;
 const DISABLED_OPACITY: f32 = 0.5;
 const EFFORT_DROPDOWN: &str = "desktop-bruh-effort";
 const DELIVER_NEEDS_FULL: &str = "Needs Full access.";
@@ -167,7 +162,7 @@ struct SettingsForm {
     /// What the form was last filled from.
     shown: BruhSettings,
     name: Entity<InputState>,
-    job: Entity<InputState>,
+    job: Entity<TextareaState>,
     model: Entity<InputState>,
     effort: Option<String>,
     effort_open: bool,
@@ -185,21 +180,17 @@ impl SettingsForm {
         window: &mut Window,
         cx: &mut Context<'_, ReactiveAutomations>,
     ) -> Self {
-        let name = edit_input(&settings.name, false, window, cx);
-        let job = edit_input(&settings.instructions, true, window, cx);
-        let model = edit_input(&settings.model, false, window, cx);
-        let redraw = |_: &mut ReactiveAutomations,
-                      _: &Entity<InputState>,
-                      event: &InputEvent,
-                      _: &mut Window,
-                      cx: &mut Context<'_, ReactiveAutomations>| {
+        let name = edit_input(&settings.name, window, cx);
+        let job = edit_area(&settings.instructions, window, cx);
+        let model = edit_input(&settings.model, window, cx);
+        let redraw = |event: &InputEvent, cx: &mut Context<'_, ReactiveAutomations>| {
             if matches!(event, InputEvent::Change) {
                 cx.notify();
             }
         };
         let subscriptions = vec![
-            cx.subscribe_in(&name, window, redraw),
-            cx.subscribe_in(&job, window, redraw),
+            cx.subscribe_in(&name, window, move |_, _, event, _, cx| redraw(event, cx)),
+            cx.subscribe_in(&job, window, move |_, _, event, _, cx| redraw(event, cx)),
             // The model is committed when the field loses focus: a model
             // that can't run the chosen level drops it to Read only, which
             // the service would otherwise refuse.
@@ -250,13 +241,14 @@ impl SettingsForm {
     }
 
     fn fill(&mut self, settings: &BruhSettings, window: &mut Window, cx: &mut App) {
-        for (input, text) in [
+        let fields: [(&dyn TextInput, &String); 3] = [
             (&self.name, &settings.name),
             (&self.job, &settings.instructions),
             (&self.model, &settings.model),
-        ] {
-            if value(input, cx) != *text {
-                input.update(cx, |input, cx| input.set_value(text, window, cx));
+        ];
+        for (input, text) in fields {
+            if *input.text_value(cx) != **text {
+                input.set_text_value(text.clone().into(), window, cx);
             }
         }
         self.effort.clone_from(&settings.effort);
@@ -280,7 +272,7 @@ impl SettingsForm {
 pub(super) struct BruhPage {
     agent_id: String,
     tab: BruhTab,
-    message: Option<Entity<InputState>>,
+    message: Option<Entity<TextareaState>>,
     runs: RunsPage,
     runs_requested: bool,
     runs_revision: u64,
@@ -288,7 +280,7 @@ pub(super) struct BruhPage {
     newest_request: Option<Task<()>>,
     earlier_request: Option<Task<()>>,
     /// Reply fields of open question cards, by outbox id.
-    replies: HashMap<String, (Entity<InputState>, gpui::Subscription)>,
+    replies: HashMap<String, (Entity<TextareaState>, gpui::Subscription)>,
     settings: Option<SettingsForm>,
     list: TranscriptList,
     /// What the transcript last followed (`chat_follow_key`); a new line
@@ -331,16 +323,6 @@ impl BruhPage {
     }
 }
 
-/// A page button: a click or Enter or Space runs `action` once.
-fn press(
-    el: Stateful<Div>,
-    cx: &Context<'_, ReactiveAutomations>,
-    action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
-        + 'static,
-) -> Stateful<Div> {
-    on_press(el, cx, action)
-}
-
 /// A web `Button`: handlers only while enabled.
 pub(super) fn page_button(
     id: impl Into<SharedString>,
@@ -365,7 +347,7 @@ pub(super) fn page_button(
     if disabled {
         button.cursor_not_allowed()
     } else {
-        press(button, cx, action)
+        on_press_view(button, cx, action)
     }
 }
 
@@ -379,54 +361,11 @@ fn page_switch(
     action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
         + 'static,
 ) -> Stateful<Div> {
-    let border = 1.0;
-    let thumb_x = if checked {
-        SWITCH_THUMB_ON_X_PX
-    } else {
-        SWITCH_THUMB_OFF_X_PX
-    } - border;
-    let thumb_y = (SWITCH_HEIGHT_PX - SWITCH_THUMB_PX) / 2.0 - border;
-    let switch = div()
-        .id(id)
-        .debug_selector(move || id.to_string())
-        .role(Role::Switch)
-        .aria_label(text)
-        .aria_toggled(checked.into())
-        .relative()
-        .flex_shrink_0()
-        .w(px(SWITCH_WIDTH_PX))
-        .h(px(SWITCH_HEIGHT_PX))
-        .rounded_full()
-        .border_1()
-        .map(|el| {
-            if checked {
-                el.bg(theme::persimmon_500())
-                    .border_color(gpui::transparent_black())
-            } else {
-                el.bg(theme::longan_700())
-                    .border_color(gpui::white().opacity(SWITCH_RING_OPACITY))
-            }
-        })
-        .child(
-            div()
-                .absolute()
-                .left(px(thumb_x))
-                .top(px(thumb_y))
-                .size(px(SWITCH_THUMB_PX))
-                .rounded_full()
-                .bg(theme::rambutan_100()),
-        );
+    let switch = switch(id, text, checked, Interactivity::disabled_if(disabled));
     if disabled {
-        switch.opacity(DISABLED_OPACITY).cursor_not_allowed()
+        switch
     } else {
-        press(
-            switch
-                .tab_index(0)
-                .cursor_pointer()
-                .focus_visible(|el| el.border_color(theme::persimmon_400())),
-            cx,
-            action,
-        )
+        on_press_view(switch, cx, action)
     }
 }
 
@@ -436,8 +375,8 @@ fn page_switch(
 pub(super) fn reply_field(
     window: &mut Window,
     cx: &mut Context<'_, ReactiveAutomations>,
-) -> (Entity<InputState>, gpui::Subscription) {
-    let input = cx.new(|cx| InputState::new(window, cx).multi_line(true));
+) -> (Entity<TextareaState>, gpui::Subscription) {
+    let input = cx.new(|cx| TextareaState::new(window, cx));
     let watch = cx.subscribe_in(&input, window, |_, _, event: &InputEvent, _, cx| {
         if matches!(event, InputEvent::Change) {
             cx.notify();
@@ -794,8 +733,7 @@ impl ReactiveAutomations {
         page.built_for = Some(stamp);
         if page.message.is_none() {
             let message = cx.new(|cx| {
-                InputState::new(window, cx)
-                    .multi_line(true)
+                TextareaState::new(window, cx)
                     .submit_on_enter(true)
                     .placeholder("Message")
             });
@@ -890,7 +828,7 @@ impl ReactiveAutomations {
     pub(super) fn answer_question(
         &mut self,
         id: &str,
-        input: Entity<InputState>,
+        input: Entity<TextareaState>,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
@@ -1068,7 +1006,7 @@ impl ReactiveAutomations {
                             .text_color(theme::rambutan_100())
                             .child("This bruh no longer exists."),
                     )
-                    .child(press(
+                    .child(on_press_view(
                         div()
                             .id("desktop-bruh-open-workflows")
                             .debug_selector(|| "desktop-bruh-open-workflows".to_string())
@@ -1266,7 +1204,7 @@ impl ReactiveAutomations {
                     .children(BruhTab::ALL.into_iter().map(|option| {
                         let chosen = option == tab;
                         let selector = format!("desktop-bruh-tab-{}", option.key());
-                        press(
+                        on_press_view(
                             div()
                                 .id(SharedString::from(selector.clone()))
                                 .debug_selector(move || selector)
@@ -1329,7 +1267,7 @@ impl ReactiveAutomations {
                                 .min_w_0()
                                 .flex_1()
                                 .child(
-                                    Input::new(message)
+                                    Textarea::new(message)
                                         .aria_label("Message")
                                         .disabled(blocked.is_some())
                                         .h(px(TWO_ROWS_PX))
@@ -1691,7 +1629,7 @@ impl ReactiveAutomations {
     pub(super) fn render_bruh_question(
         &self,
         item: &OutboxItem,
-        reply: Option<&Entity<InputState>>,
+        reply: Option<&Entity<TextareaState>>,
         layout: Layout,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
@@ -1733,7 +1671,7 @@ impl ReactiveAutomations {
         let id = item.id.clone();
         let answer = input.clone();
         card.child(
-            Input::new(input)
+            Textarea::new(input)
                 .aria_label(format!("Reply to {}", item.title))
                 .h(px(TWO_ROWS_PX))
                 .px(px(FIELD_X_PADDING_PX))
@@ -1822,7 +1760,7 @@ impl ReactiveAutomations {
             ))
             .child(labelled(
                 "Job",
-                Input::new(&form.job)
+                Textarea::new(&form.job)
                     .aria_label("Job")
                     .h(px(FIVE_ROWS_PX))
                     .px(px(FIELD_X_PADDING_PX))
@@ -1907,7 +1845,7 @@ impl ReactiveAutomations {
                         if reason.is_some() {
                             segment.opacity(DISABLED_OPACITY).cursor_not_allowed()
                         } else {
-                            press(
+                            on_press_view(
                                 segment
                                     .tab_index(0)
                                     .cursor_pointer()
@@ -2511,7 +2449,7 @@ mod tests {
             editor
                 .source_mut()
                 .value
-                .update(cx, |input, cx| input.set_value("/tmp/scans", window, cx));
+                .set_value("/tmp/scans", window, cx);
             panel.review_automation(cx);
             let Some(Editor::Automation(editor)) = &panel.editor else {
                 panic!("automation editor");

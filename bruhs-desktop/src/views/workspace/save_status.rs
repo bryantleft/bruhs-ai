@@ -37,9 +37,11 @@ impl SaveStatus {
     pub(super) fn alert(&self) -> Option<&'static str> {
         match self {
             Self::Saved | Self::Saving => None,
-            Self::Failed(_) => Some("Local save failed. Keep this window open; copy a recovery snapshot or retry. Workflows cannot advance yet."),
-            Self::Conflict => Some("Another instance changed this workspace. Your draft is kept here. Copy recovery before reloading; retry cannot overwrite the newer saved version."),
-            Self::RecoveryRequired(_) => Some("Saved data needs recovery. The original file is preserved and saving is paused. Copy this window's recovery snapshot before repairing or reloading."),
+            // The web's words for the same failures (`storage::metadata::SaveError`),
+            // with this app's window and local storage.
+            Self::Failed(_) => Some("Local storage could not save this change. Keep this window open and retry."),
+            Self::Conflict => Some("Another window saved newer data. Your unsaved changes are kept here; copy them before reloading to review the latest version."),
+            Self::RecoveryRequired(_) => Some("Saved data could not be decoded. The original copy was preserved; no replacement was saved. Copy this window's recovery data before repairing or reloading."),
         }
     }
 }
@@ -48,46 +50,80 @@ use super::*;
 use gpui_component::zoom::px;
 
 impl Workspace {
-    /// The strip appears only when a save failed; routine saves show nothing.
+    /// Web `MetadataStatus`: nothing while saves succeed; after a failure,
+    /// "Not saved", the reason, Retry save and the private recovery data.
+    /// The desktop saves the whole workspace in one file, so its strip
+    /// stands for every page, under the navigation.
     pub(super) fn render_save_status(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
         let message = self.save_status.alert()?;
         Some(
             div()
                 .id("workspace-save-status")
                 .debug_selector(|| "desktop-save-status".into())
-                .role(Role::Alert)
-                .aria_label(message)
                 .w_full()
                 .flex_shrink_0()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
-                .px_3()
+                .border_b_1()
+                .border_color(theme::longan_800().opacity(0.4))
+                // Web `px-4 sm:px-6`; the window is never narrower than `sm`.
+                .px(px(24.0))
                 .py_2()
-                .bg(theme::longan_900())
-                .text_size(px(12.0))
-                .text_color(theme::durian_300())
-                .child(div().flex_1().min_w_0().child(message))
-                .when(matches!(self.save_status, SaveStatus::Failed(_)), |el| {
-                    el.child(web_button("retry-workspace-save", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
-                        .debug_selector(|| "desktop-retry-save".into())
-                        .aria_label("Retry local save")
-                        .child("Retry save")
-                        .on_click(cx.listener(|this, _, _, cx| this.persist_and_notify(cx))))
-                })
-                .child(web_button("copy-workspace-recovery", WebButtonVariant::Ghost, WebButtonSize::Small, ButtonState::Enabled)
-                    .debug_selector(|| "desktop-copy-recovery".into())
-                    .aria_label("Copy private recovery snapshot")
-                    .child("Copy recovery")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        // Explicit local clipboard action; recovery is never sent to the agent.
-                        match serde_json::to_string_pretty(&this.recovery_snapshot(cx)) {
-                            Ok(json) => cx.write_to_clipboard(ClipboardItem::new_string(json)),
-                            Err(_) => this.persistence_error = Some("The recovery snapshot could not be encoded. Keep this window open.".into()),
-                        }
-                        cx.notify();
-                    })))
+                .child(super::automations_ui::label_sm("Not saved", theme::rambutan_400()))
+                .child(
+                    super::automations_ui::label_sm(message, theme::lychee_300())
+                        .id("workspace-save-reason")
+                        .mt_1()
+                        .role(Role::Alert)
+                        .aria_label(message),
+                )
+                .child(
+                    div()
+                        .mt_2()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .gap_3()
+                        .when(matches!(self.save_status, SaveStatus::Failed(_)), |row| {
+                            row.child(
+                                web_button(
+                                    "retry-workspace-save",
+                                    WebButtonVariant::Ghost,
+                                    WebButtonSize::Small,
+                                    ButtonState::Enabled,
+                                )
+                                .debug_selector(|| "desktop-retry-save".into())
+                                .aria_label("Retry save")
+                                // Web `bg-longan-800 px-3 py-2 text-rambutan-200`.
+                                .bg(theme::longan_800())
+                                .px_3()
+                                .py_2()
+                                .text_color(theme::rambutan_200())
+                                .child("Retry save")
+                                .on_click(cx.listener(|this, _, _, cx| this.persist_and_notify(cx))),
+                            )
+                        })
+                        .child(
+                            web_button(
+                                "copy-workspace-recovery",
+                                WebButtonVariant::Ghost,
+                                WebButtonSize::Small,
+                                ButtonState::Enabled,
+                            )
+                            .debug_selector(|| "desktop-copy-recovery".into())
+                            .aria_label("Copy recovery data (private)")
+                            .px_0()
+                            .text_color(theme::rambutan_400())
+                            // The web shows the data to copy; the desktop copies it.
+                            .child("Copy recovery data (private)")
+                            .on_click(cx.listener(|this, _, _, cx| {
+                                // Explicit local clipboard action; recovery is never sent to the agent.
+                                match serde_json::to_string_pretty(&this.recovery_snapshot(cx)) {
+                                    Ok(json) => cx.write_to_clipboard(ClipboardItem::new_string(json)),
+                                    Err(_) => this.persistence_error = Some("The recovery snapshot could not be encoded. Keep this window open.".into()),
+                                }
+                                cx.notify();
+                            })),
+                        ),
+                )
                 .into_any_element(),
         )
     }

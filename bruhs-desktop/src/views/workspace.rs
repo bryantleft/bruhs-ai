@@ -1,7 +1,7 @@
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui_component::resizable::{
     h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
 };
@@ -61,6 +61,8 @@ use bruhs_models::{
     RelationshipItemKind, RelationshipProfile, SchedulingLink, SchedulingPreferences, SourceClip,
     TodaySnapshot, WorkItem, WorkItemPlanning,
 };
+use bruhs_ui::press::on_press_view;
+use bruhs_ui::text_field::TextInput;
 
 mod app_links;
 mod automations_ui;
@@ -159,6 +161,8 @@ use task_forms_ui::*;
 use tasks_ui::*;
 
 // --- Actions ---
+/// Escape closes overlays; shared with the `bruhs-ui` components.
+pub use bruhs_ui::actions::CloseOverlays;
 actions!(
     workspace,
     [
@@ -171,7 +175,6 @@ actions!(
         StopAll,
         OpenTaskCreateShortcut,
         OpenCapture,
-        CloseOverlays,
         OpenChatView,
         OpenTodayView,
         OpenInboxView,
@@ -649,8 +652,8 @@ pub(crate) fn provider_mark(provider: AgentProvider, _cx: &App) -> AnyElement {
 }
 
 /// Redraw the workspace whenever `input` is edited.
-fn redraw_on_edit(
-    input: &Entity<InputState>,
+fn redraw_on_edit<T: EventEmitter<InputEvent>>(
+    input: &Entity<T>,
     window: &mut Window,
     cx: &mut Context<'_, Workspace>,
 ) -> Subscription {
@@ -1080,7 +1083,7 @@ fn form_text_input(input: Input) -> Input {
         .text_size(px(FORM_INPUT_TEXT_SIZE_PX))
 }
 
-fn form_textarea(input: Input, height_px: f32) -> Input {
+fn form_textarea<E: Styled>(input: E, height_px: f32) -> E {
     input
         .h(px(height_px))
         .px(px(FORM_INPUT_X_PADDING_PX))
@@ -1209,6 +1212,15 @@ pub struct Workspace {
     automation_error: Option<String>,
     reviewed_workflow_id: Option<String>,
     mcp_bridge: mcp_bridge::WorkspaceBridge,
+    /// Agent workflows' scroll area.
+    automations_scroll: ScrollHandle,
+    /// The page's own dry run (New dry run, a suggestion's or a draft's
+    /// preview), reviewed in Preview changes while it waits.
+    dry_run_workflow_id: Option<String>,
+    /// Opened "Review workflow" disclosures, by place and workflow.
+    workflow_disclosures: HashSet<String>,
+    /// The app-wide workflow notice put away, until it changes.
+    dismissed_workflow_notice: Option<String>,
     mobile: mobile::MobileUi,
     local_servers: Vec<LocalServer>,
     local_servers_loading: bool,
@@ -1282,10 +1294,10 @@ pub struct Workspace {
     sidebar_working_section: bool,
     title_instructions: String,
     title_instructions_by_project: BTreeMap<String, String>,
-    title_instructions_input: Entity<InputState>,
+    title_instructions_input: Entity<TextareaState>,
     /// The project whose title instructions Settings shows; empty for none.
     title_project: String,
-    title_project_instructions_input: Entity<InputState>,
+    title_project_instructions_input: Entity<TextareaState>,
     keybindings: Vec<bruhs_models::logic::keybindings::Keybinding>,
     keybinding_index: usize,
     keybinding_key_input: Entity<InputState>,
@@ -1391,11 +1403,11 @@ pub struct Workspace {
 
     // Child views
     command_input: Entity<InputState>,
-    capture_input: Entity<InputState>,
+    capture_input: Entity<TextareaState>,
     capture_cancel_focus: FocusHandle,
     capture_submit_focus: FocusHandle,
     knowledge_title_input: Entity<InputState>,
-    knowledge_body_input: Entity<InputState>,
+    knowledge_body_input: Entity<TextareaState>,
     knowledge_tags_input: Entity<InputState>,
     clip_title_input: Entity<InputState>,
     clip_url_input: Entity<InputState>,
@@ -1403,7 +1415,7 @@ pub struct Workspace {
     clip_author_input: Entity<InputState>,
     clip_published_input: Entity<InputState>,
     clip_tags_input: Entity<InputState>,
-    clip_excerpt_input: Entity<InputState>,
+    clip_excerpt_input: Entity<TextareaState>,
     /// The Knowledge library's search.
     knowledge: knowledge_ui::KnowledgeState,
     clip_create_visible: bool,
@@ -1419,8 +1431,8 @@ pub struct Workspace {
     inbox_import_source: InboxSource,
     inbox_sender_input: Entity<InputState>,
     inbox_subject_input: Entity<InputState>,
-    inbox_body_input: Entity<InputState>,
-    inbox_reply_input: Entity<InputState>,
+    inbox_body_input: Entity<TextareaState>,
+    inbox_reply_input: Entity<TextareaState>,
     relationship_company_input: Entity<InputState>,
     relationship_role_input: Entity<InputState>,
     relationship_email_input: Entity<InputState>,
@@ -1443,19 +1455,19 @@ pub struct Workspace {
     life_health: life_ui::HealthForms,
     /// Each finance card's form (web `finance_tab`).
     life_finance: life_ui::FinanceForms,
-    life_csv_input: Entity<InputState>,
+    life_csv_input: Entity<TextareaState>,
     task_create_title_input: Entity<InputState>,
-    task_create_description_input: Entity<InputState>,
+    task_create_description_input: Entity<TextareaState>,
     task_create_due_input: Entity<InputState>,
     task_detail_title_input: Entity<InputState>,
-    task_detail_description_input: Entity<InputState>,
+    task_detail_description_input: Entity<TextareaState>,
     task_detail_due_input: Entity<InputState>,
     task_detail_cycle_input: Entity<InputState>,
     task_detail_waiting_input: Entity<InputState>,
     event_create_title_input: Entity<InputState>,
     event_create_start_input: Entity<InputState>,
     event_create_end_input: Entity<InputState>,
-    event_create_notes_input: Entity<InputState>,
+    event_create_notes_input: Entity<TextareaState>,
     tasks_panel: Entity<TasksPanelView>,
     diff_panel: Entity<DiffPanelView>,
     /// Meetings / people / Google-sync state from bruhs-server.
@@ -1935,7 +1947,7 @@ impl Workspace {
                                     .into(),
                             );
                         }
-                        this.reviewed_workflow_id = Some(id);
+                        this.show_dry_run(id);
                         this.persist_and_notify(cx);
                     },
                 ));
@@ -1945,6 +1957,10 @@ impl Workspace {
             automation_error: None,
             reviewed_workflow_id: None,
             mcp_bridge: mcp_bridge::WorkspaceBridge::default(),
+            automations_scroll: ScrollHandle::new(),
+            dry_run_workflow_id: None,
+            workflow_disclosures: HashSet::new(),
+            dismissed_workflow_notice: None,
             mobile: mobile::MobileUi::new(window, cx),
             local_servers: Vec::new(),
             local_servers_loading: false,
@@ -2666,21 +2682,11 @@ impl Workspace {
                     .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
-                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                        cx.stop_propagation();
-                        // Keys toggle on key down; GPUI's key-up click would
-                        // toggle back.
-                        if !event.is_keyboard() {
+                    .map(|el| {
+                        on_press_view(el, cx, |this, window, cx| {
                             this.toggle_sidebar_for_window(window, cx);
-                        }
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.toggle_sidebar_for_window(window, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(
                         svg()
                             .path("icons/panel-left.svg")
@@ -2727,6 +2733,7 @@ impl Workspace {
                 // draggable split whose height is remembered.
                 if self.terminal_drawer_open {
                     let split = v_resizable("chat-terminal-split")
+                        .with_handle_appearance(bruhs_ui::resize_handle::handle_appearance())
                         .with_state(&self.terminal_split_state)
                         .child(resizable_panel().child(main))
                         .child(
@@ -2860,6 +2867,11 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.sync_api_client_visibility(window, cx);
         self.sync_mobile_offer();
+        // As on the web, a dry run belongs to Agent workflows: once another
+        // page shows, a dry run still waiting is reviewed in its own card.
+        if self.active_view != AppView::Automations {
+            self.dry_run_workflow_id = None;
+        }
         if !self.settings_visible() && self.credential_settings.read(cx).has_editor() {
             self.credential_settings
                 .update(cx, |view, _| view.clear_editor());
@@ -2878,6 +2890,7 @@ impl Render for Workspace {
             }
         }
         self.page_history.visit(&page_key(&self.active_view));
+        self.forget_left_people_return();
         self.sync_thread_catalog(cx);
         self.sync_create_bruh(cx);
         self.sync_room_dialog(cx);
@@ -3014,6 +3027,15 @@ impl Render for Workspace {
                     .when(!booking, |el| {
                         el.child(self.render_workspace_navigation(sidebar_drawer, cx))
                     })
+                    // Under the navigation, above the page, as the web places
+                    // its notices: never under the macOS window buttons.
+                    .when_some(self.render_save_status(cx), |el, status| el.child(status))
+                    .when_some(self.persistence_error.clone(), |el, error| {
+                        el.child(self.render_persistence_error(error, cx))
+                    })
+                    .when_some(self.render_workflow_status(cx), |el, status| {
+                        el.child(status)
+                    })
                     .child(
                         div()
                             .relative()
@@ -3056,6 +3078,9 @@ impl Render for Workspace {
                         .min_h_0()
                         .child(
                             h_resizable("chat-panel-split")
+                                .with_handle_appearance(
+                                    bruhs_ui::resize_handle::handle_appearance(),
+                                )
                                 .with_state(&self.right_panel_split_state)
                                 .child(resizable_panel().child(main_column))
                                 .child(
@@ -3237,13 +3262,6 @@ impl Render for Workspace {
             .text_color(cx.theme().foreground)
             .flex()
             .flex_col()
-            .when_some(self.render_save_status(cx), |el, status| el.child(status))
-            .when_some(self.render_workflow_status(cx), |el, status| {
-                el.child(status)
-            })
-            .when_some(self.persistence_error.clone(), |el, error| {
-                el.child(self.render_persistence_error(error, cx))
-            })
             .child(body)
             .when_some(self.overlay.clone(), |el, overlay| {
                 el.child(match overlay {

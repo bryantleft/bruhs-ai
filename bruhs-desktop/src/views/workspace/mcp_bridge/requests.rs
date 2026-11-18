@@ -136,8 +136,9 @@ impl Workspace {
             EpochMs::now().as_millis(),
         )? {
             Proposed::Existing(id) => id,
+            // As on the web: the proposal gets its own review card, and the
+            // history stays where the user left it.
             Proposed::Created(id) => {
-                self.reviewed_workflow_id = Some(id.clone());
                 self.persist_and_notify(cx);
                 id
             }

@@ -86,13 +86,9 @@ async fn native_compose_keeps_latest_device_text_off_route_after_server_failure(
     })
     .await;
     let client_id = view.read_with(cx, |view, _| view.active().unwrap().value.client_id.clone());
-    view.update_in(cx, |view, window, cx| {
-        view.inputs[0].update(cx, |input, cx| input.focus(window, cx))
-    });
+    view.update_in(cx, |view, window, cx| view.inputs[0].focus(window, cx));
     cx.simulate_input("Unfinished <");
-    view.update_in(cx, |view, window, cx| {
-        view.inputs[4].update(cx, |input, cx| input.focus(window, cx))
-    });
+    view.update_in(cx, |view, window, cx| view.inputs[4].focus(window, cx));
     cx.simulate_input("Latest private body 東京");
 
     workspace.update(cx, |workspace, cx| {
@@ -176,7 +172,7 @@ async fn native_compose_keeps_latest_device_text_off_route_after_server_failure(
     });
     view.read_with(cx, |view, cx| {
         assert_eq!(
-            view.inputs[4].read(cx).value().as_str(),
+            view.inputs[4].value(cx).as_str(),
             "Latest private body 東京"
         )
     });

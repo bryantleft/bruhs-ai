@@ -104,6 +104,14 @@ mod host {
             self.webview.is_some()
         }
 
+        /// Debug captures only: run `script` in the page, standing in for the
+        /// person's own input (`BRUHS_DESKTOP_SMOKE_SCENE`).
+        #[cfg(debug_assertions)]
+        pub fn evaluate(&self, script: &str) -> Result<(), String> {
+            let webview = self.webview.as_ref().ok_or("the page is not open yet")?;
+            webview.evaluate_script(script).map_err(|e| e.to_string())
+        }
+
         /// Create on first use, then keep the page positioned and visible.
         pub fn place(
             &mut self,
@@ -219,6 +227,10 @@ mod host {
         pub fn is_live(&self) -> bool {
             false
         }
+        #[cfg(debug_assertions)]
+        pub fn evaluate(&self, _script: &str) -> Result<(), String> {
+            Err("no embedded browser on this platform".to_string())
+        }
         pub fn place(
             &mut self,
             _window: &gpui::Window,
@@ -287,6 +299,12 @@ impl PreviewPanelView {
         };
         view.refresh_servers(cx);
         view
+    }
+
+    /// Debug captures only: run `script` in the page (see [`WebViewHost::evaluate`]).
+    #[cfg(debug_assertions)]
+    pub fn smoke_evaluate(&self, script: &str) -> Result<(), String> {
+        self.host.evaluate(script)
     }
 
     #[cfg(any(test, debug_assertions))]

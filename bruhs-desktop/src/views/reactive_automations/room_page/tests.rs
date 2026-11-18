@@ -134,7 +134,7 @@ fn click(cx: &mut VisualTestContext, selector: &'static str) {
 
 /// A key press as the app gets it, without the newline the test
 /// platform would also type.
-fn press(cx: &mut VisualTestContext, key: &str) {
+fn press(cx: &mut VisualTestContext, key: &'static str) {
     let keystroke = gpui::Keystroke::parse(key).expect("keystroke");
     cx.simulate_event(gpui::KeyDownEvent {
         keystroke: keystroke.clone(),

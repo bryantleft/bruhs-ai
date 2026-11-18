@@ -2,6 +2,7 @@
 use super::*;
 use crate::app_state::spawn_tokio;
 use bruhs_models::secrets::{review_text, SavedCredential, SavedCredentialState};
+use bruhs_ui::press::on_press_view;
 use gpui_component::input::{Input, InputContentType};
 use gpui_component::zoom::px;
 
@@ -200,7 +201,6 @@ impl CredentialSettings {
         cx: &Context<'_, Self>,
     ) -> impl IntoElement {
         let id = entry.id.clone();
-        let key_id = id.clone();
         web_button(
             SharedString::from(format!(
                 "credential-{}-{id}",
@@ -217,15 +217,11 @@ impl CredentialSettings {
             review_text(&entry.name)
         ))
         .child(if delete { "Delete" } else { "Replace" })
-        .on_click(
-            cx.listener(move |this, _, window, cx| this.begin_edit(id.clone(), delete, window, cx)),
-        )
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                cx.stop_propagation();
-                this.begin_edit(key_id.clone(), delete, window, cx);
-            }
-        }))
+        .map(|el| {
+            on_press_view(el, cx, move |this, window, cx| {
+                this.begin_edit(id.clone(), delete, window, cx)
+            })
+        })
     }
 
     fn row(&self, entry: &SavedCredential, cx: &Context<'_, Self>) -> AnyElement {
@@ -326,15 +322,9 @@ impl CredentialSettings {
                         } else {
                             "Save replacement"
                         })
-                        .on_click(cx.listener(|this, _, window, cx| this.mutate(window, cx)))
-                        .on_key_down(cx.listener(
-                            |this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    cx.stop_propagation();
-                                    this.mutate(window, cx);
-                                }
-                            },
-                        )),
+                        .map(|el| {
+                            on_press_view(el, cx, |this, window, cx| this.mutate(window, cx))
+                        }),
                     )
                     .child(
                         web_button(
@@ -346,19 +336,12 @@ impl CredentialSettings {
                         .min_h(px(theme::CONTROL_PX))
                         .aria_label("Cancel credential change")
                         .child("Cancel")
-                        .on_click(cx.listener(|this, _, _, cx| {
-                            this.clear_editor();
-                            cx.notify();
-                        }))
-                        .on_key_down(cx.listener(
-                            |this, event: &KeyDownEvent, _, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    cx.stop_propagation();
-                                    this.clear_editor();
-                                    cx.notify();
-                                }
-                            },
-                        )),
+                        .map(|el| {
+                            on_press_view(el, cx, |this, _, cx| {
+                                this.clear_editor();
+                                cx.notify();
+                            })
+                        }),
                     ),
             )
             .into_any_element()
@@ -384,8 +367,7 @@ impl Render for CredentialSettings {
             .child(self.connections.clone())
             .child(Input::new(&self.search).h(px(theme::CONTROL_PX)).aria_label("Search saved credentials"))
             .child(web_button("refresh-credentials", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(self.busy)).min_h(px(theme::CONTROL_PX)).aria_label("Refresh credentials").child("Refresh credentials")
-                .on_click(cx.listener(|this, _, _, cx| this.refresh(cx)))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, _, cx| { if is_web_button_activation_key(event.keystroke.key.as_str()) { cx.stop_propagation(); this.refresh(cx); } })))
+                .map(|el| on_press_view(el, cx, |this, _, cx| this.refresh(cx))))
             .child("Values are never displayed. Replace a key to rotate it. Deleting removes the saved copy; running commands may finish with the value they already received.")
             .child("Older saved credentials appear here after their next thread request.")
             .when(matches!(self.load, Load::Loading), |element| element.child("Loading saved credentials…"))

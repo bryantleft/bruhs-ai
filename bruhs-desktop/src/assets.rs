@@ -8,12 +8,12 @@ pub const PROVIDER_LOGO_OPACITY: f32 = 0.6;
 pub const ACTIVITY_ICON_PATH: &str = "icons/activity.svg";
 pub const ARROW_UP_ICON_PATH: &str = "icons/arrow-up.svg";
 pub const CLOSE_ICON_PATH: &str = "icons/x.svg";
-pub const CHECK_ICON_PATH: &str = "icons/check.svg";
+pub const CHECK_ICON_PATH: &str = bruhs_ui::icons::CHECK;
 pub const ALERT_TRIANGLE_ICON_PATH: &str = "icons/alert-triangle.svg";
 pub const GIT_BRANCH_ICON_PATH: &str = "icons/git-branch.svg";
 pub const PIN_ICON_PATH: &str = "icons/pin.svg";
 /// Web `ellipsis` (lucide), the thread card's actions button.
-pub const ELLIPSIS_ICON_PATH: &str = "icons/ellipsis.svg";
+pub const ELLIPSIS_ICON_PATH: &str = bruhs_ui::icons::ELLIPSIS;
 pub const FILE_DIFF_ICON_PATH: &str = "icons/file-diff.svg";
 pub const FOLDER_ICON_PATH: &str = "icons/folder.svg";
 pub const SQUARE_ICON_PATH: &str = "icons/square.svg";
@@ -53,7 +53,7 @@ pub const MESSAGE_SQUARE_ICON_PATH: &str = "icons/message-square.svg";
 pub const PEN_LINE_ICON_PATH: &str = "icons/pen-line.svg";
 pub const ARCHIVE_ICON_PATH: &str = "icons/archive.svg";
 pub const CLIPBOARD_LIST_ICON_PATH: &str = "icons/clipboard-list.svg";
-pub const CHEVRON_DOWN_ICON_PATH: &str = "icons/chevron-down.svg";
+pub const CHEVRON_DOWN_ICON_PATH: &str = bruhs_ui::icons::CHEVRON_DOWN;
 pub const PANEL_RIGHT_ICON_PATH: &str = "icons/panel-right.svg";
 pub const BOT_ICON_PATH: &str = "icons/bot.svg";
 pub const KEYBOARD_ICON_PATH: &str = "icons/keyboard.svg";
@@ -114,8 +114,6 @@ const DOWNLOAD_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24"
 const COPY_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>"#;
 const KEYBOARD_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></svg>"#;
 const HELP_CIRCLE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>"#;
-const CHEVRON_DOWN_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/chevron-down.svg");
 const PANEL_RIGHT_ICON: &[u8] =
     include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/panel-right.svg");
 const REFRESH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>"#;
@@ -151,11 +149,9 @@ pub fn embedded_fonts() -> Vec<Cow<'static, [u8]>> {
 const ACTIVITY_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M22 12h-2.48a2 2 0 0 0-1.93 1.46l-2.35 8.36a.5.5 0 0 1-.96 0L9.24 2.18a.5.5 0 0 0-.96 0l-2.35 8.36A2 2 0 0 1 4 12H2"/></svg>"#;
 const ARROW_UP_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m5 12 7-7 7 7"/><path d="M12 19V5"/></svg>"#;
 const CLOSE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M18 6 6 18"/><path d="m6 6 12 12"/></svg>"#;
-const CHECK_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 6 9 17l-5-5"/></svg>"#;
 const ALERT_TRIANGLE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m21.73 18-8-14a2 2 0 0 0-3.48 0l-8 14A2 2 0 0 0 4 21h16a2 2 0 0 0 1.73-3Z"/><path d="M12 9v4"/><path d="M12 17h.01"/></svg>"#;
 const GIT_BRANCH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><line x1="6" x2="6" y1="3" y2="15"/><circle cx="18" cy="6" r="3"/><circle cx="6" cy="18" r="3"/><path d="M18 9a9 9 0 0 1-9 9"/></svg>"#;
 const PIN_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M12 17v5"/><path d="M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V7a1 1 0 0 1 1-1 2 2 0 0 0 0-4H8a2 2 0 0 0 0 4 1 1 0 0 1 1 1z"/></svg>"#;
-const ELLIPSIS_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="1"/><circle cx="19" cy="12" r="1"/><circle cx="5" cy="12" r="1"/></svg>"#;
 const FILE_DIFF_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M15 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V7z"/><path d="M9 10h6"/><path d="M12 13V7"/><path d="M9 17h6"/></svg>"#;
 const FOLDER_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M20 20a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-7.9a2 2 0 0 1-1.69-.9L9.6 3.9A2 2 0 0 0 7.93 3H4a2 2 0 0 0-2 2v13a2 2 0 0 0 2 2Z"/></svg>"#;
 const SQUARE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect width="14" height="14" x="5" y="5" rx="2"/></svg>"#;
@@ -180,6 +176,9 @@ const HAND_METAL_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 2
 
 impl AssetSource for DesktopAssets {
     fn load(&self, path: &str) -> gpui::Result<Option<Cow<'static, [u8]>>> {
+        if let Some(svg) = bruhs_ui::icons::load(path) {
+            return Ok(Some(Cow::Borrowed(svg)));
+        }
         match path {
             BRAND_LOGO_PATH => Ok(Some(Cow::Borrowed(
                 &include_bytes!("../../bruhs-web/bruhs.svg")[..],
@@ -196,11 +195,9 @@ impl AssetSource for DesktopAssets {
             ACTIVITY_ICON_PATH => Ok(Some(Cow::Borrowed(ACTIVITY_ICON))),
             ARROW_UP_ICON_PATH => Ok(Some(Cow::Borrowed(ARROW_UP_ICON))),
             CLOSE_ICON_PATH => Ok(Some(Cow::Borrowed(CLOSE_ICON))),
-            CHECK_ICON_PATH => Ok(Some(Cow::Borrowed(CHECK_ICON))),
             ALERT_TRIANGLE_ICON_PATH => Ok(Some(Cow::Borrowed(ALERT_TRIANGLE_ICON))),
             GIT_BRANCH_ICON_PATH => Ok(Some(Cow::Borrowed(GIT_BRANCH_ICON))),
             PIN_ICON_PATH => Ok(Some(Cow::Borrowed(PIN_ICON))),
-            ELLIPSIS_ICON_PATH => Ok(Some(Cow::Borrowed(ELLIPSIS_ICON))),
             FILE_DIFF_ICON_PATH => Ok(Some(Cow::Borrowed(FILE_DIFF_ICON))),
             FOLDER_ICON_PATH => Ok(Some(Cow::Borrowed(FOLDER_ICON))),
             SQUARE_ICON_PATH => Ok(Some(Cow::Borrowed(SQUARE_ICON))),
@@ -240,7 +237,6 @@ impl AssetSource for DesktopAssets {
             MESSAGE_SQUARE_ICON_PATH => Ok(Some(Cow::Borrowed(MESSAGE_SQUARE_ICON))),
             PEN_LINE_ICON_PATH => Ok(Some(Cow::Borrowed(PEN_LINE_ICON))),
             ARCHIVE_ICON_PATH => Ok(Some(Cow::Borrowed(ARCHIVE_ICON))),
-            CHEVRON_DOWN_ICON_PATH => Ok(Some(Cow::Borrowed(CHEVRON_DOWN_ICON))),
             KEYBOARD_ICON_PATH => Ok(Some(Cow::Borrowed(KEYBOARD_ICON))),
             EYE_ICON_PATH => Ok(Some(Cow::Borrowed(EYE_ICON))),
             WRENCH_ICON_PATH => Ok(Some(Cow::Borrowed(WRENCH_ICON))),

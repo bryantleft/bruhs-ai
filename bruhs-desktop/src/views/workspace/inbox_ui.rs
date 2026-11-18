@@ -2,12 +2,11 @@
 //! triage semantics as the web surface.
 
 use bruhs_models::{InboxCard, InboxDirectory, InboxFilter, INBOX_PAGE_SIZE};
-use gpui::prelude::*;
-use gpui::*;
 use gpui_component::input::{Input, InputEvent};
 use gpui_component::zoom::px;
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 
 /// The Linked person dropdown's trigger and options.
 const LINKED_PERSON_DROPDOWN_ID: &str = "desktop-inbox-linked-person";
@@ -48,12 +47,13 @@ impl Workspace {
     }
 
     pub(super) fn start_inbox_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        for input in [
+        let inputs: [&dyn TextInput; 3] = [
             &self.inbox_sender_input,
             &self.inbox_subject_input,
             &self.inbox_body_input,
-        ] {
-            input.update(cx, |input, cx| input.set_value("", window, cx));
+        ];
+        for input in inputs {
+            input.set_text_value("".into(), window, cx);
         }
         self.active_view = AppView::Inbox;
         self.inbox_import_visible = true;
@@ -353,11 +353,7 @@ impl Workspace {
             .into_iter()
             .map(|card| self.render_inbox_card(&card, cx))
             .collect::<Vec<_>>();
-        let empty = if !query.trim().is_empty() {
-            "No matching conversations."
-        } else {
-            self.inbox_filter.empty_message()
-        };
+        let (empty, next_step) = inbox_empty_state(&query, self.inbox_filter);
 
         div().debug_selector(|| "desktop-inbox-page".into())
             .flex_1().h_full().min_w_0().bg(cx.theme().background).flex().flex_col()
@@ -369,14 +365,9 @@ impl Workspace {
                 .child(div().flex().flex_wrap().gap_2()
                 .child(web_button("desktop-inbox-email", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
                     .debug_selector(|| "desktop-inbox-email".into()).aria_label("Email").child("Email")
-                    .on_click(cx.listener(|this, _, _, cx| this.open_connected_inbox(cx)))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            this.open_connected_inbox(cx);
-                        }
-                    })))
+                    .map(|el| on_press_view(el, cx, |this, _, cx| this.open_connected_inbox(cx))))
                 .child(web_button("desktop-import-conversation", WebButtonVariant::Primary, WebButtonSize::Small, ButtonState::Enabled)
+                    .debug_selector(|| "desktop-import-conversation".into())
                     .aria_label("Import conversation").child("Import conversation")
                     .on_click(cx.listener(|this, _, window, cx| this.start_inbox_import(window, cx))))))
             .child(div().flex_1().min_h_0().overflow_y_scrollbar().p_4().flex().justify_center()
@@ -389,7 +380,7 @@ impl Workspace {
                         .when(total == 0, |element| element.child(div().py_12().px_4().text_center()
                             .child(div().id("desktop-inbox-empty").debug_selector(|| "desktop-inbox-empty".into()).role(Role::Status).text_size(px(13.0)).text_color(theme::rambutan_300()).child(empty))
                             .child(div().mt_1().text_size(px(12.0)).text_color(theme::rambutan_500())
-                                .child(if !query.trim().is_empty() { "Try another search or choose All." } else { "Import a message or choose another view." })))))
+                                .child(next_step)))))
                     .child(div().id("desktop-inbox-counts").role(Role::Status).aria_label("Inbox counts").flex().flex_wrap().gap_4().text_size(px(12.0)).text_color(theme::rambutan_400())
                         .child(format!("{} open", counts.open)).child(format!("{} unread", counts.unread))
                         .child(format!("{} need reply", counts.needs_reply)).child(format!("{} snoozed", counts.snoozed)))
@@ -426,19 +417,13 @@ impl Workspace {
                 .text_color(theme::blueberry_400())
         })
         .child(value.label())
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.inbox_filter = value;
-            this.inbox_page = 0;
-            cx.notify();
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
+        .map(|el| {
+            on_press_view(el, cx, move |this, _, cx| {
                 this.inbox_filter = value;
                 this.inbox_page = 0;
                 cx.notify();
-            }
-        }))
+            })
+        })
         .into_any_element()
     }
 
@@ -460,18 +445,10 @@ impl Workspace {
         .aria_label(label)
         .min_h(px(theme::CONTROL_PX))
         .when(!disabled, |button| {
-            button
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.inbox_page = page;
-                    cx.notify();
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        this.inbox_page = page;
-                        cx.notify();
-                    }
-                }))
+            on_press_view(button, cx, move |this, _, cx| {
+                this.inbox_page = page;
+                cx.notify();
+            })
         })
         .child(label)
         .into_any_element()
@@ -479,7 +456,6 @@ impl Workspace {
 
     fn render_inbox_card(&self, conversation: &InboxCard, cx: &Context<'_, Self>) -> AnyElement {
         let id = conversation.id.clone();
-        let keyboard_id = id.clone();
         let sender = conversation.sender.clone();
         let preview = conversation.preview.clone();
         let key = element_key(&id);
@@ -512,15 +488,11 @@ impl Workspace {
             .py_3()
             .hover(|element| element.bg(theme::longan_800().opacity(0.7)))
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _event, window, cx| {
-                this.select_inbox_conversation(&id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    this.select_inbox_conversation(&keyboard_id, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.select_inbox_conversation(&id, window, cx);
+                })
+            })
             .flex()
             .items_start()
             .gap_3()
@@ -692,7 +664,8 @@ impl Workspace {
                                     .aria_label("Conversation subject"),
                             )
                             .child(
-                                Input::new(&self.inbox_body_input).aria_label("Message, required"),
+                                Textarea::new(&self.inbox_body_input)
+                                    .aria_label("Message, required"),
                             )
                             .when_some(self.persistence_error.clone(), |element, error| {
                                 element.child(
@@ -709,6 +682,7 @@ impl Workspace {
                                     WebButtonSize::Default,
                                     ButtonState::Enabled,
                                 )
+                                .debug_selector(|| "desktop-inbox-import-submit".into())
                                 .aria_label("Import")
                                 .child("Import")
                                 .on_click(cx.listener(
@@ -1026,7 +1000,7 @@ impl Workspace {
                                 div()
                                     .debug_selector(|| "desktop-inbox-reply-box".to_string())
                                     .child(
-                                        Input::new(&self.inbox_reply_input)
+                                        Textarea::new(&self.inbox_reply_input)
                                             .h(px(REPLY_BOX_HEIGHT_PX))
                                             .aria_label("Reply draft"),
                                     ),
@@ -1062,6 +1036,9 @@ impl Workspace {
                                                 )
                                                 .border_color(theme::longan_700())
                                                 .text_color(theme::rambutan_300())
+                                                .debug_selector(|| {
+                                                    "desktop-inbox-save-draft".into()
+                                                })
                                                 .aria_label("Save draft")
                                                 .child("Save draft")
                                                 .on_click(cx.listener(
@@ -1083,6 +1060,7 @@ impl Workspace {
                                                             .is_empty(),
                                                     ),
                                                 )
+                                                .debug_selector(|| "desktop-inbox-log-reply".into())
                                                 .aria_label("Log reply")
                                                 .child("Log reply")
                                                 .on_click(cx.listener(
@@ -1095,6 +1073,23 @@ impl Workspace {
                             ),
                     ),
             )
+    }
+}
+
+/// What an empty conversation list says and the next step it offers, in
+/// the web Inbox's words: a search with no match, or the filter's own
+/// empty view.
+pub(super) fn inbox_empty_state(query: &str, filter: InboxFilter) -> (&'static str, &'static str) {
+    if query.trim().is_empty() {
+        (
+            filter.empty_message(),
+            "Import a message or choose another view.",
+        )
+    } else {
+        (
+            "No matching conversations.",
+            "Try another search or choose All.",
+        )
     }
 }
 
@@ -1158,8 +1153,8 @@ pub(super) struct InboxInputs {
     pub(super) inbox_search_input: Entity<InputState>,
     pub(super) inbox_sender_input: Entity<InputState>,
     pub(super) inbox_subject_input: Entity<InputState>,
-    pub(super) inbox_body_input: Entity<InputState>,
-    pub(super) inbox_reply_input: Entity<InputState>,
+    pub(super) inbox_body_input: Entity<TextareaState>,
+    pub(super) inbox_reply_input: Entity<TextareaState>,
 }
 
 impl Workspace {
@@ -1189,16 +1184,14 @@ impl Workspace {
             cx.new(|cx| InputState::new(window, cx).placeholder("Subject (optional)"));
         subscriptions.push(redraw_on_edit(&inbox_subject_input, window, cx));
         let inbox_body_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder("Paste the message…")
-                .multi_line(true)
                 .rows(8)
         });
         subscriptions.push(redraw_on_edit(&inbox_body_input, window, cx));
         let inbox_reply_input = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder("Write a reply…")
-                .multi_line(true)
                 .rows(4)
         });
         subscriptions.push(redraw_on_edit(&inbox_reply_input, window, cx));

@@ -19,6 +19,12 @@ pub struct WorkbenchPanel {
 }
 impl EventEmitter<WorkbenchEvent> for WorkbenchPanel {}
 impl WorkbenchPanel {
+    /// Debug captures only: run `script` in the Workbench page.
+    #[cfg(debug_assertions)]
+    pub fn smoke_evaluate(&self, script: &str, cx: &App) -> Result<(), String> {
+        self.preview.read(cx).smoke_evaluate(script)
+    }
+
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         let server_base = std::env::var("BRUHS_SERVER_URL")
             .unwrap_or_else(|_| crate::server_client::DEFAULT_SERVER_URL.into());

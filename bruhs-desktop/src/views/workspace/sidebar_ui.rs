@@ -6,7 +6,7 @@
 
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
+use gpui_component::input::{Input, InputEvent, InputState, TextareaState};
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::zoom::px;
 use gpui_component::ActiveTheme;
@@ -28,6 +28,7 @@ use bruhs_models::logic::sidebar::{
     snooze_presets, thread_menu, SnoozeWhen, ThreadMenuEntry, ThreadMenuFacts,
 };
 use bruhs_models::{AppView, EpochMs};
+use bruhs_ui::press::on_press_view;
 
 /// Shared app drawer width.
 pub const SIDEBAR_WIDTH_PX: f32 = 248.0;
@@ -338,10 +339,9 @@ impl Workspace {
         label: &'static str,
         icon_path: &'static str,
         size: f32,
-        on_activate: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + 'static + Clone,
+        on_activate: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + 'static,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
-        let on_key = on_activate.clone();
         div()
             .id(id)
             .debug_selector(move || id.to_string())
@@ -363,17 +363,7 @@ impl Workspace {
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                cx.stop_propagation();
-                on_activate(this, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    on_key(this, window, cx);
-                }
-            }))
+            .map(|el| on_press_view(el, cx, on_activate))
             .child(icon(icon_path, SIDEBAR_ICON_PX, theme::rambutan_400()))
             .into_any_element()
     }
@@ -582,14 +572,11 @@ impl Workspace {
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.text_color(theme::rambutan_300()))
-            .on_click(cx.listener(move |this, _ev, _window, cx| this.toggle_shelf(section, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.toggle_shelf(section, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| {
+                    this.toggle_shelf(section, cx)
+                })
+            })
             .child(div().flex_shrink_0().child(label))
             .child(
                 div()
@@ -651,9 +638,7 @@ impl Workspace {
         };
         let provider = bruhs_models::agent::AgentProvider::for_model(&thread.model_id);
         let id_for_select = thread.id.clone();
-        let id_for_select_key = thread.id.clone();
         let id_for_delete = thread.id.clone();
-        let id_for_delete_key = thread.id.clone();
         let id_for_menu = thread.id.clone();
         let id_for_menu_key = thread.id.clone();
 
@@ -832,17 +817,11 @@ impl Workspace {
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.visible().border_color(theme::persimmon_400()))
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                cx.stop_propagation();
-                this.delete_thread_by_id(&id_for_delete, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.delete_thread_by_id(&id_for_delete_key, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| {
+                    this.delete_thread_by_id(&id_for_delete, cx);
+                })
+            })
             .child(
                 icon(
                     assets::CLOSE_ICON_PATH,
@@ -951,16 +930,11 @@ impl Workspace {
                     .border_color(gpui::transparent_black())
                     .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY_40)))
             })
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                this.select_thread_by_id(&id_for_select, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.select_thread_by_id(&id_for_select_key, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| {
+                    this.select_thread_by_id(&id_for_select, cx);
+                })
+            })
             .child(top_line)
             .child(title_line)
             .children(meta_line)
@@ -1296,8 +1270,6 @@ impl Workspace {
             "desktop-sidebar-nav-{}",
             label.to_ascii_lowercase().replace(' ', "-")
         );
-        let click_view = view.clone();
-        let key_view = view;
         div()
             .id(ElementId::Name(selector.clone().into()))
             .debug_selector(move || selector)
@@ -1329,17 +1301,11 @@ impl Workspace {
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                cx.stop_propagation();
-                this.activate_sidebar_view(click_view.clone(), window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.activate_sidebar_view(key_view.clone(), window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.activate_sidebar_view(view.clone(), window, cx);
+                })
+            })
             .child(icon(
                 icon_path,
                 SIDEBAR_ICON_PX,
@@ -1386,17 +1352,11 @@ impl Workspace {
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
-            .on_click(cx.listener(|this, _ev, window, cx| {
-                cx.stop_propagation();
-                this.open_settings(&OpenSettings, window, cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
+            .map(|el| {
+                on_press_view(el, cx, |this, window, cx| {
                     this.open_settings(&OpenSettings, window, cx);
-                }
-            }))
+                })
+            })
             .child(icon(
                 "icons/settings.svg",
                 SIDEBAR_ICON_PX,
@@ -1527,18 +1487,14 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
-    ) -> (Entity<InputState>, Entity<InputState>) {
+    ) -> (Entity<TextareaState>, Entity<TextareaState>) {
         let global_input = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
+            TextareaState::new(window, cx)
                 .placeholder("prefix: Bug\nmax 48")
                 .default_value(global)
         });
-        let project_instructions = cx.new(|cx| {
-            InputState::new(window, cx)
-                .multi_line(true)
-                .placeholder("prefix: Bug")
-        });
+        let project_instructions =
+            cx.new(|cx| TextareaState::new(window, cx).placeholder("prefix: Bug"));
         subscriptions.push(cx.subscribe_in(
             &global_input,
             window,

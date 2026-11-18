@@ -39,6 +39,8 @@ fn fixture(
         gpui_component::Root::new(workspace, window, cx)
     });
     let workspace = cell.borrow().clone().unwrap();
+    // Tall enough for every Agent workflows card.
+    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(3200.0)));
     let fixture = Fixture(
         std::env::temp_dir().join(format!("bruhs-native-background-{}", uuid::Uuid::new_v4())),
     );
@@ -194,6 +196,16 @@ async fn background_save_failure_blocks_next_step_and_retry_continues_once(
     assert_eq!(fs::read(fixture.path()).unwrap(), durable);
     cx.run_until_parked();
     assert!(cx.debug_bounds("desktop-workflow-status").is_some());
+    // Nothing runs while the save fails, so the notice must not say it does.
+    workspace.update_in(cx, |w, _, _| {
+        let notice = w.workflow_notice().expect("a notice");
+        assert!(notice.error, "a failed save is announced as an error");
+        assert!(
+            notice.message.starts_with("Workflow needs attention"),
+            "{}",
+            notice.message
+        );
+    });
     fs::remove_dir(&backup).unwrap();
     fs::rename(retained, backup).unwrap();
     let retry = cx.debug_bounds("desktop-retry-save").unwrap();

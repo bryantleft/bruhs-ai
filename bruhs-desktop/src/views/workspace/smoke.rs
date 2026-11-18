@@ -164,6 +164,123 @@ impl Workspace {
                 self.set_settings_section(SettingsSection::About, cx);
             }
             "search" => self.activate_sidebar_view(AppView::Search, window, cx),
+            // Agent workflows with the MCP connection on, to compare with the
+            // web (PARITY-05); a client then connects through its file.
+            "workbench" => self.activate_sidebar_view(AppView::Workbench, window, cx),
+            // Verification's Use in composer pressed inside the embedded
+            // Workbench page (PARITY-04): the draft must reach the composer
+            // through the page's own `window.ipc` relay.
+            "workbench-use-draft" => {
+                let script = r#"(() => {
+  location.hash = '#verification';
+  const deadline = Date.now() + 20000;
+  (function step() {
+    const doc = document.getElementById('panel').contentDocument;
+    const box = doc && doc.getElementById('draft');
+    const use = doc && doc.getElementById('use-draft');
+    if (box && use && !use.hidden) {
+      box.value = 'Ship the launch post on Friday.';
+      use.click();
+      return;
+    }
+    if (Date.now() < deadline) setTimeout(step, 200);
+  })();
+})();"#;
+                let result = self
+                    .workbench_panel
+                    .as_ref()
+                    .ok_or_else(|| "Workbench is not open".to_string())
+                    .and_then(|panel| panel.read(cx).smoke_evaluate(script, cx));
+                eprintln!("BRUHS_DESKTOP_SMOKE workbench-use-draft {result:?}");
+            }
+            // A change that must be saved, and the save strip's Retry: for the
+            // failed-save comparison (PARITY-04).
+            "smoke-edit" => {
+                let on = self.automation_state.permissions.allows(
+                    bruhs_models::AgentDomain::Tasks,
+                    bruhs_models::AgentAccess::Write,
+                );
+                self.automation_state.permissions.set(
+                    bruhs_models::AgentDomain::Tasks,
+                    bruhs_models::AgentAccess::Write,
+                    !on,
+                );
+                self.persist_and_notify(cx);
+            }
+            "retry-save" => self.persist_and_notify(cx),
+            // `toggle-grant:Calendar`: flip a domain's Write grant and save.
+            scene if scene.starts_with("toggle-grant:") => {
+                let label = scene.trim_start_matches("toggle-grant:");
+                if let Some(domain) = bruhs_models::AgentDomain::ALL
+                    .into_iter()
+                    .find(|domain| domain.label() == label)
+                {
+                    let access = bruhs_models::AgentAccess::Write;
+                    let on = self.automation_state.permissions.allows(domain, access);
+                    self.automation_state.permissions.set(domain, access, !on);
+                    self.persist_and_notify(cx);
+                }
+            }
+
+            "save-report" => eprintln!(
+                "BRUHS_DESKTOP_SMOKE save status={:?} tasks_write={}",
+                self.save_status,
+                self.automation_state.permissions.allows(
+                    bruhs_models::AgentDomain::Tasks,
+                    bruhs_models::AgentAccess::Write
+                )
+            ),
+            "composer-report" => {
+                let text = self
+                    .smoke_active_chat()
+                    .map(|chat| chat.read(cx).input_state.read(cx).value().to_string());
+                eprintln!(
+                    "BRUHS_DESKTOP_SMOKE composer view={:?} text={text:?}",
+                    self.active_view
+                );
+            }
+            // The foot of Agent workflows' cards (jobs, audit, safety and
+            // history) where the web page ends, above desktop's Phone access.
+            "automations-grid-bottom" => {
+                let scroll = &self.automations_scroll;
+                let grid = if self.automation_error.is_some() {
+                    3
+                } else {
+                    2
+                };
+                // From the page's foot, back up past Phone access and its gap.
+                if let Some(mobile) = scroll.bounds_for_item(grid + 1) {
+                    let max = scroll.max_offset();
+                    let up = mobile.size.height + px(12.0);
+                    scroll.set_offset(point(px(0.0), -(max.y - up).max(px(0.0))));
+                    cx.notify();
+                }
+            }
+            "mcp-off" => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+                self.automations_scroll.scroll_to_top_of_item(1);
+            }
+            #[cfg(unix)]
+            "mcp-copied" => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+                self.smoke_mcp_copied(cx);
+                self.automations_scroll.scroll_to_top_of_item(1);
+            }
+            #[cfg(unix)]
+            "mcp-undo-requested" => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+                self.smoke_mcp_undo_requested(cx);
+                self.automations_scroll.scroll_to_top_of_item(1);
+            }
+            #[cfg(unix)]
+            "mcp-connected" => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+                self.enable_mcp_bridge(cx);
+                // The panel is the page's second item, after the crew. Repeat
+                // the scene (`mcp-connected;mcp-connected`) once the crew has
+                // loaded, since that moves the panel down.
+                self.automations_scroll.scroll_to_top_of_item(1);
+            }
             "search-query" => {
                 self.activate_sidebar_view(AppView::Search, window, cx);
                 self.search_query_input

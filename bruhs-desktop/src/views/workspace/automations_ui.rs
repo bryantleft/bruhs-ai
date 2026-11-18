@@ -5,6 +5,10 @@ use gpui_component::zoom::px;
 mod chat;
 mod draft_outcomes;
 mod history_ui;
+mod review_ui;
+pub(in crate::views::workspace) use review_ui::{
+    body_sm, card_title, label_sm, neutral_ring, web_card,
+};
 mod people;
 #[cfg(test)]
 mod reactive_tests;
@@ -18,6 +22,11 @@ use bruhs_models::{
     agent_tool_definitions, AgentAccess, AgentDomain, BackgroundJobStatus, FinanceTransaction,
     WorkflowOperation, WorkflowStatus, WorkoutLog,
 };
+
+/// Web `mx-auto max-w-6xl`: the page's content column.
+fn page_column() -> Div {
+    div().w_full().max_w(px(1152.0)).mx_auto()
+}
 
 /// A record a workflow step creates, before it is stored.
 enum AutomationRecord {
@@ -109,134 +118,173 @@ impl Workspace {
         false
     }
 
+    /// Web `WorkflowStatus`: the app-wide workflow notice, above every page
+    /// but Agent workflows. Its words come from the shared rule, which never
+    /// names a workflow or shows its payload.
     pub(super) fn render_workflow_status(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
-        let active = self.automation_state.jobs.iter().any(|job| {
-            job.auto_run
-                && matches!(
-                    job.status,
-                    BackgroundJobStatus::Running | BackgroundJobStatus::Paused
-                )
-        });
-        let pending_mcp = self.mcp_bridge.pending_review(&self.automation_state);
-        if !active && !pending_mcp && self.automation_error.is_none() {
+        use bruhs_models::logic::workflow_review as review;
+        if self.active_view == AppView::Automations {
             return None;
         }
-        // This app-wide surface must not expose workflow payloads or domain data.
-        let message = if self.automation_error.is_some() {
-            "Workflow needs attention. Open workflows to review before continuing."
-        } else if pending_mcp {
-            "An MCP proposal is awaiting your review. Open workflows to inspect the full payload."
-        } else if !self.save_status.is_saved() {
-            "Background workflow is waiting for a durable local save."
-        } else if self
-            .automation_state
-            .jobs
-            .iter()
-            .any(|job| job.auto_run && job.status == BackgroundJobStatus::Running)
-        {
-            "Background workflow is running while this app is open."
-        } else {
-            "Background workflow is paused."
+        let notice = self.workflow_notice()?;
+        if notice.dismiss_key.is_some() && notice.dismiss_key == self.dismissed_workflow_notice {
+            return None;
+        }
+        let text_button = |id: &'static str, label: &'static str, color: Hsla| {
+            web_button(
+                id,
+                WebButtonVariant::Ghost,
+                WebButtonSize::Small,
+                ButtonState::Enabled,
+            )
+            .px_2()
+            .text_color(color)
+            .aria_label(label)
         };
         Some(
             div()
                 .id("workspace-workflow-status")
                 .debug_selector(|| "desktop-workflow-status".into())
-                .role(if self.automation_error.is_some() {
-                    Role::Alert
-                } else {
-                    Role::Status
-                })
-                .aria_label(message)
+                .role(Role::Region)
+                .aria_label(review::WORKFLOW_STATUS_LABEL)
                 .w_full()
                 .flex_shrink_0()
-                .flex()
-                .flex_wrap()
-                .items_center()
-                .gap_2()
-                .px_3()
-                .py_2()
+                .border_b_1()
+                .border_color(theme::longan_800().opacity(0.5))
                 .bg(theme::longan_900())
-                .text_color(theme::rambutan_400())
-                .text_size(px(12.0))
-                .child(div().flex_1().min_w_0().child(message))
-                .when(
-                    self.automation_state
-                        .jobs
-                        .iter()
-                        .any(|job| job.auto_run && job.status == BackgroundJobStatus::Running),
-                    |el| {
-                        el.child(
-                            web_button(
-                                "pause-background-workflows",
-                                WebButtonVariant::Outline,
-                                WebButtonSize::Small,
-                                ButtonState::Enabled,
-                            )
-                            .aria_label("Pause background workflows")
-                            .debug_selector(|| "desktop-pause-background-workflows".into())
-                            .child("Pause")
-                            .on_click(cx.listener(|this, _, _, cx| {
-                                let ids: Vec<_> = this
-                                    .automation_state
-                                    .jobs
-                                    .iter()
-                                    .filter(|job| {
-                                        job.auto_run && job.status == BackgroundJobStatus::Running
-                                    })
-                                    .map(|job| job.id.clone())
-                                    .collect();
-                                for id in ids {
-                                    // Only running jobs were collected, so
-                                    // a refusal means it finished meanwhile.
-                                    if !this
-                                        .automation_state
-                                        .pause_job(&id, EpochMs::now().as_millis())
-                                    {
-                                        tracing::debug!("job {id} was no longer running");
-                                    }
-                                }
-                                this.persist_and_notify(cx);
-                            })),
-                        )
-                    },
-                )
+                .px_4()
+                .py_2()
                 .child(
-                    web_button(
-                        "open-workflow-status",
-                        WebButtonVariant::Outline,
-                        WebButtonSize::Small,
-                        ButtonState::Enabled,
-                    )
-                    .aria_label("Open workflows")
-                    .debug_selector(|| "desktop-open-workflows".into())
-                    .child("Open workflows")
-                    .on_click(cx.listener(|this, _, _, cx| {
-                        this.reviewed_workflow_id = this
-                            .mcp_bridge
-                            .pending_review_id(&this.automation_state)
-                            .map(str::to_owned)
-                            .or_else(|| {
-                                this.automation_state
-                                    .jobs
-                                    .iter()
-                                    .find(|job| {
-                                        job.auto_run
-                                            && matches!(
-                                                job.status,
-                                                BackgroundJobStatus::Running
-                                                    | BackgroundJobStatus::Paused
-                                            )
-                                    })
-                                    .map(|job| job.workflow_id.clone())
+                    div()
+                        .flex()
+                        .flex_wrap()
+                        .items_center()
+                        .justify_between()
+                        .gap_x_3()
+                        .gap_y_1()
+                        .child(
+                            review_ui::body_sm(
+                                notice.message.clone(),
+                                if notice.error {
+                                    theme::lychee_300()
+                                } else {
+                                    theme::rambutan_300()
+                                },
+                            )
+                            .id("workflow-status-message")
+                            .role(if notice.error {
+                                Role::Alert
+                            } else {
+                                Role::Status
                             })
-                            .or_else(|| this.reviewed_workflow_id.clone());
-                        this.active_view = AppView::Automations;
-                        cx.notify();
-                    })),
+                            .aria_label(notice.message.clone()),
+                        )
+                        .child(
+                            div()
+                                .flex()
+                                .flex_wrap()
+                                .items_center()
+                                .gap_2()
+                                .when(review::background_running(&self.automation_state), |row| {
+                                    row.child(
+                                        text_button(
+                                            "pause-background-workflows",
+                                            review::PAUSE_BACKGROUND_LABEL,
+                                            theme::rambutan_300(),
+                                        )
+                                        .debug_selector(|| {
+                                            "desktop-pause-background-workflows".into()
+                                        })
+                                        .child(review::PAUSE_BACKGROUND)
+                                        .on_click(
+                                            cx.listener(|this, _, _, cx| {
+                                                let ids: Vec<_> = this
+                                                    .automation_state
+                                                    .jobs
+                                                    .iter()
+                                                    .filter(|job| {
+                                                        job.auto_run
+                                                            && job.status
+                                                                == BackgroundJobStatus::Running
+                                                    })
+                                                    .map(|job| job.id.clone())
+                                                    .collect();
+                                                for id in ids {
+                                                    // Only running jobs were collected, so
+                                                    // a refusal means it finished meanwhile.
+                                                    if !this
+                                                        .automation_state
+                                                        .pause_job(&id, EpochMs::now().as_millis())
+                                                    {
+                                                        tracing::debug!(
+                                                            "job {id} was no longer running"
+                                                        );
+                                                    }
+                                                }
+                                                this.persist_and_notify(cx);
+                                            }),
+                                        ),
+                                    )
+                                })
+                                .child(
+                                    text_button(
+                                        "open-workflow-status",
+                                        review::OPEN_WORKFLOWS,
+                                        theme::persimmon_300(),
+                                    )
+                                    .debug_selector(|| "desktop-open-workflows".into())
+                                    .child(review::OPEN_WORKFLOWS)
+                                    .on_click(cx.listener(
+                                        |this, _, _, cx| {
+                                            // As on the web: the page, where each
+                                            // waiting review has its own card.
+                                            this.active_view = AppView::Automations;
+                                            cx.notify();
+                                        },
+                                    )),
+                                )
+                                .when_some(notice.dismiss_key, |row, key| {
+                                    row.child(
+                                        text_button(
+                                            "dismiss-workflow-status",
+                                            review::DISMISS_WORKFLOW_STATUS,
+                                            theme::rambutan_400(),
+                                        )
+                                        .debug_selector(|| "desktop-dismiss-workflow-status".into())
+                                        .child("Dismiss")
+                                        .on_click(
+                                            cx.listener(move |this, _, _, cx| {
+                                                this.dismissed_workflow_notice = Some(key.clone());
+                                                cx.notify();
+                                            }),
+                                        ),
+                                    )
+                                }),
+                        ),
                 )
                 .into_any_element(),
         )
+    }
+
+    /// What the app-wide workflow notice says, by the shared rule.
+    pub(super) fn workflow_notice(
+        &self,
+    ) -> Option<bruhs_models::logic::workflow_review::WorkflowNotice> {
+        bruhs_models::logic::workflow_review::workflow_notice(
+            &self.automation_state,
+            // Like the web's failed store: a workflow error or a save that
+            // failed, which also stops background steps.
+            self.automation_error.is_some() || self.save_status.alert().is_some(),
+            self.save_status.is_saved(),
+            self.mcp_bridge.pending_review(&self.automation_state),
+        )
+    }
+
+    /// Puts a new dry run on show, as the web's `make_preview` does: in
+    /// Preview changes and in the history.
+    pub(super) fn show_dry_run(&mut self, id: String) {
+        self.dry_run_workflow_id = Some(id.clone());
+        self.reviewed_workflow_id = Some(id);
     }
 
     /// Tests' shortcut to a previewed focus workflow that also counts the
@@ -259,7 +307,7 @@ impl Workspace {
             self.automation_error =
                 Some("The focus workflow could not be previewed. No records were changed.".into());
         }
-        self.reviewed_workflow_id = Some(id);
+        self.show_dry_run(id);
         self.persist_and_notify(cx);
     }
 
@@ -297,7 +345,7 @@ impl Workspace {
             self.automation_error =
                 Some("The workflow could not be previewed. No records were changed.".into());
         }
-        self.reviewed_workflow_id = Some(workflow);
+        self.show_dry_run(workflow);
         self.persist_and_notify(cx);
     }
 
@@ -312,7 +360,7 @@ impl Workspace {
             self.automation_error =
                 Some("The focus workflow could not be previewed. No records were changed.".into());
         }
-        self.reviewed_workflow_id = Some(workflow);
+        self.show_dry_run(workflow);
         self.persist_and_notify(cx);
     }
 
@@ -332,11 +380,11 @@ impl Workspace {
                 let preview = copy::preview(suggestion.operations.len());
                 div()
                     .debug_selector(move || format!("desktop-suggestion-{index}"))
-                    .rounded(px(6.0))
+                    .rounded(px(review_ui::CARD_RADIUS_PX))
                     .bg(theme::longan_950().opacity(0.7))
                     .border_1()
                     .border_color(theme::longan_700().opacity(0.4))
-                    .p_3()
+                    .p(px(11.0))
                     .child(
                         div()
                             .flex()
@@ -347,25 +395,23 @@ impl Workspace {
                                 div()
                                     .flex_1()
                                     .min_w_0()
+                                    .child(review_ui::label(
+                                        suggestion.title.clone(),
+                                        theme::rambutan_200(),
+                                    ))
                                     .child(
-                                        div()
-                                            .text_size(px(12.0))
-                                            .text_color(theme::rambutan_200())
-                                            .child(suggestion.title.clone()),
+                                        review_ui::body_sm(
+                                            suggestion.explanation.clone(),
+                                            theme::rambutan_400(),
+                                        )
+                                        .mt_1(),
                                     )
                                     .child(
-                                        div()
-                                            .mt_1()
-                                            .text_size(px(12.0))
-                                            .text_color(theme::rambutan_400())
-                                            .child(suggestion.explanation.clone()),
-                                    )
-                                    .child(
-                                        div()
-                                            .mt_2()
-                                            .text_size(px(11.0))
-                                            .text_color(theme::blueberry_300())
-                                            .child(copy::evidence(&suggestion.evidence)),
+                                        review_ui::label_sm(
+                                            copy::evidence(&suggestion.evidence),
+                                            theme::blueberry_300(),
+                                        )
+                                        .mt_2(),
                                     ),
                             )
                             .child(
@@ -379,6 +425,11 @@ impl Workspace {
                                     format!("desktop-automation-suggestion-dismiss-{index}")
                                 })
                                 .aria_label(copy::DISMISS_LABEL)
+                                // Web: plain `text-label-sm text-rambutan-500`.
+                                .flex_none()
+                                .min_h(px(0.0))
+                                .p_0()
+                                .text_color(theme::rambutan_500())
                                 .child(copy::DISMISS)
                                 .on_click(cx.listener(
                                     move |this, _event, _window, cx| {
@@ -388,7 +439,8 @@ impl Workspace {
                             ),
                     )
                     .child(
-                        div().mt_3().child(
+                        // A row, so the button keeps its own width as on the web.
+                        div().mt_3().flex().child(
                             web_button(
                                 ("automation-suggestion-preview", index),
                                 WebButtonVariant::Primary,
@@ -410,13 +462,8 @@ impl Workspace {
                     .into_any_element()
             })
             .collect::<Vec<_>>();
-        div()
+        review_ui::web_card(review_ui::neutral_ring())
             .debug_selector(|| "desktop-local-suggestions".into())
-            .rounded(px(6.0))
-            .bg(theme::longan_900().opacity(0.65))
-            .border_1()
-            .border_color(theme::longan_800())
-            .p_3()
             .child(
                 div()
                     .flex()
@@ -427,18 +474,8 @@ impl Workspace {
                         div()
                             .flex_1()
                             .min_w_0()
-                            .child(
-                                div()
-                                    .text_size(px(12.0))
-                                    .text_color(theme::rambutan_200())
-                                    .child(copy::TITLE),
-                            )
-                            .child(
-                                div()
-                                    .text_size(px(11.0))
-                                    .text_color(theme::rambutan_500())
-                                    .child(copy::DESCRIPTION),
-                            ),
+                            .child(review_ui::card_title(copy::TITLE))
+                            .child(review_ui::body_sm(copy::DESCRIPTION, theme::rambutan_500())),
                     )
                     .child(
                         web_button(
@@ -471,6 +508,10 @@ impl Workspace {
                 "Recheck the preview and Write grants before starting. No records were changed."
                     .into(),
             );
+        } else {
+            // As on the web: it goes on show in the history, with its
+            // Run, Pause and Undo controls.
+            self.reviewed_workflow_id = Some(id.to_owned());
         }
         self.persist_and_notify(cx);
     }
@@ -735,22 +776,6 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    fn automation_panel(&self, title: &'static str, body: impl IntoElement) -> Div {
-        div()
-            .rounded(px(6.0))
-            .bg(theme::longan_900().opacity(0.65))
-            .border_1()
-            .border_color(theme::longan_800())
-            .p_3()
-            .child(
-                div()
-                    .text_size(px(12.0))
-                    .text_color(theme::rambutan_200())
-                    .child(title),
-            )
-            .child(body)
-    }
-
     /// A bruh's or a room's own page. The reactive panel draws it:
     /// `sync_bruh_page` has already told the panel which one is open.
     pub(super) fn render_bruh_page(&self) -> Div {
@@ -786,199 +811,26 @@ impl Workspace {
         // Web `lg:grid-cols-[minmax(0,1fr)_22rem]`: the grants column sits
         // beside the workflows from `lg`, under them below.
         let stacked = Self::narrower_than(window, LG_BREAKPOINT_PX);
+        // Web `px-4 py-4 sm:px-6 sm:py-5` around the page, `sm:px-6` in its
+        // header.
+        let compact = Self::narrower_than(window, SM_BREAKPOINT_PX);
         let grants = AgentDomain::ALL
             .into_iter()
             .enumerate()
             .map(|(index, domain)| {
-                let read_on = self
-                    .automation_state
-                    .permissions
-                    .allows(domain, AgentAccess::Read);
-                let write_on = self
-                    .automation_state
-                    .permissions
-                    .allows(domain, AgentAccess::Write);
                 div()
                     .id(("automation-grant", index))
-                    .mt_2()
                     .flex()
                     .items_center()
                     .justify_between()
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(theme::rambutan_300())
-                            .child(domain.label()),
-                    )
+                    .gap_3()
+                    .child(review_ui::label_sm(domain.label(), theme::rambutan_300()).flex_1())
                     .child(
                         div()
                             .flex()
                             .gap_1()
-                            .child(
-                                web_button(
-                                    ("automation-read", index),
-                                    if read_on {
-                                        WebButtonVariant::Outline
-                                    } else {
-                                        WebButtonVariant::Ghost
-                                    },
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label(format!("Toggle {} Read access", domain.label()))
-                                .child("Read")
-                                .on_click(cx.listener(
-                                    move |this, _event, _window, cx| {
-                                        let current = this
-                                            .automation_state
-                                            .permissions
-                                            .allows(domain, AgentAccess::Read);
-                                        this.automation_state.permissions.set(
-                                            domain,
-                                            AgentAccess::Read,
-                                            !current,
-                                        );
-                                        this.persist_and_notify(cx);
-                                    },
-                                )),
-                            )
-                            .child(
-                                web_button(
-                                    ("automation-write", index),
-                                    if write_on {
-                                        WebButtonVariant::Outline
-                                    } else {
-                                        WebButtonVariant::Ghost
-                                    },
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .aria_label(format!("Toggle {} Write access", domain.label()))
-                                .child("Write")
-                                .on_click(cx.listener(
-                                    move |this, _event, _window, cx| {
-                                        let current = this
-                                            .automation_state
-                                            .permissions
-                                            .allows(domain, AgentAccess::Write);
-                                        this.automation_state.permissions.set(
-                                            domain,
-                                            AgentAccess::Write,
-                                            !current,
-                                        );
-                                        this.persist_and_notify(cx);
-                                    },
-                                )),
-                            ),
-                    )
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
-
-        let latest = self.reviewed_automation();
-        let workflow_rows = latest
-            .into_iter()
-            .flat_map(|workflow| workflow.steps.iter())
-            .enumerate()
-            .map(|(index, step)| {
-                let fields = step.operation.review_fields(|millis| {
-                    if !millis.is_finite() || millis.fract() != 0.0 {
-                        return format!("Invalid timestamp ({millis})");
-                    }
-                    chrono::DateTime::from_timestamp_millis(
-                        EpochMs::saturating_from_f64(millis).as_millis(),
-                    )
-                    .map_or_else(
-                        || format!("Invalid timestamp ({millis})"),
-                        |date| {
-                            format!(
-                                "{} ({millis} ms since Unix epoch)",
-                                date.to_rfc3339_opts(chrono::SecondsFormat::Millis, true)
-                            )
-                        },
-                    )
-                });
-                div()
-                    .id(("automation-step", index))
-                    .mt_2()
-                    .rounded(px(4.0))
-                    .bg(theme::longan_950().opacity(0.45))
-                    .px_3()
-                    .py_2()
-                    .flex()
-                    .flex_col()
-                    .gap_2()
-                    .min_w_0()
-                    .text_size(px(11.0))
-                    .text_color(theme::rambutan_300())
-                    .child(format!(
-                        "{}, {}, {:?}{}",
-                        index + 1,
-                        step.operation.domain().label(),
-                        step.status,
-                        if self.save_status.is_saved() {
-                            ""
-                        } else {
-                            ", not yet saved"
-                        }
-                    ))
-                    .children(fields.into_iter().map(|(label, value)| {
-                        div()
-                            .min_w_0()
-                            .flex()
-                            .flex_col()
-                            .child(div().text_color(theme::rambutan_500()).child(label))
-                            .child(div().child(value))
-                    }))
-                    .into_any_element()
-            })
-            .collect::<Vec<_>>();
-        let blocked = latest
-            .filter(|workflow| workflow.status == WorkflowStatus::Previewed)
-            .map(|workflow| {
-                workflow
-                    .steps
-                    .iter()
-                    .map(|step| step.operation.domain())
-                    .filter(|domain| {
-                        !self
-                            .automation_state
-                            .permissions
-                            .allows(*domain, AgentAccess::Write)
-                    })
-                    .collect::<HashSet<_>>()
-            })
-            .unwrap_or_default();
-        // What the workflow on show can do: its own job's controls and Undo,
-        // the same rule as the web's history.
-        let controls = latest
-            .map(|workflow| workflow_history::controls(&self.automation_state, workflow))
-            .unwrap_or_default();
-        let audit = self
-            .automation_state
-            .audit
-            .iter()
-            .rev()
-            .take(20)
-            .enumerate()
-            .map(|(index, event)| {
-                div()
-                    .id(("automation-audit", index))
-                    .mt_2()
-                    .border_l_1()
-                    .border_color(theme::blueberry_400().opacity(0.3))
-                    .pl_3()
-                    .child(
-                        div()
-                            .text_size(px(10.0))
-                            .text_color(theme::blueberry_400())
-                            .child(format!("{:?}", event.kind)),
-                    )
-                    .child(
-                        div()
-                            .text_size(px(11.0))
-                            .text_color(theme::rambutan_300())
-                            .child(event.message.clone()),
+                            .child(self.grant_toggle(index, domain, AgentAccess::Read, cx))
+                            .child(self.grant_toggle(index, domain, AgentAccess::Write, cx)),
                     )
                     .into_any_element()
             })
@@ -993,38 +845,55 @@ impl Workspace {
             .bg(theme::longan_950())
             .child(
                 div()
-                    .px_4()
+                    .flex_shrink_0()
+                    .px(px(if compact { 16.0 } else { 24.0 }))
                     .py_3()
                     .border_b_1()
                     .border_color(theme::longan_800().opacity(0.5))
                     .child(
                         div()
                             .font_family(theme::HEADING_FONT_FAMILY)
+                            .font_weight(FontWeight::MEDIUM)
                             .text_size(px(18.0))
                             .text_color(theme::rambutan_100())
                             .child("Agent workflows"),
                     )
                     .child(
-                        div()
-                            .mt_1()
-                            .text_size(px(11.0))
-                            .text_color(theme::rambutan_500())
-                            .child("Preview changes, grant only what is needed, and keep every action reversible."),
+                        review_ui::body_sm(
+                            "Preview changes, grant only what is needed, and keep every action reversible.",
+                            theme::rambutan_500(),
+                        )
+                        .mt(px(2.0)),
                     ),
             )
             .child(
                 div()
+                    .id("automations-scroll")
                     .flex_1()
                     .min_h_0()
-                    .overflow_y_scrollbar()
-                    .p_4()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.automations_scroll)
+                    .px(px(if compact { 16.0 } else { 24.0 }))
+                    .py(px(if compact { 16.0 } else { 20.0 }))
                     .child(self.reactive_automations.clone())
-                    .child(self.render_mcp_bridge(cx))
-                    .when_some(self.automation_error.clone(), |panel, message| panel.child(
-                        div().mb_3().text_size(px(12.0)).text_color(theme::lychee_300()).child(message)
-                    ))
+                    // Web `mx-auto mb-4 max-w-6xl`.
+                    .child(page_column().mb_4().child(self.render_mcp_bridge(cx)))
+                    .when_some(self.automation_error.clone(), |panel, message| {
+                        panel.child(
+                            page_column().mb_3().child(
+                                div()
+                                    .id("automation-error")
+                                    .role(Role::Alert)
+                                    .rounded(px(review_ui::CARD_RADIUS_PX))
+                                    .bg(theme::longan_900())
+                                    .px_3()
+                                    .py_2()
+                                    .child(review_ui::body_sm(message, theme::lychee_300())),
+                            ),
+                        )
+                    })
                     .child(
-                        div()
+                        page_column()
                             .flex()
                             .when(stacked, |content| content.flex_col())
                             .gap_4()
@@ -1037,114 +906,12 @@ impl Workspace {
                                     .when(stacked, |workflows| workflows.flex_none().w_full())
                                     .flex()
                                     .flex_col()
-                                    .gap_3()
+                                    .gap_4()
+                                    .children(self.render_workflow_reviews(cx))
                                     .child(self.render_local_suggestions(cx))
-                                    .child(self.automation_panel(
-                                        "Workflow review",
-                                        div()
-                                            .child(self.render_automation_history(cx))
-                                            .when_some(latest, |panel, workflow| panel.child(self.render_mcp_rollback_review(&workflow.id, cx)))
-                                            .when(!blocked.is_empty(), |panel| panel.child(
-                                                div().mt_2().text_size(px(11.0)).text_color(theme::durian_300()).child(format!(
-                                                    "Grant Write for: {}.",
-                                                    blocked.iter().map(|domain| domain.label()).collect::<Vec<_>>().join(", ")
-                                                )),
-                                            ))
-                                            .when_some(latest.filter(|workflow| workflow.status == WorkflowStatus::Previewed).map(|workflow| workflow.id.clone()), |panel, reviewed_id| {
-                                                let decline_id = reviewed_id.clone();
-                                                let recheck_id = reviewed_id.clone();
-                                                panel.child(
-                                                div().flex().gap_2().child(
-                                                web_button("automation-recheck", WebButtonVariant::Ghost, WebButtonSize::Small, ButtonState::Enabled)
-                                                    .aria_label("Recheck grants")
-                                                    .mt_2()
-                                                    .child("Recheck grants")
-                                                    .on_click(cx.listener(move |this, _event, _window, cx| {
-                                                        if this.save_status.is_saved() {
-                                                            this.automation_error = this
-                                                                .automation_state
-                                                                .preview(&recheck_id, EpochMs::now().as_millis())
-                                                                .is_none()
-                                                                .then(|| "This workflow can no longer be previewed. No records were changed.".into());
-                                                            this.persist_and_notify(cx);
-                                                        }
-                                                    }))
-                                                ).child(web_button("automation-start", WebButtonVariant::Primary, WebButtonSize::Small, ButtonState::disabled_if(!blocked.is_empty() || !self.save_status.is_saved()))
-                                                    .debug_selector(|| "desktop-start-workflow".into())
-                                                    .aria_label("Start transaction")
-                                                    .mt_2()
-                                                    .child("Start transaction")
-                                                    .on_click(cx.listener(move |this, _event, _window, cx| this.start_reviewed_automation(&reviewed_id, cx))))
-                                                .child(web_button("automation-decline", WebButtonVariant::Ghost, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved()))
-                                                    .debug_selector(|| "desktop-decline-workflow".into())
-                                                    .aria_label("Decline proposal")
-                                                    .mt_2().child("Decline proposal")
-                                                    .on_click(cx.listener(move |this, _, _, cx| {
-                                                        if this.save_status.is_saved() && this.automation_state.decline_workflow(&decline_id, EpochMs::now().as_millis()) { this.persist_and_notify(cx); }
-                                                    }))))
-                                            }),
-                                    ))
-                                    .child(self.automation_panel(
-                                        "Background job",
-                                        div()
-                                            .mt_2()
-                                            .text_size(px(11.0))
-                                            .text_color(theme::rambutan_400())
-                                            .child("Background execution is optional and runs only while this app is open.")
-                                            .child(if !self.save_status.is_saved() {
-                                                "Changes are provisional, waiting for local save".to_string()
-                                            } else {
-                                                controls.job_status().unwrap_or_else(|| "No active job.".to_string())
-                                            })
-                                            .when_some(controls.running.map(|job| job.id.clone()), |panel, job_id| panel.child(
-                                                web_button("automation-run-next", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved()))
-                                                    .debug_selector(|| "desktop-run-workflow-step".into())
-                                                    .aria_label(workflow_history::RUN_NEXT_STEP)
-                                                    .mt_2()
-                                                    .child(workflow_history::RUN_NEXT_STEP)
-                                                    .on_click(cx.listener(move |this, _event, _window, cx| this.run_automation_step(&job_id, cx))),
-                                            ))
-                                            .when_some(controls.running.map(|job| job.id.clone()), |panel, job_id| panel.child(
-                                                web_button("automation-enable-background", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved() || controls.in_background()))
-                                                    .aria_label(workflow_history::RUN_IN_BACKGROUND)
-                                                    .debug_selector(|| "desktop-enable-workflow-background".into())
-                                                    .mt_2()
-                                                    .child(workflow_history::RUN_IN_BACKGROUND)
-                                                    .on_click(cx.listener(move |this, _, _, cx| this.enable_background_automation(&job_id, cx))),
-                                            ))
-                                            .when_some(controls.running.map(|job| job.id.clone()), |panel, job_id| panel.child(
-                                                web_button("automation-pause", WebButtonVariant::Ghost, WebButtonSize::Small, ButtonState::Enabled)
-                                                    .aria_label(workflow_history::PAUSE_LABEL)
-                                                    .debug_selector(|| "desktop-pause-workflow".into())
-                                                    .mt_2()
-                                                    .child(workflow_history::PAUSE)
-                                                    .on_click(cx.listener(move |this, _event, _window, cx| {
-                                                        if this.automation_state.pause_job(&job_id, EpochMs::now().as_millis()) {
-                                                            this.persist_and_notify(cx);
-                                                        }
-                                                    })),
-                                            ))
-                                            .when_some(controls.paused.map(|job| job.id.clone()), |panel, job_id| panel.child(
-                                                web_button("automation-resume", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved()))
-                                                    .aria_label(workflow_history::RESUME_LABEL)
-                                                    .debug_selector(|| "desktop-resume-workflow".into())
-                                                    .mt_2()
-                                                    .child(workflow_history::RESUME)
-                                                    .on_click(cx.listener(move |this, _, _, cx| this.resume_automation(&job_id, cx))),
-                                            ))
-                                            .when_some(latest.filter(|_| controls.undo).map(|workflow| workflow.id.clone()), |panel, workflow_id| panel.child(
-                                                web_button("automation-rollback", WebButtonVariant::Destructive, WebButtonSize::Small, ButtonState::disabled_if(!self.save_status.is_saved()))
-                                                    .debug_selector(|| "desktop-undo-workflow".into())
-                                                    .aria_label(workflow_history::UNDO)
-                                                    .mt_2()
-                                                    .child(workflow_history::UNDO)
-                                                    .on_click(cx.listener(move |this, _event, _window, cx| this.rollback_reviewed_automation(&workflow_id, cx))),
-                                            ))
-                                            .children(workflow_rows),
-                                    ))
-                                    .child(self.automation_panel("Audit timeline", div()
-                                        .when(!self.save_status.is_saved(), |el| el.child("Pending local save, entries below are provisional"))
-                                        .children(audit))),
+                                    .children(self.render_preview_changes(cx))
+                                    .child(self.render_background_jobs(cx))
+                                    .child(self.render_audit_timeline()),
                             )
                             .child(
                                 div()
@@ -1152,36 +919,89 @@ impl Workspace {
                                     .w(px(AUTOMATION_GRANTS_WIDTH_PX))
                                     .when(stacked, |grants| grants.w_full())
                                     .flex_none()
-                                    .child(self.automation_panel(
-                                        "Capability grants",
-                                        div()
-                                            .mt_1()
-                                            .child(
-                                                div()
-                                                    .text_size(px(12.0))
-                                                    .text_color(theme::rambutan_400())
-                                                    .child("Read and Write are independent. Finance and Health start fully off."),
-                                            )
-                                            .children(grants)
+                                    .flex()
+                                    .flex_col()
+                                    .gap_4()
+                                    .child(
+                                        review_ui::web_card(review_ui::neutral_ring())
+                                            .child(review_ui::card_title(
+                                                bruhs_models::logic::workflow_review::CAPABILITY_GRANTS,
+                                            ))
+                                            .child(review_ui::body_sm(
+                                                bruhs_models::logic::workflow_review::CAPABILITY_GRANTS_NOTE,
+                                                theme::rambutan_500(),
+                                            ))
                                             .child(
                                                 div()
                                                     .mt_3()
-                                                    .text_size(px(10.0))
-                                                    .text_color(theme::pandan_300())
-                                                    .child({
-                                                        let n = self.automation_state.workflows.len();
-                                                        format!(
-                                                            "{} typed tools, {n} {}",
-                                                            agent_tool_definitions().len(),
-                                                            if n == 1 { "workflow" } else { "workflows" }
-                                                        )
-                                                    }),
+                                                    .flex()
+                                                    .flex_col()
+                                                    .gap_2()
+                                                    .children(grants),
                                             ),
-                                    )),
+                                    )
+                                    .child(self.render_safety_contract())
+                                    .child(self.render_workflow_history(cx)),
                             ),
                     )
-                    .child(self.render_mobile(cx).mt_3()),
+                    .child(self.render_mobile(cx).mt_3())
+                    .vertical_scrollbar(&self.automations_scroll),
             )
+    }
+
+    /// Web's Read or Write toggle in Capability grants: a tinted pill when
+    /// granted, a dark one when not.
+    fn grant_toggle(
+        &self,
+        index: usize,
+        domain: AgentDomain,
+        access: AgentAccess,
+        cx: &Context<'_, Self>,
+    ) -> Stateful<Div> {
+        let on = self.automation_state.permissions.allows(domain, access);
+        let name = match access {
+            AgentAccess::Read => "Read",
+            AgentAccess::Write => "Write",
+        };
+        web_button(
+            match access {
+                AgentAccess::Read => ElementId::from(("automation-read", index)),
+                AgentAccess::Write => ElementId::from(("automation-write", index)),
+            },
+            WebButtonVariant::Ghost,
+            WebButtonSize::Small,
+            ButtonState::Enabled,
+        )
+        .aria_label(format!("Toggle {} {name} access", domain.label()))
+        .aria_toggled(if on { Toggled::True } else { Toggled::False })
+        .min_h(px(0.0))
+        // Web `px-2 py-1` with an inset ring; the border takes its 1px here.
+        .px(px(7.0))
+        .py(px(3.0))
+        .border_1()
+        .map(|toggle| {
+            if on {
+                // What Chrome draws for the web's granted toggle: its blue
+                // ring on the card, with no fill and rambutan-300 text (the
+                // class's blueberry fill and text never take effect there).
+                toggle
+                    .border_color(theme::blueberry_400().opacity(0.2))
+                    .text_color(theme::rambutan_300())
+            } else {
+                toggle
+                    .bg(theme::longan_950().opacity(0.6))
+                    .border_color(theme::longan_700().opacity(0.4))
+                    .text_color(theme::rambutan_400())
+            }
+        })
+        .child(name)
+        .on_click(cx.listener(move |this, _event, _window, cx| {
+            let current = this.automation_state.permissions.allows(domain, access);
+            this.automation_state
+                .permissions
+                .set(domain, access, !current);
+            this.persist_and_notify(cx);
+        }))
     }
 }
 

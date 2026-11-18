@@ -203,6 +203,10 @@ fn start_sample(run: SharedRun, window: &mut Window, cx: &mut App) {
                 let frames = collector
                     .collect_unseen()
                     .into_iter()
+                    .filter_map(|event| match event {
+                        gpui::profiler::FrameEvent::Draw(frame) => Some(frame),
+                        gpui::profiler::FrameEvent::Present(_) => None,
+                    })
                     .filter(|f| {
                         f.window_id == window_id
                             && f.draw_start >= started
@@ -358,7 +362,7 @@ pub(super) fn initialize(config: &Config, cx: &mut App) {
         runtime: Arc::new(runtime),
     });
     cx.set_global(FixtureMode::default());
-    gpui::profiler::set_frame_trace_enabled(config.cpu);
+    gpui::profiler::set_trace_enabled(config.cpu);
     println!(
         "NATIVE_PLATFORM_READY {}",
         json!({"font_families":names,"frame_trace":config.cpu,"scope":"Native platform;GPUI test-support absence is verified from linked Cargo artifacts before launch."})

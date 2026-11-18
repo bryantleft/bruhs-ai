@@ -44,7 +44,7 @@ fn event_color_menu_scrolls_to_its_last_option(cx: &mut TestAppContext) {
     let last_before = cx
         .debug_bounds("desktop-event-color-option-dragonfruit")
         .unwrap();
-    cx.simulate_event(gpui::ScrollWheelEvent {
+    cx.simulate_event(gpui::ScrollEvent {
         position: menu.center(),
         delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.0), gpui::px(-1000.0))),
         ..Default::default()
@@ -152,7 +152,7 @@ fn task_detail_keeps_its_footer_visible_and_planning_reachable(cx: &mut TestAppC
             "Delete task is below the window at {height}px"
         );
         let body = cx.debug_bounds("desktop-task-detail-body").unwrap();
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position: body.center(),
             delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.0), gpui::px(-5000.0))),
             ..Default::default()
@@ -296,7 +296,7 @@ fn scroll_form_body_to_end(
     let bounds = cx.debug_bounds(selector).expect("form scroll viewport");
     let extent = workspace.read_with(cx, |workspace, _| workspace.modal_scroll.max_offset().y);
     assert!(extent > gpui::px(0.0), "expanded form must overflow");
-    cx.simulate_event(gpui::ScrollWheelEvent {
+    cx.simulate_event(gpui::ScrollEvent {
         position: gpui::point(bounds.right() - gpui::px(12.0), bounds.center().y),
         delta: gpui::ScrollDelta::Pixels(gpui::point(gpui::px(0.0), -extent)),
         ..Default::default()

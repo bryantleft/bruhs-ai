@@ -5,7 +5,6 @@
 
 use super::super::meetings_ui::PersonMergePanel;
 use super::super::{AppView, Workspace};
-use super::test_fixture::fixture;
 use crate::server_client::ServerClient;
 use crate::views::meetings_hub::HubEvent;
 use bruhs_models::{
@@ -14,8 +13,7 @@ use bruhs_models::{
     RelationshipItemKind, RelationshipProfile,
 };
 use gpui::{
-    point, Bounds, Entity, Modifiers, ScrollDelta, ScrollWheelEvent, TestAppContext,
-    VisualTestContext,
+    point, Bounds, Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext,
 };
 use gpui_component::zoom::px;
 use std::sync::Arc;
@@ -60,7 +58,7 @@ fn scroll_people_page_to(cx: &mut VisualTestContext, selector: &'static str) {
     let page = cx
         .debug_bounds("desktop-people-page")
         .expect("Missing desktop-people-page");
-    cx.simulate_event(ScrollWheelEvent {
+    cx.simulate_event(ScrollEvent {
         position: page.center(),
         delta: ScrollDelta::Pixels(point(px(0.0), px(-100_000.0))),
         ..Default::default()
@@ -82,6 +80,15 @@ fn scroll_people_page_to(cx: &mut VisualTestContext, selector: &'static str) {
         viewport.contains(&target.center()),
         "{selector} is inside the measured window viewport after scrolling"
     );
+}
+
+/// The shared fixture in a full-HD window: these checks scroll the People
+/// page past a full page of cards, which a taller window would show at once.
+fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
+    let (workspace, cx) = super::test_fixture::fixture(cx);
+    cx.simulate_resize(gpui::size(px(1920.0), px(1080.0)));
+    cx.run_until_parked();
+    (workspace, cx)
 }
 
 #[gpui::test]

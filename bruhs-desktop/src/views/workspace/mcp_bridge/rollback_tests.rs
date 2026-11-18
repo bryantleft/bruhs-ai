@@ -33,7 +33,7 @@ async fn click(workspace: &Entity<Workspace>, cx: &mut VisualTestContext, select
         cx.update(|window, _| gpui::Bounds::new(gpui::Point::default(), window.viewport_size()));
     if !viewport.contains(&bounds.center()) {
         // A pending undo review can push the final action below the fold.
-        cx.simulate_event(gpui::ScrollWheelEvent {
+        cx.simulate_event(gpui::ScrollEvent {
             position: gpui::point(bounds.center().x, viewport.bottom() - gpui::px(64.0)),
             delta: gpui::ScrollDelta::Pixels(gpui::point(
                 gpui::px(0.0),
@@ -197,10 +197,13 @@ async fn declined_undo_cannot_be_resurfaced_by_repeating_the_request(cx: &mut Te
     .await);
     ok(call(&workspace, cx, request(&id, false)).await);
     workspace.update_in(cx, |w, _, _| {
+        // The new proposal waits in its own card, and the declined undo
+        // opens nothing again.
         assert_eq!(
-            w.reviewed_workflow_id.as_deref(),
-            next["workflow_id"].as_str()
+            bruhs_models::logic::workflow_review::awaiting_review(&w.automation_state, None),
+            vec![next["workflow_id"].as_str().unwrap().to_owned()]
         );
+        assert!(w.mcp_bridge.rollback_requests().is_empty());
         assert_eq!(w.work_items.len(), 1);
         w.mcp_bridge = WorkspaceBridge::default();
     });
@@ -226,4 +229,27 @@ async fn reconnect_drops_undo_requests_without_deleting_saved_records(cx: &mut T
         assert_eq!(w.work_items.len(), 1);
         w.mcp_bridge = WorkspaceBridge::default();
     });
+}
+
+/// The Undo requested card's own Undo transaction approves the request, as
+/// the web's does.
+#[gpui::test]
+async fn the_undo_cards_own_undo_rolls_the_workflow_back(cx: &mut TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    let id = started(&workspace, cx, 1).await;
+    click(&workspace, cx, "desktop-run-workflow-step").await;
+    let requested = ok(call(&workspace, cx, request(&id, false)).await);
+    assert_eq!(requested["rollback_review"], "pending");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-mcp-rollback-review").is_some());
+    click(&workspace, cx, "desktop-accept-mcp-rollback").await;
+    workspace.update_in(cx, |w, _, _| {
+        assert!(w.work_items.is_empty(), "the created task is gone");
+        assert_eq!(
+            w.automation_state.workflows[0].status,
+            WorkflowStatus::RolledBack
+        );
+    });
+    assert!(cx.debug_bounds("desktop-mcp-rollback-review").is_none());
+    workspace.update_in(cx, |w, _, _| w.mcp_bridge = WorkspaceBridge::default());
 }

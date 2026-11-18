@@ -1,7 +1,5 @@
 use crate::views::task_registry_subscription::TaskRegistrySubscription;
-use crate::views::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::views::workspace::{provider_label, provider_mark};
 use crate::{
     app_state::{spawn_tokio, DesktopState},
@@ -30,7 +28,7 @@ use gpui::prelude::*;
 use gpui::*;
 use gpui_component::input::{
     Enter as InputEnter, Escape as InputEscape, Input, InputEvent, InputState,
-    MoveDown as InputMoveDown, MoveUp as InputMoveUp,
+    MoveDown as InputMoveDown, MoveUp as InputMoveUp, TextareaState,
 };
 use gpui_component::scroll::ScrollableElement;
 use gpui_component::text::{TextView, TextViewStyle};
@@ -719,7 +717,7 @@ pub struct ChatView {
     _model_picker_subscription: Subscription,
     /// The header's inline rename while it is open.
     title_rename: Option<title_rename::TitleRename>,
-    pub input_state: Entity<InputState>,
+    pub input_state: Entity<TextareaState>,
     /// The running (or stopped but possibly still unwinding) turn's sender
     /// on the tokio runtime. A stopped turn keeps its aborted handle here so
     /// the next submit can wait for it to release the thread.
@@ -772,7 +770,7 @@ impl ChatView {
         cx: &mut Context<'_, Self>,
     ) -> Self {
         let input_state = cx.new(|cx| {
-            InputState::new(window, cx)
+            TextareaState::new(window, cx)
                 .placeholder(CHAT_INPUT_PLACEHOLDER)
                 .auto_grow(CHAT_COMPOSER_MIN_ROWS, CHAT_COMPOSER_MAX_ROWS)
                 .submit_on_enter(true)

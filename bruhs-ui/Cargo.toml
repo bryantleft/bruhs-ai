@@ -1,0 +1,36 @@
+[package]
+name = "bruhs-ui"
+version = "0.1.0"
+description = "Bruhs-styled GPUI components on top of gpui-component: theme, buttons, dropdowns, popovers"
+edition.workspace = true
+license.workspace = true
+repository.workspace = true
+rust-version.workspace = true
+publish = false
+
+[features]
+# Lets a dependent crate's tests run the components without OS hooks (the
+# macOS reduced-motion observer), the way this crate's own tests do.
+test-support = []
+
+[lints]
+workspace = true
+
+[dependencies]
+async-channel = "2"
+bruhs-models = { workspace = true }
+gpui = { workspace = true }
+gpui-component = { path = "../third_party/gpui-component/crates/component" }
+gpui-base = { path = "../third_party/gpui-component/crates/base" }
+tracing = { workspace = true }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = ["NSView", "NSResponder", "NSGraphics"] }
+objc2-foundation = { version = "0.3", features = ["NSGeometry"] }
+raw-window-handle = "0.6"
+
+[dev-dependencies]
+gpui = { workspace = true, features = ["test-support"] }
+gpui-component = { path = "../third_party/gpui-component/crates/component", features = ["test-support"] }

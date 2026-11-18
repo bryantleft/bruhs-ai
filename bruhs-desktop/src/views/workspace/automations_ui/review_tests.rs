@@ -18,7 +18,8 @@ fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContex
     });
     let workspace = cell.borrow().clone().unwrap();
     // Tall enough for the controls under the Local suggestions card.
-    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(2000.0)));
+    // Tall enough for every Agent workflows card, review cards included.
+    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(3200.0)));
     workspace.update_in(cx, |w, _, cx| {
         w.automation_state = AutomationState::default();
         w.work_items.clear();

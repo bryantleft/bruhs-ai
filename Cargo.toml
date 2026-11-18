@@ -23,12 +23,13 @@ members = [
     "bruhs-core",
     "bruhs-models",
     "bruhs-desktop",
+    "bruhs-ui",
     "bruhs-mcp",
     "bruhs-capture",
     "claude-sdk-rs",
     "codex-sdk-rs",
 ]
-exclude = ["third_party/gpui-component", "third_party/taffy", "third_party/axum", "third_party/gpui-windows"]
+exclude = ["third_party/gpui-component", "third_party/axum", "third_party/gpui-windows", "third_party/mathjax-svg-rs"]
 
 [workspace.package]
 edition = "2021"
@@ -36,7 +37,7 @@ license = "MIT"
 repository = "https://github.com/bryantleft/bruhs-ai"
 # Matches rust-toolchain.toml: the zed gpui pin needs a recent compiler, so the
 # MSRV is the pinned toolchain rather than something older we do not test.
-rust-version = "1.95"
+rust-version = "1.98"
 
 # Every dependency used by two or more members is declared once here. Members
 # opt in with `dep = { workspace = true }` and add only the features they need
@@ -45,6 +46,7 @@ rust-version = "1.95"
 # Internal crates
 bruhs-core = { path = "bruhs-core" }
 bruhs-models = { path = "bruhs-models" }
+bruhs-ui = { path = "bruhs-ui" }
 
 # Async runtime and futures
 tokio = "1"
@@ -89,8 +91,10 @@ keyring = { version = "3", features = ["apple-native", "windows-native", "sync-s
 # move gpui forward, bump the rev here, in third_party/gpui-component/Cargo.toml
 # and in third_party/gpui-windows/Cargo.toml (excluded from this workspace, so
 # they keep their own pins; see third_party/gpui-component/VENDORED.md).
-gpui = { git = "https://github.com/zed-industries/zed", rev = "2b9b3c7ea21293c9f271d993503e6d8dba2c6891" }
-gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "2b9b3c7ea21293c9f271d993503e6d8dba2c6891" }
+# `version` keeps Cargo off zed's `tooling/lints/test_fixture/gpui` (0.0.0),
+# which it otherwise falls back to when gpui 0.2's dependencies conflict.
+gpui = { git = "https://github.com/zed-industries/zed", rev = "d2a4fb6ded7c470be25d1541281da3882495b65b", version = "0.2" }
+gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "d2a4fb6ded7c470be25d1541281da3882495b65b" }
 
 # Dev-only
 tempfile = "3"
@@ -100,14 +104,14 @@ tempfile = "3"
 # sum_tree only uses its no-op `#[instrument]`. This keeps the distributed
 # binaries MIT. See third_party/ztracing-noop/README.md.
 ztracing = { path = "third_party/ztracing-noop" }
-# Keep native WebView2 child windows above the DirectComposition scene.
+# Clears a dropped window's activation callback; see third_party/gpui-windows/VENDORED.md.
 gpui_windows = { path = "third_party/gpui-windows" }
 
 [patch.crates-io]
-# Avoid discarded flex minimum measurements; see third_party/taffy/VENDORED.md.
-taffy = { path = "third_party/taffy" }
 # Borrowed byte writer for bounded task-event encoding; see third_party/axum/VENDORED.md.
 axum = { path = "third_party/axum" }
+# boa_engine 0.22, whose icu crates agree with gpui's; see third_party/mathjax-svg-rs/VENDORED.md.
+mathjax-svg-rs = { path = "third_party/mathjax-svg-rs" }
 
 [workspace.lints.rust]
 future-incompatible = "warn"

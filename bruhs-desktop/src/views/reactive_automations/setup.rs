@@ -123,7 +123,7 @@ impl ReactiveAutomations {
             return;
         };
         let source_text = value(&source.value, cx);
-        source.value = edit_input(&source_text, source.kind == "command", window, cx);
+        source.value = edit_field(&source_text, source.kind == "command", window, cx);
         self.open_subscription(setup.as_ref().map(|s| s.subscription.clone()), window, cx);
         let Some(Editor::Subscription(mut subscription)) = self.editor.take() else {
             return;
@@ -221,13 +221,13 @@ impl ReactiveAutomations {
         let mut body=card().child(heading("Set up an automation")).child(muted("Describe the outcome and choose what starts it. Nothing is saved or enabled until you review the complete automation."))
             .when(editor.agent_locked,|body|body.child(muted("This routine runs as this bruh. Change its job and model in Settings.").debug_selector(||"automation-runs-as-bruh".to_string())))
             .when(!editor.agent_locked,|body|body.child(field("Automation name",&editor.agent.name,false,self.busy)).child(field("What should this automation do?",&editor.agent.instructions,true,self.busy)).child(field("Automation working folder",&editor.agent.path,false,self.busy)).child(field("Model",&editor.agent.model,false,self.busy))).child(muted("Starts when"))
-            .child(div().flex().flex_wrap().gap_2().children([("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("calendar","At set times of day"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(kind,label)|control(SharedString::from(format!("automation-kind-{kind}")),label,self.busy).aria_selected(editor.source.kind==kind).when(editor.source.kind==kind,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.kind=kind;editor.source.value=edit_input(if kind=="app_event"{"meeting.completed"}else{""},kind=="command",window,cx);if kind=="schedule"{editor.source.interval.update(cx,|input,cx|input.set_value("3600",window,cx));}}cx.notify();}))));
+            .child(div().flex().flex_wrap().gap_2().children([("folder","A file arrives"),("http","A website changes"),("command","A command reports a change"),("schedule","On a repeating schedule"),("calendar","At set times of day"),("webhook","A webhook arrives"),("app_event","A meeting event occurs"),("custom","A custom event arrives")].into_iter().map(|(kind,label)|control(SharedString::from(format!("automation-kind-{kind}")),label,self.busy).aria_selected(editor.source.kind==kind).when(editor.source.kind==kind,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.kind=kind;editor.source.value=edit_field(if kind=="app_event"{"meeting.completed"}else{""},kind=="command",window,cx);if kind=="schedule"{editor.source.interval.update(cx,|input,cx|input.set_value("3600",window,cx));}}cx.notify();}))));
         body=match editor.source.kind {
             "folder"=>body.child(field("Folder to watch",&editor.source.value,false,self.busy)).child(field("File pattern",&editor.source.pattern,false,self.busy)),
             "http"=>body.child(field("Website URL",&editor.source.value,false,self.busy)),
             "command"=>body.child(field("Command to run",&editor.source.value,true,self.busy)).child(muted("This command runs on your machine once you enable the automation.")),
             "schedule"=>body.child(field("Run every, in seconds",&editor.source.interval,false,self.busy)),
-            "app_event"=>body.child(div().flex().flex_wrap().gap_2().children([("meeting.completed","Meeting completed"),("meeting.transcribed","Final transcript updated"),("meeting.summary","Summary ready")].into_iter().map(|(topic,label)|{let selected=value(&editor.source.value,cx)==topic;control(SharedString::from(format!("automation-topic-{topic}")),label,self.busy).aria_selected(selected).when(selected,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.value.update(cx,|input,cx|input.set_value(topic,window,cx));}cx.notify();})}))),
+            "app_event"=>body.child(div().flex().flex_wrap().gap_2().children([("meeting.completed","Meeting completed"),("meeting.transcribed","Final transcript updated"),("meeting.summary","Summary ready")].into_iter().map(|(topic,label)|{let selected=value(&editor.source.value,cx)==topic;control(SharedString::from(format!("automation-topic-{topic}")),label,self.busy).aria_selected(selected).when(selected,|button|button.bg(theme::blueberry_500().opacity(0.15))).on_activate(cx,move |this,window,cx|{if let Some(Editor::Automation(editor))=&mut this.editor{editor.source.value.set_value(topic,window,cx);}cx.notify();})}))),
             "calendar"=>body.child(self.render_calendar_fields(&editor.source, cx)),
             "webhook"=>body.child(muted("A private endpoint is created when you enable this automation. Reveal its token in Advanced settings.")),
             _=>body.child(muted("Device bridges can publish through the local API. Use a watched folder for FTP uploads.")),
@@ -502,7 +502,7 @@ impl ReactiveAutomations {
                                 }
                                 this.editor = Some(Editor::Chat {
                                     agent_id: chat_id.clone(),
-                                    message: edit_input("", true, window, cx),
+                                    message: edit_area("", window, cx),
                                 });
                                 cx.notify();
                             }
@@ -759,10 +759,7 @@ mod tests {
                 .agent
                 .path
                 .update(cx, |input, cx| input.set_value("/tmp", window, cx));
-            editor
-                .source
-                .value
-                .update(cx, |input, cx| input.set_value("/tmp/scans", window, cx));
+            editor.source.value.set_value("/tmp/scans", window, cx);
             panel.review_automation(cx);
             let Some(Editor::Automation(editor)) = &panel.editor else {
                 panic!("automation editor");

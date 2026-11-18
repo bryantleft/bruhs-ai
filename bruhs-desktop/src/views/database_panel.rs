@@ -1,20 +1,20 @@
 //! Native controls for the same server-owned connections and read policy as the web.
-use super::web_button::{
-    is_web_button_activation_key, web_button, ButtonState, WebButtonSize, WebButtonVariant,
-};
+use super::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{
     app_state::spawn_tokio,
     server_client::{ServerClient, ServerError},
     theme,
 };
 use bruhs_models::{database::*, num::ToFloatLossy};
+use bruhs_ui::press::on_press_view;
+use bruhs_ui::text_field::TextField;
 use gpui::{prelude::*, *};
 use gpui_component::zoom::px;
 use gpui_component::{
-    input::{Input, InputEvent, InputState},
+    input::{InputEvent, InputState, TextareaState},
     scroll::ScrollableElement,
 };
-use std::{collections::BTreeSet, future::Future, rc::Rc};
+use std::{collections::BTreeSet, future::Future};
 use uuid::Uuid;
 
 #[derive(Clone)]
@@ -25,13 +25,13 @@ pub(crate) struct DatabaseAttachment {
 struct Editor {
     previous: Option<DatabaseConnection>,
     postgres: bool,
-    name: Entity<InputState>,
-    path: Entity<InputState>,
-    host: Entity<InputState>,
-    port: Entity<InputState>,
-    database: Entity<InputState>,
-    user: Entity<InputState>,
-    password: Entity<InputState>,
+    name: TextField,
+    path: TextField,
+    host: TextField,
+    port: TextField,
+    database: TextField,
+    user: TextField,
+    password: TextField,
 }
 pub(crate) struct DatabasePanel {
     pub project_path: String,
@@ -47,10 +47,10 @@ pub(crate) struct DatabasePanel {
     offset: u64,
     previous_offsets: Vec<u64>,
     last_browse: Option<BrowseDatabase>,
-    sql: Entity<InputState>,
-    filter_column: Entity<InputState>,
-    filter: Entity<InputState>,
-    sort: Entity<InputState>,
+    sql: TextField,
+    filter_column: TextField,
+    filter: TextField,
+    sort: TextField,
     descending: bool,
     editor: Option<Editor>,
     error: Option<String>,
@@ -68,20 +68,19 @@ fn input(
     secret: bool,
     window: &mut Window,
     cx: &mut App,
-) -> Entity<InputState> {
-    cx.new(|cx| {
-        let mut input = InputState::new(window, cx).multi_line(multiline);
-        if secret {
-            input = input.masked(true);
-        }
-        input.set_value(value, window, cx);
-        input
-    })
+) -> TextField {
+    let field = if multiline {
+        TextField::Area(cx.new(|cx| TextareaState::new(window, cx)))
+    } else {
+        TextField::Line(cx.new(|cx| InputState::new(window, cx).masked(secret)))
+    };
+    field.set_value(value.to_string(), window, cx);
+    field
 }
-fn value(input: &Entity<InputState>, cx: &App) -> String {
-    input.read(cx).value().to_string()
+fn value(input: &TextField, cx: &App) -> String {
+    input.value(cx).to_string()
 }
-fn field(label: &'static str, input: &Entity<InputState>, multiline: bool, disabled: bool) -> Div {
+fn field(label: &'static str, input: &TextField, multiline: bool, disabled: bool) -> Div {
     div()
         .min_w_0()
         .w_full()
@@ -90,11 +89,10 @@ fn field(label: &'static str, input: &Entity<InputState>, multiline: bool, disab
         .gap_1()
         .child(text(label))
         .child(
-            Styled::h(
-                Input::new(input).aria_label(label).disabled(disabled),
-                px(if multiline { 96.0 } else { 32.0 }),
-            )
-            .text_size(px(14.0)),
+            input
+                .element(label, disabled)
+                .h(px(if multiline { 96.0 } else { 32.0 }))
+                .text_size(px(14.0)),
         )
 }
 fn text(label: impl Into<SharedString>) -> Div {
@@ -135,16 +133,7 @@ impl Action for Stateful<Div> {
         cx: &Context<'_, DatabasePanel>,
         f: impl Fn(&mut DatabasePanel, &mut Window, &mut Context<'_, DatabasePanel>) + 'static,
     ) -> Self {
-        let f = Rc::new(f);
-        let click = Rc::clone(&f);
-        self.on_click(cx.listener(move |this, _, window, cx| click(this, window, cx)))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    f(this, window, cx);
-                }
-            }))
+        on_press_view(self, cx, f)
     }
 }
 impl DatabasePanel {
@@ -190,7 +179,7 @@ impl DatabasePanel {
         for input in [&panel.filter_column, &panel.filter, &panel.sort] {
             panel
                 .input_subscriptions
-                .push(cx.subscribe(input, |_, _, event: &InputEvent, cx| {
+                .push(input.subscribe(cx, |_, event: &InputEvent, cx| {
                     if matches!(event, InputEvent::Change) {
                         cx.notify();
                     }
@@ -1041,12 +1030,8 @@ mod tests {
             panel.edit(None, window, cx);
             assert!(!panel.editor.as_ref().unwrap().postgres);
             let editor = panel.editor.as_ref().unwrap();
-            editor
-                .name
-                .update(cx, |input, cx| input.set_value("Fixture", window, cx));
-            editor.path.update(cx, |input, cx| {
-                input.set_value("/synthetic/db.sqlite3", window, cx)
-            });
+            editor.name.set_value("Fixture", window, cx);
+            editor.path.set_value("/synthetic/db.sqlite3", window, cx);
             let old_name = value(&editor.name, cx);
             panel.notice = Some("A view refresh".into());
             assert_eq!(value(&panel.editor.as_ref().unwrap().name, cx), old_name);
@@ -1170,9 +1155,7 @@ mod tests {
             panel.busy = false;
             panel.error = None;
             panel.result = Some(partial.clone());
-            panel
-                .sort
-                .update(cx, |input, cx| input.set_value("name", window, cx));
+            panel.sort.set_value("name", window, cx);
             cx.notify();
         });
         cx.run_until_parked();

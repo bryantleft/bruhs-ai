@@ -1,6 +1,7 @@
 //! Claude CLI sign-in: status checks, the login flow with polling, and the banner.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 use std::borrow::Cow;
 pub(super) const AUTH_BANNER_FONT_FAMILY: &str = "Monaspace Neon";
@@ -643,22 +644,15 @@ impl ChatView {
                                                     .focus_visible(|el| {
                                                         el.border_color(theme::persimmon_400())
                                                     })
-                                                    .on_click(cx.listener(
-                                                        move |this, _ev, _window, cx| {
-                                                            this.start_cli_login(provider, cx);
-                                                        },
-                                                    ))
-                                                    .on_key_down(cx.listener(
-                                                        move |this, event: &KeyDownEvent, window, cx| {
-                                                            if is_web_button_activation_key(
-                                                                event.keystroke.key.as_str(),
-                                                            ) {
-                                                                window.prevent_default();
-                                                                cx.stop_propagation();
+                                                    .map(|el| {
+                                                        on_press_view(
+                                                            el,
+                                                            cx,
+                                                            move |this, _window, cx| {
                                                                 this.start_cli_login(provider, cx);
-                                                            }
-                                                        },
-                                                    ))
+                                                            },
+                                                        )
+                                                    })
                                             },
                                         ),
                                     )
@@ -674,22 +668,11 @@ impl ChatView {
                                         .tab_index(0)
                                         .role(Role::Button)
                                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                        .on_click(cx.listener(move |this, _ev, _window, cx| {
-                                            this.start_cli_auth_check(provider, cx);
-                                        }))
-                                        .on_key_down(
-                                            cx.listener(
-                                                move |this, event: &KeyDownEvent, window, cx| {
-                                                    if is_web_button_activation_key(
-                                                        event.keystroke.key.as_str(),
-                                                    ) {
-                                                        window.prevent_default();
-                                                        cx.stop_propagation();
-                                                        this.start_cli_auth_check(provider, cx);
-                                                    }
-                                                },
-                                            ),
-                                        ),
+                                        .map(|el| {
+                                            on_press_view(el, cx, move |this, _window, cx| {
+                                                this.start_cli_auth_check(provider, cx);
+                                            })
+                                        }),
                                     ),
                             ),
                     ),

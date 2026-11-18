@@ -3,6 +3,7 @@
 use super::*;
 use crate::server_client::ServerError;
 use bruhs_models::{connections::ServiceProvider, mail::*, InboxFilter};
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 use std::future::Future;
 use std::sync::atomic::AtomicBool;
@@ -641,7 +642,6 @@ impl ConnectedInbox {
         let label = label.into();
         let id = id.into();
         let debug_id = id.to_string();
-        let keyboard = action.clone();
         web_button(
             id,
             WebButtonVariant::Ghost,
@@ -655,18 +655,11 @@ impl ConnectedInbox {
         .aria_label(label.clone())
         .debug_selector(move || debug_id)
         .child(label)
-        .on_click(cx.listener(move |this, _, _, cx| {
-            if enabled {
+        .when(enabled, |el| {
+            on_press_view(el, cx, move |this, _window, cx| {
                 this.action(action.clone(), cx);
-            }
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if enabled && is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
-                this.action(keyboard.clone(), cx);
-            }
-        }))
+            })
+        })
     }
 
     fn compose_entry(&self, reply: Option<bool>, cx: &Context<'_, Self>) -> Div {
@@ -693,20 +686,11 @@ impl ConnectedInbox {
                 .child(label)
                 .aria_label(label)
                 .debug_selector(move || format!("desktop-compose-entry-{label}"))
-                .on_click(cx.listener(move |this, _, window, cx| {
-                    if enabled {
+                .when(enabled, |el| {
+                    on_press_view(el, cx, move |this, window, cx| {
                         this.open_composer(reply.is_none() && index == 1, all, window, cx);
-                    }
-                }))
-                .on_key_down(cx.listener(
-                    move |this, event: &KeyDownEvent, window, cx| {
-                        if enabled && is_web_button_activation_key(&event.keystroke.key) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.open_composer(reply.is_none() && index == 1, all, window, cx);
-                        }
-                    },
-                ))
+                    })
+                })
             }))
     }
     fn open_composer(
@@ -885,18 +869,11 @@ impl ConnectedInbox {
                                 },
                             ))
                             .child(meta(card.preview.clone()).truncate())
-                            .on_click(cx.listener(move |this, _, _, cx| {
-                                this.action(Action::Thread(id.clone()), cx)
-                            }))
-                            .on_key_down(cx.listener({
-                                let id = row.external_id.clone();
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        this.action(Action::Thread(id.clone()), cx);
-                                    }
-                                }
-                            }))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, _window, cx| {
+                                    this.action(Action::Thread(id.clone()), cx)
+                                })
+                            })
                     }))
                     .when(
                         !self.rows_loading

@@ -164,6 +164,17 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Changed
 
+- Agent workflows in the desktop app now reviews like the web's: an MCP
+  client's proposal, its undo request and any workflow left waiting each get
+  their own card above Local suggestions, with the full payload, the grants
+  still missing and their own Start or Undo. A dry run you start is reviewed
+  in Preview changes, and Run, Pause, Resume and Undo for the workflow on
+  show sit in Workflow history. The MCP panel says what Copy MCP config
+  copied, on both apps.
+- The workflow notice above every page now has Pause for running background
+  workflows on the web too.
+- A dry run waiting in Preview changes can be declined there, on both apps,
+  so one you decided against no longer holds up an MCP client's proposal.
 - The desktop app runs on its UI framework, gpui, without patches. Long
   lines may now break at a `/` and no longer break after a `-`, so a line can
   wrap at a different word than on the web.
@@ -267,6 +278,13 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- In the desktop app, a failed save now reads like the web's: "Not saved",
+  why, Retry save and Copy recovery data, under the page's top bar instead
+  of under the window's close and minimize buttons.
+- In the desktop app, the workflow notice (such as "An MCP proposal is
+  awaiting your review") no longer runs under the window's close and
+  minimize buttons. It sits under the page's top bar, as on the web, and is
+  hidden on Agent workflows itself.
 - The desktop app's keyboard works from the start: reopened on a page
   other than Chat, it used to ignore Tab and the shortcuts until a click.
 - In the desktop app, Tab leaves a reply, note or other multi-line field,

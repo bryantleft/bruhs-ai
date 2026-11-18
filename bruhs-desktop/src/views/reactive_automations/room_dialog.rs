@@ -7,13 +7,13 @@ use super::create_bruh::{hint, label, labelled, text_field, ERROR_FILL_OPACITY, 
 use super::*;
 use crate::views::crew_face::bruh_face;
 use crate::views::dropdown::{dropdown, DropdownGroup, DropdownOption, Listbox};
-use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     lead_choices, room_command, room_form_for, Room, RoomForm, RoomState, DELETE_ROOM_CONFIRM,
     DELETE_ROOM_NO, DELETE_ROOM_YES, NEW_ROOM, NO_BRUHS_YET, ROOM_LEAD, ROOM_MEMBERS,
     ROOM_SETTINGS,
 };
 use bruhs_models::crew::RAIL_FACE_PX;
+use bruhs_ui::press::on_press_view;
 use gpui_component::scroll::ScrollableElement;
 
 /// The dialog is done: the service took what it sent, or nothing needed
@@ -592,7 +592,7 @@ impl ReactiveAutomations {
                     .aria_label(DELETE_ROOM_YES)
                     .child(DELETE_ROOM_YES);
                     let yes = if rooms_on {
-                        on_press(
+                        on_press_view(
                             yes.focus_visible(|el| el.border_color(theme::persimmon_400())),
                             cx,
                             |this, _, cx| this.delete_room(cx),
@@ -600,7 +600,7 @@ impl ReactiveAutomations {
                     } else {
                         yes
                     };
-                    let keep = on_press(
+                    let keep = on_press_view(
                         web_button(
                             "desktop-room-delete-keep",
                             WebButtonVariant::Ghost,
