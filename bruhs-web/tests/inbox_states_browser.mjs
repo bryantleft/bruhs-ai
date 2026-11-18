@@ -358,6 +358,7 @@ try {
     check(failed && evidence.failure.alert === 'Local records could not be loaded. Existing storage was left unchanged; conversation changes made here are kept.', 'a failed open says the records could not be loaded', evidence.failure);
     check(evidence.failure.retry, 'Retry loading records is offered');
     check(evidence.failure.list === 'Conversations could not be loaded', 'the list says it could not load', evidence.failure.list);
+    check(evidence.failure.listDetail === 'Choose Retry loading records above. Stored conversations were left unchanged.', 'the list says how to recover, not that records are loading', evidence.failure.listDetail);
     await shot('storage-failure');
     const version = await page.evaluate(`indexedDB.databases().then(list => list.find(db => db.name === 'bruhs')?.version ?? null)`);
     check(version === 999999999, 'the newer database was left unchanged', version);

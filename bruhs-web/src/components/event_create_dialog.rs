@@ -317,6 +317,7 @@ pub fn EventCreateDialog() -> impl IntoView {
                 <div class="space-y-1.5">
                     <label class="text-label-sm text-rambutan-400">"Title"</label>
                     <Input
+                        aria_label="Event title"
                         value=Signal::derive(move || title.get())
                         on_input=Callback::new(move |v| set_title.set(v))
                         placeholder="What's happening?".to_string()
@@ -329,6 +330,7 @@ pub fn EventCreateDialog() -> impl IntoView {
                     <div class="space-y-1.5">
                         <label class="text-label-sm text-rambutan-400">"Start"</label>
                         <DateTimePicker
+                            label="Event start"
                             value=Signal::derive(move || start_str.get())
                             on_change=Callback::new(move |v| set_start_str.set(v))
                             disabled=Signal::derive(move || is_google_event.get())
@@ -337,6 +339,7 @@ pub fn EventCreateDialog() -> impl IntoView {
                     <div class="space-y-1.5">
                         <label class="text-label-sm text-rambutan-400">"End"</label>
                         <DateTimePicker
+                            label="Event end"
                             value=Signal::derive(move || end_str.get())
                             on_change=Callback::new(move |v| set_end_str.set(v))
                             disabled=Signal::derive(move || is_google_event.get())
@@ -372,6 +375,7 @@ pub fn EventCreateDialog() -> impl IntoView {
                 <div class="space-y-1.5">
                     <label class="text-label-sm text-rambutan-400">"Notes"</label>
                     <Textarea
+                        aria_label="Event notes"
                         value=Signal::derive(move || notes.get())
                         on_input=Callback::new(move |v| set_notes.set(v))
                         placeholder="Add details (optional)".to_string()

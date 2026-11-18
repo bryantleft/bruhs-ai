@@ -149,7 +149,7 @@ fn InboxLibrary() -> impl IntoView {
                 <section aria-label="Conversations" class="overflow-hidden rounded-grape bg-longan-900/45 inset-ring inset-ring-longan-800">
                     <Show when=move || !matching.with(Vec::is_empty) fallback=move || {
                         if !executor.ready.get() {
-                            view! { <div class="px-5 py-14 text-center"><p role="status" class="text-label text-rambutan-300">{move || if executor.load_error.get().is_some() { "Conversations could not be loaded" } else { "Loading conversations…" }}</p><p class="mt-1 text-body-sm text-rambutan-500">"Your conversations will appear after local records load."</p></div> }.into_any()
+                            view! { <div class="px-5 py-14 text-center"><p role="status" class="text-label text-rambutan-300">{move || if executor.load_error.get().is_some() { "Conversations could not be loaded" } else { "Loading conversations…" }}</p><p class="mt-1 text-body-sm text-rambutan-500">{move || if executor.load_error.get().is_some() { "Choose Retry loading records above. Stored conversations were left unchanged." } else { "Your conversations will appear after local records load." }}</p></div> }.into_any()
                         } else {
                             view! { <div class="px-5 py-14 text-center"><p role="status" class="text-label text-rambutan-300">{move || if !query.get().trim().is_empty() { "No matching conversations." } else { filter.get().empty_message() }}</p><p class="mt-1 text-body-sm text-rambutan-500">{move || if !query.get().trim().is_empty() { "Try another search or choose All." } else { "Import a message or choose another view." }}</p></div> }.into_any()
                         }

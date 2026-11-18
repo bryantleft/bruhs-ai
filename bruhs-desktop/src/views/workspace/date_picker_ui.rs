@@ -320,6 +320,8 @@ impl Workspace {
     ) -> AnyElement {
         let value = self.date_picker_value(target, cx);
         let text = trigger_label(target.with_time(), &value);
+        // The field's name and its date, as the web's picker announces both.
+        let name = format!("{}, {text}", target.aria_label());
         let tooltip = text.clone();
         let selector = target.selector();
         let open = self.date_picker.filter(|open| open.target == target);
@@ -353,7 +355,7 @@ impl Workspace {
             .line_height(relative(1.5))
             .text_color(theme::rambutan_100())
             .role(Role::Button)
-            .aria_label(target.aria_label())
+            .aria_label(name)
             .aria_expanded(open.is_some())
             .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
             .when(disabled, |el| el.opacity(DATE_FIELD_DISABLED_OPACITY))

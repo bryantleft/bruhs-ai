@@ -153,11 +153,42 @@ fn initial_selection(rows: &[Thread], linked: Option<&str>) -> Option<String> {
         .map(|thread| thread.id.clone())
 }
 
+/// How long a load may take before the strip says so. Most loads finish in
+/// a few dozen milliseconds; showing the strip for that moment moved the
+/// whole page 37px when it went, so early clicks missed.
+const SLOW_LOAD_MS: u64 = 400;
+
 #[component]
 pub fn ThreadCatalogStatus() -> impl IntoView {
     let catalog = expect_context::<ThreadCatalog>();
+    let slow = RwSignal::new(false);
+    Effect::new(move |_| {
+        if catalog.status.get() == Status::Ready {
+            slow.set(false);
+            return;
+        }
+        set_timeout(
+            move || {
+                // Only a load still running is slow; the page may be gone.
+                if catalog
+                    .status
+                    .try_get_untracked()
+                    .is_some_and(|status| status != Status::Ready)
+                {
+                    let _ = slow.try_set(true);
+                }
+            },
+            std::time::Duration::from_millis(SLOW_LOAD_MS),
+        );
+    });
+    // A failure shows at once; loading only once it is slow.
+    let shown = move || match catalog.status.get() {
+        Status::Ready => false,
+        Status::Failed => true,
+        Status::Pending | Status::Loading => slow.get(),
+    };
     view! {
-        <Show when=move || catalog.status.get() != Status::Ready>
+        <Show when=shown>
             <section aria-label="Thread list loading status" role="status"
                 class="flex shrink-0 flex-wrap items-center gap-2 border-b border-longan-700 px-3 py-2 text-body-sm text-rambutan-300 sm:px-5">
                 <span>{move || if catalog.status.get() == Status::Failed {

@@ -287,6 +287,12 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   web's sizes.
 - People controls are at least 24px with a mouse on both apps, and form
   fields 32px (some were 18 to 20px).
+- The web no longer jumps the page 37px when the thread list finishes
+  loading: Loading saved threads shows only once a load takes a while, and
+  a failure still shows at once.
+- The event dialog's Title, Notes and date fields have names for screen
+  readers on the web, as on the desktop, and the date fields announce their
+  date on both apps.
 - On the web, leaving Agent workflows while a press in Workflow history
   (Run, Pause, Resume or Undo, or Previous and Next) was still settling
   could stop the app with an internal error, so pages no longer updated
