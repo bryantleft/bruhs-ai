@@ -202,6 +202,43 @@ fn streamed_markdown_replacements_match_fresh_documents(cx: &mut TestAppContext)
 }
 
 #[gpui::test]
+fn streamed_bursts_and_nested_definitions_match_fresh_documents(cx: &mut TestAppContext) {
+    use gpui_component::text::TextViewState;
+    cx.update(|cx| {
+        gpui_component::init(cx);
+        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+    });
+    // Each case: a committed start, then chunks pushed in one burst (more
+    // than the parser coalesces at once) before anything settles.
+    let code: String = (0..40).map(|i| format!("  let v{i} = {i};\n")).collect();
+    let cases: [(&str, String); 4] = [
+        ("Intro", format!("\n\n  ```\n{code}  ```\n")),
+        ("> [x]: /u\n\nSee ", "[x] now".to_string()),
+        ("- [x]: /u\n\nSee ", "[x] now".to_string()),
+        ("[foo\nbar]: /u\n\nSee ", "[foo bar] now".to_string()),
+    ];
+    for (start, tail) in cases {
+        let streamed = cx.update(|cx| cx.new(|cx| TextViewState::markdown(start, cx)));
+        cx.run_until_parked();
+        streamed.update(cx, |state, cx| {
+            for ch in tail.chars() {
+                state.push_str(&ch.to_string(), cx);
+            }
+        });
+        cx.run_until_parked();
+        let text = format!("{start}{tail}");
+        let fresh = cx.update(|cx| cx.new(|cx| TextViewState::markdown(&text, cx)));
+        cx.run_until_parked();
+        streamed.read_with(cx, |state, cx| {
+            assert!(
+                state.parsed_content_eq(fresh.read(cx)),
+                "a streamed burst must match a fresh document: {text:?}"
+            );
+        });
+    }
+}
+
+#[gpui::test]
 fn markdown_background_appends_include_initial_and_replaced_content(cx: &mut TestAppContext) {
     use gpui_component::text::TextViewState;
     cx.update(|cx| {

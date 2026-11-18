@@ -70,9 +70,24 @@ Every local change is marked `bruhs:` in the source.
   except while its handle is dragged.
 - `crates/base/src/scrollbar.rs`: only the primary button drags the thumb or
   jumps the track. A right-click on a scrollbar no longer starts a drag.
-- `crates/base/src/text/state.rs`: `TextViewState::parsed_content_eq`
-  (`test-support` only). The desktop's streaming tests compare a streamed
-  Markdown/HTML prefix with a fresh parse.
+- `crates/base/src/text/state.rs`, streamed Markdown:
+  - Upstream's append path re-parses only the last block, with a fresh
+    reference table. That can disagree with a full parse:
+    - after a list, quote or code block the new text continues;
+    - with raw HTML;
+    - with reference definitions on either side.
+  - The background parser now judges each append against its own document.
+    It keeps the fast path only for a paragraph tail that a blank line
+    separates from the block before it. Otherwise it parses the whole text
+    and reports a replacement.
+  - The previous vendored copy followed the same rule.
+  - Desktop tests check 11,118 streamed prefixes, plus bursts and nested
+    definitions, against fresh parses.
+  - Upstream's own `set_text_streaming_markdown_matches_a_full_parse`, which
+    expects lists and code to append, no longer holds here. The vendored
+    crates' tests are not run.
+  - `TextViewState::parsed_content_eq` (`test-support` only) is the hook
+    those tests compare with.
 - `crates/component/src/title_bar.rs`:
   - `TITLE_BAR_HEIGHT` 34 -> 44.
   - macOS `TITLE_BAR_LEFT_PADDING` 80 -> 88.

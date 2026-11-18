@@ -397,44 +397,7 @@ impl TextViewState {
         }
         self.stream_fade.note_extend(self.text.len());
         self.text.push_str(new_text);
-        // bruhs: an append re-parses only the last block, with a fresh
-        // reference table. That matches a full parse after a paragraph, but
-        // not after a container or code block whose source the delta can
-        // continue or reinterpret, raw HTML, or a `[ref]: url` definition,
-        // which reaches blocks on either side of it. Those parse whole, as
-        // the previous vendored copy did.
-        if self.format == TextViewFormat::Markdown && !self.append_matches_full_parse() {
-            let text = self.text.clone();
-            self.increment_update(&text, false, cx);
-            return;
-        }
         self.increment_update(new_text, true, cx);
-    }
-
-    /// bruhs: whether re-parsing the last block with appended Markdown
-    /// gives what a full parse of the whole text would.
-    fn append_matches_full_parse(&self) -> bool {
-        let document = &self.parsed_content.document;
-        let blocks = &document.blocks;
-        let Some(last @ super::node::BlockNode::Paragraph(_)) = blocks.last() else {
-            return false;
-        };
-        // A paragraph right under a list or quote can be a lazy continuation
-        // of it; only one a blank line separates is a block of its own.
-        let separated = match (
-            blocks.len().checked_sub(2).map(|ix| &blocks[ix]),
-            last.span(),
-        ) {
-            (None, Some(_)) => true,
-            (Some(previous), Some(span)) => previous.span().is_some_and(|previous| {
-                document
-                    .source
-                    .get(previous.end..span.start)
-                    .is_some_and(has_blank_line)
-            }),
-            _ => false,
-        };
-        separated && !has_link_reference_definition(&self.text) && !has_html_line(&self.text)
     }
 
     /// Set the motion policy; see [`TextViewMotion`].
@@ -1358,6 +1321,20 @@ impl Future for UpdateFuture {
                 Poll::Ready(Some(mut options)) => {
                     let hit_coalesce_budget =
                         merge_pending_options(&mut options, self.rx.as_ref().get_ref());
+                    // bruhs: an append re-parses only the last block, with a
+                    // fresh reference table. Judged against this parser's own
+                    // document, an append that would not match a full parse is
+                    // parsed whole and reported as a replacement, so the view
+                    // drops cached layout for blocks it may have changed.
+                    if options.append
+                        && self.format == TextViewFormat::Markdown
+                        && !append_matches_full_parse(&self.content.document, &options.pending_text)
+                    {
+                        options.pending_text =
+                            format!("{}{}", self.content.document.source, options.pending_text);
+                        options.append = false;
+                        options.mode = ParseMode::Replace;
+                    }
 
                     let res = parse_content(self.format, self.content.clone(), &options);
                     if let Ok(content) = &res {
@@ -1437,25 +1414,71 @@ fn merge_pending_options(options: &mut UpdateOptions, rx: &Receiver<UpdateOption
     true
 }
 
-/// bruhs: whether `text` has a line that may be a link reference or footnote
-/// definition (`[label]: ...`, indented at most three spaces).
-fn has_link_reference_definition(text: &str) -> bool {
-    // CommonMark ends a line at `\n`, `\r` or `\r\n`.
-    text.split(['\n', '\r']).any(|line| {
-        let trimmed = line.trim_start_matches(' ');
-        line.len() - trimmed.len() <= 3
-            && trimmed.starts_with('[')
-            && trimmed.find("]:").is_some_and(|end| end > 1)
-    })
+/// bruhs: whether re-parsing the last block of `document` with `appended`
+/// gives what a full parse of the whole text would. Only a paragraph that a
+/// blank line separates from the block before it qualifies: a container or
+/// code block can be continued or reinterpreted by the new text. Raw HTML and
+/// reference definitions anywhere force a full parse, since they reach blocks
+/// on either side of them.
+fn append_matches_full_parse(document: &ParsedDocument, appended: &str) -> bool {
+    let blocks = &document.blocks;
+    let Some(last @ node::BlockNode::Paragraph(_)) = blocks.last() else {
+        return false;
+    };
+    let separated = match (
+        blocks.len().checked_sub(2).map(|ix| &blocks[ix]),
+        last.span(),
+    ) {
+        (None, Some(_)) => true,
+        (Some(previous), Some(span)) => previous.span().is_some_and(|previous| {
+            document
+                .source
+                .get(previous.end..span.start)
+                .is_some_and(has_blank_line)
+        }),
+        _ => false,
+    };
+    if !separated {
+        return false;
+    }
+    let text = format!("{}{}", document.source, appended);
+    !may_define_reference(&text) && !has_html_line(&text)
 }
 
-/// bruhs: whether a line of `text` may open raw HTML (`<`, indented at most
-/// three spaces).
+/// bruhs: whether `text` may hold a link reference or footnote definition.
+/// Any `]:` counts: definitions can sit in quotes and lists, and their label
+/// can span lines.
+fn may_define_reference(text: &str) -> bool {
+    text.contains("]:")
+}
+
+/// bruhs: whether a line of `text` may open raw HTML, once quote and list
+/// markers are set aside.
 fn has_html_line(text: &str) -> bool {
     // CommonMark ends a line at `\n`, `\r` or `\r\n`.
     text.split(['\n', '\r']).any(|line| {
-        let trimmed = line.trim_start_matches(' ');
-        line.len() - trimmed.len() <= 3 && trimmed.starts_with('<')
+        let mut rest = line.trim_start();
+        loop {
+            let before = rest.len();
+            rest = rest.trim_start_matches('>').trim_start();
+            for marker in ["- ", "* ", "+ "] {
+                rest = rest.strip_prefix(marker).unwrap_or(rest).trim_start();
+            }
+            let digits = rest.len() - rest.trim_start_matches(|c: char| c.is_ascii_digit()).len();
+            if digits > 0 {
+                let after = &rest[digits..];
+                if let Some(next) = after
+                    .strip_prefix(". ")
+                    .or_else(|| after.strip_prefix(") "))
+                {
+                    rest = next.trim_start();
+                }
+            }
+            if rest.len() == before {
+                break;
+            }
+        }
+        rest.starts_with('<')
     })
 }
 
