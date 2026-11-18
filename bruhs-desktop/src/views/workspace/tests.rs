@@ -197,6 +197,7 @@ use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;
 mod parity_rows;
+mod today_acceptance;
 
 fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
     NaiveDate::from_ymd_opt(year, month, day)
