@@ -261,8 +261,13 @@ struct Bar {
 }
 
 impl Bar {
+    /// The run the thumb slides along: the track less an inset at each end.
+    fn inner_len(&self) -> Pixels {
+        (along(self.track.size, self.axis) - px(THUMB_INSET_PX) * 2.0).max(Pixels::ZERO)
+    }
+
     fn travel(&self) -> Pixels {
-        along(self.track.size, self.axis) - self.thumb_len
+        self.inner_len() - self.thumb_len
     }
 
     fn thumb(&self, active: bool) -> Bounds<Pixels> {
@@ -272,13 +277,13 @@ impl Bar {
             Axis::Vertical => Bounds::new(
                 point(
                     self.track.right() - inset - thick,
-                    self.track.top() + self.thumb_start,
+                    self.track.top() + inset + self.thumb_start,
                 ),
                 size(thick, self.thumb_len),
             ),
             Axis::Horizontal => Bounds::new(
                 point(
-                    self.track.left() + self.thumb_start,
+                    self.track.left() + inset + self.thumb_start,
                     self.track.bottom() - inset - thick,
                 ),
                 size(self.thumb_len, thick),
@@ -292,7 +297,7 @@ impl Bar {
         if travel <= Pixels::ZERO {
             return Pixels::ZERO;
         }
-        let start = along_point(self.track.origin, self.axis);
+        let start = along_point(self.track.origin, self.axis) + px(THUMB_INSET_PX);
         let ratio = ((along_point(pointer, self.axis) - start - grab) / travel).clamp(0.0, 1.0);
         -(self.max_offset * ratio)
     }
@@ -351,7 +356,7 @@ fn bars(
                 size(viewport.size.width - corner, track),
             ),
         };
-        let track_len = along(bounds.size, bar_axis);
+        let track_len = (along(bounds.size, bar_axis) - px(THUMB_INSET_PX) * 2.0).max(Pixels::ZERO);
         let visible = along(viewport.size, bar_axis);
         let whole = along(content, bar_axis);
         let max_offset = (whole - visible).max(Pixels::ZERO);
@@ -512,7 +517,10 @@ impl Element for Scrollbar {
                     } else {
                         style.thumb
                     };
-                    window.paint_quad(fill(bar.thumb(active), color));
+                    let thumb = bar.thumb(active);
+                    // A pill, like the web's `border-radius: 8px` thumb.
+                    let radius = thumb.size.width.min(thumb.size.height) / 2.0;
+                    window.paint_quad(fill(thumb, color).corner_radii(radius));
                 }
             }
         });
@@ -642,8 +650,10 @@ mod tests {
         // A quarter of the content is visible.
         assert_eq!(bar.thumb_len, px(48.).max(px(25.)));
         assert_eq!(bar.max_offset, px(300.));
-        // Halfway down the content, halfway along the travel.
-        assert_eq!(bar.thumb_start, (px(100.) - bar.thumb_len) * 0.5);
+        // Halfway down the content, halfway along the travel (the track
+        // less its two insets).
+        let run = px(100. - THUMB_INSET_PX * 2.);
+        assert_eq!(bar.thumb_start, (run - bar.thumb_len) * 0.5);
     }
 
     #[test]
