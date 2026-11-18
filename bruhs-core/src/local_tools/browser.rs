@@ -910,7 +910,9 @@ impl Cdp {
         Ok(result["result"]["value"].clone())
     }
 
-    pub async fn call(&mut self, method: &str, params: Value) -> Result<Value, ToolError> {
+    /// Send a command without waiting for its reply, which arrives through
+    /// [`Self::next_message`] under the returned id.
+    pub async fn send(&mut self, method: &str, params: Value) -> Result<u64, ToolError> {
         self.sequence = self.sequence.checked_add(1).ok_or_else(|| {
             ToolError::Invalid("Browser command sequence exhausted. Start a new browser.".into())
         })?;
@@ -929,6 +931,27 @@ impl Cdp {
                     .into(),
             ))
             .await?;
+        Ok(id)
+    }
+
+    /// The next message from Chrome, a reply or an event, kept whole: a
+    /// reader that matches replies by id loses no event.
+    pub async fn next_message(&mut self) -> Result<Value, ToolError> {
+        while let Some(frame) = self.socket.next().await {
+            if let Message::Text(text) = frame? {
+                return Ok(serde_json::from_str(&text)?);
+            }
+        }
+        Err(ToolError::Unavailable(
+            "Chrome closed the debugging connection. Start another browser.".into(),
+        ))
+    }
+
+    /// Send a command and wait for its reply. Events read meanwhile go to
+    /// the console and network logs; every other event is dropped, so a
+    /// live view reads with [`Self::send`] and [`Self::next_message`].
+    pub async fn call(&mut self, method: &str, params: Value) -> Result<Value, ToolError> {
+        let id = self.send(method, params).await?;
         while let Some(frame) = self.socket.next().await {
             let frame = frame?;
             let Message::Text(text) = frame else {

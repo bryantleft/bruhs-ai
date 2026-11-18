@@ -70,6 +70,8 @@ pub const LIVE_VIEW_HINT: &str = "Keys go to the page. Press F6 to leave.";
 pub const TAKE_CONTROL_FIRST: &str = "Take control to use the page.";
 pub const USE_THE_WINDOW: &str = "Use the window.";
 pub const COMPUTERS_FULL: &str = "Four bruh browsers are open. Close one in its Computer tab.";
+pub const VIEWERS_FULL: &str = "Four live views are open for this browser. Close one first.";
+pub const LIVE_VIEW_ENDED: &str = "This live view has ended. Open the browser again.";
 pub const TURN_ON_IN_SETTINGS: &str = "Turn on Computer in the bruh's Settings.";
 
 const NEEDS_CLAUDE: &str = "Computer needs a Claude model.";

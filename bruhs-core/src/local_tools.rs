@@ -14,6 +14,7 @@ mod computer;
 mod devices;
 mod network;
 mod process;
+mod screencast;
 #[cfg(test)]
 mod tests;
 mod video;
@@ -22,6 +23,7 @@ pub use computer::BruhComputer;
 #[cfg(any(test, feature = "test-support"))]
 pub use computer::{FakePages, PageLaunch};
 pub use process::ProcessPolicy;
+pub use screencast::{ComputerWatch, Viewer};
 pub use video::DeviceVideo;
 
 #[derive(Debug, thiserror::Error)]

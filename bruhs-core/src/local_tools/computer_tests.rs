@@ -2,8 +2,8 @@ use std::{path::Path, sync::Arc, time::Duration};
 
 use bruhs_models::crew::{
     handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, COMPUTERS_FULL, COMPUTER_OFF_DENIAL,
-    LOCAL_HOST_DENIAL, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
-    USE_THE_WINDOW,
+    LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, TAKE_CONTROL_FIRST,
+    TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
 };
 use bruhs_models::local_tools::{
     BrowserAction, ComputerInput, ComputerRequest, Control, GrantRequest, MouseButton, MouseKind,
@@ -11,7 +11,7 @@ use bruhs_models::local_tools::{
 };
 
 use super::{BruhComputer, LocalToolsHost};
-use crate::local_tools::ToolError;
+use crate::local_tools::{screencast::fake_chrome::FakeChrome, ComputerWatch, ToolError};
 
 /// A bruh whose profile is `<home>/bruhs/<id>/browser`.
 fn bruh_in(home: &Path, id: &str) -> BruhComputer {
@@ -807,6 +807,141 @@ async fn a_held_computer_never_closes_for_idleness() {
     reaper.abort();
 }
 
+/// Whether watching failed because there is no such bruh live view.
+fn ended(watch: Result<ComputerWatch, ToolError>) -> bool {
+    matches!(watch, Err(ToolError::NotFound(message)) if message == LIVE_VIEW_ENDED)
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_watched_browser_never_closes_for_idleness() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    let reaper = host.start_idle_reaper();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    let state = host.open_computer("a").await.unwrap();
+    let watch = host
+        .watch_computer(state.session_id.as_deref().unwrap())
+        .unwrap_or_else(|_| panic!("the open browser can be watched"));
+    for _ in 0..3 {
+        tokio::time::advance(Duration::from_secs(10 * 60)).await;
+        settle().await;
+    }
+    assert!(host.computer_state("a").await.unwrap().session_id.is_some());
+    assert_eq!(fake.closes("a"), 0);
+    // Unwatched, it idles out like any other.
+    drop(watch);
+    tokio::time::advance(Duration::from_secs(11 * 60)).await;
+    settle().await;
+    assert_eq!(fake.closes("a"), 1);
+    reaper.abort();
+}
+
+#[tokio::test]
+async fn watching_needs_a_bruh_session() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    assert!(ended(host.watch_computer("nope")));
+    assert!(ended(host.watch_computer("")));
+    // A thread's verification grant and the bruh's own grant are no live
+    // views; thread sessions live outside the bruh slots altogether.
+    let thread = host
+        .grant(GrantRequest {
+            principal: "thread-1".into(),
+            scope: ToolScope::Browser,
+        })
+        .unwrap();
+    assert!(ended(host.watch_computer(&thread.id)));
+    let (_, bruh_grant) = host.bruh_grant("a").unwrap();
+    assert!(ended(host.watch_computer(&bruh_grant)));
+    let session = host.open_computer("a").await.unwrap().session_id.unwrap();
+    let Ok(mut watch) = host.watch_computer(&session) else {
+        panic!("the open browser can be watched");
+    };
+    assert_eq!(watch.agent_id, "a");
+    assert_eq!(
+        watch.state.borrow().session_id.as_deref(),
+        Some(session.as_str())
+    );
+    fake.publish_frame("a", vec![1, 2]);
+    assert_eq!(&*watch.viewer.next_frame().await.unwrap(), &[1, 2]);
+    host.close_computer("a").await.unwrap();
+    assert!(ended(host.watch_computer(&session)));
+    // Turning Computer off ends the live view.
+    host.sync_bruhs(vec![]).await;
+    watch.viewer.ack();
+    assert!(watch.viewer.next_frame().await.is_none());
+}
+
+#[tokio::test]
+async fn the_live_view_restarts_after_every_relaunch() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    let mut chrome = FakeChrome::start().await;
+    fake.set_page_socket("a", &chrome.url);
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    let session = host.open_computer("a").await.unwrap().session_id.unwrap();
+    // Nobody watches yet: no connection.
+    chrome.settle(Duration::from_millis(50)).await;
+    assert_eq!(chrome.count("Page.enable"), 0);
+    let Ok(watch) = host.watch_computer(&session) else {
+        panic!("the open browser can be watched");
+    };
+    chrome
+        .wait_for("the first page's screencast", |chrome| {
+            chrome.count_on(0, "Page.startScreencast") == 1
+        })
+        .await;
+    // Each relaunch has a new page socket; the old connection goes with
+    // its page.
+    let relaunched = |n: usize| {
+        move |chrome: &FakeChrome| {
+            chrome.count_on(n, "Page.startScreencast") == 1 && chrome.closed(n - 1)
+        }
+    };
+    host.computer_request("a", ComputerRequest::OpenWindow)
+        .await
+        .unwrap();
+    chrome
+        .wait_for("the window's screencast", relaunched(1))
+        .await;
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    chrome
+        .wait_for("the handed back page's screencast", relaunched(2))
+        .await;
+    host.computer_request("a", ComputerRequest::OpenWindow)
+        .await
+        .unwrap();
+    chrome
+        .wait_for("the second window's screencast", relaunched(3))
+        .await;
+    fake.close_window("a");
+    chrome
+        .wait_for(
+            "the screencast after a window closed by hand",
+            relaunched(4),
+        )
+        .await;
+    host.computer_request("a", ComputerRequest::Close)
+        .await
+        .unwrap();
+    host.computer_request("a", ComputerRequest::Open)
+        .await
+        .unwrap();
+    chrome
+        .wait_for("the reopened page's screencast", relaunched(5))
+        .await;
+    drop(watch);
+    chrome
+        .wait_for("the screencast to stop", |chrome| {
+            chrome.count_on(5, "Page.stopScreencast") == 1
+        })
+        .await;
+    host.close_all().await;
+}
+
 /// A stand-in for a Chrome a crash left behind: a shell whose command line
 /// carries `args`, which exits on SIGTERM and takes its `sleep` with it.
 /// Returns once the shell runs with its trap set, so `ps` shows `args`.
@@ -969,4 +1104,40 @@ async fn live_bruh_computer_runs_behind_the_guard_and_closes_cleanly() {
         assert!(!alive, "Chrome exited");
     }
     assert!(bruh.profile_dir.join("Default").exists());
+}
+
+#[tokio::test]
+#[ignore = "launches headless Chrome on a temp profile; run explicitly for local acceptance"]
+async fn live_bruh_computer_streams_jpeg_frames_to_its_viewers() {
+    let home = tempfile::tempdir().unwrap();
+    let host = LocalToolsHost::new().unwrap();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    let session = host.open_computer("a").await.unwrap().session_id.unwrap();
+    let Ok(mut watch) = host.watch_computer(&session) else {
+        panic!("the open browser can be watched");
+    };
+    let Ok(mut second) = host.watch_computer(&session) else {
+        panic!("a second viewer can join");
+    };
+    for viewer in [&mut watch.viewer, &mut second.viewer] {
+        let frame = tokio::time::timeout(Duration::from_secs(10), viewer.next_frame())
+            .await
+            .expect("Chrome sends a frame")
+            .unwrap();
+        assert!(frame.starts_with(&[0xff, 0xd8]), "a JPEG");
+        viewer.ack();
+    }
+    // A relaunch while watched streams the new page.
+    host.close_computer("a").await.unwrap();
+    host.open_computer("a").await.unwrap();
+    host.bruh_command("a", BrowserAction::Scroll { dx: 0.0, dy: 10.0 })
+        .await
+        .unwrap();
+    let frame = tokio::time::timeout(Duration::from_secs(10), watch.viewer.next_frame())
+        .await
+        .expect("the reopened page sends a frame")
+        .unwrap();
+    assert!(frame.starts_with(&[0xff, 0xd8]), "a JPEG");
+    drop((watch, second));
+    host.close_all().await;
 }

@@ -17,8 +17,8 @@ use async_trait::async_trait;
 use bruhs_models::{
     crew::{
         handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS, COMPUTERS_FULL,
-        COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS,
-        OWNER_HAS_COMPUTER, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
+        COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, MAX_COMPUTERS,
+        NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
@@ -33,6 +33,7 @@ use uuid::Uuid;
 use super::{
     browser::{Browser, LaunchOptions},
     network::NetworkGuard,
+    screencast::{ComputerWatch, ScreencastHub, ScreencastTask},
     GrantState, LocalToolsHost, ProcessPolicy, ToolError,
 };
 
@@ -60,8 +61,8 @@ pub struct BruhComputer {
 #[async_trait]
 pub(super) trait ComputerPage: Send {
     fn session(&self) -> &BrowserSession;
-    /// The page target's debugging socket, for the live view.
-    #[expect(dead_code, reason = "used from Task 7")]
+    /// The page target's debugging socket, for the live view. `None` for
+    /// a page without one, such as a fake.
     fn page_socket(&self) -> Option<String>;
     /// The page view in CSS px: [`COMPUTER_VIEWPORT`] headless, the
     /// window's when headed.
@@ -184,6 +185,8 @@ struct Slot {
     /// Bumped when the bruh is stopped; an in-flight action ends.
     interrupt: watch::Sender<u64>,
     state: watch::Sender<ComputerState>,
+    /// The live view's newest frame and its viewers, across relaunches.
+    hub: Arc<ScreencastHub>,
     page: tokio::sync::Mutex<PageSlot>,
 }
 
@@ -221,12 +224,16 @@ impl PageSlot {
     }
 }
 
-/// A running page with the guard its traffic goes through and its seat.
-/// Dropping it stops the guard and frees the seat.
+/// A running page with the guard its traffic goes through, its seat and
+/// its live view. Dropping it stops the guard and the screencast and frees
+/// the seat.
 struct OpenPage {
     page: Box<dyn ComputerPage>,
     _guard: NetworkGuard,
     seat: Seat,
+    /// Streams this page while someone watches. Each launch has its own,
+    /// since a relaunched page has a new socket.
+    screencast: Option<ScreencastTask>,
 }
 
 struct Seat {
@@ -259,7 +266,8 @@ impl Drop for Seat {
 }
 
 impl Slot {
-    fn new(computer: BruhComputer) -> Self {
+    /// `budget` is the largest live view frame, in bytes.
+    fn new(computer: BruhComputer, budget: usize) -> Self {
         let grant = ToolGrant {
             id: Uuid::new_v4().to_string(),
             principal: Principal::Bruh(computer.agent_id.clone()).wire(),
@@ -282,6 +290,7 @@ impl Slot {
             }),
             interrupt: watch::channel(0).0,
             state,
+            hub: ScreencastHub::new(budget),
             page: tokio::sync::Mutex::new(PageSlot::default()),
         }
     }
@@ -338,19 +347,26 @@ impl Slot {
 
     fn publish(&self, page: &PageSlot) {
         let meta = self.meta();
+        let session = page
+            .open
+            .as_ref()
+            .map(|open| open.page.session().id.clone());
+        let headed = page.headed && page.open.is_some();
         self.state.send_modify(|state| {
-            state.session_id = page
-                .open
-                .as_ref()
-                .map(|open| open.page.session().id.clone());
+            // The same window keeps the size its frames gave it; a launch
+            // starts from the page's own measure.
+            let same_window = headed && state.headed && state.session_id == session;
+            state.session_id = session;
             state.url.clone_from(&page.last_url);
             state.error.clone_from(&page.error);
             state.control = meta.control;
-            state.headed = page.headed && page.open.is_some();
-            state.viewport = page
-                .open
-                .as_ref()
-                .map_or(COMPUTER_VIEWPORT, |open| open.page.viewport());
+            state.headed = headed;
+            if !same_window {
+                state.viewport = page
+                    .open
+                    .as_ref()
+                    .map_or(COMPUTER_VIEWPORT, |open| open.page.viewport());
+            }
         });
         drop(meta);
     }
@@ -359,6 +375,9 @@ impl Slot {
     /// its seat for a relaunch.
     async fn close_page(&self, page: &mut PageSlot) -> Option<Seat> {
         let mut open = page.open.take()?;
+        // Its screencast goes first, so it doesn't reconnect to a page
+        // that is closing.
+        drop(open.screencast.take());
         page.headed = false;
         let name = self.meta().name.clone();
         tracing::debug!(bruh = %name, "closing bruh browser");
@@ -446,7 +465,8 @@ impl LocalToolsHost {
             match slots.get(&computer.agent_id) {
                 Some(slot) => slot.update(&computer),
                 None => {
-                    slots.insert(computer.agent_id.clone(), Arc::new(Slot::new(computer)));
+                    let slot = Slot::new(computer, self.policy.max_output_bytes);
+                    slots.insert(slot.agent_id.clone(), Arc::new(slot));
                 }
             }
         }
@@ -461,6 +481,7 @@ impl LocalToolsHost {
         let removed = self.update_slots(computers);
         for slot in &removed {
             slot.grant.revoked.send_replace(true);
+            slot.hub.end();
         }
         join_all(removed.iter().map(|slot| async move {
             let mut page = slot.page.lock().await;
@@ -512,6 +533,7 @@ impl LocalToolsHost {
         let slots = self.computer_slots();
         for slot in &slots {
             slot.grant.revoked.send_replace(true);
+            slot.hub.end();
         }
         join_all(slots.iter().map(|slot| async move {
             let mut page = slot.page.lock().await;
@@ -804,16 +826,36 @@ impl LocalToolsHost {
             .as_mut()
             .ok_or_else(|| ToolError::Unavailable("The bruh's browser didn't open.".into()))?;
         let result = open.page.owner_input(&input).await;
+        page.last_used = Some(Instant::now());
+        // Pointer and key input leave the state alone: the live view
+        // follows where a click leads, which the slot's last address may
+        // not know yet.
         if matches!(
             input,
             ComputerInput::Navigate { .. } | ComputerInput::Back | ComputerInput::Reload
         ) {
             slot.refresh_url(&mut page).await;
+            slot.publish(&page);
         }
-        page.last_used = Some(Instant::now());
-        slot.publish(&page);
         drop(page);
         result
+    }
+
+    /// A live view of the bruh browser `session_id` names: its frames and
+    /// state. A thread's verification browser has no live view.
+    pub fn watch_computer(&self, session_id: &str) -> Result<ComputerWatch, ToolError> {
+        let slot = self
+            .computer_slots()
+            .into_iter()
+            .find(|slot| slot.state.borrow().session_id.as_deref() == Some(session_id))
+            .ok_or_else(|| ToolError::NotFound(LIVE_VIEW_ENDED.into()))?;
+        // An open page's screencast starts as its first viewer joins.
+        let viewer = slot.hub.viewer()?;
+        Ok(ComputerWatch {
+            agent_id: slot.agent_id.clone(),
+            viewer,
+            state: slot.state.subscribe(),
+        })
     }
 
     /// The bruh's Computer state as it changes, for runs that wait while
@@ -860,13 +902,18 @@ impl LocalToolsHost {
     async fn close_idle(&self) {
         let idle = Duration::from_millis(COMPUTER_IDLE_MS);
         join_all(self.computer_slots().iter().map(|slot| async move {
-            // A page in use or held by the owner isn't idle.
+            // A page in use, held by the owner or watched isn't idle.
             if slot.control() == Control::Owner {
                 return;
             }
             let Ok(mut page) = slot.page.try_lock() else {
                 return;
             };
+            if slot.hub.watched() {
+                // Its idle time starts when the last viewer leaves.
+                page.last_used = Some(Instant::now());
+                return;
+            }
             let expired = page.last_used.is_some_and(|used| used.elapsed() >= idle);
             if page.open.is_some() && expired {
                 slot.shut(&mut page).await;
@@ -919,10 +966,20 @@ impl LocalToolsHost {
         headless: bool,
     ) -> Result<(), ToolError> {
         let result = match launched {
-            Ok(open) => {
+            Ok(mut open) => {
                 if !headless {
                     self.watch_window(&slot.agent_id, &open);
                 }
+                // Every launch while watched (a reopen, a window, a hand
+                // back) streams its new page.
+                open.screencast = open.page.page_socket().map(|socket| {
+                    ScreencastTask::start(
+                        socket,
+                        Arc::clone(&slot.hub),
+                        slot.state.clone(),
+                        self.policy,
+                    )
+                });
                 page.open = Some(open);
                 page.headed = !headless;
                 page.error = None;
@@ -975,6 +1032,7 @@ impl LocalToolsHost {
             page,
             _guard: guard,
             seat,
+            screencast: None,
         })
     }
 
@@ -995,7 +1053,7 @@ mod fake {
     use std::{
         collections::HashMap,
         path::PathBuf,
-        sync::{Arc, Mutex, PoisonError},
+        sync::{Arc, Mutex, OnceLock, PoisonError, Weak},
     };
 
     use async_trait::async_trait;
@@ -1011,6 +1069,8 @@ mod fake {
     #[derive(Clone, Default)]
     pub struct FakePages {
         seen: Arc<Mutex<Seen>>,
+        /// The host these pages belong to, for frames sent to its slots.
+        host: Arc<OnceLock<Weak<LocalToolsHost>>>,
     }
 
     #[derive(Default)]
@@ -1030,6 +1090,8 @@ mod fake {
         gone: std::collections::HashSet<String>,
         fail_actions: std::collections::HashSet<String>,
         fail_launches: std::collections::HashSet<String>,
+        /// The page socket each bruh's next launches report.
+        page_sockets: HashMap<String, String>,
     }
 
     impl FakePages {
@@ -1120,6 +1182,20 @@ mod fake {
             self.seen().fail_actions.insert(agent_id.into());
         }
 
+        /// A frame from the bruh's page, as Chrome's screencast would send.
+        pub fn publish_frame(&self, agent_id: &str, bytes: Vec<u8>) {
+            let host = self.host.get().and_then(Weak::upgrade);
+            if let Some(slot) = host.and_then(|host| host.computer_slot(agent_id)) {
+                slot.hub.publish(bytes);
+            }
+        }
+
+        /// The bruh's later pages report `url` as their debugging socket,
+        /// so the host streams them from there.
+        pub fn set_page_socket(&self, agent_id: &str, url: &str) {
+            self.seen().page_sockets.insert(agent_id.into(), url.into());
+        }
+
         /// The bruh's next launch fails, as when Chrome can't open.
         pub fn fail_next_launch(&self, agent_id: &str) {
             self.seen().fail_launches.insert(agent_id.into());
@@ -1141,14 +1217,15 @@ mod fake {
                         url: launch.url.clone(),
                     };
                     let (window, feed) = watch::channel(None);
+                    let mut seen = pages.seen();
                     let page = FakePage {
                         agent_id: launch.agent_id.clone(),
                         profile_dir: launch.profile_dir.clone(),
                         session: session.clone(),
                         pages: pages.clone(),
                         window: feed,
+                        socket: seen.page_sockets.get(&launch.agent_id).cloned(),
                     };
-                    let mut seen = pages.seen();
                     seen.windows.insert(launch.agent_id.clone(), window);
                     seen.urls
                         .insert(launch.agent_id.clone(), launch.url.clone());
@@ -1167,6 +1244,7 @@ mod fake {
         session: BrowserSession,
         pages: FakePages,
         window: watch::Receiver<Option<String>>,
+        socket: Option<String>,
     }
 
     impl FakePage {
@@ -1182,7 +1260,7 @@ mod fake {
         }
 
         fn page_socket(&self) -> Option<String> {
-            None
+            self.socket.clone()
         }
 
         fn viewport(&self) -> Viewport {
@@ -1276,6 +1354,7 @@ mod fake {
             let host =
                 Self::with_parts(ProcessPolicy::default(), client, pages.launcher(), network)
                     .unwrap_or_else(|error| panic!("the fake host has a valid policy: {error}"));
+            let _ = pages.host.set(Arc::downgrade(&host));
             (host, pages)
         }
     }
