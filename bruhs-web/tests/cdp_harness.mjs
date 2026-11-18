@@ -1,11 +1,13 @@
 // Shared by the CDP browser harnesses (today_replay_browser.mjs,
-// workflow_pause_browser.mjs, inbox_states_browser.mjs): a static server for
+// workflow_pause_browser.mjs, inbox_states_browser.mjs,
+// people_profile_browser.mjs): a static server for
 // a built dist, headless Chrome on a fixed debugging port with a fresh
 // profile, and a flat-session CDP client with real pointer and key input.
 //
 // Nothing leaves the machine and nothing reaches a bruhs-server: every request
 // that is not for the dist is refused. Loopback /api requests fail as a
-// stopped server would; anything else is recorded as unexpected.
+// stopped server would, unless the page's fixture `api` answers them;
+// anything else is recorded as unexpected.
 //
 // Each page gets inert IndexedDB hooks, switched on per check through
 // `window.__qa` (see `QA_HOOKS`): delay a read-write transaction's
@@ -34,6 +36,14 @@ export async function serveDist(dist, port) {
   const server = createServer(async (request, response) => {
     const url = new URL(request.url, 'http://127.0.0.1');
     if (!['GET', 'HEAD'].includes(request.method)) { response.writeHead(405); response.end(); return; }
+    if (url.pathname === '/__qa_stream') {
+      // An event stream that stays open and says nothing, for fixture APIs.
+      response.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-store', 'Access-Control-Allow-Origin': '*' });
+      response.write(': fixture\n\n');
+      const timer = setInterval(() => response.write(': connected\n\n'), 1000);
+      request.on('close', () => clearInterval(timer));
+      return;
+    }
     if (url.pathname === '/__qa_blank') {
       response.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8', 'Cache-Control': 'no-store' });
       response.end('<!doctype html><title>QA fixture page</title><p>Same-origin IndexedDB fixture page.</p>');
@@ -198,6 +208,21 @@ export class Page {
     try {
       if (url.origin === this.origin) { await this.send('Fetch.continueRequest', { requestId }); return; }
       if (loopback(url.hostname) && url.pathname.startsWith('/api/')) {
+        const answer = this.api && (request.method === 'OPTIONS' ? { status: 204, body: null } : this.api({ method: request.method, url, body: request.postData ?? null }));
+        if (answer === 'stream') {
+          await this.send('Fetch.continueRequest', { requestId, url: `${this.origin}/__qa_stream` });
+          return;
+        }
+        if (answer) {
+          const responseHeaders = [
+            ['Access-Control-Allow-Origin', this.origin], ['Access-Control-Allow-Headers', '*'],
+            ['Access-Control-Allow-Methods', 'GET, HEAD, OPTIONS, POST, PATCH, PUT, DELETE'],
+            ['Access-Control-Allow-Private-Network', 'true'], ['Cache-Control', 'no-store'], ['Content-Type', 'application/json'],
+          ].map(([name, value]) => ({ name, value }));
+          const body = answer.body === null ? '' : JSON.stringify(answer.body);
+          await this.send('Fetch.fulfillRequest', { requestId, responseCode: answer.status ?? 200, responseHeaders, body: Buffer.from(body).toString('base64') });
+          return;
+        }
         this.refusedApi.push(`${request.method} ${url.pathname}`);
         await this.send('Fetch.failRequest', { requestId, errorReason: 'ConnectionRefused' });
         return;
@@ -207,7 +232,13 @@ export class Page {
     } catch {}
   }
 
-  async init({ width = 1280, height = 800, touch = false, initScripts = [], timezone = undefined } = {}) {
+  /**
+   * `api`, if given, answers loopback /api requests: it gets
+   * `{ method, url, body }` and returns `{ status, body }` (JSON), the string
+   * 'stream' for a quiet event stream, or nothing to refuse the request.
+   */
+  async init({ width = 1280, height = 800, touch = false, initScripts = [], timezone = undefined, api = undefined } = {}) {
+    this.api = api;
     await this.send('Page.enable');
     await this.send('Runtime.enable');
     await this.send('Fetch.enable', { patterns: [{ urlPattern: '*', requestStage: 'Request' }] });
