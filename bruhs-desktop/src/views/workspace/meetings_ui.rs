@@ -1042,7 +1042,8 @@ impl Workspace {
                 .rounded(px(4.0))
                 .border_1()
                 .border_color(ring_color)
-                .px_1()
+                // Web `px-2` inside an inset ring; here the 1px border takes one.
+                .px(px(7.0))
                 .capture_action(cx.listener(|this, _: &InputEscape, _window, cx| {
                     this.cancel_speaker_rename(cx);
                     cx.stop_propagation();
@@ -1050,6 +1051,7 @@ impl Workspace {
                 .child(
                     Input::new(&self.speaker_rename_input)
                         .appearance(false)
+                        .px_0()
                         .aria_label("Speaker name"),
                 )
                 .into_any_element();
@@ -2207,13 +2209,15 @@ impl Workspace {
                             } else {
                                 theme::ring_card()
                             })
-                            .px_3()
+                            // Web `px-2.5` (the shared Input), less the 1px border.
+                            .px(px(9.0))
                             .flex()
                             .items_center()
                             .child(
                                 div().flex_1().min_w_0().child(
                                     Input::new(&self.search_query_input)
                                         .appearance(false)
+                                        .px_0()
                                         .aria_label("Search everything"),
                                 ),
                             )

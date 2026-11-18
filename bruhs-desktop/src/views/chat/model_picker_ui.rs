@@ -587,6 +587,8 @@ impl ChatView {
                         div().flex_1().min_w_0().child(
                             Input::new(&self.model_picker_query)
                                 .appearance(false)
+                                // Web: a bare <input> after the icon's gap.
+                                .px_0()
                                 .role(Role::EditableComboBox)
                                 .aria_label(matches.get(highlighted).map_or_else(
                                     || {

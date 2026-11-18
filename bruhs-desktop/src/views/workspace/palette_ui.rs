@@ -369,6 +369,8 @@ pub(super) const COMMAND_BAR_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const COMMAND_BAR_INPUT_TEXT_SIZE_PX: f32 = theme::APP_UI_TEXT_SIZE_PX;
 pub(super) const COMMAND_BAR_INPUT_X_PADDING_PX: f32 = 16.0;
 pub(super) const COMMAND_BAR_INPUT_Y_PADDING_PX: f32 = 12.0;
+/// The web input's line box: its text at the page's 1.5 line height.
+pub(super) const COMMAND_BAR_INPUT_LINE_HEIGHT_PX: f32 = COMMAND_BAR_INPUT_TEXT_SIZE_PX * 1.5;
 pub(super) const COMMAND_BAR_OVERLAY_OPACITY: f32 = 0.70;
 pub(super) const COMMAND_BAR_LIST_MAX_HEIGHT_PX: f32 = 576.0;
 pub(super) const COMMAND_BAR_LIST_X_PADDING_PX: f32 = 8.0;
@@ -1141,21 +1143,28 @@ impl Workspace {
                     }))
                     .child(
                         div()
+                            .debug_selector(|| "desktop-command-bar-input".to_string())
                             .flex_shrink_0()
                             .px(px(COMMAND_BAR_INPUT_X_PADDING_PX))
                             .py(px(COMMAND_BAR_INPUT_Y_PADDING_PX))
                             .border_b_1()
                             .border_color(theme::longan_800())
-                            .child(
-                                Input::new(&self.command_input)
+                            .child({
+                                let input = Input::new(&self.command_input)
                                     .aria_label("Command search")
                                     .appearance(false)
                                     .bordered(false)
                                     .focus_bordered(false)
                                     .cleanable(false)
                                     .font_family(COMMAND_BAR_BODY_FONT_FAMILY)
-                                    .text_size(px(COMMAND_BAR_INPUT_TEXT_SIZE_PX)),
-                            ),
+                                    .text_size(px(COMMAND_BAR_INPUT_TEXT_SIZE_PX))
+                                    // Web `px-4 py-3` belong to the wrapper:
+                                    // the field is only its line of text.
+                                    .p_0()
+                                    .line_height(px(COMMAND_BAR_INPUT_LINE_HEIGHT_PX));
+                                // `Input::h` sizes only multi-line fields.
+                                Styled::h(input, px(COMMAND_BAR_INPUT_LINE_HEIGHT_PX))
+                            }),
                     )
                     .children(self.render_palette_mode_chip())
                     .child(self.render_command_action_list(cx))

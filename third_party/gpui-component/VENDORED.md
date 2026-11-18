@@ -65,6 +65,14 @@ Every local change is marked `bruhs:` in the source.
 - `crates/component/src/input/textarea.rs`: `Textarea::focus_bordered`,
   forwarded to the `Input` it renders. The composer turns the focus border
   off.
+- `crates/component/src/input/input.rs`, `textarea.rs`: `editor_padding`
+  replaces the multi-line editor's padding, which upstream always derives from
+  the size. The chat composer pads its field like the web's textarea and keeps
+  only the editor's bottom padding.
+  - A single-line `Input` takes `.px_0()` / `.p_0()` instead: the caller's
+    style is applied after the size's padding.
+  - `Input::h` sizes only multi-line fields. For a single-line height, call
+    `Styled::h(input, ..)`.
 - `crates/base/src/input/base/state.rs`: a disabled input is not a Tab stop,
   as a disabled `<input>` is not on the web. A click still focuses it.
   Upstream keeps every input in the Tab order. The desktop test

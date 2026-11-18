@@ -91,8 +91,19 @@ fn chains(src: &str) -> Vec<(usize, String, String)> {
         let start = i;
         let base = depths[start];
         // The chain runs while we are nested deeper than where it started, or
-        // the line is another `.method()` at the same level.
-        while i < lines.len() && (depths[i] > base || lines[i].trim_start().starts_with('.')) {
+        // the line is another `.method()` at the same level. A comment line
+        // between two calls is part of the chain too.
+        let continues = |i: usize| {
+            let line = lines[i].trim_start();
+            line.starts_with('.')
+                || (line.starts_with("//")
+                    && lines[i + 1..]
+                        .iter()
+                        .map(|l| l.trim_start())
+                        .find(|l| !l.starts_with("//"))
+                        .is_some_and(|l| l.starts_with('.')))
+        };
+        while i < lines.len() && (depths[i] > base || continues(i)) {
             i += 1;
         }
         let enclosing = lines[..start]

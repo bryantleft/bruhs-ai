@@ -291,7 +291,6 @@ impl CredentialSettings {
         panel = match editor {
             Editor::Replace { input, .. } => panel.child("New credential value").child(
                 Input::new(input)
-                    .h(px(theme::CONTROL_PX))
                     .aria_label("New credential value")
                     .content_type(InputContentType::Password)
                     .disabled(self.busy),
@@ -365,7 +364,7 @@ impl Render for CredentialSettings {
             .collect();
         div().id("credential-manager").p_4().min_w_0().font_family(theme::UI_SMALL_FONT_FAMILY).text_size(px(12.0)).text_color(theme::rambutan_200()).flex().flex_col().gap_3()
             .child(self.connections.clone())
-            .child(Input::new(&self.search).h(px(theme::CONTROL_PX)).aria_label("Search saved credentials"))
+            .child(Input::new(&self.search).aria_label("Search saved credentials"))
             .child(web_button("refresh-credentials", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::disabled_if(self.busy)).min_h(px(theme::CONTROL_PX)).aria_label("Refresh credentials").child("Refresh credentials")
                 .map(|el| on_press_view(el, cx, |this, _, cx| this.refresh(cx))))
             .child("Values are never displayed. Replace a key to rotate it. Deleting removes the saved copy; running commands may finish with the value they already received.")

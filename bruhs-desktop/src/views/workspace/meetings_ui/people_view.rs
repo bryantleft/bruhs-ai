@@ -1722,7 +1722,8 @@ impl Workspace {
                 .bg(theme::longan_800())
                 .border_1()
                 .border_color(theme::longan_600())
-                .px_1()
+                // Web `px-2`, less the 1px border.
+                .px(px(7.0))
                 .py(px(2.0))
                 .capture_action(cx.listener(|this, _: &InputEscape, _window, cx| {
                     this.cancel_person_rename(cx);
@@ -1731,6 +1732,7 @@ impl Workspace {
                 .child(
                     Input::new(&self.person_rename_input)
                         .appearance(false)
+                        .px_0()
                         .aria_label("Profile name"),
                 )
                 .into_any_element()

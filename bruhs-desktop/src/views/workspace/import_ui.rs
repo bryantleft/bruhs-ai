@@ -937,7 +937,8 @@ impl Workspace {
                                     .bg(theme::longan_900())
                                     .border_1()
                                     .border_color(theme::longan_700())
-                                    .px(px(10.0))
+                                    // Web `px-2.5`, less the 1px border.
+                                    .px(px(9.0))
                                     // A small (24px) input in 2px padding and a
                                     // 1px border: 30px, the web's py-1.5 field.
                                     .py(px(2.0))
@@ -946,6 +947,7 @@ impl Workspace {
                                             .small()
                                             .aria_label("Search threads")
                                             .appearance(false)
+                                            .px_0()
                                             .bordered(false)
                                             .focus_bordered(false)
                                             .cleanable(false)

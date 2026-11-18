@@ -1,8 +1,8 @@
 use std::rc::Rc;
 
 use gpui::{
-    App, DefiniteLength, Entity, IntoElement, RenderOnce, SharedString, StyleRefinement, Styled,
-    Window, prelude::FluentBuilder as _,
+    App, DefiniteLength, Edges, Entity, IntoElement, Pixels, RenderOnce, SharedString,
+    StyleRefinement, Styled, Window, prelude::FluentBuilder as _,
 };
 
 use super::{Input, TextareaState};
@@ -23,6 +23,8 @@ pub struct Textarea {
     bordered: bool,
     /// bruhs: forwarded to [`Input::focus_bordered`].
     focus_bordered: bool,
+    /// bruhs: forwarded to [`Input::editor_padding`].
+    editor_padding: Option<Edges<Pixels>>,
     disabled: bool,
     readonly: bool,
     tab_index: isize,
@@ -78,6 +80,7 @@ impl Textarea {
             appearance: true,
             bordered: true,
             focus_bordered: true,
+            editor_padding: None,
             disabled: false,
             readonly: false,
             tab_index: 0,
@@ -110,6 +113,13 @@ impl Textarea {
     /// bruhs: whether focus draws the focus border, as on [`Input`].
     pub fn focus_bordered(mut self, bordered: bool) -> Self {
         self.focus_bordered = bordered;
+        self
+    }
+
+    /// bruhs: the editor's inner padding, in place of the one its size gives,
+    /// as on [`Input::editor_padding`].
+    pub fn editor_padding(mut self, padding: Edges<Pixels>) -> Self {
+        self.editor_padding = Some(padding);
         self
     }
 
@@ -208,6 +218,9 @@ impl Textarea {
             .appearance(self.appearance)
             .bordered(self.bordered)
             .focus_bordered(self.focus_bordered)
+            .when_some(self.editor_padding, |this, padding| {
+                this.editor_padding(padding)
+            })
             .disabled(self.disabled)
             .readonly(self.readonly)
             .tab_index(self.tab_index)

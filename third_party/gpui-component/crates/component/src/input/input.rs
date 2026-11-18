@@ -4,8 +4,9 @@ use crate::zoom::px;
 use gpui::prelude::FluentBuilder as _;
 use gpui::{
     AnyElement, App, DefiniteLength, Edges, ElementId, Entity, Global, Hsla,
-    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Rems, RenderOnce, Role,
-    SharedString, StyleRefinement, Styled, TextAlign, TouchPhase, Window, div, relative,
+    InteractiveElement as _, IntoElement, MouseButton, ParentElement as _, Pixels, Rems,
+    RenderOnce, Role, SharedString, StyleRefinement, Styled, TextAlign, TouchPhase, Window, div,
+    relative,
 };
 
 use crate::button::{Button, ButtonRounded, ButtonVariants as _};
@@ -149,6 +150,8 @@ pub struct Input {
     readonly: bool,
     bordered: bool,
     focus_bordered: bool,
+    /// bruhs: a multi-line editor's inner padding, in place of the size's.
+    editor_padding: Option<Edges<Pixels>>,
     tab_index: isize,
     selected: bool,
     content_type: Option<InputContentType>,
@@ -261,6 +264,7 @@ impl Input {
             readonly: false,
             bordered: true,
             focus_bordered: true,
+            editor_padding: None,
             tab_index: 0,
             selected: false,
             content_type: None,
@@ -333,6 +337,13 @@ impl Input {
     /// Set focus border for the input, default is true.
     pub fn focus_bordered(mut self, bordered: bool) -> Self {
         self.focus_bordered = bordered;
+        self
+    }
+
+    /// bruhs: the multi-line editor's inner padding, in place of the one its
+    /// size gives, for a caller that pads the field itself.
+    pub fn editor_padding(mut self, padding: Edges<Pixels>) -> Self {
+        self.editor_padding = Some(padding);
         self
     }
 
@@ -611,7 +622,8 @@ impl RenderOnce for Input {
         );
         state.set_editor_paddings(
             if state.presentation(cx).is_multi_line() {
-                Edges {
+                // bruhs: a caller that pads the editor itself passes its own.
+                self.editor_padding.unwrap_or(Edges {
                     top: self.size.input_py(),
                     right: self.size.input_px(),
                     bottom: self.size.input_py(),
@@ -620,7 +632,7 @@ impl RenderOnce for Input {
                     } else {
                         self.size.input_px()
                     },
-                }
+                })
             } else {
                 Edges::default()
             },

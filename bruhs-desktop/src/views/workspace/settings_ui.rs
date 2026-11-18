@@ -492,6 +492,8 @@ impl Workspace {
                     .child(
                         Input::new(&input)
                             .appearance(false)
+                            // Web: the stepper's value has no padding.
+                            .px_0()
                             .disabled(disabled)
                             .text_center()
                             .w_full()

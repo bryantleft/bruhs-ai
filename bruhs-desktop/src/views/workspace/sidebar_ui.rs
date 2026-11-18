@@ -401,6 +401,8 @@ impl Workspace {
                             Input::new(&self.sidebar_search)
                                 .aria_label("Search threads and projects")
                                 .appearance(false)
+                                // Web: a bare <input> after the icon's gap.
+                                .px_0()
                                 .bordered(false)
                                 .focus_bordered(false)
                                 .cleanable(false)

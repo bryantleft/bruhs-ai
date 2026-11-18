@@ -556,7 +556,8 @@ impl Workspace {
                 .bg(theme::longan_900())
                 .border_1()
                 .border_color(theme::longan_700())
-                .px(px(6.0))
+                // Web `px-1.5`, less the 1px border.
+                .px(px(5.0))
                 .py(px(2.0))
                 .text_size(px(LABEL_PX))
                 .font_weight(FontWeight::MEDIUM)
@@ -564,6 +565,8 @@ impl Workspace {
                 .child(
                     Input::new(input)
                         .appearance(false)
+                        // Web `px-1.5` is the wrapper's; the field has none.
+                        .px_0()
                         .text_center()
                         .w_full()
                         .aria_label(aria),

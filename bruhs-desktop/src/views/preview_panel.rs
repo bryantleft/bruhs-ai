@@ -580,7 +580,8 @@ impl PreviewPanelView {
                     .flex_1()
                     .min_w_0()
                     .h(px(28.0))
-                    .px_2()
+                    // Web: the Input's `px-2.5`, less the 1px border.
+                    .px(px(9.0))
                     .rounded(px(4.0))
                     .bg(theme::longan_900())
                     .border_1()
@@ -591,6 +592,7 @@ impl PreviewPanelView {
                         Input::new(&self.url_input)
                             .aria_label("Preview URL")
                             .appearance(false)
+                            .px_0()
                             .bordered(false)
                             .focus_bordered(false)
                             .cleanable(false)

@@ -574,7 +574,9 @@ mod tests {
         child.process_group(0).stdout(std::process::Stdio::piped());
         let mut child = child.spawn().unwrap();
         let group = child.id();
-        for _ in 0..100 {
+        // Up to 10s: under a loaded test run the script can take longer than
+        // a moment to start and write the file.
+        for _ in 0..500 {
             if pid_file.exists()
                 && !std::fs::read_to_string(&pid_file)
                     .unwrap()
