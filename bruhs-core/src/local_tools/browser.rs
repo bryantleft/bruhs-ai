@@ -1,4 +1,11 @@
-use std::{collections::VecDeque, process::Stdio, sync::Arc};
+use std::{
+    collections::VecDeque,
+    net::SocketAddr,
+    path::{Path, PathBuf},
+    process::Stdio,
+    sync::Arc,
+    time::Duration,
+};
 
 use base64::Engine;
 use bruhs_models::local_tools::*;
@@ -24,13 +31,121 @@ use super::{
 mod browser_guard;
 use browser_guard::BrowserGuard;
 
+#[path = "browser_input.rs"]
+mod browser_input;
+use browser_input::{click_events, key_events, wheel_event, KEY, MOUSE, TEXT};
+
+/// How a browser launches: where its profile lives, whether it shows a
+/// window, and the proxy its traffic goes through.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(super) struct LaunchOptions {
+    /// A kept profile (a bruh's), created `0700` when missing. `None` is a
+    /// temporary profile removed with the browser.
+    pub profile: Option<PathBuf>,
+    pub headless: bool,
+    /// The network guard. Loopback goes through it too.
+    pub proxy: Option<SocketAddr>,
+}
+
+impl LaunchOptions {
+    /// A thread's verification browser: a temporary profile in a window,
+    /// with no proxy.
+    pub fn verification() -> Self {
+        Self {
+            profile: None,
+            headless: false,
+            proxy: None,
+        }
+    }
+}
+
+/// Chrome's command line for a launch on `profile`.
+pub(super) fn launch_args(
+    options: &LaunchOptions,
+    profile: &Path,
+    user_agent: &str,
+) -> Vec<String> {
+    let mut args = vec![
+        format!("--user-data-dir={}", profile.display()),
+        format!("--user-agent={user_agent}"),
+    ];
+    args.extend(
+        [
+            "--remote-debugging-port=0",
+            "--remote-debugging-address=127.0.0.1",
+            "--no-first-run",
+            "--no-default-browser-check",
+            "--disable-extensions",
+        ]
+        .map(String::from),
+    );
+    if options.profile.is_some() {
+        // A kept profile opens both headless and in a window. Headless Chrome
+        // uses the mock keychain on macOS and a window the real one, and
+        // cookies encrypted under one key can't be read under the other, so
+        // every launch of a kept profile pins the same key store.
+        args.extend(["--use-mock-keychain", "--password-store=basic"].map(String::from));
+    }
+    if options.headless {
+        args.push("--headless=new".into());
+        args.push(format!(
+            "--window-size={},{}",
+            COMPUTER_VIEWPORT.width, COMPUTER_VIEWPORT.height
+        ));
+    }
+    if let Some(proxy) = options.proxy {
+        args.push(format!("--proxy-server=http://{proxy}"));
+        // Chrome bypasses the proxy for loopback unless told not to.
+        args.push("--proxy-bypass-list=<-loopback>".into());
+        args.push("--force-webrtc-ip-handling-policy=disable_non_proxied_udp".into());
+    }
+    args.push("about:blank".into());
+    args
+}
+
+enum Profile {
+    Temporary(tempfile::TempDir),
+    Kept(PathBuf),
+}
+
+impl Profile {
+    async fn open(kept: Option<&Path>) -> Result<Self, ToolError> {
+        let Some(path) = kept else {
+            return Ok(Self::Temporary(
+                tempfile::Builder::new()
+                    .prefix("bruhs-browser-")
+                    .tempdir()?,
+            ));
+        };
+        let mut folder = tokio::fs::DirBuilder::new();
+        folder.recursive(true);
+        #[cfg(unix)]
+        folder.mode(0o700);
+        folder.create(path).await?;
+        Ok(Self::Kept(path.to_owned()))
+    }
+
+    fn path(&self) -> &Path {
+        match self {
+            Self::Temporary(folder) => folder.path(),
+            Self::Kept(path) => path,
+        }
+    }
+}
+
 pub(super) struct Browser {
     pub info: BrowserSession,
     child: Arc<Mutex<Child>>,
-    _profile: tempfile::TempDir,
+    _profile: Profile,
     logs: tokio::task::JoinHandle<()>,
     guard: BrowserGuard,
     cdp: Cdp,
+    /// The browser-level `ws://…/devtools/browser/…` endpoint.
+    endpoint: String,
+    /// The page target's `webSocketDebuggerUrl`.
+    page_socket: String,
+    viewport: Viewport,
+    policy: ProcessPolicy,
 }
 
 impl Drop for Browser {
@@ -47,23 +162,13 @@ impl Browser {
         client: &reqwest::Client,
         request: BrowserStart,
         policy: ProcessPolicy,
+        options: &LaunchOptions,
     ) -> Result<Self, ToolError> {
         let executable = browser_executable()?;
         let user_agent = browser_user_agent(&executable, policy).await?;
-        let profile = tempfile::Builder::new()
-            .prefix("bruhs-browser-")
-            .tempdir()?;
+        let profile = Profile::open(options.profile.as_deref()).await?;
         let mut child = Command::new(executable)
-            .arg(format!("--user-data-dir={}", profile.path().display()))
-            .arg(format!("--user-agent={user_agent}"))
-            .args([
-                "--remote-debugging-port=0",
-                "--remote-debugging-address=127.0.0.1",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--disable-extensions",
-                "about:blank",
-            ])
+            .args(launch_args(options, profile.path(), &user_agent))
             .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::piped())
@@ -146,23 +251,35 @@ impl Browser {
             )
             .await?;
             cdp.call("Log.enable", json!({})).await?;
+            let viewport = if options.headless {
+                cdp.call(
+                    "Emulation.setDeviceMetricsOverride",
+                    json!({"width":COMPUTER_VIEWPORT.width,"height":COMPUTER_VIEWPORT.height,"deviceScaleFactor":1,"mobile":false}),
+                )
+                .await?;
+                COMPUTER_VIEWPORT
+            } else {
+                // Measured on about:blank, before any page script can run.
+                measured_viewport(&mut cdp).await?
+            };
             cdp.navigate(&request.url).await?;
             guard.check()?;
-            Ok::<_, ToolError>((cdp, guard))
+            Ok::<_, ToolError>((cdp, guard, socket.to_owned(), viewport))
         };
-        let (cdp, guard) = match tokio::time::timeout(policy.timeout, result).await {
-            Ok(Ok(ready)) => ready,
-            result => {
-                logs.abort();
-                let _ = child.lock().await.kill().await;
-                return Err(match result {
-                    Ok(Err(error)) => error,
-                    _ => ToolError::Unavailable(
-                        "Chrome's debugging connection did not become ready.".into(),
-                    ),
-                });
-            }
-        };
+        let (cdp, guard, page_socket, viewport) =
+            match tokio::time::timeout(policy.timeout, result).await {
+                Ok(Ok(ready)) => ready,
+                result => {
+                    logs.abort();
+                    let _ = child.lock().await.kill().await;
+                    return Err(match result {
+                        Ok(Err(error)) => error,
+                        _ => ToolError::Unavailable(
+                            "Chrome's debugging connection did not become ready.".into(),
+                        ),
+                    });
+                }
+            };
         Ok(Self {
             info: BrowserSession {
                 id: uuid::Uuid::new_v4().to_string(),
@@ -174,7 +291,18 @@ impl Browser {
             logs,
             guard,
             cdp,
+            endpoint: endpoint.into(),
+            page_socket,
+            viewport,
+            policy,
         })
+    }
+
+    /// The page target's debugging socket, for a second connection such as
+    /// the live view's.
+    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
+    pub fn page_socket(&self) -> &str {
+        &self.page_socket
     }
 
     pub async fn stop(&mut self) -> Result<(), ToolError> {
@@ -187,57 +315,49 @@ impl Browser {
         Ok(())
     }
 
+    /// Ask Chrome to quit, so it writes cookies and the rest of the profile
+    /// to disk, and kill it if it hasn't exited within `grace`.
+    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
+    pub async fn close(&mut self, grace: Duration) -> Result<(), ToolError> {
+        // The guard kills Chrome as soon as its connection drops, which
+        // `Browser.close` does first.
+        self.guard.disarm().await;
+        let deadline = tokio::time::Instant::now() + grace;
+        let (endpoint, policy) = (self.endpoint.clone(), self.policy);
+        let _ = tokio::time::timeout_at(deadline, async move {
+            let mut browser = Cdp::connect(&endpoint, policy).await?;
+            // Chrome can drop the connection before it replies; the exit
+            // below is what counts.
+            let _ = browser.call("Browser.close", json!({})).await;
+            Ok::<_, ToolError>(())
+        })
+        .await;
+        let mut child = self.child.lock().await;
+        let exited = tokio::time::timeout_at(deadline, child.wait()).await;
+        if !matches!(exited, Ok(Ok(_))) {
+            child.kill().await?;
+        }
+        drop(child);
+        self.logs.abort();
+        Ok(())
+    }
+
+    #[cfg(test)]
+    pub async fn exit_status(&self) -> Option<std::process::ExitStatus> {
+        self.child.lock().await.try_wait().ok().flatten()
+    }
+
     pub async fn command(
         &mut self,
         action: BrowserAction,
         policy: ProcessPolicy,
     ) -> Result<ToolReply, ToolError> {
         self.guard.check()?;
-        let operation = async {
-            let value = match action {
-                BrowserAction::Navigate { url } => {
-                    validate_browser_url(&url).map_err(|error| ToolError::Invalid(error.into()))?;
-                    let result = self.cdp.navigate(&url).await?;
-                    self.info.url = url;
-                    result
-                }
-                BrowserAction::Snapshot => self.evaluate(r#"({url:location.href,title:document.title,text:document.body?.innerText,controls:[...document.querySelectorAll('a,button,input,textarea,select,[role=button]')].map(e=>({tag:e.tagName,text:e.innerText||e.getAttribute('aria-label')||'',id:e.id,name:e.name,type:e.type,href:e.href})),readyState:document.readyState})"#).await?,
-                BrowserAction::Evaluate { expression } => self.evaluate(&expression).await?,
-                BrowserAction::Click { selector } => {
-                    let selector = serde_json::to_string(&selector)?;
-                    self.evaluate(&format!(r#"(()=>{{const es=document.querySelectorAll({selector});if(es.length!==1)throw new Error('Selector must match exactly one element; found '+es.length);const e=es[0];if(e.disabled)throw new Error('Element is disabled');e.scrollIntoView({{block:'center'}});e.click();return {{clicked:true}}}})()"#)).await?
-                }
-                BrowserAction::Fill { selector, text } => {
-                    let selector = serde_json::to_string(&selector)?;
-                    let text = serde_json::to_string(&text)?;
-                    self.evaluate(&format!(r#"(()=>{{const es=document.querySelectorAll({selector});if(es.length!==1)throw new Error('Selector must match exactly one element; found '+es.length);const e=es[0];if(e.disabled||e.readOnly)throw new Error('Element is not editable');const p=e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:e instanceof HTMLInputElement?HTMLInputElement.prototype:null;if(!p)throw new Error('Choose an input or textarea');Object.getOwnPropertyDescriptor(p,'value').set.call(e,{text});e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}));return {{filled:true}}}})()"#)).await?
-                }
-                BrowserAction::Screenshot => {
-                    let value = self.cdp.call("Page.captureScreenshot", json!({"format":"png","captureBeyondViewport":false})).await?;
-                    let data = value["data"].as_str().ok_or_else(|| ToolError::Invalid("Chrome returned no screenshot data.".into()))?;
-                    let bytes = base64::engine::general_purpose::STANDARD.decode(data).map_err(|error| ToolError::Invalid(format!("Chrome returned an invalid screenshot: {error}")))?;
-                    return super::screenshot(bytes).await;
-                }
-                BrowserAction::Console => {
-                    self.cdp.call("Runtime.evaluate", json!({"expression":"void 0"})).await?;
-                    json!({"events":self.cdp.console})
-                }
-                BrowserAction::Network => {
-                    self.cdp.call("Runtime.evaluate", json!({"expression":"void 0"})).await?;
-                    json!({"events":self.cdp.network})
-                }
-                BrowserAction::ClickAt { .. }
-                | BrowserAction::Type { .. }
-                | BrowserAction::Key { .. }
-                | BrowserAction::Scroll { .. } => {
-                    return Err(ToolError::Invalid(
-                        "This browser action is not available yet.".into(),
-                    ))
-                }
-            };
-            Ok(ToolReply { value, image: None })
+        let navigated = match &action {
+            BrowserAction::Navigate { url } => Some(url.clone()),
+            _ => None,
         };
-        let reply = tokio::time::timeout(policy.timeout, operation)
+        let reply = tokio::time::timeout(policy.timeout, act(&mut self.cdp, action, self.viewport))
             .await
             .map_err(|_| {
                 ToolError::Unavailable(
@@ -246,24 +366,202 @@ impl Browser {
                 )
             })?;
         self.guard.check()?;
+        if let (Ok(_), Some(url)) = (&reply, navigated) {
+            self.info.url = url;
+        }
         reply
     }
 
-    async fn evaluate(&mut self, expression: &str) -> Result<Value, ToolError> {
-        let result = self
-            .cdp
-            .call(
-                "Runtime.evaluate",
-                json!({"expression":expression,"returnByValue":true,"awaitPromise":true,"userGesture":true}),
-            )
-            .await?;
-        if let Some(exception) = result.get("exceptionDetails") {
-            return Err(ToolError::Invalid(format!(
-                "Browser evaluation failed: {exception}"
-            )));
-        }
-        Ok(result["result"]["value"].clone())
+    /// The page's address now (`location.href`).
+    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
+    pub async fn current_url(&mut self) -> Result<String, ToolError> {
+        self.guard.check()?;
+        let href = tokio::time::timeout(self.policy.timeout, self.cdp.evaluate("location.href"))
+            .await
+            .map_err(|_| {
+                ToolError::Unavailable("Chrome didn't say which page is open.".into())
+            })??;
+        href.as_str()
+            .map(str::to_owned)
+            .ok_or_else(|| ToolError::Unavailable("Chrome didn't say which page is open.".into()))
     }
+
+    /// One input from the owner's live view. Navigation follows the agent's
+    /// URL rules.
+    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
+    pub async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError> {
+        validate_input(input, self.viewport).map_err(|error| ToolError::Invalid(error.into()))?;
+        self.guard.check()?;
+        let cdp = &mut self.cdp;
+        let operation = async {
+            match input {
+                ComputerInput::Navigate { url } => {
+                    cdp.navigate(url).await?;
+                }
+                ComputerInput::Back => {
+                    cdp.evaluate("history.back()").await?;
+                }
+                ComputerInput::Reload => {
+                    cdp.call("Page.reload", json!({})).await?;
+                }
+                _ => {
+                    for (method, params) in browser_input::owner_events(input) {
+                        cdp.call(method, params).await?;
+                    }
+                }
+            }
+            Ok::<_, ToolError>(())
+        };
+        tokio::time::timeout(self.policy.timeout, operation)
+            .await
+            .map_err(|_| {
+                ToolError::Unavailable("The page didn't take the input in time.".into())
+            })??;
+        self.guard.check()?;
+        if let ComputerInput::Navigate { url } = input {
+            self.info.url.clone_from(url);
+        }
+        Ok(())
+    }
+}
+
+/// The page's text, title and controls. It never reads input values, so a
+/// filled password stays out of the agent's context.
+pub(super) const SNAPSHOT_EXPRESSION: &str = r#"({url:location.href,title:document.title,text:document.body?.innerText,controls:[...document.querySelectorAll('a,button,input,textarea,select,[role=button]')].map(e=>({tag:e.tagName,text:e.innerText||e.getAttribute('aria-label')||'',id:e.id,name:e.name,type:e.type,href:e.href})),readyState:document.readyState})"#;
+
+/// Run one agent action on a page. Real input actions are checked against
+/// `viewport` and their budgets first.
+pub(super) async fn act(
+    cdp: &mut Cdp,
+    action: BrowserAction,
+    viewport: Viewport,
+) -> Result<ToolReply, ToolError> {
+    if matches!(
+        action,
+        BrowserAction::ClickAt { .. }
+            | BrowserAction::Type { .. }
+            | BrowserAction::Key { .. }
+            | BrowserAction::Scroll { .. }
+    ) {
+        validate_action(&action, viewport).map_err(|error| ToolError::Invalid(error.into()))?;
+    }
+    let value = match action {
+        BrowserAction::Navigate { url } => {
+            validate_browser_url(&url).map_err(|error| ToolError::Invalid(error.into()))?;
+            cdp.navigate(&url).await?
+        }
+        BrowserAction::Snapshot => cdp.evaluate(SNAPSHOT_EXPRESSION).await?,
+        BrowserAction::Evaluate { expression } => cdp.evaluate(&expression).await?,
+        BrowserAction::Click { selector } => click(cdp, &selector, viewport).await?,
+        BrowserAction::Fill { selector, text } => {
+            let element = one_element(&selector)?;
+            let text = serde_json::to_string(&text)?;
+            cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled||e.readOnly)throw new Error('Element is not editable');const p=e instanceof HTMLTextAreaElement?HTMLTextAreaElement.prototype:e instanceof HTMLInputElement?HTMLInputElement.prototype:null;if(!p)throw new Error('Choose an input or textarea');Object.getOwnPropertyDescriptor(p,'value').set.call(e,{text});e.dispatchEvent(new Event('input',{{bubbles:true}}));e.dispatchEvent(new Event('change',{{bubbles:true}}));return {{filled:true}}}})()"#)).await?
+        }
+        BrowserAction::Screenshot => {
+            let value = cdp
+                .call(
+                    "Page.captureScreenshot",
+                    json!({"format":"png","captureBeyondViewport":false}),
+                )
+                .await?;
+            let data = value["data"]
+                .as_str()
+                .ok_or_else(|| ToolError::Invalid("Chrome returned no screenshot data.".into()))?;
+            let bytes = base64::engine::general_purpose::STANDARD
+                .decode(data)
+                .map_err(|error| {
+                    ToolError::Invalid(format!("Chrome returned an invalid screenshot: {error}"))
+                })?;
+            return super::screenshot(bytes).await;
+        }
+        BrowserAction::Console => {
+            cdp.call("Runtime.evaluate", json!({"expression":"void 0"}))
+                .await?;
+            json!({"events":cdp.console})
+        }
+        BrowserAction::Network => {
+            cdp.call("Runtime.evaluate", json!({"expression":"void 0"}))
+                .await?;
+            json!({"events":cdp.network})
+        }
+        BrowserAction::ClickAt { x, y } => {
+            for event in click_events(x, y) {
+                cdp.call(MOUSE, event).await?;
+            }
+            json!({"clicked":true,"via":"input","x":x,"y":y})
+        }
+        BrowserAction::Type { text, selector } => {
+            if let Some(selector) = selector {
+                let element = one_element(&selector)?;
+                cdp.evaluate(&format!(r#"(()=>{{{element}if(!(e instanceof HTMLInputElement||e instanceof HTMLTextAreaElement||e.isContentEditable))throw new Error('Choose an input, textarea or editable element');if(e.disabled||e.readOnly)throw new Error('Element is not editable');e.focus();const a=document.activeElement;if(a!==e&&!(a&&a.isContentEditable&&a.contains(e)))throw new Error('Element did not take focus');return true}})()"#)).await?;
+            }
+            cdp.call(TEXT, json!({"text":text})).await?;
+            json!({"typed":text.chars().count()})
+        }
+        BrowserAction::Key { key } => {
+            let mapped = cdp_key(&key)
+                .ok_or_else(|| ToolError::Invalid(format!("Bruhs can't press {key}.")))?;
+            // An agent's key never carries modifiers.
+            for event in key_events(&mapped, 0) {
+                cdp.call(KEY, event).await?;
+            }
+            json!({"pressed":key})
+        }
+        BrowserAction::Scroll { dx, dy } => {
+            let (x, y) = (
+                f64::from(viewport.width) / 2.0,
+                f64::from(viewport.height) / 2.0,
+            );
+            cdp.call(MOUSE, wheel_event(x, y, dx, dy)).await?;
+            json!({"scrolled":true})
+        }
+    };
+    Ok(ToolReply { value, image: None })
+}
+
+/// A script prefix binding `e` to the one element `selector` matches.
+fn one_element(selector: &str) -> Result<String, ToolError> {
+    let selector = serde_json::to_string(selector)?;
+    Ok(format!("const es=document.querySelectorAll({selector});if(es.length!==1)throw new Error('Selector must match exactly one element; found '+es.length);const e=es[0];"))
+}
+
+/// A real click at the element's centre once it's scrolled into view, or a
+/// script click when it has no box or something else covers its centre.
+async fn click(cdp: &mut Cdp, selector: &str, viewport: Viewport) -> Result<Value, ToolError> {
+    let element = one_element(selector)?;
+    let located = cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled)throw new Error('Element is disabled');e.scrollIntoView({{block:'center',inline:'center',behavior:'instant'}});const r=e.getBoundingClientRect(),x=r.left+r.width/2,y=r.top+r.height/2,t=document.elementFromPoint(x,y);return {{x,y,w:r.width,h:r.height,hit:!!t&&(t===e||e.contains(t))}}}})()"#)).await?;
+    let centre = || {
+        let (x, y) = (located["x"].as_f64()?, located["y"].as_f64()?);
+        let boxed = located["w"].as_f64()? > 0.0 && located["h"].as_f64()? > 0.0;
+        (boxed && located["hit"] == true).then_some((x, y))
+    };
+    let centre = centre()
+        .filter(|&(x, y)| validate_action(&BrowserAction::ClickAt { x, y }, viewport).is_ok());
+    if let Some((x, y)) = centre {
+        for event in click_events(x, y) {
+            cdp.call(MOUSE, event).await?;
+        }
+        return Ok(json!({"clicked":true,"via":"input","x":x,"y":y}));
+    }
+    cdp.evaluate(&format!(r#"(()=>{{{element}if(e.disabled)throw new Error('Element is disabled');e.click();return true}})()"#)).await?;
+    Ok(json!({"clicked":true,"via":"script"}))
+}
+
+/// A headed window's page size in CSS px, or the computer view when Chrome
+/// gives none.
+async fn measured_viewport(cdp: &mut Cdp) -> Result<Viewport, ToolError> {
+    let size = cdp.evaluate("[innerWidth,innerHeight]").await?;
+    let side = |index: usize| {
+        size[index]
+            .as_u64()
+            .and_then(|side| u32::try_from(side).ok())
+            .filter(|side| *side > 0)
+    };
+    Ok(match (side(0), side(1)) {
+        (Some(width), Some(height)) => Viewport { width, height },
+        _ => COMPUTER_VIEWPORT,
+    })
 }
 
 pub(super) struct Cdp {
@@ -312,6 +610,21 @@ impl Cdp {
             }
         }
         Ok(result)
+    }
+
+    async fn evaluate(&mut self, expression: &str) -> Result<Value, ToolError> {
+        let result = self
+            .call(
+                "Runtime.evaluate",
+                json!({"expression":expression,"returnByValue":true,"awaitPromise":true,"userGesture":true}),
+            )
+            .await?;
+        if let Some(exception) = result.get("exceptionDetails") {
+            return Err(ToolError::Invalid(format!(
+                "Browser evaluation failed: {exception}"
+            )));
+        }
+        Ok(result["result"]["value"].clone())
     }
 
     pub async fn call(&mut self, method: &str, params: Value) -> Result<Value, ToolError> {

@@ -119,6 +119,7 @@ fn names(read_only: bool) -> Vec<&'static str> {
 }
 fn input_schema(name: &str) -> Value {
     let string = json!({"type":"string"});
+    let number = json!({"type":"number"});
     let forge = json!({"enum":["auto","git_hub","git_lab"],"default":"auto"});
     let isolation = json!({"type":"object","properties":{"kind":{"enum":["shared","worktree"]},"base_branch":string},"required":["kind"]});
     let task = json!({"type":"object","properties":{
@@ -149,7 +150,7 @@ fn input_schema(name: &str) -> Value {
             vec!["action", "timeout_seconds"],
         ),
         "local_browser" => (
-            json!({"operation":{"enum":["start","command"]},"url":string,"session_id":string,"command":{"type":"object","properties":{"action":{"enum":["navigate","snapshot","click","fill","evaluate","screenshot","console","network"]},"url":string,"selector":string,"text":string,"expression":string},"required":["action"]}}),
+            json!({"operation":{"enum":["start","command"]},"url":string,"session_id":string,"command":{"type":"object","properties":{"action":{"enum":["navigate","snapshot","click","click_at","type","key","scroll","fill","evaluate","screenshot","console","network"]},"url":string,"selector":string,"text":string,"expression":string,"x":number,"y":number,"key":string,"dx":number,"dy":number},"required":["action"]}}),
             vec!["operation"],
         ),
         "local_device" => (
@@ -184,7 +185,7 @@ fn catalogue(read_only: bool) -> Value {
         ),
         (
             "local_browser",
-            "Operate the dedicated local browser using an existing grant for this thread. arguments.operation='start' with url, or operation='command' with session_id and command (navigate/snapshot/click/fill/evaluate/screenshot/console/network). Cannot create a grant.",
+            "Operate the dedicated local browser using an existing grant for this thread. arguments.operation='start' with url, or operation='command' with session_id and command (navigate/snapshot/click/click_at/type/key/scroll/fill/evaluate/screenshot/console/network). click presses the element's centre (via: input) or clicks it by script when covered (via: script); click_at takes x and y in CSS px; type inserts text into selector or the focused element; key presses one named key (Enter, Tab, Escape, Backspace, Delete, Space, arrows, Home, End, PageUp, PageDown); scroll wheels by dx and dy px. Cannot create a grant.",
         ),
         (
             "local_device",
@@ -512,6 +513,24 @@ mod tests {
         assert!(tools.contains("workspace_status"));
         assert!(!tools.contains("local_browser"));
         assert!(!tools.contains("task_work"));
+    }
+    #[test]
+    fn the_thread_browser_offers_real_input_actions() {
+        let schema = input_schema("local_browser");
+        let command = &schema["properties"]["command"]["properties"];
+        for action in ["click_at", "type", "key", "scroll"] {
+            assert!(command["action"]["enum"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(action)));
+        }
+        for field in ["x", "y", "dx", "dy"] {
+            assert_eq!(command[field]["type"], "number", "{field}");
+        }
+        assert_eq!(command["key"]["type"], "string");
+        assert!(catalogue(false)
+            .to_string()
+            .contains("navigate/snapshot/click/click_at/type/key/scroll/fill"));
     }
     #[test]
     fn forge_and_tracker_tools_prepare_without_an_owner_execution_capability() {

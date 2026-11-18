@@ -28,12 +28,16 @@ pub(super) struct BrowserGuard {
     task: tokio::task::JoinHandle<()>,
     failure: watch::Receiver<Option<String>>,
     child: Arc<Mutex<Child>>,
+    /// Whether losing the guard kills Chrome. Only a graceful close clears it.
+    armed: bool,
 }
 
 impl Drop for BrowserGuard {
     fn drop(&mut self) {
-        if let Ok(mut child) = self.child.try_lock() {
-            let _ = child.start_kill();
+        if self.armed {
+            if let Ok(mut child) = self.child.try_lock() {
+                let _ = child.start_kill();
+            }
         }
         self.task.abort();
     }
@@ -70,6 +74,7 @@ impl BrowserGuard {
             task,
             failure,
             child: child.clone(),
+            armed: true,
         };
         if ready_rx.await.is_err() {
             let _ = child.lock().await.kill().await;
@@ -79,6 +84,17 @@ impl BrowserGuard {
         }
         guard.check()?;
         Ok(guard)
+    }
+
+    /// Stop protecting without killing Chrome, for a graceful close: the
+    /// guard would otherwise kill it as soon as `Browser.close` drops the
+    /// guard's connection, before Chrome writes its profile. Returns once the
+    /// guard task can no longer kill.
+    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 5"))]
+    pub async fn disarm(&mut self) {
+        self.armed = false;
+        self.task.abort();
+        let _ = (&mut self.task).await;
     }
 
     pub fn check(&self) -> Result<(), ToolError> {

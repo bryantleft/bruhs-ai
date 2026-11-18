@@ -191,10 +191,11 @@ impl LocalToolsHost {
             ));
         }
         let launch = BrowserLaunch::acquire(&self.opening, &request.grant_id)?;
+        let options = browser::LaunchOptions::verification();
         let browser = tokio::select! {
             biased;
             _ = revoked.changed() => return Err(ToolError::Revoked),
-            result = browser::Browser::start(&self.client, request, self.policy) => result?,
+            result = browser::Browser::start(&self.client, request, self.policy, &options) => result?,
         };
         let info = browser.info.clone();
         // A revoked launch must not become a usable session.

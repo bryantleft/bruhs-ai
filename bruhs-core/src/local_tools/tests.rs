@@ -296,3 +296,559 @@ async fn live_browser_fills_clicks_and_saves_screenshot_then_revokes() {
     websocket_fixture.await.unwrap();
     fixture.abort();
 }
+
+#[test]
+fn bruh_launches_use_a_persistent_headless_profile_behind_the_guard() {
+    use browser::{launch_args, LaunchOptions};
+    use std::path::Path;
+    let options = LaunchOptions {
+        profile: Some("/data/bruhs/a/browser".into()),
+        headless: true,
+        proxy: Some("127.0.0.1:4100".parse().unwrap()),
+    };
+    let args = launch_args(&options, Path::new("/data/bruhs/a/browser"), "UA");
+    for expected in [
+        "--headless=new",
+        "--user-data-dir=/data/bruhs/a/browser",
+        "--proxy-server=http://127.0.0.1:4100",
+        "--proxy-bypass-list=<-loopback>",
+        "--force-webrtc-ip-handling-policy=disable_non_proxied_udp",
+        "--window-size=1280,800",
+        "--use-mock-keychain",
+        "--password-store=basic",
+        "--user-agent=UA",
+    ] {
+        assert!(args.iter().any(|arg| arg == expected), "{expected}");
+    }
+    assert_eq!(args.last().map(String::as_str), Some("about:blank"));
+    let verification = launch_args(&LaunchOptions::verification(), Path::new("/tmp/x"), "UA");
+    assert!(!verification
+        .iter()
+        .any(|arg| arg.starts_with("--headless") || arg.starts_with("--proxy")));
+    assert!(verification
+        .iter()
+        .any(|arg| arg == "--user-data-dir=/tmp/x"));
+}
+
+#[test]
+fn headed_and_headless_bruh_launches_share_the_cookie_key() {
+    use browser::{launch_args, LaunchOptions};
+    use std::path::Path;
+    let launch = |headless| {
+        launch_args(
+            &LaunchOptions {
+                profile: Some("/data/bruhs/a/browser".into()),
+                headless,
+                proxy: Some("127.0.0.1:4100".parse().unwrap()),
+            },
+            Path::new("/data/bruhs/a/browser"),
+            "UA",
+        )
+    };
+    let keys = |args: Vec<String>| -> Vec<String> {
+        args.into_iter()
+            .filter(|arg| arg.contains("keychain") || arg.starts_with("--password-store"))
+            .collect()
+    };
+    let headed = keys(launch(false));
+    assert_eq!(headed, ["--use-mock-keychain", "--password-store=basic"]);
+    assert_eq!(headed, keys(launch(true)));
+    assert!(!launch(false)
+        .iter()
+        .any(|arg| arg.starts_with("--headless")));
+}
+
+#[test]
+fn the_snapshot_never_reads_input_values() {
+    assert!(!browser::SNAPSHOT_EXPRESSION.contains("value"));
+}
+
+/// A fake page target: records every CDP call and answers `Runtime.evaluate`
+/// calls in turn from `evaluations`, everything else with `{}`.
+async fn fake_page(
+    evaluations: Vec<serde_json::Value>,
+) -> (
+    browser::Cdp,
+    tokio::task::JoinHandle<Vec<(String, serde_json::Value)>>,
+) {
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use tokio_tungstenite::tungstenite::Message;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let mut evaluations = evaluations.into_iter();
+        let mut calls = Vec::new();
+        while let Some(Ok(Message::Text(text))) = socket.next().await {
+            let request: serde_json::Value = serde_json::from_str(&text).unwrap();
+            let method = request["method"].as_str().unwrap().to_owned();
+            let result = if method == "Runtime.evaluate" {
+                json!({"result":{"value":evaluations.next().unwrap_or(serde_json::Value::Null)}})
+            } else {
+                json!({})
+            };
+            calls.push((method, request["params"].clone()));
+            socket
+                .send(Message::Text(
+                    json!({"id":request["id"],"result":result})
+                        .to_string()
+                        .into(),
+                ))
+                .await
+                .unwrap();
+        }
+        calls
+    });
+    let cdp = browser::Cdp::connect(&format!("ws://{addr}"), ProcessPolicy::default())
+        .await
+        .unwrap();
+    (cdp, server)
+}
+
+#[tokio::test]
+async fn real_clicks_press_and_release_at_the_element_centre() {
+    use serde_json::json;
+    let (mut cdp, server) = fake_page(vec![json!({"x":100,"y":50,"hit":true,"w":10,"h":10})]).await;
+    let reply = browser::act(
+        &mut cdp,
+        BrowserAction::Click {
+            selector: "#buy".into(),
+        },
+        COMPUTER_VIEWPORT,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reply.value,
+        json!({"clicked":true,"via":"input","x":100.0,"y":50.0})
+    );
+    drop(cdp);
+    let calls = server.await.unwrap();
+    let methods: Vec<_> = calls.iter().map(|(method, _)| method.as_str()).collect();
+    assert_eq!(
+        methods,
+        [
+            "Runtime.evaluate",
+            "Input.dispatchMouseEvent",
+            "Input.dispatchMouseEvent",
+            "Input.dispatchMouseEvent"
+        ]
+    );
+    let kinds: Vec<_> = calls[1..]
+        .iter()
+        .map(|(_, params)| params["type"].as_str().unwrap())
+        .collect();
+    assert_eq!(kinds, ["mouseMoved", "mousePressed", "mouseReleased"]);
+    for (_, params) in &calls[1..] {
+        assert_eq!(
+            (params["x"].as_f64(), params["y"].as_f64()),
+            (Some(100.0), Some(50.0))
+        );
+    }
+    assert!(calls[0].1["expression"]
+        .as_str()
+        .unwrap()
+        .contains("elementFromPoint"));
+}
+
+#[tokio::test]
+async fn a_covered_or_boxless_element_falls_back_to_a_script_click() {
+    use serde_json::json;
+    for located in [
+        json!({"x":100,"y":50,"hit":false,"w":10,"h":10}),
+        json!({"x":0,"y":0,"hit":true,"w":0,"h":0}),
+    ] {
+        let (mut cdp, server) = fake_page(vec![located, json!(true)]).await;
+        let reply = browser::act(
+            &mut cdp,
+            BrowserAction::Click {
+                selector: "#buy".into(),
+            },
+            COMPUTER_VIEWPORT,
+        )
+        .await
+        .unwrap();
+        assert_eq!(reply.value, json!({"clicked":true,"via":"script"}));
+        drop(cdp);
+        let calls = server.await.unwrap();
+        assert_eq!(calls.len(), 2);
+        assert!(calls.iter().all(|(method, _)| method == "Runtime.evaluate"));
+        assert!(calls[1].1["expression"]
+            .as_str()
+            .unwrap()
+            .contains(".click()"));
+    }
+}
+
+#[tokio::test]
+async fn typing_focuses_then_inserts_and_scrolling_wheels_at_the_centre() {
+    use serde_json::json;
+    let (mut cdp, server) = fake_page(vec![json!(true)]).await;
+    let reply = browser::act(
+        &mut cdp,
+        BrowserAction::Type {
+            text: "hi".into(),
+            selector: Some("#q".into()),
+        },
+        COMPUTER_VIEWPORT,
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply.value, json!({"typed":2}));
+    let reply = browser::act(
+        &mut cdp,
+        BrowserAction::Scroll { dx: 0.0, dy: 300.0 },
+        COMPUTER_VIEWPORT,
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply.value, json!({"scrolled":true}));
+    drop(cdp);
+    let calls = server.await.unwrap();
+    let methods: Vec<_> = calls.iter().map(|(method, _)| method.as_str()).collect();
+    assert_eq!(
+        methods,
+        [
+            "Runtime.evaluate",
+            "Input.insertText",
+            "Input.dispatchMouseEvent"
+        ]
+    );
+    assert!(calls[0].1["expression"]
+        .as_str()
+        .unwrap()
+        .contains(".focus()"));
+    assert_eq!(calls[1].1, json!({"text":"hi"}));
+    let wheel = &calls[2].1;
+    assert_eq!(wheel["type"], "mouseWheel");
+    assert_eq!(
+        (
+            wheel["x"].as_f64(),
+            wheel["y"].as_f64(),
+            wheel["deltaY"].as_f64()
+        ),
+        (Some(640.0), Some(400.0), Some(300.0))
+    );
+}
+
+#[tokio::test]
+async fn agent_keys_and_points_are_checked_before_anything_reaches_the_page() {
+    use serde_json::json;
+    let (mut cdp, server) = fake_page(vec![]).await;
+    let reply = browser::act(
+        &mut cdp,
+        BrowserAction::Key {
+            key: "Enter".into(),
+        },
+        COMPUTER_VIEWPORT,
+    )
+    .await
+    .unwrap();
+    assert_eq!(reply.value, json!({"pressed":"Enter"}));
+    let reply = browser::act(
+        &mut cdp,
+        BrowserAction::ClickAt { x: 10.0, y: 20.0 },
+        COMPUTER_VIEWPORT,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        reply.value,
+        json!({"clicked":true,"via":"input","x":10.0,"y":20.0})
+    );
+    for refused in [
+        BrowserAction::Key { key: "F5".into() },
+        BrowserAction::ClickAt { x: 1281.0, y: 0.0 },
+        BrowserAction::Scroll {
+            dx: 0.0,
+            dy: 20_000.0,
+        },
+        BrowserAction::Type {
+            text: "x".repeat(MAX_TYPE_CHARS + 1),
+            selector: None,
+        },
+    ] {
+        assert!(matches!(
+            browser::act(&mut cdp, refused, COMPUTER_VIEWPORT).await,
+            Err(ToolError::Invalid(_))
+        ));
+    }
+    drop(cdp);
+    let calls = server.await.unwrap();
+    let methods: Vec<_> = calls.iter().map(|(method, _)| method.as_str()).collect();
+    assert_eq!(
+        methods,
+        ["Input.dispatchKeyEvent"; 2]
+            .iter()
+            .chain(["Input.dispatchMouseEvent"; 3].iter())
+            .copied()
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(calls[0].1["modifiers"], 0);
+    assert_eq!(calls[0].1["type"], "keyDown");
+    assert_eq!(calls[1].1["type"], "keyUp");
+}
+
+#[tokio::test]
+#[ignore = "launches headless Chrome on a persistent temp profile; run explicitly for local acceptance"]
+async fn live_bruh_profile_keeps_a_cookie_across_a_graceful_close() {
+    use axum::{http::header, routing::get};
+    use browser::{Browser, LaunchOptions};
+    use std::sync::{Arc, Mutex};
+    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let observed = seen.clone();
+    let app = axum::Router::new()
+        .route(
+            "/set",
+            get(|| async {
+                (
+                    [(header::SET_COOKIE, "bruh=kept; Max-Age=3600; Path=/")],
+                    axum::response::Html("<title>Set</title>"),
+                )
+            }),
+        )
+        .route(
+            "/check",
+            get(move |headers: axum::http::HeaderMap| {
+                let observed = observed.clone();
+                async move {
+                    let cookie = headers
+                        .get(header::COOKIE)
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or("")
+                        .to_owned();
+                    observed.lock().unwrap().push(cookie);
+                    axum::response::Html("<title>Check</title>")
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let home = tempfile::tempdir().unwrap();
+    let profile = home.path().join("bruhs").join("a").join("browser");
+    let options = LaunchOptions {
+        profile: Some(profile.clone()),
+        headless: true,
+        proxy: None,
+    };
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let start = |path: &str| BrowserStart {
+        grant_id: "live".into(),
+        url: format!("http://{addr}{path}"),
+    };
+    let grace = std::time::Duration::from_millis(bruhs_models::crew::CLOSE_GRACE_MS);
+    let mut first = Browser::start(&client, start("/set"), ProcessPolicy::default(), &options)
+        .await
+        .unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        let mode = std::fs::metadata(&profile).unwrap().permissions().mode();
+        assert_eq!(mode & 0o777, 0o700);
+    }
+    assert_eq!(
+        first.current_url().await.unwrap(),
+        format!("http://{addr}/set")
+    );
+    assert!(first.page_socket().starts_with("ws://127.0.0.1:"));
+    assert!(first.page_socket().contains("/devtools/page/"));
+    first.close(grace).await.unwrap();
+    let status = first.exit_status().await.expect("Chrome exited");
+    assert!(status.success(), "Chrome was killed, not closed: {status}");
+    drop(first);
+    assert!(
+        profile.join("Default").exists(),
+        "the profile outlives its browser"
+    );
+    let mut second = Browser::start(&client, start("/check"), ProcessPolicy::default(), &options)
+        .await
+        .unwrap();
+    assert!(
+        seen.lock()
+            .unwrap()
+            .iter()
+            .any(|cookie| cookie.contains("bruh=kept")),
+        "the cookie did not survive the close: {:?}",
+        seen.lock().unwrap()
+    );
+    second.close(grace).await.unwrap();
+    assert!(second.exit_status().await.is_some());
+    drop(second);
+    assert!(profile.exists());
+    fixture.abort();
+}
+
+#[tokio::test]
+#[ignore = "launches headless Chrome; run explicitly for local acceptance"]
+async fn live_browser_clicks_types_presses_and_scrolls_with_real_input() {
+    use axum::routing::get;
+    use browser::{Browser, LaunchOptions};
+    let app = axum::Router::new()
+        .route("/", get(|| async { axum::response::Html("<title>Input fixture</title><input id=q><div id=covered style=\"position:relative\"><button id=under onclick=\"document.body.dataset.under=event.isTrusted\">Under</button><div style=\"position:absolute;inset:0\"></div></div><button id=far style=\"margin-top:2000px\" onclick=\"document.body.dataset.far=event.isTrusted\">Far</button>") }))
+        .route("/other", get(|| async { axum::response::Html("<title>Other</title>") }));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let options = LaunchOptions {
+        profile: None,
+        headless: true,
+        proxy: None,
+    };
+    let policy = ProcessPolicy::default();
+    let mut browser = Browser::start(
+        &client,
+        BrowserStart {
+            grant_id: "live".into(),
+            url: format!("http://{addr}/"),
+        },
+        policy,
+        &options,
+    )
+    .await
+    .unwrap();
+    let evaluate = |expression: &str| BrowserAction::Evaluate {
+        expression: expression.into(),
+    };
+    assert_eq!(
+        browser
+            .command(evaluate("[innerWidth,innerHeight]"), policy)
+            .await
+            .unwrap()
+            .value,
+        serde_json::json!([1280, 800])
+    );
+    let typed = browser
+        .command(
+            BrowserAction::Type {
+                text: "hey".into(),
+                selector: Some("#q".into()),
+            },
+            policy,
+        )
+        .await
+        .unwrap();
+    assert_eq!(typed.value["typed"], 3);
+    browser
+        .command(
+            BrowserAction::Key {
+                key: "Backspace".into(),
+            },
+            policy,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        browser
+            .command(evaluate("document.querySelector('#q').value"), policy)
+            .await
+            .unwrap()
+            .value,
+        "he"
+    );
+    let far = browser
+        .command(
+            BrowserAction::Click {
+                selector: "#far".into(),
+            },
+            policy,
+        )
+        .await
+        .unwrap();
+    assert_eq!(far.value["via"], "input");
+    let under = browser
+        .command(
+            BrowserAction::Click {
+                selector: "#under".into(),
+            },
+            policy,
+        )
+        .await
+        .unwrap();
+    assert_eq!(under.value["via"], "script");
+    assert_eq!(
+        browser
+            .command(
+                evaluate("[document.body.dataset.far,document.body.dataset.under]"),
+                policy
+            )
+            .await
+            .unwrap()
+            .value,
+        serde_json::json!(["true", "false"])
+    );
+    let before = browser
+        .command(evaluate("scrollY"), policy)
+        .await
+        .unwrap()
+        .value;
+    browser
+        .command(BrowserAction::Scroll { dx: 0.0, dy: 300.0 }, policy)
+        .await
+        .unwrap();
+    let after = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let now = browser
+                .command(evaluate("scrollY"), policy)
+                .await
+                .unwrap()
+                .value;
+            if now != before {
+                return now;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the wheel scrolled the page");
+    assert!(after.as_f64().unwrap() > before.as_f64().unwrap());
+    browser
+        .command(
+            BrowserAction::Navigate {
+                url: format!("http://{addr}/other"),
+            },
+            policy,
+        )
+        .await
+        .unwrap();
+    assert_eq!(
+        browser.current_url().await.unwrap(),
+        format!("http://{addr}/other")
+    );
+    browser.owner_input(&ComputerInput::Reload).await.unwrap();
+    browser.owner_input(&ComputerInput::Back).await.unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while browser.current_url().await.unwrap() != format!("http://{addr}/") {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("Back returned to the first page");
+    // Owner navigation follows a bruh's URL rules: never this computer.
+    for refused in [format!("http://{addr}/other"), "file:///etc/hosts".into()] {
+        assert!(matches!(
+            browser
+                .owner_input(&ComputerInput::Navigate { url: refused })
+                .await,
+            Err(ToolError::Invalid(_))
+        ));
+    }
+    assert_eq!(
+        browser.current_url().await.unwrap(),
+        format!("http://{addr}/")
+    );
+    browser
+        .close(std::time::Duration::from_millis(
+            bruhs_models::crew::CLOSE_GRACE_MS,
+        ))
+        .await
+        .unwrap();
+    fixture.abort();
+}
