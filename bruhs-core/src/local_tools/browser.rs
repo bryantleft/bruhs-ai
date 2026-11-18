@@ -242,8 +242,17 @@ impl Browser {
             })?;
             // Only the initial about:blank page has run so far. Pause and mark
             // every page/worker before any untrusted navigation or script runs.
-            let guard =
-                BrowserGuard::start(endpoint.as_str(), target_id, child.clone(), policy).await?;
+            // Only bruhs keep a profile. Their browsers never write files to
+            // this computer behind the owner's back.
+            let deny_downloads = options.profile.is_some();
+            let guard = BrowserGuard::start(
+                endpoint.as_str(),
+                target_id,
+                child.clone(),
+                policy,
+                deny_downloads,
+            )
+            .await?;
             let mut cdp = Cdp::connect(socket, policy).await?;
             cdp.call("Page.enable", json!({})).await?;
             cdp.call("Page.setLifecycleEventsEnabled", json!({"enabled":true}))
@@ -256,12 +265,6 @@ impl Browser {
             )
             .await?;
             cdp.call("Log.enable", json!({})).await?;
-            if options.profile.is_some() {
-                // Only bruhs keep a profile. Their browsers never write files
-                // to this computer behind the owner's back.
-                cdp.call("Browser.setDownloadBehavior", json!({"behavior":"deny"}))
-                    .await?;
-            }
             let viewport = if options.headless {
                 cdp.call(
                     "Emulation.setDeviceMetricsOverride",
@@ -389,17 +392,28 @@ impl Browser {
         reply
     }
 
-    /// The page's address now (`location.href`).
+    /// The page's address now, from its navigation history. No page script
+    /// runs, so the page can't stall the read or gain a user activation.
     pub async fn current_url(&mut self) -> Result<String, ToolError> {
         self.guard.check()?;
-        let href = tokio::time::timeout(self.policy.timeout, self.cdp.evaluate("location.href"))
+        let unknown = || ToolError::Unavailable("Chrome didn't say which page is open.".into());
+        let history = tokio::time::timeout(
+            self.policy.timeout,
+            self.cdp.call("Page.getNavigationHistory", json!({})),
+        )
+        .await
+        .map_err(|_| unknown())??;
+        current_entry_url(&history).ok_or_else(unknown)
+    }
+
+    /// Releases a mouse button an interrupted action left pressed.
+    pub async fn release_pointer(&mut self) -> Result<(), ToolError> {
+        self.guard.check()?;
+        tokio::time::timeout(self.policy.timeout, self.cdp.release_pressed())
             .await
             .map_err(|_| {
-                ToolError::Unavailable("Chrome didn't say which page is open.".into())
-            })??;
-        href.as_str()
-            .map(str::to_owned)
-            .ok_or_else(|| ToolError::Unavailable("Chrome didn't say which page is open.".into()))
+                ToolError::Unavailable("The page didn't take the mouse release in time.".into())
+            })?
     }
 
     /// One input from the owner's live view. Navigation follows the agent's
@@ -440,6 +454,12 @@ impl Browser {
     }
 }
 
+/// The current entry's URL in a `Page.getNavigationHistory` result.
+pub(super) fn current_entry_url(history: &Value) -> Option<String> {
+    let index = usize::try_from(history["currentIndex"].as_u64()?).ok()?;
+    history["entries"][index]["url"].as_str().map(str::to_owned)
+}
+
 /// What a launch on a bruh's profile says when a Chrome Bruhs didn't start
 /// holds it.
 pub(super) const PROFILE_IN_USE: &str =
@@ -469,10 +489,20 @@ async fn write_pid_file(profile: &Path, child: &Mutex<Child>) -> Option<PathBuf>
 /// it (named by the pid file, with this profile on its command line) is
 /// stopped. Any other live Chrome holding the profile's lock is an error:
 /// a new launch would hand its URL to that Chrome and exit.
-#[cfg(unix)]
 pub(super) async fn release_profile(
     profile: &Path,
     policy: ProcessPolicy,
+) -> Result<(), ToolError> {
+    let grace = Duration::from_millis(bruhs_models::crew::CLOSE_GRACE_MS);
+    release_profile_within(profile, policy, grace).await
+}
+
+/// [`release_profile`], giving a stale Chrome `grace` after SIGTERM.
+#[cfg(unix)]
+pub(super) async fn release_profile_within(
+    profile: &Path,
+    policy: ProcessPolicy,
+    grace: Duration,
 ) -> Result<(), ToolError> {
     let pid_file = pid_file(profile);
     if let Some(pid) = tokio::fs::read_to_string(&pid_file)
@@ -481,7 +511,7 @@ pub(super) async fn release_profile(
         .and_then(|text| process_id(text.trim()))
     {
         if alive(pid) && uses_profile(pid, profile, policy).await == Some(true) {
-            stop_process(pid).await;
+            stop_process(pid, profile, policy, grace).await;
         }
         let _ = tokio::fs::remove_file(&pid_file).await;
     }
@@ -501,9 +531,10 @@ pub(super) async fn release_profile(
 }
 
 #[cfg(not(unix))]
-pub(super) async fn release_profile(
+pub(super) async fn release_profile_within(
     _profile: &Path,
     _policy: ProcessPolicy,
+    _grace: Duration,
 ) -> Result<(), ToolError> {
     Ok(())
 }
@@ -529,7 +560,8 @@ async fn uses_profile(pid: libc::pid_t, profile: &Path, policy: ProcessPolicy) -
     let args = ["-ww", "-o", "command=", "-p"].map(String::from);
     let mut args = args.to_vec();
     args.push(pid.to_string());
-    let output = process::run("ps", &args, policy).await.ok()?;
+    // A fixed path, so a `ps` earlier on PATH can't answer for it.
+    let output = process::run("/bin/ps", &args, policy).await.ok()?;
     let line = String::from_utf8_lossy(&output);
     let flag = format!("--user-data-dir={}", profile.display());
     Some(line.match_indices(&flag).any(|(at, _)| {
@@ -540,11 +572,15 @@ async fn uses_profile(pid: libc::pid_t, profile: &Path, policy: ProcessPolicy) -
     }))
 }
 
-/// SIGTERM, so Chrome writes its profile, then SIGKILL after the close grace.
+/// SIGTERM, so Chrome writes its profile, then SIGKILL after `grace`. The
+/// SIGKILL goes only to a process still on this profile: the pid may have
+/// been reused once Chrome exited.
 #[cfg(unix)]
-async fn stop_process(pid: libc::pid_t) {
-    let grace = Duration::from_millis(bruhs_models::crew::CLOSE_GRACE_MS);
+async fn stop_process(pid: libc::pid_t, profile: &Path, policy: ProcessPolicy, grace: Duration) {
     for signal in [libc::SIGTERM, libc::SIGKILL] {
+        if signal == libc::SIGKILL && uses_profile(pid, profile, policy).await != Some(true) {
+            return;
+        }
         // SAFETY: `pid` is a single process (`process_id` refuses group and
         // broadcast values) whose command line names this bruh's profile.
         unsafe { libc::kill(pid, signal) };
@@ -705,6 +741,8 @@ pub(super) struct Cdp {
     event_bytes: usize,
     budget: usize,
     loaded: Option<String>,
+    /// The last mouse press not yet released.
+    pressed: Option<Value>,
 }
 
 impl Cdp {
@@ -722,6 +760,7 @@ impl Cdp {
             event_bytes: 0,
             budget: policy.max_output_bytes,
             loaded: None,
+            pressed: None,
         })
     }
 
@@ -765,6 +804,13 @@ impl Cdp {
             ToolError::Invalid("Browser command sequence exhausted. Start a new browser.".into())
         })?;
         let id = self.sequence;
+        if method == MOUSE {
+            match params["type"].as_str() {
+                Some("mousePressed") => self.pressed = Some(params.clone()),
+                Some("mouseReleased") => self.pressed = None,
+                _ => {}
+            }
+        }
         self.socket
             .send(Message::Text(
                 json!({"id":id,"method":method,"params":params})
@@ -791,6 +837,17 @@ impl Cdp {
         Err(ToolError::Unavailable(
             "Chrome closed the debugging connection. Start another browser.".into(),
         ))
+    }
+
+    /// Releases the last press if no release followed it, as after an
+    /// action cut short between the two.
+    pub async fn release_pressed(&mut self) -> Result<(), ToolError> {
+        let Some(mut release) = self.pressed.take() else {
+            return Ok(());
+        };
+        release["type"] = "mouseReleased".into();
+        release["buttons"] = 0.into();
+        self.call(MOUSE, release).await.map(|_| ())
     }
 
     fn observe(&mut self, value: Value, bytes: usize) {

@@ -230,6 +230,11 @@ async fn stop_interrupts_a_pending_action_and_keeps_the_browser() {
     let error = pending.await.unwrap().unwrap_err();
     assert_eq!(error.to_string(), ACTION_STOPPED);
     assert_eq!(fake.closes("a"), 0);
+    assert_eq!(
+        fake.releases("a"),
+        1,
+        "a cut-off click lets go of the button"
+    );
     assert!(host.computer_state("a").await.unwrap().session_id.is_some());
     // Paused, the bruh can't act; resumed, it can.
     host.sync_bruhs(vec![paused]).await;
@@ -377,6 +382,17 @@ async fn close_all_closes_every_bruh_browser() {
     host.open_computer("b").await.unwrap();
     host.close_all().await;
     assert_eq!((fake.closes("a"), fake.closes("b")), (1, 1));
+    // Nothing opens after shutdown, so no profile folder comes back.
+    let error = host.open_computer("a").await.unwrap_err();
+    assert!(
+        matches!(&error, ToolError::Refused(message) if message == COMPUTER_OFF_DENIAL),
+        "{error:?}"
+    );
+    assert!(host
+        .bruh_command("b", BrowserAction::Snapshot)
+        .await
+        .is_err());
+    assert_eq!(fake.launches().len(), 2);
 }
 
 /// A stand-in for a Chrome a crash left behind: a shell whose command line
@@ -384,10 +400,22 @@ async fn close_all_closes_every_bruh_browser() {
 /// Returns once the shell runs with its trap set, so `ps` shows `args`.
 #[cfg(unix)]
 async fn orphan(home: &Path, args: &[String]) -> tokio::process::Child {
+    shell(
+        home,
+        "trap 'kill $! 2>/dev/null; exit 0' TERM; : > \"$READY\"; sleep 30 & wait",
+        args,
+    )
+    .await
+}
+
+/// Runs `script` with `args` on its command line, once it has touched
+/// `$READY`.
+#[cfg(unix)]
+async fn shell(home: &Path, script: &str, args: &[String]) -> tokio::process::Child {
     let ready = home.join(format!("ready-{}", uuid::Uuid::new_v4()));
     let child = tokio::process::Command::new("/bin/sh")
         .arg("-c")
-        .arg("trap 'kill $! 2>/dev/null; exit 0' TERM; : > \"$READY\"; sleep 30 & wait")
+        .arg(script)
         .arg("sh")
         .args(args)
         .env("READY", &ready)
@@ -456,6 +484,34 @@ async fn a_chrome_left_by_a_crash_is_stopped_before_its_profile_reopens() {
     assert!(holder.try_wait().unwrap().is_none(), "never killed");
     stop_orphan(other).await;
     stop_orphan(holder).await;
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_stale_chrome_that_ignores_sigterm_is_killed_after_the_grace() {
+    use super::super::browser::release_profile_within;
+    use std::os::unix::process::ExitStatusExt;
+    let home = tempfile::tempdir().unwrap();
+    let profile = home.path().join("bruhs").join("a").join("browser");
+    std::fs::create_dir_all(&profile).unwrap();
+    let pid_file = profile.with_file_name("browser.pid");
+    // Short sleeps, so nothing outlives the shell for long.
+    let mut stubborn = shell(
+        home.path(),
+        "trap '' TERM; : > \"$READY\"; while :; do sleep 0.05; done",
+        &[format!("--user-data-dir={}", profile.display())],
+    )
+    .await;
+    std::fs::write(&pid_file, stubborn.id().unwrap().to_string()).unwrap();
+    let grace = Duration::from_millis(300);
+    let policy = crate::local_tools::ProcessPolicy::default();
+    let (released, exited) = tokio::join!(
+        release_profile_within(&profile, policy, grace),
+        stubborn.wait()
+    );
+    released.unwrap();
+    assert_eq!(exited.unwrap().signal(), Some(libc::SIGKILL));
+    assert!(!pid_file.exists());
 }
 
 #[tokio::test]

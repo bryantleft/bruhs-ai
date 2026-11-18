@@ -4,6 +4,9 @@
 //! Auto-attachment pauses each target before script execution, installs the
 //! marker used by the host API guard, recursively protects descendants, then
 //! resumes it. The tool API exposes JavaScript, never raw browser-protocol calls.
+//! A bruh's browser also has downloads denied here, on the browser-level
+//! session, before any target runs: a page can end its own session (a popup,
+//! then `window.close()`), but not this one, whose loss kills Chrome.
 
 use std::{collections::HashMap, sync::Arc};
 
@@ -49,6 +52,7 @@ impl BrowserGuard {
         initial_target: &str,
         child: Arc<Mutex<Child>>,
         policy: ProcessPolicy,
+        deny_downloads: bool,
     ) -> Result<Self, ToolError> {
         let config = WebSocketConfig::default()
             .max_message_size(Some(policy.max_output_bytes))
@@ -60,7 +64,7 @@ impl BrowserGuard {
         let initial_target = initial_target.to_owned();
         let protected_child = child.clone();
         let task = tokio::spawn(async move {
-            let result = protect(socket, &initial_target, policy, ready_tx).await;
+            let result = protect(socket, &initial_target, policy, deny_downloads, ready_tx).await;
             let reason = match result {
                 Ok(()) => "Chrome closed its browser protection connection.".into(),
                 Err(error) => format!("Browser protection failed: {error}"),
@@ -106,6 +110,8 @@ impl BrowserGuard {
 
 #[derive(Clone, Copy)]
 enum Step {
+    /// `Browser.setDownloadBehavior` deny, before `Root` attaches anything.
+    Downloads,
     Root,
     Network,
     Marker,
@@ -138,6 +144,7 @@ impl Protection {
         step: Step,
     ) -> Result<(), ToolError> {
         let (method, params) = match step {
+            Step::Downloads => ("Browser.setDownloadBehavior", json!({"behavior":"deny"})),
             Step::Root | Step::Descendants => (
                 "Target.setAutoAttach",
                 json!({
@@ -181,6 +188,7 @@ async fn protect(
     socket: Socket,
     initial_target: &str,
     policy: ProcessPolicy,
+    deny_downloads: bool,
     ready_tx: oneshot::Sender<()>,
 ) -> Result<(), ToolError> {
     let mut state = Protection {
@@ -192,7 +200,13 @@ async fn protect(
     let mut ready_tx = Some(ready_tx);
     let mut root_ready = false;
     let mut initial_ready = false;
-    state.send(None, None, Step::Root).await?;
+    // Nothing is attached, so nothing resumes, until the denial is in place.
+    let first = if deny_downloads {
+        Step::Downloads
+    } else {
+        Step::Root
+    };
+    state.send(None, None, first).await?;
     loop {
         let deadline = state.pending.values().map(|request| request.deadline).min();
         let frame = tokio::select! {
@@ -218,6 +232,7 @@ async fn protect(
                 )));
             }
             let next = match pending.step {
+                Step::Downloads => Some(Step::Root),
                 Step::Root => {
                     root_ready = true;
                     None
@@ -383,6 +398,7 @@ mod tests {
             "initial",
             child.clone(),
             ProcessPolicy::default(),
+            false,
         )
         .await
         .unwrap();
@@ -431,11 +447,70 @@ mod tests {
             &format!("ws://{address}"),
             "initial",
             child.clone(),
-            ProcessPolicy::default()
+            ProcessPolicy::default(),
+            false
         )
         .await
         .is_err());
         assert!(child.lock().await.try_wait().unwrap().is_some());
+        fixture.await.unwrap();
+    }
+
+    #[tokio::test]
+    async fn a_bruh_browser_denies_downloads_before_any_target_resumes() {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let fixture = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.unwrap();
+            let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+            let mut methods = Vec::new();
+            loop {
+                let request = read(&mut socket).await;
+                let method = request["method"].as_str().unwrap().to_owned();
+                if method == "Browser.setDownloadBehavior" {
+                    assert!(
+                        request.get("sessionId").is_none(),
+                        "the browser-level session"
+                    );
+                    assert_eq!(request["params"], json!({"behavior":"deny"}));
+                }
+                if method == "Target.setAutoAttach" && request.get("sessionId").is_none() {
+                    write(&mut socket, json!({"method":"Target.attachedToTarget","params":{"sessionId":"page-session","targetInfo":{"targetId":"initial","type":"page"},"waitingForDebugger":true}})).await;
+                }
+                write(
+                    &mut socket,
+                    json!({"id":request["id"],"sessionId":request["sessionId"],"result":{}}),
+                )
+                .await;
+                methods.push(method.clone());
+                if method == "Runtime.runIfWaitingForDebugger" {
+                    break;
+                }
+            }
+            assert_eq!(methods[0], "Browser.setDownloadBehavior");
+            assert_eq!(methods[1], "Target.setAutoAttach");
+            while socket.next().await.is_some() {}
+        });
+        let child = Arc::new(Mutex::new(
+            tokio::process::Command::new("/bin/sleep")
+                .arg("60")
+                .kill_on_drop(true)
+                .spawn()
+                .unwrap(),
+        ));
+        let mut guard = BrowserGuard::start(
+            &format!("ws://{address}"),
+            "initial",
+            child.clone(),
+            ProcessPolicy::default(),
+            true,
+        )
+        .await
+        .unwrap();
+        guard.check().unwrap();
+        guard.disarm().await;
+        drop(guard);
+        child.lock().await.kill().await.unwrap();
         fixture.await.unwrap();
     }
 }

@@ -852,3 +852,61 @@ async fn live_browser_clicks_types_presses_and_scrolls_with_real_input() {
         .unwrap();
     fixture.abort();
 }
+
+#[tokio::test]
+async fn a_press_cut_short_is_released_once() {
+    use serde_json::json;
+    let mouse = "Input.dispatchMouseEvent";
+    let (mut cdp, server) = fake_page(vec![]).await;
+    cdp.release_pressed().await.unwrap();
+    cdp.call(
+        mouse,
+        json!({"type":"mousePressed","x":10.0,"y":20.0,"button":"left","buttons":1,"clickCount":1,"modifiers":0}),
+    )
+    .await
+    .unwrap();
+    cdp.release_pressed().await.unwrap();
+    cdp.release_pressed().await.unwrap();
+    // A press with its release needs nothing more.
+    for kind in ["mousePressed", "mouseReleased"] {
+        cdp.call(
+            mouse,
+            json!({"type":kind,"x":1.0,"y":2.0,"button":"left","buttons":0,"clickCount":1,"modifiers":0}),
+        )
+        .await
+        .unwrap();
+    }
+    cdp.release_pressed().await.unwrap();
+    drop(cdp);
+    let calls = server.await.unwrap();
+    let kinds: Vec<_> = calls
+        .iter()
+        .map(|(_, params)| params["type"].as_str().unwrap().to_owned())
+        .collect();
+    assert_eq!(
+        kinds,
+        [
+            "mousePressed",
+            "mouseReleased",
+            "mousePressed",
+            "mouseReleased"
+        ]
+    );
+    assert_eq!(calls[1].1["x"], 10.0);
+    assert_eq!(calls[1].1["y"], 20.0);
+    assert_eq!(calls[1].1["button"], "left");
+    assert_eq!(calls[1].1["buttons"], 0);
+}
+
+#[test]
+fn the_page_address_comes_from_its_navigation_history() {
+    let history = serde_json::json!({
+        "currentIndex": 1,
+        "entries": [{"url": "https://a.test/1"}, {"url": "https://a.test/2"}],
+    });
+    assert_eq!(
+        browser::current_entry_url(&history).as_deref(),
+        Some("https://a.test/2")
+    );
+    assert_eq!(browser::current_entry_url(&serde_json::json!({})), None);
+}

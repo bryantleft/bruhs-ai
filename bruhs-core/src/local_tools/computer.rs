@@ -69,6 +69,8 @@ pub(super) trait ComputerPage: Send {
     #[expect(dead_code, reason = "used from Task 6")]
     async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError>;
     async fn url(&mut self) -> Option<String>;
+    /// Releases a mouse button an interrupted action left pressed.
+    async fn release_pointer(&mut self);
     /// A graceful close: Chrome writes its profile, then exits.
     async fn close(&mut self);
 }
@@ -97,6 +99,12 @@ impl ComputerPage for Browser {
 
     async fn url(&mut self) -> Option<String> {
         self.current_url().await.ok()
+    }
+
+    async fn release_pointer(&mut self) {
+        if let Err(error) = Browser::release_pointer(self).await {
+            tracing::warn!(%error, "couldn't release the bruh browser's mouse button");
+        }
     }
 
     async fn close(&mut self) {
@@ -382,8 +390,13 @@ impl LocalToolsHost {
     }
 
     /// Close every bruh browser, as the server stops.
+    /// Nothing opens again afterwards.
     pub async fn close_all(&self) {
-        join_all(self.computer_slots().iter().map(|slot| async move {
+        let slots = self.computer_slots();
+        for slot in &slots {
+            slot.grant.revoked.send_replace(true);
+        }
+        join_all(slots.iter().map(|slot| async move {
             let mut page = slot.page.lock().await;
             slot.shut(&mut page).await;
         }))
@@ -446,11 +459,27 @@ impl LocalToolsHost {
             drop(page);
             reply
         };
-        tokio::select! {
+        // The handlers only name the outcome: `work` (and the page lock it
+        // may hold) is dropped when the `select!` ends.
+        let outcome = tokio::select! {
             biased;
             _ = revoked.changed() => Err(ToolError::Refused(COMPUTER_OFF_DENIAL.into())),
             _ = interrupt.changed() => Err(ToolError::Refused(ACTION_STOPPED.into())),
-            reply = work => reply,
+            reply = work => Ok(reply),
+        };
+        match outcome {
+            Ok(reply) => reply,
+            Err(ToolError::Refused(message)) if message == ACTION_STOPPED => {
+                // A click cut off between press and release would leave the
+                // button held on a browser that stays open.
+                let mut page = slot.page.lock().await;
+                if let Some(open) = page.open.as_mut() {
+                    let _ = tokio::time::timeout(PAGE_URL_WAIT, open.page.release_pointer()).await;
+                }
+                drop(page);
+                Err(ToolError::Refused(message))
+            }
+            Err(error) => Err(error),
         }
     }
 
@@ -506,6 +535,11 @@ impl LocalToolsHost {
     /// Launch the slot's page if it isn't open. A failure lands in the
     /// state's `error`.
     async fn ensure_open(&self, slot: &Slot, page: &mut PageSlot) -> Result<(), ToolError> {
+        // A slot that was removed or shut for good never launches again, so
+        // it can't recreate a deleted bruh's profile.
+        if *slot.grant.revoked.borrow() {
+            return Err(ToolError::Refused(COMPUTER_OFF_DENIAL.into()));
+        }
         if page.open.is_some() {
             return Ok(());
         }
@@ -595,6 +629,7 @@ mod fake {
         actions: HashMap<String, Vec<BrowserAction>>,
         inputs: HashMap<String, Vec<ComputerInput>>,
         closes: HashMap<String, Vec<bool>>,
+        releases: HashMap<String, usize>,
         urls: HashMap<String, String>,
         holds: HashMap<String, Arc<Notify>>,
     }
@@ -631,6 +666,11 @@ mod fake {
 
         pub fn closes(&self, agent_id: &str) -> usize {
             self.seen().closes.get(agent_id).map_or(0, Vec::len)
+        }
+
+        /// How often the host released the bruh's mouse button.
+        pub fn releases(&self, agent_id: &str) -> usize {
+            self.seen().releases.get(agent_id).copied().unwrap_or(0)
         }
 
         /// For each close, whether the profile folder still existed.
@@ -741,6 +781,15 @@ mod fake {
 
         async fn url(&mut self) -> Option<String> {
             self.pages.seen().urls.get(&self.agent_id).cloned()
+        }
+
+        async fn release_pointer(&mut self) {
+            *self
+                .pages
+                .seen()
+                .releases
+                .entry(self.agent_id.clone())
+                .or_default() += 1;
         }
 
         async fn close(&mut self) {
