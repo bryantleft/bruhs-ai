@@ -5,7 +5,7 @@
 //! capture_status_banner,banner}.rs`. Data comes from `MeetingsHub`; sizes
 //! are the web's Tailwind values in px.
 
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -18,13 +18,13 @@ use bruhs_models::{
     PersonProfile, RelationshipItemKind, RelationshipProfile, SearchDocument, SearchHit,
     SearchIndex, SearchKind, Speaker, SpeakerIdentity,
 };
-use gpui::prelude::*;
-use gpui::*;
-use gpui_component::checkbox::Checkbox;
-use gpui_component::input::{
+use bruhs_ui::checkbox::Checkbox;
+use bruhs_ui::input::{
     Escape as InputEscape, Input, InputEvent, InputState, Textarea, TextareaState,
 };
-use gpui_component::Disableable;
+use bruhs_ui::Disableable;
+use gpui::prelude::*;
+use gpui::*;
 use std::sync::Arc;
 
 use super::{

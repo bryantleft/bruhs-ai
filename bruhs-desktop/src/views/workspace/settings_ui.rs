@@ -7,11 +7,11 @@
 
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_models::{Calendar, GoogleCalendarSyncState, WhisperModel};
+use bruhs_ui::checkbox::Checkbox;
+use bruhs_ui::input::Input;
+use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::checkbox::Checkbox;
-use gpui_component::input::Input;
-use gpui_component::zoom::px;
 
 use super::{Workspace, SETTINGS_ROW_CONTROL_WIDTH_PX};
 use crate::views::dropdown::{dropdown, DropdownGroup, DropdownOption};
@@ -20,8 +20,8 @@ use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButton
 use crate::{assets, theme};
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_models::EpochMs;
+use bruhs_ui::input::{InputEvent, InputState};
 use bruhs_ui::press::{on_press_view, Interactivity};
-use gpui_component::input::{InputEvent, InputState};
 
 pub(super) const SETTINGS_WHISPER_DROPDOWN_ID: &str = "desktop-whisper-model";
 pub(super) const SETTINGS_TRANSCRIPTION_PROVIDER_DROPDOWN_ID: &str =

@@ -3,8 +3,8 @@
 //! Times, labels, the event and the wording come from
 //! `bruhs_models::logic::booking`, shared with web.
 
-use gpui_component::input::{Input, InputState};
-use gpui_component::zoom::px;
+use bruhs_ui::input::{Input, InputState};
+use bruhs_ui::zoom::px;
 
 use super::calendar_ui::local_datetime_from_ms;
 use super::*;

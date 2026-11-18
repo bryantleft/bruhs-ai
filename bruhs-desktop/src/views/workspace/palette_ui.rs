@@ -3,7 +3,7 @@
 use super::*;
 use bruhs_models::logic::preview;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
     CommandAction {

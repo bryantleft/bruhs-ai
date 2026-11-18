@@ -4,7 +4,7 @@ use super::*;
 pub(super) use crate::views::meetings_hub::local_offset_minutes_east;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::collections::HashMap;
 
 impl DesktopTimegridDrag {
@@ -698,8 +698,7 @@ impl Workspace {
             .as_ref()
             .filter(|state| state.event_id == payload.event_id && state.kind == payload.kind)
             .map_or(0.0, |state| state.grab_offset_y_px);
-        let pointer_y_px =
-            gpui_component::zoom::css_px(drag.event.position.y - drag.bounds.origin.y);
+        let pointer_y_px = bruhs_ui::zoom::css_px(drag.event.position.y - drag.bounds.origin.y);
         let changed = self
             .calendar_events
             .iter_mut()
@@ -1751,7 +1750,7 @@ impl Workspace {
                         el.on_drag(
                             move_drag,
                             move |drag: &DesktopTimegridDrag, offset, _window, cx| {
-                                let grab_offset_y_px = gpui_component::zoom::css_px(offset.y);
+                                let grab_offset_y_px = bruhs_ui::zoom::css_px(offset.y);
                                 let _ = workspace.update(cx, |this, cx| {
                                     this.begin_timegrid_drag(drag, grab_offset_y_px, cx);
                                 });

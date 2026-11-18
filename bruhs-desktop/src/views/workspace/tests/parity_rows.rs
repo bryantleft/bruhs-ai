@@ -4,7 +4,7 @@
 
 use super::*;
 use bruhs_models::{Meeting, MeetingSummary, ObservationKind, PersonObservation, PersonProfile};
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 /// A workspace in a window, with the app's theme and dialogs root. Its hub
 /// talks to a closed loopback port (9), never a bruhs-server running on
@@ -15,8 +15,8 @@ fn parity_workspace(
 ) -> (Entity<Workspace>, &mut gpui::VisualTestContext) {
     cx.executor().allow_parking();
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state should initialize"));
     });
@@ -25,7 +25,7 @@ fn parity_workspace(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()

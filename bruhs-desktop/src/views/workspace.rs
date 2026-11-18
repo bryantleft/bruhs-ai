@@ -1,14 +1,14 @@
+use bruhs_ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use bruhs_ui::resizable::{
+    h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
+};
+use bruhs_ui::scroll::ScrollableElement;
+use bruhs_ui::tooltip::Tooltip;
+use bruhs_ui::zoom::px;
+use bruhs_ui::{ActiveTheme, Icon, IconName, WindowExt};
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use gpui_component::resizable::{
-    h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
-};
-use gpui_component::scroll::ScrollableElement;
-use gpui_component::tooltip::Tooltip;
-use gpui_component::zoom::px;
-use gpui_component::{ActiveTheme, Icon, IconName, WindowExt};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet};
@@ -2380,7 +2380,7 @@ impl Workspace {
     fn narrower_than(window: &Window, breakpoint_px: f32) -> bool {
         // In CSS pixels, so a zoomed window switches layouts at the widths a
         // zoomed browser page does.
-        gpui_component::zoom::css_px(window.viewport_size().width) < breakpoint_px
+        bruhs_ui::zoom::css_px(window.viewport_size().width) < breakpoint_px
     }
 
     /// Web: below `sm` the sidebar is a drawer over a scrim; from `sm` it
@@ -2404,14 +2404,14 @@ impl Workspace {
     }
 
     /// Draw the window's design lengths at the saved zoom (see
-    /// [`gpui_component::zoom`]), and keep the macOS traffic lights centred in
+    /// [`bruhs_ui::zoom`]), and keep the macOS traffic lights centred in
     /// the zoomed header.
     fn apply_zoom(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        gpui_component::zoom::set_zoom(self.zoom, cx);
+        bruhs_ui::zoom::set_zoom(self.zoom, cx);
         #[cfg(target_os = "macos")]
         window.set_traffic_light_position(point(
-            gpui_component::zoom::window_px(12.0),
-            gpui_component::zoom::window_px(crate::zoom::traffic_light_top(
+            bruhs_ui::zoom::window_px(12.0),
+            bruhs_ui::zoom::window_px(crate::zoom::traffic_light_top(
                 theme::APP_HEADER_HEIGHT_PX,
                 self.zoom,
             )),
@@ -2424,7 +2424,7 @@ impl Workspace {
     fn traffic_light_inset(&self) -> Pixels {
         #[cfg(target_os = "macos")]
         {
-            gpui_component::zoom::window_px(SIDEBAR_HEADER_LEFT_INSET_PX)
+            bruhs_ui::zoom::window_px(SIDEBAR_HEADER_LEFT_INSET_PX)
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -3030,7 +3030,7 @@ impl Render for Workspace {
         let sidebar_docked = !sidebar_drawer && self.sidebar_visible && !booking;
         let sidebar_drawer_open = sidebar_drawer && self.compact_sidebar_open && !booking;
         let chat_panel_open = self.right_panel_open() && self.active_view == AppView::Chat;
-        let right_drawer_width = (gpui_component::zoom::css_px(window.viewport_size().width)
+        let right_drawer_width = (bruhs_ui::zoom::css_px(window.viewport_size().width)
             * RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE)
             .min(RIGHT_PANEL_DRAWER_WIDTH_PX);
         let body = div()
@@ -3092,7 +3092,7 @@ impl Render for Workspace {
                     // remembered, clamped, and gives way to the chat's 360px
                     // minimum. A window resize never changes the remembered
                     // width, so the panel holds it unless its edge is dragged.
-                    let viewport_width = gpui_component::zoom::css_px(window.viewport_size().width);
+                    let viewport_width = bruhs_ui::zoom::css_px(window.viewport_size().width);
                     let sidebar_width = if sidebar_docked {
                         WORKSPACE_SIDE_PANEL_WIDTH_PX
                     } else {
@@ -3204,8 +3204,8 @@ impl Render for Workspace {
             // textarea: nothing traps the keyboard. The composer indents its
             // list items and code first (`composer_edit`), and accepts a
             // suggestion, before this runs.
-            .capture_action(cx.listener(
-                |this, _: &gpui_component::input::IndentInline, window, cx| {
+            .capture_action(
+                cx.listener(|this, _: &bruhs_ui::input::IndentInline, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
                     if this.overlay_open()
@@ -3215,10 +3215,10 @@ impl Render for Workspace {
                     } else {
                         window.focus_next(cx);
                     }
-                },
-            ))
-            .capture_action(cx.listener(
-                |this, _: &gpui_component::input::OutdentInline, window, cx| {
+                }),
+            )
+            .capture_action(
+                cx.listener(|this, _: &bruhs_ui::input::OutdentInline, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
                     if this.overlay_open()
@@ -3228,8 +3228,8 @@ impl Render for Workspace {
                     } else {
                         window.focus_prev(cx);
                     }
-                },
-            ))
+                }),
+            )
             // Every bruhs type role is `line-height: 1.5`; gpui defaults to φ
             // (1.618), which made every row ~2px taller than the web's.
             .line_height(relative(WORKSPACE_LINE_HEIGHT))

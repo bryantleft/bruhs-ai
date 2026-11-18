@@ -4,12 +4,12 @@
 //! with the Settled fold, and the footer view switcher. Sizes are the web's
 //! Tailwind values in px; colours are the same bruhs tokens.
 
+use bruhs_ui::input::{Input, InputEvent, InputState, TextareaState};
+use bruhs_ui::scroll::ScrollableElement;
+use bruhs_ui::zoom::px;
+use bruhs_ui::ActiveTheme;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState, TextareaState};
-use gpui_component::scroll::ScrollableElement;
-use gpui_component::zoom::px;
-use gpui_component::ActiveTheme;
 use std::rc::Rc;
 
 mod menu_popover;

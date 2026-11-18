@@ -105,7 +105,7 @@ fn open(
     snapshot: ReactiveSnapshot,
 ) -> (Entity<ReactiveAutomations>, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         theme::apply_bruhs_theme(cx);
     });
     let holder = Rc::new(RefCell::new(None));
@@ -113,7 +113,7 @@ fn open(
     let (_, cx) = cx.add_window_view(|window, cx| {
         let panel = cx.new(ReactiveAutomations::new);
         *capture.borrow_mut() = Some(panel.clone());
-        gpui_component::Root::new(panel, window, cx)
+        bruhs_ui::Root::new(panel, window, cx)
     });
     cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(1200.0)));
     let panel = holder.borrow().clone().unwrap();

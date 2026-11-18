@@ -535,7 +535,7 @@ mod tests {
         Rc<RefCell<Vec<ReactiveBruhCreated>>>,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = Rc::new(RefCell::new(None));
@@ -544,7 +544,7 @@ mod tests {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
             let host = cx.new(|_| CreateBruhHost(panel));
-            gpui_component::Root::new(host, window, cx)
+            bruhs_ui::Root::new(host, window, cx)
         });
         let panel = holder.borrow().clone().unwrap();
         let created = Rc::new(RefCell::new(Vec::new()));
@@ -579,7 +579,7 @@ mod tests {
             // type the newline into a one-line field, which a real one never
             // receives.)
             name.update(cx, |_, cx| {
-                cx.emit(gpui_component::input::InputEvent::PressEnter {
+                cx.emit(bruhs_ui::input::InputEvent::PressEnter {
                     secondary: false,
                     shift: false,
                 });

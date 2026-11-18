@@ -3,7 +3,7 @@
 use super::library_pages_ui::LibraryPage;
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 // Match the web task list/board budgets. The native library action fixture
 // measures 100/1,000/10,000 tasks; complete records remain in work_items.

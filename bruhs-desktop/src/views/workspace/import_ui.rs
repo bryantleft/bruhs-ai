@@ -15,8 +15,8 @@ use bruhs_models::logic::portable::{
 };
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
-use gpui_component::Sizable as _;
+use bruhs_ui::zoom::px;
+use bruhs_ui::Sizable as _;
 use std::time::Duration;
 
 pub(super) const IMPORT_DIALOG_LABEL: &str = "Import thread";

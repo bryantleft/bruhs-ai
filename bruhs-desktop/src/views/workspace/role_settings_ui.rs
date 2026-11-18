@@ -8,9 +8,9 @@ use super::*;
 use bruhs_models::agent::{AgentProvider, MODEL_CATALOG};
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use bruhs_models::roles::{Role as ThreadRole, RoleOverride, MAX_ROLES};
+use bruhs_ui::input::{Input, Textarea};
 use bruhs_ui::press::on_press_view;
-use gpui_component::input::{Input, Textarea};
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 pub(super) const SETTINGS_ROLE_DROPDOWN_ID: &str = "desktop-role";
 pub(super) const SETTINGS_ROLE_MODEL_DROPDOWN_ID: &str = "desktop-role-model";

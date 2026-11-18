@@ -3,7 +3,7 @@ use super::*;
 use bruhs_models::crew::{
     access_summary, BruhLook, BruhStatus, COMMAND_SOURCE_ACCESS, RAIL_FACE_PX,
 };
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 pub(super) struct AutomationEditor {
     agent: AgentEditor,
@@ -727,7 +727,7 @@ mod tests {
         cx: &mut gpui::TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -735,7 +735,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
+            bruhs_ui::Root::new(panel, window, cx)
         });
         let panel = holder.borrow().clone().unwrap();
         panel.update_in(cx, |panel, window, cx| {

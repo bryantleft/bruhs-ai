@@ -7,11 +7,11 @@ use bruhs_core::{AppState, BackgroundTask, TaskStatus};
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_models::EpochMs;
 use bruhs_ui::press::on_press_view;
+use bruhs_ui::scroll::ScrollableElement;
+use bruhs_ui::tooltip::Tooltip;
+use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::scroll::ScrollableElement;
-use gpui_component::tooltip::Tooltip;
-use gpui_component::zoom::px;
 use std::sync::Arc;
 
 pub struct TasksPanelView {

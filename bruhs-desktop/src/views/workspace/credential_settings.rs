@@ -2,9 +2,9 @@
 use super::*;
 use crate::app_state::spawn_tokio;
 use bruhs_models::secrets::{review_text, SavedCredential, SavedCredentialState};
+use bruhs_ui::input::{Input, InputContentType};
 use bruhs_ui::press::on_press_view;
-use gpui_component::input::{Input, InputContentType};
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 enum Load {
     Idle,
@@ -390,7 +390,7 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -409,7 +409,7 @@ mod tests {
                 view
             });
             *output.borrow_mut() = Some(view.clone());
-            gpui_component::Root::new(view, window, cx)
+            bruhs_ui::Root::new(view, window, cx)
         });
         let view = capture.borrow().clone().unwrap();
         view.update_in(cx, |view, window, cx| {

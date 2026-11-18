@@ -8,7 +8,7 @@ use std::{cell::RefCell, rc::Rc};
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state"));
     });
@@ -17,7 +17,7 @@ fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestCont
     let (_, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *capture.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = captured.borrow().clone().expect("workspace");
     cx.run_until_parked();

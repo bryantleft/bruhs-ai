@@ -1,8 +1,8 @@
 //! Native sidebar input and complete headless frame settling; no provider or save activity.
 use super::super::super::{element_key, MessageRole};
 use super::*;
+use bruhs_ui::zoom::px;
 use gpui::size;
-use gpui_component::zoom::px;
 
 #[derive(Clone, Copy)]
 struct Case {
@@ -110,7 +110,7 @@ fn scene_state(case: Case) -> PersistedWorkspaceState {
 
 struct Scene {
     workspace: Entity<Workspace>,
-    root: Entity<gpui_component::Root>,
+    root: Entity<bruhs_ui::Root>,
     input_bytes: usize,
     input_sha256: String,
     selectors: Vec<&'static str>,
@@ -134,7 +134,7 @@ fn mount(cx: &mut TestAppContext, case: Case) -> (Scene, &mut VisualTestContext)
             )
         });
         *capture.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = captured.borrow_mut().take().unwrap();
     visual.simulate_resize(size(px(case.width), px(case.height)));

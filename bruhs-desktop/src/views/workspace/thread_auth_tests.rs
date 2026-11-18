@@ -12,8 +12,8 @@ fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContex
     cx.executor().allow_parking();
     cx.update(|cx| {
         ChatView::clear_auth_probe_for_test(cx);
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("isolated desktop state"));
     });
@@ -22,7 +22,7 @@ fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContex
     let (_, visual) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *capture.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = captured.borrow_mut().take().expect("workspace");
     visual.run_until_parked();

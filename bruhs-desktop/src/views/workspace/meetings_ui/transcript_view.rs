@@ -3,8 +3,8 @@ use super::*;
 use bruhs_models::num::ToIntSaturating;
 use bruhs_models::TranscriptSegment;
 use bruhs_ui::press::on_press_view;
-use gpui_component::scroll::{Scrollbar, ScrollbarMode};
-use gpui_component::zoom::px;
+use bruhs_ui::scroll::{Scrollbar, ScrollbarMode};
+use bruhs_ui::zoom::px;
 
 pub(super) const LIVE_ROW_OFFSET: usize = bruhs_models::MAX_TRANSCRIPT_SEGMENTS + 1;
 
@@ -17,7 +17,7 @@ pub(in crate::views::workspace) struct TranscriptViewport {
     pinned_record: Option<String>,
     header_focus: FocusHandle,
     footer_focus: FocusHandle,
-    /// The page zoom the rows were measured at (`gpui_component::zoom`).
+    /// The page zoom the rows were measured at (`bruhs_ui::zoom`).
     zoom: f32,
 }
 
@@ -61,11 +61,11 @@ impl TranscriptViewport {
                 pinned_record: None,
                 header_focus,
                 footer_focus,
-                zoom: gpui_component::zoom::zoom(),
+                zoom: bruhs_ui::zoom::zoom(),
             }
         });
         // Every row's height changes with the page zoom.
-        let zoom = gpui_component::zoom::zoom();
+        let zoom = bruhs_ui::zoom::zoom();
         if view.zoom != zoom {
             view.zoom = zoom;
             view.list.remeasure();

@@ -156,8 +156,8 @@ fn calendar_workspace(
     cx: &mut gpui::TestAppContext,
 ) -> (Entity<Workspace>, &mut gpui::VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -167,7 +167,7 @@ fn calendar_workspace(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()

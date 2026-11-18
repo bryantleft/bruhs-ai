@@ -5,9 +5,9 @@ use super::runner::{self, Config};
 use super::{FixtureMode, Service};
 use crate::assets;
 use crate::views::workspace::Workspace;
+use bruhs_ui::zoom::px;
+use bruhs_ui::Root;
 use gpui::*;
-use gpui_component::zoom::px;
-use gpui_component::Root;
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -292,7 +292,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             let handle = cx
                 .open_window(
                     WindowOptions {
-                        titlebar: Some(gpui_component::TitleBar::title_bar_options()),
+                        titlebar: Some(bruhs_ui::TitleBar::title_bar_options()),
                         window_min_size: Some(size(px(640.0), px(480.0))),
                         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                             None,

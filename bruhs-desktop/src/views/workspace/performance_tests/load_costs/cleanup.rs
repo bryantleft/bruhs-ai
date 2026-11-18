@@ -3,7 +3,7 @@ use super::*;
 use std::fs;
 
 pub(super) fn close_fixture(
-    root: Entity<gpui_component::Root>,
+    root: Entity<bruhs_ui::Root>,
     workspace: Entity<Workspace>,
     visual: &mut VisualTestContext,
 ) {
@@ -53,7 +53,7 @@ fn workspace_fixture_cleanup_releases_entities_before_return(cx: &mut TestAppCon
                     });
                     cx.on_release(move |_, _| root_flag.set(true)).detach();
                     *capture.borrow_mut() = Some(workspace.clone());
-                    gpui_component::Root::new(workspace, window, cx)
+                    bruhs_ui::Root::new(workspace, window, cx)
                 });
                 let workspace = captured.borrow_mut().take().unwrap();
                 assert!(visual.debug_bounds("desktop-composer").is_some());

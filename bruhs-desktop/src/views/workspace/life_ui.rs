@@ -6,7 +6,7 @@ use bruhs_models::{
     health_provider_adapters, life_agent_prompt, FinanceField, HealthField, LifeInsightDomain,
     ProviderStatus,
 };
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 /// Which finance card's Add was pressed.
 #[derive(Clone, Copy)]
@@ -1396,7 +1396,7 @@ impl Workspace {
     pub(super) fn render_life_page(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
         // Web's forms take their columns from `sm`.
         let narrow = Self::narrower_than(window, SM_BREAKPOINT_PX);
-        let width = gpui_component::zoom::css_px(window.viewport_size().width);
+        let width = bruhs_ui::zoom::css_px(window.viewport_size().width);
         let two_columns = width >= RECORD_GRID_TWO_COLUMNS_PX;
         let finance = self.life_tab == DesktopLifeTab::Finance;
         let summary = if finance {
@@ -1663,7 +1663,7 @@ mod money_tests {
         cx: &mut gpui::TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1672,7 +1672,7 @@ mod money_tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let workspace = cx.new(|cx| Workspace::new(window, cx));
             *capture.borrow_mut() = Some(workspace.clone());
-            gpui_component::Root::new(workspace, window, cx)
+            bruhs_ui::Root::new(workspace, window, cx)
         });
         let workspace = cell.borrow().clone().unwrap();
         let dir = std::env::temp_dir().join(format!("bruhs-native-money-{}", uuid::Uuid::new_v4()));
@@ -1770,7 +1770,7 @@ mod health_audit_tests {
     #[gpui::test]
     fn health_forms_reject_normalized_values_and_preserve_invalid_drafts(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });

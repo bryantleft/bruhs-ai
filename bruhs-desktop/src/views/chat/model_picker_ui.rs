@@ -7,7 +7,7 @@ use bruhs_models::runtime_models::{
     ModelChoice, RuntimeModels,
 };
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 /// A runtime's model listing as a future the desktop's tokio runtime drives.
 type ListingFuture = std::pin::Pin<Box<dyn std::future::Future<Output = RuntimeModels> + Send>>;

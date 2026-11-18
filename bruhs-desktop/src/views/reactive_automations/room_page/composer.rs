@@ -1,7 +1,7 @@
 //! The room composer: its draft and bruh chips, the `@` list of the
 //! room's members, and posting.
 use super::*;
-use gpui_component::Sizable as _;
+use bruhs_ui::Sizable as _;
 
 /// Web `rounded-[16px]` on the composer surface.
 const COMPOSER_RADIUS_PX: f32 = 16.0;

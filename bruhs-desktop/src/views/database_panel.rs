@@ -8,12 +8,12 @@ use crate::{
 use bruhs_models::{database::*, num::ToFloatLossy};
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::text_field::TextField;
-use gpui::{prelude::*, *};
-use gpui_component::zoom::px;
-use gpui_component::{
+use bruhs_ui::zoom::px;
+use bruhs_ui::{
     input::{InputEvent, InputState, TextareaState},
     scroll::ScrollableElement,
 };
+use gpui::{prelude::*, *};
 use std::{collections::BTreeSet, future::Future};
 use uuid::Uuid;
 
@@ -1000,7 +1000,7 @@ mod tests {
     #[gpui::test]
     fn database_native_controls_keep_data_private_until_selected(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(crate::app_state::DesktopState::new().unwrap());
         });
@@ -1012,7 +1012,7 @@ mod tests {
                 DatabasePanel::with_client("/synthetic/project".into(), client, window, cx)
             });
             *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
+            bruhs_ui::Root::new(panel, window, cx)
         });
         cx.simulate_resize(size(px(640.0), px(1100.0)));
         let panel = holder.borrow().clone().unwrap();

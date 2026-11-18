@@ -28,8 +28,8 @@ use bruhs_models::crew::{
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use bruhs_ui::press::on_press_view;
+use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::{press::Interactivity, switch::switch, text_field::TextInput};
-use gpui_component::scroll::ScrollableElement;
 use std::cell::Cell;
 
 /// Web `text-h3`.
@@ -476,7 +476,7 @@ impl Layout {
     /// The layout of a page last measured at `measured` CSS px wide (0
     /// before its first frame, when the window's width stands in).
     pub(super) fn measured(measured: f32, window: &Window) -> Self {
-        let viewport = gpui_component::zoom::css_px(window.viewport_size().width);
+        let viewport = bruhs_ui::zoom::css_px(window.viewport_size().width);
         let width = if measured > 0.0 { measured } else { viewport };
         Self::of(width, viewport)
     }
@@ -524,7 +524,7 @@ pub(super) fn measure_width(
     let entity = cx.entity_id();
     canvas(
         move |bounds, _, cx| {
-            let measured = gpui_component::zoom::css_px(bounds.size.width);
+            let measured = bruhs_ui::zoom::css_px(bounds.size.width);
             if (width.get() - measured).abs() > 0.5 {
                 width.set(measured);
                 cx.notify(entity);
@@ -2087,7 +2087,7 @@ mod tests {
         tab: BruhTab,
     ) -> (Entity<ReactiveAutomations>, &mut VisualTestContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = Rc::new(RefCell::new(None));
@@ -2095,7 +2095,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
+            bruhs_ui::Root::new(panel, window, cx)
         });
         cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(2400.0)));
         let panel = holder.borrow().clone().unwrap();
@@ -2604,7 +2604,7 @@ mod tests {
     #[gpui::test]
     fn crew_links_open_only_web_and_mail_addresses(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let mut click = |url: &str| {

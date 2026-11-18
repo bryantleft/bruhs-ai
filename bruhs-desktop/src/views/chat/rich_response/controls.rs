@@ -1,7 +1,7 @@
 use super::*;
 use bruhs_models::logic::rich_response::standalone_widget_document;
-use gpui_component::zoom::px;
-use gpui_component::FocusTrapElement as _;
+use bruhs_ui::zoom::px;
+use bruhs_ui::FocusTrapElement as _;
 
 fn standalone_document(entry: &Entry, app: &App) -> Option<String> {
     let ResponseBlock::Html(html) = entry.resolved.as_deref()? else {

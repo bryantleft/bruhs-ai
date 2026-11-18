@@ -2,7 +2,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 pub(super) const EVENT_COLOR_OPTIONS: &[(&str, &str)] = &[
     ("persimmon", "Persimmon"),
     ("blueberry", "Blueberry"),

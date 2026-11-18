@@ -4,6 +4,8 @@
 //! Drawing at a zoom is `gpui_component::zoom`: design lengths are CSS pixels
 //! scaled by the zoom, so pages reflow at the web's widths.
 
+pub use gpui_component::zoom::{css_px, px, set_zoom, window_px, zoom};
+
 /// The zoom steps, smallest first.
 pub const LEVELS: [f32; 12] = [
     0.67, 0.75, 0.8, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0,

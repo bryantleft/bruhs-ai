@@ -10,8 +10,8 @@ use bruhs_models::{
     health_copy, FinanceTransaction, HealthEntryError, HealthField, HealthJournal, Holding,
     LifeContext, RecoveryLog, SleepLog, WorkoutLog,
 };
+use bruhs_ui::input::InputState;
 use gpui::{Bounds, Entity, Focusable, Pixels, VisualTestContext};
-use gpui_component::input::InputState;
 use std::sync::Arc;
 
 fn bounds(cx: &mut VisualTestContext, selector: &str) -> Option<Bounds<Pixels>> {
@@ -253,7 +253,7 @@ fn sleep_and_recovery_card_counts_logs_like_web(cx: &mut gpui::TestAppContext) {
 fn set(
     cx: &mut VisualTestContext,
     workspace: &Entity<Workspace>,
-    pick: fn(&super::FinanceForms) -> &gpui::Entity<gpui_component::input::InputState>,
+    pick: fn(&super::FinanceForms) -> &gpui::Entity<bruhs_ui::input::InputState>,
     value: &str,
 ) {
     workspace.update_in(cx, |workspace, window, cx| {

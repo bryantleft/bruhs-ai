@@ -292,7 +292,7 @@ mod tests {
     #[gpui::test]
     fn the_editor_changes_the_look(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -301,7 +301,7 @@ mod tests {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
             let host = cx.new(|_| CreateBruhHost(panel));
-            gpui_component::Root::new(host, window, cx)
+            bruhs_ui::Root::new(host, window, cx)
         });
         let panel = holder.borrow().clone().unwrap();
         panel.update_in(cx, |panel, window, cx| {

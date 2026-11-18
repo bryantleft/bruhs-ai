@@ -1,15 +1,15 @@
 use super::{set, value, ApiAttachment, ApiClientPanel};
 use crate::{server_client::ServerClient, theme};
 use bruhs_models::api_client::*;
+use bruhs_ui::zoom::px;
 use gpui::{point, size, AppContext, Modifiers, TestAppContext, VisualTestContext};
-use gpui_component::zoom::px;
 use std::{cell::RefCell, rc::Rc};
 use uuid::Uuid;
 
 #[gpui::test]
 fn api_client_native_controls_import_tree_and_unsent_attachment(cx: &mut TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(crate::app_state::DesktopState::new().unwrap());
     });
@@ -21,7 +21,7 @@ fn api_client_native_controls_import_tree_and_unsent_attachment(cx: &mut TestApp
             ApiClientPanel::with_client("/synthetic/api-project".into(), client, window, cx)
         });
         *capture.borrow_mut() = Some(panel.clone());
-        gpui_component::Root::new(panel, window, cx)
+        bruhs_ui::Root::new(panel, window, cx)
     });
     cx.simulate_resize(size(px(640.0), px(2600.0)));
     let panel = holder.borrow().clone().unwrap();

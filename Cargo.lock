@@ -1253,8 +1253,6 @@ dependencies = [
  "futures-util",
  "gdkx11",
  "gpui",
- "gpui-base",
- "gpui-component",
  "gpui_platform",
  "gtk",
  "image",

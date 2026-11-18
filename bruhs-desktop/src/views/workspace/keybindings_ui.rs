@@ -7,15 +7,15 @@
 //! off. A plain key such as `/` or `c` is left alone when its condition fails,
 //! or the character would never reach the field.
 
+use bruhs_ui::input::{Input, InputEvent, InputState};
+use bruhs_ui::zoom::px;
+use bruhs_ui::WindowExt;
 use gpui::prelude::*;
 use gpui::{
     div, Action, AnyElement, App, Context, Entity, Focusable, KeyBinding,
     KeyBindingContextPredicate, Keystroke, KeystrokeEvent, OperatingSystem, Role, SharedString,
     Subscription, Unbind, WeakEntity, Window,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::zoom::px;
-use gpui_component::WindowExt;
 
 use bruhs_models::logic::keybindings::{
     chord_claimed, chord_from_event, default_keybindings, gpui_shortcut, resolve,

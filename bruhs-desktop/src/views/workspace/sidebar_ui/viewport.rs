@@ -1,6 +1,6 @@
 //! Only row geometry and focus targets live here; cards read current thread data.
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::collections::HashMap;
 use std::rc::Rc;
 

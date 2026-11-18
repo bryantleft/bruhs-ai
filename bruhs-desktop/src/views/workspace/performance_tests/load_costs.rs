@@ -29,8 +29,8 @@ fn current(state: Option<&mut PersistedWorkspaceState>) -> RestoredRecords {
 
 fn initialize(cx: &mut TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().unwrap());
     });
@@ -262,7 +262,7 @@ fn observe_with_loader(
         let read_decode_hash_ms = started.elapsed().as_secs_f64() * 1000.0;
         let workspace =
             cx.new(|cx| Workspace::from_loaded_state(loaded, window, cx, restore, restore_threads));
-        let root = gpui_component::Root::new(workspace.clone(), window, cx);
+        let root = bruhs_ui::Root::new(workspace.clone(), window, cx);
         let constructed = started.elapsed().as_secs_f64() * 1000.0;
         *capture.borrow_mut() = Some((
             workspace,

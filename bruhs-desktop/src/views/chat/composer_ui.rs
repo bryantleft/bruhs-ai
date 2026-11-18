@@ -6,12 +6,12 @@
 //! context strip under it, and the `/ commands · @ files · ⌘K palette`
 //! hints. Sizes are the web's Tailwind values in px.
 
+use bruhs_ui::input::{Input, Textarea};
+use bruhs_ui::scroll::ScrollableElement as _;
+use bruhs_ui::tooltip::Tooltip;
+use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, Textarea};
-use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::tooltip::Tooltip;
-use gpui_component::zoom::px;
 
 use bruhs_models::logic::commands::COMPACT_UNAVAILABLE;
 use bruhs_models::logic::composer_text::{exceeds_message_limit_with, MESSAGE_LIMIT_HINT};
@@ -406,8 +406,8 @@ fn context_ring(reading: ContextReading) -> impl IntoElement {
             // Window points per ring unit: the painted box already carries the
             // zoom, so these lengths must not be zoomed again.
             let scale = f32::from(bounds.size.width) / CONTEXT_RING_BOX_UNITS;
-            let radius = gpui_component::zoom::window_px(CONTEXT_RING_RADIUS_UNITS * scale);
-            let stroke = gpui_component::zoom::window_px(CONTEXT_RING_STROKE_UNITS * scale);
+            let radius = bruhs_ui::zoom::window_px(CONTEXT_RING_RADIUS_UNITS * scale);
+            let stroke = bruhs_ui::zoom::window_px(CONTEXT_RING_STROKE_UNITS * scale);
             let center = bounds.center();
             let at = |turn: f32| {
                 let angle = (turn - 0.25) * std::f32::consts::TAU;
@@ -3387,8 +3387,8 @@ mod tests {
         use gpui::AppContext as _;
 
         cx.update(|cx| {
-            gpui_component::init(cx);
-            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            bruhs_ui::init(cx);
+            bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
             crate::theme::apply_bruhs_theme(cx);
             cx.set_global(crate::app_state::DesktopState::new().unwrap());
         });

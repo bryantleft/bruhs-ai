@@ -2,8 +2,8 @@
 //! or cite a saved source by searching for it. Search, paging, keys and
 //! wording come from `bruhs_models::logic::record_picker`, shared with web.
 
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::zoom::px;
+use bruhs_ui::input::{Input, InputEvent, InputState};
+use bruhs_ui::zoom::px;
 
 use super::*;
 use bruhs_models::logic::record_picker::{

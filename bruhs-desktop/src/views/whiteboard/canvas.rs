@@ -3,7 +3,7 @@ use bruhs_models::{num::ToFloatLossy as _, whiteboard as board};
 use gpui::*;
 // The board paints in window points: its camera is its zoom, and input maps
 // window points to the board, so the page zoom must not scale it again.
-use gpui_component::zoom::window_px as px;
+use bruhs_ui::zoom::window_px as px;
 use std::collections::BTreeMap;
 
 #[derive(Default, Clone)]

@@ -1,7 +1,7 @@
 //! Composer hints: `/` commands, `#` pull requests, `$` skills, and `@` mentions.
 
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 pub(super) use bruhs_models::logic::commands::SLASH_COMMANDS as DESKTOP_SLASH_COMMANDS;
 pub(super) const COMPOSER_HINT_EMPTY_LABEL: &str = "No matches";

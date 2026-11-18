@@ -2,7 +2,7 @@
 //! it as the drawer under the chat (⌘J) or as the full Terminal view, so the
 //! sessions are the same wherever you look at them.
 
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::sync::Arc;
 
 use bruhs_core::terminal::{TerminalInfo, TerminalManager, TerminalSpec};
@@ -905,13 +905,13 @@ mod tests {
     fn terminal_launch_errors_arrive_without_blocking_the_action(cx: &mut gpui::TestAppContext) {
         use gpui::AppContext as _;
         use std::sync::Arc;
-        cx.update(gpui_component::init);
+        cx.update(bruhs_ui::init);
         let runtime = Arc::new(tokio::runtime::Runtime::new().unwrap());
         let panel = cx.new(|cx| {
             super::TerminalPanelView::new(bruhs_core::terminal::TerminalManager::new(), runtime, cx)
         });
         let host = panel.clone();
-        let (_, cx) = cx.add_window_view(|window, cx| gpui_component::Root::new(host, window, cx));
+        let (_, cx) = cx.add_window_view(|window, cx| bruhs_ui::Root::new(host, window, cx));
         let directory = tempfile::tempdir().unwrap();
         let missing = directory
             .path()
@@ -938,13 +938,13 @@ mod tests {
     ) {
         use gpui::AppContext as _;
         use std::sync::Arc;
-        cx.update(gpui_component::init);
+        cx.update(bruhs_ui::init);
         let runtime = Arc::new(tokio::runtime::Runtime::new().unwrap());
         let panel = cx.new(|cx| {
             super::TerminalPanelView::new(bruhs_core::terminal::TerminalManager::new(), runtime, cx)
         });
         let host = panel.clone();
-        let (_, cx) = cx.add_window_view(|window, cx| gpui_component::Root::new(host, window, cx));
+        let (_, cx) = cx.add_window_view(|window, cx| bruhs_ui::Root::new(host, window, cx));
         let directory = tempfile::tempdir().unwrap();
         let missing = directory
             .path()

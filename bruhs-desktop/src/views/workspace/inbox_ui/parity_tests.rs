@@ -4,8 +4,8 @@
 use super::super::performance_tests::fixture;
 use super::super::{AppView, InboxConversation, InboxMessage, InboxParticipant, InboxSource};
 use bruhs_models::{MessageDirection, MessageSendState, PersonProfile};
+use bruhs_ui::zoom::px;
 use gpui::{size, VisualTestContext};
-use gpui_component::zoom::px;
 use std::sync::Arc;
 
 fn click(cx: &mut VisualTestContext, selector: &str) {

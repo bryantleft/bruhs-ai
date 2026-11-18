@@ -2,7 +2,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 impl Workspace {
     pub(super) fn toggle_scheduling_panel(
@@ -718,7 +718,7 @@ mod audit_tests {
     #[gpui::test]
     fn scheduling_duration_rejects_invalid_drafts_without_creating_links(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -803,7 +803,7 @@ mod audit_tests {
     #[gpui::test]
     fn closing_scheduling_restores_focus_after_its_control_disappears(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });

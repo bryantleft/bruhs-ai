@@ -6,9 +6,9 @@
 
 use crate::theme;
 use bruhs_models::logic::dither::meter_column;
+use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::{div, Context, Div, Hsla, Window};
-use gpui_component::zoom::px;
 
 // One braille cell (Bruhs AGENTS.md section 19), the same size as web's
 // `BrailleMeter`: 4px dots, 2px apart in a column, columns 3px apart.

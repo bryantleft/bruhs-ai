@@ -1,6 +1,6 @@
 //! Optimized, offscreen diagnostics for a token arriving in a long native reply.
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::{hint::black_box, time::Instant};
 
 #[gpui::test]
@@ -35,7 +35,7 @@ fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestA
     cx.update(|window, cx| {
         let _ = window.draw(cx);
     });
-    let selected = cx.update(gpui_base::TextSelection::selected_text);
+    let selected = cx.update(bruhs_ui::text::TextSelection::selected_text);
     assert!(
         selected.contains("value_"),
         "the drag selects visible code: {selected:?}"
@@ -46,7 +46,7 @@ fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestA
     });
     cx.run_until_parked();
     assert_eq!(
-        cx.update(gpui_base::TextSelection::selected_text),
+        cx.update(bruhs_ui::text::TextSelection::selected_text),
         selected,
         "streaming preserves selected code"
     );
@@ -56,7 +56,7 @@ fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestA
     });
     cx.run_until_parked();
     assert_eq!(
-        cx.update(gpui_base::TextSelection::selected_text),
+        cx.update(bruhs_ui::text::TextSelection::selected_text),
         selected,
         "completion preserves selected code"
     );
@@ -64,7 +64,7 @@ fn code_selection_keeps_its_text_while_the_streaming_tail_changes(cx: &mut TestA
 
 #[gpui::test]
 fn streaming_keeps_the_markdown_view_through_tokens_and_completion(cx: &mut TestAppContext) {
-    use gpui_component::text::TextViewState;
+    use bruhs_ui::text::TextViewState;
     let created = Rc::new(RefCell::new(Vec::new()));
     let capture = Rc::clone(&created);
     let _subscription = cx.update(|cx| {
@@ -120,10 +120,10 @@ fn paragraphs(count: usize) -> String {
 
 #[gpui::test]
 fn streamed_markdown_replacements_match_fresh_documents(cx: &mut TestAppContext) {
-    use gpui_component::text::TextViewState;
+    use bruhs_ui::text::TextViewState;
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
     });
     let incremental = cx.update(|cx| cx.new(|cx| TextViewState::markdown("", cx)));
     let fresh = cx.update(|cx| cx.new(|cx| TextViewState::markdown("", cx)));
@@ -203,10 +203,10 @@ fn streamed_markdown_replacements_match_fresh_documents(cx: &mut TestAppContext)
 
 #[gpui::test]
 fn streamed_bursts_and_nested_definitions_match_fresh_documents(cx: &mut TestAppContext) {
-    use gpui_component::text::TextViewState;
+    use bruhs_ui::text::TextViewState;
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
     });
     // Each case: a committed start, then chunks pushed in one burst (more
     // than the parser coalesces at once) before anything settles.
@@ -240,10 +240,10 @@ fn streamed_bursts_and_nested_definitions_match_fresh_documents(cx: &mut TestApp
 
 #[gpui::test]
 fn markdown_background_appends_include_initial_and_replaced_content(cx: &mut TestAppContext) {
-    use gpui_component::text::TextViewState;
+    use bruhs_ui::text::TextViewState;
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
     });
     let state = cx.update(|cx| cx.new(|cx| TextViewState::markdown("**Initial**", cx)));
     let expected = cx.update(|cx| cx.new(|cx| TextViewState::markdown("**Initial** suffix", cx)));

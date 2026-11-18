@@ -22,9 +22,9 @@ mod webview_platform;
 mod whiteboard_performance;
 mod zoom;
 
+use bruhs_ui::zoom::px;
+use bruhs_ui::{Root, TitleBar};
 use gpui::*;
-use gpui_component::zoom::px;
-use gpui_component::{Root, TitleBar};
 use std::cell::RefCell;
 use std::env;
 use std::rc::Rc;
@@ -217,7 +217,7 @@ fn main() {
             ]);
             // ---- gpui-component setup ----
             // Initializes Theme, Root, dialog/sheet/notification machinery, input system, etc.
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             motion::init(cx);
 
             // The bruhs type stack is all Monaspace. The web loads it as a
@@ -228,7 +228,7 @@ fn main() {
             }
 
             // Switch to dark theme + apply bruhs design tokens on top.
-            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
             theme::apply_bruhs_theme(cx);
 
             // ---- App state ----
@@ -348,7 +348,7 @@ fn main() {
                 cx.activate(true);
             }
             let opened = cx.open_window(window_options, |window, cx| {
-                // The first level on the window MUST be a gpui_component::Root —
+                // The first level on the window MUST be a bruhs_ui::Root —
                 // it provides the dialog/sheet/notification overlays and applies
                 // the theme background + font family to the whole window.
                 // Matches the web's `<title>`. gpui sets the platform title and

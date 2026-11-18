@@ -4,9 +4,9 @@ use crate::views::workspace::{
     Workspace,
 };
 use crate::{app_state::DesktopState, assets, theme};
+use bruhs_ui::zoom::px;
+use bruhs_ui::Root;
 use gpui::*;
-use gpui_component::zoom::px;
-use gpui_component::Root;
 use serde_json::{json, Value};
 use sha2::{Digest as _, Sha256};
 use std::{
@@ -324,7 +324,7 @@ pub(super) fn prepare_input(config: &Config) -> Result<(), String> {
 }
 
 pub(super) fn initialize(config: &Config, cx: &mut App) {
-    gpui_component::init(cx);
+    bruhs_ui::init(cx);
     crate::motion::init(cx);
     cx.text_system()
         .add_fonts(assets::embedded_fonts())
@@ -339,7 +339,7 @@ pub(super) fn initialize(config: &Config, cx: &mut App) {
         !names.is_empty(),
         "The native text backend must expose embedded Monaspace families"
     );
-    gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+    bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
     theme::apply_bruhs_theme(cx);
     let runtime = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -388,7 +388,7 @@ pub(super) fn run(args: &[String]) -> Result<(), String> {
             let handle = cx
                 .open_window(
                     WindowOptions {
-                        titlebar: Some(gpui_component::TitleBar::title_bar_options()),
+                        titlebar: Some(bruhs_ui::TitleBar::title_bar_options()),
                         window_min_size: Some(size(px(640.0), px(480.0))),
                         window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                             None,

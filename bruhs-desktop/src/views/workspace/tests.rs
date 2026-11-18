@@ -188,9 +188,9 @@ use crate::{app_state::DesktopState, assets, theme};
 use bruhs_core::registry::TaskUpdate;
 use bruhs_core::TaskKind;
 use bruhs_models::EpochMs;
+use bruhs_ui::zoom::px;
 use chrono::{NaiveDate, NaiveDateTime};
 use gpui::{AppContext as _, Entity, Focusable};
-use gpui_component::zoom::px;
 use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;
@@ -224,8 +224,8 @@ fn event(id: &str, start_at: NaiveDateTime, end_at: NaiveDateTime) -> DesktopCal
 #[gpui::test]
 fn desktop_settings_modal_focus_should_stay_trapped_like_web_dialog(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -236,7 +236,7 @@ fn desktop_settings_modal_focus_should_stay_trapped_like_web_dialog(cx: &mut gpu
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -323,8 +323,8 @@ fn desktop_codex_model_should_not_render_claude_auth_banner_like_web(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -346,7 +346,7 @@ fn desktop_codex_model_should_not_render_claude_auth_banner_like_web(
             }
             cx.notify();
         });
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
 
     assert_provider_logo_bounds(cx, "desktop-chat-provider-logo-codex");
@@ -375,8 +375,8 @@ fn persisted_thread_without_card_fields_should_still_load() {
 #[gpui::test]
 fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -386,7 +386,7 @@ fn desktop_settings_sections_switch_and_dropdowns_select(cx: &mut gpui::TestAppC
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -551,8 +551,8 @@ fn palette_helpers_match_thread_links_queries_and_browser_command() {
 #[gpui::test]
 fn desktop_palette_threads_mode_and_thread_links(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -562,7 +562,7 @@ fn desktop_palette_threads_mode_and_thread_links(cx: &mut gpui::TestAppContext) 
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -660,8 +660,8 @@ fn desktop_palette_threads_mode_and_thread_links(cx: &mut gpui::TestAppContext) 
 #[gpui::test]
 fn desktop_terminal_drawer_and_view_should_render_like_web(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -671,7 +671,7 @@ fn desktop_terminal_drawer_and_view_should_render_like_web(cx: &mut gpui::TestAp
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -788,8 +788,8 @@ fn desktop_terminal_drawer_and_view_should_render_like_web(cx: &mut gpui::TestAp
 #[gpui::test]
 fn desktop_preview_surface_should_render_like_web(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -799,7 +799,7 @@ fn desktop_preview_surface_should_render_like_web(cx: &mut gpui::TestAppContext)
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -988,8 +988,8 @@ fn right_panel_toggle_surface_semantics() {
 #[gpui::test]
 fn desktop_diff_panel_renders_files_and_gaps(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1000,7 +1000,7 @@ fn desktop_diff_panel_renders_files_and_gaps(cx: &mut gpui::TestAppContext) {
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -1137,8 +1137,8 @@ fn desktop_code_thread_cards_and_settled_fold_should_match_web_sidebar(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1149,7 +1149,7 @@ fn desktop_code_thread_cards_and_settled_fold_should_match_web_sidebar(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -1283,8 +1283,8 @@ fn desktop_project_picker_select_current_should_attach_to_current_thread(
         .to_string();
 
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1295,7 +1295,7 @@ fn desktop_project_picker_select_current_should_attach_to_current_thread(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -1394,8 +1394,8 @@ fn desktop_project_picker_directory_clicks_should_match_web_browse_and_select_fl
         .to_string();
 
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1406,7 +1406,7 @@ fn desktop_project_picker_directory_clicks_should_match_web_browse_and_select_fl
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -1472,8 +1472,8 @@ fn desktop_task_create_dialog_submit_should_match_web_work_item_fields(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1484,7 +1484,7 @@ fn desktop_task_create_dialog_submit_should_match_web_work_item_fields(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -1598,8 +1598,8 @@ fn desktop_task_create_dialog_submit_should_match_web_work_item_fields(
 #[gpui::test]
 fn desktop_tasks_header_controls_should_match_web_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1610,7 +1610,7 @@ fn desktop_tasks_header_controls_should_match_web_flow(cx: &mut gpui::TestAppCon
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -1716,8 +1716,8 @@ fn desktop_event_create_dialog_submit_should_match_web_calendar_event_fields(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1728,7 +1728,7 @@ fn desktop_event_create_dialog_submit_should_match_web_calendar_event_fields(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -1827,8 +1827,8 @@ fn desktop_event_create_dialog_submit_should_match_web_calendar_event_fields(
 #[gpui::test]
 fn desktop_event_edit_dialog_save_and_delete_should_match_web_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1839,7 +1839,7 @@ fn desktop_event_edit_dialog_save_and_delete_should_match_web_flow(cx: &mut gpui
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -1943,8 +1943,8 @@ fn desktop_calendar_navigation_and_create_entrypoints_should_match_web_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1955,7 +1955,7 @@ fn desktop_calendar_navigation_and_create_entrypoints_should_match_web_flow(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -2112,8 +2112,8 @@ fn desktop_calendar_navigation_and_create_entrypoints_should_match_web_flow(
 #[gpui::test]
 fn desktop_calendar_month_pills_should_match_web_click_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -2124,7 +2124,7 @@ fn desktop_calendar_month_pills_should_match_web_click_flow(cx: &mut gpui::TestA
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -2222,8 +2222,8 @@ fn desktop_calendar_timegrid_event_block_should_match_web_click_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -2234,7 +2234,7 @@ fn desktop_calendar_timegrid_event_block_should_match_web_click_flow(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -2306,8 +2306,8 @@ fn desktop_calendar_timegrid_move_and_resize_should_match_web_state_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -2318,7 +2318,7 @@ fn desktop_calendar_timegrid_move_and_resize_should_match_web_state_flow(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -2434,8 +2434,8 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -2446,7 +2446,7 @@ fn desktop_workspace_sidebar_controls_and_cards_should_match_web_flow(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -2622,12 +2622,12 @@ fn thread_menu_workspace(
     String,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         cx.bind_keys([
             gpui::KeyBinding::new("escape", super::CloseOverlays, None),
             gpui::KeyBinding::new("cmd-k", FocusCommandBar, None),
         ]);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state should initialize"));
     });
@@ -2636,7 +2636,7 @@ fn thread_menu_workspace(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3005,8 +3005,8 @@ fn desktop_thread_menu_custom_snooze_should_match_web(cx: &mut gpui::TestAppCont
 #[gpui::test]
 fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3017,7 +3017,7 @@ fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContex
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3140,8 +3140,8 @@ fn desktop_status_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContex
 #[gpui::test]
 fn desktop_chat_header_tasks_toggle_should_match_web_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3152,7 +3152,7 @@ fn desktop_chat_header_tasks_toggle_should_match_web_flow(cx: &mut gpui::TestApp
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3211,8 +3211,8 @@ fn desktop_tasks_panel_expand_dismiss_and_close_should_match_web_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     let app = cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         let app = state.app.clone();
@@ -3243,7 +3243,7 @@ fn desktop_tasks_panel_expand_dismiss_and_close_should_match_web_flow(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3309,8 +3309,8 @@ fn desktop_tasks_panel_expand_dismiss_and_close_should_match_web_flow(
 #[gpui::test]
 fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3321,7 +3321,7 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3418,8 +3418,8 @@ fn desktop_sidebar_footer_nav_should_switch_views_like_web(cx: &mut gpui::TestAp
 #[gpui::test]
 fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3429,7 +3429,7 @@ fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::Test
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3523,8 +3523,8 @@ fn desktop_sidebar_footer_should_wrap_views_into_rows_of_six(cx: &mut gpui::Test
 #[gpui::test]
 fn desktop_capture_kinds_should_show_their_icons_above_the_labels(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3534,7 +3534,7 @@ fn desktop_capture_kinds_should_show_their_icons_above_the_labels(cx: &mut gpui:
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3571,8 +3571,8 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3583,7 +3583,7 @@ fn desktop_today_plan_review_apply_and_undo_should_be_one_transaction(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3722,7 +3722,7 @@ fn desktop_palette_should_reopen_by_keyboard_after_escape_and_navigation(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         cx.bind_keys([
             gpui::KeyBinding::new("cmd-k", FocusCommandBar, None),
             gpui::KeyBinding::new("escape", super::CloseOverlays, None),
@@ -3735,7 +3735,7 @@ fn desktop_palette_should_reopen_by_keyboard_after_escape_and_navigation(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell.borrow().clone().unwrap();
     workspace.update_in(cx, |workspace, window, cx| {
@@ -3784,8 +3784,8 @@ fn desktop_palette_should_reopen_by_keyboard_after_escape_and_navigation(
 #[gpui::test]
 fn desktop_command_bar_should_not_activate_calendar_content(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3796,7 +3796,7 @@ fn desktop_command_bar_should_not_activate_calendar_content(cx: &mut gpui::TestA
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3831,8 +3831,8 @@ fn desktop_compact_layout_should_use_drawers_without_collapsing_main_content(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3843,7 +3843,7 @@ fn desktop_compact_layout_should_use_drawers_without_collapsing_main_content(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3930,8 +3930,8 @@ fn desktop_compact_layout_should_use_drawers_without_collapsing_main_content(
 #[gpui::test]
 fn desktop_command_bar_filter_click_should_open_settings_like_web(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -3942,7 +3942,7 @@ fn desktop_command_bar_filter_click_should_open_settings_like_web(cx: &mut gpui:
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -3988,8 +3988,8 @@ fn desktop_command_bar_filter_click_should_open_settings_like_web(cx: &mut gpui:
 #[gpui::test]
 fn desktop_command_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -4000,7 +4000,7 @@ fn desktop_command_bar_actions_should_match_web_flow(cx: &mut gpui::TestAppConte
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -4109,8 +4109,8 @@ fn desktop_project_sidebar_create_select_and_delete_should_match_web_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -4121,7 +4121,7 @@ fn desktop_project_sidebar_create_select_and_delete_should_match_web_flow(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -4264,8 +4264,8 @@ fn desktop_task_detail_edit_select_close_and_delete_should_match_web_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -4276,7 +4276,7 @@ fn desktop_task_detail_edit_select_close_and_delete_should_match_web_flow(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -4453,8 +4453,8 @@ fn desktop_task_board_drop_handler_should_match_web_status_move_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -4465,7 +4465,7 @@ fn desktop_task_board_drop_handler_should_match_web_status_move_flow(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -6664,8 +6664,8 @@ fn update_run(
 fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::TestAppContext) {
     use bruhs_models::updates::{AppUpdateState, RunOutcome, RunPhase};
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -6675,7 +6675,7 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -6825,8 +6825,8 @@ fn desktop_update_pills_dialog_and_settings_should_match_web(cx: &mut gpui::Test
 fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext) {
     use bruhs_models::updates::AppUpdateState;
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -6836,7 +6836,7 @@ fn desktop_restart_to_update_should_confirm_first(cx: &mut gpui::TestAppContext)
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -6913,8 +6913,8 @@ impl gpui::Render for TaskControlGeometryHarness {
 #[gpui::test]
 fn native_task_tabs_keep_content_still_during_keyboard_focus(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().unwrap());
     });
@@ -6926,7 +6926,7 @@ fn native_task_tabs_keep_content_still_during_keyboard_focus(cx: &mut gpui::Test
             focus: std::array::from_fn(|_| cx.focus_handle()),
         });
         *capture.borrow_mut() = Some(harness.clone());
-        gpui_component::Root::new(harness, window, cx)
+        bruhs_ui::Root::new(harness, window, cx)
     });
     let view = captured.borrow().clone().unwrap();
     cx.run_until_parked();

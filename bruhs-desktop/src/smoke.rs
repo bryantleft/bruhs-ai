@@ -21,8 +21,8 @@
 //! drivable (or made to auto-submit prompts) through its environment.
 
 use crate::{app_state, views};
+use bruhs_ui::Root;
 use gpui::*;
-use gpui_component::Root;
 use std::{env, time::Duration};
 
 pub(crate) const DESKTOP_WINDOW_SMOKE_ENV: &str = "BRUHS_DESKTOP_WINDOW_SMOKE";
@@ -73,12 +73,8 @@ pub(crate) fn window_origin() -> Option<Point<Pixels>> {
     let (x, y) = raw.trim().split_once(',')?;
     let x: f32 = x.trim().parse().ok()?;
     let y: f32 = y.trim().parse().ok()?;
-    (x.is_finite() && y.is_finite()).then(|| {
-        point(
-            gpui_component::zoom::window_px(x),
-            gpui_component::zoom::window_px(y),
-        )
-    })
+    (x.is_finite() && y.is_finite())
+        .then(|| point(bruhs_ui::zoom::window_px(x), bruhs_ui::zoom::window_px(y)))
 }
 
 /// Whether the window opens without taking focus (`BRUHS_DESKTOP_WINDOW_BACKGROUND`).
@@ -94,8 +90,8 @@ pub(crate) fn parse_window_size(raw: &str) -> Option<Size<Pixels>> {
     (width >= 640.0 && height >= 480.0 && width.is_finite() && height.is_finite()).then(|| {
         // A window size, in window points: the zoom never sizes the window.
         size(
-            gpui_component::zoom::window_px(width),
-            gpui_component::zoom::window_px(height),
+            bruhs_ui::zoom::window_px(width),
+            bruhs_ui::zoom::window_px(height),
         )
     })
 }

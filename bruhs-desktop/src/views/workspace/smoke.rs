@@ -3,7 +3,7 @@
 //! way to auto-drive the window.
 
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 /// One key press after another, each once the window has drawn the last
 /// one's effect, as typing gives it: a key down, then the key up that

@@ -169,12 +169,12 @@ fn people_with_relationships(
     });
 }
 
-fn field(input: &gpui::Entity<gpui_component::input::InputState>, cx: &gpui::App) -> String {
+fn field(input: &gpui::Entity<bruhs_ui::input::InputState>, cx: &gpui::App) -> String {
     input.read(cx).value().to_string()
 }
 
 /// `field` for the multi-line notes.
-fn notes(input: &gpui::Entity<gpui_component::input::TextareaState>, cx: &gpui::App) -> String {
+fn notes(input: &gpui::Entity<bruhs_ui::input::TextareaState>, cx: &gpui::App) -> String {
     input.read(cx).value().to_string()
 }
 

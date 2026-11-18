@@ -2,9 +2,9 @@
 //! triage semantics as the web surface.
 
 use bruhs_models::{InboxCard, InboxDirectory, InboxFilter, INBOX_PAGE_SIZE};
+use bruhs_ui::input::{Input, InputEvent};
+use bruhs_ui::zoom::px;
 use gpui::Toggled;
-use gpui_component::input::{Input, InputEvent};
-use gpui_component::zoom::px;
 
 use super::*;
 use bruhs_ui::press::on_press_view;

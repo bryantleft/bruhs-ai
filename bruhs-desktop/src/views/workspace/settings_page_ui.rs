@@ -1,9 +1,9 @@
 //! The settings dialog shell: section nav, scroll spy, rows, cards, and the General, Keyboard and About sections.
 
 use super::*;
+use bruhs_ui::input::{Input, Textarea};
 use bruhs_ui::press::on_press_view;
-use gpui_component::input::{Input, Textarea};
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 /// Web `<BrailleBruh size=96.0 />` in Settings → About.
 const SETTINGS_ABOUT_BRUH_PX: f32 = 96.0;
@@ -249,8 +249,7 @@ struct SettingsRow {
 
 impl RenderOnce for SettingsRow {
     fn render(self, window: &mut Window, _cx: &mut App) -> impl IntoElement {
-        let stacked =
-            settings_rows_stack(gpui_component::zoom::css_px(window.viewport_size().width));
+        let stacked = settings_rows_stack(bruhs_ui::zoom::css_px(window.viewport_size().width));
         let selector = self.selector;
         let meta = |text: SharedString| {
             div()
@@ -351,13 +350,13 @@ impl Workspace {
     /// pixels like the margins they are compared with.
     pub(super) fn settings_section_tops(&self) -> Option<Vec<f32>> {
         let container_top = self.settings_scroll.bounds().top();
-        let offset_y = gpui_component::zoom::css_px(self.settings_scroll.offset().y);
+        let offset_y = bruhs_ui::zoom::css_px(self.settings_scroll.offset().y);
         SettingsSection::ALL
             .iter()
             .enumerate()
             .map(|(ix, _)| {
                 let bounds = self.settings_scroll.bounds_for_item(ix)?;
-                Some(gpui_component::zoom::css_px(bounds.top() - container_top) + offset_y)
+                Some(bruhs_ui::zoom::css_px(bounds.top() - container_top) + offset_y)
             })
             .collect()
     }
@@ -373,10 +372,9 @@ impl Workspace {
             return;
         };
         if let Some(target) = self.settings_scroll_target.take() {
-            let offset_y = gpui_component::zoom::css_px(self.settings_scroll.offset().y);
+            let offset_y = bruhs_ui::zoom::css_px(self.settings_scroll.offset().y);
             let layout_top = tops[target.index()] - offset_y;
-            let max_scroll =
-                gpui_component::zoom::css_px(self.settings_scroll.max_offset().y).max(0.0);
+            let max_scroll = bruhs_ui::zoom::css_px(self.settings_scroll.max_offset().y).max(0.0);
             let y = (SETTINGS_SECTION_SCROLL_MARGIN_PX - layout_top).clamp(-max_scroll, 0.0);
             self.settings_scroll.set_offset(point(px(0.0), px(y)));
             // The spy re-reads the post-scroll layout on the next frame.
@@ -1183,7 +1181,7 @@ impl Workspace {
         // A percentage width inside the vertical scroll container measures as
         // indefinite and collapses the row labels, so size the column here.
         let cards_width =
-            settings_cards_width(gpui_component::zoom::css_px(window.viewport_size().width));
+            settings_cards_width(bruhs_ui::zoom::css_px(window.viewport_size().width));
         div()
             .absolute()
             .top_0()
@@ -1390,7 +1388,7 @@ mod ui_audit_tests {
     #[gpui::test]
     fn project_title_instructions_pick_a_project_from_a_list_like_web(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().expect("desktop state"));
         });
@@ -1399,7 +1397,7 @@ mod ui_audit_tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let workspace = cx.new(|cx| Workspace::new(window, cx));
             *captured.borrow_mut() = Some(workspace.clone());
-            gpui_component::Root::new(workspace, window, cx)
+            bruhs_ui::Root::new(workspace, window, cx)
         });
         let workspace = capture.borrow().clone().expect("workspace");
         workspace.update_in(cx, |workspace, window, cx| {
@@ -1451,7 +1449,7 @@ mod ui_audit_tests {
     #[gpui::test]
     fn desktop_settings_minimum_window_keeps_visible_stack_and_jump(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().expect("desktop state"));
         });
@@ -1460,7 +1458,7 @@ mod ui_audit_tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let workspace = cx.new(|cx| Workspace::new(window, cx));
             *captured.borrow_mut() = Some(workspace.clone());
-            gpui_component::Root::new(workspace, window, cx)
+            bruhs_ui::Root::new(workspace, window, cx)
         });
         let workspace = capture.borrow().clone().expect("workspace");
         cx.simulate_resize(size(px(641.0), px(481.0)));

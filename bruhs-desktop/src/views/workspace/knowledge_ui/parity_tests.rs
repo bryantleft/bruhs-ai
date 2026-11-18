@@ -4,8 +4,8 @@
 use super::super::performance_tests::fixture;
 use super::super::{element_key, AppView, Workspace};
 use bruhs_models::{KnowledgeDocument, SourceClip};
+use bruhs_ui::zoom::px;
 use gpui::{size, Entity, VisualTestContext};
-use gpui_component::zoom::px;
 
 fn document_card(id: &str) -> &'static str {
     Box::leak(format!("desktop-knowledge-document-{}", element_key(id)).into_boxed_str())

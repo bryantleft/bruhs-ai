@@ -1,9 +1,9 @@
 //! Small, independent meeting window. Shares the existing hub; never starts a
 //! second recorder, timer, transcript subscription, or capture session.
 
+use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::zoom::px;
 
 use super::meetings_hub::{format_elapsed, MeetingsHub};
 use super::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};

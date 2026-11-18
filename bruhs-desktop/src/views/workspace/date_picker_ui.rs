@@ -4,12 +4,12 @@
 //! input states in the web's wire formats (`YYYY-MM-DD`,
 //! `YYYY-MM-DDTHH:MM`), so the create / update paths are unchanged.
 
+use bruhs_ui::input::{Input, InputEvent, InputState};
+use bruhs_ui::tooltip::Tooltip;
+use bruhs_ui::zoom::px;
 use chrono::{Datelike, Local, NaiveDate};
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::zoom::px;
 
 use super::Workspace;
 use crate::{assets, theme};

@@ -2,9 +2,9 @@
 
 use super::*;
 use bruhs_models::secrets::{SecretDecision, SecretRequest};
+use bruhs_ui::input::InputContentType;
 use bruhs_ui::press::on_press_view;
-use gpui_component::input::InputContentType;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 pub(super) struct SecretPrompt {
     request: SecretRequest,
@@ -249,7 +249,7 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -258,7 +258,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let chat = cx.new(|cx| ChatView::new(window, cx));
             *output.borrow_mut() = Some(chat.clone());
-            gpui_component::Root::new(chat, window, cx)
+            bruhs_ui::Root::new(chat, window, cx)
         });
         let chat = captured.borrow().clone().unwrap();
         chat.update_in(cx, |chat, window, cx| {

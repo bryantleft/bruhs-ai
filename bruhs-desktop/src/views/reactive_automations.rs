@@ -12,7 +12,7 @@ use bruhs_models::crew::{
     ServiceNotice,
 };
 use bruhs_models::reactive::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 mod bruh_page;
 mod create_bruh;
 mod editor_fields;
@@ -27,10 +27,10 @@ mod transcript_list;
 mod updates;
 mod weekly_reports;
 pub(crate) use bruh_page::ReactiveOpenAutomations;
+use bruhs_ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use bruhs_ui::text_field::{TextField, TextInput};
 pub(crate) use create_bruh::ReactiveBruhCreated;
 use gpui::{prelude::*, *};
-use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 pub(crate) use room_dialog::ReactiveRoomDone;
 pub(crate) use room_page::ReactiveOpenRoomSettings;
 use std::{
@@ -1823,13 +1823,12 @@ impl Render for ReactiveAutomations {
         self.ensure_weekly_inputs(_window, cx);
         self.ensure_notification_form(_window, cx);
         // Web `lg:grid-cols-2`: Notifications beside Background service.
-        let settings_columns = if gpui_component::zoom::css_px(_window.viewport_size().width)
-            >= SETTINGS_TWO_COLUMNS_PX
-        {
-            2
-        } else {
-            1
-        };
+        let settings_columns =
+            if bruhs_ui::zoom::css_px(_window.viewport_size().width) >= SETTINGS_TWO_COLUMNS_PX {
+                2
+            } else {
+                1
+            };
         // Web order: the introduction with Refresh under it, Updates, Weekly
         // engineering reports, then New automation and its automations, then
         // Notifications and Background service.
@@ -2473,7 +2472,7 @@ mod tests {
         cx: &mut gpui::TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = Rc::new(std::cell::RefCell::new(None));
@@ -2481,7 +2480,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
+            bruhs_ui::Root::new(panel, window, cx)
         });
         let panel = holder.borrow().clone().unwrap();
         panel.update_in(cx, |panel, window, cx| {
@@ -2513,7 +2512,7 @@ mod tests {
     #[gpui::test]
     fn a_key_press_on_a_toggle_flips_it_once(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = Rc::new(std::cell::RefCell::new(None));
@@ -2521,7 +2520,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
+            bruhs_ui::Root::new(panel, window, cx)
         });
         cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(2400.0)));
         let panel = holder.borrow().clone().unwrap();
@@ -2560,7 +2559,7 @@ mod tests {
     #[gpui::test]
     fn an_app_event_source_picks_its_topic_from_the_web_list(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = Rc::new(std::cell::RefCell::new(None));
@@ -2568,7 +2567,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
+            bruhs_ui::Root::new(panel, window, cx)
         });
         let panel = holder.borrow().clone().unwrap();
         panel.update_in(cx, |panel, window, cx| {
@@ -2662,7 +2661,7 @@ mod crew_tests {
     #[gpui::test]
     fn live_frames_and_snapshots_keep_the_crew_current(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let (panel, cx) = cx.add_window_view(|_, cx| ReactiveAutomations::new(cx));

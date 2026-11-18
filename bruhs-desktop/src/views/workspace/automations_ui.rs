@@ -1,7 +1,7 @@
 //! Native capability grants, transactional workflows, durable jobs, and audit.
 
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 mod chat;
 mod draft_outcomes;
 mod history_ui;
@@ -1025,7 +1025,7 @@ mod durability_tests {
         cx: &mut gpui::TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1058,7 +1058,7 @@ mod durability_tests {
     #[gpui::test]
     fn unsaved_native_workflow_cannot_start_advance_or_undo(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1120,7 +1120,7 @@ mod durability_tests {
     ) {
         use std::{cell::RefCell, fs, rc::Rc};
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1130,7 +1130,7 @@ mod durability_tests {
             let first = cx.new(|cx| Workspace::new(window, cx));
             let stale = cx.new(|cx| Workspace::new(window, cx));
             *capture.borrow_mut() = Some((first, stale.clone()));
-            gpui_component::Root::new(stale, window, cx)
+            bruhs_ui::Root::new(stale, window, cx)
         });
         let (first, stale) = cell.borrow().clone().unwrap();
         let dir =
@@ -1178,7 +1178,7 @@ mod durability_tests {
         use std::{cell::RefCell, fs, rc::Rc};
 
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1187,7 +1187,7 @@ mod durability_tests {
         let (_root, cx) = cx.add_window_view(|window, cx| {
             let workspace = cx.new(|cx| Workspace::new(window, cx));
             *capture.borrow_mut() = Some(workspace.clone());
-            gpui_component::Root::new(workspace, window, cx)
+            bruhs_ui::Root::new(workspace, window, cx)
         });
         let workspace = cell.borrow().clone().unwrap();
         let dir =

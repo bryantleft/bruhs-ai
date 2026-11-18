@@ -5,7 +5,7 @@
 //! the empty line); the lines follow it.
 use super::bruh_page::{Layout, PAGE_PADDING_PX, TRANSCRIPT_GAP_PX};
 use super::*;
-use gpui_component::scroll::ScrollableElement;
+use bruhs_ui::scroll::ScrollableElement;
 use std::ops::Range;
 
 /// Rows laid out past each edge of the view, as in the thread chat.
