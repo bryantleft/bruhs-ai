@@ -183,22 +183,29 @@ pub const MAX_TYPE_CHARS: usize = 2_000;
 pub const MAX_SCROLL_PX: f64 = 10_000.0;
 
 const CLICK_OUTSIDE: &str = "Click inside the page view.";
+/// Names [`COMPUTER_VIEWPORT`]'s size; a test keeps the two in step.
+const CLICK_OUTSIDE_COMPUTER: &str = "Click inside the 1280 by 800 view.";
 const TOO_MUCH_TEXT: &str = "Type at most 2,000 characters at once.";
+const TOO_MUCH_FILL: &str = "Fill at most 2,000 characters at once.";
+const ENCODED_HOST: &str = "Use the host's plain ASCII name (punycode for international names).";
 const SCROLL_TOO_FAR: &str = "Scroll at most 10,000 pixels at once.";
 const UNKNOWN_KEY: &str =
     "Press Enter, Tab, Escape, Backspace, Delete, Space, an arrow key, Home, End, PageUp or PageDown.";
 
 /// Check a browser action against the view it acts on and its budgets.
+/// Navigate also refuses hosts on this computer, which is a bruh rule, so
+/// thread browsers don't run their navigation through this.
 pub fn validate_action(action: &BrowserAction, viewport: Viewport) -> Result<(), &'static str> {
     match action {
         BrowserAction::ClickAt { x, y } if !in_view(*x, *y, viewport) => {
             Err(if viewport == COMPUTER_VIEWPORT {
-                "Click inside the 1280 by 800 view."
+                CLICK_OUTSIDE_COMPUTER
             } else {
                 CLICK_OUTSIDE
             })
         }
         BrowserAction::Type { text, .. } if !within_type_budget(text) => Err(TOO_MUCH_TEXT),
+        BrowserAction::Fill { text, .. } if !within_type_budget(text) => Err(TOO_MUCH_FILL),
         BrowserAction::Key { key } if !AGENT_KEYS.contains(&key.as_str()) => Err(UNKNOWN_KEY),
         BrowserAction::Scroll { dx, dy } if !within_scroll(*dx, *dy) => Err(SCROLL_TOO_FAR),
         BrowserAction::Navigate { url } => validate_navigation(url),
@@ -231,13 +238,18 @@ fn within_type_budget(text: &str) -> bool {
 }
 
 /// A URL a bruh's browser may open: the browser URL rules, and never a host
-/// on this computer.
+/// on this computer. Chrome percent-decodes and maps (UTS46) a host before it
+/// resolves it, so a host with `%` or any non-ASCII character is refused
+/// rather than checked as written.
 fn validate_navigation(url: &str) -> Result<(), &'static str> {
     validate_browser_url(url)?;
     let rest = url
         .strip_prefix("http://")
         .or_else(|| url.strip_prefix("https://"));
     let authority = rest.and_then(|rest| rest.split(['/', '?', '#']).next());
+    if authority.is_some_and(|authority| authority.contains('%') || !authority.is_ascii()) {
+        return Err(ENCODED_HOST);
+    }
     if authority.is_some_and(crate::crew::is_local_host) {
         return Err(crate::crew::LOCAL_HOST_DENIAL);
     }
@@ -501,6 +513,58 @@ mod tests {
             r##"{"action":"fill","selector":"#p","secret":{"login_id":"x"}}"##
         )
         .is_err());
+    }
+
+    #[test]
+    fn bruh_navigation_refuses_encoded_and_mapped_hosts() {
+        let v = COMPUTER_VIEWPORT;
+        for url in [
+            "http://%6Cocalhost:3001/",
+            "http://%31%32%37.0.0.1/",
+            "http://\u{ff4c}\u{ff4f}\u{ff43}\u{ff41}\u{ff4c}\u{ff48}\u{ff4f}\u{ff53}\u{ff54}/",
+            "http://127\u{3002}0\u{3002}0\u{3002}1/",
+        ] {
+            let navigate = BrowserAction::Navigate { url: url.into() };
+            assert_eq!(validate_action(&navigate, v), Err(ENCODED_HOST), "{url}");
+        }
+        // Encoding in the path is fine, and thread browsers keep their rules.
+        let path = BrowserAction::Navigate {
+            url: "https://example.com/a%20b?q=%41".into(),
+        };
+        assert!(validate_action(&path, v).is_ok());
+        assert!(validate_browser_url("http://%6Cocalhost:3001/").is_ok());
+        let local = BrowserAction::Navigate {
+            url: "http://[::1]:3001/".into(),
+        };
+        assert_eq!(
+            validate_action(&local, v),
+            Err(crate::crew::LOCAL_HOST_DENIAL)
+        );
+    }
+
+    #[test]
+    fn click_copy_names_the_computer_view() {
+        assert_eq!(
+            CLICK_OUTSIDE_COMPUTER,
+            format!(
+                "Click inside the {} by {} view.",
+                COMPUTER_VIEWPORT.width, COMPUTER_VIEWPORT.height
+            )
+        );
+    }
+
+    #[test]
+    fn fill_text_has_the_type_budget() {
+        let v = COMPUTER_VIEWPORT;
+        let fill = |text: String| BrowserAction::Fill {
+            selector: "#q".into(),
+            text,
+        };
+        assert!(validate_action(&fill("x".repeat(MAX_TYPE_CHARS)), v).is_ok());
+        assert_eq!(
+            validate_action(&fill("x".repeat(MAX_TYPE_CHARS + 1)), v),
+            Err("Fill at most 2,000 characters at once.")
+        );
     }
 
     #[test]

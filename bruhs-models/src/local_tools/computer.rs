@@ -290,6 +290,47 @@ fn printable_key(key: &str) -> Option<CdpKey> {
     })
 }
 
+/// Map an owner key from the live view to CDP's key fields. Keys
+/// [`cdp_key`] maps keep its fields, with the client's `code` where it has
+/// none (punctuation). Any other key is forwarded as the client named it,
+/// with a virtual key code for function keys, Insert and the modifiers (0
+/// otherwise) and no text. Agent keys stay on [`super::AGENT_KEYS`].
+#[must_use]
+pub fn owner_cdp_key(key: &str, code: &str) -> CdpKey {
+    if let Some(mut mapped) = cdp_key(key) {
+        if mapped.code.is_empty() {
+            mapped.code = code.into();
+        }
+        return mapped;
+    }
+    CdpKey {
+        key: key.into(),
+        code: code.into(),
+        key_code: forwarded_key_code(key),
+        text: None,
+    }
+}
+
+/// Windows virtual key codes for owner keys [`cdp_key`] doesn't map.
+fn forwarded_key_code(key: &str) -> u32 {
+    if let Some(number) = key
+        .strip_prefix('F')
+        .and_then(|number| number.parse::<u32>().ok())
+        .filter(|number| (1..=12).contains(number))
+    {
+        return 111 + number;
+    }
+    match key {
+        "Insert" => 45,
+        "Shift" => 16,
+        "Control" => 17,
+        "Alt" => 18,
+        "Meta" => 91,
+        "CapsLock" => 20,
+        _ => 0,
+    }
+}
+
 /// Where an owner key press in the live view goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum KeyRoute {
@@ -340,7 +381,120 @@ pub fn to_viewport(x: f64, y: f64, shown: (f64, f64), viewport: Viewport) -> Opt
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::local_tools::MAX_TYPE_CHARS;
+    use crate::local_tools::{AGENT_KEYS, MAX_SCROLL_PX, MAX_TYPE_CHARS};
+
+    #[test]
+    fn every_agent_key_maps_to_cdp() {
+        for key in AGENT_KEYS {
+            let mapped = cdp_key(key).unwrap_or_else(|| panic!("{key}"));
+            assert!(mapped.key_code > 0 && !mapped.code.is_empty(), "{key}");
+        }
+    }
+
+    #[test]
+    fn owner_keys_cdp_cannot_map_are_forwarded_without_text() {
+        assert_eq!(
+            owner_cdp_key("F1", "F1"),
+            CdpKey {
+                key: "F1".into(),
+                code: "F1".into(),
+                key_code: 112,
+                text: None
+            }
+        );
+        assert_eq!(owner_cdp_key("F12", "F12").key_code, 123);
+        assert_eq!(owner_cdp_key("F13", "F13").key_code, 0);
+        assert_eq!(owner_cdp_key("Insert", "Insert").key_code, 45);
+        let shift = owner_cdp_key("Shift", "ShiftLeft");
+        assert_eq!(
+            (shift.code.as_str(), shift.key_code, shift.text),
+            ("ShiftLeft", 16, None)
+        );
+        assert_eq!(owner_cdp_key("Meta", "MetaLeft").key_code, 91);
+        assert_eq!(owner_cdp_key("Unidentified", "").key_code, 0);
+        // Punctuation keeps its text and takes the client's physical code.
+        let bang = owner_cdp_key("!", "Digit1");
+        assert_eq!(
+            (bang.code.as_str(), bang.text.as_deref()),
+            ("Digit1", Some("!"))
+        );
+        // A key cdp_key maps keeps its own fields.
+        assert_eq!(
+            owner_cdp_key("Enter", "NumpadEnter"),
+            cdp_key("Enter").unwrap()
+        );
+    }
+
+    #[test]
+    fn state_messages_carry_the_state_fields() {
+        let state = ComputerState {
+            agent_id: "a".into(),
+            session_id: Some("s".into()),
+            url: Some("https://a.test/".into()),
+            control: Control::Owner,
+            ..ComputerState::default()
+        };
+        let message = ScreencastMessage::State(state);
+        let wire = serde_json::json!({
+            "type": "state",
+            "agent_id": "a",
+            "session_id": "s",
+            "url": "https://a.test/",
+            "control": "owner",
+            "headed": false,
+            "viewport": {"width": 1280, "height": 800},
+            "error": null,
+        });
+        assert_eq!(serde_json::to_value(&message).unwrap(), wire);
+        assert_eq!(
+            serde_json::from_value::<ScreencastMessage>(wire).unwrap(),
+            message
+        );
+    }
+
+    #[test]
+    fn owner_wheels_keys_and_modifiers_are_bounded() {
+        let v = COMPUTER_VIEWPORT;
+        let wheel = |x: f64, dy: f64| ComputerInput::Wheel {
+            x,
+            y: 10.0,
+            dx: 0.0,
+            dy,
+        };
+        assert!(validate_input(&wheel(10.0, -MAX_SCROLL_PX), v).is_ok());
+        assert_eq!(
+            validate_input(&wheel(-1.0, 1.0), v),
+            Err("Scroll inside the page view.")
+        );
+        for dy in [MAX_SCROLL_PX + 1.0, f64::NAN, f64::INFINITY] {
+            assert_eq!(
+                validate_input(&wheel(10.0, dy), v),
+                Err("Scroll at most 10,000 pixels at once.")
+            );
+        }
+        let key = |key: &str, code: &str, modifiers: u8| ComputerInput::Key {
+            kind: KeyKind::Down,
+            key: key.into(),
+            code: code.into(),
+            modifiers,
+        };
+        let all = MODIFIER_ALT | MODIFIER_CTRL | MODIFIER_META | MODIFIER_SHIFT;
+        assert!(validate_input(&key("a", "KeyA", all), v).is_ok());
+        assert!(validate_input(&key("a", "KeyA", 16), v).is_err());
+        assert!(validate_input(&key("", "KeyA", 0), v).is_err());
+        assert!(validate_input(&key("a", &"x".repeat(32), 0), v).is_ok());
+        assert!(validate_input(&key("a", &"x".repeat(33), 0), v).is_err());
+        let mouse = |modifiers: u8| ComputerInput::Mouse {
+            kind: MouseKind::Down,
+            x: 1.0,
+            y: 1.0,
+            button: MouseButton::Left,
+            clicks: 1,
+            modifiers,
+        };
+        assert!(validate_input(&mouse(MODIFIER_SHIFT), v).is_ok());
+        assert!(validate_input(&mouse(0x80), v).is_err());
+    }
 
     #[test]
     fn computer_messages_have_stable_wire_names() {
