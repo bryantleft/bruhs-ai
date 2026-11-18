@@ -149,7 +149,7 @@ pub fn LinkedRecords(person_id: String) -> impl IntoView {
                     view! {
                         <ul role="list" class="space-y-0.5">
                             {rows.into_iter().map(|(meeting_id, title)| {
-                                let title = if title.trim().is_empty() { "Untitled meeting".to_string() } else { title };
+                                let title = people_copy::meeting_link_title(&title).to_string();
                                 let label = format!("Open meeting {title}");
                                 view! {
                                     <li>
