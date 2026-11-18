@@ -7,8 +7,9 @@ use crate::{
 };
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
 use bruhs_models::crew::{
-    agent_run_level, auto_run_note, event_policy, event_policy_line, run_reviewed_label,
-    saved_agent_level, service_is_current, service_notice, AccessLevel, BruhState, ServiceNotice,
+    agent_run_level, auto_run_note, crew_commands_ready, event_policy, event_policy_line,
+    rooms_ready, run_reviewed_label, saved_agent_level, service_notice, AccessLevel, BruhState,
+    ServiceNotice,
 };
 use bruhs_models::reactive::*;
 use gpui_component::zoom::px;
@@ -18,8 +19,11 @@ mod editor_fields;
 mod face_editor;
 mod memory;
 mod notifications;
+mod room_dialog;
+mod room_page;
 mod runs;
 mod setup;
+mod transcript_list;
 mod updates;
 mod weekly_reports;
 pub(crate) use bruh_page::ReactiveOpenAutomations;
@@ -27,6 +31,8 @@ use bruhs_ui::text_field::{TextField, TextInput};
 pub(crate) use create_bruh::ReactiveBruhCreated;
 use gpui::{prelude::*, *};
 use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+pub(crate) use room_dialog::ReactiveRoomDone;
+pub(crate) use room_page::ReactiveOpenRoomSettings;
 use std::{
     collections::{HashMap, HashSet, VecDeque},
     rc::Rc,
@@ -96,6 +102,8 @@ fn service_update(notice: ServiceNotice, bundled: bool) -> Option<ServiceUpdate>
 #[derive(Default)]
 struct CrewState {
     bruhs: Vec<BruhState>,
+    /// Every room, as the service last reported them.
+    rooms: Vec<bruhs_models::crew::room::RoomState>,
     /// The serving service's crew protocol, once a frame or snapshot says.
     protocol: Option<u32>,
     /// The installed login service's protocol; `None` when none is installed.
@@ -187,6 +195,8 @@ enum Scope {
     Crew,
     /// The create bruh dialog.
     CreateBruh,
+    /// New room and Room settings.
+    Room,
 }
 
 #[derive(Clone)]
@@ -228,8 +238,14 @@ pub(crate) struct ReactiveAutomations {
     awareness: Option<gpui::Subscription>,
     crew: CrewState,
     create: Option<create_bruh::CreateBruh>,
+    /// New room or Room settings, while open.
+    room_dialog: Option<room_dialog::RoomDialog>,
     /// The bruh page on screen, while the workspace shows one.
     bruh: Option<bruh_page::BruhPage>,
+    /// The room page on screen, while the workspace shows one.
+    room: Option<room_page::RoomPage>,
+    /// A room just made: its composer takes focus once its page shows.
+    focus_room: Option<String>,
     /// Commands waiting for the one in flight, sent in order; a failure
     /// drops them, since they assumed it would apply.
     queued: VecDeque<(ReactiveCommand, Scope)>,
@@ -241,6 +257,9 @@ pub(crate) struct ReactiveAutomations {
     /// What each stop command of ⌘. fails with in a test.
     #[cfg(test)]
     stop_failure: Option<String>,
+    /// What `send_now` fails with in a test.
+    #[cfg(test)]
+    send_failure: Option<String>,
 }
 
 trait ReactiveButton {
@@ -417,12 +436,21 @@ enum Effect {
     ResetNotifications,
     /// Open the bruh this dialog made.
     OpenBruh(String),
+    /// A room was made, saved or deleted: close the dialog that asked.
+    RoomDone(String),
+    /// A post reached the room: its draft won't come back.
+    RoomPosted,
     None,
 }
 impl Effect {
     fn of(command: &ReactiveCommand) -> Self {
         match command {
             ReactiveCommand::CreateBruh { agent, .. } => Self::OpenBruh(agent.id.clone()),
+            ReactiveCommand::CreateRoom { room } | ReactiveCommand::UpdateRoom { room } => {
+                Self::RoomDone(room.id.clone())
+            }
+            ReactiveCommand::DeleteRoom { id } => Self::RoomDone(id.clone()),
+            ReactiveCommand::PostRoom { .. } => Self::RoomPosted,
             ReactiveCommand::Apply {
                 change: ReactiveChange::SaveAutomation { .. },
             } => Self::CloseAutomation,
@@ -529,13 +557,18 @@ impl ReactiveAutomations {
             awareness: None,
             crew: CrewState::default(),
             create: None,
+            room_dialog: None,
             bruh: None,
+            room: None,
+            focus_room: None,
             queued: VecDeque::new(),
             snapshot_rev: 0,
             #[cfg(test)]
             sent: Vec::new(),
             #[cfg(test)]
             stop_failure: None,
+            #[cfg(test)]
+            send_failure: None,
         };
         if cfg!(not(test)) {
             panel.start_crew_stream(cx);
@@ -608,6 +641,7 @@ impl ReactiveAutomations {
     /// Every snapshot passes through here so arrivals are detected exactly once.
     fn set_snapshot(&mut self, snapshot: ReactiveSnapshot, cx: &mut Context<'_, Self>) {
         self.crew.bruhs.clone_from(&snapshot.bruhs);
+        self.crew.rooms.clone_from(&snapshot.rooms);
         self.note_crew_protocol(snapshot.protocol, cx);
         self.agent_names = snapshot
             .agents
@@ -651,6 +685,10 @@ impl ReactiveAutomations {
         }
         self.loaded = true;
         self.last_refresh = Some(Instant::now());
+        // Tests never reach a server.
+        if cfg!(test) {
+            return;
+        }
         self.reading = true;
         self.revision = self.revision.wrapping_add(1);
         let revision = self.revision;
@@ -717,23 +755,30 @@ impl ReactiveAutomations {
                             this.send_in(next, scope, cx);
                         }
                     }
-                    Err(error) => {
-                        this.queued.clear();
-                        let message = reactive_error(error);
-                        if scope == Scope::CreateBruh {
-                            this.create_failed();
-                        }
-                        if scope == Scope::General {
-                            this.error = Some(message);
-                        } else {
-                            this.scoped_error = Some((scope, message));
-                        }
-                    }
+                    Err(error) => this.command_failed(scope, reactive_error(error)),
                 }
                 cx.notify();
             });
         }));
         cx.notify();
+    }
+    /// The service refused a command: drop what was queued behind it, let
+    /// the dialog that sent it try again, and show why where it was sent.
+    fn command_failed(&mut self, scope: Scope, message: String) {
+        self.queued.clear();
+        // A post that failed, or was dropped from the queue, comes back.
+        self.room_post_failed();
+        if scope == Scope::CreateBruh {
+            self.create_failed();
+        }
+        if scope == Scope::Room {
+            self.room_failed();
+        }
+        if scope == Scope::General {
+            self.error = Some(message);
+        } else {
+            self.scoped_error = Some((scope, message));
+        }
     }
     /// Send `commands` in order, after any command already on its way.
     fn send_all(
@@ -753,6 +798,8 @@ impl ReactiveAutomations {
     fn apply_effect(&mut self, effect: Effect, cx: &mut Context<'_, Self>) {
         match effect {
             Effect::OpenBruh(agent_id) => self.created_bruh(agent_id, cx),
+            Effect::RoomDone(room_id) => self.room_done(&room_id, cx),
+            Effect::RoomPosted => self.room_posted(),
             Effect::CloseAutomation => self.editor = None,
             Effect::CloseReply(id) => {
                 if self.reply.as_ref().is_some_and(|(open, _)| *open == id) {
@@ -1040,6 +1087,7 @@ impl ReactiveAutomations {
                 Some(Editor::Chat { agent_id, message }) => ReactiveCommand::Chat {
                     agent_id: agent_id.clone(),
                     message: value(message, cx),
+                    run_id: None,
                 },
                 Some(Editor::Publish {
                     source_id,
@@ -1392,7 +1440,15 @@ impl ReactiveAutomations {
     /// Whether the service understands the crew commands. Unknown counts as
     /// not yet.
     pub(crate) fn crew_ready(&self) -> bool {
-        self.crew.protocol.is_some_and(service_is_current)
+        self.crew.protocol.is_some_and(crew_commands_ready)
+    }
+    /// Whether the service has rooms. Unknown counts as not yet.
+    pub(crate) fn rooms_ready(&self) -> bool {
+        self.crew.protocol.is_some_and(rooms_ready)
+    }
+    /// Why rooms are off, once the service is known to be older.
+    pub(crate) fn rooms_reason(&self) -> Option<&'static str> {
+        bruhs_models::crew::room::rooms_reason(self.crew.protocol)
     }
     /// Which older service to update, once the serving protocol is known.
     pub(crate) fn crew_notice(&self) -> Option<ServiceNotice> {
@@ -1432,6 +1488,37 @@ impl ReactiveAutomations {
     /// Send a command from the crew rail; a failure shows in the rail.
     pub(crate) fn send_crew(&mut self, command: ReactiveCommand, cx: &mut Context<'_, Self>) {
         self.send_in(command, Scope::Crew, cx);
+    }
+    /// Send `command` at once, beside any command in flight, for a caller
+    /// that must hear how it went, such as `message_bruh`. The task ends
+    /// with the server's error, if any.
+    pub(crate) fn send_now(
+        &mut self,
+        command: ReactiveCommand,
+        cx: &mut Context<'_, Self>,
+    ) -> Task<Result<(), String>> {
+        #[cfg(test)]
+        {
+            let _ = cx;
+            self.sent.push(command);
+            Task::ready(self.send_failure.clone().map_or(Ok(()), Err))
+        }
+        #[cfg(not(test))]
+        {
+            let client = self.client.clone();
+            let sending = spawn_tokio(cx, async move {
+                client
+                    .reactive_command(&command)
+                    .await
+                    .map(|_| ())
+                    .map_err(reactive_error)
+            });
+            cx.spawn(async move |this, cx| {
+                let result = sending.await;
+                let _ = this.update(cx, |this, cx| this.refresh_snapshot(cx));
+                result
+            })
+        }
     }
     /// Stop every bruh: one command to a current service, a cancel per live
     /// run to an older one, going on past a cancel that fails. Sent at once,
@@ -1498,6 +1585,11 @@ impl ReactiveAutomations {
     pub(crate) fn set_busy_for_test(&mut self, busy: bool) {
         self.busy = busy;
     }
+    /// Make every `send_now` fail with `error`.
+    #[cfg(test)]
+    pub(crate) fn fail_sends_for_test(&mut self, error: &str) {
+        self.send_failure = Some(error.to_string());
+    }
     /// Make every stop command of ⌘. fail with `error`.
     #[cfg(test)]
     pub(crate) fn fail_stops_for_test(&mut self, error: &str) {
@@ -1522,6 +1614,28 @@ impl ReactiveAutomations {
     #[cfg(test)]
     pub(crate) fn sent_for_test(&self) -> &[ReactiveCommand] {
         &self.sent
+    }
+    /// Refuse the last command sent, from the room dialog, as the service
+    /// would.
+    #[cfg(test)]
+    pub(crate) fn refuse_room_for_test(&mut self, error: &str, cx: &mut Context<'_, Self>) {
+        self.command_failed(Scope::Room, error.to_string());
+        cx.notify();
+    }
+    /// Answer the last command sent as the service would on success:
+    /// `snapshot`, then what the command closes or opens.
+    #[cfg(test)]
+    pub(crate) fn answer_last_for_test(
+        &mut self,
+        snapshot: ReactiveSnapshot,
+        cx: &mut Context<'_, Self>,
+    ) {
+        self.set_snapshot(snapshot, cx);
+        if let Some(command) = self.sent.last() {
+            let effect = Effect::of(command);
+            self.apply_effect(effect, cx);
+        }
+        cx.notify();
     }
 
     /// Follow the service's live crew frames for as long as the panel lives.
@@ -1554,12 +1668,21 @@ impl ReactiveAutomations {
         }));
     }
     fn apply_crew_signal(&mut self, signal: OutboxSignal, cx: &mut Context<'_, Self>) {
+        let mut changed = false;
         if self.crew.bruhs != signal.bruhs {
             self.crew.bruhs = signal.bruhs;
+            cx.emit(ReactiveCrewChanged);
             cx.notify();
+            changed = true;
         }
-        // A bruh page reads the crew again on every change, like the web's.
-        if self.bruh.is_some() {
+        if self.crew.rooms != signal.rooms {
+            self.crew.rooms = signal.rooms;
+            cx.notify();
+            changed = true;
+        }
+        // A bruh or room page reads the crew again when its bruhs or rooms
+        // change, like the web's.
+        if changed && (self.bruh.is_some() || self.room.is_some()) {
             self.refresh_snapshot(cx);
         }
         self.note_crew_protocol(signal.protocol, cx);
@@ -1666,7 +1789,14 @@ impl EventEmitter<ReactivePreview> for ReactiveAutomations {}
 impl EventEmitter<ReactiveProjectOpened> for ReactiveAutomations {}
 impl EventEmitter<ReactiveArrival> for ReactiveAutomations {}
 impl EventEmitter<ReactiveBruhCreated> for ReactiveAutomations {}
+impl EventEmitter<ReactiveRoomDone> for ReactiveAutomations {}
 impl EventEmitter<ReactiveOpenAutomations> for ReactiveAutomations {}
+impl EventEmitter<ReactiveOpenRoomSettings> for ReactiveAutomations {}
+impl EventEmitter<ReactiveCrewChanged> for ReactiveAutomations {}
+
+/// A live crew frame changed some bruh's state, so a run may have ended.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub(crate) struct ReactiveCrewChanged;
 
 impl Render for ReactiveAutomations {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
@@ -1681,6 +1811,12 @@ impl Render for ReactiveAutomations {
             self.ensure_bruh_page(_window, cx);
             return self
                 .render_bruh_page(&agent_id, _window, cx)
+                .into_any_element();
+        }
+        if let Some(room_id) = self.room_page_id().map(str::to_string) {
+            self.ensure_room_page(_window, cx);
+            return self
+                .render_room_page(&room_id, _window, cx)
                 .into_any_element();
         }
         let disabled = self.busy || self.snapshot.is_none();
@@ -2313,7 +2449,7 @@ mod tests {
         ReactiveSnapshot, ServerError,
     };
     use crate::theme;
-    use gpui::AppContext as _;
+    use gpui::{AppContext as _, Entity, VisualTestContext};
     use std::rc::Rc;
     #[test]
     fn native_interval_editor_round_trips_milliseconds_without_float_casts() {
@@ -2370,6 +2506,55 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(cx.debug_bounds("reactive-Save agent").is_some());
+    }
+
+    /// One Space or Enter on a focused toggle flips it once, as a click
+    /// does: the keyboard's own click never runs the action a second time.
+    #[gpui::test]
+    fn a_key_press_on_a_toggle_flips_it_once(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let holder = Rc::new(std::cell::RefCell::new(None));
+        let capture = holder.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let panel = cx.new(ReactiveAutomations::new);
+            *capture.borrow_mut() = Some(panel.clone());
+            gpui_component::Root::new(panel, window, cx)
+        });
+        cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(2400.0)));
+        let panel = holder.borrow().clone().unwrap();
+        panel.update_in(cx, |panel, window, cx| {
+            panel.snapshot = Some(ReactiveSnapshot::default());
+            panel.loaded = true;
+            panel.open_agent(None, window, cx);
+        });
+        cx.run_until_parked();
+        let enabled = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| match &panel.editor {
+                Some(Editor::Agent(editor)) => editor.agent.enabled,
+                _ => panic!("agent editor"),
+            })
+        };
+        let toggle = cx
+            .debug_bounds("reactive-Agent paused")
+            .expect("the toggle");
+        cx.simulate_click(toggle.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        assert!(enabled(&panel, cx), "a click flips it once");
+        for key in ["space", "enter"] {
+            let before = enabled(&panel, cx);
+            let keystroke = gpui::Keystroke::parse(key).expect("keystroke");
+            cx.simulate_event(gpui::KeyDownEvent {
+                keystroke: keystroke.clone(),
+                is_held: false,
+                prefer_character_input: false,
+            });
+            cx.simulate_event(gpui::KeyUpEvent { keystroke });
+            cx.run_until_parked();
+            assert_ne!(enabled(&panel, cx), before, "{key} flips it once");
+        }
     }
 
     #[gpui::test]
@@ -2505,6 +2690,12 @@ mod crew_tests {
             );
             assert_eq!(panel.crew(), std::slice::from_ref(&ann));
             assert!(panel.crew_ready());
+            // Protocol 1 keeps the crew commands but has no rooms.
+            assert!(!panel.rooms_ready());
+            assert_eq!(
+                panel.rooms_reason(),
+                Some(ServiceNotice::ServingOld.message())
+            );
             // An older service's snapshot has no crew and protocol 0.
             panel.set_snapshot(ReactiveSnapshot::default(), cx);
             assert!(panel.crew().is_empty());

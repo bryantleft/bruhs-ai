@@ -42,19 +42,48 @@ impl BusyPolicy {
     }
 }
 
-/// Why a run exists.
+/// Why a run exists. A trigger type this build doesn't know (one a newer
+/// service added) reads as [`RunTrigger::Other`], so the run, and the
+/// snapshot that lists it, still decode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunTrigger {
     Event,
     Chat,
-    FollowUp { follow_up_id: String },
-    Answer { outbox_id: String },
-    DraftOutcome { run_id: String },
+    FollowUp {
+        follow_up_id: String,
+    },
+    Answer {
+        outbox_id: String,
+    },
+    DraftOutcome {
+        run_id: String,
+    },
     Consolidation,
+    Room {
+        room_id: String,
+        message_id: String,
+        #[serde(default)]
+        hop: u32,
+        /// A run the owner's decision resumed; its prompt is not rebuilt.
+        #[serde(default)]
+        resumed: bool,
+    },
+    /// A trigger from a newer service. Never written by this build.
+    #[serde(other)]
+    Other,
 }
 
 impl RunTrigger {
+    /// The room a room run belongs to.
+    #[must_use]
+    pub fn room_id(&self) -> Option<&str> {
+        match self {
+            Self::Room { room_id, .. } => Some(room_id),
+            _ => None,
+        }
+    }
+
     pub fn label(&self) -> &'static str {
         match self {
             Self::Event => "Event",
@@ -63,6 +92,8 @@ impl RunTrigger {
             Self::Answer { .. } => "Your answer",
             Self::DraftOutcome { .. } => "Draft decision",
             Self::Consolidation => "Memory tidy-up",
+            Self::Room { .. } => "Room",
+            Self::Other => "Run",
         }
     }
 }
@@ -140,6 +171,8 @@ pub struct OutboxSignal {
     pub latest_unread: Option<OutboxItem>,
     #[serde(default)]
     pub bruhs: Vec<crate::crew::BruhState>,
+    #[serde(default)]
+    pub rooms: Vec<crate::crew::room::RoomState>,
     #[serde(default)]
     pub protocol: u32,
 }

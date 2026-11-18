@@ -22,6 +22,8 @@ pub mod clock;
 mod crew_tests;
 mod notify;
 mod report_sources;
+#[cfg(test)]
+mod room_tests;
 pub mod sources;
 mod store;
 #[cfg(test)]
@@ -336,6 +338,17 @@ impl ReactiveRuntime {
         before: Option<String>,
     ) -> Result<Vec<bruhs_models::reactive::ReactiveRun>, ReactiveError> {
         self.call(move |connection| store::agent_runs(connection, &agent_id, before.as_deref()))
+            .await
+    }
+
+    /// One room's messages, newest first, a page of `HISTORY_LIMIT` at a time.
+    /// `before` is the id of the last message on the previous page.
+    pub async fn room_messages(
+        &self,
+        room_id: String,
+        before: Option<String>,
+    ) -> Result<Vec<bruhs_models::crew::room::RoomMessage>, ReactiveError> {
+        self.call(move |connection| store::rooms::messages(connection, &room_id, before.as_deref()))
             .await
     }
 

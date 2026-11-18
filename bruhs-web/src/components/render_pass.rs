@@ -41,13 +41,20 @@ pub fn install_render_pass(
             )
         });
 
-        gloo_timers::callback::Timeout::new(0, move || {
-            wasm_bindgen_futures::spawn_local(async move {
-                run_pass(needs_math, needs_mermaid).await;
-            });
-        })
-        .forget();
+        schedule_render_pass(needs_math, needs_mermaid);
     });
+}
+
+/// Run the pass once the DOM has settled, over every `.prose-msg` block it
+/// has not processed yet. Pages with their own prose (a room, a bruh's
+/// chat) call it when their lines change.
+pub fn schedule_render_pass(needs_math: bool, needs_mermaid: bool) {
+    gloo_timers::callback::Timeout::new(0, move || {
+        wasm_bindgen_futures::spawn_local(async move {
+            run_pass(needs_math, needs_mermaid).await;
+        });
+    })
+    .forget();
 }
 
 /// Whether `markdown` has math KaTeX would render: `$$…$$`, `\[…\]`,

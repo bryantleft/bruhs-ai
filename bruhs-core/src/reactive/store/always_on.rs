@@ -119,6 +119,8 @@ fn create_item(
         approval: None,
     };
     // A retried run reuses its receipt; its earlier update stays the record.
+    // Approvals the run opened don't count: `save_item` keys them by their
+    // own id, so they never match the run's.
     let exists: bool = connection.query_row(
         "SELECT EXISTS(SELECT 1 FROM reactive_outbox WHERE run_id=?1)",
         [&run.id],
@@ -126,6 +128,9 @@ fn create_item(
     )?;
     if !exists {
         save_item(connection, &item)?;
+        if kind == OutboxKind::Ask {
+            super::rooms::ask_opened(connection, run, &item)?;
+        }
     }
     Ok(())
 }
@@ -206,9 +211,15 @@ pub(super) fn answer(
             item.title, item.message
         );
         let mut run = new_run(connection, &agent, prompt, None, None, RunStatus::Queued, 0)?;
-        run.trigger = Some(RunTrigger::Answer {
+        // A room run resumes in its room while the bruh is still in it.
+        let original = get::<ReactiveRun>(connection, "reactive_runs", &item.run_id)?;
+        run.trigger = match original {
+            Some(original) => super::rooms::resume_trigger_for(connection, &original)?,
+            None => None,
+        }
+        .or(Some(RunTrigger::Answer {
             outbox_id: item.id.clone(),
-        });
+        }));
         save_run(connection, &run)?;
     }
     let now = EpochMs::now();
@@ -239,6 +250,7 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
         open_questions: usize::try_from(open_questions).unwrap_or_default(),
         latest_unread: latest.map(decode).transpose()?,
         bruhs: super::crew::bruh_states(connection, EpochMs::now())?,
+        rooms: super::rooms::room_states(connection)?,
         protocol: bruhs_models::crew::CREW_PROTOCOL,
     })
 }
@@ -775,7 +787,10 @@ pub(super) fn apply_report(
         }
     }
     let (outcome, mut title, mut message) = effective_outcome(body, report);
+    // A room run's reply is already in the room; only a question needs a card.
+    let in_room = run.trigger.as_ref().and_then(RunTrigger::room_id).is_some();
     let kind = match outcome {
+        RunOutcome::Notify if in_room => None,
         RunOutcome::Notify => Some(OutboxKind::Notify),
         RunOutcome::Ask => Some(OutboxKind::Ask),
         RunOutcome::Silent if is_weekly_report => {

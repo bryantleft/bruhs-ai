@@ -33,6 +33,11 @@ pub enum ChipKind {
         label: String,
         excerpt: String,
     },
+    /// A bruh named in a room post; reads as its mention everywhere.
+    Bruh {
+        agent_id: String,
+        name: String,
+    },
 }
 
 /// One chip. `start` and `end` are UTF-8 byte offsets into the current draft.
@@ -70,6 +75,7 @@ pub fn chip_label(kind: &ChipKind) -> String {
         ChipKind::PullRequest { number, .. } => format!("#{number}"),
         ChipKind::Thread { title, .. } => format!("@{title}"),
         ChipKind::Terminal { label, .. } => label.clone(),
+        ChipKind::Bruh { name, .. } => format!("@{name}"),
     }
 }
 
@@ -222,6 +228,7 @@ pub fn chip_detail(kind: &ChipKind) -> String {
                 format!("{label}: {line}")
             }
         }
+        ChipKind::Bruh { name, .. } => name.clone(),
     }
 }
 
@@ -352,6 +359,7 @@ fn agent_body(kind: &ChipKind) -> String {
             format!("Thread \"{title}\" ({thread_id})")
         }
         ChipKind::Terminal { label, excerpt } => format!("{label}:\n{excerpt}"),
+        ChipKind::Bruh { name, .. } => format!("@{name}"),
     }
 }
 
@@ -368,6 +376,7 @@ fn copy_link(kind: &ChipKind) -> String {
         ChipKind::PullRequest { number, url, .. } => format!("[#{number}]({url})"),
         ChipKind::Thread { title, thread_id } => format!("[{title}](bruhs-thread://{thread_id})"),
         ChipKind::Terminal { label, .. } => label.clone(),
+        ChipKind::Bruh { name, .. } => format!("@{name}"),
     }
 }
 
@@ -455,6 +464,19 @@ mod tests {
                 state: "open".into(),
             },
         }
+    }
+
+    #[test]
+    fn a_bruh_chip_reads_as_its_mention_everywhere() {
+        let kind = ChipKind::Bruh {
+            agent_id: "a".into(),
+            name: "Ada".into(),
+        };
+        assert_eq!(chip_label(&kind), "@Ada");
+        assert_eq!(chip_detail(&kind), "Ada");
+        let (text, _, chips) = insert_chip("ask  now", &[], 4, "c1".to_string(), kind);
+        assert_eq!(expand_prompt(&text, &chips), text);
+        assert!(markdown_for_copy(&text, &chips).contains("@Ada"));
     }
 
     #[test]

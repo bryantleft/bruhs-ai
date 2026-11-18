@@ -10,15 +10,23 @@
 //! turn for that message ends, and gets that turn's reply. The call is not
 //! held when nothing could answer it soon: the chat page is not mounted, the
 //! queue is paused, or no lane is free.
+//!
+//! `message_bruh` hands work to a bruh instead. A bruh's chat lives in the
+//! background service, so the message goes there as a `Chat` with a run id
+//! picked here, and a sender that waits is held ([`BruhWait`]) while that
+//! run is read on every crew change and every [`BRUH_WAIT_POLL_MS`].
 
 use bruhs_models::agent::Role;
+use bruhs_models::crew::BruhState;
 use bruhs_models::ids::ThreadId;
+use bruhs_models::reactive::ReactiveCommand;
 use bruhs_models::roles::RoleBook;
 use bruhs_models::thread_link::{
-    answer_reply, delivered_reply, list_reply, pick_role, plan_message, read_reply,
-    recipient_waiting_reply, resolve_thread, Answer, Created, Delivery, DeliveryState, Outgoing,
-    Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadReplySubmission,
-    ThreadRequest,
+    answer_reply, bruh_sent_reply, bruh_service_refusal, delivered_reply, due_bruh_answers,
+    forget_bruh_waits_of, list_reply, pick_role, plan_bruh_message, plan_message, read_reply,
+    recipient_waiting_reply, resolve_thread, same_turn, Answer, BruhOutgoing, BruhWait, Created,
+    Delivery, DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine, ThreadOperation,
+    ThreadReply, ThreadReplySubmission, ThreadRequest, BRUH_WAIT_POLL_MS,
 };
 use leptos::prelude::*;
 
@@ -73,10 +81,22 @@ pub struct ThreadLink {
     hops: RwSignal<u32>,
     /// The user's roles: what a new thread can start with.
     roles: RwSignal<RoleBook>,
+    /// The crew as the service last reported it: the bruhs a turn can message.
+    bruhs: RwSignal<Vec<BruhState>>,
+    /// The service's crew protocol; `None` until its first frame.
+    protocol: RwSignal<Option<u32>>,
     /// The chat page is mounted. It owns the turn lifecycle, so a queued
     /// message can only start while it is.
     chat_mounted: RwSignal<bool>,
     waits: StoredValue<Vec<Wait>>,
+    bruh_waits: StoredValue<Vec<BruhWait>>,
+    /// A loop reads the held bruh runs every [`BRUH_WAIT_POLL_MS`].
+    bruh_polling: StoredValue<bool>,
+    /// A check of the held bruh runs is in flight; one at a time, so a
+    /// page read earlier never lands after a newer one.
+    bruh_checking: StoredValue<bool>,
+    /// A check was asked for during the one in flight: run once more.
+    bruh_recheck: StoredValue<bool>,
 }
 
 /// Threads as cards, most recent first. A thread whose role was deleted
@@ -140,6 +160,28 @@ fn ended_for(prompt: &str, settled: &[AgentMessage], stopped: bool) -> Option<En
     })
 }
 
+/// How long one read of a bruh's runs may take before a check of the held
+/// waits moves on without it and reads again on the next tick.
+const BRUH_READ_TIMEOUT_MS: u32 = 10_000;
+
+/// `read`'s output, or `None` once `deadline` comes first.
+async fn within<T>(
+    read: impl std::future::Future<Output = T>,
+    deadline: impl std::future::Future<Output = ()>,
+) -> Option<T> {
+    futures_util::pin_mut!(read);
+    futures_util::pin_mut!(deadline);
+    match futures_util::future::select(read, deadline).await {
+        futures_util::future::Either::Left((value, _)) => Some(value),
+        futures_util::future::Either::Right(_) => None,
+    }
+}
+
+/// Keep only the bruh waits whose calling thread still exists.
+fn keep_bruh_waits_of(waits: &mut Vec<BruhWait>, threads: &[&str]) {
+    waits.retain(|wait| threads.contains(&wait.caller.as_str()));
+}
+
 /// Whether a waited-for message can no longer run: its thread is gone, or
 /// the message left the queue while no turn there is running or starting.
 fn is_removed(wait: &Wait, queue: &PromptQueue, exists: bool, busy: bool) -> bool {
@@ -153,6 +195,7 @@ fn is_removed(wait: &Wait, queue: &PromptQueue, exists: bool, busy: bool) -> boo
 impl ThreadLink {
     pub fn install() {
         let crate::state::PromptQueueSignal(queue) = expect_context();
+        let updates = expect_context::<crate::agent_updates::AgentUpdates>();
         let link = Self {
             boards: expect_context(),
             threads: expect_context::<crate::state::ThreadsSignal>().0,
@@ -166,8 +209,14 @@ impl ThreadLink {
             saves: expect_context(),
             hops: expect_context::<crate::state::ThreadHopsSignal>().0,
             roles: expect_context::<crate::state::RolesSignal>().0,
+            bruhs: updates.bruhs,
+            protocol: updates.protocol,
             chat_mounted: RwSignal::new(false),
             waits: StoredValue::new(Vec::new()),
+            bruh_waits: StoredValue::new(Vec::new()),
+            bruh_polling: StoredValue::new(false),
+            bruh_checking: StoredValue::new(false),
+            bruh_recheck: StoredValue::new(false),
         };
         provide_context(link);
         // A held call must end when its message can no longer run: the user
@@ -177,6 +226,13 @@ impl ThreadLink {
             link.queue.track();
             link.threads.track();
             link.end_removed();
+        });
+        // A crew change can mean a held bruh run has ended, or its bruh left.
+        Effect::new(move |_| {
+            link.bruhs.track();
+            if link.bruh_waits.with_value(|waits| !waits.is_empty()) {
+                leptos::task::spawn_local(link.check_bruh_waits());
+            }
         });
     }
 
@@ -244,6 +300,26 @@ impl ThreadLink {
                         None => return,
                     }
                 }
+                ThreadOperation::MessageBruh {
+                    name_or_id,
+                    message,
+                    wait,
+                    caller_full_access,
+                } => match self
+                    .send_bruh(
+                        &request.thread_id,
+                        &request.id,
+                        &name_or_id,
+                        &message,
+                        wait,
+                        caller_full_access,
+                    )
+                    .await
+                {
+                    Some(reply) => reply,
+                    // Held: answered when the bruh's run ends.
+                    None => return,
+                },
             };
             Self::post(request.thread_id, request.id, reply);
         });
@@ -266,6 +342,9 @@ impl ThreadLink {
     /// `thread_id`'s turn ended with these messages. Answer the calls that
     /// waited on it, and forget the calls its own turn was holding.
     pub fn turn_ended(self, thread_id: &str, settled: &[AgentMessage], stopped: bool) {
+        // The broker ended the bruh calls of a turn that is over, too.
+        self.bruh_waits
+            .update_value(|waits| forget_bruh_waits_of(waits, thread_id));
         let due = self
             .waits
             .try_update_value(|waits| {
@@ -311,9 +390,14 @@ impl ThreadLink {
         }
     }
 
-    /// End the held calls whose message can no longer run.
+    /// End the held calls whose message can no longer run, and forget the
+    /// bruh waits of a deleted thread, whose calls the broker has ended.
     fn end_removed(self) {
         let threads = self.threads.get_untracked();
+        let live: Vec<&str> = threads.iter().map(|thread| thread.id.as_str()).collect();
+        let _ = self
+            .bruh_waits
+            .try_update_value(|waits| keep_bruh_waits_of(waits, &live));
         let gone = self
             .waits
             .try_update_value(|waits| {
@@ -344,10 +428,160 @@ impl ThreadLink {
         }
     }
 
+    /// Send a `message_bruh` to the bruh's chat. `None` when the call is
+    /// held for the bruh's reply.
+    async fn send_bruh(
+        self,
+        caller_id: &ThreadId,
+        request_id: &str,
+        name_or_id: &str,
+        message: &str,
+        wait: bool,
+        caller_full_access: bool,
+    ) -> Option<ThreadReply> {
+        let caller = caller_id.as_str();
+        let turn = self.turns.turn_id_untracked(caller);
+        if let Some(reason) = bruh_service_refusal(self.protocol.get_untracked()) {
+            return Some(ThreadReply::refused(reason));
+        }
+        let threads = self.threads.get_untracked();
+        let Some(sender) = threads.iter().find(|thread| thread.id == caller) else {
+            return Some(ThreadReply::refused(
+                "Not sent: this thread no longer exists in the app.",
+            ));
+        };
+        let ids: Vec<&str> = threads.iter().map(|thread| thread.id.as_str()).collect();
+        let prompt = self
+            .turns
+            .messages(caller)
+            .map(|settled| running_prompt(&settled))
+            .unwrap_or_default();
+        let bruhs = self.bruhs.get_untracked();
+        let plan = match plan_bruh_message(
+            &BruhOutgoing {
+                caller_id: caller,
+                caller_title: &sender.title,
+                caller_prompt: &prompt,
+                ids: &ids,
+                name_or_id,
+                message,
+                wait,
+                max_hops: self.hops.get_untracked(),
+                caller_full_access,
+            },
+            &bruhs,
+        ) {
+            Ok(plan) => plan,
+            Err(refusal) => return Some(refusal),
+        };
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let command = ReactiveCommand::Chat {
+            agent_id: plan.agent_id.clone(),
+            message: plan.prompt,
+            run_id: Some(run_id.clone()),
+        };
+        if let Err(error) = crate::api::reactive_command(&command).await {
+            return Some(ThreadReply::refused(format!("Not sent: {error}")));
+        }
+        if !wait {
+            return Some(bruh_sent_reply(&plan.name));
+        }
+        if !same_turn(turn, self.turns.turn_id_untracked(caller)) {
+            // The turn ended during the send, or another began, so the
+            // broker has ended the call already, as `turn_ended` does for
+            // thread waits.
+            return None;
+        }
+        self.bruh_waits.update_value(|waits| {
+            waits.push(BruhWait {
+                request_id: request_id.to_string(),
+                caller: caller_id.clone(),
+                agent_id: plan.agent_id,
+                name: plan.name,
+                run_id,
+                seen: false,
+            });
+        });
+        self.poll_bruh_waits();
+        None
+    }
+
+    /// Read the held bruh runs every [`BRUH_WAIT_POLL_MS`] while any wait.
+    fn poll_bruh_waits(self) {
+        if self.bruh_polling.get_value() {
+            return;
+        }
+        self.bruh_polling.set_value(true);
+        leptos::task::spawn_local(async move {
+            loop {
+                gloo_timers::future::TimeoutFuture::new(BRUH_WAIT_POLL_MS).await;
+                let waiting = self
+                    .bruh_waits
+                    .try_with_value(|waits| !waits.is_empty())
+                    .unwrap_or(false);
+                if !waiting {
+                    let _ = self.bruh_polling.try_set_value(false);
+                    break;
+                }
+                self.check_bruh_waits().await;
+            }
+        });
+    }
+
+    /// Read the newest runs of each bruh a call waits on, and answer the
+    /// calls whose wait is over. One check runs at a time; one asked for
+    /// meanwhile runs once more after it.
+    async fn check_bruh_waits(self) {
+        if self.bruh_checking.try_get_value().unwrap_or(true) {
+            let _ = self.bruh_recheck.try_set_value(true);
+            return;
+        }
+        let _ = self.bruh_checking.try_set_value(true);
+        loop {
+            let _ = self.bruh_recheck.try_set_value(false);
+            self.check_bruh_waits_once().await;
+            if !self.bruh_recheck.try_get_value().unwrap_or(false) {
+                break;
+            }
+        }
+        let _ = self.bruh_checking.try_set_value(false);
+    }
+
+    async fn check_bruh_waits_once(self) {
+        let mut agents: Vec<String> = self
+            .bruh_waits
+            .try_with_value(|waits| waits.iter().map(|wait| wait.agent_id.clone()).collect())
+            .unwrap_or_default();
+        agents.sort();
+        agents.dedup();
+        let mut pages = Vec::new();
+        for agent_id in agents {
+            let read = within(
+                crate::api::agent_runs(&agent_id, None),
+                gloo_timers::future::TimeoutFuture::new(BRUH_READ_TIMEOUT_MS),
+            );
+            match read.await {
+                Some(Ok(runs)) => pages.push((agent_id, runs)),
+                // Read again on the next tick.
+                Some(Err(error)) => log::debug!("bruh runs could not be read: {error}"),
+                None => log::debug!("bruh runs took too long to read"),
+            }
+        }
+        let crew = self.bruhs.get_untracked();
+        let due = self
+            .bruh_waits
+            .try_update_value(|waits| due_bruh_answers(waits, &crew, &pages))
+            .unwrap_or_default();
+        for (wait, reply) in due {
+            Self::post(wait.caller, wait.request_id, reply);
+        }
+    }
+
     fn list(self, caller: &str) -> ThreadReply {
         let threads = self.threads.get_untracked();
         let running = self.turns.running_untracked();
         let roles = self.roles.get_untracked();
+        let bruhs = self.bruhs.get_untracked();
         // Roles as they run in the caller's project.
         let project = threads
             .iter()
@@ -359,6 +593,7 @@ impl ThreadLink {
                 &cards(&threads, &running, queue, &roles),
                 caller,
                 &roles.resolved(project),
+                &bruhs,
             )
         })
     }
@@ -713,5 +948,42 @@ mod tests {
         // Its thread was deleted, queue row or not.
         assert!(is_removed(&held, &queue, false, false));
         assert!(is_removed(&held, &queue, false, true));
+    }
+
+    #[test]
+    fn a_deleted_threads_bruh_waits_go() {
+        let kept = ThreadId::new_v4();
+        let gone = ThreadId::new_v4();
+        let wait = |caller: &ThreadId, run: &str| BruhWait {
+            request_id: format!("q-{run}"),
+            caller: caller.clone(),
+            agent_id: "b".into(),
+            name: "Bo".into(),
+            run_id: run.into(),
+            seen: false,
+        };
+        let mut waits = vec![wait(&kept, "1"), wait(&gone, "2"), wait(&kept, "3")];
+        keep_bruh_waits_of(&mut waits, &[kept.as_str(), "other"]);
+        let runs: Vec<&str> = waits.iter().map(|wait| wait.run_id.as_str()).collect();
+        assert_eq!(runs, ["1", "3"]);
+    }
+
+    #[test]
+    fn a_read_that_hangs_gives_up_at_its_deadline() {
+        use std::future::{pending, ready};
+        let deadline = || ready(());
+        assert_eq!(poll_once(within(ready(7), deadline())), Some(Some(7)));
+        assert_eq!(poll_once(within(pending::<u8>(), deadline())), Some(None));
+        assert_eq!(poll_once(within(pending::<u8>(), pending::<()>())), None);
+    }
+
+    /// Poll `future` once: its output if it is ready.
+    fn poll_once<F: std::future::Future>(future: F) -> Option<F::Output> {
+        let mut future = std::pin::pin!(future);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => Some(output),
+            std::task::Poll::Pending => None,
+        }
     }
 }

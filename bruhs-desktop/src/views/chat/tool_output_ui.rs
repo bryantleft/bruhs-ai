@@ -694,7 +694,7 @@ impl ChatView {
                                     .px(px(PERMISSION_PROMPT_X_PADDING_PX))
                                     .py(px(PERMISSION_PROMPT_Y_PADDING_PX))
                                     .child(
-                                        TextView::markdown(
+                                        untrusted_markdown(
                                             "desktop-permission-input-text",
                                             permission_input_markdown(&request.input),
                                         )

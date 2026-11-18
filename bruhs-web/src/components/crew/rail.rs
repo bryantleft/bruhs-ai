@@ -5,6 +5,9 @@
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
+use bruhs_models::crew::room::{
+    new_room_block, room_rail_rows, RoomRailRow, NEW_ROOM, NO_BRUHS_YET,
+};
 use bruhs_models::crew::{
     rail_order, service_notice, status_line, BruhState, BruhStatus, ServiceNotice, RAIL_FACE_PX,
 };
@@ -15,6 +18,7 @@ use wasm_bindgen::JsCast;
 use super::create::CreateBruhDialog;
 use super::data::use_crew_snapshot;
 use super::face::BruhFace;
+use super::room_dialog::RoomDialog;
 use super::shortcuts::CrewFocusRequest;
 use crate::components::reactive_automations::local_time;
 use crate::state::{load_pref, save_pref, ActiveView, AppView, SetActiveView, ThreadNotice};
@@ -84,6 +88,15 @@ fn row_status(state: &BruhState) -> String {
     status_line(state.status, wake.as_deref())
 }
 
+/// Why New room is off. Until the crew has loaded, nobody knows whether it
+/// has a bruh, so it is off and titled plainly, as for an unknown service.
+fn room_block_for(protocol: Option<u32>, bruhs: Option<usize>) -> Option<&'static str> {
+    match bruhs {
+        Some(bruhs) => new_room_block(protocol, bruhs),
+        None => new_room_block(None, 0),
+    }
+}
+
 fn unread_text(unread: usize) -> String {
     if unread > 99 {
         "99+".into()
@@ -149,6 +162,53 @@ fn rail_row(
     }
 }
 
+/// One room's row, kept current from `rows` by its id.
+fn room_row(
+    room_id: String,
+    rows: Memo<Vec<RoomRailRow>>,
+    active_view: Option<ReadSignal<AppView>>,
+    open_room: Callback<String>,
+) -> impl IntoView {
+    let id = StoredValue::new(room_id);
+    let row = Memo::new(move |_| {
+        rows.with(|rows| id.with_value(|id| rows.iter().find(|row| row.id == *id).cloned()))
+    });
+    let name = move || row.get().map(|row| row.name).unwrap_or_default();
+    let line = move || row.get().map(|row| row.line).unwrap_or_default();
+    let current = move || {
+        active_view.is_some_and(|view| {
+            view.with(|view| {
+                matches!(view, AppView::Room { room_id } if id.with_value(|id| id == room_id))
+            })
+        })
+    };
+    view! {
+        <li>
+            <button
+                type="button"
+                data-crew-room=move || id.get_value()
+                aria-current=move || current().then_some("page")
+                title=move || format!("{} {}", name(), line())
+                class=move || format!("{ROW} {}", if current() { "bg-longan-800/60" } else { "hover:bg-longan-800/40" })
+                on:click=move |_| open_room.run(id.get_value())
+            >
+                // As wide as a bruh's face, so room and bruh names line up.
+                <span
+                    aria-hidden="true"
+                    class="inline-flex shrink-0 items-center justify-center text-rambutan-400"
+                    style=format!("width:{RAIL_FACE_PX}px;height:{RAIL_FACE_PX}px")
+                >
+                    <Icon name="users" size=16 />
+                </span>
+                <span class="min-w-0 flex-1">
+                    <span class="block truncate text-label text-rambutan-100">{name}</span>
+                    <span class="block truncate text-label-sm text-rambutan-500">{line}</span>
+                </span>
+            </button>
+        </li>
+    }
+}
+
 #[component]
 pub fn CrewRail(
     /// Runs after a bruh's page opens, such as to close a phone's sidebar.
@@ -160,9 +220,18 @@ pub fn CrewRail(
     let set_view = use_context::<SetActiveView>().map(|set| set.0);
     let open = RwSignal::new(rail_open(load_pref(OPEN_PREF).as_deref()));
     let creating = RwSignal::new(false);
+    let creating_room = RwSignal::new(false);
     let rows = Memo::new(move |_| {
         data.snapshot
             .with(|snapshot| snapshot.as_ref().map(|snapshot| rail_rows(&snapshot.bruhs)))
+    });
+    let rooms = Memo::new(move |_| {
+        data.snapshot.with(|snapshot| {
+            snapshot
+                .as_ref()
+                .map(|snapshot| room_rail_rows(&snapshot.rooms, &snapshot.bruhs))
+                .unwrap_or_default()
+        })
     });
     let any_paused = Memo::new(move |_| {
         rows.with(|rows| {
@@ -276,7 +345,21 @@ pub fn CrewRail(
             on_open.run(());
         }
     });
+    let open_room = Callback::new(move |room_id: String| {
+        if let Some(set_view) = set_view {
+            set_view.set(AppView::Room { room_id });
+        }
+        if let Some(on_open) = on_open {
+            on_open.run(());
+        }
+    });
     let new_title = Signal::derive(move || data.service_reason().unwrap_or("New bruh"));
+    let room_block = Memo::new(move |_| {
+        let bruhs = data
+            .snapshot
+            .with(|snapshot| snapshot.as_ref().map(|snapshot| snapshot.bruhs.len()));
+        room_block_for(data.protocol(), bruhs)
+    });
 
     view! {
         <section aria-label="Crew" data-crew-rail="" class="flex min-h-0 shrink-0 flex-col px-2 pb-2">
@@ -306,6 +389,17 @@ pub fn CrewRail(
                     disabled=move || !ready.get()
                     class="bruhs-control inline-flex size-control-sm shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50"
                     on:click=move |_| creating.set(true)
+                >
+                    <Icon name="user-plus" size=16 />
+                </button>
+                <button
+                    type="button"
+                    aria-label=NEW_ROOM
+                    title=move || room_block.get().unwrap_or(NEW_ROOM)
+                    data-crew-new-room=""
+                    disabled=move || room_block.with(Option::is_some)
+                    class="bruhs-control inline-flex size-control-sm shrink-0 items-center justify-center rounded-grape text-rambutan-400 transition-colors hover:bg-longan-800/50 hover:text-rambutan-100 focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50"
+                    on:click=move |_| creating_room.set(true)
                 >
                     <Icon name="plus" size=16 />
                 </button>
@@ -354,23 +448,37 @@ pub fn CrewRail(
                             </div>
                         }.into_any()),
                         Some(true) => Some(view! {
-                            <p class="px-1 text-label-sm text-rambutan-500">"No bruhs yet."</p>
+                            <p class="px-1 text-label-sm text-rambutan-500">{NO_BRUHS_YET}</p>
                         }.into_any()),
                         Some(false) => None,
                     }}
                     {move || rows.with(|rows| rows.is_some()).then(|| data.error.get()).flatten().map(|message| view! {
                         <p role="alert" class="mx-1 break-words text-label-sm text-lychee-200">{message}</p>
                     })}
-                    <ul role="list" aria-label="Bruhs" class="m-0 max-h-[40vh] min-h-0 list-none space-y-0.5 overflow-y-auto p-0">
-                        <For
-                            each=move || rows.get().unwrap_or_default()
-                            key=|bruh| bruh.agent_id.clone()
-                            children=move |bruh: BruhState| rail_row(bruh.agent_id, rows, active_view, open_bruh)
-                        />
-                    </ul>
+                    // One scroll region for both lists, rooms under the bruhs.
+                    <div data-crew-lists="" class="max-h-[40vh] min-h-0 space-y-0.5 overflow-y-auto">
+                        <ul role="list" aria-label="Bruhs" class="m-0 list-none space-y-0.5 p-0">
+                            <For
+                                each=move || rows.get().unwrap_or_default()
+                                key=|bruh| bruh.agent_id.clone()
+                                children=move |bruh: BruhState| rail_row(bruh.agent_id, rows, active_view, open_bruh)
+                            />
+                        </ul>
+                        // No empty list for a screen reader to announce.
+                        <Show when=move || rooms.with(|rooms| !rooms.is_empty())>
+                            <ul role="list" aria-label="Rooms" class="m-0 list-none space-y-0.5 p-0">
+                                <For
+                                    each=move || rooms.get()
+                                    key=|room| room.id.clone()
+                                    children=move |room: RoomRailRow| room_row(room.id, rooms, active_view, open_room)
+                                />
+                            </ul>
+                        </Show>
+                    </div>
                 </div>
             </Show>
             <CreateBruhDialog open=creating on_open=on_open.unwrap_or_else(|| Callback::new(|()| {})) />
+            <RoomDialog open=creating_room on_open=on_open.unwrap_or_else(|| Callback::new(|()| {})) />
         </section>
     }
 }
@@ -378,6 +486,7 @@ pub fn CrewRail(
 #[cfg(test)]
 mod tests {
     use super::*;
+    use bruhs_models::crew::room::{Room, RoomState};
     use bruhs_models::crew::{BruhAccess, BruhLook, CREW_PROTOCOL};
     use bruhs_models::EpochMs;
 
@@ -486,6 +595,50 @@ mod tests {
             row_status(&sleeper),
             format!("Wakes {}", local_time(EpochMs::saturating_from_i64(1_000)))
         );
+    }
+
+    fn room(id: &str, name: &str, working: &[&str]) -> RoomState {
+        RoomState {
+            room: Room {
+                id: id.into(),
+                name: name.into(),
+                members: working.iter().map(|id| (*id).to_string()).collect(),
+                lead: None,
+            },
+            last_seq: 0,
+            working: working.iter().map(|id| (*id).to_string()).collect(),
+        }
+    }
+
+    #[test]
+    fn rooms_sit_under_the_bruhs_by_name_with_their_status_line() {
+        let mut ada = bruh("Ada", BruhStatus::Working);
+        ada.agent_id = "x".into();
+        let rows = room_rail_rows(
+            &[room("b", "beta", &[]), room("a", "Alpha", &["x"])],
+            &[ada],
+        );
+        let shown: Vec<(&str, &str, &str)> = rows
+            .iter()
+            .map(|row| (row.id.as_str(), row.name.as_str(), row.line.as_str()))
+            .collect();
+        assert_eq!(
+            shown,
+            [
+                ("a", "Alpha", "Ada is working"),
+                ("b", "beta", "No members")
+            ]
+        );
+    }
+
+    #[test]
+    fn new_room_waits_for_the_crew_before_asking_for_a_bruh() {
+        assert_eq!(room_block_for(Some(CREW_PROTOCOL), None), Some(NEW_ROOM));
+        assert_eq!(
+            room_block_for(Some(CREW_PROTOCOL), Some(0)),
+            Some(bruhs_models::crew::room::ADD_A_BRUH_FIRST)
+        );
+        assert_eq!(room_block_for(Some(CREW_PROTOCOL), Some(1)), None);
     }
 
     #[test]

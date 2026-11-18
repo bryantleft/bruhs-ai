@@ -4,7 +4,8 @@
 
 use std::collections::VecDeque;
 
-use bruhs_models::crew::{service_is_current, service_notice};
+use bruhs_models::crew::room::rooms_reason;
+use bruhs_models::crew::{crew_commands_ready, rooms_ready, service_notice};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveSnapshot};
 use leptos::prelude::*;
 
@@ -38,14 +39,28 @@ impl CrewData {
     /// Whether the service understands the crew commands. Unknown counts as
     /// not yet: nothing that needs them is offered until the version is known.
     pub fn crew_ready(&self) -> bool {
-        self.protocol().is_some_and(service_is_current)
+        self.protocol().is_some_and(crew_commands_ready)
+    }
+
+    /// Whether the service has rooms. Unknown counts as not yet.
+    pub fn rooms_ready(&self) -> bool {
+        self.protocol().is_some_and(rooms_ready)
     }
 
     /// Why crew commands are off, once the version is known to be older.
+    /// Empty while they work, so a working control carries no excuse.
     pub fn service_reason(&self) -> Option<&'static str> {
+        if self.crew_ready() {
+            return None;
+        }
         self.protocol()
             .and_then(|protocol| service_notice(protocol, None))
             .map(|notice| notice.message())
+    }
+
+    /// Why rooms are off, once the version is known to be older.
+    pub fn rooms_reason(&self) -> Option<&'static str> {
+        rooms_reason(self.protocol())
     }
 }
 
@@ -148,11 +163,13 @@ fn new_crew_data() -> CrewData {
         }
     });
 
-    // Load now, and again whenever the service reports a change to the crew.
+    // Load now, and again whenever the service reports a change to the crew
+    // or its rooms.
     let updates = use_context::<AgentUpdates>();
     if let Some(updates) = updates {
         Effect::new(move |_| {
             updates.bruhs.track();
+            updates.rooms.track();
             reload.run(());
         });
     } else {
@@ -183,6 +200,35 @@ mod tests {
             reload: Callback::new(|()| {}),
             live_protocol: None,
         }
+    }
+
+    fn data_at(protocol: u32) -> CrewData {
+        let data = data();
+        data.snapshot.set(Some(ReactiveSnapshot {
+            protocol,
+            ..ReactiveSnapshot::default()
+        }));
+        data
+    }
+
+    #[test]
+    fn a_protocol_one_snapshot_offers_crew_commands_but_not_rooms() {
+        let owner = Owner::new();
+        owner.with(|| {
+            let old = data_at(1);
+            assert!(old.crew_ready() && !old.rooms_ready());
+            assert_eq!(old.service_reason(), None);
+            assert_eq!(
+                old.rooms_reason(),
+                Some(bruhs_models::crew::ServiceNotice::ServingOld.message())
+            );
+            let current = data_at(bruhs_models::crew::CREW_PROTOCOL);
+            assert!(current.crew_ready() && current.rooms_ready());
+            assert_eq!(
+                (current.service_reason(), current.rooms_reason()),
+                (None, None)
+            );
+        });
     }
 
     #[test]

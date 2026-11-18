@@ -287,7 +287,7 @@ impl Workspace {
         self.sidebar_search.read(cx).value().to_string()
     }
 
-    pub(super) fn render_sidebar(&self, cx: &Context<'_, Self>) -> Div {
+    pub(super) fn render_sidebar(&self, window: &Window, cx: &Context<'_, Self>) -> Div {
         div()
             .w_full()
             .h_full()
@@ -303,7 +303,7 @@ impl Workspace {
             .flex_col()
             .child(self.render_sidebar_header())
             .child(self.render_sidebar_controls(cx))
-            .children(self.render_crew_rail(cx))
+            .children(self.render_crew_rail(window, cx))
             .child(self.render_sidebar_list(cx))
             .child(self.render_sidebar_undo(cx))
             .children(self.render_sidebar_update_button(cx))

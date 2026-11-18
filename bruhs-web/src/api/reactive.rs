@@ -50,6 +50,18 @@ pub async fn agent_runs(
     .await
 }
 
+/// One room's messages, newest first; `before` is the id of the last message already shown.
+pub async fn room_messages(
+    room_id: &str,
+    before: Option<&str>,
+) -> Result<Vec<bruhs_models::crew::room::RoomMessage>, ApiError> {
+    let base = format!("/api/reactive/rooms/{}/messages", segment(room_id));
+    get_json(&before.map_or(base.clone(), |before| {
+        format!("{base}?before={}", segment(before))
+    }))
+    .await
+}
+
 pub async fn reactive_hook_token(source_id: &str) -> Result<ReactiveHookToken, ApiError> {
     get_json(&format!(
         "/api/reactive/sources/{}/token",

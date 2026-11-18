@@ -11,10 +11,14 @@
 //!   `# ` with a space stays a heading.
 //! - Type `$` the same way as `@` → skills for the selected provider.
 //! - Type `/` at the start of a line → slash command popover.
+//! - With `members` set (a room), `@` lists only those bruhs and the other
+//!   triggers stay closed.
 //! - ↑/↓ navigate, Enter selects, Esc closes.
 //! - Enter submits. In a list, quote, or code block it edits the draft instead.
 
 use bruhs_models::agent::AgentProvider;
+use bruhs_models::crew::room::{member_hits, mention_query, Room, ROOM_LEAD};
+use bruhs_models::crew::{face_view, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
 use bruhs_models::logic::commands::{insert_skill_mention, COMMAND_HELP, SLASH_COMMANDS};
 use bruhs_models::logic::composer_text::{
     composer_edit, fences, overlay_html_with_chips, paste_outcome, set_fence_language,
@@ -35,7 +39,7 @@ use crate::state::{
     ActiveThreadId, AgentMessage, AppView, ChipRetargetGuard, ComposerChips, ComposerDraft,
     SetActiveView, SetModelSelectOpen, Thread, ThreadsSignal,
 };
-use crate::ui::Icon;
+use crate::ui::{BrailleBruh, Icon};
 
 mod autosize;
 mod caret;
@@ -47,6 +51,8 @@ enum PopoverKind {
     Pulls,
     Skills,
     Slash,
+    /// A room's members.
+    Members,
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -56,6 +62,7 @@ enum Pick {
     Pull(PullHit),
     Skill(String),
     Slash(&'static str),
+    Member { agent_id: String, name: String },
 }
 
 #[derive(Clone, PartialEq, Eq)]
@@ -63,7 +70,36 @@ struct PickRow {
     label: String,
     sub: String,
     icon: &'static str,
+    /// A bruh's face, drawn in place of the icon.
+    face: Option<(BruhLook, BruhStatus)>,
     pick: Pick,
+}
+
+/// The `@` rows of a room: its members the query names, the lead marked.
+fn member_rows(members: &[BruhState], lead: Option<&str>, query: &str) -> Vec<PickRow> {
+    let room = Room {
+        id: String::new(),
+        name: String::new(),
+        members: members.iter().map(|bruh| bruh.agent_id.clone()).collect(),
+        lead: None,
+    };
+    member_hits(&room, members, query)
+        .into_iter()
+        .map(|bruh| PickRow {
+            label: bruh.name.clone(),
+            sub: if lead == Some(bruh.agent_id.as_str()) {
+                ROOM_LEAD.into()
+            } else {
+                String::new()
+            },
+            icon: "",
+            face: Some((bruh.look.clone(), bruh.status)),
+            pick: Pick::Member {
+                agent_id: bruh.agent_id.clone(),
+                name: bruh.name.clone(),
+            },
+        })
+        .collect()
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -85,8 +121,22 @@ fn slash_commands() -> Vec<SlashItem> {
 /// Detect which popover (if any) should be open based on textarea contents
 /// and caret position. Returns the active kind plus the query string after
 /// the trigger character.
+#[cfg(test)]
 fn detect_trigger(text: &str, caret: usize) -> Option<(PopoverKind, String)> {
+    detect_trigger_in(false, text, caret)
+}
+
+/// [`detect_trigger`], or in a room (`members_mode`) only the members' `@`,
+/// by the rule every app shares.
+fn detect_trigger_in(
+    members_mode: bool,
+    text: &str,
+    caret: usize,
+) -> Option<(PopoverKind, String)> {
     let caret = caret.min(text.len());
+    if members_mode {
+        return mention_query(text, caret).map(|(_, query)| (PopoverKind::Members, query));
+    }
     let before = &text[..caret];
 
     // Find the last `@` or `/` token in `before`.
@@ -259,7 +309,15 @@ pub fn MentionEditor(
     /// for hosting inside the composer surface. Default `true`.
     #[prop(optional)]
     chrome: Option<bool>,
+    /// A room's members, in room order. When set, `@` lists only them and
+    /// picks a bruh chip; `#`, `$` and `/` don't open.
+    #[prop(optional, into)]
+    members: Option<Signal<Vec<BruhState>>>,
+    /// The room's lead, marked in the `@` list.
+    #[prop(optional, into)]
+    lead: Signal<Option<String>>,
 ) -> impl IntoView {
+    let members_mode = members.is_some();
     let textarea_ref: NodeRef<leptos::html::Textarea> = NodeRef::new();
     let placeholder = if placeholder.is_empty() {
         "Message bruhs...".to_string()
@@ -336,7 +394,11 @@ pub fn MentionEditor(
         textarea_ref,
         value,
         Signal::derive(move || {
-            chrome || disabled.get() || suggestion_blocked.get() || popover_kind.get().is_some()
+            chrome
+                || members_mode
+                || disabled.get()
+                || suggestion_blocked.get()
+                || popover_kind.get().is_some()
         }),
     );
 
@@ -424,6 +486,7 @@ pub fn MentionEditor(
                     label: title.clone(),
                     sub: "Thread".into(),
                     icon: "@",
+                    face: None,
                     pick: Pick::Thread { id, title },
                 })
                 .collect::<Vec<_>>();
@@ -433,6 +496,7 @@ pub fn MentionEditor(
                     label: file.name,
                     sub: file.path.clone(),
                     icon,
+                    face: None,
                     pick: Pick::File(file.path),
                 }
             }));
@@ -448,6 +512,7 @@ pub fn MentionEditor(
                     label,
                     sub,
                     icon: "#",
+                    face: None,
                     pick: Pick::Pull(pull),
                 }
             })
@@ -459,6 +524,7 @@ pub fn MentionEditor(
                 label: format!("${}", skill.name),
                 sub: skill.description,
                 icon: "$",
+                face: None,
                 pick: Pick::Skill(skill.name),
             })
             .collect(),
@@ -469,9 +535,17 @@ pub fn MentionEditor(
                 label: command.name.to_string(),
                 sub: command.desc.to_string(),
                 icon: "",
+                face: None,
                 pick: Pick::Slash(command.name),
             })
             .collect(),
+        Some(PopoverKind::Members) => {
+            let query = popover_query.get();
+            let lead = lead.get();
+            members.map_or_else(Vec::new, |members| {
+                members.with(|members| member_rows(members, lead.as_deref(), &query))
+            })
+        }
         None => Vec::new(),
     });
 
@@ -501,7 +575,7 @@ pub fn MentionEditor(
             return;
         }
         let caret = caret::selection_byte_offset(&ta, &val);
-        match detect_trigger(&val, caret) {
+        match detect_trigger_in(members_mode, &val, caret) {
             Some((kind, query)) => {
                 let kind_changed = popover_kind.get_untracked().as_ref() != Some(&kind);
                 if kind_changed {
@@ -602,9 +676,18 @@ pub fn MentionEditor(
                 set_selected_idx.set(0);
                 return;
             }
+            Pick::Member { agent_id, name } => ChipKind::Bruh {
+                agent_id: agent_id.clone(),
+                name: name.clone(),
+            },
             Pick::Slash(_) => return,
         };
-        let Some((trigger_start, trigger_end)) = trigger_bounds(&val, caret) else {
+        let bounds = if members_mode {
+            mention_query(&val, caret).map(|(at, _)| (at, caret))
+        } else {
+            trigger_bounds(&val, caret)
+        };
+        let Some((trigger_start, trigger_end)) = bounds else {
             return;
         };
         let existing = context_chips.get_untracked();
@@ -990,9 +1073,10 @@ pub fn MentionEditor(
         else {
             return;
         };
+        // Without a host for attachments, such as a room, a long paste stays text.
         if paste_outcome(&value.get_untracked(), &text, force) == PasteOutcome::Attach {
-            ev.prevent_default();
             if let Some(on_attach_paste) = on_attach_paste.as_ref() {
+                ev.prevent_default();
                 on_attach_paste.run(text);
             }
         }
@@ -1011,6 +1095,26 @@ pub fn MentionEditor(
             overlay.set_scroll_top(top);
         }
     };
+
+    // Keyboard moves through a long list keep the selected row in view.
+    let list_ref: NodeRef<leptos::html::Ul> = NodeRef::new();
+    Effect::new(move |_| {
+        let index = selected_idx.get();
+        if popover_kind.get().is_none() {
+            return;
+        }
+        request_animation_frame(move || {
+            let Some(Some(list)) = list_ref.try_get_untracked() else {
+                return;
+            };
+            if let Ok(Some(row)) = list.query_selector(&format!("[data-mention-row=\"{index}\"]")) {
+                let options = web_sys::ScrollIntoViewOptions::new();
+                options.set_block(web_sys::ScrollLogicalPosition::Nearest);
+                row.scroll_into_view_with_scroll_into_view_options(&options);
+            }
+        });
+    });
+    let room_label = members_mode.then(|| placeholder.clone());
 
     // ── Render ───────────────────────────────────────────────────────────────
     view! {
@@ -1063,10 +1167,13 @@ pub fn MentionEditor(
             })}
             <textarea
                 node_ref=textarea_ref
-                id="chat-input"
+                // A room's composer is not the chat's: chat shortcuts look for `chat-input`.
+                id=if members_mode { "room-input" } else { "chat-input" }
+                aria-label=room_label
                 class=move || format!("col-start-1 row-start-1 {}", textarea_class())
                 placeholder=move || if suggestion.suffix.get().is_empty() { placeholder.clone() } else { String::new() }
-                aria-describedby="prompt-suggestion-help"
+                // A room has no prompt suggestions, and the id stays the chat's.
+                aria-describedby=(!members_mode).then_some("prompt-suggestion-help")
                 rows=rows
                 disabled=move || disabled.get()
                 on:input=on_input
@@ -1082,7 +1189,7 @@ pub fn MentionEditor(
                 on:compositionend=move |_| suggestion.composing.set(false)
                 on:select=move |_| { if let Some(ta) = textarea_ref.get_untracked() { suggestion::remember_selection(&ta, suggestion.selection); } }
             />
-            <span id="prompt-suggestion-help" class="sr-only">{move || if suggestion.suffix.get().is_empty() { "" } else { "Next prompt suggested. Press Tab to accept or Escape to dismiss." }}</span>
+            {(!members_mode).then(|| view! { <span id="prompt-suggestion-help" class="sr-only">{move || if suggestion.suffix.get().is_empty() { "" } else { "Next prompt suggested. Press Tab to accept or Escape to dismiss." }}</span> })}
             {move || (!suggestion.suffix.get().is_empty()).then(|| view! {
                 <button type="button" class="col-start-1 px-3 py-1 text-left text-label-sm text-rambutan-500 hover:text-rambutan-200 focus-visible:outline-persimmon-400 cursor-pointer" aria-label="Accept suggested prompt"
                     tabindex="-1"
@@ -1098,14 +1205,10 @@ pub fn MentionEditor(
                     return ().into_any();
                 }
 
-                // Build a uniform Vec<(label, sub, icon)> from whichever source
-                // is active, then render. This keeps the JSX simple and avoids
+                // Build uniform rows from whichever source is active, then
+                // render. This keeps the JSX simple and avoids
                 // For-macro pitfalls.
-                let items: Vec<(String, String, &'static str)> = picker_rows
-                    .get()
-                    .into_iter()
-                    .map(|row| (row.label, row.sub, row.icon))
-                    .collect();
+                let items: Vec<PickRow> = picker_rows.get();
 
                 if items.is_empty() {
                     let message = if matches!(kind, Some(PopoverKind::Pulls)) {
@@ -1128,9 +1231,13 @@ pub fn MentionEditor(
                 let rendered: Vec<_> = items
                     .into_iter()
                     .enumerate()
-                    .map(|(i, (label, sub, icon))| {
+                    .map(|(i, PickRow { label, sub, icon, face, .. })| {
                         view! {
                             <li
+                                data-mention-row=i
+                                // A room's list is a listbox of bruhs, each a touch-sized row.
+                                role=members_mode.then_some("option")
+                                aria-selected=move || members_mode.then(|| (selected_idx.get() == i).to_string())
                                 on:mouseenter=move |_| set_selected_idx.set(i)
                                 on:mousedown=move |ev: web_sys::MouseEvent| {
                                     // mousedown so the textarea doesn't lose focus first
@@ -1138,7 +1245,8 @@ pub fn MentionEditor(
                                     apply_selection.run(i);
                                 }
                                 class=move || format!(
-                                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer text-body-sm {}",
+                                    "flex items-center gap-2 px-3 py-1.5 cursor-pointer text-body-sm {} {}",
+                                    if members_mode { "bruhs-control" } else { "" },
                                     if selected_idx.get() == i {
                                         "bg-longan-800 text-rambutan-100"
                                     } else {
@@ -1146,6 +1254,10 @@ pub fn MentionEditor(
                                     }
                                 )
                             >
+                                {face.map(|(look, status)| {
+                                    let still = face_view(&look, status, 0, true);
+                                    view! { <BrailleBruh size=f64::from(RAIL_FACE_PX) view=Signal::derive(move || still) /> }
+                                })}
                                 {(!icon.is_empty()).then(|| {
                                     if matches!(icon, "file" | "folder") {
                                         view! { <Icon name=icon size=12 class="text-rambutan-500" /> }.into_any()
@@ -1161,8 +1273,13 @@ pub fn MentionEditor(
                     .collect();
 
                 view! {
-                    <div class="absolute bottom-full left-0 right-0 mb-1 z-40 max-h-72 overflow-y-auto rounded-grape bg-longan-700 inset-ring inset-ring-white/15">
-                        <ul class="py-1">{rendered}</ul>
+                    <div class="absolute bottom-full left-0 right-0 mb-1 z-40 max-h-72 overflow-y-auto rounded-grape bg-longan-700 inset-ring inset-ring-white/15" data-mention-popover="">
+                        <ul
+                            node_ref=list_ref
+                            class="py-1"
+                            role=members_mode.then_some("listbox")
+                            aria-label=members_mode.then_some("Members")
+                        >{rendered}</ul>
                     </div>
                 }.into_any()
             }}
@@ -1401,6 +1518,62 @@ mod tests {
             matches!(detect_trigger("use $re", 7), Some((PopoverKind::Skills, q)) if q == "re")
         );
         assert!(detect_trigger("cost $12", 8).is_none());
+    }
+
+    #[test]
+    fn room_mode_lists_members_and_opens_no_other_popover() {
+        assert_eq!(
+            detect_trigger_in(true, "hi @b", 5),
+            Some((PopoverKind::Members, "b".into()))
+        );
+        assert_eq!(detect_trigger_in(true, "#12", 3), None);
+        assert_eq!(detect_trigger_in(true, "/goal", 5), None);
+        assert_eq!(detect_trigger_in(true, "use $re", 7), None);
+        assert_eq!(
+            detect_trigger_in(false, "hi @b", 5),
+            Some((PopoverKind::Files, "b".into()))
+        );
+        // The room's own rule: `(@` opens, `mail@` does not.
+        assert_eq!(
+            detect_trigger_in(true, "(@a", 3),
+            Some((PopoverKind::Members, "a".into()))
+        );
+        assert_eq!(detect_trigger_in(true, "mail@bo", 7), None);
+        // A caret past the end reads as the end.
+        assert_eq!(
+            detect_trigger_in(true, "@", 9),
+            Some((PopoverKind::Members, String::new()))
+        );
+    }
+
+    #[test]
+    fn room_rows_are_members_with_their_faces_and_the_lead_marked() {
+        let bruh = |id: &str, name: &str| BruhState {
+            agent_id: id.into(),
+            name: name.into(),
+            look: BruhLook::default(),
+            access: Default::default(),
+            effort: None,
+            status: BruhStatus::Working,
+            next_wake_ms: None,
+            unread: 0,
+        };
+        let members = [bruh("c", "Cy"), bruh("b", "Bobby"), bruh("a", "Abo")];
+        let rows = member_rows(&members, Some("a"), "bo");
+        let shown: Vec<(&str, &str)> = rows
+            .iter()
+            .map(|row| (row.label.as_str(), row.sub.as_str()))
+            .collect();
+        assert_eq!(shown, [("Bobby", ""), ("Abo", "Lead")]);
+        assert_eq!(
+            rows[1].face,
+            Some((BruhLook::default(), BruhStatus::Working))
+        );
+        assert!(matches!(
+            &rows[1].pick,
+            Pick::Member { agent_id, name } if agent_id == "a" && name == "Abo"
+        ));
+        assert_eq!(member_rows(&members, None, "").len(), 3);
     }
 
     #[test]

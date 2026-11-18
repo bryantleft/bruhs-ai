@@ -781,8 +781,8 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    /// A bruh's own page. The reactive panel draws it: `sync_bruh_page` has
-    /// already told the panel which bruh is open.
+    /// A bruh's or a room's own page. The reactive panel draws it:
+    /// `sync_bruh_page` has already told the panel which one is open.
     pub(super) fn render_bruh_page(&self) -> Div {
         div()
             .flex_1()
@@ -794,16 +794,21 @@ impl Workspace {
             .child(self.reactive_automations.clone())
     }
 
-    /// Tell the reactive panel which bruh page is open, before it draws, so
-    /// it draws that page for `AppView::Bruh` and its automations otherwise.
+    /// Tell the reactive panel which bruh or room page is open, before it
+    /// draws, so it draws that page for `AppView::Bruh` or `AppView::Room`
+    /// and its automations otherwise.
     pub(super) fn sync_bruh_page(&mut self, cx: &mut Context<'_, Self>) {
-        let open = match &self.active_view {
-            AppView::Bruh { agent_id } => Some(agent_id.clone()),
-            _ => None,
+        let (bruh, room) = match &self.active_view {
+            AppView::Bruh { agent_id } => (Some(agent_id.clone()), None),
+            AppView::Room { room_id } => (None, Some(room_id.clone())),
+            _ => (None, None),
         };
-        if self.reactive_automations.read(cx).bruh_page_agent() != open.as_deref() {
-            self.reactive_automations
-                .update(cx, |panel, cx| panel.show_bruh(open, cx));
+        let panel = self.reactive_automations.read(cx);
+        if panel.bruh_page_agent() != bruh.as_deref() || panel.room_page_id() != room.as_deref() {
+            self.reactive_automations.update(cx, |panel, cx| {
+                panel.show_bruh(bruh, cx);
+                panel.show_room(room, cx);
+            });
         }
     }
 

@@ -69,6 +69,10 @@ pub enum AppView {
     Bruh {
         agent_id: String,
     },
+    /// One room: its transcript, members and settings.
+    Room {
+        room_id: String,
+    },
 }
 
 impl AppView {
@@ -94,6 +98,9 @@ impl AppView {
             Self::Booking { slug } => format!("/book/{slug}"),
             Self::Bruh { agent_id } => {
                 format!("/bruhs/{}", utf8_percent_encode(agent_id, ROUTE_COMPONENT))
+            }
+            Self::Room { room_id } => {
+                format!("/rooms/{}", utf8_percent_encode(room_id, ROUTE_COMPONENT))
             }
             other => format!("/{}", other.as_str()),
         }
@@ -128,6 +135,12 @@ impl AppView {
             let agent_id = percent_decode_str(rest).decode_utf8().ok()?;
             return (!agent_id.trim().is_empty() && agent_id.len() <= 128).then(|| Self::Bruh {
                 agent_id: agent_id.into_owned(),
+            });
+        }
+        if let Some(rest) = route.strip_prefix("/rooms/") {
+            let room_id = percent_decode_str(rest).decode_utf8().ok()?;
+            return (!room_id.trim().is_empty() && room_id.len() <= 128).then(|| Self::Room {
+                room_id: room_id.into_owned(),
             });
         }
         let with_id = |prefix: &str| route.strip_prefix(prefix).filter(|id| !id.is_empty());
@@ -200,6 +213,7 @@ impl AppView {
             Self::Search => "search",
             Self::Terminal => "terminal",
             Self::Bruh { .. } => "bruh",
+            Self::Room { .. } => "room",
         }
     }
 }
@@ -394,6 +408,9 @@ mod tests {
             AppView::Bruh {
                 agent_id: "bruh 1/ä".into(),
             },
+            AppView::Room {
+                room_id: "room 1/ä".into(),
+            },
         ];
         for view in views {
             assert_eq!(AppView::from_route(&view.route()), Some(view.clone()));
@@ -417,6 +434,14 @@ mod tests {
             "/bruhs/b1"
         );
         assert_eq!(AppView::from_route("/bruhs/"), None);
+        assert_eq!(
+            AppView::Room {
+                room_id: "r1".into()
+            }
+            .route(),
+            "/rooms/r1"
+        );
+        assert_eq!(AppView::from_route("/rooms/"), None);
     }
 
     #[test]
