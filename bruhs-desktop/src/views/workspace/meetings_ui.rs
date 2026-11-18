@@ -5,7 +5,7 @@
 //! capture_status_banner,banner}.rs`. Data comes from `MeetingsHub`; sizes
 //! are the web's Tailwind values in px.
 
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -18,11 +18,12 @@ use bruhs_models::{
     PersonProfile, RelationshipItemKind, RelationshipProfile, SearchDocument, SearchHit,
     SearchIndex, SearchKind, Speaker, SpeakerIdentity,
 };
+use bruhs_ui::checkbox::Checkbox;
+use bruhs_ui::input::{
+    Escape as InputEscape, Input, InputEvent, InputState, Textarea, TextareaState,
+};
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::checkbox::Checkbox;
-use gpui_component::input::{Escape as InputEscape, Input, InputEvent, InputState};
-use gpui_component::Disableable;
 use std::sync::Arc;
 
 use super::{
@@ -51,11 +52,13 @@ pub(super) mod suggestions;
 pub(super) mod transcript_view;
 
 // Web type scale on these pages.
-const BODY_PX: f32 = 16.0;
-const BODY_SM_PX: f32 = 14.0;
-const LABEL_PX: f32 = 14.0;
+// The web's type scale is the one in `bruhs-web/index.html` (text-body 14px,
+// body-sm and label 13px, label-sm 12px, h4 16px), not the design system's.
+const BODY_PX: f32 = 14.0;
+const BODY_SM_PX: f32 = 13.0;
+const LABEL_PX: f32 = 13.0;
 const LABEL_SM_PX: f32 = 12.0;
-const H4_PX: f32 = 18.0;
+const H4_PX: f32 = 16.0;
 const DISPLAY_SM_PX: f32 = 32.0;
 const BODY_FONT: &str = "Monaspace Neon";
 const LABEL_FONT: &str = "Monaspace Argon";
@@ -107,6 +110,7 @@ impl SpeakerRef {
     }
 }
 
+/// Web `text-label*`: Argon at weight 500, with the web's 1.5 line height.
 fn label(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
     div()
         .font_family(LABEL_FONT)
@@ -114,15 +118,19 @@ fn label(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
         .when(size <= 12.0, |el| {
             el.font_family(theme::UI_SMALL_FONT_FAMILY)
         })
+        .font_weight(FontWeight::MEDIUM)
         .text_size(px(size))
+        .line_height(relative(1.5))
         .text_color(color)
         .child(text.into())
 }
 
+/// Web `text-body*`: Neon, with the web's 1.5 line height.
 fn body(text: impl Into<SharedString>, size: f32, color: Hsla) -> Div {
     div()
         .font_family(BODY_FONT)
         .text_size(px(size))
+        .line_height(relative(1.5))
         .text_color(color)
         .child(text.into())
 }
@@ -201,8 +209,10 @@ fn text_button(
     let text = text.into();
     div()
         .id(id)
-        .font_family(LABEL_FONT)
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
         .text_size(px(LABEL_SM_PX))
+        .line_height(relative(1.5))
         .text_color(color)
         .tab_index(0)
         .role(Role::Button)
@@ -1031,7 +1041,8 @@ impl Workspace {
                 .rounded(px(4.0))
                 .border_1()
                 .border_color(ring_color)
-                .px_1()
+                // Web `px-2` inside an inset ring; here the 1px border takes one.
+                .px(px(7.0))
                 .capture_action(cx.listener(|this, _: &InputEscape, _window, cx| {
                     this.cancel_speaker_rename(cx);
                     cx.stop_propagation();
@@ -1039,6 +1050,7 @@ impl Workspace {
                 .child(
                     Input::new(&self.speaker_rename_input)
                         .appearance(false)
+                        .px_0()
                         .aria_label("Speaker name"),
                 )
                 .into_any_element();
@@ -2196,13 +2208,15 @@ impl Workspace {
                             } else {
                                 theme::ring_card()
                             })
-                            .px_3()
+                            // Web `px-2.5` (the shared Input), less the 1px border.
+                            .px(px(9.0))
                             .flex()
                             .items_center()
                             .child(
                                 div().flex_1().min_w_0().child(
                                     Input::new(&self.search_query_input)
                                         .appearance(false)
+                                        .px_0()
                                         .aria_label("Search everything"),
                                 ),
                             )
@@ -2763,7 +2777,7 @@ pub(super) struct PeopleInputs {
     pub(super) relationship_email_input: Entity<InputState>,
     pub(super) relationship_phone_input: Entity<InputState>,
     pub(super) relationship_location_input: Entity<InputState>,
-    pub(super) relationship_notes_input: Entity<InputState>,
+    pub(super) relationship_notes_input: Entity<TextareaState>,
     pub(super) relationship_item_input: Entity<InputState>,
     pub(super) search_query_input: Entity<InputState>,
     pub(super) person_rename_input: Entity<InputState>,
@@ -2893,22 +2907,18 @@ impl Workspace {
         cx: &mut Context<'_, Self>,
         subscriptions: &mut Vec<Subscription>,
     ) -> PeopleInputs {
-        let relationship_company_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Company"));
+        let relationship_company_input = cx.new(|cx| InputState::new(window, cx));
         subscriptions.push(redraw_on_edit(&relationship_company_input, window, cx));
-        let relationship_role_input = cx.new(|cx| InputState::new(window, cx).placeholder("Role"));
+        let relationship_role_input = cx.new(|cx| InputState::new(window, cx));
         subscriptions.push(redraw_on_edit(&relationship_role_input, window, cx));
-        let relationship_email_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Email"));
+        let relationship_email_input = cx.new(|cx| InputState::new(window, cx));
         subscriptions.push(redraw_on_edit(&relationship_email_input, window, cx));
-        let relationship_phone_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Phone"));
+        let relationship_phone_input = cx.new(|cx| InputState::new(window, cx));
         subscriptions.push(redraw_on_edit(&relationship_phone_input, window, cx));
-        let relationship_location_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Location"));
+        let relationship_location_input = cx.new(|cx| InputState::new(window, cx));
         subscriptions.push(redraw_on_edit(&relationship_location_input, window, cx));
-        let relationship_notes_input =
-            cx.new(|cx| InputState::new(window, cx).placeholder("Private notes"));
+        // Web: a four-row notes field.
+        let relationship_notes_input = cx.new(|cx| TextareaState::new(window, cx).rows(4));
         subscriptions.push(redraw_on_edit(&relationship_notes_input, window, cx));
         let relationship_item_input = cx.new(|cx| {
             InputState::new(window, cx).placeholder("Interaction, commitment, reminder, or note…")

@@ -1,11 +1,11 @@
 //! Variable-height messages keep geometry in the list and text in the thread.
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 impl ChatView {
     pub(super) fn sync_message_viewport(&self) {
         // Every row's height changes with the page zoom.
-        let zoom = gpui_component::zoom::zoom();
+        let zoom = bruhs_ui::zoom::zoom();
         if self.messages_zoom.replace(zoom) != zoom {
             self.messages_viewport.remeasure();
         }

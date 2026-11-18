@@ -12,8 +12,8 @@ mod record_routing_tests;
 
 fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state"));
     });
@@ -22,7 +22,7 @@ fn workspace(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestCont
     let (_, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *captured.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = entity.borrow().clone().expect("workspace");
     (workspace, cx)
@@ -374,4 +374,19 @@ fn native_palette_no_results_should_remain_editable_and_dismissible(cx: &mut Tes
     workspace.update_in(cx, |workspace, _, _| {
         assert!(!workspace.command_bar_visible())
     });
+}
+
+/// Web: the palette's input row is `px-4 py-3` around one 1.5-line row of
+/// `text-body-sm`, over a 1px bottom border: 12 + 19.5 + 12 + 1.
+#[gpui::test]
+fn palette_input_row_is_as_tall_as_the_web_input(cx: &mut TestAppContext) {
+    let (workspace, cx) = workspace(cx);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.focus_command_bar(&FocusCommandBar, window, cx);
+    });
+    cx.run_until_parked();
+    let row = cx
+        .debug_bounds("desktop-command-bar-input")
+        .expect("the palette input row should be rendered");
+    assert_eq!(f32::from(row.size.height), 44.5);
 }

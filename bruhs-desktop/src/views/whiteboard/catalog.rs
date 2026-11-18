@@ -7,9 +7,9 @@ use crate::{paths, theme};
 use bruhs_core::whiteboard::{BoardStore, BoardWriter, StoreError};
 use bruhs_models::whiteboard::*;
 use bruhs_models::whiteboard::{bounds, Asset, Point};
+use bruhs_ui::input::{InputEvent, InputState};
 use bruhs_ui::text_field::TextField;
 use gpui::{prelude::*, *};
-use gpui_component::input::{InputEvent, InputState};
 use std::{collections::BTreeMap, sync::Arc};
 
 pub(crate) struct BoardSeat {

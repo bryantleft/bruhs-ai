@@ -24,16 +24,16 @@ use bruhs_models::logic::queue::PromptQueue;
 use bruhs_models::logic::run_place::{RememberedWorktree, WorkspaceChoice};
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_models::EpochMs;
-use gpui::prelude::*;
-use gpui::*;
-use gpui_component::input::{
+use bruhs_ui::input::{
     Enter as InputEnter, Escape as InputEscape, Input, InputEvent, InputState,
     MoveDown as InputMoveDown, MoveUp as InputMoveUp, TextareaState,
 };
-use gpui_component::scroll::ScrollableElement;
-use gpui_component::text::{TextView, TextViewStyle};
-use gpui_component::zoom::px;
-use gpui_component::{ActiveTheme, RopeExt};
+use bruhs_ui::scroll::ScrollableElement;
+use bruhs_ui::text::{TextView, TextViewStyle};
+use bruhs_ui::zoom::px;
+use bruhs_ui::ActiveTheme;
+use gpui::prelude::*;
+use gpui::*;
 use markdown::{mdast, ParseOptions};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
@@ -519,7 +519,7 @@ pub struct ChatView {
     pub thread_title: String,
     pub messages: Vec<Message>,
     messages_viewport: ListState,
-    /// The page zoom the rows were measured at (`gpui_component::zoom`).
+    /// The page zoom the rows were measured at (`bruhs_ui::zoom`).
     messages_zoom: std::cell::Cell<f32>,
     messages_focus: FocusHandle,
     rendered_messages: std::cell::Cell<Option<(usize, usize)>>,
@@ -1036,7 +1036,7 @@ impl ChatView {
                 state.set_follow_mode(FollowMode::Tail);
                 state
             },
-            messages_zoom: std::cell::Cell::new(gpui_component::zoom::zoom()),
+            messages_zoom: std::cell::Cell::new(bruhs_ui::zoom::zoom()),
             messages_focus: cx.focus_handle(),
             rendered_messages: std::cell::Cell::new(None),
             #[cfg(test)]
@@ -1929,7 +1929,7 @@ impl Render for ChatView {
                     move |bounds, _window, cx| {
                         // In CSS pixels: it is compared with, and laid out
                         // beside, design widths that zoom with the page.
-                        let width = gpui_component::zoom::css_px(bounds.size.width);
+                        let width = bruhs_ui::zoom::css_px(bounds.size.width);
                         if (measured.get() - width).abs() > 0.5 {
                             measured.set(width);
                             cx.notify(entity);

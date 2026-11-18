@@ -156,8 +156,8 @@ fn calendar_workspace(
     cx: &mut gpui::TestAppContext,
 ) -> (Entity<Workspace>, &mut gpui::VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -167,7 +167,7 @@ fn calendar_workspace(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *workspace_for_window.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = workspace_cell
         .borrow()
@@ -401,6 +401,35 @@ fn calendar_views_draw_their_controls_at_the_parity_cell(cx: &mut gpui::TestAppC
         let page = rendered_bounds(cx, "desktop-calendar-page");
         assert!(f32::from(page.size.width) > 0.0 && f32::from(page.size.height) > 0.0);
     }
+}
+
+/// CAL-17: in a 640×480 window the week's seven headers wrap ("Sun" over
+/// "15"), as the web's do, instead of pushing Saturday past the window's
+/// edge; and the grid opens two hours before now, as the web's does.
+#[gpui::test]
+fn the_week_fits_a_640_window_and_opens_near_now_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = calendar_workspace(cx);
+    cx.simulate_resize(gpui::size(gpui::px(640.0), gpui::px(480.0)));
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.active_view = AppView::Calendar;
+        workspace.calendar_anchor = NaiveDate::from_ymd_opt(2026, 5, 12).expect("a date");
+        workspace.set_calendar_mode(DesktopCalendarMode::Week, cx);
+    });
+    cx.run_until_parked();
+    let saturday = rendered_bounds(cx, "desktop-calendar-week-header-2026-05-16");
+    let width = cx.update(|window, _| window.viewport_size().width);
+    assert!(
+        saturday.right() <= width,
+        "Saturday's header ends at {:?}, inside the {width:?} window",
+        saturday.right()
+    );
+    let expected = super::super::calendar_ui::timegrid_opening_scroll_px(chrono::Timelike::hour(
+        &chrono::Local::now(),
+    ));
+    workspace.update(cx, |workspace, _| {
+        let offset = workspace.calendar_timegrid_scroll.offset().y;
+        assert_eq!(f32::from(-offset), expected, "the grid opened near now");
+    });
 }
 
 fn day_list_event_selector(event_id: &str) -> &'static str {
@@ -664,9 +693,10 @@ fn calendar_records_open_from_the_keyboard(cx: &mut gpui::TestAppContext) {
     let more = added_stops(&three, &four);
     assert_eq!(more.len(), 1, "+N more is one Tab stop");
 
-    // +N more by Enter: focus moves into the day list; its Google row opens
-    // the read-only detail by Enter. The day list's stops are its close
-    // button, then each record in order.
+    // +N more by Enter: focus moves into the day list, onto its first
+    // record as on the web; its Google row opens the read-only detail by
+    // Enter. The day list's stops are each record in order, then its close
+    // button.
     focus_page(&workspace, cx);
     tab_to(cx, &more[0], "+N more");
     press(cx, "enter");
@@ -674,7 +704,7 @@ fn calendar_records_open_from_the_keyboard(cx: &mut gpui::TestAppContext) {
         assert_eq!(workspace.overlay, Some(Overlay::CalendarDay { date }));
     });
     assert!(in_dialog(&workspace, cx), "focus moved into the day list");
-    for _ in 0..4 {
+    for _ in 0..2 {
         cx.simulate_keystrokes("tab");
     }
     press(cx, "enter");
@@ -696,7 +726,7 @@ fn calendar_records_open_from_the_keyboard(cx: &mut gpui::TestAppContext) {
         assert_eq!(workspace.overlay, Some(Overlay::CalendarDay { date }));
     });
     assert!(in_dialog(&workspace, cx), "focus moved into the day list");
-    for _ in 0..5 {
+    for _ in 0..3 {
         cx.simulate_keystrokes("tab");
     }
     press(cx, "space");

@@ -12,10 +12,10 @@ use bruhs_models::{
     KnowledgeLink, KnowledgeLinkKind, PeopleUndo, PersonProfile, RelationshipItem,
     RelationshipItemKind, RelationshipProfile,
 };
+use bruhs_ui::zoom::px;
 use gpui::{
     point, Bounds, Entity, Modifiers, ScrollDelta, ScrollEvent, TestAppContext, VisualTestContext,
 };
-use gpui_component::zoom::px;
 use std::sync::Arc;
 
 fn offline(workspace: &Entity<Workspace>, cx: &mut VisualTestContext) {

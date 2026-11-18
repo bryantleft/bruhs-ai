@@ -1456,6 +1456,7 @@ pub fn Sidebar() -> impl IntoView {
                     <div class="flex flex-col gap-1">
                         <span class="text-label-sm text-rambutan-400">"Date and time"</span>
                         <DateTimePicker
+                            label="Snooze until"
                             value=Signal::derive(move || custom_when.get())
                             on_change=Callback::new(move |when: String| custom_when.set(when))
                         />

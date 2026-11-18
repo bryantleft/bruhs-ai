@@ -14,7 +14,7 @@ use bruhs_models::crew::room::{
 };
 use bruhs_models::crew::RAIL_FACE_PX;
 use bruhs_ui::press::on_press_view;
-use gpui_component::scroll::ScrollableElement;
+use bruhs_ui::scroll::ScrollableElement;
 
 /// The dialog is done: the service took what it sent, or nothing needed
 /// sending. `open` is a room it made, to open now.

@@ -91,8 +91,8 @@ fn initialize(cx: &mut TestAppContext, program: String, original: bool) -> Recei
     cx.executor().allow_parking();
     let (completed, rx) = mpsc::channel();
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("initialize isolated desktop state"));
         cx.set_global(ProbeFixture {
@@ -108,7 +108,7 @@ fn chats(
     cx: &mut TestAppContext,
     count: usize,
 ) -> (
-    Entity<gpui_component::Root>,
+    Entity<bruhs_ui::Root>,
     Vec<Entity<ChatView>>,
     &mut VisualTestContext,
 ) {
@@ -128,7 +128,7 @@ fn chats(
             .collect();
         let active = views.last().expect("at least one fixture chat").clone();
         *capture.borrow_mut() = views;
-        gpui_component::Root::new(active, window, cx)
+        bruhs_ui::Root::new(active, window, cx)
     });
     let views = captured.borrow_mut().drain(..).collect();
     (root, views, visual)
@@ -146,7 +146,7 @@ fn finish_probes(completed: &Receiver<()>, count: usize, visual: &mut VisualTest
 }
 
 fn close(
-    root: Entity<gpui_component::Root>,
+    root: Entity<bruhs_ui::Root>,
     views: Vec<Entity<ChatView>>,
     visual: &mut VisualTestContext,
 ) {

@@ -3,7 +3,7 @@
 use super::*;
 use bruhs_models::logic::link_scheme::is_safe_link;
 use bruhs_models::logic::rich_response::{response_blocks, ResponseBlock};
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 pub(super) const CHAT_DIAGRAM_ERROR_FONT_FAMILY: &str = "Monaspace Argon";
 pub(super) const CHAT_DIAGRAM_ERROR_TEXT_SIZE_PX: f32 = 10.5;
 pub(super) const CHAT_DIAGRAM_ERROR_RADIUS_PX: f32 = 8.0;
@@ -28,8 +28,8 @@ pub(super) const CHAT_PROSE_CODE_Y_PADDING_PX: f32 = 10.0;
 pub(super) const CHAT_PROSE_CODE_LINE_HEIGHT: f32 = 1.55;
 pub(super) const CHAT_PROSE_CODE_BORDER_OPACITY: f32 = 1.0;
 
-pub(crate) fn desktop_markdown_style(cx: &App) -> TextViewStyle {
-    let mut style = TextViewStyle::default()
+pub(crate) fn desktop_markdown_style(_cx: &App) -> TextViewStyle {
+    TextViewStyle::default()
         .paragraph_gap(rems(CHAT_PROSE_PARAGRAPH_GAP_REM))
         .heading_font_size(|level, _base| match level {
             1 => px(CHAT_PROSE_HEADING_1_TEXT_SIZE_PX),
@@ -48,10 +48,7 @@ pub(crate) fn desktop_markdown_style(cx: &App) -> TextViewStyle {
                 .line_height(relative(CHAT_PROSE_CODE_LINE_HEIGHT))
                 .font_family(TOOL_CODE_FONT_FAMILY)
                 .text_color(theme::rambutan_300()),
-        );
-    style.highlight_theme = cx.theme().highlight_theme.clone();
-    style.is_dark = true;
-    style
+        )
 }
 
 /// `TextView::markdown` for text the app did not write (a reply, a bruh's

@@ -10,6 +10,7 @@ use super::keys::{focus_handle_of, focus_page, focused, in_dialog, press, tab_to
 use super::launch::{init, launch, quit, saved};
 use super::*;
 use crate::views::workspace::inbox_ui::inbox_empty_state;
+use crate::views::workspace::save_status::SaveStatus;
 use bruhs_models::{
     InboxConversation, InboxFilter, InboxMessage, InboxParticipant, InboxSource, MessageDirection,
     MessageSendState,
@@ -154,6 +155,104 @@ async fn a_reply_draft_survives_leaving_and_a_restart(cx: &mut gpui::TestAppCont
             .expect("the other conversation");
         assert_eq!(brief.draft_body(), "");
     });
+}
+
+/// INBOX-06, failed persistence: a reply draft saved while the state file's
+/// folder is read-only stays in the reply box and the conversation, and
+/// "Not saved" reports the failure with Retry save. The file keeps its
+/// last good copy. Once the folder is writable again, Retry save stores the
+/// draft, the strip goes, and a restart has the draft.
+#[gpui::test]
+#[cfg(unix)]
+async fn a_reply_draft_survives_a_failed_save_and_retry(cx: &mut gpui::TestAppContext) {
+    use std::os::unix::fs::PermissionsExt;
+
+    init(cx);
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let folder = files.path().join("state");
+    std::fs::create_dir(&folder).expect("the state folder");
+    let path = folder.join("state.json");
+    let mut relaunch = cx.clone();
+    let (workspace, cx) = launch(cx, &path);
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.inbox_conversations = vec![conversation("lunch", "Lunch plans", "Ada", 2)];
+        workspace.persist_and_notify(cx);
+    });
+    saved(&workspace, cx).await;
+    show_inbox(&workspace, cx);
+    click(cx, card("lunch"));
+    saved(&workspace, cx).await;
+    let last_good = std::fs::read(&path).expect("the saved state");
+
+    // The folder goes read-only, then the draft is saved.
+    let read_only = |mode: u32| {
+        std::fs::set_permissions(&folder, std::fs::Permissions::from_mode(mode))
+            .expect("the folder's permissions");
+    };
+    read_only(0o555);
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .inbox_reply_input
+            .update(cx, |input, cx| input.focus(window, cx));
+    });
+    cx.run_until_parked();
+    cx.simulate_input("Friday works");
+    click(cx, "desktop-inbox-save-draft");
+    cx.condition(&workspace, |workspace, _| {
+        matches!(workspace.save_status, SaveStatus::Failed(_))
+    })
+    .await;
+    cx.run_until_parked();
+    assert_eq!(
+        std::fs::read(&path).expect("the state file"),
+        last_good,
+        "the last good copy is untouched"
+    );
+    workspace.read_with(cx, |workspace, cx| {
+        assert_eq!(workspace.inbox_reply_input.read(cx).value(), "Friday works");
+        assert_eq!(
+            workspace.inbox_conversations[0].draft_body(),
+            "Friday works"
+        );
+        assert_eq!(
+            workspace.save_status.alert(),
+            Some("Local storage could not save this change. Keep this window open and retry.")
+        );
+    });
+    assert_rendered_bounds(cx, "desktop-save-status");
+    assert_rendered_bounds(cx, "desktop-retry-save");
+    // Leaving and coming back keeps it too; that save fails as well and is
+    // reported again.
+    click(cx, "desktop-inbox-back");
+    click(cx, card("lunch"));
+    assert_eq!(reply(&workspace, cx), "Friday works");
+    cx.condition(&workspace, |workspace, _| {
+        matches!(workspace.save_status, SaveStatus::Failed(_))
+    })
+    .await;
+    cx.run_until_parked();
+    assert_rendered_bounds(cx, "desktop-save-status");
+
+    // Writing works again: Retry save stores the draft.
+    read_only(0o755);
+    click(cx, "desktop-retry-save");
+    saved(&workspace, cx).await;
+    assert_no_rendered_bounds(cx, "desktop-save-status");
+    let stored = load_desktop_state_from_path(&path)
+        .expect("a readable state file")
+        .expect("a state file");
+    let lunch = stored
+        .inbox_conversations
+        .iter()
+        .find(|conversation| conversation.id == "lunch")
+        .expect("the conversation");
+    assert_eq!(lunch.draft_body(), "Friday works");
+    quit(&workspace, cx);
+
+    let (restarted, cx) = launch(&mut relaunch, &path);
+    show_inbox(&restarted, cx);
+    click(cx, card("lunch"));
+    assert_eq!(reply(&restarted, cx), "Friday works");
 }
 
 /// INBOX-09: Delete asks first with the shared wording. Cancel and Escape
@@ -390,12 +489,11 @@ async fn the_inbox_works_from_the_keyboard(cx: &mut gpui::TestAppContext) {
         "focus returns to Delete, as the web dialog restores its invoker"
     );
     press(cx, "enter");
-    // Tab stays in the dialog: its close button, Cancel and Delete, then
-    // back to the close button, as the web dialog's focus trap wraps.
-    // (Opened from the keyboard, desktop focuses the dialog itself; the
-    // web focuses its first control.)
-    cx.simulate_keystrokes("tab");
-    let close = focused(cx).expect("the dialog's first stop");
+    // Opened from the keyboard, the dialog focuses its first control,
+    // Cancel, as the web dialog does. Tab stays in the dialog: Delete, the
+    // close button, then Cancel again, as the web dialog's focus trap wraps.
+    let cancel = focused(cx).expect("the dialog's first control");
+    assert!(in_dialog(&workspace, cx), "focus moved into the dialog");
     let mut stops = 1;
     loop {
         cx.simulate_keystrokes("tab");
@@ -403,15 +501,16 @@ async fn the_inbox_works_from_the_keyboard(cx: &mut gpui::TestAppContext) {
             in_dialog(&workspace, cx),
             "Tab left the dialog after {stops} stops"
         );
-        if focused(cx).as_ref() == Some(&close) {
+        if focused(cx).as_ref() == Some(&cancel) {
             break;
         }
         stops += 1;
         assert!(stops < 10, "Tab never wrapped inside the dialog");
     }
-    assert_eq!(stops, 3, "close, Cancel and Delete");
-    // Shift-Tab wraps back to Delete, the last stop.
-    cx.simulate_keystrokes("shift-tab");
+    assert_eq!(stops, 3, "Cancel, Delete and the close button");
+    // Shift-Tab from Cancel passes the close button and wraps to Delete,
+    // the last stop.
+    cx.simulate_keystrokes("shift-tab shift-tab");
     press(cx, "enter");
     workspace.read_with(cx, |workspace, _| {
         assert!(workspace.inbox_conversations.is_empty(), "deleted");
@@ -425,6 +524,126 @@ async fn the_inbox_works_from_the_keyboard(cx: &mut gpui::TestAppContext) {
         "the deleted record's page is gone; focus is on the page"
     );
     saved(&workspace, cx).await;
+}
+
+/// INBOX-11: the import form's Cancel, and Escape, close it and return
+/// focus to Import conversation, as the web dialog restores its invoker.
+/// Opened from the command bar, closing it leaves focus on the page, as on
+/// the web, whose invoker is gone by then.
+#[gpui::test]
+async fn closing_the_import_form_returns_focus_to_its_opener(cx: &mut gpui::TestAppContext) {
+    init(cx);
+    cx.update(|cx| cx.bind_keys([gpui::KeyBinding::new("escape", CloseOverlays, None)]));
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let path = files.path().join("state.json");
+    let (workspace, cx) = launch(cx, &path);
+    show_inbox(&workspace, cx);
+    let open_by_enter = |cx: &mut gpui::VisualTestContext| {
+        let import = focus_handle_of(cx, "desktop-import-conversation");
+        focus_page(&workspace, cx);
+        tab_to(cx, &import, "Import conversation");
+        press(cx, "enter");
+        workspace.read_with(cx, |workspace, _| assert!(workspace.inbox_import_visible));
+    };
+    let import_has_focus = |focus: Option<gpui::FocusHandle>, cx: &mut gpui::VisualTestContext| {
+        focus.is_some() && focus == Some(focus_handle_of(cx, "desktop-import-conversation"))
+    };
+
+    // Cancel by Enter.
+    open_by_enter(cx);
+    let cancel = focus_handle_of(cx, "desktop-inbox-import-cancel");
+    assert!(focused(cx).as_ref() == Some(&cancel));
+    press(cx, "enter");
+    workspace.read_with(cx, |workspace, _| assert!(!workspace.inbox_import_visible));
+    let after_cancel = focused(cx);
+    assert!(
+        import_has_focus(after_cancel, cx),
+        "Cancel returns focus to Import conversation"
+    );
+
+    // Escape, from the sender field.
+    open_by_enter(cx);
+    let sender = input_handle(&workspace, cx, |w| &w.inbox_sender_input);
+    assert!(focused(cx).as_ref() == Some(&sender));
+    cx.simulate_keystrokes("escape");
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, _| {
+        assert!(!workspace.inbox_import_visible, "Escape closes the form")
+    });
+    let after_escape = focused(cx);
+    assert!(
+        import_has_focus(after_escape, cx),
+        "Escape returns focus to Import conversation"
+    );
+
+    // From the command bar, which has focus when its action runs: the page.
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace.focus_command_bar(&FocusCommandBar, window, cx);
+    });
+    cx.run_until_parked();
+    workspace.update_in(cx, |workspace, window, cx| {
+        assert!(workspace.command_bar_visible());
+        workspace.execute_command_action("import-conversation", window, cx);
+    });
+    cx.run_until_parked();
+    workspace.read_with(cx, |workspace, _| {
+        assert!(!workspace.command_bar_visible(), "the command bar closed");
+        assert!(workspace.inbox_import_visible);
+    });
+    assert!(
+        focused(cx).as_ref() == Some(&sender),
+        "the sender has focus"
+    );
+    let cancel = focus_handle_of(cx, "desktop-inbox-import-cancel");
+    assert!(focused(cx).as_ref() == Some(&cancel));
+    press(cx, "enter");
+    workspace.read_with(cx, |workspace, _| assert!(!workspace.inbox_import_visible));
+    let on_page = workspace.update_in(cx, |workspace, window, _cx| {
+        workspace.workspace_focus_handle.is_focused(window)
+    });
+    assert!(on_page, "focus is on the page");
+}
+
+/// INBOX-11: opening a conversation from its row lands on Back to Inbox,
+/// and Back returns to that row, as on the web (focus used to stay on the
+/// page both ways).
+#[gpui::test]
+async fn opening_a_conversation_and_going_back_keep_the_keyboard_s_place(
+    cx: &mut gpui::TestAppContext,
+) {
+    init(cx);
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let path = files.path().join("state.json");
+    let (workspace, cx) = launch(cx, &path);
+    workspace.update(cx, |workspace, _| {
+        workspace.inbox_conversations = vec![
+            conversation("launch", "Launch review", "Ada", 2),
+            conversation("invoice", "Invoice 1042", "Billing", 1),
+        ];
+    });
+    show_inbox(&workspace, cx);
+    let row = focus_handle_of(cx, card("invoice"));
+    focus_page(&workspace, cx);
+    tab_to(cx, &row, "the Invoice row");
+    press(cx, "enter");
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.active_view, conversation_view("invoice"));
+    });
+    let back = workspace.read_with(cx, |workspace, _| workspace.inbox_back_focus.clone());
+    assert!(
+        focused(cx).as_ref() == Some(&back),
+        "focus is on Back to Inbox"
+    );
+    press(cx, "enter");
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.active_view, AppView::Inbox);
+    });
+    // The row keeps its handle while the list is hidden, so this is the
+    // handle learned before opening it.
+    assert!(
+        focused(cx).as_ref() == Some(&row),
+        "focus is back on the Invoice row"
+    );
 }
 
 /// INBOX-13: before the first import, each filter's empty view, a search
@@ -442,6 +661,7 @@ async fn empty_inbox_views_use_the_web_wording(cx: &mut gpui::TestAppContext) {
             inbox_empty_state(
                 &workspace.inbox_search_input.read(cx).value(),
                 workspace.inbox_filter,
+                workspace.saved_records_loaded,
             )
         })
     };
@@ -520,4 +740,63 @@ async fn empty_inbox_views_use_the_web_wording(cx: &mut gpui::TestAppContext) {
     assert_rendered_bounds(cx, card(&id));
     assert_no_rendered_bounds(cx, "desktop-inbox-empty");
     saved(&workspace, cx).await;
+}
+
+/// INBOX-13, storage failure: a state file that cannot be decoded leaves the
+/// list saying what the web says when its records fail to load, instead of
+/// an empty Inbox. "Not saved" says why, and the original file is kept:
+/// nothing is saved over it, even after an import in this window.
+#[gpui::test]
+async fn an_undecodable_state_file_reads_as_a_load_failure(cx: &mut gpui::TestAppContext) {
+    init(cx);
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let path = files.path().join("state.json");
+    let original = b"{ \"inbox_conversations\": [ not json".to_vec();
+    std::fs::write(&path, &original).expect("an undecodable state file");
+    let (workspace, cx) = launch(cx, &path);
+    workspace.read_with(cx, |workspace, _| {
+        assert!(matches!(
+            workspace.save_status,
+            SaveStatus::RecoveryRequired(_)
+        ));
+        assert!(workspace.inbox_conversations.is_empty());
+    });
+    show_inbox(&workspace, cx);
+    assert_rendered_bounds(cx, "desktop-inbox-empty");
+    assert_rendered_bounds(cx, "desktop-save-status");
+    let shown = |workspace: &Entity<Workspace>, cx: &mut gpui::VisualTestContext| {
+        workspace.read_with(cx, |workspace, cx| {
+            inbox_empty_state(
+                &workspace.inbox_search_input.read(cx).value(),
+                workspace.inbox_filter,
+                workspace.saved_records_loaded,
+            )
+        })
+    };
+    // Not the loading line: these records will not appear by waiting.
+    let failed = (
+        "Conversations could not be loaded",
+        "Stored conversations were left unchanged.",
+    );
+    assert_eq!(shown(&workspace, cx), failed);
+    click(cx, "desktop-inbox-filter-All");
+    assert_eq!(shown(&workspace, cx), failed, "every view says so");
+    click(cx, "desktop-inbox-filter-Inbox");
+
+    // An import still opens, in this window only; the original stays.
+    click(cx, "desktop-import-conversation");
+    workspace.update_in(cx, |workspace, window, cx| {
+        workspace
+            .inbox_sender_input
+            .update(cx, |input, cx| input.set_value("Ada", window, cx));
+        workspace
+            .inbox_body_input
+            .update(cx, |input, cx| input.set_value("Kept here", window, cx));
+    });
+    click(cx, "desktop-inbox-import-submit");
+    workspace.read_with(cx, |workspace, _| {
+        assert_eq!(workspace.inbox_conversations.len(), 1);
+    });
+    cx.run_until_parked();
+    assert_eq!(std::fs::read(&path).expect("the state file"), original);
 }

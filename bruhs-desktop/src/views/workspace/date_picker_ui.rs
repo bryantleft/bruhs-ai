@@ -4,12 +4,12 @@
 //! input states in the web's wire formats (`YYYY-MM-DD`,
 //! `YYYY-MM-DDTHH:MM`), so the create / update paths are unchanged.
 
+use bruhs_ui::input::{Input, InputEvent, InputState};
+use bruhs_ui::tooltip::Tooltip;
+use bruhs_ui::zoom::px;
 use chrono::{Datelike, Local, NaiveDate};
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::tooltip::Tooltip;
-use gpui_component::zoom::px;
 
 use super::Workspace;
 use crate::{assets, theme};
@@ -320,6 +320,8 @@ impl Workspace {
     ) -> AnyElement {
         let value = self.date_picker_value(target, cx);
         let text = trigger_label(target.with_time(), &value);
+        // The field's name and its date, as the web's picker announces both.
+        let name = format!("{}, {text}", target.aria_label());
         let tooltip = text.clone();
         let selector = target.selector();
         let open = self.date_picker.filter(|open| open.target == target);
@@ -353,7 +355,7 @@ impl Workspace {
             .line_height(relative(1.5))
             .text_color(theme::rambutan_100())
             .role(Role::Button)
-            .aria_label(target.aria_label())
+            .aria_label(name)
             .aria_expanded(open.is_some())
             .tooltip(move |window, cx| Tooltip::new(tooltip.clone()).build(window, cx))
             .when(disabled, |el| el.opacity(DATE_FIELD_DISABLED_OPACITY))
@@ -554,7 +556,8 @@ impl Workspace {
                 .bg(theme::longan_900())
                 .border_1()
                 .border_color(theme::longan_700())
-                .px(px(6.0))
+                // Web `px-1.5`, less the 1px border.
+                .px(px(5.0))
                 .py(px(2.0))
                 .text_size(px(LABEL_PX))
                 .font_weight(FontWeight::MEDIUM)
@@ -562,6 +565,8 @@ impl Workspace {
                 .child(
                     Input::new(input)
                         .appearance(false)
+                        // Web `px-1.5` is the wrapper's; the field has none.
+                        .px_0()
                         .text_center()
                         .w_full()
                         .aria_label(aria),

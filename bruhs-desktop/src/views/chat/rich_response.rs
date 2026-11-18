@@ -7,7 +7,7 @@ use bruhs_models::logic::rich_response::{
     MAX_WIDGET_STATE_BYTES, MIN_WIDGET_HEIGHT, WIDGET_PROTOCOL,
 };
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::cell::RefCell;
 use std::rc::Rc;
 

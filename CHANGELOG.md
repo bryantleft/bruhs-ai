@@ -278,6 +278,62 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- Buttons on the web show their intended colors: blue text and tinted
+  fills (the selected Calendar view, Inbox filter and Agent workflows
+  grants, Today's Review) and some card fills were being dropped by the
+  stylesheet order.
+- The desktop app's Calendar, People and Inbox look like the web's: the
+  selected Calendar view is blue, due tasks are italic, Week and Day open
+  near the current hour, and a narrow window's week fits all seven days;
+  People's form and opened profile have the web's layout, labelled fields
+  and a multi-line Notes field; the Inbox list uses the web's spacing and
+  type. Italic text, page headers and People and Meetings text match the
+  web's sizes.
+- People controls are at least 24px with a mouse on both apps, and form
+  fields 32px (some were 18 to 20px).
+- The web no longer jumps the page 37px when the thread list finishes
+  loading: Loading saved threads shows only once a load takes a while, and
+  a failure still shows at once.
+- The event dialog's Title, Notes and date fields have names for screen
+  readers on the web, as on the desktop, and the date fields announce their
+  date on both apps.
+- On the web, leaving Agent workflows while a press in Workflow history
+  (Run, Pause, Resume or Undo, or Previous and Next) was still settling
+  could stop the app with an internal error, so pages no longer updated
+  until a reload. Leaving the page now just leaves it; the press is still
+  saved.
+- On the web, the error banner for a refused or failed day plan Apply or
+  Undo now goes with the error: when you dismiss it on Today, or when a later
+  Apply or Undo works. It used to stay on every page, still saying, for
+  example, that a focus block had changed after the Undo had gone through.
+- The workflow notice counts one saved step as "1 step saved", in both
+  apps.
+- Keyboard focus keeps its place on both apps: opening an Inbox
+  conversation lands on Back to Inbox and Back returns to its row, and the
+  workflow notice's Pause hands focus to Open workflows. The web notice no
+  longer drops keyboard focus each time a step is saved.
+- On the desktop, primary buttons show a visible focus ring, and page titles
+  are headings for screen readers.
+- In the desktop app, a dialog opened from the keyboard puts focus on its
+  first control, as the web does, instead of on the dialog itself: a delete
+  confirmation on Cancel, a month's day list on its first record, Snooze
+  until on its date, New bruh on its name, and a read-only Google event on
+  Open in Google Calendar. Tasks' Projects starts on its close button.
+- In the desktop app, a disabled text field is no longer a Tab stop, as on
+  the web.
+- In the desktop Inbox, Cancel and Escape close the import form and put
+  focus back on Import conversation, as the web's dialog does. Import
+  conversation in the command bar now closes the command bar instead of
+  leaving it over the form.
+- The desktop import form offers each provider as its own button, as the
+  web does, instead of one button that cycled through them.
+- Screen readers hear the desktop Inbox as they hear the web's: the filters
+  and providers are pressed or not, a row reads its sender, date, subject,
+  preview and source, the search field is a search field, and the list,
+  the messages and the titles are named.
+- When the desktop app's saved data cannot be decoded, the Inbox says
+  "Conversations could not be loaded", as the web does, instead of "Your
+  inbox is clear."
 - In the desktop app, a failed save now reads like the web's: "Not saved",
   why, Retry save and Copy recovery data, under the page's top bar instead
   of under the window's close and minimize buttons.

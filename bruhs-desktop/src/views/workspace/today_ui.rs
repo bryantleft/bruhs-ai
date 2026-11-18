@@ -1,7 +1,7 @@
 //! Today page: the day plan (draft, apply, undo) and its task and agenda sections.
 
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 use bruhs_models::today_copy;
 
@@ -1075,7 +1075,7 @@ impl Workspace {
         let date = self.planning_now().format("%A, %B %-d").to_string();
         let unread_updates = self.reactive_automations.read(cx).unread_count();
         // Web's breakpoints read the window's width.
-        let width = gpui_component::zoom::css_px(window.viewport_size().width);
+        let width = bruhs_ui::zoom::css_px(window.viewport_size().width);
         let two_columns = width >= TODAY_TWO_COLUMNS_PX;
         let status_columns = if width >= TODAY_STATUS_FOUR_COLUMNS_PX {
             4
@@ -1700,7 +1700,7 @@ mod audit_tests {
         use gpui::AppContext as _;
 
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1728,7 +1728,7 @@ mod audit_tests {
     #[gpui::test]
     fn today_event_opens_its_day_and_restores_workspace_focus(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });

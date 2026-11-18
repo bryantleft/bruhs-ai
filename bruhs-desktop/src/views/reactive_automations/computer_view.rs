@@ -33,7 +33,10 @@ use bruhs_models::crew::{
 use bruhs_models::local_tools::{
     ComputerInput, ComputerRequest, ComputerState, HeldKeys, MouseButton, Viewport,
 };
+use bruhs_ui::input::{Input, InputEvent, InputState};
 use bruhs_ui::press::on_press_view;
+use bruhs_ui::scroll::ScrollableElement;
+use bruhs_ui::zoom::{css_px, px};
 use gpui::prelude::*;
 use gpui::Focusable as _;
 use gpui::{
@@ -41,9 +44,6 @@ use gpui::{
     HitboxBehavior, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, RenderImage, Role,
     SharedString, Stateful, Subscription, Task, WeakEntity, Window,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::scroll::ScrollableElement;
-use gpui_component::zoom::{css_px, px};
 use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 /// How often the tab asks for the state while no live view runs, so a
@@ -713,7 +713,7 @@ impl Render for ComputerView {
         }
         self.sync_address(controls.navigate, window, cx);
         let layout = Layout::measured(self.width.get(), window);
-        let viewport = gpui_component::zoom::css_px(window.viewport_size().width);
+        let viewport = bruhs_ui::zoom::css_px(window.viewport_size().width);
         let measured = self.width.get();
         let page = if measured > 0.0 { measured } else { viewport };
         let column = page.min(COLUMN_MAX_PX);

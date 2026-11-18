@@ -5,7 +5,7 @@ use gpui::{AppContext, Entity, TestAppContext, VisualTestContext};
 fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.executor().allow_parking();
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().unwrap());
     });
@@ -14,7 +14,7 @@ fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContex
     let (_, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *capture.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = cell.borrow().clone().unwrap();
     // Tall enough for the controls under the Local suggestions card.

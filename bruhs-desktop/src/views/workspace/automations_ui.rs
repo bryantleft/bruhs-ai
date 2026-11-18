@@ -1,7 +1,7 @@
 //! Native capability grants, transactional workflows, durable jobs, and audit.
 
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 mod chat;
 mod draft_outcomes;
 mod history_ui;
@@ -197,7 +197,7 @@ impl Workspace {
                                         })
                                         .child(review::PAUSE_BACKGROUND)
                                         .on_click(
-                                            cx.listener(|this, _, _, cx| {
+                                            cx.listener(|this, _, window, cx| {
                                                 let ids: Vec<_> = this
                                                     .automation_state
                                                     .jobs
@@ -221,6 +221,10 @@ impl Workspace {
                                                         );
                                                     }
                                                 }
+                                                // Pause goes once its step settles and
+                                                // takes the button with it: focus moves
+                                                // to Open workflows, as on the web.
+                                                this.workflow_notice_open_focus.focus(window, cx);
                                                 this.persist_and_notify(cx);
                                             }),
                                         ),
@@ -232,6 +236,7 @@ impl Workspace {
                                         review::OPEN_WORKFLOWS,
                                         theme::persimmon_300(),
                                     )
+                                    .track_focus(&self.workflow_notice_open_focus)
                                     .debug_selector(|| "desktop-open-workflows".into())
                                     .child(review::OPEN_WORKFLOWS)
                                     .on_click(cx.listener(
@@ -981,12 +986,12 @@ impl Workspace {
         .border_1()
         .map(|toggle| {
             if on {
-                // What Chrome draws for the web's granted toggle: its blue
-                // ring on the card, with no fill and rambutan-300 text (the
-                // class's blueberry fill and text never take effect there).
+                // Web `bg-blueberry-500/15 text-blueberry-200
+                // inset-ring-blueberry-400/20`.
                 toggle
+                    .bg(theme::blueberry_500().opacity(0.15))
                     .border_color(theme::blueberry_400().opacity(0.2))
-                    .text_color(theme::rambutan_300())
+                    .text_color(theme::blueberry_200())
             } else {
                 toggle
                     .bg(theme::longan_950().opacity(0.6))
@@ -1020,7 +1025,7 @@ mod durability_tests {
         cx: &mut gpui::TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1053,7 +1058,7 @@ mod durability_tests {
     #[gpui::test]
     fn unsaved_native_workflow_cannot_start_advance_or_undo(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1115,7 +1120,7 @@ mod durability_tests {
     ) {
         use std::{cell::RefCell, fs, rc::Rc};
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1125,7 +1130,7 @@ mod durability_tests {
             let first = cx.new(|cx| Workspace::new(window, cx));
             let stale = cx.new(|cx| Workspace::new(window, cx));
             *capture.borrow_mut() = Some((first, stale.clone()));
-            gpui_component::Root::new(stale, window, cx)
+            bruhs_ui::Root::new(stale, window, cx)
         });
         let (first, stale) = cell.borrow().clone().unwrap();
         let dir =
@@ -1173,7 +1178,7 @@ mod durability_tests {
         use std::{cell::RefCell, fs, rc::Rc};
 
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -1182,7 +1187,7 @@ mod durability_tests {
         let (_root, cx) = cx.add_window_view(|window, cx| {
             let workspace = cx.new(|cx| Workspace::new(window, cx));
             *capture.borrow_mut() = Some(workspace.clone());
-            gpui_component::Root::new(workspace, window, cx)
+            bruhs_ui::Root::new(workspace, window, cx)
         });
         let workspace = cell.borrow().clone().unwrap();
         let dir =

@@ -14,6 +14,15 @@ pub use directory::{InboxCard, InboxCounts, InboxDirectory, InboxFilter, INBOX_P
 pub const DELETE_CONVERSATION_TITLE: &str = "Delete conversation";
 pub const DELETE_CONVERSATION_DETAIL: &str =
     "This permanently deletes the local conversation and its messages.";
+/// The conversation list on both apps while saved conversations load, and
+/// when they could not be loaded; [`INBOX_LOAD_DETAIL`] goes under the
+/// first and [`INBOX_LOAD_FAILED_DETAIL`] under the second.
+pub const INBOX_LOADING: &str = "Loading conversations…";
+pub const INBOX_LOAD_FAILED: &str = "Conversations could not be loaded";
+pub const INBOX_LOAD_DETAIL: &str = "Your conversations will appear after local records load.";
+/// Under [`INBOX_LOAD_FAILED`]: nothing stored was replaced (the web offers
+/// Retry loading records above it; the desktop keeps its file untouched).
+pub const INBOX_LOAD_FAILED_DETAIL: &str = "Stored conversations were left unchanged.";
 /// Under a conversation's reply box on both apps. Command Enter logs the
 /// reply; Save draft keeps it on this device.
 pub const REPLY_HINT: &str = "⌘↵ log reply, drafts stay local";
@@ -30,6 +39,16 @@ pub enum InboxSource {
 }
 
 impl InboxSource {
+    /// Every source, in the order the import forms offer them.
+    pub const ALL: [Self; 6] = [
+        Self::Email,
+        Self::Slack,
+        Self::Discord,
+        Self::IMessage,
+        Self::X,
+        Self::Import,
+    ];
+
     pub const fn label(self) -> &'static str {
         match self {
             Self::Email => "Email",
@@ -387,6 +406,24 @@ fn normalized_subject(subject: String) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Both import forms offer every source once, Email first, in this
+    /// order.
+    #[test]
+    fn the_import_forms_offer_every_source_once() {
+        let offered = InboxSource::ALL.map(|source| match source {
+            InboxSource::Email
+            | InboxSource::Slack
+            | InboxSource::Discord
+            | InboxSource::IMessage
+            | InboxSource::X
+            | InboxSource::Import => source.label(),
+        });
+        assert_eq!(
+            offered,
+            ["Email", "Slack", "Discord", "iMessage", "X", "Imported"]
+        );
+    }
 
     #[test]
     fn the_title_line_names_the_source_and_every_participant() {

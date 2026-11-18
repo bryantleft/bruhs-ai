@@ -2,7 +2,7 @@
 //! `bruhs_core::git` (status + unified diff), rendered as per-file sections
 //! with "N unmodified lines" separators, like bruhs-web's `diff_panel.rs`.
 
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::collections::{hash_map::DefaultHasher, HashSet};
 use std::hash::{Hash, Hasher};
 use std::rc::Rc;
@@ -15,10 +15,10 @@ use bruhs_models::logic::review::{
     DiffReviewFilter, ViewedBook, ViewedState,
 };
 pub use bruhs_models::logic::tools::relative_path;
+use bruhs_ui::scroll::ScrollableElement;
+use bruhs_ui::tooltip::Tooltip;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::scroll::ScrollableElement;
-use gpui_component::tooltip::Tooltip;
 
 use crate::views::chat::{DesktopToolCall, Message, MessageRole};
 use crate::views::dropdown::{
@@ -1772,7 +1772,7 @@ mod tests {
     fn unwrapped_diff_lines_remain_horizontally_scrollable(cx: &mut gpui::TestAppContext) {
         use gpui::{point, px, size, Modifiers, ScrollDelta, ScrollEvent, TouchPhase};
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             crate::theme::apply_bruhs_theme(cx);
         });
         let (panel, cx) = cx.add_window_view(|_, cx| super::DiffPanelView::new(cx));

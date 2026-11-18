@@ -122,6 +122,12 @@ tags `v<version>`. Asset names carry no version, so
 - `scripts/bundle-macos.sh <version>` alone builds an ad-hoc-signed
   `dist/Bruhs.app` to try locally; `--sign` adds the Developer ID signature
   and `--notarize` Apple's notarization.
+- The disk image opens on a Bruhs install window that
+  `packaging/macos/make-dmg.sh` lays out through Finder, so the first build
+  asks to let the terminal control Finder. Its art,
+  `packaging/macos/dmg-background.tiff`, comes from
+  `bruhs-site/brand/dmg.html` via `bruhs-site/brand/render.sh`; the icon spots
+  in both files have to match.
 - Signing uses the first "Developer ID Application" identity in the keychain
   (`BRUHS_SIGN_IDENTITY` overrides). Notarization uses the notarytool
   profile `bruhs-notary` (`BRUHS_NOTARY_PROFILE`); create it once with
@@ -133,16 +139,13 @@ tags `v<version>`. Asset names carry no version, so
 - `BRUHS_RELEASE_VERSION`, set by the bundle script, makes a build a release:
   it then updates from GitHub releases instead of git.
 - The icon is `packaging/macos/AppIcon.icns`, generated from
-  `packaging/macos/AppIcon.svg` (written by `bruhs-site/brand/logo.mjs`) by
-  `packaging/macos/make-icon.sh`.
+  `packaging/macos/AppIcon.svg` and `AppIcon-small.svg` (written by
+  `bruhs-site/brand/logo.mjs`) by `packaging/macos/make-icon.sh`.
 - gpui's `sum_tree` depends on zed's GPL-3.0 `ztracing`; the workspace patches
   it to the no-op `third_party/ztracing-noop` so the shipped binaries stay
   MIT.
 
 ## Third-party code
 
-- `third_party/gpui-component` is a vendored copy of
-  [longbridge/gpui-component](https://github.com/longbridge/gpui-component)
-  (Apache-2.0); `VENDORED.md` lists the local changes.
 - gpui comes from upstream [zed](https://github.com/zed-industries/zed), pinned
   to one rev, with no patches.

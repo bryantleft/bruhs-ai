@@ -1,9 +1,9 @@
 //! Real-window rendering probe with synthetic data and no application services.
 use crate::{assets, views::whiteboard::WhiteboardView};
 use bruhs_models::{num::ToFloatLossy as _, whiteboard::*};
+use bruhs_ui::zoom::px;
+use bruhs_ui::Root;
 use gpui::*;
-use gpui_component::zoom::px;
-use gpui_component::Root;
 use serde_json::json;
 use std::{cell::RefCell, path::PathBuf, rc::Rc, time::Instant};
 
@@ -92,7 +92,7 @@ pub fn run() -> Result<(), String> {
     gpui_platform::application()
         .with_assets(assets::DesktopAssets)
         .run(move |cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             if let Err(error) = cx.text_system().add_fonts(assets::embedded_fonts()) {
                 eprintln!("WHITEBOARD_PERFORMANCE_ERROR {error}");
                 cx.quit();
@@ -143,7 +143,7 @@ fn editor(project: String) -> Result<(), String> {
     gpui_platform::application()
         .with_assets(assets::DesktopAssets)
         .run(move |cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             if let Err(error) = cx.text_system().add_fonts(assets::embedded_fonts()) {
                 eprintln!("WHITEBOARD_EDITOR_ERROR {error}");
                 cx.quit();

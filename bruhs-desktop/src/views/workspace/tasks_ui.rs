@@ -3,7 +3,7 @@
 use super::library_pages_ui::LibraryPage;
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 // Match the web task list/board budgets. The native library action fixture
 // measures 100/1,000/10,000 tasks; complete records remain in work_items.
@@ -861,7 +861,8 @@ impl Workspace {
     /// window too compact for the project sidebar.
     pub(super) fn open_task_projects(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.open_overlay(Overlay::TaskProjects);
-        self.focus_first_modal_tab_stop(window, cx);
+        // The web dialog's first control is its Close.
+        self.focus_modal_close_button(window, cx);
         cx.notify();
     }
 

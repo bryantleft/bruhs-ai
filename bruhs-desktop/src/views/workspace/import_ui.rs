@@ -15,8 +15,8 @@ use bruhs_models::logic::portable::{
 };
 use bruhs_models::time::{format_relative_ms, RelativeTimeStyle};
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
-use gpui_component::Sizable as _;
+use bruhs_ui::zoom::px;
+use bruhs_ui::Sizable as _;
 use std::time::Duration;
 
 pub(super) const IMPORT_DIALOG_LABEL: &str = "Import thread";
@@ -937,7 +937,8 @@ impl Workspace {
                                     .bg(theme::longan_900())
                                     .border_1()
                                     .border_color(theme::longan_700())
-                                    .px(px(10.0))
+                                    // Web `px-2.5`, less the 1px border.
+                                    .px(px(9.0))
                                     // A small (24px) input in 2px padding and a
                                     // 1px border: 30px, the web's py-1.5 field.
                                     .py(px(2.0))
@@ -946,6 +947,7 @@ impl Workspace {
                                             .small()
                                             .aria_label("Search threads")
                                             .appearance(false)
+                                            .px_0()
                                             .bordered(false)
                                             .focus_bordered(false)
                                             .cleanable(false)

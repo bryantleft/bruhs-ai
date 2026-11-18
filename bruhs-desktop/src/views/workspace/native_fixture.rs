@@ -1,6 +1,6 @@
 //! Saved data and assertions for the normal native-platform performance binary.
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use serde_json::{json, Value};
 use sha2::Digest as _;
 

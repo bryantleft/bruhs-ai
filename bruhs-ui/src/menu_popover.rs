@@ -29,8 +29,8 @@ pub fn menu_origin(
     );
     // Placed from measured window geometry, so already in window points.
     point(
-        gpui_component::zoom::window_px(left.to_f32_lossy()),
-        gpui_component::zoom::window_px(top.to_f32_lossy()),
+        crate::zoom::window_px(left.to_f32_lossy()),
+        crate::zoom::window_px(top.to_f32_lossy()),
     )
 }
 

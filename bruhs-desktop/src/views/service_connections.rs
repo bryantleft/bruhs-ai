@@ -7,8 +7,8 @@ use crate::{
 use bruhs_core::secrets::SecretManager;
 use bruhs_models::{connections::*, ids::ThreadId};
 use bruhs_ui::press::on_press_view;
+use bruhs_ui::zoom::px;
 use gpui::{prelude::*, *};
-use gpui_component::zoom::px;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum Work {

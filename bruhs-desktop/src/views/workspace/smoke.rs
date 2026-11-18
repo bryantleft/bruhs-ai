@@ -3,7 +3,25 @@
 //! way to auto-drive the window.
 
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
+
+/// One key press after another, each once the window has drawn the last
+/// one's effect, as typing gives it: a key down, then the key up that
+/// clicks a focused button.
+fn press_keys(keys: Vec<Keystroke>, window: &mut Window, cx: &mut App) {
+    let mut keys = keys.into_iter();
+    let Some(keystroke) = keys.next() else {
+        return;
+    };
+    window.dispatch_keystroke(keystroke.clone(), cx);
+    window.dispatch_event(PlatformInput::KeyUp(KeyUpEvent { keystroke }), cx);
+    let rest: Vec<Keystroke> = keys.collect();
+    if !rest.is_empty() {
+        window.on_next_frame(move |window, _cx| {
+            window.on_next_frame(move |window, cx| press_keys(rest, window, cx));
+        });
+    }
+}
 
 impl Workspace {
     /// `BRUHS_DESKTOP_COMMANDS_SMOKE`: a fresh project-less chat, made
@@ -122,6 +140,15 @@ impl Workspace {
             "today" => self.activate_sidebar_view(AppView::Today, window, cx),
             "tasks" => self.activate_primary_view(AppView::Tasks, window, cx),
             "calendar" => self.activate_primary_view(AppView::Calendar, window, cx),
+            "calendar-week" | "calendar-day" => {
+                self.activate_primary_view(AppView::Calendar, window, cx);
+                let mode = if scene == "calendar-week" {
+                    DesktopCalendarMode::Week
+                } else {
+                    DesktopCalendarMode::Day
+                };
+                self.set_calendar_mode(mode, cx);
+            }
             "terminal" => self.activate_primary_view(AppView::Terminal, window, cx),
             "command-bar" => self.focus_command_bar(&FocusCommandBar, window, cx),
             "model-picker" => self.toggle_model_picker(&ToggleModelPicker, window, cx),
@@ -144,6 +171,33 @@ impl Workspace {
                 }
             }
             "people" => self.activate_sidebar_view(AppView::People, window, cx),
+            "codex-login" => {
+                if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
+                    chat.update(cx, |chat, cx| chat.smoke_start_codex_login(cx));
+                }
+            }
+            "codex-report" => {
+                if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
+                    eprintln!(
+                        "BRUHS_DESKTOP_SMOKE codex {}",
+                        chat.read(cx).smoke_codex_auth()
+                    );
+                }
+            }
+            // The first profile opened, as a click on its name does.
+            "person-expand" => {
+                self.activate_sidebar_view(AppView::People, window, cx);
+                if let Some(id) = self
+                    .meetings_hub
+                    .read(cx)
+                    .people
+                    .first()
+                    .map(|p| p.id.clone())
+                {
+                    self.expanded_person_id = Some(id.clone());
+                    self.load_relationship_inputs(&id, window, cx);
+                }
+            }
             // Life opens on Finance; this is its Health tab, to compare with
             // the web's.
             "life-health" => {
@@ -293,6 +347,76 @@ impl Workspace {
                 self.toggle_date_picker(date_picker_ui::DatePickerTarget::EventStart, window, cx);
             }
             "settings" => self.open_settings(&OpenSettings, window, cx),
+            // Today's own Plan my day, Apply plan and Undo (TODAY-01), and
+            // what they left: the plan, its Undo receipt, the focus blocks
+            // and the tasks' links.
+            "today-plan" => self.draft_desktop_day_plan(cx),
+            "today-apply" => self.apply_desktop_day_plan(cx),
+            "today-undo" => self.undo_desktop_day_plan(cx),
+            "today-report" => {
+                let blocks = self.calendar_events.len();
+                let links: Vec<(String, usize)> = self
+                    .work_items
+                    .iter()
+                    .map(|task| (task.title.clone(), task.planning.time_block_event_ids.len()))
+                    .collect();
+                eprintln!(
+                    "BRUHS_DESKTOP_SMOKE today proposal={:?} applied={} events={blocks} links={links:?} error={:?} busy={} save={:?}",
+                    self.day_plan_proposal.as_ref().map(|plan| plan.blocks.len()),
+                    self.day_plan_undo.is_some(),
+                    self.day_plan_error,
+                    self.day_plan_busy(),
+                    self.save_status,
+                );
+            }
+            // Inbox (INBOX-06, INBOX-11): the list, the import form, a reply
+            // draft saved as Save draft does, the delete dialog, and focus
+            // in the search field or the reply box.
+            "inbox" => self.open_inbox_view(window, cx),
+            "inbox-import" => self.start_inbox_import(window, cx),
+            "inbox-delete" => self.request_record_delete(window, cx),
+            "inbox-focus-search" => {
+                let input = self.inbox_search_input.clone();
+                input.update(cx, |input, cx| input.focus(window, cx));
+            }
+            "inbox-focus-reply" => {
+                let input = self.inbox_reply_input.clone();
+                input.update(cx, |input, cx| input.focus(window, cx));
+            }
+            scene if scene.starts_with("inbox-draft:") => {
+                let text = scene.trim_start_matches("inbox-draft:").to_string();
+                self.inbox_reply_input
+                    .update(cx, |input, cx| input.set_value(text, window, cx));
+                self.save_inbox_draft(cx);
+            }
+            "inbox-report" => {
+                let draft = match &self.active_view {
+                    AppView::ConversationDetail { conversation_id } => self
+                        .inbox_conversations
+                        .iter()
+                        .find(|conversation| conversation.id == *conversation_id)
+                        .map(|conversation| conversation.draft_body().to_string()),
+                    _ => None,
+                };
+                eprintln!(
+                    "BRUHS_DESKTOP_SMOKE inbox view={:?} draft={draft:?} reply={:?} save={:?}",
+                    self.active_view,
+                    self.inbox_reply_input.read(cx).value(),
+                    self.save_status,
+                );
+            }
+            // `key:shift-tab`: key presses delivered through gpui's own
+            // dispatch, inside this window (no OS event), as if typed: Tab
+            // moves focus and shows its ring, Enter on a button presses it
+            // (gpui clicks on the key up).
+            scene if scene.starts_with("key:") => {
+                let keys: Vec<Keystroke> = scene
+                    .trim_start_matches("key:")
+                    .split_whitespace()
+                    .filter_map(|key| Keystroke::parse_with_os(key, keybindings_ui::host_os()).ok())
+                    .collect();
+                window.defer(cx, move |window, cx| press_keys(keys, window, cx));
+            }
             // The crew: a bruh's page on its Chat or Settings tab, and the
             // New bruh dialog (web-vs-desktop crew comparison).
             "bruh-create" => self.open_create_bruh_dialog(window, cx),
@@ -411,6 +535,7 @@ impl Workspace {
                 self.set_settings_section(section, cx);
             }
             "transcript"
+            | "transcript-prose"
             | "transcript-diff"
             | "transcript-tasks"
             | "transcript-preview"
@@ -424,6 +549,8 @@ impl Workspace {
                     chat.update(cx, |chat, cx| {
                         if scene.starts_with("transcript-rich") {
                             chat.smoke_seed_rich_response(cx);
+                        } else if scene == "transcript-prose" {
+                            chat.smoke_seed_prose(cx);
                         } else {
                             chat.smoke_seed_transcript(cx);
                         }

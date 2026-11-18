@@ -119,7 +119,7 @@ fn observe_with_counters(
         let read_decode_hash_ms = started.elapsed().as_secs_f64() * 1000.0;
         let workspace =
             cx.new(|cx| Workspace::from_loaded_state(loaded, window, cx, restore, restore_threads));
-        let root = gpui_component::Root::new(workspace.clone(), window, cx);
+        let root = bruhs_ui::Root::new(workspace.clone(), window, cx);
         let usage_constructed = CpuSnapshot::capture();
         let constructed = started.elapsed().as_secs_f64() * 1000.0;
         *capture.borrow_mut() = Some((

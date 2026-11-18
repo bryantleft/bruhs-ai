@@ -10,7 +10,7 @@ fn reactive_draft_is_previewed_without_granting_write_or_starting_a_job(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().unwrap());
     });
@@ -19,7 +19,7 @@ fn reactive_draft_is_previewed_without_granting_write_or_starting_a_job(
     let (_, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *capture.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = holder.borrow().clone().unwrap();
     let directory = tempfile::tempdir().unwrap();

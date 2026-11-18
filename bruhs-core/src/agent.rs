@@ -864,6 +864,11 @@ impl AgentOrchestrator {
                 return;
             }
             if !unattended && app_tools {
+                if let Err(error) = crate::website_reader::configure(&mut query_options) {
+                    turn.send_start_error(format!("Could not configure website reading: {error}"))
+                        .await;
+                    return;
+                }
                 if let Err(error) =
                     crate::artifact_tools::configure(&mut query_options, &artifact_project)
                 {

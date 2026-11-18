@@ -2,7 +2,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 pub(super) const TERMINAL_COMMAND_PREFIX: &str = "$ ";
 pub(super) const TERMINAL_OUTPUT_MAX_LINES: usize = 100;
 pub(super) const TERMINAL_OUTPUT_MORE_LINES_LABEL: &str = "more lines";

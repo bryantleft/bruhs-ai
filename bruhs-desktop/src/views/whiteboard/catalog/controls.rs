@@ -1,8 +1,8 @@
 use super::*;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
-use gpui_component::{input::Input, scroll::ScrollableElement};
+use bruhs_ui::zoom::px;
+use bruhs_ui::{input::Input, scroll::ScrollableElement};
 
 impl WhiteboardLibrary {
     fn command(&mut self, command: BoardCommand, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -272,14 +272,14 @@ impl WhiteboardLibrary {
         let mut panel = div()
             .id("whiteboard-dialog")
             .role(Role::Dialog)
-            .capture_action(cx.listener(
-                |this, action: &gpui_component::input::Enter, window, cx| {
+            .capture_action(
+                cx.listener(|this, action: &bruhs_ui::input::Enter, window, cx| {
                     if action.secondary && !action.shift {
                         cx.stop_propagation();
                         this.submit_dialog(window, cx);
                     }
-                },
-            ))
+                }),
+            )
             .p_3()
             .gap_2()
             .flex()

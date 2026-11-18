@@ -7,15 +7,15 @@
 //! off. A plain key such as `/` or `c` is left alone when its condition fails,
 //! or the character would never reach the field.
 
+use bruhs_ui::input::{Input, InputEvent, InputState};
+use bruhs_ui::zoom::px;
+use bruhs_ui::WindowExt;
 use gpui::prelude::*;
 use gpui::{
     div, Action, AnyElement, App, Context, Entity, Focusable, KeyBinding,
     KeyBindingContextPredicate, Keystroke, KeystrokeEvent, OperatingSystem, Role, SharedString,
     Subscription, Unbind, WeakEntity, Window,
 };
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::zoom::px;
-use gpui_component::WindowExt;
 
 use bruhs_models::logic::keybindings::{
     chord_claimed, chord_from_event, default_keybindings, gpui_shortcut, resolve,
@@ -51,10 +51,10 @@ enum KeyDecision {
     Undo,
     SidebarFocus(bool),
     /// Tab (true: Shift+Tab) in an open thread menu: close it and move on
-    /// from its "…" button, before gpui-component's Tab binding runs.
+    /// from its "…" button, before the window root's Tab binding runs.
     CloseThreadMenu(bool),
     /// Tab (true: Shift+Tab) in an open dialog: step within it, as the web
-    /// dialog's focus trap does. gpui-component's Tab binding runs before
+    /// dialog's focus trap does. The window root's Tab binding runs before
     /// the dialog's own key handler and would move focus to the page
     /// behind the dialog.
     DialogFocus(bool),
@@ -855,7 +855,7 @@ impl PendingBinding {
 }
 
 /// The host OS, which resolves `secondary-` in a shortcut.
-fn host_os() -> OperatingSystem {
+pub(super) fn host_os() -> OperatingSystem {
     if cfg!(target_os = "macos") {
         OperatingSystem::Mac
     } else if cfg!(target_os = "windows") {

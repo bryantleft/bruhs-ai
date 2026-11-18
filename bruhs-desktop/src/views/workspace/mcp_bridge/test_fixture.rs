@@ -8,7 +8,7 @@ pub(super) fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut Visua
     // executor's virtual clock. The fixture itself does not open an IPC socket.
     cx.executor().allow_parking();
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         crate::theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state"));
     });
@@ -17,7 +17,7 @@ pub(super) fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut Visua
     let (_, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *capture.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = cell.borrow().clone().expect("workspace entity");
     workspace.update_in(cx, |workspace, _, cx| {

@@ -9,10 +9,10 @@
 
 use bruhs_core::preview::LocalServer;
 use bruhs_models::logic::preview::normalize_preview_url;
+use bruhs_ui::input::{Input, InputEvent, InputState};
+use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::zoom::px;
 
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{assets, theme};
@@ -120,8 +120,8 @@ mod host {
             bounds: gpui::Bounds<gpui::Pixels>,
         ) -> Result<(), String> {
             // The page's content zooms with the window's (see
-            // `gpui_component::zoom`); its frame is already in window points.
-            let zoom = gpui_component::zoom::zoom();
+            // `bruhs_ui::zoom`); its frame is already in window points.
+            let zoom = bruhs_ui::zoom::zoom();
             let key = (
                 f32::from(bounds.origin.x),
                 f32::from(bounds.origin.y),
@@ -580,7 +580,8 @@ impl PreviewPanelView {
                     .flex_1()
                     .min_w_0()
                     .h(px(28.0))
-                    .px_2()
+                    // Web: the Input's `px-2.5`, less the 1px border.
+                    .px(px(9.0))
                     .rounded(px(4.0))
                     .bg(theme::longan_900())
                     .border_1()
@@ -591,6 +592,7 @@ impl PreviewPanelView {
                         Input::new(&self.url_input)
                             .aria_label("Preview URL")
                             .appearance(false)
+                            .px_0()
                             .bordered(false)
                             .focus_bordered(false)
                             .cleanable(false)

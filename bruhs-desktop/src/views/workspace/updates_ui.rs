@@ -13,7 +13,7 @@ use bruhs_models::updates::{
     RUN_POLL_INTERVAL_MS, SUCCESS_VISIBLE_MS,
 };
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::collections::HashSet;
 
 const RESTART_CONFIRM_LABEL: &str = "Restart to update";
@@ -612,7 +612,7 @@ impl Workspace {
         )
     }
 
-    fn activate_sidebar_update(
+    pub(super) fn activate_sidebar_update(
         &mut self,
         can_update: bool,
         window: &mut Window,

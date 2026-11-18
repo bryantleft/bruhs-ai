@@ -4,12 +4,12 @@
 //! with the Settled fold, and the footer view switcher. Sizes are the web's
 //! Tailwind values in px; colours are the same bruhs tokens.
 
+use bruhs_ui::input::{Input, InputEvent, InputState, TextareaState};
+use bruhs_ui::scroll::ScrollableElement;
+use bruhs_ui::zoom::px;
+use bruhs_ui::ActiveTheme;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState, TextareaState};
-use gpui_component::scroll::ScrollableElement;
-use gpui_component::zoom::px;
-use gpui_component::ActiveTheme;
 use std::rc::Rc;
 
 mod menu_popover;
@@ -49,7 +49,7 @@ fn status_pulse_opacity(progress: f32) -> f32 {
 }
 /// Matches the chat and panel headers.
 pub const SIDEBAR_HEADER_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
-/// Room for the macOS traffic lights (gpui-component puts them at x=12).
+/// Room for the macOS traffic lights (`bruhs_ui::TitleBar` puts them at x=12).
 #[cfg(target_os = "macos")]
 pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 88.0;
 #[cfg(not(target_os = "macos"))]
@@ -401,6 +401,8 @@ impl Workspace {
                             Input::new(&self.sidebar_search)
                                 .aria_label("Search threads and projects")
                                 .appearance(false)
+                                // Web: a bare <input> after the icon's gap.
+                                .px_0()
                                 .bordered(false)
                                 .focus_bordered(false)
                                 .cleanable(false)
@@ -1047,7 +1049,7 @@ impl Workspace {
                     return;
                 }
                 // Tab is routed by the workspace keystroke interceptor, which
-                // runs before gpui-component's Tab binding (`key_decision`).
+                // runs before the window root's Tab binding (`key_decision`).
                 let current = enabled
                     .iter()
                     .position(|item| this.thread_menu_items[item.slot()].is_focused(window));

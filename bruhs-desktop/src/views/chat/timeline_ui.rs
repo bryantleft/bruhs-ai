@@ -9,13 +9,13 @@ use crate::views::copy_feedback::CopyFeedback;
 use bruhs_models::logic::context_meter::format_tokens;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_ui::press::on_press_view;
+use bruhs_ui::zoom::px;
 use chrono::{Local, TimeZone};
-use gpui_component::zoom::px;
 use std::time::Duration;
 
+use bruhs_ui::tooltip::Tooltip;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::tooltip::Tooltip;
 
 #[cfg(any(test, debug_assertions))]
 use super::TurnState;

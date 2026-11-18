@@ -60,6 +60,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         bruhs_core::database_tools::run_mcp_helper().await?;
         return Ok(());
     }
+    if bruhs_core::website_reader::is_mcp_helper() {
+        bruhs_core::website_reader::run_mcp_helper().await?;
+        return Ok(());
+    }
     if bruhs_core::artifact_tools::is_mcp_helper() {
         bruhs_core::artifact_tools::run_mcp_helper().await?;
         return Ok(());

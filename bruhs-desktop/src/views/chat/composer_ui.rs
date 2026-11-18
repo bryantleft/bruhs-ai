@@ -6,12 +6,12 @@
 //! context strip under it, and the `/ commands · @ files · ⌘K palette`
 //! hints. Sizes are the web's Tailwind values in px.
 
+use bruhs_ui::input::{Input, Textarea};
+use bruhs_ui::scroll::ScrollableElement as _;
+use bruhs_ui::tooltip::Tooltip;
+use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, Textarea};
-use gpui_component::scroll::ScrollableElement as _;
-use gpui_component::tooltip::Tooltip;
-use gpui_component::zoom::px;
 
 use bruhs_models::logic::commands::COMPACT_UNAVAILABLE;
 use bruhs_models::logic::composer_text::{exceeds_message_limit_with, MESSAGE_LIMIT_HINT};
@@ -65,6 +65,11 @@ pub const CHAT_COMPOSER_RING_OPACITY: f32 = 0.10;
 pub const CHAT_COMPOSER_FOCUS_RING_OPACITY: f32 = 0.40;
 pub const CHAT_COMPOSER_INPUT_X_PADDING_PX: f32 = 12.0;
 pub const CHAT_COMPOSER_INPUT_TOP_PADDING_PX: f32 = 10.0;
+/// Web `pb-1`.
+pub const CHAT_COMPOSER_INPUT_BOTTOM_PADDING_PX: f32 = 4.0;
+/// The composer surface's border. The web rings it with an inset ring, which
+/// takes no space, so the field's padding gives this back.
+const CHAT_COMPOSER_SURFACE_BORDER_PX: f32 = 1.0;
 pub const CHAT_COMPOSER_FOOTER_X_PADDING_PX: f32 = 12.0;
 pub const CHAT_COMPOSER_FOOTER_BOTTOM_PADDING_PX: f32 = 12.0;
 pub const CHAT_COMPOSER_FOOTER_GAP_PX: f32 = 8.0;
@@ -401,8 +406,8 @@ fn context_ring(reading: ContextReading) -> impl IntoElement {
             // Window points per ring unit: the painted box already carries the
             // zoom, so these lengths must not be zoomed again.
             let scale = f32::from(bounds.size.width) / CONTEXT_RING_BOX_UNITS;
-            let radius = gpui_component::zoom::window_px(CONTEXT_RING_RADIUS_UNITS * scale);
-            let stroke = gpui_component::zoom::window_px(CONTEXT_RING_STROKE_UNITS * scale);
+            let radius = bruhs_ui::zoom::window_px(CONTEXT_RING_RADIUS_UNITS * scale);
+            let stroke = bruhs_ui::zoom::window_px(CONTEXT_RING_STROKE_UNITS * scale);
             let center = bounds.center();
             let at = |turn: f32| {
                 let angle = (turn - 0.25) * std::f32::consts::TAU;
@@ -767,7 +772,8 @@ impl ChatView {
             .h(px(theme::CONTROL_XS_PX))
             .flex()
             .items_center()
-            .px_1()
+            // Web `px-1` inside an inset ring; here the 1px border takes one.
+            .px(px(3.0))
             .rounded(px(4.0))
             .border_1()
             .border_color(theme::persimmon_400().opacity(0.40))
@@ -778,6 +784,7 @@ impl ChatView {
             .child(
                 Input::new(&rename.input)
                     .appearance(false)
+                    .px_0()
                     .aria_label("Thread title"),
             )
             .into_any_element()
@@ -1056,8 +1063,6 @@ impl ChatView {
         // own — `render_composer_surface` rings the whole composer instead.
         div()
             .debug_selector(|| "desktop-composer-input".to_string())
-            .px(px(CHAT_COMPOSER_INPUT_X_PADDING_PX))
-            .pt(px(CHAT_COMPOSER_INPUT_TOP_PADDING_PX))
             .capture_action(cx.listener(|this, _: &InputMoveUp, window, cx| {
                 if this.handle_composer_hint_key("up", window, cx) {
                     cx.stop_propagation();
@@ -1097,6 +1102,18 @@ impl ChatView {
                 Textarea::new(&self.input_state)
                     .aria_label("Message")
                     .appearance(false)
+                    // Web `px-3 pt-2.5 pb-1`, inside the textarea: text
+                    // scrolls through it and the scrollbar stays clear of
+                    // the text.
+                    .editor_padding(Edges {
+                        top: px(CHAT_COMPOSER_INPUT_TOP_PADDING_PX
+                            - CHAT_COMPOSER_SURFACE_BORDER_PX),
+                        right: px(CHAT_COMPOSER_INPUT_X_PADDING_PX
+                            - CHAT_COMPOSER_SURFACE_BORDER_PX),
+                        bottom: px(CHAT_COMPOSER_INPUT_BOTTOM_PADDING_PX),
+                        left: px(CHAT_COMPOSER_INPUT_X_PADDING_PX
+                            - CHAT_COMPOSER_SURFACE_BORDER_PX),
+                    })
                     .bordered(false)
                     .focus_bordered(false)
                     .font_family(theme::CODE_FONT_FAMILY)
@@ -3370,8 +3387,8 @@ mod tests {
         use gpui::AppContext as _;
 
         cx.update(|cx| {
-            gpui_component::init(cx);
-            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            bruhs_ui::init(cx);
+            bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
             crate::theme::apply_bruhs_theme(cx);
             cx.set_global(crate::app_state::DesktopState::new().unwrap());
         });

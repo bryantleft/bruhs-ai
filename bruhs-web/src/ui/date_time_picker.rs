@@ -31,6 +31,11 @@ pub fn DateTimePicker(
     on_change: Option<Callback<String>>,
     #[prop(optional, into)] disabled: Signal<bool>,
     #[prop(optional, into)] class: String,
+    /// The field's name ("Event start"). The trigger announces it with
+    /// the chosen date, as the desktop's picker does; without it the
+    /// trigger is named by its date alone.
+    #[prop(optional, into)]
+    label: Option<String>,
 ) -> impl IntoView {
     let open = RwSignal::new(false);
 
@@ -176,6 +181,7 @@ pub fn DateTimePicker(
             <button
                 type="button"
                 class=final_class
+                aria-label=move || label.clone().map(|label| format!("{label}, {}", trigger_label()))
                 disabled=move || disabled.get()
                 on:click=move |_| {
                     if !disabled.get_untracked() {

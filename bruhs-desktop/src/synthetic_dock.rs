@@ -4,15 +4,15 @@ use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButton
 use crate::views::{meeting_dock, meetings_hub::MeetingsHub};
 use crate::{assets, theme};
 use bruhs_ui::press::on_press_view;
+use bruhs_ui::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::zoom::px;
 use std::sync::Arc;
 
 pub fn run() {
     gpui_platform::application().with_assets(assets::DesktopAssets).run(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.text_system().add_fonts(assets::embedded_fonts()).expect("fixture fonts");
         let runtime = Arc::new(tokio::runtime::Runtime::new().expect("fixture runtime"));

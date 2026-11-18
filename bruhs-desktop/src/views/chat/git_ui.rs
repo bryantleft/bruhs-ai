@@ -3,7 +3,7 @@
 use super::*;
 use bruhs_models::logic::run_place::WorkspaceChoice;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 pub(super) const GIT_BRANCH_EMPTY_LABEL: &str = "No branches";
 pub(super) const GIT_BRANCH_CURRENT_MARK: &str = assets::CHECK_ICON_PATH;
 pub(super) const GIT_BRANCH_MENU_MIN_WIDTH_PX: f32 = 200.0;

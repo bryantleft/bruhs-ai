@@ -4,7 +4,7 @@ use super::*;
 pub(super) use crate::views::meetings_hub::local_offset_minutes_east;
 use bruhs_models::num::{ToFloatLossy, ToIntSaturating};
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::collections::HashMap;
 
 impl DesktopTimegridDrag {
@@ -274,6 +274,12 @@ pub(super) fn calendar_month_days<'a>(
     days
 }
 
+/// Where the Week and Day grid opens: two hours before the current hour, as
+/// web's `TimeGridView` does.
+pub(super) fn timegrid_opening_scroll_px(hour: u32) -> f32 {
+    (hour.to_f32_lossy() - 2.0).max(0.0) * DESKTOP_HOUR_ROW_PX
+}
+
 pub(super) fn timegrid_total_height_px() -> f32 {
     DESKTOP_HOUR_ROW_PX * 24.0
 }
@@ -499,35 +505,45 @@ pub(super) const CALENDAR_HEADER_MIN_HEIGHT_PX: f32 = 40.0;
 pub(super) const CALENDAR_HEADER_X_PADDING_PX: f32 = 16.0;
 pub(super) const CALENDAR_HEADER_Y_PADDING_PX: f32 = 8.0;
 pub(super) const CALENDAR_HEADER_BORDER_OPACITY: f32 = 0.40;
-pub(super) const CALENDAR_HEADER_TITLE_MIN_WIDTH_PX: f32 = 180.0;
-pub(super) const CALENDAR_HEADER_TITLE_TEXT_SIZE_PX: f32 = 12.0;
+/// Web `text-body-sm`.
+pub(super) const CALENDAR_HEADER_TITLE_TEXT_SIZE_PX: f32 = 13.0;
 pub(super) const CALENDAR_HEADER_TITLE_GROUP_GAP_PX: f32 = 12.0;
 pub(super) const CALENDAR_NAV_GROUP_GAP_PX: f32 = 4.0;
 pub(super) const CALENDAR_NAV_BUTTON_SIZE_PX: f32 = theme::CONTROL_PX;
 pub(super) const CALENDAR_CONTROL_RADIUS_PX: f32 = 8.0;
-pub(super) const CALENDAR_NAV_TEXT_SIZE_PX: f32 = 12.0;
+pub(super) const CALENDAR_NAV_TEXT_SIZE_PX: f32 = 13.0;
 pub(super) const CALENDAR_NAV_HOVER_BG_OPACITY: f32 = 0.40;
-pub(super) const CALENDAR_TODAY_X_PADDING_PX: f32 = 8.0;
-pub(super) const CALENDAR_TODAY_Y_PADDING_PX: f32 = 2.0;
-pub(super) const CALENDAR_TODAY_TEXT_SIZE_PX: f32 = 12.0;
+/// Web `px-2` less the 1px border that stands in for its focus outline.
+pub(super) const CALENDAR_TODAY_X_PADDING_PX: f32 = 7.0;
+/// Web `text-label`.
+pub(super) const CALENDAR_TODAY_TEXT_SIZE_PX: f32 = 13.0;
 pub(super) const CALENDAR_ACTION_GROUP_GAP_PX: f32 = 8.0;
 pub(super) const CALENDAR_MODE_SWITCHER_GAP_PX: f32 = 2.0;
-pub(super) const CALENDAR_MODE_SWITCHER_PADDING_PX: f32 = 2.0;
+/// Web `p-0.5` less the 1px border that stands in for its inset ring.
+pub(super) const CALENDAR_MODE_SWITCHER_PADDING_PX: f32 = 1.0;
 pub(super) const CALENDAR_MODE_SWITCHER_BORDER_OPACITY: f32 = 0.60;
 pub(super) const CALENDAR_MODE_SWITCHER_BG_OPACITY: f32 = 0.40;
-pub(super) const CALENDAR_MODE_ACTIVE_BORDER_OPACITY: f32 = 0.20;
+pub(super) const CALENDAR_MODE_ACTIVE_BORDER_OPACITY: f32 = 0.30;
 pub(super) const CALENDAR_MODE_ACTIVE_BG_OPACITY: f32 = 0.15;
-pub(super) const CALENDAR_MODE_INACTIVE_OPACITY: f32 = 0.0;
 pub(super) const CALENDAR_MODE_HOVER_BG_OPACITY: f32 = 0.40;
-pub(super) const CALENDAR_MODE_X_PADDING_PX: f32 = 8.0;
-pub(super) const CALENDAR_MODE_Y_PADDING_PX: f32 = 2.0;
-pub(super) const CALENDAR_MODE_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const CALENDAR_NEW_EVENT_X_PADDING_PX: f32 = 10.0;
-pub(super) const CALENDAR_NEW_EVENT_Y_PADDING_PX: f32 = 4.0;
+/// Web `min-h-[28px]`.
+pub(super) const CALENDAR_MODE_HEIGHT_PX: f32 = theme::CONTROL_SM_PX;
+/// Web `px-2` less the 1px border.
+pub(super) const CALENDAR_MODE_X_PADDING_PX: f32 = 7.0;
+/// Web `text-label`.
+pub(super) const CALENDAR_MODE_TEXT_SIZE_PX: f32 = 13.0;
+/// Web `px-2.5 py-1` less the 1px border that stands in for its inset ring;
+/// Schedule uses the same.
+pub(super) const CALENDAR_NEW_EVENT_X_PADDING_PX: f32 = 9.0;
+pub(super) const CALENDAR_NEW_EVENT_Y_PADDING_PX: f32 = 3.0;
 pub(super) const CALENDAR_NEW_EVENT_BORDER_OPACITY: f32 = 0.20;
 pub(super) const CALENDAR_NEW_EVENT_BG_OPACITY: f32 = 0.15;
 pub(super) const CALENDAR_NEW_EVENT_HOVER_BG_OPACITY: f32 = 0.25;
-pub(super) const CALENDAR_NEW_EVENT_TEXT_SIZE_PX: f32 = 12.0;
+/// Web `text-body-sm`; Schedule uses the same.
+pub(super) const CALENDAR_NEW_EVENT_TEXT_SIZE_PX: f32 = 13.0;
+/// Schedule: web `inset-ring-blueberry-500/20`, `hover:bg-blueberry-500/10`.
+pub(super) const CALENDAR_SCHEDULE_BORDER_OPACITY: f32 = 0.20;
+pub(super) const CALENDAR_SCHEDULE_HOVER_BG_OPACITY: f32 = 0.10;
 pub(super) const CALENDAR_MONTH_TODAY_SIZE_PX: f32 = 20.0;
 pub(super) const CALENDAR_MONTH_TODAY_RADIUS_PX: f32 = 999.0;
 pub(super) const CALENDAR_MONTH_CELL_PADDING_PX: f32 = 6.0;
@@ -536,7 +552,8 @@ pub(super) const CALENDAR_MONTH_CELL_BORDER_OPACITY: f32 = 0.30;
 pub(super) const CALENDAR_WEEKDAY_X_PADDING_PX: f32 = 8.0;
 pub(super) const CALENDAR_WEEKDAY_Y_PADDING_PX: f32 = 6.0;
 pub(super) const CALENDAR_WEEKDAY_TEXT_SIZE_PX: f32 = 12.0;
-pub(super) const CALENDAR_DATE_TEXT_SIZE_PX: f32 = 12.0;
+/// Web `text-label`.
+pub(super) const CALENDAR_DATE_TEXT_SIZE_PX: f32 = 13.0;
 pub(super) const CALENDAR_PILL_DOT_SIZE_PX: f32 = 6.0;
 pub(super) const CALENDAR_PILL_DOT_RADIUS_PX: f32 = 999.0;
 pub(super) const CALENDAR_PILL_TEXT_SIZE_PX: f32 = 12.0;
@@ -545,7 +562,8 @@ pub(super) const CALENDAR_TIMEGRID_HEADER_X_PADDING_PX: f32 = 8.0;
 pub(super) const CALENDAR_TIMEGRID_HEADER_Y_PADDING_PX: f32 = 6.0;
 pub(super) const CALENDAR_TIMEGRID_HEADER_BORDER_OPACITY: f32 = 0.40;
 pub(super) const CALENDAR_TIMEGRID_COLUMN_BORDER_OPACITY: f32 = 0.30;
-pub(super) const CALENDAR_TIMEGRID_HEADER_TEXT_SIZE_PX: f32 = 12.0;
+/// Web `text-label`.
+pub(super) const CALENDAR_TIMEGRID_HEADER_TEXT_SIZE_PX: f32 = 13.0;
 pub(super) const CALENDAR_TIMEGRID_HOUR_X_PADDING_PX: f32 = 6.0;
 pub(super) const CALENDAR_TIMEGRID_HOUR_TOP_PADDING_PX: f32 = 2.0;
 pub(super) const CALENDAR_TIMEGRID_HOUR_LABEL_BORDER_OPACITY: f32 = 0.40;
@@ -578,6 +596,9 @@ impl Workspace {
         mode: DesktopCalendarMode,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.calendar_mode != mode {
+            self.calendar_timegrid_autoscroll.set(true);
+        }
         self.calendar_mode = mode;
         self.persist_and_notify(cx);
     }
@@ -677,8 +698,7 @@ impl Workspace {
             .as_ref()
             .filter(|state| state.event_id == payload.event_id && state.kind == payload.kind)
             .map_or(0.0, |state| state.grab_offset_y_px);
-        let pointer_y_px =
-            gpui_component::zoom::css_px(drag.event.position.y - drag.bounds.origin.y);
+        let pointer_y_px = bruhs_ui::zoom::css_px(drag.event.position.y - drag.bounds.origin.y);
         let changed = self
             .calendar_events
             .iter_mut()
@@ -779,6 +799,47 @@ impl Workspace {
     }
 
     pub(super) fn render_calendar_header(&self, cx: &Context<'_, Self>) -> Div {
+        // Web `calendar_page.rs`: a body-sm title, then ‹ Today › as 32px
+        // text buttons; on the right Schedule, the Day/Week/Month group and
+        // + New. Borders stand in for web's inset rings, so each control
+        // gives up 1px of padding to keep web's size.
+        let nav_glyph = |id: &'static str,
+                         selector: &'static str,
+                         label: &'static str,
+                         glyph: &'static str,
+                         step: fn(&mut Self, &mut Context<'_, Self>)| {
+            div()
+                .id(id)
+                .debug_selector(move || selector.to_string())
+                .min_w(px(CALENDAR_NAV_BUTTON_SIZE_PX))
+                .min_h(px(CALENDAR_NAV_BUTTON_SIZE_PX))
+                .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
+                .flex()
+                .items_center()
+                .justify_center()
+                .text_size(px(CALENDAR_NAV_TEXT_SIZE_PX))
+                .font_family(theme::CODE_FONT_FAMILY)
+                .line_height(relative(1.5))
+                .text_color(theme::rambutan_500())
+                .tab_index(0)
+                .role(Role::Button)
+                .aria_label(label)
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .cursor_pointer()
+                .hover(|el| {
+                    el.bg(theme::longan_800().opacity(CALENDAR_NAV_HOVER_BG_OPACITY))
+                        .text_color(theme::rambutan_300())
+                })
+                .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
+                .map(|el| {
+                    on_press_view(el, cx, move |this, _window, cx| {
+                        step(this, cx);
+                    })
+                })
+                .child(glyph)
+        };
         div()
             .min_h(px(CALENDAR_HEADER_MIN_HEIGHT_PX))
             .px(px(CALENDAR_HEADER_X_PADDING_PX))
@@ -793,16 +854,17 @@ impl Workspace {
             .flex_shrink_0()
             .child(
                 div()
+                    .min_w_0()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(CALENDAR_HEADER_TITLE_GROUP_GAP_PX))
                     .child(
                         div()
-                            .min_w(px(CALENDAR_HEADER_TITLE_MIN_WIDTH_PX))
                             .debug_selector(|| "desktop-calendar-title".to_string())
                             .text_size(px(CALENDAR_HEADER_TITLE_TEXT_SIZE_PX))
-                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                            .font_weight(FontWeight::MEDIUM)
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_400())
                             .child(self.calendar_title()),
                     )
@@ -811,55 +873,27 @@ impl Workspace {
                             .flex()
                             .items_center()
                             .gap(px(CALENDAR_NAV_GROUP_GAP_PX))
-                            .child(
-                                div()
-                                    .id("calendar-prev")
-                                    .debug_selector(|| "desktop-calendar-prev".to_string())
-                                    .size(px(CALENDAR_NAV_BUTTON_SIZE_PX))
-                                    .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(px(CALENDAR_NAV_TEXT_SIZE_PX))
-                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                    .text_color(theme::rambutan_500())
-                                    .tab_index(0)
-                                    .role(Role::Button)
-                                    .aria_label(CALENDAR_PREVIOUS_LABEL)
-                                    .border_1()
-                                    .border_color(gpui::transparent_black())
-                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                    .cursor_pointer()
-                                    .hover(|el| {
-                                        el.bg(theme::longan_800()
-                                            .opacity(CALENDAR_NAV_HOVER_BG_OPACITY))
-                                            .text_color(theme::rambutan_300())
-                                    })
-                                    .tooltip(|window, cx| {
-                                        Tooltip::new(CALENDAR_PREVIOUS_LABEL).build(window, cx)
-                                    })
-                                    .map(|el| {
-                                        on_press_view(el, cx, |this, _window, cx| {
-                                            this.calendar_prev(cx);
-                                        })
-                                    })
-                                    .child(
-                                        svg()
-                                            .path(assets::CHEVRON_LEFT_ICON_PATH)
-                                            .size(px(14.0))
-                                            .text_color(theme::rambutan_400()),
-                                    ),
-                            )
+                            .child(nav_glyph(
+                                "calendar-prev",
+                                "desktop-calendar-prev",
+                                CALENDAR_PREVIOUS_LABEL,
+                                "‹",
+                                Self::calendar_prev,
+                            ))
                             .child(
                                 div()
                                     .id("calendar-today")
                                     .debug_selector(|| "desktop-calendar-today".to_string())
+                                    .min_h(px(CALENDAR_NAV_BUTTON_SIZE_PX))
+                                    .flex()
+                                    .items_center()
+                                    .justify_center()
                                     .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
                                     .px(px(CALENDAR_TODAY_X_PADDING_PX))
-                                    .py(px(CALENDAR_TODAY_Y_PADDING_PX))
                                     .text_size(px(CALENDAR_TODAY_TEXT_SIZE_PX))
-                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_family(theme::UI_FONT_FAMILY)
                                     .font_weight(FontWeight::MEDIUM)
+                                    .line_height(relative(1.5))
                                     .text_color(theme::rambutan_400())
                                     .tab_index(0)
                                     .role(Role::Button)
@@ -880,66 +914,54 @@ impl Workspace {
                                     })
                                     .child("Today"),
                             )
-                            .child(
-                                div()
-                                    .id("calendar-next")
-                                    .debug_selector(|| "desktop-calendar-next".to_string())
-                                    .size(px(CALENDAR_NAV_BUTTON_SIZE_PX))
-                                    .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
-                                    .flex()
-                                    .items_center()
-                                    .justify_center()
-                                    .text_size(px(CALENDAR_NAV_TEXT_SIZE_PX))
-                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
-                                    .text_color(theme::rambutan_500())
-                                    .tab_index(0)
-                                    .role(Role::Button)
-                                    .aria_label(CALENDAR_NEXT_LABEL)
-                                    .border_1()
-                                    .border_color(gpui::transparent_black())
-                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                    .cursor_pointer()
-                                    .hover(|el| {
-                                        el.bg(theme::longan_800()
-                                            .opacity(CALENDAR_NAV_HOVER_BG_OPACITY))
-                                            .text_color(theme::rambutan_300())
-                                    })
-                                    .tooltip(|window, cx| {
-                                        Tooltip::new(CALENDAR_NEXT_LABEL).build(window, cx)
-                                    })
-                                    .map(|el| {
-                                        on_press_view(el, cx, |this, _window, cx| {
-                                            this.calendar_next(cx);
-                                        })
-                                    })
-                                    .child(
-                                        svg()
-                                            .path(assets::CHEVRON_RIGHT_ICON_PATH)
-                                            .size(px(14.0))
-                                            .text_color(theme::rambutan_400()),
-                                    ),
-                            ),
+                            .child(nav_glyph(
+                                "calendar-next",
+                                "desktop-calendar-next",
+                                CALENDAR_NEXT_LABEL,
+                                "›",
+                                Self::calendar_next,
+                            )),
                     ),
             )
             .child(
                 div()
                     .flex()
+                    .flex_wrap()
                     .items_center()
                     .gap(px(CALENDAR_ACTION_GROUP_GAP_PX))
                     .child(
-                        web_button(
-                            "calendar-scheduling",
-                            WebButtonVariant::Outline,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("Smart scheduling")
-                        .child("Schedule")
-                        .on_click(cx.listener(
-                            |this, _event, window, cx| {
-                                this.toggle_scheduling_panel(window, cx);
-                            },
-                        )),
+                        div()
+                            .id("calendar-scheduling")
+                            .debug_selector(|| "desktop-calendar-scheduling".to_string())
+                            .min_h(px(CALENDAR_NAV_BUTTON_SIZE_PX))
+                            .flex()
+                            .items_center()
+                            .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
+                            .px(px(CALENDAR_NEW_EVENT_X_PADDING_PX))
+                            .py(px(CALENDAR_NEW_EVENT_Y_PADDING_PX))
+                            .text_size(px(CALENDAR_NEW_EVENT_TEXT_SIZE_PX))
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .line_height(relative(1.5))
+                            .text_color(theme::blueberry_300())
+                            .border_1()
+                            .border_color(
+                                theme::blueberry_500().opacity(CALENDAR_SCHEDULE_BORDER_OPACITY),
+                            )
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .aria_label("Schedule")
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .cursor_pointer()
+                            .hover(|el| {
+                                el.bg(theme::blueberry_500()
+                                    .opacity(CALENDAR_SCHEDULE_HOVER_BG_OPACITY))
+                            })
+                            .map(|el| {
+                                on_press_view(el, cx, |this, window, cx| {
+                                    this.toggle_scheduling_panel(window, cx);
+                                })
+                            })
+                            .child("Schedule"),
                     )
                     .child(
                         div()
@@ -947,7 +969,7 @@ impl Workspace {
                             .items_center()
                             .gap(px(CALENDAR_MODE_SWITCHER_GAP_PX))
                             .id("calendar-view-modes")
-                            .role(Role::TabList)
+                            .role(Role::Group)
                             .aria_label("Calendar view")
                             .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
                             .border_1()
@@ -966,6 +988,9 @@ impl Workspace {
                         div()
                             .id("calendar-new-event")
                             .debug_selector(|| "desktop-calendar-new-event".to_string())
+                            .min_h(px(CALENDAR_NAV_BUTTON_SIZE_PX))
+                            .flex()
+                            .items_center()
                             .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
                             .border_1()
                             .border_color(
@@ -975,8 +1000,8 @@ impl Workspace {
                             .px(px(CALENDAR_NEW_EVENT_X_PADDING_PX))
                             .py(px(CALENDAR_NEW_EVENT_Y_PADDING_PX))
                             .text_size(px(CALENDAR_NEW_EVENT_TEXT_SIZE_PX))
-                            .font_family(theme::UI_SMALL_FONT_FAMILY)
-                            .font_weight(FontWeight::MEDIUM)
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .line_height(relative(1.5))
                             .text_color(theme::persimmon_200())
                             .tab_index(0)
                             .role(Role::Button)
@@ -1000,6 +1025,9 @@ impl Workspace {
             )
     }
 
+    /// Web's mode pill: blueberry marks the selected view (persimmon is the
+    /// brand's), 28px tall, announced as a pressed toggle like web's
+    /// `aria-pressed`.
     pub(super) fn render_calendar_mode_button(
         &self,
         mode: DesktopCalendarMode,
@@ -1009,32 +1037,38 @@ impl Workspace {
         div()
             .id(("calendar-mode", mode as usize))
             .debug_selector(move || format!("desktop-calendar-mode-{}", mode.as_str()))
+            .min_h(px(CALENDAR_MODE_HEIGHT_PX))
+            .flex()
+            .items_center()
+            .justify_center()
             .rounded(px(CALENDAR_CONTROL_RADIUS_PX))
             .border_1()
             .border_color(if is_active {
-                theme::persimmon_400().opacity(CALENDAR_MODE_ACTIVE_BORDER_OPACITY)
+                theme::blueberry_500().opacity(CALENDAR_MODE_ACTIVE_BORDER_OPACITY)
             } else {
-                theme::longan_900().opacity(CALENDAR_MODE_INACTIVE_OPACITY)
+                gpui::transparent_black()
             })
-            .bg(if is_active {
-                theme::persimmon_500().opacity(CALENDAR_MODE_ACTIVE_BG_OPACITY)
-            } else {
-                theme::longan_900().opacity(CALENDAR_MODE_INACTIVE_OPACITY)
+            .when(is_active, |el| {
+                el.bg(theme::blueberry_500().opacity(CALENDAR_MODE_ACTIVE_BG_OPACITY))
             })
             .px(px(CALENDAR_MODE_X_PADDING_PX))
-            .py(px(CALENDAR_MODE_Y_PADDING_PX))
             .text_size(px(CALENDAR_MODE_TEXT_SIZE_PX))
-            .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .font_family(theme::UI_FONT_FAMILY)
             .font_weight(FontWeight::MEDIUM)
+            .line_height(relative(1.5))
             .text_color(if is_active {
-                theme::persimmon_200()
+                theme::blueberry_300()
             } else {
                 theme::rambutan_500()
             })
             .tab_index(0)
-            .role(Role::Tab)
+            .role(Role::Button)
             .aria_label(mode.label())
-            .aria_selected(is_active)
+            .aria_toggled(if is_active {
+                Toggled::True
+            } else {
+                Toggled::False
+            })
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .when(!is_active, |el| {
@@ -1087,6 +1121,7 @@ impl Workspace {
                     .text_size(px(CALENDAR_WEEKDAY_TEXT_SIZE_PX))
                     .font_family(theme::UI_SMALL_FONT_FAMILY)
                     .font_weight(FontWeight::MEDIUM)
+                    .line_height(relative(1.5))
                     .text_color(theme::rambutan_500())
                     .flex()
                     .justify_center()
@@ -1205,21 +1240,22 @@ impl Workspace {
                 .items_center()
                 .justify_center()
                 .text_size(px(CALENDAR_DATE_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
+                .font_family(theme::UI_FONT_FAMILY)
                 .font_weight(FontWeight::MEDIUM)
+                .line_height(relative(1.5))
                 .text_color(theme::longan_950())
-                .child(date.day().to_string())
-        } else if in_month {
-            div()
-                .text_size(px(CALENDAR_DATE_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .text_color(theme::rambutan_300())
                 .child(date.day().to_string())
         } else {
             div()
                 .text_size(px(CALENDAR_DATE_TEXT_SIZE_PX))
-                .font_family(theme::UI_SMALL_FONT_FAMILY)
-                .text_color(theme::rambutan_500())
+                .font_family(theme::UI_FONT_FAMILY)
+                .font_weight(FontWeight::MEDIUM)
+                .line_height(relative(1.5))
+                .text_color(if in_month {
+                    theme::rambutan_300()
+                } else {
+                    theme::rambutan_500()
+                })
                 .child(date.day().to_string())
         };
 
@@ -1250,7 +1286,8 @@ impl Workspace {
             .min_w_0()
             .min_h_0()
             .overflow_hidden()
-            .p(px(CALENDAR_MONTH_CELL_PADDING_PX))
+            // Web `p-1.5`; the 1px focus border takes the rest.
+            .p(px(CALENDAR_MONTH_CELL_PADDING_PX - 1.0))
             .relative()
             .border_1()
             .border_color(gpui::transparent_black())
@@ -1294,6 +1331,8 @@ impl Workspace {
                         )
                         .text_size(px(CALENDAR_PILL_TEXT_SIZE_PX))
                         .font_family(theme::UI_SMALL_FONT_FAMILY)
+                        .font_weight(FontWeight::MEDIUM)
+                        .line_height(relative(1.5))
                         .text_color(theme::rambutan_500())
                         .hover(|el| el.text_color(theme::rambutan_300()))
                         .child(format!("+{extra} more")),
@@ -1313,19 +1352,25 @@ impl Workspace {
         div()
             .id(("calendar-task-pill", element_key(&item.id)))
             .debug_selector(move || format!("desktop-calendar-task-pill-{debug_key}"))
-            .w_full()
             .min_w_0()
             .flex_shrink_0()
             .flex()
             .items_center()
             .gap_1()
+            // The 1px focus border bleeds into the cell's padding and the
+            // gap, like web's outline, so the text gets web's full width
+            // and rows keep web's 22px pitch.
+            .m(px(-1.0))
             .text_size(px(CALENDAR_PILL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .font_weight(FontWeight::MEDIUM)
+            .line_height(relative(1.5))
             .text_color(theme::rambutan_500())
             .italic()
             .tab_index(0)
             .role(Role::Button)
-            .aria_label(format!("Open task {}", item.title))
+            // Web: "Open task {title}, due this day".
+            .aria_label(format!("Open task {}, due this day", item.title))
             .border_1()
             .border_color(gpui::transparent_black())
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -1359,14 +1404,19 @@ impl Workspace {
         div()
             .id(("calendar-event-pill", element_key(&event.id)))
             .debug_selector(move || format!("desktop-calendar-event-pill-{debug_key}"))
-            .w_full()
             .min_w_0()
             .flex_shrink_0()
             .flex()
             .items_center()
             .gap_1()
+            // The 1px focus border bleeds into the cell's padding and the
+            // gap, like web's outline, so the text gets web's full width
+            // and rows keep web's 22px pitch.
+            .m(px(-1.0))
             .text_size(px(CALENDAR_PILL_TEXT_SIZE_PX))
             .font_family(theme::UI_SMALL_FONT_FAMILY)
+            .font_weight(FontWeight::MEDIUM)
+            .line_height(relative(1.5))
             .text_color(theme::rambutan_400())
             .tab_index(0)
             .role(Role::Button)
@@ -1405,6 +1455,12 @@ impl Workspace {
         let legacy = self.calendar_legacy_preparation.get();
         #[cfg(not(test))]
         let legacy = false;
+        if self.calendar_timegrid_autoscroll.replace(false) {
+            self.calendar_timegrid_scroll.set_offset(point(
+                px(0.0),
+                -px(timegrid_opening_scroll_px(Local::now().hour())),
+            ));
+        }
         let start = if columns == 7 {
             week_start(self.calendar_anchor)
         } else {
@@ -1417,8 +1473,13 @@ impl Workspace {
             .iter()
             .map(|date| {
                 let is_today = *date == today_date();
+                let header_date = *date;
+                // Web: `text-label`, centered, wrapping to "Sun" over "15"
+                // when seven columns share a narrow window.
                 div()
+                    .debug_selector(move || format!("desktop-calendar-week-header-{header_date}"))
                     .flex_1()
+                    .min_w_0()
                     .px(px(CALENDAR_TIMEGRID_HEADER_X_PADDING_PX))
                     .py(px(CALENDAR_TIMEGRID_HEADER_Y_PADDING_PX))
                     .border_l_1()
@@ -1426,14 +1487,15 @@ impl Workspace {
                         theme::longan_800().opacity(CALENDAR_TIMEGRID_COLUMN_BORDER_OPACITY),
                     )
                     .text_size(px(CALENDAR_TIMEGRID_HEADER_TEXT_SIZE_PX))
-                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                    .font_family(theme::UI_FONT_FAMILY)
+                    .font_weight(FontWeight::MEDIUM)
+                    .line_height(relative(1.5))
+                    .text_center()
                     .text_color(if is_today {
                         theme::persimmon_300()
                     } else {
                         theme::rambutan_400()
                     })
-                    .flex()
-                    .justify_center()
                     .child(format_day_header(*date))
                     .into_any_element()
             })
@@ -1492,24 +1554,31 @@ impl Workspace {
                     .children(header_cells),
             )
             .child(
-                div().flex_1().min_h_0().overflow_y_scrollbar().child(
-                    div()
-                        .h(px(timegrid_total_height_px()))
-                        .flex()
-                        .flex_row()
-                        .child(
-                            div()
-                                .w(px(CALENDAR_TIMEGRID_AXIS_WIDTH_PX))
-                                .flex_shrink_0()
-                                .border_r_1()
-                                .border_color(
-                                    theme::longan_800()
-                                        .opacity(CALENDAR_TIMEGRID_COLUMN_BORDER_OPACITY),
-                                )
-                                .children(hour_rows),
-                        )
-                        .children(day_columns),
-                ),
+                div()
+                    .id("calendar-timegrid-scroll")
+                    .flex_1()
+                    .min_h_0()
+                    .overflow_y_scroll()
+                    .track_scroll(&self.calendar_timegrid_scroll)
+                    .child(
+                        div()
+                            .h(px(timegrid_total_height_px()))
+                            .flex()
+                            .flex_row()
+                            .child(
+                                div()
+                                    .w(px(CALENDAR_TIMEGRID_AXIS_WIDTH_PX))
+                                    .flex_shrink_0()
+                                    .border_r_1()
+                                    .border_color(
+                                        theme::longan_800()
+                                            .opacity(CALENDAR_TIMEGRID_COLUMN_BORDER_OPACITY),
+                                    )
+                                    .children(hour_rows),
+                            )
+                            .children(day_columns),
+                    )
+                    .vertical_scrollbar(&self.calendar_timegrid_scroll),
             )
             .into_any_element()
     }
@@ -1681,7 +1750,7 @@ impl Workspace {
                         el.on_drag(
                             move_drag,
                             move |drag: &DesktopTimegridDrag, offset, _window, cx| {
-                                let grab_offset_y_px = gpui_component::zoom::css_px(offset.y);
+                                let grab_offset_y_px = bruhs_ui::zoom::css_px(offset.y);
                                 let _ = workspace.update(cx, |this, cx| {
                                     this.begin_timegrid_drag(drag, grab_offset_y_px, cx);
                                 });
@@ -1807,6 +1876,7 @@ impl Workspace {
             .id(id)
             .debug_selector(move || selector)
             .flex_shrink_0()
+            .m(px(-1.0))
             .tab_index(0)
             .role(Role::Button)
             .aria_label(label)
@@ -1978,6 +2048,21 @@ impl Workspace {
             )
             .children(rows);
         self.render_modal_shell(CALENDAR_DAY_LIST_LABEL, content, None, window, cx)
+    }
+}
+
+#[cfg(test)]
+mod timegrid_scroll_tests {
+    use super::timegrid_opening_scroll_px;
+
+    /// Web `TimeGridView`: the grid opens two hours before the current
+    /// hour, at 40px an hour, and never above midnight.
+    #[test]
+    fn the_time_grid_opens_two_hours_before_now_like_web() {
+        assert_eq!(timegrid_opening_scroll_px(0), 0.0);
+        assert_eq!(timegrid_opening_scroll_px(1), 0.0);
+        assert_eq!(timegrid_opening_scroll_px(7), 200.0);
+        assert_eq!(timegrid_opening_scroll_px(23), 840.0);
     }
 }
 

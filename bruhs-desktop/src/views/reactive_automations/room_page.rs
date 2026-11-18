@@ -26,7 +26,7 @@ use bruhs_models::logic::context_chip::{
     ContextChip,
 };
 use bruhs_ui::press::on_press_view;
-use gpui_component::tooltip::Tooltip;
+use bruhs_ui::tooltip::Tooltip;
 use std::cell::Cell;
 use std::collections::hash_map::Entry;
 

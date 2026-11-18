@@ -9,7 +9,7 @@
 use super::*;
 use bruhs_models::logic::workflow_history::UNDO;
 use bruhs_models::logic::workflow_review as review;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 /// Web `rounded-grape`.
 pub(in crate::views::workspace) const CARD_RADIUS_PX: f32 = 8.0;

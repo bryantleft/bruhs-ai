@@ -2,7 +2,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 pub(super) const EVENT_COLOR_OPTIONS: &[(&str, &str)] = &[
     ("persimmon", "Persimmon"),
     ("blueberry", "Blueberry"),
@@ -165,7 +165,8 @@ impl Workspace {
             cx,
         );
         if event.is_read_only() {
-            self.modal_start_focus_handle.focus(window, cx);
+            // Its fields are disabled: the first enabled control, as on the web.
+            self.focus_first_modal_tab_stop(window, cx);
         } else {
             self.focus_event_title_input(window, cx);
         }
@@ -728,6 +729,7 @@ impl Workspace {
                                 }),
                             ),
                     )
+                    .child(self.render_modal_content_start())
                     .child(
                         div()
                             .id("event-create-body")

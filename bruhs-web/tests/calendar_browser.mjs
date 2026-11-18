@@ -188,10 +188,18 @@ try {
     }
     // A month cell shows three lines and clips on compact widths; its day
     // number stays on top and opens every event and due task of that day.
+    // On touch the whole day is one target (tailwind.css makes its buttons
+    // pass taps through), so a tap on the day opens the list.
     async function openDay(iso) {
       const day = page.locator(`button[data-calendar-day="${iso}"]`);
-      await reachable(day, `the ${iso} day number`);
-      await day.click();
+      if (cell.hasTouch) {
+        const wholeDay = page.locator('[data-calendar-cell]').filter({ has: day });
+        await reachable(wholeDay, `the ${iso} day`);
+        await wholeDay.click();
+      } else {
+        await reachable(day, `the ${iso} day number`);
+        await day.click();
+      }
       await dayList().waitFor();
     }
     async function snapshot(name) {

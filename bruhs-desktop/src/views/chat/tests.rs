@@ -770,8 +770,8 @@ fn desktop_permission_prompt_approve_should_clear_inline_banner_like_web(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -782,7 +782,7 @@ fn desktop_permission_prompt_approve_should_clear_inline_banner_like_web(
     let (_root, cx) = cx.add_window_view(|window, cx| {
         let chat = cx.new(|cx| ChatView::new(window, cx));
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell
         .borrow()
@@ -850,8 +850,8 @@ fn finished_assistant(content: &str, tool_id: &str, secs: i64) -> Message {
 #[gpui::test]
 fn desktop_mention_file_should_insert_at_and_open_hints(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -865,7 +865,7 @@ fn desktop_mention_file_should_insert_at_and_open_hints(cx: &mut gpui::TestAppCo
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell.borrow().clone().expect("chat entity");
     cx.run_until_parked();
@@ -884,8 +884,8 @@ fn desktop_mention_file_should_insert_at_and_open_hints(cx: &mut gpui::TestAppCo
 #[gpui::test]
 fn desktop_hero_long_project_name_stays_inside_composer(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -902,7 +902,7 @@ fn desktop_hero_long_project_name_stays_inside_composer(cx: &mut gpui::TestAppCo
             );
             chat
         });
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     cx.run_until_parked();
     refresh_chat_test_window(cx);
@@ -968,8 +968,8 @@ fn group_models_keeps_provider_order() {
 #[gpui::test]
 fn desktop_model_picker_opens_from_chip_and_selects(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -985,7 +985,7 @@ fn desktop_model_picker_opens_from_chip_and_selects(cx: &mut gpui::TestAppContex
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell
         .borrow()
@@ -1037,8 +1037,8 @@ fn desktop_model_picker_opens_from_chip_and_selects(cx: &mut gpui::TestAppContex
 #[gpui::test]
 fn desktop_thread_rename_should_match_web_header(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state should initialize"));
     });
@@ -1051,7 +1051,7 @@ fn desktop_thread_rename_should_match_web_header(cx: &mut gpui::TestAppContext) 
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell.borrow().clone().expect("chat entity");
     // GPUI reports focus changes, such as leaving the field, only in an
@@ -1149,8 +1149,8 @@ fn should_fold_only_completed_non_latest_turns_with_activity() {
 #[gpui::test]
 fn desktop_turn_fold_collapses_tool_cards(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1172,7 +1172,7 @@ fn desktop_turn_fold_collapses_tool_cards(cx: &mut gpui::TestAppContext) {
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell
         .borrow()
@@ -1213,8 +1213,8 @@ fn desktop_turn_fold_collapses_tool_cards(cx: &mut gpui::TestAppContext) {
 #[gpui::test]
 fn desktop_tool_call_cards_expand_should_match_web_body_renderers(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1277,7 +1277,7 @@ fn desktop_tool_call_cards_expand_should_match_web_body_renderers(cx: &mut gpui:
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell
         .borrow()
@@ -1346,8 +1346,8 @@ fn desktop_thinking_and_usage_meta_should_match_web_interaction_flow(
     cx: &mut gpui::TestAppContext,
 ) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1386,7 +1386,7 @@ fn desktop_thinking_and_usage_meta_should_match_web_interaction_flow(
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell
         .borrow()
@@ -1420,8 +1420,8 @@ fn desktop_thinking_and_usage_meta_should_match_web_interaction_flow(
 #[gpui::test]
 fn desktop_export_reply_should_open_one_panel_like_web(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state should initialize"));
     });
@@ -1449,7 +1449,7 @@ fn desktop_export_reply_should_open_one_panel_like_web(cx: &mut gpui::TestAppCon
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell
         .borrow()
@@ -1528,8 +1528,8 @@ fn press_chat_key(cx: &mut gpui::VisualTestContext, key: &'static str) {
 #[gpui::test]
 fn desktop_composer_hint_keyboard_should_match_web_flow(cx: &mut gpui::TestAppContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1545,7 +1545,7 @@ fn desktop_composer_hint_keyboard_should_match_web_flow(cx: &mut gpui::TestAppCo
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell
         .borrow()
@@ -1655,8 +1655,8 @@ fn desktop_composer_hints_and_git_branch_menu_should_match_web_flow(cx: &mut gpu
         .to_string();
 
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         let state = DesktopState::new().expect("desktop state should initialize");
         cx.set_global(state);
@@ -1673,7 +1673,7 @@ fn desktop_composer_hints_and_git_branch_menu_should_match_web_flow(cx: &mut gpu
             chat
         });
         *chat_for_window.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = chat_cell
         .borrow()

@@ -21,7 +21,7 @@ const EVENT_QUEUE: usize = 16;
 
 /// What the live view hears from the server.
 #[derive(Debug, Clone, PartialEq)]
-pub(crate) enum ScreencastEvent {
+pub enum ScreencastEvent {
     /// One JPEG frame. Call [`Screencast::ack`] once it is decoded.
     Frame(Vec<u8>),
     State(ComputerState),
@@ -40,7 +40,7 @@ enum Outgoing {
 }
 
 /// An open live view. Dropping it closes the socket.
-pub(crate) struct Screencast {
+pub struct Screencast {
     pub events: async_channel::Receiver<ScreencastEvent>,
     outgoing: async_channel::Sender<Outgoing>,
 }

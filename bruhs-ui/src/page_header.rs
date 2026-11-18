@@ -3,14 +3,15 @@
 //! right, on a bar above the page's scrolling content.
 
 use crate::theme;
+use crate::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::zoom::px;
 
 /// The header bar. Add the page's actions with `.child(…)`; they sit on the
 /// right, and like the web's they wrap under the title when the page is too
 /// narrow for both (give a group of them `flex_wrap` too).
 pub fn page_header(title: impl Into<SharedString>, subtitle: Option<SharedString>) -> Div {
+    let title: SharedString = title.into();
     div()
         .flex()
         .flex_wrap()
@@ -31,17 +32,27 @@ pub fn page_header(title: impl Into<SharedString>, subtitle: Option<SharedString
                 .debug_selector(|| "desktop-page-title".to_string())
                 .min_w_0()
                 .child(
+                    // Web `text-h3`: Xenon 18px, weight 500, the page's `h1`.
                     div()
+                        .id("page-title")
+                        .role(Role::Heading)
+                        .aria_level(1)
+                        .aria_label(title.clone())
                         .font_family(theme::HEADING_FONT_FAMILY)
-                        .text_size(px(16.0))
+                        .text_size(px(18.0))
                         .font_weight(FontWeight::MEDIUM)
+                        .line_height(relative(1.5))
                         .text_color(theme::rambutan_100())
-                        .child(title.into()),
+                        .child(title),
                 )
                 .when_some(subtitle, |header, subtitle| {
+                    // Web `mt-0.5 text-body-sm`: Neon 13px.
                     header.child(
                         div()
-                            .text_size(px(11.0))
+                            .mt(px(2.0))
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_500())
                             .child(subtitle),
                     )

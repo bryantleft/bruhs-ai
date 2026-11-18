@@ -29,7 +29,7 @@ members = [
     "claude-sdk-rs",
     "codex-sdk-rs",
 ]
-exclude = ["third_party/gpui-component", "third_party/axum", "third_party/gpui-windows", "third_party/mathjax-svg-rs"]
+exclude = ["third_party/axum", "third_party/gpui-windows", "third_party/mathjax-svg-rs"]
 
 [workspace.package]
 edition = "2021"
@@ -87,10 +87,9 @@ cpal = "0.15"
 keyring = { version = "3", features = ["apple-native", "windows-native", "sync-secret-service"] }
 
 # gpui comes from upstream zed, pinned to one rev, with no patches: keep to
-# gpui's public API (the desktop's zoom, `crate::zoom`, is built on it). To
-# move gpui forward, bump the rev here, in third_party/gpui-component/Cargo.toml
-# and in third_party/gpui-windows/Cargo.toml (excluded from this workspace, so
-# they keep their own pins; see third_party/gpui-component/VENDORED.md).
+# gpui's public API (bruhs-ui, the app's UI toolkit, is built only on it). To
+# move gpui forward, bump the rev here and in third_party/gpui-windows/Cargo.toml
+# (excluded from this workspace, so it keeps its own pin).
 # `version` keeps Cargo off zed's `tooling/lints/test_fixture/gpui` (0.0.0),
 # which it otherwise falls back to when gpui 0.2's dependencies conflict.
 gpui = { git = "https://github.com/zed-industries/zed", rev = "d2a4fb6ded7c470be25d1541281da3882495b65b", version = "0.2" }

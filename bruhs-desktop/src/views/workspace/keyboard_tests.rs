@@ -8,10 +8,10 @@ use super::{
 };
 use crate::{app_state::DesktopState, theme};
 use bruhs_models::{InboxConversation, InboxMessage, InboxSource};
+use bruhs_ui::zoom::window_px;
 use gpui::{
     size, AppContext, Entity, FocusHandle, Focusable as _, TestAppContext, VisualTestContext,
 };
-use gpui_component::zoom::window_px;
 use std::{cell::RefCell, rc::Rc};
 
 fn open(
@@ -19,8 +19,8 @@ fn open(
     state: Option<PersistedWorkspaceState>,
 ) -> (Entity<Workspace>, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state"));
     });
@@ -37,7 +37,7 @@ fn open(
             )
         });
         *captured.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = entity.borrow().clone().expect("workspace");
     cx.simulate_resize(size(window_px(1280.0), window_px(800.0)));

@@ -255,6 +255,21 @@ impl ChatView {
     }
 }
 
+impl ChatView {
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=codex-login`: the banner's Log in, for a
+    /// real sign-in check in a debug build.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_start_codex_login(&mut self, cx: &mut Context<'_, Self>) {
+        self.start_codex_login(cx);
+    }
+
+    /// What the Codex banner knows, for the same check.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_codex_auth(&self) -> String {
+        format!("{:?}", self.codex_auth)
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     // Named imports: `use super::*` here recurses through `#[gpui::test]`.
@@ -357,8 +372,8 @@ mod tests {
         let dir = tempfile::tempdir().expect("fixture dir");
         let program = fixture(dir.path());
         cx.update(|cx| {
-            gpui_component::init(cx);
-            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            bruhs_ui::init(cx);
+            bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
             crate::theme::apply_bruhs_theme(cx);
             cx.set_global(crate::app_state::DesktopState::new().expect("desktop state"));
             cx.set_global(CodexProbe(Some(program)));
@@ -381,7 +396,7 @@ mod tests {
                 .collect();
             let first = chats[0].clone();
             *capture.borrow_mut() = chats;
-            gpui_component::Root::new(first, window, cx)
+            bruhs_ui::Root::new(first, window, cx)
         });
         let chats = made.borrow().clone();
         for chat in &chats {

@@ -1,14 +1,14 @@
+use bruhs_ui::input::{Input, InputEvent, InputState, Textarea, TextareaState};
+use bruhs_ui::resizable::{
+    h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
+};
+use bruhs_ui::scroll::ScrollableElement;
+use bruhs_ui::tooltip::Tooltip;
+use bruhs_ui::zoom::px;
+use bruhs_ui::{ActiveTheme, Icon, IconName, WindowExt};
 use chrono::{Datelike, Duration, Local, NaiveDate, NaiveDateTime, NaiveTime, TimeZone, Timelike};
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
-use gpui_component::resizable::{
-    h_resizable, resizable_panel, v_resizable, ResizablePanelEvent, ResizableState,
-};
-use gpui_component::scroll::ScrollableElement;
-use gpui_component::tooltip::Tooltip;
-use gpui_component::zoom::px;
-use gpui_component::{ActiveTheme, Icon, IconName, WindowExt};
 use serde::{Deserialize, Serialize};
 use std::cell::RefCell;
 use std::collections::{hash_map::DefaultHasher, BTreeMap, HashSet};
@@ -1214,6 +1214,10 @@ pub struct Workspace {
     mcp_bridge: mcp_bridge::WorkspaceBridge,
     /// Agent workflows' scroll area.
     automations_scroll: ScrollHandle,
+    /// Calendar's Week and Day grid. Like the web's, it opens two hours
+    /// before now each time it is shown (`calendar_timegrid_autoscroll`).
+    calendar_timegrid_scroll: ScrollHandle,
+    calendar_timegrid_autoscroll: std::cell::Cell<bool>,
     /// The page's own dry run (New dry run, a suggestion's or a draft's
     /// preview), reviewed in Preview changes while it waits.
     dry_run_workflow_id: Option<String>,
@@ -1221,6 +1225,15 @@ pub struct Workspace {
     workflow_disclosures: HashSet<String>,
     /// The app-wide workflow notice put away, until it changes.
     dismissed_workflow_notice: Option<String>,
+    /// The workflow notice's Open workflows, which Pause hands focus to.
+    workflow_notice_open_focus: FocusHandle,
+    /// The conversation page's Back to Inbox, which an opened row focuses.
+    inbox_back_focus: FocusHandle,
+    /// Each Inbox row's focus, kept while the list is hidden (an element's
+    /// own handle goes with it), so Back to Inbox can return to the row.
+    inbox_row_focus: RefCell<std::collections::HashMap<String, FocusHandle>>,
+    /// The conversation Back to Inbox returns focus to.
+    inbox_return_row: Option<String>,
     mobile: mobile::MobileUi,
     local_servers: Vec<LocalServer>,
     local_servers_loading: bool,
@@ -1393,6 +1406,7 @@ pub struct Workspace {
     palette_return_focus: Option<(AppView, FocusHandle)>,
     modal_start_focus_handle: FocusHandle,
     modal_end_focus_handle: FocusHandle,
+    modal_focus: modal_ui::ModalFocus,
     modal_scroll: ScrollHandle,
     /// The dialogs' backdrop blur, which lives in native views, not gpui's.
     blur_scrim: BlurScrimHandle,
@@ -1419,7 +1433,14 @@ pub struct Workspace {
     /// The Knowledge library's search.
     knowledge: knowledge_ui::KnowledgeState,
     clip_create_visible: bool,
+    /// False when the state file could not be read and no backup restored
+    /// it: the Inbox then says its conversations could not be loaded.
+    saved_records_loaded: bool,
     inbox_import_visible: bool,
+    /// The Inbox's Import conversation button, where closing the import form
+    /// returns focus when the button opened it.
+    inbox_import_focus: FocusHandle,
+    inbox_import_returns_focus: bool,
     inbox_mail_visible: bool,
     connected_inbox: Entity<connected_inbox::ConnectedInbox>,
     inbox_page: usize,
@@ -1438,7 +1459,7 @@ pub struct Workspace {
     relationship_email_input: Entity<InputState>,
     relationship_phone_input: Entity<InputState>,
     relationship_location_input: Entity<InputState>,
-    relationship_notes_input: Entity<InputState>,
+    relationship_notes_input: Entity<TextareaState>,
     relationship_item_input: Entity<InputState>,
     relationship_item_kind: RelationshipItemKind,
     scheduling_visible: bool,
@@ -1562,6 +1583,7 @@ impl Workspace {
         let permission_mode = initial_permission_mode_from_persisted(persisted.as_ref());
         // A missing file is a new workspace with no plan to recover.
         let day_plan_loaded = persisted.is_some() || persistence_error.is_none();
+        let saved_records_loaded = day_plan_loaded;
         let mut subscriptions = Vec::new();
         let command_input = Self::new_command_input(window, cx, &mut subscriptions);
         let import_input = Self::new_import_input(window, cx, &mut subscriptions);
@@ -1958,9 +1980,15 @@ impl Workspace {
             reviewed_workflow_id: None,
             mcp_bridge: mcp_bridge::WorkspaceBridge::default(),
             automations_scroll: ScrollHandle::new(),
+            calendar_timegrid_scroll: ScrollHandle::new(),
+            calendar_timegrid_autoscroll: std::cell::Cell::new(true),
             dry_run_workflow_id: None,
             workflow_disclosures: HashSet::new(),
             dismissed_workflow_notice: None,
+            workflow_notice_open_focus: cx.focus_handle().tab_stop(true),
+            inbox_back_focus: cx.focus_handle().tab_stop(true),
+            inbox_row_focus: RefCell::new(std::collections::HashMap::new()),
+            inbox_return_row: None,
             mobile: mobile::MobileUi::new(window, cx),
             local_servers: Vec::new(),
             local_servers_loading: false,
@@ -2143,6 +2171,7 @@ impl Workspace {
             modal_start_focus_handle,
             blur_scrim: BlurScrimHandle::default(),
             modal_end_focus_handle,
+            modal_focus: modal_ui::ModalFocus::new(cx),
             modal_scroll: ScrollHandle::new(),
             import_picker: import_ui::ImportPicker::default(),
             import_input,
@@ -2162,7 +2191,10 @@ impl Workspace {
             clip_excerpt_input,
             knowledge,
             clip_create_visible: false,
+            saved_records_loaded,
             inbox_import_visible: false,
+            inbox_import_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+            inbox_import_returns_focus: false,
             inbox_mail_visible: false,
             connected_inbox,
             inbox_page: 0,
@@ -2348,7 +2380,7 @@ impl Workspace {
     fn narrower_than(window: &Window, breakpoint_px: f32) -> bool {
         // In CSS pixels, so a zoomed window switches layouts at the widths a
         // zoomed browser page does.
-        gpui_component::zoom::css_px(window.viewport_size().width) < breakpoint_px
+        bruhs_ui::zoom::css_px(window.viewport_size().width) < breakpoint_px
     }
 
     /// Web: below `sm` the sidebar is a drawer over a scrim; from `sm` it
@@ -2372,14 +2404,14 @@ impl Workspace {
     }
 
     /// Draw the window's design lengths at the saved zoom (see
-    /// [`gpui_component::zoom`]), and keep the macOS traffic lights centred in
+    /// [`bruhs_ui::zoom`]), and keep the macOS traffic lights centred in
     /// the zoomed header.
     fn apply_zoom(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        gpui_component::zoom::set_zoom(self.zoom, cx);
+        bruhs_ui::zoom::set_zoom(self.zoom, cx);
         #[cfg(target_os = "macos")]
         window.set_traffic_light_position(point(
-            gpui_component::zoom::window_px(12.0),
-            gpui_component::zoom::window_px(crate::zoom::traffic_light_top(
+            bruhs_ui::zoom::window_px(12.0),
+            bruhs_ui::zoom::window_px(crate::zoom::traffic_light_top(
                 theme::APP_HEADER_HEIGHT_PX,
                 self.zoom,
             )),
@@ -2392,7 +2424,7 @@ impl Workspace {
     fn traffic_light_inset(&self) -> Pixels {
         #[cfg(target_os = "macos")]
         {
-            gpui_component::zoom::window_px(SIDEBAR_HEADER_LEFT_INSET_PX)
+            bruhs_ui::zoom::window_px(SIDEBAR_HEADER_LEFT_INSET_PX)
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -2802,7 +2834,7 @@ impl Workspace {
                 .min_w_0()
                 .min_h_0()
                 .flex()
-                .child(self.render_people_page(cx)),
+                .child(self.render_people_page(window, cx)),
             AppView::Search => div()
                 .flex_1()
                 .h_full()
@@ -2872,6 +2904,11 @@ impl Render for Workspace {
         if self.active_view != AppView::Automations {
             self.dry_run_workflow_id = None;
         }
+        // The web mounts its time grid afresh whenever it appears.
+        if self.active_view != AppView::Calendar || self.calendar_mode == DesktopCalendarMode::Month
+        {
+            self.calendar_timegrid_autoscroll.set(true);
+        }
         if !self.settings_visible() && self.credential_settings.read(cx).has_editor() {
             self.credential_settings
                 .update(cx, |view, _| view.clear_editor());
@@ -2895,6 +2932,7 @@ impl Render for Workspace {
         self.sync_create_bruh(cx);
         self.sync_room_dialog(cx);
         self.sync_bruh_page(cx);
+        self.schedule_modal_first_control(window, cx);
         // A removed modal's input still owns its FocusHandle. Restore focus
         // before it leaves the dispatch tree, or global shortcuts go nowhere.
         if !self.overlay_open() {
@@ -2992,7 +3030,7 @@ impl Render for Workspace {
         let sidebar_docked = !sidebar_drawer && self.sidebar_visible && !booking;
         let sidebar_drawer_open = sidebar_drawer && self.compact_sidebar_open && !booking;
         let chat_panel_open = self.right_panel_open() && self.active_view == AppView::Chat;
-        let right_drawer_width = (gpui_component::zoom::css_px(window.viewport_size().width)
+        let right_drawer_width = (bruhs_ui::zoom::css_px(window.viewport_size().width)
             * RIGHT_PANEL_DRAWER_MAX_WINDOW_SHARE)
             .min(RIGHT_PANEL_DRAWER_WIDTH_PX);
         let body = div()
@@ -3054,7 +3092,7 @@ impl Render for Workspace {
                     // remembered, clamped, and gives way to the chat's 360px
                     // minimum. A window resize never changes the remembered
                     // width, so the panel holds it unless its edge is dragged.
-                    let viewport_width = gpui_component::zoom::css_px(window.viewport_size().width);
+                    let viewport_width = bruhs_ui::zoom::css_px(window.viewport_size().width);
                     let sidebar_width = if sidebar_docked {
                         WORKSPACE_SIDE_PANEL_WIDTH_PX
                     } else {
@@ -3166,8 +3204,8 @@ impl Render for Workspace {
             // textarea: nothing traps the keyboard. The composer indents its
             // list items and code first (`composer_edit`), and accepts a
             // suggestion, before this runs.
-            .capture_action(cx.listener(
-                |this, _: &gpui_component::input::IndentInline, window, cx| {
+            .capture_action(
+                cx.listener(|this, _: &bruhs_ui::input::IndentInline, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
                     if this.overlay_open()
@@ -3177,10 +3215,10 @@ impl Render for Workspace {
                     } else {
                         window.focus_next(cx);
                     }
-                },
-            ))
-            .capture_action(cx.listener(
-                |this, _: &gpui_component::input::OutdentInline, window, cx| {
+                }),
+            )
+            .capture_action(
+                cx.listener(|this, _: &bruhs_ui::input::OutdentInline, window, cx| {
                     window.prevent_default();
                     cx.stop_propagation();
                     if this.overlay_open()
@@ -3190,8 +3228,8 @@ impl Render for Workspace {
                     } else {
                         window.focus_prev(cx);
                     }
-                },
-            ))
+                }),
+            )
             // Every bruhs type role is `line-height: 1.5`; gpui defaults to φ
             // (1.618), which made every row ~2px taller than the web's.
             .line_height(relative(WORKSPACE_LINE_HEIGHT))

@@ -3,7 +3,7 @@
 //! `bruhs-web/src/components/meeting_suggestions_panel.rs`. The shared rules
 //! live in `bruhs_models::meeting_suggestions`.
 
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::time::Duration;
 
 use bruhs_models::meeting_suggestions::{

@@ -1,7 +1,7 @@
 //! Native controls for the same host-owned reports used by the web client.
 use super::*;
 use bruhs_models::{weekly_reports::*, EpochMs};
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 #[derive(Default)]
 pub(super) struct WeeklyReportsState {
@@ -730,7 +730,7 @@ mod tests {
         cx: &mut gpui::TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = Rc::new(std::cell::RefCell::new(None));
@@ -738,7 +738,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
+            bruhs_ui::Root::new(panel, window, cx)
         });
         cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(1400.0)));
         let panel = holder.borrow().clone().unwrap();

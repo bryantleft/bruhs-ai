@@ -2,8 +2,9 @@
 //! triage semantics as the web surface.
 
 use bruhs_models::{InboxCard, InboxDirectory, InboxFilter, INBOX_PAGE_SIZE};
-use gpui_component::input::{Input, InputEvent};
-use gpui_component::zoom::px;
+use bruhs_ui::input::{Input, InputEvent};
+use bruhs_ui::zoom::px;
+use gpui::Toggled;
 
 use super::*;
 use bruhs_ui::press::on_press_view;
@@ -36,6 +37,36 @@ fn person_value(id: &str) -> &'static str {
     kept
 }
 
+/// A row's accessible name, in the order the web row reads from its
+/// content: read state, sender, date, subject, Important, preview and source.
+pub(super) fn inbox_row_label(card: &InboxCard) -> String {
+    let subject = if card.subject.trim().is_empty() {
+        "(No subject)"
+    } else {
+        card.subject.as_str()
+    };
+    let state = if card.unread {
+        "Unread conversation:"
+    } else {
+        "Read conversation:"
+    };
+    let date = inbox_date(card.message_at_ms);
+    let source = format!("{} import", card.source.label());
+    [
+        state,
+        card.sender.as_str(),
+        date.as_str(),
+        subject,
+        if card.important { "Important" } else { "" },
+        card.preview.as_str(),
+        source.as_str(),
+    ]
+    .into_iter()
+    .filter(|part| !part.trim().is_empty())
+    .collect::<Vec<_>>()
+    .join(" ")
+}
+
 impl Workspace {
     pub(super) fn open_inbox_view(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
         self.active_view = AppView::Inbox;
@@ -44,6 +75,19 @@ impl Workspace {
         self.close_transient_surfaces();
         self.workspace_focus_handle.focus(window, cx);
         self.persist_and_notify(cx);
+    }
+
+    /// Back to Inbox: the list, with focus on the row the conversation was
+    /// opened from when it was opened from one (web: the same).
+    pub(super) fn back_to_inbox(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let row = self
+            .inbox_return_row
+            .take()
+            .and_then(|id| self.inbox_row_focus.borrow().get(&id).cloned());
+        self.open_inbox_view(window, cx);
+        if let Some(row) = row {
+            row.focus(window, cx);
+        }
     }
 
     pub(super) fn start_inbox_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -55,6 +99,11 @@ impl Workspace {
         for input in inputs {
             input.set_text_value("".into(), window, cx);
         }
+        // Like the web dialog, closing the form returns focus to the button
+        // that opened it.
+        self.inbox_import_returns_focus = self.inbox_import_focus.is_focused(window);
+        // The command bar's Import conversation closes the bar, as the web's.
+        self.close_transient_surfaces();
         self.active_view = AppView::Inbox;
         self.inbox_import_visible = true;
         self.inbox_mail_visible = false;
@@ -65,16 +114,56 @@ impl Workspace {
             .update(cx, |input, cx| input.focus(window, cx));
     }
 
-    fn cycle_inbox_source(&mut self, cx: &mut Context<'_, Self>) {
-        self.inbox_import_source = match self.inbox_import_source {
-            InboxSource::Email => InboxSource::Slack,
-            InboxSource::Slack => InboxSource::Discord,
-            InboxSource::Discord => InboxSource::IMessage,
-            InboxSource::IMessage => InboxSource::X,
-            InboxSource::X => InboxSource::Import,
-            InboxSource::Import => InboxSource::Email,
-        };
+    /// Cancel or Escape: close the import form. Focus returns to Import
+    /// conversation when it opened the form, as the web dialog restores its
+    /// invoker; otherwise (the command bar opened it) to the page.
+    pub(super) fn cancel_inbox_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.inbox_import_visible = false;
+        if std::mem::take(&mut self.inbox_import_returns_focus) {
+            self.inbox_import_focus.focus(window, cx);
+        } else {
+            self.workspace_focus_handle.focus(window, cx);
+        }
         cx.notify();
+    }
+
+    /// The import form's provider choice, a pressed button as on the web.
+    fn inbox_source_button(&self, source: InboxSource, cx: &Context<'_, Self>) -> AnyElement {
+        let selected = self.inbox_import_source == source;
+        web_button(
+            ("inbox-import-source", element_key(source.label())),
+            WebButtonVariant::Ghost,
+            WebButtonSize::Default,
+            ButtonState::Enabled,
+        )
+        .debug_selector(move || format!("desktop-inbox-import-source-{}", source.label()))
+        .aria_label(source.label())
+        .aria_toggled(if selected {
+            Toggled::True
+        } else {
+            Toggled::False
+        })
+        .text_size(px(12.0))
+        .rounded(px(4.0))
+        .border_color(if selected {
+            theme::blueberry_500().opacity(0.3)
+        } else {
+            theme::longan_700()
+        })
+        .when(selected, |button| {
+            button
+                .bg(theme::blueberry_500().opacity(0.15))
+                .text_color(theme::blueberry_400())
+        })
+        .when(!selected, |button| button.text_color(theme::rambutan_400()))
+        .child(source.label())
+        .map(|el| {
+            on_press_view(el, cx, move |this, _, cx| {
+                this.inbox_import_source = source;
+                cx.notify();
+            })
+        })
+        .into_any_element()
     }
 
     pub(super) fn save_inbox_import(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
@@ -259,7 +348,7 @@ impl Workspace {
             .into_any_element()
     }
 
-    fn save_inbox_draft(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn save_inbox_draft(&mut self, cx: &mut Context<'_, Self>) {
         let body = self.inbox_reply_input.read(cx).value().to_string();
         self.mutate_current_conversation(
             move |conversation| conversation.upsert_draft(body, EpochMs::now().as_millis()),
@@ -353,41 +442,44 @@ impl Workspace {
             .into_iter()
             .map(|card| self.render_inbox_card(&card, cx))
             .collect::<Vec<_>>();
-        let (empty, next_step) = inbox_empty_state(&query, self.inbox_filter);
+        let (empty, next_step) =
+            inbox_empty_state(&query, self.inbox_filter, self.saved_records_loaded);
 
         div().debug_selector(|| "desktop-inbox-page".into())
             .flex_1().h_full().min_w_0().bg(cx.theme().background).flex().flex_col()
-            .child(div().px_4().py_3().border_b_1().border_color(theme::longan_800())
-                .flex().flex_wrap().gap_3().items_center().justify_between()
-                .child(div().min_w_0()
-                    .child(div().font_family(theme::HEADING_FONT_FAMILY).text_size(px(18.0)).text_color(theme::rambutan_100()).child("Inbox"))
-                    .child(div().mt_0p5().text_size(px(12.0)).text_color(theme::rambutan_500()).child("Imported conversations and local reply drafts.")))
-                .child(div().flex().flex_wrap().gap_2()
+            // Web `PageHeader` with the two actions.
+            .child(crate::views::page_header::page_header("Inbox", Some("Imported conversations and local reply drafts.".into()))
+                .child(div().flex().flex_wrap().items_center().gap_2()
                 .child(web_button("desktop-inbox-email", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
                     .debug_selector(|| "desktop-inbox-email".into()).aria_label("Email").child("Email")
                     .map(|el| on_press_view(el, cx, |this, _, cx| this.open_connected_inbox(cx))))
                 .child(web_button("desktop-import-conversation", WebButtonVariant::Primary, WebButtonSize::Small, ButtonState::Enabled)
                     .debug_selector(|| "desktop-import-conversation".into())
                     .aria_label("Import conversation").child("Import conversation")
+                    .track_focus(&self.inbox_import_focus)
                     .on_click(cx.listener(|this, _, window, cx| this.start_inbox_import(window, cx))))))
-            .child(div().flex_1().min_h_0().overflow_y_scrollbar().p_4().flex().justify_center()
-                .child(div().w_full().max_w(px(1024.0)).flex().flex_col().gap_4()
-                    .child(Input::new(&self.inbox_search_input).aria_label("Search inbox"))
-                    .child(div().id("desktop-inbox-filter-group").role(Role::Group).aria_label("Inbox filter").flex().flex_wrap().gap_1()
-                        .children(InboxFilter::ALL.into_iter().map(|value| self.inbox_filter_button(value, cx))))
-                    .child(div().flex().flex_col().rounded(px(8.0)).border_1().border_color(theme::longan_800()).overflow_hidden()
+            // Web `max-w-5xl space-y-5 px-4 py-5 sm:px-6`; desktop windows are at least sm.
+            .child(div().flex_1().min_h_0().overflow_y_scrollbar().px_6().py_5().flex().justify_center()
+                .child(div().w_full().max_w(px(1024.0)).flex().flex_col().gap_5()
+                    .child(div().flex().flex_col().gap_3()
+                        .child(Input::new(&self.inbox_search_input).aria_label("Search inbox").role(Role::SearchInput))
+                        .child(div().id("desktop-inbox-filter-group").role(Role::Group).aria_label("Inbox filter").flex().flex_wrap().gap_1()
+                            .children(InboxFilter::ALL.into_iter().map(|value| self.inbox_filter_button(value, cx)))))
+                    .child(div().id("desktop-inbox-conversations").role(Role::Region).aria_label("Conversations")
+                        .flex().flex_col().rounded(px(8.0)).border_1().border_color(theme::longan_800()).overflow_hidden()
                         .children(cards)
                         .when(total == 0, |element| element.child(div().py_12().px_4().text_center()
-                            .child(div().id("desktop-inbox-empty").debug_selector(|| "desktop-inbox-empty".into()).role(Role::Status).text_size(px(13.0)).text_color(theme::rambutan_300()).child(empty))
+                            .child(div().id("desktop-inbox-empty").debug_selector(|| "desktop-inbox-empty".into()).role(Role::Status).aria_label(empty).text_size(px(13.0)).text_color(theme::rambutan_300()).child(empty))
                             .child(div().mt_1().text_size(px(12.0)).text_color(theme::rambutan_500())
                                 .child(next_step)))))
-                    .child(div().id("desktop-inbox-counts").role(Role::Status).aria_label("Inbox counts").flex().flex_wrap().gap_4().text_size(px(12.0)).text_color(theme::rambutan_400())
+                    .child(div().id("desktop-inbox-counts").role(Role::Status).aria_label("Inbox counts").flex().flex_wrap().gap_x_5().gap_y_1()
+                        .font_family(theme::UI_SMALL_FONT_FAMILY).font_weight(FontWeight::MEDIUM).text_size(px(12.0)).line_height(relative(1.5)).text_color(theme::rambutan_400())
                         .child(format!("{} open", counts.open)).child(format!("{} unread", counts.unread))
                         .child(format!("{} need reply", counts.needs_reply)).child(format!("{} snoozed", counts.snoozed)))
-                    .child(div().text_size(px(12.0)).text_color(theme::rambutan_400())
+                    .child(div().font_family(theme::UI_SMALL_FONT_FAMILY).font_weight(FontWeight::MEDIUM).text_size(px(12.0)).line_height(relative(1.5)).text_color(theme::rambutan_400())
                         .child("Imported messages and replies stay on this device. Choose Email to read and sync connected Gmail."))))
             .when(total > INBOX_PAGE_SIZE, |element| element.child(
-                div().id("desktop-inbox-pages").aria_label("Inbox pages")
+                div().id("desktop-inbox-pages").role(Role::Navigation).aria_label("Inbox pages")
                     .flex().items_center().justify_between().px_3().py_2()
                     .border_t_1().border_color(theme::longan_800())
                     .child(self.inbox_page_button("desktop-inbox-previous", "Previous", start == 0, (start / INBOX_PAGE_SIZE).saturating_sub(1), cx))
@@ -404,16 +496,26 @@ impl Workspace {
             ButtonState::Enabled,
         )
         .debug_selector(move || format!("desktop-inbox-filter-{}", value.label()))
-        .aria_label(if selected {
-            format!("{}, selected", value.label())
+        .aria_label(value.label())
+        .aria_toggled(if selected {
+            Toggled::True
         } else {
-            value.label().into()
+            Toggled::False
         })
+        // Web: a 32px `px-2.5 py-1.5 text-label-sm` pill, rambutan-400 until
+        // selected, then blueberry with a ring.
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
         .text_size(px(12.0))
         .rounded(px(4.0))
+        .px(px(9.0))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .text_color(theme::rambutan_400())
         .when(selected, |button| {
             button
                 .bg(theme::blueberry_500().opacity(0.15))
+                .border_color(theme::blueberry_500().opacity(0.3))
                 .text_color(theme::blueberry_400())
         })
         .child(value.label())
@@ -459,25 +561,18 @@ impl Workspace {
         let sender = conversation.sender.clone();
         let preview = conversation.preview.clone();
         let key = element_key(&id);
+        let focus = self
+            .inbox_row_focus
+            .borrow_mut()
+            .entry(id.clone())
+            .or_insert_with(|| cx.focus_handle().tab_stop(true))
+            .clone();
         div()
             .id(("inbox-card", key))
             .debug_selector(move || format!("desktop-inbox-card-{key}"))
             .role(Role::Button)
-            .aria_label(format!(
-                "{} conversation: {}. {}",
-                if conversation.unread {
-                    "Unread"
-                } else {
-                    "Read"
-                },
-                conversation.subject,
-                if conversation.important {
-                    "Important"
-                } else {
-                    ""
-                }
-            ))
-            .tab_index(0)
+            .aria_label(inbox_row_label(conversation))
+            .track_focus(&focus)
             .cursor_pointer()
             .w_full()
             .min_w_0()
@@ -486,11 +581,15 @@ impl Workspace {
             .border_color(theme::longan_800())
             .px_3()
             .py_3()
-            .hover(|element| element.bg(theme::longan_800().opacity(0.7)))
+            .hover(|element| element.bg(theme::longan_800().opacity(0.6)))
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
             .map(|el| {
                 on_press_view(el, cx, move |this, window, cx| {
+                    // Opening a row lands on Back to Inbox, which returns
+                    // here, as on the web.
+                    this.inbox_return_row = Some(id.clone());
                     this.select_inbox_conversation(&id, window, cx);
+                    this.inbox_back_focus.focus(window, cx);
                 })
             })
             .flex()
@@ -500,7 +599,7 @@ impl Workspace {
             .child(
                 div()
                     .debug_selector(move || format!("desktop-inbox-card-dot-{key}"))
-                    .mt(px(6.0))
+                    .mt(px(8.0))
                     .size(px(8.0))
                     .flex_shrink_0()
                     .rounded_full()
@@ -515,20 +614,25 @@ impl Workspace {
                     .min_w_0()
                     .flex_1()
                     .child(
+                        // Web: the sender in `text-label` (semibold while
+                        // unread), the date in `text-label-sm`.
                         div()
                             .flex()
-                            .items_center()
+                            .items_baseline()
                             .justify_between()
+                            .gap_3()
                             .child(
                                 div()
                                     .truncate()
+                                    .font_family(theme::UI_FONT_FAMILY)
                                     .text_size(px(13.0))
+                                    .line_height(relative(1.5))
                                     .min_w_0()
                                     .flex_1()
                                     .font_weight(if conversation.unread {
                                         FontWeight::SEMIBOLD
                                     } else {
-                                        FontWeight::NORMAL
+                                        FontWeight::MEDIUM
                                     })
                                     .text_color(if conversation.unread {
                                         theme::rambutan_100()
@@ -540,16 +644,22 @@ impl Workspace {
                             .child(
                                 div()
                                     .flex_shrink_0()
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
                                     .text_size(px(12.0))
+                                    .line_height(relative(1.5))
                                     .text_color(theme::rambutan_500())
                                     .child(inbox_date(conversation.message_at_ms)),
                             ),
                     )
                     .child(
+                        // Web: subject and preview in `text-body-sm`.
                         div()
-                            .mt_1()
+                            .mt_0p5()
                             .truncate()
-                            .text_size(px(12.0))
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_300())
                             .child(if conversation.subject.trim().is_empty() {
                                 "(No subject)".to_string()
@@ -559,9 +669,11 @@ impl Workspace {
                     )
                     .child(
                         div()
-                            .mt_1()
+                            .mt_0p5()
                             .truncate()
-                            .text_size(px(12.0))
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_500())
                             .overflow_hidden()
                             .child(preview),
@@ -571,7 +683,10 @@ impl Workspace {
                             .mt_1()
                             .flex()
                             .gap_3()
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .font_weight(FontWeight::MEDIUM)
                             .text_size(px(12.0))
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_500())
                             .child(format!("{} import", conversation.source.label()))
                             .when(conversation.important, |element| element.child("Important")),
@@ -610,14 +725,11 @@ impl Workspace {
                             WebButtonSize::Small,
                             ButtonState::Enabled,
                         )
+                        .debug_selector(|| "desktop-inbox-import-cancel".into())
                         .aria_label("Cancel")
                         .child("Cancel")
                         .on_click(cx.listener(
-                            |this, _event, window, cx| {
-                                this.inbox_import_visible = false;
-                                this.workspace_focus_handle.focus(window, cx);
-                                cx.notify();
-                            },
+                            |this, _event, window, cx| this.cancel_inbox_import(window, cx),
                         )),
                     ),
             )
@@ -645,28 +757,15 @@ impl Workspace {
                                     .child("Provider"),
                             )
                             .child(
-                                web_button(
-                                    "cycle-inbox-provider",
-                                    WebButtonVariant::Outline,
-                                    WebButtonSize::Small,
-                                    ButtonState::Enabled,
-                                )
-                                .child(self.inbox_import_source.label())
-                                .on_click(cx.listener(
-                                    |this, _event, _window, cx| this.cycle_inbox_source(cx),
-                                )),
+                                div().flex().flex_wrap().gap_1().children(
+                                    InboxSource::ALL
+                                        .into_iter()
+                                        .map(|source| self.inbox_source_button(source, cx)),
+                                ),
                             )
-                            .child(
-                                Input::new(&self.inbox_sender_input).aria_label("Sender, required"),
-                            )
-                            .child(
-                                Input::new(&self.inbox_subject_input)
-                                    .aria_label("Conversation subject"),
-                            )
-                            .child(
-                                Textarea::new(&self.inbox_body_input)
-                                    .aria_label("Message, required"),
-                            )
+                            .child(Input::new(&self.inbox_sender_input).aria_label("Sender"))
+                            .child(Input::new(&self.inbox_subject_input).aria_label("Subject"))
+                            .child(Textarea::new(&self.inbox_body_input).aria_label("Message"))
                             .when_some(self.persistence_error.clone(), |element, error| {
                                 element.child(
                                     div()
@@ -815,7 +914,7 @@ impl Workspace {
                             .id("back-to-inbox")
                             .debug_selector(|| "desktop-inbox-back".to_string())
                             .role(Role::Button)
-                            .tab_index(0)
+                            .track_focus(&self.inbox_back_focus)
                             .aria_label("Back to Inbox")
                             .flex_shrink_0()
                             .min_h(px(theme::CONTROL_PX))
@@ -835,7 +934,7 @@ impl Workspace {
                             .whitespace_nowrap()
                             .child("← Inbox")
                             .on_click(cx.listener(|this, _event, window, cx| {
-                                this.open_inbox_view(window, cx)
+                                this.back_to_inbox(window, cx)
                             })),
                     )
                     .child(
@@ -844,6 +943,10 @@ impl Workspace {
                             .flex_1()
                             .child(
                                 div()
+                                    .id("desktop-inbox-conversation-title")
+                                    .role(Role::Heading)
+                                    .aria_level(1)
+                                    .aria_label(conversation.subject.clone())
                                     .debug_selector(|| {
                                         "desktop-inbox-conversation-title".to_string()
                                     })
@@ -964,6 +1067,9 @@ impl Workspace {
                     .child(
                         // Web `mx-auto max-w-3xl px-4 py-5 space-y-3`.
                         div()
+                            .id("desktop-inbox-messages")
+                            .role(Role::Region)
+                            .aria_label("Conversation messages")
                             .debug_selector(|| "desktop-inbox-message-column".to_string())
                             .w_full()
                             .max_w(px(CONVERSATION_COLUMN_PX))
@@ -1077,10 +1183,21 @@ impl Workspace {
 }
 
 /// What an empty conversation list says and the next step it offers, in
-/// the web Inbox's words: a search with no match, or the filter's own
-/// empty view.
-pub(super) fn inbox_empty_state(query: &str, filter: InboxFilter) -> (&'static str, &'static str) {
-    if query.trim().is_empty() {
+/// the web Inbox's words: saved conversations that could not be loaded, a
+/// search with no match, or the filter's own empty view. The desktop reads
+/// its state file before the first frame, so it never shows the web's
+/// loading state.
+pub(super) fn inbox_empty_state(
+    query: &str,
+    filter: InboxFilter,
+    records_loaded: bool,
+) -> (&'static str, &'static str) {
+    if !records_loaded {
+        (
+            bruhs_models::INBOX_LOAD_FAILED,
+            bruhs_models::INBOX_LOAD_FAILED_DETAIL,
+        )
+    } else if query.trim().is_empty() {
         (
             filter.empty_message(),
             "Import a message or choose another view.",
@@ -1121,9 +1238,9 @@ fn inbox_action_button(id: &'static str, label: &'static str) -> Stateful<Div> {
         .child(label)
 }
 
-/// ⌘↵ in the reply box logs the reply, as on the web. gpui-component inserts
-/// a newline at the cursor before it reports the key, and the web prevents
-/// it, so the reply is the text without that newline.
+/// ⌘↵ in the reply box logs the reply, as on the web. A field that inserted a
+/// newline at the cursor before reporting the key would differ from the web,
+/// which prevents it, so the reply is the text without any such newline.
 fn reply_without_submit_newline(value: &str, cursor: usize) -> String {
     match cursor.checked_sub(1) {
         Some(at) if value.get(at..cursor) == Some("\n") => {
@@ -1229,7 +1346,10 @@ mod parity_tests;
 
 #[cfg(test)]
 mod tests {
-    use super::{element_key, inbox_date, AppView, InboxConversation, InboxMessage, InboxSource};
+    use super::{
+        element_key, inbox_date, inbox_row_label, AppView, InboxCard, InboxConversation,
+        InboxMessage, InboxSource,
+    };
     use gpui::{Modifiers, TestAppContext};
 
     #[gpui::test]
@@ -1303,6 +1423,37 @@ mod tests {
         cx.run_until_parked();
         assert!(cx.debug_bounds(open_row).is_some());
         assert!(cx.debug_bounds(archived_row).is_some());
+    }
+
+    /// A row reads as the web's row does, from its content: read state,
+    /// sender, date, subject, Important, preview and source.
+    #[test]
+    fn inbox_rows_read_like_the_web_row() {
+        let card = InboxCard {
+            id: "launch".into(),
+            source: InboxSource::Email,
+            subject: "Launch review".into(),
+            sender: "Ada".into(),
+            preview: "Can we walk through it?".into(),
+            unread: true,
+            important: true,
+            message_at_ms: i64::MAX,
+        };
+        assert_eq!(
+            inbox_row_label(&card),
+            "Unread conversation: Ada Unknown date Launch review Important Can we walk through it? Email import"
+        );
+        let read = InboxCard {
+            subject: " ".into(),
+            unread: false,
+            important: false,
+            source: InboxSource::Import,
+            ..card
+        };
+        assert_eq!(
+            inbox_row_label(&read),
+            "Read conversation: Ada Unknown date (No subject) Can we walk through it? Imported import"
+        );
     }
 
     #[test]

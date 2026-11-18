@@ -2,15 +2,15 @@
 //! hierarchy. Document and source mutations share the desktop's one atomic
 //! state snapshot; attachment payloads are copied beside that snapshot.
 
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::cell::RefCell;
 use std::collections::BTreeSet;
 
 use bruhs_models::logic::knowledge_library::{self as library, document_copy, source_host, Card};
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::num::ToFloatLossy;
-use gpui_component::input::{Input, InputEvent};
-use gpui_component::text::TextView;
+use bruhs_ui::input::{Input, InputEvent};
+use bruhs_ui::text::TextView;
 
 use crate::views::chat::desktop_markdown_style;
 

@@ -805,8 +805,8 @@ mod tests {
 
     fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut VisualTestContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
-            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            bruhs_ui::init(cx);
+            bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().expect("desktop state"));
         });
@@ -815,7 +815,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let workspace = cx.new(|cx| Workspace::new(window, cx));
             *capture.borrow_mut() = Some(workspace.clone());
-            gpui_component::Root::new(workspace, window, cx)
+            bruhs_ui::Root::new(workspace, window, cx)
         });
         let workspace = captured.borrow().clone().expect("workspace");
         cx.run_until_parked();

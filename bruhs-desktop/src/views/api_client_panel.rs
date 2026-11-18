@@ -8,12 +8,12 @@ use crate::{
 use bruhs_models::{api_client::*, num::ToFloatLossy};
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::text_field::TextField;
-use gpui::{prelude::*, *};
-use gpui_component::zoom::px;
-use gpui_component::{
+use bruhs_ui::zoom::px;
+use bruhs_ui::{
     input::{InputState, TextareaState},
     scroll::ScrollableElement,
 };
+use gpui::{prelude::*, *};
 use std::{collections::BTreeSet, future::Future, sync::Arc};
 use uuid::Uuid;
 

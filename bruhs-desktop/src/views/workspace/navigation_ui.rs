@@ -1,5 +1,5 @@
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 impl Workspace {
     /// The main column's title bar row: window drag area, room for the

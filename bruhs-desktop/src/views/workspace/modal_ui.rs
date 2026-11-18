@@ -4,7 +4,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 pub(super) const DESKTOP_MODAL_FOCUS_TRAP_KEY: &str = "tab";
 pub(super) const DESKTOP_MODAL_FOCUS_START_TAB_INDEX: isize = 0;
 pub(super) const DESKTOP_MODAL_FOCUS_END_TAB_INDEX: isize = 999;
@@ -24,7 +24,7 @@ pub(super) fn picker_max_height(window: &Window) -> Pixels {
 /// Height a form dialog takes: its preferred height, or what the window
 /// allows around a centered dialog.
 pub(super) fn form_dialog_height(window: &Window) -> f32 {
-    (gpui_component::zoom::css_px(window.viewport_size().height) - DESKTOP_DIALOG_EDGE_GAP_PX * 2.0)
+    (bruhs_ui::zoom::css_px(window.viewport_size().height) - DESKTOP_DIALOG_EDGE_GAP_PX * 2.0)
         .clamp(
             DESKTOP_DIALOG_MIN_AVAILABLE_HEIGHT_PX,
             FORM_DIALOG_PREFERRED_HEIGHT_PX,
@@ -71,19 +71,75 @@ impl Workspace {
         self.close_sidebar_menus();
     }
 
+    /// Focus for a dialog that just opened, as the web `Dialog` places it:
+    /// its first control, or the dialog itself when it has none. Web
+    /// dialogs have no close button, so the shared shell's is skipped. The
+    /// dialog takes focus at once, so Escape and Tab reach it; its first
+    /// control follows once the dialog has drawn
+    /// ([`Self::schedule_modal_first_control`]), since Tab order only knows
+    /// drawn elements.
     pub(super) fn focus_first_modal_tab_stop(
-        &self,
+        &mut self,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        self.focus_modal_dialog(window, cx);
+        self.modal_focus.first_control_pending = true;
+    }
+
+    /// Focus the open dialog itself. Settings keeps it there: on the web it
+    /// is a page that focuses nothing until the first Tab.
+    pub(super) fn focus_modal_dialog(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
         let start = self.modal_start_focus_handle.clone();
-        cx.defer_in(window, move |_this, window, cx| {
-            start.focus(window, cx);
-            window.focus_next(cx);
-            if !start.contains_focused(window, cx) {
-                start.focus(window, cx);
-            }
+        cx.defer_in(window, move |_this, window, cx| start.focus(window, cx));
+    }
+
+    /// Focus the shared shell's close button: Tasks' Projects, whose web
+    /// dialog begins with its own Close.
+    pub(super) fn focus_modal_close_button(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let close = self.modal_focus.close.clone();
+        cx.defer_in(window, move |_this, window, cx| close.focus(window, cx));
+    }
+
+    /// Render's half of [`Self::focus_first_modal_tab_stop`]: a step that
+    /// runs right after the frame that draws the new dialog.
+    pub(super) fn schedule_modal_first_control(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if !std::mem::take(&mut self.modal_focus.first_control_pending)
+            || (self.overlay.is_none() && self.top_layer.is_none())
+        {
+            return;
+        }
+        cx.defer_in(window, |this, window, cx| {
+            this.focus_modal_first_control(window, cx);
         });
+    }
+
+    fn focus_modal_first_control(&self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        let dialog = self.modal_start_focus_handle.clone();
+        // A click or a key moved focus meanwhile, or the dialog closed.
+        if !dialog.is_focused(window) {
+            return;
+        }
+        // Begin after a form dialog's header and its close button. The
+        // command bar and pickers draw above any form dialog and have no
+        // such header.
+        if self.top_layer.is_none() {
+            let content = self.modal_focus.content.clone();
+            content.focus(window, cx);
+            window.focus_next(cx);
+            if dialog.contains_focused(window, cx) && !content.is_focused(window) {
+                return;
+            }
+        }
+        dialog.focus(window, cx);
+        window.focus_next(cx);
+        if !dialog.contains_focused(window, cx) {
+            dialog.focus(window, cx);
+        }
     }
 
     pub(super) fn trap_modal_tab_focus(
@@ -128,6 +184,17 @@ impl Workspace {
             .size(px(0.0))
             .overflow_hidden()
             .track_focus(&self.modal_end_focus_handle)
+            .into_any_element()
+    }
+
+    /// Where a dialog's own controls begin, after its header and close
+    /// button: the web dialog's first focusable comes after this.
+    pub(super) fn render_modal_content_start(&self) -> AnyElement {
+        div()
+            .id("desktop-modal-content-start")
+            .size(px(0.0))
+            .overflow_hidden()
+            .track_focus(&self.modal_focus.content)
             .into_any_element()
     }
 
@@ -272,6 +339,15 @@ impl Workspace {
         }
         if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
             chat.update(cx, |chat, cx| chat.close_composer_menus(cx));
+        }
+        // The Inbox import form closes like the web's import dialog.
+        if !had_overlay
+            && !had_menu
+            && self.inbox_import_visible
+            && self.active_view == AppView::Inbox
+        {
+            self.cancel_inbox_import(window, cx);
+            return;
         }
         // Nothing was open, so the focused control keeps Escape: a speaker
         // rename, a text field, or the terminal.
@@ -674,6 +750,7 @@ impl Workspace {
                                         .size(px(theme::ICON_PX))
                                         .text_color(theme::rambutan_400()),
                                 )
+                                .track_focus(&self.modal_focus.close)
                                 .tab_index(0)
                                 .role(Role::Button)
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
@@ -685,6 +762,7 @@ impl Workspace {
                                 }),
                             ),
                     )
+                    .child(self.render_modal_content_start())
                     .child(
                         div()
                             .id("desktop-modal-body")
@@ -708,6 +786,30 @@ impl Workspace {
                     .child(self.render_modal_focus_sentinel()),
             )
             .into_any_element()
+    }
+}
+
+/// Focus handles of the shared dialog shell, and whether a dialog that just
+/// opened still has to move focus to its first control.
+pub(super) struct ModalFocus {
+    /// After a dialog's header: where its own controls begin.
+    pub(super) content: FocusHandle,
+    /// The shared shell's close button.
+    pub(super) close: FocusHandle,
+    /// Set by [`Workspace::focus_first_modal_tab_stop`], taken by render.
+    pub(super) first_control_pending: bool,
+}
+
+impl ModalFocus {
+    pub(super) fn new(cx: &mut Context<'_, Workspace>) -> Self {
+        Self {
+            // a11y-exempt: a focus-handle builder, not an element; nothing draws.
+            content: cx.focus_handle().tab_stop(false).tab_index(0),
+            // a11y-exempt: a focus-handle builder, not an element; the close
+            // button that tracks it names itself.
+            close: cx.focus_handle().tab_index(0).tab_stop(true),
+            first_control_pending: false,
+        }
     }
 }
 

@@ -15,6 +15,7 @@ pub mod editor;
 pub mod files;
 pub mod git;
 pub mod google_calendar;
+mod harness_mcp;
 pub mod import;
 pub mod local_tools;
 pub mod mail;
@@ -43,6 +44,7 @@ pub mod thread_link;
 pub mod transcript;
 pub mod updates;
 pub mod uploads;
+pub mod website_reader;
 pub mod whiteboard;
 pub mod workbench_tools;
 #[cfg(unix)]

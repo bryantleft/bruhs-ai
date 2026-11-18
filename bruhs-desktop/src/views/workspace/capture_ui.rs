@@ -2,7 +2,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 const CAPTURE_TEXTAREA_HEIGHT_PX: f32 = 118.0;
 

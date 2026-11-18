@@ -8,11 +8,11 @@ use bruhs_models::local_tools::{
     MouseKind, MAX_SCROLL_PX, MODIFIER_ALT, MODIFIER_CTRL, MODIFIER_META, MODIFIER_SHIFT,
     WHEEL_LINE_PX,
 };
+use bruhs_ui::zoom::css_px;
 use gpui::{
     Context, Focusable as _, KeyUpEvent, Keystroke, Modifiers, MouseDownEvent, MouseMoveEvent,
     MouseUpEvent, Pixels, Point, ScrollDelta, ScrollEvent, Window,
 };
-use gpui_component::zoom::css_px;
 /// The DOM `key` and `code` of a GPUI keystroke, for the page. `None` for
 /// keys the live view doesn't forward.
 pub(crate) fn dom_key(keystroke: &Keystroke) -> Option<(String, String)> {

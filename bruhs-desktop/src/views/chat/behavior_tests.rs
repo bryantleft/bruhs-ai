@@ -18,8 +18,8 @@ pub(in crate::views::chat) fn chat_window(
     cx: &mut TestAppContext,
 ) -> (Entity<ChatView>, &mut VisualTestContext) {
     cx.update(|cx| {
-        gpui_component::init(cx);
-        gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+        bruhs_ui::init(cx);
+        bruhs_ui::Theme::change(bruhs_ui::ThemeMode::Dark, None, cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().expect("desktop state should initialize"));
     });
@@ -32,7 +32,7 @@ pub(in crate::views::chat) fn chat_window(
             chat
         });
         *capture.borrow_mut() = Some(chat.clone());
-        gpui_component::Root::new(chat, window, cx)
+        bruhs_ui::Root::new(chat, window, cx)
     });
     let chat = cell
         .borrow()
@@ -838,7 +838,7 @@ mod git {
     fn restoring_a_project_chat_reads_git_only_once_it_is_drawn(cx: &mut TestAppContext) {
         let repo = repo_with_unstaged_change();
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             cx.set_global(crate::app_state::DesktopState::new().unwrap());
         });
         let path = repo.path().to_string_lossy().into_owned();

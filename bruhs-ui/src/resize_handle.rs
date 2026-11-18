@@ -2,13 +2,13 @@
 //! leading edge, transparent until hovered or dragged, then persimmon at 40%
 //! (`hover:bg-persimmon-400/40`).
 //!
-//! gpui-component owns the handle's hit area, cursor and drag; this only
+//! [`crate::resizable`] owns the handle's hit area, cursor and drag; this only
 //! paints inside it. Pass it to a panel group's `with_handle_appearance`.
 
 use std::rc::Rc;
 
+use crate::resizable::{ResizeHandleRenderer, ResizeHandleState};
 use gpui::{div, Axis, IntoElement, Styled};
-use gpui_base::{ResizeHandleRenderer, ResizeHandleState};
 
 use crate::theme;
 

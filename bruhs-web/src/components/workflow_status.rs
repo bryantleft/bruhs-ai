@@ -26,6 +26,9 @@ fn notice(
     )
 }
 
+/// The notice's Open workflows, which Pause hands focus to.
+const OPEN_WORKFLOWS_DOM_ID: &str = "workflow-notice-open";
+
 #[component]
 pub fn WorkflowStatus() -> impl IntoView {
     let AutomationStateSignal(automation) = expect_context();
@@ -47,26 +50,32 @@ pub fn WorkflowStatus() -> impl IntoView {
     });
     view! {
         <Show when=move || active.get() != AppView::Automations && current.get().is_some_and(|item| item.dismiss_key.is_none() || item.dismiss_key != dismissed.get())>
+            // The message changes with every saved step; the line and the
+            // buttons stay the same elements, so a live region keeps
+            // announcing and keyboard focus stays where it is.
             <section aria-label=WORKFLOW_STATUS_LABEL class="shrink-0 border-b border-longan-800/50 bg-longan-900 px-4 py-2">
-                {move || current.get().map(|item| {
-                    let role = if item.error { "alert" } else { "status" };
-                    let color = if item.error { "text-body-sm text-lychee-300" } else { "text-body-sm text-rambutan-300" };
-                    view! {
-                        <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
-                            <p role=role aria-live="polite" class=color>{item.message}</p>
-                            <div class="flex flex-wrap items-center gap-2">
-                                // As on desktop: stop every background run from any page.
-                                <Show when=move || automation.with(background_running)>
-                                    <button type="button" aria-label=PAUSE_BACKGROUND_LABEL class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-rambutan-300 cursor-pointer" disabled=move || executor.pause_requested.get() on:click=move |_| executor.pause_requested.set(true)>{PAUSE_BACKGROUND}</button>
-                                </Show>
-                                <button type="button" class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-persimmon-300 cursor-pointer" on:click=move |_| set_active.set(AppView::Automations)>{OPEN_WORKFLOWS}</button>
-                                {item.dismiss_key.map(|key| view! {
-                                    <button type="button" aria-label=DISMISS_WORKFLOW_STATUS class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-rambutan-400 cursor-pointer" on:click=move |_| dismissed.set(Some(key.clone()))>"Dismiss"</button>
-                                })}
-                            </div>
-                        </div>
-                    }
-                })}
+                <div class="flex flex-wrap items-center justify-between gap-x-3 gap-y-1">
+                    <p
+                        role=move || if current.get().is_some_and(|item| item.error) { "alert" } else { "status" }
+                        aria-live="polite"
+                        class=move || if current.get().is_some_and(|item| item.error) { "text-body-sm text-lychee-300" } else { "text-body-sm text-rambutan-300" }
+                    >{move || current.get().map(|item| item.message)}</p>
+                    <div class="flex flex-wrap items-center gap-2">
+                        // As on desktop: stop every background run from any page.
+                        <Show when=move || automation.with(background_running)>
+                            <button type="button" aria-label=PAUSE_BACKGROUND_LABEL class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-rambutan-300 cursor-pointer" disabled=move || executor.pause_requested.get() on:click=move |_| {
+                                executor.pause_requested.set(true);
+                                // Pause goes once the step settles; focus moves
+                                // to Open workflows, which stays, as on desktop.
+                                super::record_focus::focus_record(OPEN_WORKFLOWS_DOM_ID.to_string());
+                            }>{PAUSE_BACKGROUND}</button>
+                        </Show>
+                        <button type="button" id=OPEN_WORKFLOWS_DOM_ID class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-persimmon-300 cursor-pointer" on:click=move |_| set_active.set(AppView::Automations)>{OPEN_WORKFLOWS}</button>
+                        {move || current.get().and_then(|item| item.dismiss_key).map(|key| view! {
+                            <button type="button" aria-label=DISMISS_WORKFLOW_STATUS class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-rambutan-400 cursor-pointer" on:click=move |_| dismissed.set(Some(key.clone()))>"Dismiss"</button>
+                        })}
+                    </div>
+                </div>
             </section>
         </Show>
     }

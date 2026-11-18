@@ -2,7 +2,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 pub(super) const PROJECT_PICKER_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const PROJECT_PICKER_LABEL_FONT_FAMILY: &str = "Monaspace Argon";

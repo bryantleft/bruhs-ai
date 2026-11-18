@@ -1,8 +1,8 @@
 //! What agents told the owner, newest first. Questions wait for a reply.
 use super::*;
 use bruhs_models::EpochMs;
-use gpui_component::text::TextView;
-use gpui_component::zoom::px;
+use bruhs_ui::text::TextView;
+use bruhs_ui::zoom::px;
 
 /// The newest unread item not seen before. The first snapshot only records a
 /// baseline, so updates already waiting at launch never raise a notice.
@@ -515,7 +515,7 @@ mod tests {
     #[gpui::test]
     fn updates_render_at_the_top_with_reply_memory_and_follow_ups(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
         });
         let holder = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -523,7 +523,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let panel = cx.new(ReactiveAutomations::new);
             *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
+            bruhs_ui::Root::new(panel, window, cx)
         });
         cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(2400.0)));
         let panel = holder.borrow().clone().unwrap();

@@ -2,9 +2,9 @@
 
 use super::*;
 use bruhs_models::secrets::{SecretDecision, SecretRequest};
+use bruhs_ui::input::InputContentType;
 use bruhs_ui::press::on_press_view;
-use gpui_component::input::InputContentType;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 pub(super) struct SecretPrompt {
     request: SecretRequest,
@@ -227,7 +227,7 @@ impl Render for SecretPrompt {
             .when(self.request.storage_unavailable, |element| element.child(div().text_color(theme::durian_300()).child("Saved credentials could not be checked. Unlock your OS keychain or use a credential once.")))
             .child(div().id("credential-operation").max_h(px(160.0)).overflow_y_scroll().child(format!("Command: {command}\nFolder: {}\nVariable: {}", bruhs_models::secrets::review_text(&self.request.cwd), self.request.operation.env_var)))
             .child(div().text_color(theme::rambutan_400()).child("This command can access the credential. Only its exit status returns to the AI."))
-            .child(Input::new(&self.input).h(px(theme::CONTROL_PX)).aria_label("Credential").content_type(InputContentType::Password).mask_toggle().disabled(self.busy))
+            .child(Input::new(&self.input).aria_label("Credential").content_type(InputContentType::Password).mask_toggle().disabled(self.busy))
             .when_some(self.error.clone(), |element, error| element.child(div().id("credential-error").role(Role::Alert).text_color(theme::lychee_300()).child(format!("{error} Enter the credential again or decline."))))
             .child(div().flex().flex_wrap().gap_2()
                 .child(self.action_button("once", "Use once", cx))
@@ -249,7 +249,7 @@ mod tests {
         cx: &mut TestAppContext,
     ) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
@@ -258,7 +258,7 @@ mod tests {
         let (_, cx) = cx.add_window_view(|window, cx| {
             let chat = cx.new(|cx| ChatView::new(window, cx));
             *output.borrow_mut() = Some(chat.clone());
-            gpui_component::Root::new(chat, window, cx)
+            bruhs_ui::Root::new(chat, window, cx)
         });
         let chat = captured.borrow().clone().unwrap();
         chat.update_in(cx, |chat, window, cx| {

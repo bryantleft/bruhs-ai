@@ -2,8 +2,8 @@
 //! or cite a saved source by searching for it. Search, paging, keys and
 //! wording come from `bruhs_models::logic::record_picker`, shared with web.
 
-use gpui_component::input::{Input, InputEvent, InputState};
-use gpui_component::zoom::px;
+use bruhs_ui::input::{Input, InputEvent, InputState};
+use bruhs_ui::zoom::px;
 
 use super::*;
 use bruhs_models::logic::record_picker::{
@@ -497,12 +497,14 @@ impl Workspace {
                     .bg(gpui::white().opacity(RECORD_PICKER_TRIGGER_BG_OPACITY))
                     .border_1()
                     .border_color(gpui::white().opacity(RECORD_PICKER_TRIGGER_RING_OPACITY))
-                    .px_3()
+                    // Web `px-3` inside an inset ring; here the 1px border takes one.
+                    .px(px(11.0))
                     .py_1()
                     .child(
                         Input::new(&self.record_picker.input)
                             .aria_label(target.search_label())
                             .appearance(false)
+                            .px_0()
                             .bordered(false)
                             .focus_bordered(false)
                             .cleanable(false)

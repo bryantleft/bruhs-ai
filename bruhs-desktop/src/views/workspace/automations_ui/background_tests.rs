@@ -27,7 +27,7 @@ fn fixture(
     cx: &mut gpui::TestAppContext,
 ) -> (Entity<Workspace>, &mut gpui::VisualTestContext, Fixture) {
     cx.update(|cx| {
-        gpui_component::init(cx);
+        bruhs_ui::init(cx);
         theme::apply_bruhs_theme(cx);
         cx.set_global(DesktopState::new().unwrap());
     });
@@ -36,7 +36,7 @@ fn fixture(
     let (_, cx) = cx.add_window_view(|window, cx| {
         let workspace = cx.new(|cx| Workspace::new(window, cx));
         *capture.borrow_mut() = Some(workspace.clone());
-        gpui_component::Root::new(workspace, window, cx)
+        bruhs_ui::Root::new(workspace, window, cx)
     });
     let workspace = cell.borrow().clone().unwrap();
     // Tall enough for every Agent workflows card.
@@ -302,6 +302,41 @@ async fn global_pause_and_revoked_resume_do_not_advance_workflow(cx: &mut gpui::
         assert_eq!(w.automation_state.jobs[0].next_step, 0);
         w.drive_background_automations(cx);
         assert!(w.work_items.is_empty());
+    });
+}
+
+/// The notice's Pause goes once its step settles, taking the button with
+/// it: focus moves to Open workflows, which stays, as on the web.
+#[gpui::test]
+async fn pause_hands_focus_to_open_workflows(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx, _fixture) = fixture(cx);
+    cx.condition(&workspace, |w, _| w.save_status.is_saved())
+        .await;
+    workspace.update_in(cx, |w, _, cx| w.start_latest_automation(cx));
+    cx.condition(&workspace, |w, _| w.save_status.is_saved())
+        .await;
+    workspace.update_in(cx, |w, _, cx| {
+        w.enable_latest_background_automation(cx);
+        w.active_view = AppView::Today;
+    });
+    cx.run_until_parked();
+    let pause = cx
+        .debug_bounds("desktop-pause-background-workflows")
+        .expect("Pause is drawn");
+    cx.simulate_click(pause.center(), gpui::Modifiers::default());
+    cx.condition(&workspace, |w, _| w.save_status.is_saved())
+        .await;
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("desktop-pause-background-workflows")
+            .is_none(),
+        "Pause went with the run"
+    );
+    workspace.update_in(cx, |w, window, _| {
+        assert!(
+            w.workflow_notice_open_focus.is_focused(window),
+            "focus is on Open workflows"
+        );
     });
 }
 

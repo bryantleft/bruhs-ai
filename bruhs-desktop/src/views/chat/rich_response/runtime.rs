@@ -1,8 +1,8 @@
 use super::*;
 use bruhs_models::logic::rich_response::HtmlBlock;
 use bruhs_ui::press::on_press_view;
+use bruhs_ui::zoom::px;
 use futures_util::FutureExt as _;
-use gpui_component::zoom::px;
 
 pub(super) fn action_button(
     id: impl Into<ElementId>,

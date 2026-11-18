@@ -47,7 +47,7 @@ impl SaveStatus {
 }
 
 use super::*;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 
 impl Workspace {
     /// Web `MetadataStatus`: nothing while saves succeed; after a failure,
@@ -172,12 +172,12 @@ mod tests {
     #[gpui::test]
     fn only_a_failed_save_shows_the_status_strip(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            bruhs_ui::init(cx);
             theme::apply_bruhs_theme(cx);
             cx.set_global(DesktopState::new().unwrap());
         });
         let (root, cx) = cx.add_window_view(|window, cx| {
-            gpui_component::Root::new(cx.new(|cx| Workspace::new(window, cx)), window, cx)
+            bruhs_ui::Root::new(cx.new(|cx| Workspace::new(window, cx)), window, cx)
         });
         for (status, shown) in [
             (SaveStatus::Saving, false),

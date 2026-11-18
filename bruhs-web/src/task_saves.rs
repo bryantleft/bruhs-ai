@@ -62,6 +62,17 @@ impl TaskSaves {
         };
         provide_context(saves);
         saves.load_day_plan();
+        // A failed Apply's or Undo's banner goes with its error.
+        Effect::new(move |_| {
+            let Some(id) = saves
+                .day_plan
+                .with(|state| planning::stale_error_banner(state).map(str::to_owned))
+            else {
+                return;
+            };
+            saves.banners.dismiss(&id);
+            saves.day_plan.update(|state| state.error_banner = None);
+        });
     }
 
     pub(crate) fn pending(self) -> bool {

@@ -2,7 +2,7 @@
 
 use super::*;
 use bruhs_ui::press::on_press_view;
-use gpui_component::zoom::px;
+use bruhs_ui::zoom::px;
 use std::borrow::Cow;
 pub(super) const AUTH_BANNER_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const AUTH_BANNER_TEXT_SIZE_PX: f32 = 14.0;
