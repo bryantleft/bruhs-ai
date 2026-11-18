@@ -208,6 +208,20 @@ impl Workspace {
                 self.persist_and_notify(cx);
             }
             "retry-save" => self.persist_and_notify(cx),
+            // `toggle-grant:Calendar`: flip a domain's Write grant and save.
+            scene if scene.starts_with("toggle-grant:") => {
+                let label = scene.trim_start_matches("toggle-grant:");
+                if let Some(domain) = bruhs_models::AgentDomain::ALL
+                    .into_iter()
+                    .find(|domain| domain.label() == label)
+                {
+                    let access = bruhs_models::AgentAccess::Write;
+                    let on = self.automation_state.permissions.allows(domain, access);
+                    self.automation_state.permissions.set(domain, access, !on);
+                    self.persist_and_notify(cx);
+                }
+            }
+
             "save-report" => eprintln!(
                 "BRUHS_DESKTOP_SMOKE save status={:?} tasks_write={}",
                 self.save_status,

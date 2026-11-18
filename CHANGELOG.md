@@ -272,6 +272,9 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- In the desktop app, a failed save now reads like the web's: "Not saved",
+  why, Retry save and Copy recovery data, under the page's top bar instead
+  of under the window's close and minimize buttons.
 - In the desktop app, the workflow notice (such as "An MCP proposal is
   awaiting your review") no longer runs under the window's close and
   minimize buttons. It sits under the page's top bar, as on the web, and is
