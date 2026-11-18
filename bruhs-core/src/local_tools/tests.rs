@@ -359,6 +359,34 @@ fn headed_and_headless_bruh_launches_share_the_cookie_key() {
 }
 
 #[test]
+fn kept_profiles_keep_their_cache_in_the_bruh_tree() {
+    use browser::{launch_args, LaunchOptions};
+    use std::path::Path;
+    // On macOS Chrome otherwise moves a profile's cache from Application
+    // Support to ~/Library/Caches, where deleting the bruh would miss it.
+    for headless in [true, false] {
+        let args = launch_args(
+            &LaunchOptions {
+                profile: Some("/data/bruhs/a/browser".into()),
+                headless,
+                proxy: Some("127.0.0.1:4100".parse().unwrap()),
+            },
+            Path::new("/data/bruhs/a/browser"),
+            "UA",
+        );
+        let caches: Vec<&String> = args
+            .iter()
+            .filter(|arg| arg.starts_with("--disk-cache-dir"))
+            .collect();
+        assert_eq!(caches, ["--disk-cache-dir=/data/bruhs/a/browser-cache"]);
+    }
+    let verification = launch_args(&LaunchOptions::verification(), Path::new("/tmp/x"), "UA");
+    assert!(!verification
+        .iter()
+        .any(|arg| arg.starts_with("--disk-cache-dir")));
+}
+
+#[test]
 fn bruh_browsers_deny_downloads_in_a_window_too() {
     use browser::LaunchOptions;
     let bruh = |headless| LaunchOptions {

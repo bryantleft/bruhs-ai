@@ -91,6 +91,13 @@ pub(super) fn launch_args(
         // cookies encrypted under one key can't be read under the other, so
         // every launch of a kept profile pins the same key store.
         args.extend(["--use-mock-keychain", "--password-store=basic"].map(String::from));
+        // Beside the profile, inside the bruh's tree. On macOS Chrome would
+        // otherwise move the cache of a profile under Application Support
+        // to ~/Library/Caches, where deleting the bruh would leave it.
+        let cache = profile
+            .parent()
+            .map_or_else(|| profile.join("Cache"), |tree| tree.join("browser-cache"));
+        args.push(format!("--disk-cache-dir={}", cache.display()));
     }
     if options.headless {
         args.push("--headless=new".into());

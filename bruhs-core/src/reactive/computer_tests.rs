@@ -1,7 +1,7 @@
 //! Computers: the switch, keeping the host in step with the store, and
 //! removing a deleted bruh's whole `bruhs/<id>` tree.
 
-use super::computers::{sweep_trees, OWNED_MARKER};
+use super::computers::{mark_tree, sweep_trees, OWNED_MARKER};
 use super::crew_tests::{agent, claim_one, runtime_with};
 use super::{ReactiveError, ReactiveRuntime};
 use crate::local_tools::LocalToolsHost;
@@ -384,4 +384,60 @@ async fn a_failed_create_leaves_no_tree_behind() {
         .await;
     assert!(refused.is_err());
     assert!(!home(&dir).join("bruhs/fresh").exists());
+}
+
+#[tokio::test]
+async fn turning_computer_off_closes_the_browser_and_keeps_its_profile() {
+    let (dir, runtime) = runtime_with(&[]).await;
+    let tree = home(&dir).join("bruhs/a");
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    runtime.attach_computers(host.clone()).unwrap();
+    runtime.command(create_bruh("a")).await.unwrap();
+    runtime.command(set_computer("a", true)).await.unwrap();
+    eventually(|| async { host.computer_state("a").await.is_ok() }).await;
+    host.open_computer("a").await.unwrap();
+    runtime.command(set_computer("a", false)).await.unwrap();
+    eventually(|| async { fake.closes("a") == 1 }).await;
+    assert!(host.computer_state("a").await.is_err());
+    assert!(tree.join("browser/Cookies").is_file(), "the profile stays");
+    assert_eq!(
+        std::fs::read_to_string(tree.join(OWNED_MARKER)).unwrap(),
+        "a"
+    );
+}
+
+#[tokio::test]
+async fn the_sync_loop_ends_with_its_runtime() {
+    let (dir, runtime) = runtime_with(&[full_claude("a")]).await;
+    let (host, _fake) = LocalToolsHost::with_fake_pages();
+    runtime.attach_computers(host).unwrap();
+    runtime.command(set_computer("a", true)).await.unwrap();
+    let path = dir.path().join("reactive.sqlite3");
+    drop(runtime);
+    // The loop holds the runtime only during a pass, so its database lock
+    // comes free and the same file opens again.
+    for _ in 0..500 {
+        if ReactiveRuntime::open(&path).await.is_ok() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    panic!("the sync loop kept the runtime alive");
+}
+
+#[test]
+fn a_hard_linked_marker_is_replaced_not_rewritten() {
+    let dir = tempfile::tempdir().unwrap();
+    let home = home(&dir);
+    let outside = home.join("outside");
+    std::fs::write(&outside, "someone else's").unwrap();
+    let tree = home.join("bruhs/a");
+    std::fs::create_dir_all(&tree).unwrap();
+    std::fs::hard_link(&outside, tree.join(OWNED_MARKER)).unwrap();
+    mark_tree(&home, "a").unwrap();
+    assert_eq!(std::fs::read_to_string(&outside).unwrap(), "someone else's");
+    assert_eq!(
+        std::fs::read_to_string(tree.join(OWNED_MARKER)).unwrap(),
+        "a"
+    );
 }

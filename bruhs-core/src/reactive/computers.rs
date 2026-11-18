@@ -83,13 +83,16 @@ pub(super) fn mark_tree(home: &Path, id: &str) -> Result<(), ReactiveError> {
             {
                 return Ok(());
             }
+            // Replaced, never rewritten in place: a hard-linked marker
+            // would carry the write to the file it shares.
+            std::fs::remove_file(&marker).map_err(|_| refused())?;
         }
         Ok(_) => return Err(refused()),
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
         Err(_) => return Err(refused()),
     }
     let mut options = std::fs::OpenOptions::new();
-    options.write(true).create(true).truncate(true);
+    options.write(true).create_new(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -345,9 +348,20 @@ pub(super) fn spawn_sync(runtime: &ReactiveRuntime) {
     if runtime.syncing.swap(true, Ordering::AcqRel) {
         return;
     }
+    /// Lets a later `start` run the loop again if this one panicked.
+    struct Running(Weak<std::sync::atomic::AtomicBool>);
+    impl Drop for Running {
+        fn drop(&mut self) {
+            if let Some(syncing) = self.0.upgrade() {
+                syncing.store(false, Ordering::Release);
+            }
+        }
+    }
+    let running = Running(Arc::downgrade(&runtime.syncing));
     let mut changes = runtime.watch_changes();
     let runtime = WeakRuntime::new(runtime);
     tokio::spawn(async move {
+        let _running = running;
         let mut pass = Pass::default();
         loop {
             changes.borrow_and_update();
