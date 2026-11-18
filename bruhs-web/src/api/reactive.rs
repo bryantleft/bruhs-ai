@@ -63,10 +63,6 @@ pub async fn room_messages(
     .await
 }
 
-#[expect(
-    dead_code,
-    reason = "the bruh page's Computer tab is the first caller, in the next change"
-)]
 /// A bruh's Computer as the service has it now.
 pub async fn computer_state(agent_id: &str) -> Result<ComputerState, ApiError> {
     get_json(&format!(
@@ -76,10 +72,6 @@ pub async fn computer_state(agent_id: &str) -> Result<ComputerState, ApiError> {
     .await
 }
 
-#[expect(
-    dead_code,
-    reason = "the bruh page's Computer tab is the first caller, in the next change"
-)]
 /// Opens, closes, takes control of, hands back or opens a window for a
 /// bruh's Computer.
 pub async fn computer_request(
@@ -94,10 +86,6 @@ pub async fn computer_request(
     .await
 }
 
-#[expect(
-    dead_code,
-    reason = "the bruh page's Computer tab is the first caller, in the next change"
-)]
 /// The live view's WebSocket address for a browser session.
 pub fn screencast_url(session_id: &str) -> String {
     bruhs_models::local_tools::screencast_url(BASE_URL, session_id)

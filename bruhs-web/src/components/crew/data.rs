@@ -71,13 +71,6 @@ impl CrewData {
     }
 
     /// Why the Computer is off, once the version is known to be older.
-    #[cfg_attr(
-        not(test),
-        expect(
-            dead_code,
-            reason = "the Computer tab is the first caller, in the next change"
-        )
-    )]
     pub fn computer_reason(&self) -> Option<&'static str> {
         computer_reason(self.protocol())
     }
