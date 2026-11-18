@@ -5,7 +5,7 @@
 use super::*;
 
 /// A key press as the app gets it: gpui clicks a focused button on key up.
-pub(super) fn press(cx: &mut gpui::VisualTestContext, key: &str) {
+pub(super) fn press(cx: &mut gpui::VisualTestContext, key: &'static str) {
     let keystroke = gpui::Keystroke::parse(key).expect("keystroke");
     cx.simulate_event(gpui::KeyDownEvent {
         keystroke: keystroke.clone(),

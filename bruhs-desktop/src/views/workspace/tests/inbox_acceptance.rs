@@ -73,6 +73,17 @@ fn input_handle(
     })
 }
 
+/// `input_handle` for a multi-line field.
+fn textarea_handle(
+    workspace: &Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+    input: impl Fn(&Workspace) -> &Entity<gpui_component::input::TextareaState>,
+) -> gpui::FocusHandle {
+    workspace.read_with(cx, |workspace, cx| {
+        input(workspace).read(cx).focus_handle(cx)
+    })
+}
+
 /// INBOX-06: a saved reply draft comes back when the conversation is
 /// reopened, another conversation's reply box stays empty, and after a
 /// restart the draft is there to continue and log; the logged reply and
@@ -248,8 +259,8 @@ async fn the_inbox_works_from_the_keyboard(cx: &mut gpui::TestAppContext) {
     let search = input_handle(&workspace, cx, |w| &w.inbox_search_input);
     let sender = input_handle(&workspace, cx, |w| &w.inbox_sender_input);
     let subject = input_handle(&workspace, cx, |w| &w.inbox_subject_input);
-    let message = input_handle(&workspace, cx, |w| &w.inbox_body_input);
-    let reply_box = input_handle(&workspace, cx, |w| &w.inbox_reply_input);
+    let message = textarea_handle(&workspace, cx, |w| &w.inbox_body_input);
+    let reply_box = textarea_handle(&workspace, cx, |w| &w.inbox_reply_input);
 
     // Import: the action just before the search field opens the form with
     // the sender focused. An empty import is refused and keeps its place.
