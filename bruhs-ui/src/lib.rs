@@ -45,12 +45,15 @@ pub mod switch;
 pub mod text;
 pub mod text_field;
 pub mod theme;
+pub mod title_bar;
 pub mod tooltip;
 pub mod zoom;
 
 // The kit pieces an app needs at its root. These move into bruhs-ui itself,
 // phase by phase (docs/ui-kit-replacement.md); the paths stay.
 pub use gpui_component::{
-    init, ActiveTheme, Disableable, FocusTrapElement, Icon, IconName, Root, RopeExt, Sizable,
-    Theme, ThemeMode, ThemeTokens, TitleBar, WindowExt,
+    init, ActiveTheme, Disableable, FocusTrapElement, Root, RopeExt, Sizable, Theme, ThemeMode,
+    ThemeTokens, WindowExt,
 };
+pub use icons::{Icon, IconName};
+pub use title_bar::TitleBar;

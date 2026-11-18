@@ -4,7 +4,53 @@
 //! Drawing at a zoom is `gpui_component::zoom`: design lengths are CSS pixels
 //! scaled by the zoom, so pages reflow at the web's widths.
 
-pub use gpui_component::zoom::{css_px, px, set_zoom, window_px, zoom};
+use gpui::{App, Pixels};
+use std::cell::Cell;
+
+thread_local! {
+    // The window's page zoom. One per UI thread: gpui draws every window
+    // on the main thread, and tests each run on their own.
+    static ZOOM: Cell<f32> = const { Cell::new(DEFAULT) };
+}
+
+/// The page zoom now in effect (1.0 is 100%).
+pub fn zoom() -> f32 {
+    ZOOM.with(Cell::get)
+}
+
+/// A design length: CSS pixels, drawn at the page zoom. Use it for every
+/// size the web writes in CSS (padding, gaps, text sizes, radii).
+#[inline]
+pub fn px(css: f32) -> Pixels {
+    gpui::px(css * zoom())
+}
+
+/// A length in window points, which the zoom never scales: bounds, mouse
+/// positions, scroll offsets, and window chrome (traffic lights, the window
+/// border, resize edges).
+#[inline]
+pub fn window_px(points: f32) -> Pixels {
+    gpui::px(points)
+}
+
+/// A measured length (window points) in CSS pixels, for comparing it with a
+/// design length or a web breakpoint.
+#[inline]
+pub fn css_px(points: Pixels) -> f32 {
+    f32::from(points) / zoom()
+}
+
+/// Draw the window's design lengths at `zoom`. Rem-based styles follow the
+/// theme's font size, which this rescales. Non-finite and non-positive zooms
+/// are ignored.
+pub fn set_zoom(zoom: f32, cx: &mut App) {
+    if !(zoom.is_finite() && zoom > 0.0) || (zoom - self::zoom()).abs() < f32::EPSILON {
+        return;
+    }
+    ZOOM.with(|cell| cell.set(zoom));
+    // Kit components not yet replaced read the kit's own factor and theme.
+    gpui_component::zoom::set_zoom(zoom, cx);
+}
 
 /// The zoom steps, smallest first.
 pub const LEVELS: [f32; 12] = [
@@ -82,5 +128,20 @@ mod tests {
     fn traffic_lights_keep_their_window_place() {
         assert_eq!(traffic_light_top(44.0, 1.0), 15.0);
         assert_eq!(traffic_light_top(44.0, 2.0), 37.0);
+    }
+}
+
+#[cfg(test)]
+mod length_tests {
+    use super::*;
+
+    #[test]
+    fn design_lengths_scale_and_measurements_do_not() {
+        assert_eq!(px(10.0), gpui::px(10.0));
+        ZOOM.with(|cell| cell.set(2.0));
+        assert_eq!(px(10.0), gpui::px(20.0));
+        assert_eq!(window_px(10.0), gpui::px(10.0));
+        assert_eq!(css_px(gpui::px(1280.0)), 640.0);
+        ZOOM.with(|cell| cell.set(DEFAULT));
     }
 }

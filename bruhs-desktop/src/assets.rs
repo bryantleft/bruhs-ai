@@ -68,24 +68,14 @@ pub const COPY_ICON_PATH: &str = "icons/copy.svg";
 pub const DOWNLOAD_ICON_PATH: &str = "icons/download.svg";
 pub const HELP_CIRCLE_ICON_PATH: &str = "icons/help-circle.svg";
 
-const TOP_BAR_PANEL_LEFT_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/panel-left.svg");
-const TOP_BAR_BOT_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/bot.svg");
-const TOP_BAR_TASKS_ICON: &[u8] = include_bytes!(
-    "../../third_party/gpui-component/crates/assets/assets/icons/layout-dashboard.svg"
-);
-const TOP_BAR_CALENDAR_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/calendar.svg");
-const TOP_BAR_PLUS_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/plus.svg");
-const TOP_BAR_SETTINGS_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/settings.svg");
-const TOP_BAR_TERMINAL_ICON: &[u8] = include_bytes!(
-    "../../third_party/gpui-component/crates/assets/assets/icons/square-terminal.svg"
-);
-const EXTERNAL_LINK_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/external-link.svg");
+const TOP_BAR_PANEL_LEFT_ICON: &[u8] = include_bytes!("../assets/icons/panel-left.svg");
+const TOP_BAR_BOT_ICON: &[u8] = include_bytes!("../assets/icons/bot.svg");
+const TOP_BAR_TASKS_ICON: &[u8] = include_bytes!("../assets/icons/layout-dashboard.svg");
+const TOP_BAR_CALENDAR_ICON: &[u8] = include_bytes!("../assets/icons/calendar.svg");
+const TOP_BAR_PLUS_ICON: &[u8] = include_bytes!("../assets/icons/plus.svg");
+const TOP_BAR_SETTINGS_ICON: &[u8] = include_bytes!("../assets/icons/settings.svg");
+const TOP_BAR_TERMINAL_ICON: &[u8] = include_bytes!("../assets/icons/square-terminal.svg");
+const EXTERNAL_LINK_ICON: &[u8] = include_bytes!("../assets/icons/external-link.svg");
 pub const EXTERNAL_LINK_ICON_PATH: &str = "icons/external-link.svg";
 pub const REFRESH_ICON_PATH: &str = "icons/refresh-cw.svg";
 const PAPERCLIP_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l8.57-8.57A4 4 0 1 1 18 8.84l-8.59 8.57a2 2 0 0 1-2.83-2.83l8.49-8.48"/></svg>"#;
@@ -105,8 +95,7 @@ const ARCHIVE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" 
 const EYE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M2.062 12.348a1 1 0 0 1 0-.696 10.75 10.75 0 0 1 19.876 0 1 1 0 0 1 0 .696 10.75 10.75 0 0 1-19.876 0"/><circle cx="12" cy="12" r="3"/></svg>"#;
 const WRENCH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"/></svg>"#;
 const HAMMER_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m15 12-8.373 8.373a1 1 0 1 1-3-3L12 9"/><path d="m18 15 4-4"/><path d="m21.5 11.5-1.914-1.914A2 2 0 0 1 19 8.172V7l-2.26-2.26a6 6 0 0 0-4.202-1.756L9 2.96l.92.82A6.18 6.18 0 0 1 12 8.4V10l2 2h1.172a2 2 0 0 1 1.414.586L18.5 14.5"/></svg>"#;
-const CHEVRON_LEFT_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/chevron-left.svg");
+const CHEVRON_LEFT_ICON: &[u8] = include_bytes!("../assets/icons/chevron-left.svg");
 const CHEVRON_RIGHT_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="m9 18 6-6-6-6"/></svg>"#;
 const CIRCLE_ALERT_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>"#;
 const ROTATE_CCW_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/></svg>"#;
@@ -114,8 +103,7 @@ const DOWNLOAD_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24"
 const COPY_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><rect width="14" height="14" x="8" y="8" rx="2" ry="2"/><path d="M4 16c-1.1 0-2-.9-2-2V4c0-1.1.9-2 2-2h10c1.1 0 2 .9 2 2"/></svg>"#;
 const KEYBOARD_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M10 8h.01"/><path d="M12 12h.01"/><path d="M14 8h.01"/><path d="M16 12h.01"/><path d="M18 8h.01"/><path d="M6 8h.01"/><path d="M7 16h10"/><path d="M8 12h.01"/><rect width="20" height="16" x="2" y="4" rx="2"/></svg>"#;
 const HELP_CIRCLE_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><path d="M12 17h.01"/></svg>"#;
-const PANEL_RIGHT_ICON: &[u8] =
-    include_bytes!("../../third_party/gpui-component/crates/assets/assets/icons/panel-right.svg");
+const PANEL_RIGHT_ICON: &[u8] = include_bytes!("../assets/icons/panel-right.svg");
 const REFRESH_ICON: &[u8] = br#"<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" xmlns="http://www.w3.org/2000/svg"><path d="M3 12a9 9 0 0 1 9-9 9.75 9.75 0 0 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/><path d="M21 12a9 9 0 0 1-9 9 9.75 9.75 0 0 1-6.74-2.74L3 16"/><path d="M8 16H3v5"/></svg>"#;
 
 pub struct DesktopAssets;

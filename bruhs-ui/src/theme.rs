@@ -3,6 +3,7 @@
 
 use gpui::{hsla, rgb, App, FontFeatures, Hsla};
 use gpui_component::{scroll::ScrollbarMode, Theme, ThemeTokens};
+// The kit's own components still read `Theme`; ours read bruhs-ui globals.
 use std::sync::Arc;
 
 /// bruhs label/UI face (web: `Monaspace Argon`).
@@ -465,6 +466,16 @@ pub fn apply_bruhs_theme(cx: &mut App) {
     // Scrollbars and resize handles paint from gpui-base's copy of the
     // theme, which a direct field edit does not reach.
     Theme::sync_base(cx);
+
+    // bruhs-ui's own scrollbars: always shown, like the web's, in warm tones.
+    crate::scroll::set_scrollbar_style(
+        crate::scroll::ScrollbarStyle {
+            mode: crate::scroll::ScrollbarMode::Always,
+            thumb: rambutan_500(),
+            thumb_active: rambutan_400(),
+        },
+        cx,
+    );
 }
 
 #[cfg(test)]

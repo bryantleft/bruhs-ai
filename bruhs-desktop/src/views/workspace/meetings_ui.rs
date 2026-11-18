@@ -22,7 +22,6 @@ use bruhs_ui::checkbox::Checkbox;
 use bruhs_ui::input::{
     Escape as InputEscape, Input, InputEvent, InputState, Textarea, TextareaState,
 };
-use bruhs_ui::Disableable;
 use gpui::prelude::*;
 use gpui::*;
 use std::sync::Arc;
