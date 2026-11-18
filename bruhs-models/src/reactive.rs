@@ -270,8 +270,9 @@ pub enum ReactiveCommand {
     Chat {
         agent_id: String,
         message: String,
-        /// The room run this reply answers; only sent to a service that
-        /// speaks rooms.
+        /// The id the sender picks for the run this message starts, so a
+        /// `message_bruh` sender that waits can read that run until it
+        /// ends. Only sent to a service that speaks rooms.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         run_id: Option<String>,
     },
