@@ -3,7 +3,7 @@
 //! and deleted with the same options on both surfaces.
 
 use bruhs_models::{
-    people_copy, suggested_follow_ups, RelationshipDue, RelationshipItem, RelationshipItemEdit,
+    people_copy, person_follow_ups, RelationshipDue, RelationshipItem, RelationshipItemEdit,
     RelationshipItemKind, RELATIONSHIP_ITEM_KINDS,
 };
 use leptos::prelude::*;
@@ -223,19 +223,15 @@ pub fn RelationshipPanel(person_id: String) -> impl IntoView {
     };
 
     let suggestions = move || {
+        // Only this person's follow ups, with or without saved details.
         let suggestions = relationships.with(|profiles| {
             conversations.with(|conversations| {
-                profiles
-                    .iter()
-                    .find(|profile| profile.person_id == id.get_value())
-                    .map(|profile| {
-                        suggested_follow_ups(
-                            std::slice::from_ref(profile),
-                            conversations,
-                            crate::clock::now_ms(),
-                        )
-                    })
-                    .unwrap_or_default()
+                person_follow_ups(
+                    &id.get_value(),
+                    profiles,
+                    conversations,
+                    crate::clock::now_ms(),
+                )
             })
         });
         (!suggestions.is_empty()).then(|| {
@@ -261,7 +257,7 @@ pub fn RelationshipPanel(person_id: String) -> impl IntoView {
                 .collect_view();
             view! {
                 <div class="rounded-grape bg-blueberry-500/8 p-2.5 inset-ring inset-ring-blueberry-500/20">
-                    <p class="text-label-sm uppercase tracking-wide text-blueberry-300">"Suggested follow ups"</p>
+                    <p class="text-label-sm uppercase tracking-wide text-blueberry-300">{people_copy::FOLLOW_UPS_HEADING}</p>
                     <div class="mt-1 space-y-1">{rows}</div>
                 </div>
             }

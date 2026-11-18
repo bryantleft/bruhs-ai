@@ -1772,8 +1772,24 @@ impl Workspace {
         (events, tasks)
     }
 
-    pub(super) fn open_calendar_day_list(&mut self, date: NaiveDate, cx: &mut Context<'_, Self>) {
+    /// Web "Calendar day" dialog: focus moves into it, and closing it
+    /// returns focus to the day number or +N more that opened it.
+    pub(super) fn open_calendar_day_list(
+        &mut self,
+        date: NaiveDate,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.overlay == Some(Overlay::CalendarDay { date }) {
+            return;
+        }
+        if !self.modal_start_focus_handle.contains_focused(window, cx) {
+            self.palette_return_focus = window
+                .focused(cx)
+                .map(|focus| (self.active_view.clone(), focus));
+        }
         self.open_overlay(Overlay::CalendarDay { date });
+        self.focus_first_modal_tab_stop(window, cx);
         cx.notify();
     }
 
@@ -1800,8 +1816,8 @@ impl Workspace {
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .map(|el| {
-                on_press_view(el, cx, move |this, _window, cx| {
-                    this.open_calendar_day_list(date, cx);
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.open_calendar_day_list(date, window, cx);
                 })
             })
     }

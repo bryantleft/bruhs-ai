@@ -196,7 +196,12 @@ use gpui_component::zoom::px;
 use std::{cell::RefCell, fs, rc::Rc};
 
 mod calendar_completion;
+mod calendar_zones;
+mod inbox_acceptance;
+mod keys;
+mod launch;
 mod parity_rows;
+mod today_acceptance;
 
 fn dt(year: i32, month: u32, day: u32, hour: u32, minute: u32) -> NaiveDateTime {
     NaiveDate::from_ymd_opt(year, month, day)

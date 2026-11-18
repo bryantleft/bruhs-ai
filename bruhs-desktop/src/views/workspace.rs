@@ -2844,6 +2844,7 @@ impl Render for Workspace {
             }
         }
         self.page_history.visit(&page_key(&self.active_view));
+        self.forget_left_people_return();
         self.sync_thread_catalog(cx);
         self.sync_create_bruh(cx);
         self.sync_bruh_page(cx);

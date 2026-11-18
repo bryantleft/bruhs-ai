@@ -260,6 +260,21 @@ pub fn suggested_follow_ups(
     suggestions
 }
 
+/// The follow ups one profile suggests: that person's due commitments and
+/// reminders, and replies owed in conversations they take part in. Another
+/// person's conversation never shows on this profile, and a person with no
+/// saved relationship details still gets their replies.
+pub fn person_follow_ups(
+    person_id: &str,
+    relationships: &[RelationshipProfile],
+    conversations: &[InboxConversation],
+    now_ms: i64,
+) -> Vec<SuggestedFollowUp> {
+    let mut suggestions = suggested_follow_ups(relationships, conversations, now_ms);
+    suggestions.retain(|suggestion| suggestion.person_id == person_id);
+    suggestions
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -290,6 +305,51 @@ mod tests {
         assert_eq!(suggestions.len(), 2);
         assert_eq!(suggestions[0].reason, "Send the brief");
         assert_eq!(suggestions[1].reason, "Reply to Launch");
+    }
+
+    fn unanswered(subject: &str, person_id: &str, at: i64) -> InboxConversation {
+        let mut conversation = InboxConversation::new(
+            InboxSource::Email,
+            subject,
+            vec![InboxParticipant {
+                id: format!("participant-{person_id}"),
+                display_name: person_id.into(),
+                address: String::new(),
+                person_id: Some(person_id.into()),
+            }],
+            at,
+        );
+        conversation.receive(InboxMessage::incoming(person_id, "Any update?", at));
+        conversation
+    }
+
+    /// A profile lists only its own person's follow ups, with or without
+    /// saved relationship details.
+    #[test]
+    fn a_profile_suggests_only_its_own_follow_ups() {
+        let mut ada = RelationshipProfile::new("ada", 1);
+        let mut reminder = RelationshipItem::new(RelationshipItemKind::Reminder, "Call Ada", 1);
+        reminder.due_at_ms = Some(5);
+        ada.add_item(reminder, 1);
+        let conversations = [
+            unanswered("Ada's question", "ada", 10),
+            unanswered("Grace's question", "grace", 20),
+        ];
+        let relationships = [ada];
+
+        let reasons = |person: &str| {
+            person_follow_ups(person, &relationships, &conversations, 30)
+                .into_iter()
+                .map(|suggestion| suggestion.reason)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(reasons("ada"), ["Call Ada", "Reply to Ada's question"]);
+        assert_eq!(
+            reasons("grace"),
+            ["Reply to Grace's question"],
+            "no saved details is no reason to hide a reply"
+        );
+        assert!(reasons("nobody").is_empty());
     }
 
     #[test]

@@ -40,6 +40,10 @@ pub mod people_copy {
     pub const MEETINGS_EMPTY: &str = "No meetings with this person yet.";
     pub const CONVERSATIONS_HEADING: &str = "Conversations";
     pub const CONVERSATIONS_EMPTY: &str = "No Inbox conversations with this person yet.";
+    /// A linked meeting saved without a title.
+    pub const UNTITLED_MEETING: &str = "Untitled meeting";
+    /// The heading over a profile's follow up suggestions.
+    pub const FOLLOW_UPS_HEADING: &str = "Suggested follow ups";
     pub const BACK_TO_PEOPLE: &str = "Back to People";
     pub const MERGE_CONFIRM_BUTTON: &str = "Confirm merge";
     pub const DELETE_BUTTON: &str = "Delete profile";
@@ -110,6 +114,15 @@ pub mod people_copy {
     /// "Page 2 of 5".
     pub fn page_status(page: usize, count: usize) -> String {
         format!("Page {} of {}", page.saturating_add(1), count)
+    }
+
+    /// A linked meeting's label: its title, or Untitled meeting.
+    pub fn meeting_link_title(title: &str) -> &str {
+        if title.trim().is_empty() {
+            UNTITLED_MEETING
+        } else {
+            title
+        }
     }
 }
 
