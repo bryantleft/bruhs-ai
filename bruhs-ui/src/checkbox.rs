@@ -38,6 +38,7 @@ type ChangeHandler = Rc<dyn Fn(&bool, &mut Window, &mut App)>;
 pub struct Checkbox {
     id: ElementId,
     label: Option<SharedString>,
+    aria_label: Option<SharedString>,
     checked: bool,
     disabled: bool,
     on_click: Option<ChangeHandler>,
@@ -48,6 +49,7 @@ impl Checkbox {
         Self {
             id: id.into(),
             label: None,
+            aria_label: None,
             checked: false,
             disabled: false,
             on_click: None,
@@ -57,6 +59,13 @@ impl Checkbox {
     /// Text beside the box, which also names it for assistive tech.
     pub fn label(mut self, label: impl Into<SharedString>) -> Self {
         self.label = Some(label.into());
+        self
+    }
+
+    /// The name assistive tech reads, for a box whose label is drawn
+    /// elsewhere.
+    pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
+        self.aria_label = Some(label.into());
         self
     }
 
@@ -83,7 +92,11 @@ impl RenderOnce for Checkbox {
         let state = Interactivity::disabled_if(self.disabled);
         let next = !checked;
         let handler = self.on_click.filter(|_| !self.disabled);
-        let label = self.label.clone().unwrap_or_default();
+        let label = self
+            .aria_label
+            .clone()
+            .or_else(|| self.label.clone())
+            .unwrap_or_default();
 
         let mut check = focusable_control(
             div().id(self.id.clone()),

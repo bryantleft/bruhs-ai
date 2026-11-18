@@ -10,7 +10,7 @@ use std::rc::Rc;
 use std::time::{Duration, Instant};
 
 use gpui::{
-    fill, point, px, size, App, Axis, Bounds, ContentMask, Element, ElementId, Global,
+    fill, point, px, size, App, Axis, Bounds, ContentMask, CursorStyle, Element, ElementId, Global,
     GlobalElementId, Hitbox, HitboxBehavior, Hsla, InspectorElementId, IntoElement, LayoutId,
     ListState, MouseButton, MouseDownEvent, MouseMoveEvent, MouseUpEvent, Pixels, Point, Position,
     ScrollHandle, Size, Style, UniformListScrollHandle, Window,
@@ -231,7 +231,6 @@ struct Inner {
     /// The axis being dragged, and where on the thumb it was grabbed.
     drag: Option<(Axis, Pixels)>,
     hovered_thumb: Option<Axis>,
-    pointer_inside: bool,
     last_offset: Point<Pixels>,
     last_scroll: Option<Instant>,
 }
@@ -291,11 +290,12 @@ impl Bar {
         }
     }
 
-    /// The offset that puts the thumb's grab point under `pointer`.
-    fn offset_at(&self, pointer: Point<Pixels>, grab: Pixels) -> Pixels {
+    /// The offset that puts the thumb's grab point under `pointer`. A thumb
+    /// with no room to travel leaves `current` alone.
+    fn offset_at(&self, pointer: Point<Pixels>, grab: Pixels, current: Pixels) -> Pixels {
         let travel = self.travel();
         if travel <= Pixels::ZERO {
-            return Pixels::ZERO;
+            return current;
         }
         let start = along_point(self.track.origin, self.axis) + px(THUMB_INSET_PX);
         let ratio = ((along_point(pointer, self.axis) - start - grab) / travel).clamp(0.0, 1.0);
@@ -486,13 +486,18 @@ impl Element for Scrollbar {
         let mode = self.mode.unwrap_or(style.mode);
         let inner = prepaint.state.get();
         let viewport = prepaint.viewport;
-        let mouse = window.mouse_position();
         let recently_scrolled = inner
             .last_scroll
             .is_some_and(|at| at.elapsed() < SCROLLING_LINGER);
         let shown = match mode {
             ScrollbarMode::Always => true,
-            ScrollbarMode::Hover => inner.drag.is_some() || viewport.contains(&mouse),
+            ScrollbarMode::Hover => {
+                inner.drag.is_some()
+                    || prepaint
+                        .hitboxes
+                        .iter()
+                        .any(|hitbox| hitbox.is_hovered(window))
+            }
             ScrollbarMode::Scrolling => {
                 inner.drag.is_some()
                     || recently_scrolled
@@ -509,6 +514,8 @@ impl Element for Scrollbar {
 
         window.with_content_mask(Some(ContentMask { bounds: viewport }), |window| {
             for (bar, hitbox) in prepaint.bars.iter().zip(&prepaint.hitboxes) {
+                // The track is chrome: an arrow, not the content's I-beam.
+                window.set_cursor_style(CursorStyle::Arrow, hitbox);
                 let active = inner.drag.is_some_and(|(axis, _)| axis == bar.axis)
                     || hitbox.is_hovered(window);
                 if shown {
@@ -558,10 +565,11 @@ impl Element for Scrollbar {
                     bar.thumb_len / 2.0
                 };
                 let offset = handle.offset();
+                let current = along_point(offset, bar.axis);
                 handle.set_offset(with_axis(
                     offset,
                     bar.axis,
-                    bar.offset_at(event.position, grab),
+                    bar.offset_at(event.position, grab, current),
                 ));
                 handle.start_drag();
                 state.update(|inner| inner.drag = Some((bar.axis, grab)));
@@ -570,15 +578,26 @@ impl Element for Scrollbar {
         });
         window.on_mouse_event({
             let (handle, bars, state) = (handle.clone(), bars.clone(), state.clone());
-            move |event: &MouseMoveEvent, _, window, _| {
+            move |event: &MouseMoveEvent, _, window, cx| {
                 let inner = state.get();
                 if let Some((axis, grab)) = inner.drag {
+                    // The button came up where this bar could not hear it
+                    // (it was hidden mid-drag); the drag is over.
+                    if event.pressed_button != Some(MouseButton::Left) {
+                        handle.end_drag();
+                        state.update(|inner| inner.drag = None);
+                        window.refresh();
+                        return;
+                    }
+                    // The drag owns the pointer: nothing underneath reacts.
+                    cx.stop_propagation();
                     if let Some(bar) = bars.iter().find(|bar| bar.axis == axis) {
                         let offset = handle.offset();
+                        let current = along_point(offset, axis);
                         handle.set_offset(with_axis(
                             offset,
                             axis,
-                            bar.offset_at(event.position, grab),
+                            bar.offset_at(event.position, grab, current),
                         ));
                         window.refresh();
                     }
@@ -589,12 +608,8 @@ impl Element for Scrollbar {
                     .zip(&hitboxes)
                     .find(|(_, hitbox)| hitbox.is_hovered(window))
                     .map(|(bar, _)| bar.axis);
-                let inside = viewport.contains(&event.position);
-                if hovered != inner.hovered_thumb || inside != inner.pointer_inside {
-                    state.update(|inner| {
-                        inner.hovered_thumb = hovered;
-                        inner.pointer_inside = inside;
-                    });
+                if hovered != inner.hovered_thumb {
+                    state.update(|inner| inner.hovered_thumb = hovered);
                     window.refresh();
                 }
             }
@@ -610,7 +625,12 @@ impl Element for Scrollbar {
             // flick ends exactly under the pointer.
             if let Some(bar) = bars.iter().find(|bar| bar.axis == axis) {
                 let offset = handle.offset();
-                handle.set_offset(with_axis(offset, axis, bar.offset_at(event.position, grab)));
+                let current = along_point(offset, axis);
+                handle.set_offset(with_axis(
+                    offset,
+                    axis,
+                    bar.offset_at(event.position, grab, current),
+                ));
             }
             handle.end_drag();
             state.update(|inner| inner.drag = None);
@@ -665,11 +685,11 @@ mod tests {
             ScrollbarAxis::Vertical,
         )[0];
         assert_eq!(
-            bar.offset_at(point(px(195.), px(100.)), bar.thumb_len),
+            bar.offset_at(point(px(195.), px(100.)), bar.thumb_len, Pixels::ZERO),
             px(-300.)
         );
         assert_eq!(
-            bar.offset_at(point(px(195.), px(0.)), Pixels::ZERO),
+            bar.offset_at(point(px(195.), px(0.)), Pixels::ZERO, Pixels::ZERO),
             Pixels::ZERO
         );
     }

@@ -96,6 +96,8 @@ pub struct ResizableState {
     sizes: Vec<Pixels>,
     sized: Vec<bool>,
     ranges: Vec<Range<Pixels>>,
+    /// Each panel's size as the caller last gave it.
+    requested: Vec<Option<Pixels>>,
     container: Bounds<Pixels>,
     drag: Option<Drag>,
     hovered_handle: Option<usize>,
@@ -122,7 +124,6 @@ impl ResizableState {
     }
 
     /// Sync with this frame's panels; `requested[i]` is panel i's given size.
-    /// Returns each sized panel's size to draw.
     fn sync(&mut self, axis: Axis, requested: &[Option<Pixels>], ranges: &[Range<Pixels>]) {
         self.axis = Some(axis);
         if self.sizes.len() != requested.len() {
@@ -130,15 +131,39 @@ impl ResizableState {
                 .iter()
                 .map(|size| size.unwrap_or_default())
                 .collect();
+            self.requested = requested.to_vec();
         }
+        // A size the caller changes (a new zoom, a restored width) wins over
+        // the last drag's, except during a drag.
+        if self.drag.is_none() {
+            for (ix, size) in requested.iter().enumerate() {
+                if let Some(size) = size {
+                    if self.requested.get(ix) != Some(&Some(*size)) {
+                        self.sizes[ix] = *size;
+                    }
+                }
+            }
+        }
+        self.requested = requested.to_vec();
         self.sized = requested.iter().map(Option::is_some).collect();
         self.ranges = ranges.to_vec();
         for (ix, range) in ranges.iter().enumerate() {
             if self.sized[ix] {
-                self.sizes[ix] = self.sizes[ix].clamp(range.start, range.end);
+                self.sizes[ix] = clamp(self.sizes[ix], range);
             }
         }
         self.fit_flexible();
+    }
+
+    /// End a drag whose button came up somewhere this group no longer hears
+    /// (it was hidden mid-drag).
+    fn end_drag(&mut self, cx: &mut Context<'_, Self>) {
+        if let Some(drag) = self.drag.take() {
+            if drag.moved {
+                cx.emit(ResizablePanelEvent::Resized);
+            }
+            cx.notify();
+        }
     }
 
     /// Flexible panels share what the sized ones leave.
@@ -177,6 +202,14 @@ impl ResizableState {
     }
 
     fn drag_to(&mut self, pointer: Pixels) {
+        let (before, after) = match &self.drag {
+            Some(drag) => (drag.handle, drag.handle + 1),
+            None => return,
+        };
+        // Between two flexible panels nothing can move.
+        if !self.sized[before] && !self.sized[after] {
+            return;
+        }
         let Some(drag) = self.drag.as_mut() else {
             return;
         };
@@ -189,7 +222,8 @@ impl ResizableState {
         let resize = |ix: usize, by: Pixels, sizes: &mut Vec<Pixels>, state: &Self| {
             let range = &state.ranges[ix];
             let room = state.room_for(ix, sizes);
-            sizes[ix] = (sizes[ix] + by).clamp(range.start, range.end.min(room).max(range.start));
+            let limit = range.start..range.end.min(room).max(range.start);
+            sizes[ix] = clamp(sizes[ix] + by, &limit);
         };
         match (self.sized[before], self.sized[after]) {
             (_, true) => resize(after, -delta, &mut sizes, self),
@@ -199,6 +233,11 @@ impl ResizableState {
         self.sizes = sizes;
         self.fit_flexible();
     }
+}
+
+/// `size` within `range`; an inverted range keeps its start.
+fn clamp(size: Pixels, range: &Range<Pixels>) -> Pixels {
+    size.min(range.end).max(range.start)
 }
 
 /// A group of panels laid out along one axis.
@@ -287,6 +326,28 @@ impl RenderOnce for ResizablePanelGroup {
         let mut children: Vec<AnyElement> = Vec::with_capacity(count * 2);
         for (ix, panel) in self.panels.into_iter().enumerate() {
             let sized = panel.size.is_some();
+            // The divider before this panel is its last child, on its leading
+            // edge: drawn and hit-tested above both neighbours.
+            let divider = (ix > 0).then(|| {
+                let handle = ix - 1;
+                let handle_state = if dragging == Some(handle) {
+                    ResizeHandleState::Dragging
+                } else if hovered == Some(handle) {
+                    ResizeHandleState::Hovered
+                } else {
+                    ResizeHandleState::Idle
+                };
+                divider(
+                    &group_id,
+                    handle,
+                    axis,
+                    handle_state,
+                    &state,
+                    self.handle_renderer.clone(),
+                    window,
+                    cx,
+                )
+            });
             children.push(
                 div()
                     .relative()
@@ -308,27 +369,9 @@ impl RenderOnce for ResizablePanelGroup {
                         }
                     })
                     .children(panel.children)
+                    .children(divider)
                     .into_any_element(),
             );
-            if ix + 1 < count {
-                let handle_state = if dragging == Some(ix) {
-                    ResizeHandleState::Dragging
-                } else if hovered == Some(ix) {
-                    ResizeHandleState::Hovered
-                } else {
-                    ResizeHandleState::Idle
-                };
-                children.push(divider(
-                    &group_id,
-                    ix,
-                    axis,
-                    handle_state,
-                    &state,
-                    self.handle_renderer.clone(),
-                    window,
-                    cx,
-                ));
-            }
         }
 
         let measure = state.clone();
@@ -367,10 +410,17 @@ impl RenderOnce for ResizablePanelGroup {
                                 Axis::Vertical => event.position.y,
                             };
                             moving.update(cx, |state, cx| {
-                                if state.drag.is_some() {
-                                    state.drag_to(pointer);
-                                    cx.notify();
+                                if state.drag.is_none() {
+                                    return;
                                 }
+                                // The button came up where this group could
+                                // not hear it; the drag is over.
+                                if event.pressed_button != Some(MouseButton::Left) {
+                                    state.end_drag(cx);
+                                    return;
+                                }
+                                state.drag_to(pointer);
+                                cx.notify();
                             });
                         });
                         // A drag ends wherever the button comes up.
@@ -379,14 +429,7 @@ impl RenderOnce for ResizablePanelGroup {
                             if event.button != MouseButton::Left {
                                 return;
                             }
-                            ending.update(cx, |state, cx| {
-                                if let Some(drag) = state.drag.take() {
-                                    if drag.moved {
-                                        cx.emit(ResizablePanelEvent::Resized);
-                                    }
-                                    cx.notify();
-                                }
-                            });
+                            ending.update(cx, |state, cx| state.end_drag(cx));
                         });
                     },
                 )
@@ -428,76 +471,67 @@ fn divider(
     let pad = px(HANDLE_PADDING_PX);
     let hover_state = state.clone();
     let press_state = state.clone();
-    // A zero-thickness slot on the boundary; the band straddles it, and the
-    // look starts at the boundary.
+    // The band straddles the boundary (its leading half over the panel
+    // before); the look starts at the boundary.
     div()
-        .relative()
-        .flex_none()
+        .id(ElementId::NamedChild(
+            std::sync::Arc::new(group.clone()),
+            format!("divider-{ix}").into(),
+        ))
+        .absolute()
+        .flex()
+        .occlude()
         .map(|el| match axis {
-            Axis::Horizontal => el.w(Pixels::ZERO).h_full(),
-            Axis::Vertical => el.h(Pixels::ZERO).w_full(),
+            Axis::Horizontal => el
+                .top_0()
+                .h_full()
+                .left(-pad)
+                .w(band)
+                .pl(pad)
+                .cursor(CursorStyle::ResizeLeftRight),
+            Axis::Vertical => el
+                .left_0()
+                .w_full()
+                .top(-pad)
+                .h(band)
+                .pt(pad)
+                .flex_col()
+                .cursor(CursorStyle::ResizeUpDown),
         })
-        .child(
-            div()
-                .id(ElementId::NamedChild(
-                    std::sync::Arc::new(group.clone()),
-                    format!("divider-{ix}").into(),
-                ))
-                .absolute()
-                .flex()
-                .occlude()
-                .map(|el| match axis {
-                    Axis::Horizontal => el
-                        .top_0()
-                        .h_full()
-                        .left(-pad)
-                        .w(band)
-                        .pl(pad)
-                        .cursor(CursorStyle::ResizeLeftRight),
-                    Axis::Vertical => el
-                        .left_0()
-                        .w_full()
-                        .top(-pad)
-                        .h(band)
-                        .pt(pad)
-                        .flex_col()
-                        .cursor(CursorStyle::ResizeUpDown),
-                })
-                .on_hover(move |hovered, _, cx| {
-                    hover_state.update(cx, |state, cx| {
-                        // Leaving this divider clears only its own hover.
-                        let now = if *hovered {
-                            Some(ix)
-                        } else if state.hovered_handle == Some(ix) {
-                            None
-                        } else {
-                            return;
-                        };
-                        if state.hovered_handle != now {
-                            state.hovered_handle = now;
-                            cx.notify();
-                        }
-                    });
-                })
-                .on_mouse_down(MouseButton::Left, move |event, _, cx| {
-                    cx.stop_propagation();
-                    press_state.update(cx, |state, cx| {
-                        let pointer = match axis {
-                            Axis::Horizontal => event.position.x,
-                            Axis::Vertical => event.position.y,
-                        };
-                        state.drag = Some(Drag {
-                            handle: ix,
-                            start_pointer: pointer,
-                            start_sizes: state.sizes.clone(),
-                            moved: false,
-                        });
-                        cx.notify();
-                    });
-                })
-                .on_drag(DividerDrag, |_, _, _, cx| cx.new(|_| DragGhost))
-                .child(look),
-        )
+        .on_hover(move |hovered, _, cx| {
+            hover_state.update(cx, |state, cx| {
+                // Leaving this divider clears only its own hover.
+                let now = if *hovered {
+                    Some(ix)
+                } else if state.hovered_handle == Some(ix) {
+                    None
+                } else {
+                    return;
+                };
+                if state.hovered_handle != now {
+                    state.hovered_handle = now;
+                    cx.notify();
+                }
+            });
+        })
+        .on_mouse_down(MouseButton::Left, move |event, _, cx| {
+            cx.stop_propagation();
+            press_state.update(cx, |state, cx| {
+                let pointer = match axis {
+                    Axis::Horizontal => event.position.x,
+                    Axis::Vertical => event.position.y,
+                };
+                state.drag = Some(Drag {
+                    handle: ix,
+                    start_pointer: pointer,
+                    start_sizes: state.sizes.clone(),
+                    moved: false,
+                });
+                cx.notify();
+            });
+        })
+        .on_drag(DividerDrag, |_, _, _, cx| cx.new(|_| DragGhost))
+        .child(look)
         .into_any_element()
 }
 
@@ -543,6 +577,7 @@ mod tests {
     struct Split {
         state: Entity<ResizableState>,
         range: Range<Pixels>,
+        size: Pixels,
     }
 
     impl Render for Split {
@@ -553,7 +588,7 @@ mod tests {
                     .child(resizable_panel().child(div().size_full()))
                     .child(
                         resizable_panel()
-                            .size(px(200.))
+                            .size(self.size)
                             .size_range(self.range.clone())
                             .child(div().size_full()),
                     ),
@@ -568,6 +603,7 @@ mod tests {
         let (view, cx) = cx.add_window_view(move |_, cx| Split {
             state: cx.new(|_| ResizableState::default()),
             range,
+            size: px(200.),
         });
         cx.simulate_resize(size(px(800.), px(400.)));
         cx.run_until_parked();
@@ -654,5 +690,42 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(sizes(&view, cx), vec![px(480.), px(320.)]);
+    }
+
+    #[gpui::test]
+    fn a_drag_whose_button_came_up_unheard_ends_at_the_next_move(cx: &mut TestAppContext) {
+        let (view, cx) = split(cx, px(100.)..px(500.));
+        cx.simulate_mouse_down(
+            point(px(600.), px(100.)),
+            MouseButton::Left,
+            Modifiers::none(),
+        );
+        cx.simulate_mouse_move(
+            point(px(580.), px(100.)),
+            Some(MouseButton::Left),
+            Modifiers::none(),
+        );
+        cx.simulate_mouse_move(
+            point(px(560.), px(100.)),
+            Some(MouseButton::Left),
+            Modifiers::none(),
+        );
+        // No mouse up reaches the group; the next move has no button held.
+        cx.simulate_mouse_move(point(px(300.), px(100.)), None, Modifiers::none());
+        cx.run_until_parked();
+        let state = cx.read(|cx| view.read(cx).state.clone());
+        assert!(!cx.read(|cx| state.read(cx).is_resizing()));
+        assert_eq!(sizes(&view, cx)[1], px(240.));
+    }
+
+    #[gpui::test]
+    fn a_size_the_caller_changes_takes_effect(cx: &mut TestAppContext) {
+        let (view, cx) = split(cx, px(100.)..px(500.));
+        view.update(cx, |split, cx| {
+            split.size = px(260.);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(sizes(&view, cx)[1], px(260.));
     }
 }

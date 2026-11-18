@@ -6,10 +6,8 @@
 //! div().id("save").tooltip(|window, cx| Tooltip::new("Save").build(window, cx))
 //! ```
 
-use gpui::{
-    div, AnyView, App, AppContext as _, Context, FontWeight, IntoElement, ParentElement, Render,
-    SharedString, Styled, Window,
-};
+use gpui::prelude::*;
+use gpui::{div, AnyView, App, Context, FontWeight, Render, SharedString, Window};
 
 use crate::theme;
 use crate::zoom::px;
@@ -47,6 +45,8 @@ impl Render for Tooltip {
         // The margin sits on an outer box so the bubble keeps its own size.
         div().p(px(OFFSET_PX)).child(
             div()
+                .id("tooltip")
+                .role(gpui::Role::Tooltip)
                 .rounded(px(RADIUS_PX))
                 .bg(theme::longan_700())
                 .border_1()

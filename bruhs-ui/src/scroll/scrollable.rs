@@ -289,4 +289,34 @@ mod tests {
         );
         assert_eq!(after.bottom(), px(100.));
     }
+
+    struct Padded {
+        handle: ScrollHandle,
+    }
+
+    impl Render for Padded {
+        fn render(&mut self, _: &mut Window, _: &mut Context<'_, Self>) -> impl IntoElement {
+            div().size_full().child(
+                div()
+                    .id("padded")
+                    .h(px(100.))
+                    .py(px(8.))
+                    .overflow_y_scroll()
+                    .track_scroll(&self.handle)
+                    .children((0..3).map(|_| div().h(px(20.))))
+                    .vertical_scrollbar(&self.handle),
+            )
+        }
+    }
+
+    #[gpui::test]
+    fn a_bar_in_a_padded_list_that_fits_adds_no_scroll(cx: &mut TestAppContext) {
+        let (view, cx) = cx.add_window_view(|_, _| Padded {
+            handle: ScrollHandle::new(),
+        });
+        cx.simulate_resize(size(px(400.), px(400.)));
+        cx.run_until_parked();
+        let max = cx.read(|cx| view.read(cx).handle.max_offset());
+        assert_eq!(max.y, px(0.), "{max:?}");
+    }
 }
