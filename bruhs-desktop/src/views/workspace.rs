@@ -2999,7 +2999,7 @@ impl Render for Workspace {
                         .min_w(px(WORKSPACE_SIDE_PANEL_MIN_WIDTH_PX))
                         .h_full()
                         .flex_shrink_0()
-                        .child(self.render_sidebar(cx)),
+                        .child(self.render_sidebar(window, cx)),
                 )
             })
             .child({
@@ -3099,7 +3099,7 @@ impl Render for Workspace {
                         .max_w_full()
                         .h_full()
                         .occlude()
-                        .child(self.render_sidebar(cx)),
+                        .child(self.render_sidebar(window, cx)),
                 )
             })
             .when(right_panel_drawer && chat_panel_open, |el| {

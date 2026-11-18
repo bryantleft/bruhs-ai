@@ -31,9 +31,9 @@ const CREW_ROW_BORDER_PX: f32 = 1.0;
 /// Web `px-2 py-1` on a row, less the focus border.
 const CREW_ROW_X_PADDING_PX: f32 = 8.0 - CREW_ROW_BORDER_PX;
 const CREW_ROW_Y_PADDING_PX: f32 = 4.0 - CREW_ROW_BORDER_PX;
-/// Web `max-h-[40vh]` on the list: the rail takes at most this share of the
-/// sidebar, and its list scrolls.
-const CREW_MAX_SHARE: f32 = 0.4;
+/// Web `max-h-[40vh]` on the lists: they take at most this share of the
+/// window's height, and scroll beyond it.
+const CREW_LISTS_MAX_SHARE: f32 = 0.4;
 const CREW_RADIUS_GRAPE_PX: f32 = 8.0;
 const CREW_RADIUS_SEED_PX: f32 = 4.0;
 const CREW_LABEL_TEXT_PX: f32 = 12.0;
@@ -145,7 +145,11 @@ fn small_action(id: &'static str, label: &'static str, disabled: bool) -> Statef
 
 impl Workspace {
     /// The rail between the sidebar controls and the thread list.
-    pub(super) fn render_crew_rail(&self, cx: &Context<'_, Self>) -> Option<AnyElement> {
+    pub(super) fn render_crew_rail(
+        &self,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> Option<AnyElement> {
         let panel = self.reactive_automations.read(cx);
         let open = self.crew_rail_open;
         let ready = panel.crew_ready();
@@ -325,6 +329,7 @@ impl Workspace {
                 div()
                     .id("desktop-crew-lists")
                     .debug_selector(|| "desktop-crew-lists".to_string())
+                    .max_h(window.viewport_size().height * CREW_LISTS_MAX_SHARE)
                     .min_h_0()
                     .flex_shrink(1.0)
                     .overflow_y_scroll()
@@ -372,7 +377,6 @@ impl Workspace {
                 .aria_label(CREW_TITLE)
                 .px(px(CREW_X_PADDING_PX))
                 .pb(px(CREW_BOTTOM_PADDING_PX))
-                .max_h(relative(CREW_MAX_SHARE))
                 .min_h_0()
                 .flex_shrink_0()
                 .flex()
@@ -1537,6 +1541,30 @@ mod tests {
                 }
             );
         });
+    }
+
+    /// Web `max-h-[40vh]` on the lists, not on the whole rail: a long
+    /// crew scrolls inside 40% of the window, under the header and Stop all.
+    #[gpui::test]
+    fn a_long_crew_scrolls_inside_forty_percent_of_the_window(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        let names = [
+            "Ada", "Bo", "Cy", "Dee", "Eve", "Fay", "Gus", "Hal", "Ivy", "Jo",
+        ];
+        let crew = names.iter().map(|name| named(name, name)).collect();
+        show_rooms(
+            &workspace,
+            cx,
+            crew,
+            vec![room("Launch", &["Ada"]), room("Busy", &["Bo"])],
+            CREW_PROTOCOL,
+        );
+        let lists = cx
+            .debug_bounds("desktop-crew-lists")
+            .expect("one list region");
+        let height = f32::from(lists.size.height);
+        assert!((height - 320.0).abs() < 0.5, "lists are {height}px tall");
     }
 
     #[gpui::test]
