@@ -18,6 +18,7 @@
 //! constructs (fences, emphasis, links) by emitting the literal text rather
 //! than synthesizing closers, so partial output doesn't break layout.
 
+use bruhs_models::logic::link_scheme::{is_safe_link, link_scheme, normalized_url};
 use pulldown_cmark::{html, Event, Options, Parser, Tag, TagEnd};
 
 pub(crate) mod dom;
@@ -143,10 +144,8 @@ fn image_source(url: &str) -> ImageSource {
     if safe_url(url).is_none() {
         return ImageSource::Disallowed;
     }
-    let normalized = normalize_url(url);
-    let has_scheme = normalized
-        .find([':', '/', '?', '#'])
-        .is_some_and(|at| normalized[at..].starts_with(':'));
+    let normalized = normalized_url(url);
+    let has_scheme = link_scheme(url).is_some();
     // Browsers read `\` as `/` in http(s) URLs, so `\\host` and `/\host` are
     // protocol-relative too.
     let mut leading = normalized.chars();
@@ -159,15 +158,6 @@ fn image_source(url: &str) -> ImageSource {
     }
 }
 
-/// `url` as a browser's URL parser reads it: leading and trailing C0 controls
-/// and spaces ignored, tabs and newlines removed anywhere.
-fn normalize_url(url: &str) -> String {
-    url.trim_matches(|c: char| c <= ' ')
-        .chars()
-        .filter(|c| !matches!(c, '\t' | '\n' | '\r'))
-        .collect()
-}
-
 /// `url` if a browser following it can only navigate or fetch — `http`,
 /// `https`, `mailto`, a `#fragment`, or a relative / protocol-relative path —
 /// and `None` for any other scheme (`javascript:`, `data:`, `vbscript:`,
@@ -175,18 +165,14 @@ fn normalize_url(url: &str) -> String {
 ///
 /// The scheme is read the way the URL parser in a browser reads it: leading
 /// and trailing C0 controls and spaces are ignored and tabs and newlines are
-/// removed anywhere, so `"\tjava\nscript:"` is still `javascript:`.
+/// removed anywhere, so `"\tjava\nscript:"` is still `javascript:`. The
+/// allowlist is the shared [`is_safe_link`], which the desktop's Markdown
+/// links follow too.
 pub fn safe_url(url: &str) -> Option<&str> {
-    let normalized = normalize_url(url);
-    let scheme_end = normalized.find([':', '/', '?', '#']);
-    match scheme_end {
-        // A colon before any path, query or fragment delimiter ends a scheme.
-        Some(at) if normalized[at..].starts_with(':') => {
-            let scheme = normalized[..at].to_ascii_lowercase();
-            matches!(scheme.as_str(), "http" | "https" | "mailto").then_some(url)
-        }
+    match link_scheme(url) {
+        Some(_) => is_safe_link(url).then_some(url),
         // No scheme: relative path, `//host` or `#fragment`.
-        _ => Some(url),
+        None => Some(url),
     }
 }
 

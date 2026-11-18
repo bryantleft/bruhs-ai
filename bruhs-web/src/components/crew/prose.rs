@@ -21,13 +21,8 @@ pub(super) const PROSE_BUBBLE: &str = "prose-msg crew-prose min-w-0 break-words 
 /// Where a crew link goes: a web or mail address opens in a new tab, and
 /// `None` keeps everything else (a file path, a fragment) in the page.
 pub(crate) fn crew_link(href: &str) -> Option<&str> {
-    let safe = crate::markdown::safe_url(href)?;
-    let lower = safe.trim().to_ascii_lowercase();
-    (lower.starts_with("http://")
-        || lower.starts_with("https://")
-        || lower.starts_with("mailto:")
-        || lower.starts_with("//"))
-    .then_some(safe)
+    let protocol_relative = href.trim().starts_with("//");
+    (bruhs_models::logic::link_scheme::is_safe_link(href) || protocol_relative).then_some(href)
 }
 
 /// Run the render pass whenever `texts` changes, and handle clicks in crew

@@ -12,7 +12,7 @@ use super::face_editor::still_view;
 use super::transcript_list::{transcript_view, TranscriptList};
 use super::*;
 use crate::views::braille::braille_face;
-use crate::views::chat::desktop_markdown_style;
+use crate::views::chat::{desktop_markdown_style, untrusted_markdown};
 use crate::views::crew_face::bruh_face;
 use crate::views::dropdown::{
     dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler,
@@ -30,7 +30,6 @@ use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use bruhs_ui::press::on_press_view;
 use bruhs_ui::{press::Interactivity, switch::switch, text_field::TextInput};
 use gpui_component::scroll::ScrollableElement;
-use gpui_component::text::TextView;
 use std::cell::Cell;
 
 /// Web `text-h3`.
@@ -422,7 +421,8 @@ pub(super) fn bubble(max_width: f32) -> Div {
 }
 
 /// A bruh's words as the thread chat draws a reply: Markdown without raw
-/// HTML, and a remote image as a link to it rather than loaded.
+/// HTML, and a remote image as a link to it rather than loaded. Its links
+/// follow [`untrusted_markdown`].
 pub(super) fn crew_markdown(text: &str) -> SharedString {
     markdown_with_allowed_images(text, &std::collections::BTreeSet::new()).into()
 }
@@ -443,7 +443,7 @@ pub(super) fn prose_bubble(
         .border_color(theme::longan_700().opacity(SOFT_RING_OPACITY))
         .text_color(theme::rambutan_200())
         .child(
-            TextView::markdown(SharedString::from(id), markdown)
+            untrusted_markdown(SharedString::from(id), markdown)
                 .style(desktop_markdown_style(cx))
                 .selectable(true),
         )
@@ -2577,5 +2577,57 @@ mod tests {
         cx.run_until_parked();
         assert!(cx.debug_bounds("bruh-md-r1").is_some(), "the answer");
         assert!(cx.debug_bounds("bruh-md-r2").is_none(), "the failed run");
+    }
+
+    /// One crew bubble alone in a window.
+    struct Prose(gpui::SharedString);
+
+    impl gpui::Render for Prose {
+        fn render(
+            &mut self,
+            _: &mut gpui::Window,
+            cx: &mut gpui::Context<'_, Self>,
+        ) -> impl gpui::IntoElement {
+            use gpui::{ParentElement as _, Styled as _};
+            gpui::div().size_full().child(super::prose_bubble(
+                "crew-link-test".into(),
+                self.0.clone(),
+                Layout::of(600.0, 900.0),
+                cx,
+            ))
+        }
+    }
+
+    /// A bruh can write a link to a launcher (a `.command` file, another
+    /// app's scheme). A click opens only a web or mail link; the rest draw
+    /// as their text.
+    #[gpui::test]
+    fn crew_links_open_only_web_and_mail_addresses(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let mut click = |url: &str| {
+            let markdown = super::crew_markdown(&format!("[open the full report]({url})"));
+            let (_, cx) = cx.add_window_view(|_, _| Prose(markdown));
+            cx.run_until_parked();
+            let bounds = cx.debug_bounds("crew-link-test").expect("the bubble");
+            let on_link = gpui::point(bounds.origin.x + gpui::px(20.0), bounds.center().y);
+            cx.simulate_click(on_link, gpui::Modifiers::default());
+            cx.run_until_parked();
+            cx.opened_url()
+        };
+        for url in [
+            "file:///Users/me/Downloads/run.command",
+            "javascript:alert(1)",
+            "vscode://file/etc/hosts",
+            "x-apple.systempreferences:com.apple.preference.security",
+        ] {
+            assert_eq!(click(url), None, "{url}");
+        }
+        assert_eq!(
+            click("https://example.com/report").as_deref(),
+            Some("https://example.com/report")
+        );
     }
 }
