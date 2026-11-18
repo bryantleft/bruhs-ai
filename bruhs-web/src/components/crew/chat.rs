@@ -1,7 +1,7 @@
 //! Chat with one bruh: its runs as a conversation, with its questions and
 //! approvals inline, older runs a page at a time, and a composer.
 
-use bruhs_models::crew::room::LOAD_EARLIER;
+use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
     approval_outcome, chat_follow_key, chat_markdown, composer_block, line_key, may_have_more,
     merge_runs, transcript, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
@@ -282,7 +282,7 @@ pub(super) fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
     let disabled = Signal::derive(move || data.busy.get() || !data.crew_ready());
     view! {
         <article class=CARD aria-label="Approval">
-            <p class="text-label-sm text-rambutan-400">"Wants to"</p>
+            <p class="text-label-sm text-rambutan-400">{APPROVAL_WANTS}</p>
             <p class="whitespace-pre-wrap break-words text-body text-rambutan-100">{summary}</p>
             {detail.map(|detail| view! {
                 <pre data-approval-detail="" aria-label="Full request" class="max-h-64 overflow-auto whitespace-pre-wrap break-words rounded-grape bg-longan-950 p-2 text-code-sm text-rambutan-300">{detail}</pre>

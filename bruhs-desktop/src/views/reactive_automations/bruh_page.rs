@@ -19,7 +19,7 @@ use crate::views::dropdown::{
 };
 use crate::views::web_button::on_press;
 use bruhs_models::agent::ModelId;
-use bruhs_models::crew::room::LOAD_EARLIER;
+use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
     access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level, composer_block,
     current_settings, job_line, line_key, may_have_more, merge_runs, settings_commands,
@@ -1624,7 +1624,7 @@ impl ReactiveAutomations {
             .unwrap_or_default();
         let card = self
             .render_bruh_card(&item.id, "Approval", layout)
-            .child(small_text("Wants to", theme::rambutan_400()))
+            .child(small_text(APPROVAL_WANTS, theme::rambutan_400()))
             .child(
                 div()
                     .font_family(theme::CODE_FONT_FAMILY)

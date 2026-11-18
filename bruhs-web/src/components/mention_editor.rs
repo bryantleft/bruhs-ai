@@ -1172,7 +1172,8 @@ pub fn MentionEditor(
                 aria-label=room_label
                 class=move || format!("col-start-1 row-start-1 {}", textarea_class())
                 placeholder=move || if suggestion.suffix.get().is_empty() { placeholder.clone() } else { String::new() }
-                aria-describedby="prompt-suggestion-help"
+                // A room has no prompt suggestions, and the id stays the chat's.
+                aria-describedby=(!members_mode).then_some("prompt-suggestion-help")
                 rows=rows
                 disabled=move || disabled.get()
                 on:input=on_input
@@ -1188,7 +1189,7 @@ pub fn MentionEditor(
                 on:compositionend=move |_| suggestion.composing.set(false)
                 on:select=move |_| { if let Some(ta) = textarea_ref.get_untracked() { suggestion::remember_selection(&ta, suggestion.selection); } }
             />
-            <span id="prompt-suggestion-help" class="sr-only">{move || if suggestion.suffix.get().is_empty() { "" } else { "Next prompt suggested. Press Tab to accept or Escape to dismiss." }}</span>
+            {(!members_mode).then(|| view! { <span id="prompt-suggestion-help" class="sr-only">{move || if suggestion.suffix.get().is_empty() { "" } else { "Next prompt suggested. Press Tab to accept or Escape to dismiss." }}</span> })}
             {move || (!suggestion.suffix.get().is_empty()).then(|| view! {
                 <button type="button" class="col-start-1 px-3 py-1 text-left text-label-sm text-rambutan-500 hover:text-rambutan-200 focus-visible:outline-persimmon-400 cursor-pointer" aria-label="Accept suggested prompt"
                     tabindex="-1"

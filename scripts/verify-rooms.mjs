@@ -785,6 +785,8 @@ try {
       return { top: Math.round(scroller.scrollTop), bottom: Math.round(scroller.scrollHeight - scroller.clientHeight - scroller.scrollTop) };
     })()`);
     const opened = await where();
+    const help = await evaluate(`({ ids: document.querySelectorAll('#prompt-suggestion-help').length, described: document.querySelector(${js(composer)})?.getAttribute('aria-describedby') ?? null })`);
+    record('a room composer has no prompt suggestion help of the chat\'s', help.ids === 0 && help.described === null, js(help));
     await click('button', 'Load earlier');
     await waitFor('the older page', `document.querySelectorAll(${js(`${log} [data-room-line]`)}).length === 60`, 8000);
     await sleep(400);
