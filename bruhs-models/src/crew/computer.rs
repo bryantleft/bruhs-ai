@@ -85,6 +85,10 @@ pub const LIVE_VIEW_STALLED: &str = "The live view stopped showing frames. Open 
 pub const LIVE_VIEW_FOREIGN_PAGE: &str = "This page can't open the live view.";
 /// The live view sent something other than an acknowledgement or input.
 pub const LIVE_VIEW_UNREADABLE: &str = "The live view sent a message the server can't read.";
+/// The desktop's live view speaks plain `ws://` to a local server only.
+pub const LIVE_VIEW_NEEDS_HTTP: &str = "The live view needs an http:// server address.";
+/// The live view's socket couldn't be opened.
+pub const LIVE_VIEW_UNREACHABLE: &str = "The live view can't reach the server. Try again.";
 pub const TURN_ON_IN_SETTINGS: &str = "Turn on Computer in the bruh's Settings.";
 
 pub const NEEDS_CLAUDE: &str = "Computer needs a Claude model.";

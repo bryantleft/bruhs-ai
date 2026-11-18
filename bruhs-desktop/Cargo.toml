@@ -42,7 +42,7 @@ bruhs-ui = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 cpal = { workspace = true }
 directories = { workspace = true }
-futures-util = { workspace = true, features = ["std"] }
+futures-util = { workspace = true, features = ["sink", "std"] }
 # gpui comes from upstream zed, pinned once in the root Cargo.toml
 # ([workspace.dependencies]); see the note there before bumping the rev.
 gpui = { workspace = true }
@@ -61,6 +61,8 @@ sha2 = { workspace = true }
 thiserror = { workspace = true }
 tokio = { workspace = true, features = ["macros", "process", "rt-multi-thread", "sync", "time"] }
 tokio-stream = { workspace = true }
+# The live view's socket; plain ws:// to the local server, so no TLS.
+tokio-tungstenite = "0.29"
 tracing = { workspace = true }
 tracing-subscriber = { workspace = true }
 uuid = { workspace = true }

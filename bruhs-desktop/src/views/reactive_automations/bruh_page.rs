@@ -17,13 +17,14 @@ use crate::views::crew_face::bruh_face;
 use crate::views::dropdown::{
     dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler,
 };
-use bruhs_models::agent::ModelId;
+use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::room::{APPROVAL_WANTS, LOAD_EARLIER};
 use bruhs_models::crew::{
     access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level, composer_block,
-    current_settings, job_line, line_key, may_have_more, merge_runs, settings_commands,
-    status_line, transcript, AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus,
-    TranscriptItem, PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
+    computer_switch_reason, current_settings, job_line, line_key, may_have_more, merge_runs,
+    settings_commands, status_line, transcript, AccessLevel, BruhAccess, BruhLook, BruhSettings,
+    BruhStatus, TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH, PAGE_FACE_PX, RAIL_FACE_PX,
+    SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
@@ -267,6 +268,27 @@ impl SettingsForm {
         self.level = clamp_level(self.level, &value(&self.model, cx));
         if self.level != AccessLevel::Full {
             self.can_deliver = false;
+        }
+    }
+
+    /// Why the Computer switch is off, and whether it is: the shared reason,
+    /// and off with no reason while the service's version is unknown.
+    fn computer_block(&self, protocol: Option<u32>, cx: &App) -> (Option<&'static str>, bool) {
+        let provider = AgentProvider::for_model(&value(&self.model, cx));
+        let reason = computer_switch_reason(self.level, provider, protocol);
+        let ready = protocol.is_some_and(bruhs_models::crew::computer_ready);
+        (reason, reason.is_some() || !ready)
+    }
+
+    /// The switch shows the stored value while it is off, or while the
+    /// owner hasn't changed it since the form was filled. Save then sends
+    /// SetComputer only for a change made here, so it never puts back a
+    /// value another app replaced.
+    fn sync_computer(&mut self, stored: bool, protocol: Option<u32>, cx: &App) {
+        let (_, off) = self.computer_block(protocol, cx);
+        if off || self.computer == self.shown.computer {
+            self.computer = stored;
+            self.shown.computer = stored;
         }
     }
 }
@@ -602,6 +624,21 @@ impl ReactiveAutomations {
         self.bruh.as_mut()?.settings.as_mut()
     }
 
+    /// Keep the open settings' Computer switch on the stored value where
+    /// the owner can't or didn't change it.
+    pub(super) fn sync_bruh_computer(&mut self, cx: &App) {
+        let protocol = self.crew.protocol;
+        let Some(agent_id) = self.bruh_page_agent() else {
+            return;
+        };
+        let Some(stored) = self.bruh_state(agent_id).map(|state| state.computer) else {
+            return;
+        };
+        if let Some(form) = self.bruh_settings_mut() {
+            form.sync_computer(stored, protocol, cx);
+        }
+    }
+
     fn bruh_state(&self, agent_id: &str) -> Option<&BruhState> {
         self.snapshot
             .as_ref()?
@@ -907,6 +944,14 @@ impl ReactiveAutomations {
             return;
         };
         form.clamp(cx);
+        // A level the clamp lowered can turn the Computer switch off.
+        self.sync_bruh_computer(cx);
+        let Some(page) = self.bruh.as_mut() else {
+            return;
+        };
+        let Some(form) = page.settings.as_mut() else {
+            return;
+        };
         let edited = form.edited(cx);
         if edited.name.trim().is_empty() {
             form.invalid = Some("Give the bruh a name.".into());
@@ -932,6 +977,14 @@ impl ReactiveAutomations {
                 Some(settings_commands(agent, state, &edited))
             })
             .unwrap_or_default();
+        // An older service doesn't know SetComputer.
+        let computer_ready = self.computer_ready();
+        let commands = commands
+            .into_iter()
+            .filter(|command| {
+                computer_ready || !matches!(command, ReactiveCommand::SetComputer { .. })
+            })
+            .collect();
         self.send_all(commands, Scope::General, cx);
         cx.notify();
     }
@@ -1800,6 +1853,7 @@ impl ReactiveAutomations {
             options.iter().filter_map(|(_, reason)| *reason).collect();
         reasons.dedup();
         let full = form.level == AccessLevel::Full;
+        let (computer_reason, computer_off) = form.computer_block(self.crew.protocol, cx);
         let access = section("What it may do")
             .child(
                 div()
@@ -1929,6 +1983,45 @@ impl ReactiveAutomations {
                             this.edit_bruh_settings(|form| form.can_deliver = !form.can_deliver, cx)
                         },
                     )),
+            )
+            .child(
+                div()
+                    .min_h(px(theme::CONTROL_PX))
+                    .flex()
+                    .items_center()
+                    .justify_between()
+                    .gap_3()
+                    .child(
+                        div()
+                            .min_w_0()
+                            .flex()
+                            .flex_col()
+                            .child(small_text(COMPUTER_SWITCH, theme::rambutan_300()))
+                            .child(
+                                div()
+                                    .debug_selector(|| "desktop-bruh-computer-hint".to_string())
+                                    .child(hint(COMPUTER_HINT)),
+                            )
+                            .when_some(computer_reason, |el, reason| {
+                                el.child(
+                                    div()
+                                        .debug_selector(|| {
+                                            "desktop-bruh-computer-reason".to_string()
+                                        })
+                                        .child(hint(reason)),
+                                )
+                            }),
+                    )
+                    .child(page_switch(
+                        "desktop-bruh-computer",
+                        COMPUTER_SWITCH,
+                        form.computer,
+                        computer_off,
+                        cx,
+                        |this, _, cx| {
+                            this.edit_bruh_settings(|form| form.computer = !form.computer, cx)
+                        },
+                    )),
             );
         let face = section("Face").child(self.render_face_editor(&form.look, cx));
         div()
@@ -2015,8 +2108,10 @@ mod tests {
     use super::super::setup::{with_agent_fields, AgentFields};
     use super::{BruhTab, Editor, Layout, ReactiveAutomations, RunsPage};
     use crate::theme;
+    use bruhs_models::agent::AgentProvider;
     use bruhs_models::crew::{
-        AccessLevel, BruhAccess, BruhColor, BruhLook, BruhState, BruhStatus, CREW_PROTOCOL,
+        computer_unavailable, AccessLevel, BruhAccess, BruhColor, BruhLook, BruhState, BruhStatus,
+        ServiceNotice, CREW_PROTOCOL,
     };
     use bruhs_models::reactive::{
         OutboxItem, ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun, ReactiveSnapshot,
@@ -2126,6 +2221,136 @@ mod tests {
         cx: &mut VisualTestContext,
     ) -> Vec<ReactiveCommand> {
         panel.update(cx, |panel, _| panel.sent_for_test().to_vec())
+    }
+
+    fn computer_snapshot(level: AccessLevel, protocol: u32, on: bool) -> ReactiveSnapshot {
+        let mut snapshot = snapshot(BruhStatus::Asleep, Vec::new());
+        snapshot.bruhs[0].access = BruhAccess {
+            level,
+            ..BruhAccess::default()
+        };
+        snapshot.bruhs[0].computer = on;
+        snapshot.protocol = protocol;
+        snapshot
+    }
+
+    /// The switch as drawn, and why it is off.
+    fn computer_switch(
+        panel: &Entity<ReactiveAutomations>,
+        cx: &mut VisualTestContext,
+    ) -> (bool, Option<&'static str>) {
+        panel.update(cx, |panel, cx| {
+            let protocol = panel.crew.protocol;
+            let form = panel.bruh_settings_mut().unwrap();
+            (form.computer, form.computer_block(protocol, cx).0)
+        })
+    }
+
+    #[gpui::test]
+    fn the_computer_switch_follows_access_model_and_service(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(computer_snapshot(AccessLevel::Full, CREW_PROTOCOL, false)),
+            BruhTab::Settings,
+        );
+        assert!(cx.debug_bounds("desktop-bruh-computer-hint").is_some());
+        assert!(cx.debug_bounds("desktop-bruh-computer-reason").is_none());
+        assert_eq!(computer_switch(&panel, cx), (false, None));
+        click(cx, "desktop-bruh-computer");
+        assert_eq!(computer_switch(&panel, cx), (true, None), "it is enabled");
+        click(cx, "desktop-bruh-save");
+        assert_eq!(
+            sent(&panel, cx).last(),
+            Some(&ReactiveCommand::SetComputer {
+                agent_id: "a".into(),
+                on: true
+            })
+        );
+        let saved = computer_snapshot(AccessLevel::Full, CREW_PROTOCOL, true);
+        panel.update(cx, |panel, cx| panel.answer_last_for_test(saved, cx));
+        cx.run_until_parked();
+        let before = sent(&panel, cx).len();
+
+        // Read only can't have a Computer.
+        panel.update(cx, |panel, cx| {
+            panel.set_snapshot(
+                computer_snapshot(AccessLevel::ReadOnly, CREW_PROTOCOL, false),
+                cx,
+            );
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let reason = computer_unavailable(AccessLevel::ReadOnly, AgentProvider::Claude);
+        assert_eq!(reason, Some("Computer needs Ask first or Full access."));
+        assert_eq!(computer_switch(&panel, cx), (false, reason));
+        assert!(cx.debug_bounds("desktop-bruh-computer-reason").is_some());
+        click(cx, "desktop-bruh-computer");
+        click(cx, "desktop-bruh-save");
+        assert_eq!(computer_switch(&panel, cx), (false, reason));
+        assert_eq!(sent(&panel, cx).len(), before, "nothing is sent");
+
+        // A protocol 2 service has no Computers: the switch shows the
+        // stored value, off.
+        panel.update(cx, |panel, cx| {
+            panel.set_snapshot(computer_snapshot(AccessLevel::Full, 2, true), cx);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        let old = Some(ServiceNotice::ServingOld.message());
+        assert_eq!(computer_switch(&panel, cx), (true, old));
+        click(cx, "desktop-bruh-computer");
+        click(cx, "desktop-bruh-save");
+        assert_eq!(computer_switch(&panel, cx), (true, old));
+        assert_eq!(sent(&panel, cx).len(), before, "nothing is sent");
+    }
+
+    /// Turning the switch on and then picking Read only puts it back to the
+    /// stored value, so Save sends only the level.
+    #[gpui::test]
+    fn a_blocked_switch_goes_back_to_the_stored_value(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(computer_snapshot(AccessLevel::Full, CREW_PROTOCOL, false)),
+            BruhTab::Settings,
+        );
+        click(cx, "desktop-bruh-computer");
+        assert!(computer_switch(&panel, cx).0);
+        click(cx, "desktop-bruh-access-read-only");
+        let reason = computer_unavailable(AccessLevel::ReadOnly, AgentProvider::Claude);
+        assert_eq!(computer_switch(&panel, cx), (false, reason));
+        click(cx, "desktop-bruh-save");
+        let sent = sent(&panel, cx);
+        assert!(
+            matches!(&sent[..], [ReactiveCommand::SetBruh { access, .. }] if access.level == AccessLevel::ReadOnly),
+            "{sent:?}"
+        );
+    }
+
+    /// Another app turned the Computer on while a face edit was unsaved:
+    /// Save keeps it on.
+    #[gpui::test]
+    fn a_computer_switch_left_alone_never_puts_back_an_older_value(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(computer_snapshot(AccessLevel::Full, CREW_PROTOCOL, false)),
+            BruhTab::Settings,
+        );
+        click(cx, "desktop-bruh-face-swatch-Pandan");
+        panel.update(cx, |panel, cx| {
+            panel.set_snapshot(
+                computer_snapshot(AccessLevel::Full, CREW_PROTOCOL, true),
+                cx,
+            );
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert_eq!(computer_switch(&panel, cx), (true, None), "it shows on");
+        click(cx, "desktop-bruh-save");
+        let sent = sent(&panel, cx);
+        assert!(
+            matches!(&sent[..], [ReactiveCommand::SetBruh { look, .. }] if look.face == BruhColor::Pandan),
+            "{sent:?}"
+        );
     }
 
     #[gpui::test]
