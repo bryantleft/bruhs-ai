@@ -201,8 +201,9 @@ pub fn workflow_notice(
         } else {
             "Workflow ready for next step"
         };
+        let steps = if job.next_step == 1 { "step" } else { "steps" };
         return notice(
-            format!("{mode}, {} steps saved", job.next_step),
+            format!("{mode}, {} {steps} saved", job.next_step),
             false,
             None,
         );
@@ -349,5 +350,30 @@ mod tests {
         );
         assert!(!running.message.contains("Private"));
         assert!(!background_running(&state));
+    }
+
+    #[test]
+    fn the_notice_counts_one_saved_step_in_the_singular() {
+        let mut state = AutomationState::default();
+        state
+            .permissions
+            .set(AgentDomain::Tasks, AgentAccess::Write, true);
+        let id = state.create_workflow("Plan", vec![task("a"), task("b"), task("c")], 1);
+        state.preview(&id, 2).unwrap();
+        let job = state.start_job(&id, 3).unwrap();
+        assert!(state.enable_background(&job));
+        let message =
+            |state: &AutomationState| workflow_notice(state, false, false, false).unwrap().message;
+        assert_eq!(
+            message(&state),
+            "Background workflow running, 0 steps saved"
+        );
+        assert!(state.complete_step(&job, "task-1", 4));
+        assert_eq!(message(&state), "Background workflow running, 1 step saved");
+        assert!(state.complete_step(&job, "task-2", 5));
+        assert_eq!(
+            message(&state),
+            "Background workflow running, 2 steps saved"
+        );
     }
 }
