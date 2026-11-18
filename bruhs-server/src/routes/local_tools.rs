@@ -174,7 +174,7 @@ pub async fn dictation(
     }
 }
 
-fn error(error: ToolError) -> AppError {
+pub(super) fn error(error: ToolError) -> AppError {
     match error {
         ToolError::Revoked => AppError::Forbidden(error.to_string()),
         ToolError::Invalid(message) => AppError::BadRequest(message),
