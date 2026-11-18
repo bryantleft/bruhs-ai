@@ -676,6 +676,10 @@ impl ReactiveAutomations {
         }
         self.loaded = true;
         self.last_refresh = Some(Instant::now());
+        // Tests never reach a server.
+        if cfg!(test) {
+            return;
+        }
         self.reading = true;
         self.revision = self.revision.wrapping_add(1);
         let revision = self.revision;
@@ -1659,18 +1663,21 @@ impl ReactiveAutomations {
         }));
     }
     fn apply_crew_signal(&mut self, signal: OutboxSignal, cx: &mut Context<'_, Self>) {
+        let mut changed = false;
         if self.crew.bruhs != signal.bruhs {
             self.crew.bruhs = signal.bruhs;
             cx.emit(ReactiveCrewChanged);
             cx.notify();
+            changed = true;
         }
         if self.crew.rooms != signal.rooms {
             self.crew.rooms = signal.rooms;
             cx.notify();
+            changed = true;
         }
-        // A bruh or room page reads the crew again on every change, like
-        // the web's.
-        if self.bruh.is_some() || self.room.is_some() {
+        // A bruh or room page reads the crew again when its bruhs or rooms
+        // change, like the web's.
+        if changed && (self.bruh.is_some() || self.room.is_some()) {
             self.refresh_snapshot(cx);
         }
         self.note_crew_protocol(signal.protocol, cx);

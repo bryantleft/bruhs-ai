@@ -640,6 +640,38 @@ fn a_new_last_seq_reads_the_newest_page_again(cx: &mut gpui::TestAppContext) {
     assert_eq!(read_for(&panel, cx), Some(6));
 }
 
+/// Like the web, a live crew frame reads the snapshot again only when its
+/// bruhs or rooms changed.
+#[gpui::test]
+fn only_a_changed_crew_frame_reads_the_snapshot_again(cx: &mut gpui::TestAppContext) {
+    let crew = vec![named("a", "Ada")];
+    let (panel, cx) = open(
+        cx,
+        snapshot(CREW_PROTOCOL, crew.clone(), vec![room(&["a"], None)]),
+    );
+    let frame = |rooms: Vec<RoomState>| OutboxSignal {
+        bruhs: crew.clone(),
+        rooms,
+        protocol: CREW_PROTOCOL,
+        ..OutboxSignal::default()
+    };
+    let reads = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+        panel.read_with(cx, |panel, _| panel.last_refresh.is_some())
+    };
+    panel.update(cx, |panel, cx| {
+        panel.reading = false;
+        panel.last_refresh = None;
+        panel.apply_crew_signal(frame(vec![room(&["a"], None)]), cx);
+    });
+    assert!(!reads(&panel, cx), "nothing changed");
+    let mut working = room(&["a"], None);
+    working.working = vec!["a".into()];
+    panel.update(cx, |panel, cx| {
+        panel.apply_crew_signal(frame(vec![working]), cx)
+    });
+    assert!(reads(&panel, cx), "the room changed");
+}
+
 /// Up and Down move through the `@` list and wrap; Enter picks the
 /// selected member; Tab leaves the list alone and inserts nothing.
 #[gpui::test]
