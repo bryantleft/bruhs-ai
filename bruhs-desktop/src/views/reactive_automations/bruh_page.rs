@@ -9,22 +9,27 @@ use super::create_bruh::{
     FIELD_X_PADDING_PX,
 };
 use super::face_editor::still_view;
+use super::transcript_list::{transcript_view, TranscriptList};
 use super::*;
 use crate::views::braille::braille_face;
+use crate::views::chat::desktop_markdown_style;
 use crate::views::crew_face::bruh_face;
 use crate::views::dropdown::{
     dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler,
 };
 use crate::views::web_button::on_press;
 use bruhs_models::agent::ModelId;
+use bruhs_models::crew::room::LOAD_EARLIER;
 use bruhs_models::crew::{
-    access_options, approval_outcome, chat_follow_key, clamp_level, composer_block,
-    current_settings, job_line, may_have_more, merge_runs, settings_commands, status_line,
-    transcript, AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem,
-    PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
+    access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level, composer_block,
+    current_settings, job_line, line_key, may_have_more, merge_runs, settings_commands,
+    status_line, transcript, AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus,
+    TranscriptItem, PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
 };
+use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
-use gpui_component::scroll::{ScrollableElement, Scrollbar};
+use gpui_component::scroll::ScrollableElement;
+use gpui_component::text::TextView;
 use std::cell::Cell;
 
 /// Web `text-h3`.
@@ -38,7 +43,9 @@ pub(super) const LABEL_TEXT_PX: f32 = 12.0;
 /// Web `max-w-3xl`.
 const COLUMN_MAX_PX: f32 = 768.0;
 /// Web `p-4`, and `sm:px-6` from the `sm` breakpoint.
-const PAGE_PADDING_PX: f32 = 16.0;
+pub(super) const PAGE_PADDING_PX: f32 = 16.0;
+/// Web `gap-3` between a transcript's lines.
+pub(super) const TRANSCRIPT_GAP_PX: f32 = 12.0;
 const PAGE_WIDE_PADDING_PX: f32 = 24.0;
 const SM_BREAKPOINT_PX: f32 = 640.0;
 /// Web `max-w-[80%]` on chat bubbles and cards.
@@ -283,13 +290,15 @@ pub(super) struct BruhPage {
     /// Reply fields of open question cards, by outbox id.
     replies: HashMap<String, (Entity<InputState>, gpui::Subscription)>,
     settings: Option<SettingsForm>,
-    scroll: ScrollHandle,
+    list: TranscriptList,
     /// What the transcript last followed (`chat_follow_key`); a new line
     /// scrolls into view.
     followed: (Option<String>, Option<String>),
     /// The conversation, built when the snapshot or the runs change rather
     /// than on every frame (a sweeping face redraws the page often).
     lines: Rc<Vec<TranscriptItem>>,
+    /// Each answer's Markdown by run id, ready to draw, built with `lines`.
+    prose: HashMap<String, SharedString>,
     /// The snapshot revision and runs version `lines` was built from.
     built_for: Option<(u64, u64)>,
     /// The page's width, measured as it is drawn.
@@ -311,9 +320,10 @@ impl BruhPage {
             earlier_request: None,
             replies: HashMap::new(),
             settings: None,
-            scroll: ScrollHandle::new(),
+            list: TranscriptList::new(),
             followed: (None, None),
             lines: Rc::new(Vec::new()),
+            prose: HashMap::new(),
             built_for: None,
             width: Rc::new(Cell::new(0.0)),
             _subscriptions: Vec::new(),
@@ -472,6 +482,35 @@ pub(super) fn bubble(max_width: f32) -> Div {
         .line_height(relative(1.5))
 }
 
+/// A bruh's words as the thread chat draws a reply: Markdown without raw
+/// HTML, and a remote image as a link to it rather than loaded.
+pub(super) fn crew_markdown(text: &str) -> SharedString {
+    markdown_with_allowed_images(text, &std::collections::BTreeSet::new()).into()
+}
+
+/// A bruh's bubble holding [`crew_markdown`] in the thread chat's
+/// Markdown style. `id` names it, so its parsed text survives redraws.
+pub(super) fn prose_bubble(
+    id: String,
+    markdown: SharedString,
+    layout: Layout,
+    cx: &App,
+) -> AnyElement {
+    let selector = id.clone();
+    bubble(layout.bubble())
+        .debug_selector(move || selector)
+        .bg(theme::longan_900())
+        .border_1()
+        .border_color(theme::longan_700().opacity(SOFT_RING_OPACITY))
+        .text_color(theme::rambutan_200())
+        .child(
+            TextView::markdown(SharedString::from(id), markdown)
+                .style(desktop_markdown_style(cx))
+                .selectable(true),
+        )
+        .into_any_element()
+}
+
 /// The page's measured layout: the centred column and its padding.
 #[derive(Clone, Copy)]
 pub(super) struct Layout {
@@ -510,6 +549,17 @@ impl Layout {
 
     pub(super) fn bubble(self) -> f32 {
         self.inner() * BUBBLE_SHARE
+    }
+
+    /// One row of a transcript: the column's width and side padding.
+    pub(super) fn row(self) -> Div {
+        div()
+            .w(px(self.column))
+            .min_w_0()
+            .flex_shrink_0()
+            .px(px(self.padding))
+            .flex()
+            .flex_col()
     }
 
     /// Web `mx-auto w-full max-w-3xl min-w-0 p-4 sm:px-6`. A px width,
@@ -713,9 +763,15 @@ impl ReactiveAutomations {
     /// The page's inputs and data, made before it draws. The work runs only
     /// when the snapshot or the runs changed since the last frame.
     pub(super) fn ensure_bruh_page(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        let Some(page) = self.bruh.as_ref() else {
+        let Some(page) = self.bruh.as_mut() else {
             return;
         };
+        page.list.sync_header(format!(
+            "{}:{}:{}",
+            page.runs.more,
+            page.runs.error.is_some(),
+            page.lines.is_empty()
+        ));
         let stamp = (self.snapshot_rev, page.runs.version);
         let current = page.built_for == Some(stamp) && page.message.is_some();
         let requested = page.runs_requested;
@@ -782,9 +838,20 @@ impl ReactiveAutomations {
             }
         }
         page.lines = Rc::new(transcript(&agent_id, &page.runs.runs, outbox));
+        page.prose = page
+            .lines
+            .iter()
+            .filter_map(|line| match line {
+                TranscriptItem::Bruh { run_id, .. } => {
+                    Some((run_id.clone(), crew_markdown(chat_markdown(line)?)))
+                }
+                _ => None,
+            })
+            .collect();
+        page.list.sync(page.lines.iter().map(line_key).collect());
         let shown = chat_follow_key(&page.lines);
         if shown != page.followed {
-            page.scroll.scroll_to_bottom();
+            page.list.follow();
             page.followed = shown;
         }
         if !page.runs_requested {
@@ -1238,46 +1305,11 @@ impl ReactiveAutomations {
         let Some(page) = self.bruh.as_ref() else {
             return div();
         };
-        let lines = Rc::clone(&page.lines);
         let blocked = composer_block(Some(state.status));
         let empty = page
             .message
             .as_ref()
             .is_none_or(|message| value(message, cx).trim().is_empty());
-        let log = layout
-            .column()
-            .gap_3()
-            .id("desktop-bruh-log")
-            .role(Role::Log)
-            .aria_label("Conversation")
-            .when(page.runs.more, |el| {
-                el.child(div().flex().justify_center().child(page_button(
-                    "desktop-bruh-load-earlier",
-                    "Load earlier",
-                    WebButtonVariant::Ghost,
-                    page.loading_earlier,
-                    cx,
-                    |this, _, cx| this.load_earlier_bruh_runs(cx),
-                )))
-            })
-            .when_some(page.runs.error.clone(), |el, message| {
-                el.child(alert("desktop-bruh-runs-error", message))
-            })
-            .when(lines.is_empty() && page.runs.error.is_none(), |el| {
-                el.child(
-                    div()
-                        .font_family(theme::CODE_FONT_FAMILY)
-                        .text_size(px(SMALL_TEXT_PX))
-                        .text_color(theme::rambutan_500())
-                        .child("Nothing here yet. Say hi."),
-                )
-            })
-            .children(
-                lines
-                    .iter()
-                    .cloned()
-                    .map(|line| self.render_bruh_line(line, &state.look, layout, cx)),
-            );
         let composer = layout
             .column()
             .gap_2()
@@ -1321,28 +1353,26 @@ impl ReactiveAutomations {
             .min_h_0()
             .flex()
             .flex_col()
-            .child(
-                div()
-                    .relative()
-                    .flex_1()
-                    .min_h_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        div()
-                            .id("desktop-bruh-transcript")
-                            .debug_selector(|| "desktop-bruh-transcript".to_string())
-                            .flex_1()
-                            .min_h_0()
-                            .flex()
-                            .flex_col()
-                            .items_center()
-                            .overflow_y_scroll()
-                            .track_scroll(&page.scroll)
-                            .child(log),
-                    )
-                    .child(Scrollbar::vertical(&page.scroll)),
-            )
+            .child(transcript_view(
+                "desktop-bruh-transcript",
+                "Conversation",
+                &page.list,
+                layout,
+                cx,
+                move |this, index, cx| {
+                    let page = this.bruh.as_ref()?;
+                    Some(match index.checked_sub(1) {
+                        None => this.render_bruh_head(page, cx),
+                        Some(at) => {
+                            let look = this
+                                .bruh_state(&page.agent_id)
+                                .map(|state| state.look.clone())
+                                .unwrap_or_default();
+                            this.render_bruh_line(page.lines.get(at)?.clone(), &look, layout, cx)
+                        }
+                    })
+                },
+            ))
             .child(
                 div()
                     .flex_shrink_0()
@@ -1352,6 +1382,38 @@ impl ReactiveAutomations {
                     .border_color(theme::longan_800().opacity(HAIRLINE_OPACITY))
                     .child(composer),
             )
+    }
+
+    /// What sits above the chat's lines: Load earlier, the error and the
+    /// empty line.
+    fn render_bruh_head(&self, page: &BruhPage, cx: &Context<'_, Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
+            .gap_3()
+            .when(page.runs.more, |el| {
+                el.child(div().flex().justify_center().child(page_button(
+                    "desktop-bruh-load-earlier",
+                    LOAD_EARLIER,
+                    WebButtonVariant::Ghost,
+                    page.loading_earlier,
+                    cx,
+                    |this, _, cx| this.load_earlier_bruh_runs(cx),
+                )))
+            })
+            .when_some(page.runs.error.clone(), |el, message| {
+                el.child(alert("desktop-bruh-runs-error", message))
+            })
+            .when(page.lines.is_empty() && page.runs.error.is_none(), |el| {
+                el.child(
+                    div()
+                        .font_family(theme::CODE_FONT_FAMILY)
+                        .text_size(px(SMALL_TEXT_PX))
+                        .text_color(theme::rambutan_500())
+                        .child("Nothing here yet. Say hi."),
+                )
+            })
+            .into_any_element()
     }
 
     fn render_bruh_line(
@@ -1389,6 +1451,7 @@ impl ReactiveAutomations {
                 })
                 .into_any_element(),
             TranscriptItem::Bruh {
+                run_id,
                 text,
                 trigger,
                 failed,
@@ -1413,21 +1476,24 @@ impl ReactiveAutomations {
                             el.child(small_text(trigger, theme::rambutan_500()))
                         })
                         .child(
-                            bubble(layout.bubble())
-                                .map(|el| {
-                                    if failed {
-                                        el.bg(theme::lychee_500().opacity(ERROR_FILL_OPACITY))
-                                            .text_color(theme::lychee_200())
-                                    } else {
-                                        el.bg(theme::longan_900())
-                                            .border_1()
-                                            .border_color(
-                                                theme::longan_700().opacity(SOFT_RING_OPACITY),
-                                            )
-                                            .text_color(theme::rambutan_200())
-                                    }
-                                })
-                                .child(text),
+                            match self
+                                .bruh
+                                .as_ref()
+                                .and_then(|page| page.prose.get(&run_id))
+                                .filter(|_| !failed)
+                            {
+                                Some(markdown) => prose_bubble(
+                                    format!("bruh-md-{run_id}"),
+                                    markdown.clone(),
+                                    layout,
+                                    cx,
+                                ),
+                                None => bubble(layout.bubble())
+                                    .bg(theme::lychee_500().opacity(ERROR_FILL_OPACITY))
+                                    .text_color(theme::lychee_200())
+                                    .child(text)
+                                    .into_any_element(),
+                            },
                         ),
                 )
                 .into_any_element(),
@@ -2551,5 +2617,27 @@ mod tests {
                 message: "Checking".into(),
             }]
         );
+    }
+
+    /// What the bruh answered draws as the thread chat's Markdown; a failed
+    /// run's error stays as written.
+    #[gpui::test]
+    fn answers_draw_as_markdown(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            Some(snapshot(BruhStatus::Asleep, Vec::new())),
+            BruhTab::Chat,
+        );
+        let mut answered = run("r1", "completed");
+        answered.result = Some("**Paid** the bill".into());
+        let mut failed = run("r2", "failed");
+        failed.error = Some("**no** network".into());
+        panel.update(cx, |panel, cx| {
+            panel.show_bruh_runs_for_test(vec![failed, answered]);
+            cx.notify();
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("bruh-md-r1").is_some(), "the answer");
+        assert!(cx.debug_bounds("bruh-md-r2").is_none(), "the failed run");
     }
 }

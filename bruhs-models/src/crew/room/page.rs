@@ -43,6 +43,11 @@ pub const DELETE_ROOM: &str = "Delete room";
 pub const DELETE_ROOM_YES: &str = "Delete";
 /// Backs out of [`DELETE_ROOM_CONFIRM`].
 pub const DELETE_ROOM_NO: &str = "Keep";
+/// Reads the page of older lines above a transcript, in a room or a
+/// bruh's chat.
+pub const LOAD_EARLIER: &str = "Load earlier";
+/// The room form's member list while the crew is empty.
+pub const NO_BRUHS_YET: &str = "No bruhs yet.";
 /// Why New room is off while the crew is empty.
 pub const ADD_A_BRUH_FIRST: &str = "Add a bruh first.";
 
@@ -216,6 +221,21 @@ pub fn room_follow_key(lines: &[RoomLine]) -> (Option<String>, Option<String>) {
         RoomLine::Working { .. } => None,
     });
     (newest, lines.last().map(room_line_key))
+}
+
+/// The text a line draws as Markdown, as the thread chat draws a reply: a
+/// bruh's message. The owner's words stay as typed, as thread chats show
+/// the user's turns, and failed and system lines stay plain.
+#[must_use]
+pub fn room_markdown(line: &RoomLine) -> Option<&str> {
+    match line {
+        RoomLine::Bruh {
+            text,
+            failed: false,
+            ..
+        } => Some(text),
+        _ => None,
+    }
 }
 
 /// Puts a page of messages into those shown, replacing repeats by id, in
@@ -909,5 +929,25 @@ mod tests {
             .map(|bruh| bruh.name)
             .collect();
         assert_eq!(names, ["Bo", "Ada"]);
+    }
+
+    #[test]
+    fn only_a_bruhs_reply_draws_as_markdown() {
+        let messages = [
+            msg(1, RoomAuthor::Owner, "**mine**"),
+            msg(2, bruh("a"), "**Food** and drinks"),
+            msg(3, RoomAuthor::System, "Bo is paused"),
+        ];
+        let mut failed = msg(4, bruh("a"), "**failed**");
+        failed.failed = true;
+        let mut all = messages.to_vec();
+        all.push(failed);
+        let lines = room_lines(&all, &[run("w", "a", "running", 1, "r")], &[], "r");
+        let drawn: Vec<Option<&str>> = lines.iter().map(room_markdown).collect();
+        assert_eq!(
+            drawn,
+            [None, Some("**Food** and drinks"), None, None, None],
+            "owner, system, failed and working lines stay plain"
+        );
     }
 }

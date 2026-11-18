@@ -229,6 +229,48 @@ fn a_room_shows_messages_faces_system_lines_and_cards(cx: &mut gpui::TestAppCont
     );
 }
 
+/// A bruh's message draws as the thread chat's Markdown; the owner's words
+/// and a failed reply stay as written.
+#[gpui::test]
+fn a_bruhs_message_draws_as_markdown(cx: &mut gpui::TestAppContext) {
+    let (panel, cx) = open(
+        cx,
+        snapshot(
+            CREW_PROTOCOL,
+            vec![named("a", "Ada")],
+            vec![room(&["a"], Some("a"))],
+        ),
+    );
+    let mut failed = message(3, by("a"), "**Ran out** of road");
+    failed.failed = true;
+    panel.update(cx, |panel, cx| {
+        panel.show_room_messages_for_test(vec![
+            failed,
+            message(
+                2,
+                by("a"),
+                "- **Food** and drinks\n- ![map](https://example.com/m.png)",
+            ),
+            message(1, RoomAuthor::Owner, "**pack** it"),
+        ]);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    let line = cx.debug_bounds("room-line-bruh-2").expect("Ada's line");
+    let prose = cx.debug_bounds("room-md-2").expect("Ada's Markdown");
+    assert!(line.contains(&prose.center()));
+    assert!(cx.debug_bounds("room-md-1").is_none(), "the owner's words");
+    assert!(cx.debug_bounds("room-md-3").is_none(), "a failed reply");
+    panel.read_with(cx, |panel, _| {
+        let page = panel.room.as_ref().unwrap();
+        let markdown = page.prose.get("2").expect("built with the lines");
+        assert!(
+            !markdown.contains("!["),
+            "a remote image is a link, never loaded: {markdown}"
+        );
+    });
+}
+
 #[gpui::test]
 fn at_lists_members_and_enter_inserts_a_chip(cx: &mut gpui::TestAppContext) {
     let (panel, cx) = open(
@@ -441,9 +483,16 @@ fn load_earlier_leaves_the_reader_where_they_were(cx: &mut gpui::TestAppContext)
             .map(|seq| message(seq, RoomAuthor::Owner, &format!("Message {seq}")))
             .collect()
     };
-    let offset = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+    let top = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
         panel.read_with(cx, |panel, _| {
-            panel.room.as_ref().unwrap().scroll.offset().y
+            panel
+                .room
+                .as_ref()
+                .unwrap()
+                .list
+                .state
+                .logical_scroll_top()
+                .item_ix
         })
     };
     panel.update(cx, |panel, cx| {
@@ -451,15 +500,14 @@ fn load_earlier_leaves_the_reader_where_they_were(cx: &mut gpui::TestAppContext)
         cx.notify();
     });
     cx.run_until_parked();
-    assert!(
-        offset(&panel, cx) < gpui::px(0.0),
-        "opens on the newest line"
-    );
-    // The reader goes up to Load earlier.
+    assert!(top(&panel, cx) > 1, "opens on the newest line");
+    // The reader goes up to the first line under Load earlier.
     panel.update(cx, |panel, cx| {
         let page = panel.room.as_ref().unwrap();
-        page.scroll
-            .set_offset(gpui::point(gpui::px(0.0), gpui::px(0.0)));
+        page.list.state.scroll_to(gpui::ListOffset {
+            item_ix: 1,
+            offset_in_item: gpui::px(0.0),
+        });
         cx.notify();
     });
     cx.run_until_parked();
@@ -472,7 +520,11 @@ fn load_earlier_leaves_the_reader_where_they_were(cx: &mut gpui::TestAppContext)
         panel.read_with(cx, |panel, _| panel.room.as_ref().unwrap().lines.len()),
         100
     );
-    assert_eq!(offset(&panel, cx), gpui::px(0.0), "still at the top");
+    assert_eq!(
+        top(&panel, cx),
+        51,
+        "Message 51 is still the first line in view, under the 50 that loaded"
+    );
 }
 
 #[gpui::test]

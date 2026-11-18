@@ -1,9 +1,10 @@
 //! Chat with one bruh: its runs as a conversation, with its questions and
 //! approvals inline, older runs a page at a time, and a composer.
 
+use bruhs_models::crew::room::LOAD_EARLIER;
 use bruhs_models::crew::{
-    approval_outcome, chat_follow_key, composer_block, line_key, may_have_more, merge_runs,
-    transcript, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
+    approval_outcome, chat_follow_key, chat_markdown, composer_block, line_key, may_have_more,
+    merge_runs, transcript, BruhLook, BruhStatus, TranscriptItem, RAIL_FACE_PX,
 };
 use bruhs_models::reactive::{OutboxItem, ReactiveCommand, ReactiveRun};
 use leptos::html;
@@ -11,6 +12,7 @@ use leptos::prelude::*;
 
 use super::data::{use_crew_snapshot, CrewData};
 use super::face_editor::still_view;
+use super::prose::{install_crew_prose, PROSE_BUBBLE};
 use crate::ui::{BrailleBruh, Button, ButtonSize, ButtonVariant, Textarea};
 
 pub(super) const CARD: &str =
@@ -104,6 +106,17 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
         runs.with(|runs| id.with_value(|id| transcript(id, runs, &outbox)))
     });
 
+    // Code, math and diagrams in the bruh's Markdown, and its links.
+    install_crew_prose(move || {
+        lines.with(|lines| {
+            lines
+                .iter()
+                .filter_map(chat_markdown)
+                .map(str::to_string)
+                .collect()
+        })
+    });
+
     // Follow the conversation, as a room does: a new line scrolls it into
     // view, runs loading above an open card too, and Load earlier does not.
     let scroller = NodeRef::<html::Div>::new();
@@ -138,7 +151,7 @@ pub fn BruhChat(agent_id: String) -> impl IntoView {
                 <div class="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 p-4 sm:px-6" role="log" aria-label="Conversation">
                     <Show when=move || more.get()>
                         <div class="flex justify-center">
-                            <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move || loading_earlier.get()) on_click=Callback::new(load_earlier)>"Load earlier"</Button>
+                            <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move || loading_earlier.get()) on_click=Callback::new(load_earlier)>{LOAD_EARLIER}</Button>
                         </div>
                     </Show>
                     {move || load_error.get().map(|message| view! { <p role="alert" class="rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200">{message}</p> })}
@@ -209,11 +222,11 @@ fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
                 <BrailleBruh size=f64::from(RAIL_FACE_PX) view=Signal::derive(move || look.with(|look| still_view(look, BruhStatus::Working))) />
                 <div class="flex min-w-0 max-w-[80%] flex-col gap-1">
                     {trigger.map(|trigger| view! { <span class="text-label-sm text-rambutan-500">{trigger}</span> })}
-                    <p class=if failed {
-                        "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-lychee-500/10 px-3 py-2 text-body text-lychee-200"
+                    {if failed {
+                        view! { <p class="min-w-0 whitespace-pre-wrap break-words rounded-grape bg-lychee-500/10 px-3 py-2 text-body text-lychee-200">{text}</p> }.into_any()
                     } else {
-                        "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-longan-900 px-3 py-2 text-body text-rambutan-200 inset-ring inset-ring-longan-700/50"
-                    }>{text}</p>
+                        view! { <div class=PROSE_BUBBLE inner_html=crate::markdown::render_untrusted(&text)></div> }.into_any()
+                    }}
                 </div>
             </div>
         }

@@ -4,28 +4,29 @@
 //! room's members. The workspace shows the panel for `AppView::Room` and
 //! tells it which room; the panel owns the page's state.
 use super::bruh_page::{
-    alert, bubble, measure_width, page_button, reply_field, small_text, Layout, BODY_TEXT_PX,
-    HAIRLINE_OPACITY, LABEL_TEXT_PX, RADIUS_GRAPE_PX, SMALL_TEXT_PX, SOFT_RING_OPACITY,
-    TITLE_TEXT_PX,
+    alert, bubble, crew_markdown, measure_width, page_button, prose_bubble, reply_field,
+    small_text, Layout, BODY_TEXT_PX, HAIRLINE_OPACITY, LABEL_TEXT_PX, RADIUS_GRAPE_PX,
+    SMALL_TEXT_PX, TITLE_TEXT_PX,
 };
 use super::create_bruh::ERROR_FILL_OPACITY;
 use super::face_editor::still_view;
+use super::transcript_list::{transcript_view, TranscriptList};
 use super::*;
 use crate::views::braille::braille_face;
 use crate::views::crew_face::bruh_face;
 use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     author_name, member_hits, member_states, members_line, mention_query, merge_messages,
-    room_composer_block, room_composer_hint, room_follow_key, room_lines, room_post, working_line,
-    Room, RoomLine, RoomMessage, RoomState, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM,
-    ROOM_GONE, ROOM_LEAD, ROOM_LOADING, ROOM_SETTINGS,
+    room_composer_block, room_composer_hint, room_follow_key, room_line_key, room_lines,
+    room_markdown, room_post, working_line, Room, RoomLine, RoomMessage, RoomState,
+    APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM, LOAD_EARLIER, ROOM_GONE, ROOM_LEAD, ROOM_LOADING,
+    ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhStatus, RAIL_FACE_PX};
 use bruhs_models::logic::context_chip::{
     backspace_chip, delete_forward_chip, insert_chip, replace_range, retarget, ChipKind,
     ContextChip,
 };
-use gpui_component::scroll::Scrollbar;
 use std::cell::Cell;
 use std::collections::hash_map::Entry;
 
@@ -72,9 +73,12 @@ pub(super) struct RoomPage {
     /// The transcript, built when the snapshot or the messages change rather
     /// than on every frame (a sweeping face redraws the page often).
     lines: Rc<Vec<RoomLine>>,
+    /// Each bruh message's Markdown by message id, ready to draw, built
+    /// with `lines`.
+    prose: HashMap<String, SharedString>,
     /// The snapshot revision and messages version `lines` was built from.
     built_for: Option<(u64, u64)>,
-    scroll: ScrollHandle,
+    list: TranscriptList,
     /// What the transcript last followed; a new line scrolls into view.
     followed: (Option<String>, Option<String>),
     width: Rc<Cell<f32>>,
@@ -110,8 +114,9 @@ impl RoomPage {
             hits_scroll: ScrollHandle::new(),
             replies: HashMap::new(),
             lines: Rc::new(Vec::new()),
+            prose: HashMap::new(),
             built_for: None,
-            scroll: ScrollHandle::new(),
+            list: TranscriptList::new(),
             followed: (None, None),
             width: Rc::new(Cell::new(0.0)),
             settings_focus: cx.focus_handle().tab_index(0).tab_stop(true),
@@ -327,6 +332,16 @@ impl ReactiveAutomations {
                     (snapshot.runs.as_slice(), snapshot.outbox.as_slice())
                 });
             page.lines = Rc::new(room_lines(&page.messages, runs, outbox, &room_id));
+            page.prose = page
+                .lines
+                .iter()
+                .filter_map(|line| match line {
+                    RoomLine::Bruh { message_id, .. } => {
+                        Some((message_id.clone(), crew_markdown(room_markdown(line)?)))
+                    }
+                    _ => None,
+                })
+                .collect();
             let open: Vec<String> = page
                 .lines
                 .iter()
@@ -341,12 +356,20 @@ impl ReactiveAutomations {
                     slot.insert(reply_field(window, cx));
                 }
             }
+            page.list
+                .sync(page.lines.iter().map(room_line_key).collect());
             let shown = room_follow_key(&page.lines);
             if shown != page.followed {
-                page.scroll.scroll_to_bottom();
+                page.list.follow();
                 page.followed = shown;
             }
         }
+        page.list.sync_header(format!(
+            "{}:{}:{}",
+            page.more,
+            page.error.is_some(),
+            page.loaded && page.lines.is_empty()
+        ));
         if reload {
             self.reload_room_messages(cx);
         }
@@ -534,17 +557,33 @@ impl ReactiveAutomations {
         layout: Layout,
         cx: &Context<'_, Self>,
     ) -> Div {
-        let lines = Rc::clone(&page.lines);
-        let log = layout
-            .column()
+        transcript_view(
+            "desktop-room-transcript",
+            "Room messages",
+            &page.list,
+            layout,
+            cx,
+            move |this, index, cx| {
+                let page = this.room.as_ref()?;
+                Some(match index.checked_sub(1) {
+                    None => this.render_room_head(page, cx),
+                    Some(at) => this.render_room_line(page, page.lines.get(at)?, layout, cx),
+                })
+            },
+        )
+    }
+
+    /// What sits above the lines: Load earlier, the error and the empty
+    /// line.
+    fn render_room_head(&self, page: &RoomPage, cx: &Context<'_, Self>) -> AnyElement {
+        div()
+            .flex()
+            .flex_col()
             .gap_3()
-            .id("desktop-room-log")
-            .role(Role::Log)
-            .aria_label("Room messages")
             .when(page.more, |el| {
                 el.child(div().flex().justify_center().child(page_button(
                     "desktop-room-load-earlier",
-                    "Load earlier",
+                    LOAD_EARLIER,
                     WebButtonVariant::Ghost,
                     page.loading_earlier,
                     cx,
@@ -555,7 +594,7 @@ impl ReactiveAutomations {
                 el.child(alert("desktop-room-messages-error", message))
             })
             .when(
-                page.loaded && lines.is_empty() && page.error.is_none(),
+                page.loaded && page.lines.is_empty() && page.error.is_none(),
                 |el| {
                     el.child(
                         div()
@@ -567,33 +606,7 @@ impl ReactiveAutomations {
                     )
                 },
             )
-            .children(
-                lines
-                    .iter()
-                    .map(|line| self.render_room_line(page, line, layout, cx)),
-            );
-        div().relative().flex_1().min_h_0().flex().flex_col().child(
-            div()
-                .relative()
-                .flex_1()
-                .min_h_0()
-                .flex()
-                .flex_col()
-                .child(
-                    div()
-                        .id("desktop-room-transcript")
-                        .debug_selector(|| "desktop-room-transcript".to_string())
-                        .flex_1()
-                        .min_h_0()
-                        .flex()
-                        .flex_col()
-                        .items_center()
-                        .overflow_y_scroll()
-                        .track_scroll(&page.scroll)
-                        .child(log),
-                )
-                .child(Scrollbar::vertical(&page.scroll)),
-        )
+            .into_any_element()
     }
 
     fn bruh_look(&self, agent_id: &str) -> BruhLook {
@@ -682,21 +695,19 @@ impl ReactiveAutomations {
                 failed,
                 ..
             } => {
-                let failed = *failed;
-                let body = bubble(layout.bubble())
-                    .map(|el| {
-                        if failed {
-                            el.bg(theme::lychee_500().opacity(ERROR_FILL_OPACITY))
-                                .text_color(theme::lychee_200())
-                        } else {
-                            el.bg(theme::longan_900())
-                                .border_1()
-                                .border_color(theme::longan_700().opacity(SOFT_RING_OPACITY))
-                                .text_color(theme::rambutan_200())
-                        }
-                    })
-                    .child(text.clone())
-                    .into_any_element();
+                let body = match page.prose.get(message_id).filter(|_| !*failed) {
+                    Some(markdown) => prose_bubble(
+                        format!("room-md-{message_id}"),
+                        markdown.clone(),
+                        layout,
+                        cx,
+                    ),
+                    None => bubble(layout.bubble())
+                        .bg(theme::lychee_500().opacity(ERROR_FILL_OPACITY))
+                        .text_color(theme::lychee_200())
+                        .child(text.clone())
+                        .into_any_element(),
+                };
                 self.render_room_author(
                     format!("room-line-bruh-{message_id}"),
                     agent_id,

@@ -363,7 +363,9 @@ pub fn ChatPage() -> impl IntoView {
             .and_then(|t| t.dyn_into::<web_sys::Element>().ok())
             .and_then(|t| t.closest("button[data-open-whiteboard]").ok().flatten())
         {
-            if button.closest(".prose-msg").ok().flatten().is_some() {
+            if button.closest(".prose-msg").ok().flatten().is_some()
+                && button.closest(".crew-prose").ok().flatten().is_none()
+            {
                 if let Some(source) = button.get_attribute("data-open-whiteboard") {
                     ev.prevent_default();
                     board_host.open_mermaid(source);
@@ -374,7 +376,10 @@ pub fn ChatPage() -> impl IntoView {
         let Some(anchor) = event_anchor(&ev) else {
             return;
         };
-        if anchor.closest(".prose-msg").ok().flatten().is_none() {
+        // Crew prose has no thread; its own handler takes its links.
+        if anchor.closest(".prose-msg").ok().flatten().is_none()
+            || anchor.closest(".crew-prose").ok().flatten().is_some()
+        {
             return;
         }
         let Some(href) = anchor.get_attribute("href") else {

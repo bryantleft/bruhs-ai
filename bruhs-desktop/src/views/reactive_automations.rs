@@ -23,6 +23,7 @@ mod room_dialog;
 mod room_page;
 mod runs;
 mod setup;
+mod transcript_list;
 mod updates;
 mod weekly_reports;
 pub(crate) use bruh_page::ReactiveOpenAutomations;

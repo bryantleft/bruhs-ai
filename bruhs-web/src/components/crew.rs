@@ -6,6 +6,7 @@ pub mod data;
 pub mod face;
 pub mod face_editor;
 pub mod page;
+pub mod prose;
 pub mod rail;
 pub mod room;
 pub mod room_dialog;

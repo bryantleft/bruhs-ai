@@ -4,9 +4,9 @@
 
 use bruhs_models::crew::room::{
     author_name, member_states, members_line, merge_messages, room_composer_block,
-    room_composer_hint, room_follow_key, room_line_key, room_lines, room_post, working_line, Room,
-    RoomLine, RoomMessage, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM, ROOM_GONE, ROOM_LOADING,
-    ROOM_SETTINGS,
+    room_composer_hint, room_follow_key, room_line_key, room_lines, room_markdown, room_post,
+    working_line, Room, RoomLine, RoomMessage, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM,
+    LOAD_EARLIER, ROOM_GONE, ROOM_LOADING, ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
 use leptos::html;
@@ -16,6 +16,7 @@ use super::chat::{approval_card, question_card, CARD};
 use super::data::{use_crew_snapshot, CrewData};
 use super::face::BruhFace;
 use super::face_editor::still_view;
+use super::prose::{install_crew_prose, PROSE_BUBBLE};
 use super::room_dialog::RoomDialog;
 use crate::components::mention_editor::MentionEditor;
 use crate::state::{ChipRetargetGuard, ComposerChips};
@@ -23,7 +24,6 @@ use crate::ui::{BrailleBruh, Button, ButtonSize, ButtonVariant};
 
 const ERROR: &str = "rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200";
 const OWNER: &str = "min-w-0 max-w-[80%] whitespace-pre-wrap break-words rounded-grape bg-longan-800 px-3 py-2 text-body text-rambutan-100";
-const BRUH: &str = "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-longan-900 px-3 py-2 text-body text-rambutan-200 inset-ring inset-ring-longan-700/50";
 const FAILED: &str = "min-w-0 whitespace-pre-wrap break-words rounded-grape bg-lychee-500/10 px-3 py-2 text-body text-lychee-200";
 
 #[component]
@@ -245,6 +245,17 @@ fn room_transcript(
         })
     });
 
+    // Code, math and diagrams in the bruhs' Markdown, and its links.
+    install_crew_prose(move || {
+        lines.with(|lines| {
+            lines
+                .iter()
+                .filter_map(room_markdown)
+                .map(str::to_string)
+                .collect()
+        })
+    });
+
     // Follow the room: a new line scrolls it into view; Load earlier does not.
     let scroller = NodeRef::<html::Div>::new();
     Effect::new(move |previous: Option<(Option<String>, Option<String>)>| {
@@ -262,7 +273,7 @@ fn room_transcript(
             <div class="mx-auto flex w-full max-w-3xl min-w-0 flex-col gap-3 p-4 sm:px-6" role="log" aria-label="Room messages">
                 <Show when=move || more.get()>
                     <div class="flex justify-center">
-                        <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move || loading_earlier.get()) on_click=Callback::new(load_earlier)>"Load earlier"</Button>
+                        <Button variant=ButtonVariant::Ghost size=ButtonSize::Small disabled=Signal::derive(move || loading_earlier.get()) on_click=Callback::new(load_earlier)>{LOAD_EARLIER}</Button>
                     </div>
                 </Show>
                 {move || load_error.get().map(|message| view! { <p role="alert" class=ERROR>{message}</p> })}
@@ -323,12 +334,17 @@ fn room_line(line: RoomLine, bruhs: Memo<Vec<BruhState>>, data: CrewData) -> Any
         RoomLine::Bruh {
             agent_id,
             text,
-            failed,
+            failed: true,
             ..
         } => by_bruh(
             agent_id,
             bruhs,
-            view! { <p data-room-line="bruh" class=if failed { FAILED } else { BRUH }>{text}</p> }
+            view! { <p data-room-line="bruh" class=FAILED>{text}</p> }.into_any(),
+        ),
+        RoomLine::Bruh { agent_id, text, .. } => by_bruh(
+            agent_id,
+            bruhs,
+            view! { <div data-room-line="bruh" class=PROSE_BUBBLE inner_html=crate::markdown::render_untrusted(&text)></div> }
                 .into_any(),
         ),
         RoomLine::System { text, .. } => view! {

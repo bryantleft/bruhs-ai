@@ -97,6 +97,20 @@ pub fn chat_follow_key(lines: &[TranscriptItem]) -> (Option<String>, Option<Stri
     (newest, lines.last().map(line_key))
 }
 
+/// The text a chat line draws as Markdown, as a room does
+/// (`room::room_markdown`): what the bruh answered, unless it failed.
+#[must_use]
+pub fn chat_markdown(item: &TranscriptItem) -> Option<&str> {
+    match item {
+        TranscriptItem::Bruh {
+            text,
+            failed: false,
+            ..
+        } => Some(text),
+        _ => None,
+    }
+}
+
 /// Each access level in display order, with why `model` can't run it.
 #[must_use]
 pub fn access_options(model: &str) -> Vec<(AccessLevel, Option<&'static str>)> {
@@ -139,8 +153,8 @@ pub fn current_settings(snapshot: &ReactiveSnapshot, agent_id: &str) -> Option<B
 #[cfg(test)]
 mod tests {
     use super::{
-        access_options, approval_outcome, chat_follow_key, clamp_level, composer_block,
-        current_settings, job_line, line_key, may_have_more, merge_runs,
+        access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level,
+        composer_block, current_settings, job_line, line_key, may_have_more, merge_runs,
     };
     use crate::agent::AgentProvider;
     use crate::crew::{
@@ -351,5 +365,26 @@ mod tests {
         merge_runs(&mut shown, vec![at("r1", "completed", 2)]);
         assert_eq!(loaded, chat_follow_key(&lines(&shown)));
         assert_eq!(chat_follow_key(&[]), (None, None));
+    }
+
+    #[test]
+    fn only_a_bruhs_answer_in_its_chat_draws_as_markdown() {
+        let bruh = |failed| TranscriptItem::Bruh {
+            run_id: "r".into(),
+            text: "**Done**".into(),
+            at: EpochMs::saturating_from_i64(1),
+            trigger: None,
+            failed,
+        };
+        assert_eq!(chat_markdown(&bruh(false)), Some("**Done**"));
+        assert_eq!(chat_markdown(&bruh(true)), None);
+        let owner = TranscriptItem::Owner {
+            run_id: "r".into(),
+            text: "**hi**".into(),
+            at: EpochMs::saturating_from_i64(1),
+            pending: false,
+            caption: None,
+        };
+        assert_eq!(chat_markdown(&owner), None);
     }
 }

@@ -3,7 +3,7 @@
 // by keyboard, who a post reaches, hand-offs and their limit, paused
 // members, approval and question cards in a room, Stop all, Room settings
 // (rename, Delete room and its confirm), phone-size touch targets, Load
-// earlier and reduced motion. Any panic in
+// earlier, Markdown in a bruh's messages and reduced motion. Any panic in
 // the page fails the run. Every check prints ok or FAIL; the exit status is
 // 0 only when all pass.
 //
@@ -757,8 +757,9 @@ try {
     record('Deny on a room approval card resumes Cy without the change', deny >= 1 && !!skipped, `Deny buttons ${deny}; answered ${!!skipped}`);
   });
 
-  // 12. A long room: Load earlier keeps the reader where they were. Sixty
-  // messages go straight into the room's table, the newest Bo's.
+  // 12. A long room: Load earlier keeps the reader where they were, and a
+  // bruh's Markdown renders as the chat's prose with links kept in the app.
+  // Sixty messages go straight into the room's table, the newest Bo's.
   const archive = 'room-archive';
   await check('Load earlier shows the older messages without jumping to the newest line', async () => {
     await command({ action: 'create_room', room: { id: archive, name: 'Archive', members: [ids.Bo], lead: null } });
@@ -792,6 +793,40 @@ try {
     record('Load earlier shows the older messages without jumping to the newest line',
       opened.bottom <= 2 && after.bottom > 200 && first === 'Archive message 1',
       `opened ${js(opened)}; after ${js(after)}; first line ${js(first)}`);
+  });
+
+  await check("a bruh's Markdown renders as prose, and its links never leave the app", async () => {
+    await openRoom(archive, 'Archive');
+    const line = `[data-room-author=${js(ids.Bo)}] [data-room-line="bruh"]`;
+    const prose = await waitFor('Bo\'s prose', `(() => {
+      const line = document.querySelector(${js(line)});
+      if (!line) return null;
+      return {
+        prose: line.classList.contains('prose-msg'),
+        strong: line.querySelector('li strong')?.textContent ?? null,
+        links: line.querySelectorAll('a').length,
+        code: !!line.querySelector('pre code'),
+        highlighted: !!line.querySelector('pre code.hljs'),
+        raw: line.textContent.includes('**'),
+      };
+    })()`, 8000);
+    const highlighted = await waitFor('highlighted code', `!!document.querySelector(${js(`${line} pre code.hljs`)})`, 5000).catch(() => false);
+    const owner = await evaluate(`document.querySelector('[data-room-line="owner"]')?.querySelector('strong, a') ?? null`);
+    const before = await evaluate('location.href');
+    const targets = async () => (await (await fetch(`http://127.0.0.1:${cdpPort}/json/list`)).json()).filter((t) => t.type === 'page').length;
+    const pages = await targets();
+    await click(`${line} a`, 'notes');
+    await sleep(300);
+    const afterFile = await evaluate('location.href');
+    await click(`${line} a`, 'the list');
+    await sleep(800);
+    const afterWeb = await evaluate('location.href');
+    const opened = (await targets()) - pages;
+    await shoot('web-room-markdown-1280x800');
+    record("a bruh's Markdown renders as prose, and its links never leave the app",
+      prose.prose && prose.strong === 'Food' && prose.links === 2 && prose.code && !prose.raw && !!highlighted && owner === null
+        && afterFile === before && afterWeb === before && opened === 1,
+      `prose ${js(prose)}; highlighted ${!!highlighted}; page ${before} → ${afterFile} → ${afterWeb}; new tabs ${opened}`);
   });
 
   // 13. Reduced motion: a working bruh's face stops on the room page.
