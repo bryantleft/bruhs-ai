@@ -126,17 +126,49 @@ module.exports = {
           900: "#5a3411",
           950: "#321b06",
         },
+        // 400 and 500 are the original stops. The rest are sRGB of
+        // vendor/bruhs.css's oklch stops: without them, classes such as
+        // `text-blueberry-300` exist only in the layered bruhs.css, where
+        // this build's unlayered button reset beats them, so buttons lost
+        // their color.
         blueberry: {
+          50: "#ecf6ff",
+          100: "#d8ebff",
+          200: "#bfddff",
+          300: "#a1cbff",
           400: "#5b9adf",
           500: "#3a7fcb",
+          600: "#327de2",
+          700: "#1f60b4",
+          800: "#1d4e8e",
+          900: "#1d406e",
+          950: "#0e223e",
         },
         mangosteen: {
+          50: "#f8f5fe",
+          100: "#efe9fb",
+          200: "#e2d7fb",
+          300: "#cdc0f8",
           400: "#a87fcc",
           500: "#8a5fb5",
+          600: "#7f79c8",
+          700: "#5c5998",
+          800: "#49497c",
+          900: "#393962",
+          950: "#1c1d37",
         },
         dragonfruit: {
+          50: "#fff0f8",
+          100: "#fce1f0",
+          200: "#f6c1e0",
+          300: "#e992c8",
           400: "#e864a3",
           500: "#d04388",
+          600: "#a7007c",
+          700: "#860062",
+          800: "#6b004d",
+          900: "#56003d",
+          950: "#250018",
         },
       },
       fontFamily: {
@@ -145,6 +177,19 @@ module.exports = {
         krypton: ['"Monaspace Krypton"', "ui-monospace", "monospace"],
         radon: ['"Monaspace Radon"', "ui-monospace", "monospace"],
         xenon: ['"Monaspace Xenon"', "ui-monospace", "monospace"],
+      },
+      // Tailwind 3.4's steps of 5 (3.3 stops at tens) and the 8 the app
+      // uses, so `bg-persimmon-500/15` and friends are generated here
+      // instead of only in the layered bruhs.css, where this build's
+      // unlayered button reset beat them.
+      opacity: {
+        8: "0.08",
+        15: "0.15",
+        35: "0.35",
+        45: "0.45",
+        55: "0.55",
+        65: "0.65",
+        85: "0.85",
       },
       borderRadius: {
         seed: "4px",
