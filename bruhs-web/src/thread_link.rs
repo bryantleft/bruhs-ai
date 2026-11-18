@@ -24,9 +24,9 @@ use bruhs_models::roles::RoleBook;
 use bruhs_models::thread_link::{
     answer_reply, bruh_sent_reply, bruh_service_refusal, delivered_reply, due_bruh_answers,
     forget_bruh_waits_of, list_reply, pick_role, plan_bruh_message, plan_message, read_reply,
-    recipient_waiting_reply, resolve_thread, Answer, BruhOutgoing, BruhWait, Created, Delivery,
-    DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply,
-    ThreadReplySubmission, ThreadRequest, BRUH_WAIT_POLL_MS,
+    recipient_waiting_reply, resolve_thread, same_turn, Answer, BruhOutgoing, BruhWait, Created,
+    Delivery, DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine, ThreadOperation,
+    ThreadReply, ThreadReplySubmission, ThreadRequest, BRUH_WAIT_POLL_MS,
 };
 use leptos::prelude::*;
 
@@ -158,6 +158,28 @@ fn ended_for(prompt: &str, settled: &[AgentMessage], stopped: bool) -> Option<En
         None if stopped => Ended::Stopped,
         None => Ended::Failed("its turn ended without a reply".to_string()),
     })
+}
+
+/// How long one read of a bruh's runs may take before a check of the held
+/// waits moves on without it and reads again on the next tick.
+const BRUH_READ_TIMEOUT_MS: u32 = 10_000;
+
+/// `read`'s output, or `None` once `deadline` comes first.
+async fn within<T>(
+    read: impl std::future::Future<Output = T>,
+    deadline: impl std::future::Future<Output = ()>,
+) -> Option<T> {
+    futures_util::pin_mut!(read);
+    futures_util::pin_mut!(deadline);
+    match futures_util::future::select(read, deadline).await {
+        futures_util::future::Either::Left((value, _)) => Some(value),
+        futures_util::future::Either::Right(_) => None,
+    }
+}
+
+/// Keep only the bruh waits whose calling thread still exists.
+fn keep_bruh_waits_of(waits: &mut Vec<BruhWait>, threads: &[&str]) {
+    waits.retain(|wait| threads.contains(&wait.caller.as_str()));
 }
 
 /// Whether a waited-for message can no longer run: its thread is gone, or
@@ -368,9 +390,14 @@ impl ThreadLink {
         }
     }
 
-    /// End the held calls whose message can no longer run.
+    /// End the held calls whose message can no longer run, and forget the
+    /// bruh waits of a deleted thread, whose calls the broker has ended.
     fn end_removed(self) {
         let threads = self.threads.get_untracked();
+        let live: Vec<&str> = threads.iter().map(|thread| thread.id.as_str()).collect();
+        let _ = self
+            .bruh_waits
+            .try_update_value(|waits| keep_bruh_waits_of(waits, &live));
         let gone = self
             .waits
             .try_update_value(|waits| {
@@ -413,6 +440,7 @@ impl ThreadLink {
         caller_full_access: bool,
     ) -> Option<ThreadReply> {
         let caller = caller_id.as_str();
+        let turn = self.turns.turn_id_untracked(caller);
         if let Some(reason) = bruh_service_refusal(self.protocol.get_untracked()) {
             return Some(ThreadReply::refused(reason));
         }
@@ -458,9 +486,10 @@ impl ThreadLink {
         if !wait {
             return Some(bruh_sent_reply(&plan.name));
         }
-        if !self.turns.is_running_untracked(caller) {
-            // The turn ended during the send, so the broker has ended the
-            // call already, as `turn_ended` does for thread waits.
+        if !same_turn(turn, self.turns.turn_id_untracked(caller)) {
+            // The turn ended during the send, or another began, so the
+            // broker has ended the call already, as `turn_ended` does for
+            // thread waits.
             return None;
         }
         self.bruh_waits.update_value(|waits| {
@@ -527,10 +556,15 @@ impl ThreadLink {
         agents.dedup();
         let mut pages = Vec::new();
         for agent_id in agents {
-            match crate::api::agent_runs(&agent_id, None).await {
-                Ok(runs) => pages.push((agent_id, runs)),
+            let read = within(
+                crate::api::agent_runs(&agent_id, None),
+                gloo_timers::future::TimeoutFuture::new(BRUH_READ_TIMEOUT_MS),
+            );
+            match read.await {
+                Some(Ok(runs)) => pages.push((agent_id, runs)),
                 // Read again on the next tick.
-                Err(error) => log::debug!("bruh runs could not be read: {error}"),
+                Some(Err(error)) => log::debug!("bruh runs could not be read: {error}"),
+                None => log::debug!("bruh runs took too long to read"),
             }
         }
         let crew = self.bruhs.get_untracked();
@@ -914,5 +948,42 @@ mod tests {
         // Its thread was deleted, queue row or not.
         assert!(is_removed(&held, &queue, false, false));
         assert!(is_removed(&held, &queue, false, true));
+    }
+
+    #[test]
+    fn a_deleted_threads_bruh_waits_go() {
+        let kept = ThreadId::new_v4();
+        let gone = ThreadId::new_v4();
+        let wait = |caller: &ThreadId, run: &str| BruhWait {
+            request_id: format!("q-{run}"),
+            caller: caller.clone(),
+            agent_id: "b".into(),
+            name: "Bo".into(),
+            run_id: run.into(),
+            seen: false,
+        };
+        let mut waits = vec![wait(&kept, "1"), wait(&gone, "2"), wait(&kept, "3")];
+        keep_bruh_waits_of(&mut waits, &[kept.as_str(), "other"]);
+        let runs: Vec<&str> = waits.iter().map(|wait| wait.run_id.as_str()).collect();
+        assert_eq!(runs, ["1", "3"]);
+    }
+
+    #[test]
+    fn a_read_that_hangs_gives_up_at_its_deadline() {
+        use std::future::{pending, ready};
+        let deadline = || ready(());
+        assert_eq!(poll_once(within(ready(7), deadline())), Some(Some(7)));
+        assert_eq!(poll_once(within(pending::<u8>(), deadline())), Some(None));
+        assert_eq!(poll_once(within(pending::<u8>(), pending::<()>())), None);
+    }
+
+    /// Poll `future` once: its output if it is ready.
+    fn poll_once<F: std::future::Future>(future: F) -> Option<F::Output> {
+        let mut future = std::pin::pin!(future);
+        let mut context = std::task::Context::from_waker(std::task::Waker::noop());
+        match future.as_mut().poll(&mut context) {
+            std::task::Poll::Ready(output) => Some(output),
+            std::task::Poll::Pending => None,
+        }
     }
 }

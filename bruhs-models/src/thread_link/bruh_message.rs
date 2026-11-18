@@ -277,6 +277,14 @@ pub fn due_bruh_answers(
     due
 }
 
+/// Whether a `message_bruh` sent during turn `sent` of its thread still
+/// waits: only while that same turn runs (`now`). Once it ends or another
+/// begins, the broker has ended the call.
+#[must_use]
+pub fn same_turn(sent: Option<u64>, now: Option<u64>) -> bool {
+    sent.is_some() && sent == now
+}
+
 /// Forget the bruh waits of `caller`, whose turn is over: the broker has
 /// already ended its calls.
 pub fn forget_bruh_waits_of(waits: &mut Vec<BruhWait>, caller: &str) {
@@ -730,5 +738,13 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["r-2"]
         );
+    }
+
+    #[test]
+    fn a_bruh_wait_is_kept_only_for_the_turn_that_sent_it() {
+        assert!(same_turn(Some(4), Some(4)));
+        assert!(!same_turn(Some(4), None), "the turn ended");
+        assert!(!same_turn(Some(4), Some(5)), "a new turn began");
+        assert!(!same_turn(None, None), "no turn sent it");
     }
 }

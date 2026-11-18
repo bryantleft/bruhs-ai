@@ -23,6 +23,8 @@ pub const MAX_RUNNING_TURNS: usize = 3;
 pub type LiveReply = ArcRwSignal<Option<AgentMessage>>;
 
 struct RunningTurn {
+    /// Tells this turn from the thread's earlier and later ones.
+    id: u64,
     /// Settled messages, up to and including this turn's prompt.
     messages: Vec<AgentMessage>,
     reply: LiveReply,
@@ -41,6 +43,8 @@ pub struct Turns {
     starting: RwSignal<Vec<String>>,
     /// `AbortController` is neither `Send` nor `Sync`.
     turns: StoredValue<HashMap<String, RunningTurn>, LocalStorage>,
+    /// The id the next turn takes.
+    next_id: StoredValue<u64>,
 }
 
 impl Turns {
@@ -49,6 +53,7 @@ impl Turns {
             running: RwSignal::new(Vec::new()),
             starting: RwSignal::new(Vec::new()),
             turns: StoredValue::new_local(HashMap::new()),
+            next_id: StoredValue::new(0),
         }
     }
 
@@ -62,10 +67,13 @@ impl Turns {
         abort: Option<web_sys::AbortController>,
     ) -> LiveReply {
         let live = ArcRwSignal::new(Some(reply));
+        let id = self.next_id.get_value();
+        self.next_id.set_value(id.wrapping_add(1));
         self.turns.update_value(|turns| {
             turns.insert(
                 thread_id.to_string(),
                 RunningTurn {
+                    id,
                     messages,
                     reply: live.clone(),
                     abort,
@@ -116,6 +124,14 @@ impl Turns {
     pub fn is_running(self, thread_id: &str) -> bool {
         self.running
             .with(|running| running.iter().any(|id| id == thread_id))
+    }
+
+    /// The id of `thread_id`'s running turn, so a caller can tell whether
+    /// the turn it saw is still the one running.
+    pub fn turn_id_untracked(self, thread_id: &str) -> Option<u64> {
+        self.turns
+            .try_with_value(|turns| turns.get(thread_id).map(|turn| turn.id))
+            .flatten()
     }
 
     pub fn is_running_untracked(self, thread_id: &str) -> bool {
@@ -325,5 +341,31 @@ mod tests {
         turns.update_messages("missing", |messages| messages.clear());
         assert!(!turns.abort("a"), "no controller was given");
         assert!(!turns.abort("missing"));
+    }
+
+    #[test]
+    fn each_turn_has_its_own_id() {
+        let (_owner, turns) = turns();
+        assert_eq!(turns.turn_id_untracked("a"), None);
+        let begin = || {
+            turns.begin(
+                "a",
+                Vec::new(),
+                AgentMessage::assistant_placeholder("m".into(), 0.0),
+                None,
+            );
+        };
+        begin();
+        let first = turns.turn_id_untracked("a");
+        assert!(first.is_some());
+        turns.end("a");
+        assert_eq!(turns.turn_id_untracked("a"), None);
+        begin();
+        assert!(turns.turn_id_untracked("a").is_some());
+        assert_ne!(
+            turns.turn_id_untracked("a"),
+            first,
+            "the next turn is another"
+        );
     }
 }

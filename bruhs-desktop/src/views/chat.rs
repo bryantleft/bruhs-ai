@@ -740,6 +740,12 @@ pub struct ChatView {
 impl EventEmitter<ChatViewEvent> for ChatView {}
 
 impl ChatView {
+    /// The turn streaming now, told apart from the thread's earlier and
+    /// later turns, or `None` while none is.
+    pub(crate) fn streaming_turn(&self) -> Option<u64> {
+        self.is_streaming.then_some(self.turn_generation)
+    }
+
     #[cfg(test)]
     pub fn new(window: &mut Window, cx: &mut Context<'_, Self>) -> Self {
         Self::new_with_project_path(current_dir_string(), window, cx)

@@ -21,9 +21,9 @@ use bruhs_models::reactive::{ReactiveCommand, ReactiveRun};
 use bruhs_models::thread_link::{
     answer_reply, bruh_sent_reply, bruh_service_refusal, delivered_reply, due_bruh_answers,
     forget_bruh_waits_of, list_reply, pick_role, plan_bruh_message, plan_message, read_reply,
-    recipient_waiting_reply, resolve_thread, Answer, BruhOutgoing, BruhWait, Created, Delivery,
-    DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply,
-    ThreadRequest, BRUH_WAIT_POLL_MS,
+    recipient_waiting_reply, resolve_thread, same_turn, Answer, BruhOutgoing, BruhWait, Created,
+    Delivery, DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine, ThreadOperation,
+    ThreadReply, ThreadRequest, BRUH_WAIT_POLL_MS,
 };
 use gpui::{Context, Entity, Task, Window};
 
@@ -613,6 +613,7 @@ impl Workspace {
             ));
         };
         let sender_chat = sender.chat.read(cx);
+        let turn = sender_chat.streaming_turn();
         // The prompt of the turn that is sending.
         let prompt = sender_chat
             .messages
@@ -670,9 +671,10 @@ impl Workspace {
                     bruh_sent_reply(&plan.name),
                     cx,
                 ),
-                // The turn ended during the send, so the broker has ended
-                // the call already, as it does for thread waits.
-                Ok(()) if !this.caller_is_running(&caller_id, cx) => {}
+                // The turn ended during the send, or another began, so the
+                // broker has ended the call already, as it does for thread
+                // waits.
+                Ok(()) if !same_turn(turn, this.caller_turn(&caller_id, cx)) => {}
                 Ok(()) => {
                     this.bruh_waits.waits.push(BruhWait {
                         request_id,
@@ -690,11 +692,12 @@ impl Workspace {
         ThreadAnswer::Pending
     }
 
-    fn caller_is_running(&self, caller: &ThreadId, cx: &Context<'_, Self>) -> bool {
+    /// The turn `caller` is streaming, if any.
+    fn caller_turn(&self, caller: &ThreadId, cx: &Context<'_, Self>) -> Option<u64> {
         self.threads
             .iter()
             .find(|thread| thread.id == caller.as_str())
-            .is_some_and(|thread| thread.chat.read(cx).is_streaming)
+            .and_then(|thread| thread.chat.read(cx).streaming_turn())
     }
 
     /// Read the held bruh runs every [`BRUH_WAIT_POLL_MS`] while any wait.
