@@ -22,7 +22,9 @@ use crate::zoom::px;
 type LinkFilter = Arc<dyn Fn(&Link, &App) -> Option<Link> + Send + Sync>;
 
 /// Each segment drawn this frame, with its laid-out text.
-type Registry = Rc<RefCell<Vec<(usize, TextLayout)>>>;
+/// Each segment drawn this frame: its number, its text's length (an empty
+/// segment draws a space, so its layout is longer) and its laid-out text.
+type Registry = Rc<RefCell<Vec<(usize, usize, TextLayout)>>>;
 
 const LIST_INDENT_PX: f32 = 18.0;
 const LIST_MARKER_GAP_PX: f32 = 5.0;
@@ -103,6 +105,8 @@ impl TextView {
 /// What every block of one frame is drawn with.
 struct Frame {
     style: TextViewStyle,
+    /// The body text's size, which headings and task boxes scale from.
+    font_size: Pixels,
     base_font: Font,
     base_color: Hsla,
     selection: Option<(TextPosition, TextPosition)>,
@@ -114,7 +118,7 @@ impl Frame {
     fn link(&self, link: &Link, cx: &App) -> Option<Link> {
         match &self.link_filter {
             Some(filter) => filter(link, cx),
-            None => Some(link.clone()),
+            None => is_safe_link(&link.url).then(|| link.clone()),
         }
     }
 
@@ -151,6 +155,7 @@ impl RenderOnce for TextView {
         let text_style = window.text_style();
         let frame = Frame {
             style: self.style.unwrap_or_default(),
+            font_size: text_style.font_size.to_pixels(window.rem_size()),
             base_font: text_style.font(),
             base_color: text_style.color,
             selection: state.read(cx).selected_range(),
@@ -196,26 +201,36 @@ impl RenderOnce for TextView {
                             |_, _, _| {},
                             move |_, _, window, _| {
                                 let (move_state, move_registry) = (state.clone(), registry.clone());
-                                window.on_mouse_event(move |event: &MouseMoveEvent, _, _, cx| {
-                                    if !move_state.read(cx).selecting {
-                                        return;
-                                    }
-                                    let Some(head) = hit(&move_registry, event.position, true)
-                                    else {
-                                        return;
-                                    };
-                                    move_state.update(cx, |state, cx| {
-                                        if let Some((anchor, old)) = state.selection {
-                                            if old != head {
-                                                state.selection = Some((anchor, head));
-                                                cx.notify();
-                                            }
+                                window.on_mouse_event(
+                                    move |event: &MouseMoveEvent, phase, _, cx| {
+                                        if !phase.bubble() || !move_state.read(cx).selecting {
+                                            return;
                                         }
-                                    });
-                                });
+                                        // The button came up where this view could not
+                                        // hear it (it left the screen mid-drag).
+                                        if event.pressed_button != Some(MouseButton::Left) {
+                                            move_state
+                                                .update(cx, |state, _| state.selecting = false);
+                                            return;
+                                        }
+                                        let Some(head) = hit(&move_registry, event.position, true)
+                                        else {
+                                            return;
+                                        };
+                                        move_state.update(cx, |state, cx| {
+                                            if let Some((anchor, old)) = state.selection {
+                                                if old != head {
+                                                    state.selection = Some((anchor, head));
+                                                    cx.notify();
+                                                }
+                                            }
+                                        });
+                                    },
+                                );
                                 let (up_state, up_registry) = (state.clone(), registry.clone());
-                                window.on_mouse_event(move |event: &MouseUpEvent, _, _, cx| {
-                                    if event.button != MouseButton::Left
+                                window.on_mouse_event(move |event: &MouseUpEvent, phase, _, cx| {
+                                    if !phase.bubble()
+                                        || event.button != MouseButton::Left
                                         || !up_state.read(cx).selecting
                                     {
                                         return;
@@ -264,14 +279,24 @@ fn open_link(
     let link = find_inline(&state.read(cx).document().blocks, pos.segment)
         .and_then(|inline| inline.link_at(pos.offset).cloned());
     // The filter decides what a link opens, or that it opens nothing.
+    // Without one, only web and mail links open: a reply or a document can
+    // carry a `file:` or another app's link.
     let link = match (link, filter) {
         (Some(link), Some(filter)) => filter(&link, cx),
-        (link, None) => link,
+        (Some(link), None) => is_safe_link(&link.url).then_some(link),
         (None, _) => None,
     };
     if let Some(link) = link {
         cx.open_url(&link.url);
     }
+}
+
+/// A link a view opens without its own filter: http, https or mailto.
+fn is_safe_link(url: &str) -> bool {
+    let lower = url.trim().to_ascii_lowercase();
+    ["http://", "https://", "mailto:"]
+        .iter()
+        .any(|scheme| lower.starts_with(scheme))
 }
 
 fn find_inline(blocks: &[Block], segment: usize) -> Option<&Inline> {
@@ -298,10 +323,10 @@ fn hit(registry: &Registry, point: Point<Pixels>, nearest: bool) -> Option<TextP
     let drawn = registry.borrow();
     let within = drawn
         .iter()
-        .find(|(_, layout)| layout.bounds().contains(&point));
-    let (segment, layout) = match within {
+        .find(|(_, _, layout)| layout.bounds().contains(&point));
+    let (segment, len, layout) = match within {
         Some(found) => found,
-        None if nearest => drawn.iter().min_by(|(_, a), (_, b)| {
+        None if nearest => drawn.iter().min_by(|(_, _, a), (_, _, b)| {
             distance(a.bounds(), point).total_cmp(&distance(b.bounds(), point))
         })?,
         None => return None,
@@ -309,15 +334,15 @@ fn hit(registry: &Registry, point: Point<Pixels>, nearest: bool) -> Option<TextP
     let bounds = layout.bounds();
     // Clamp into the segment so a drag past its edge selects to its end.
     let clamped = Point {
-        x: point.x.clamp(bounds.left(), bounds.right()),
-        y: point.y.clamp(bounds.top(), bounds.bottom() - px(1.0)),
+        x: point.x.max(bounds.left()).min(bounds.right()),
+        y: point.y.min(bounds.bottom() - px(1.0)).max(bounds.top()),
     };
     let offset = match layout.index_for_position(clamped) {
         Ok(ix) | Err(ix) => ix,
     };
     Some(TextPosition {
         segment: *segment,
-        offset: offset.min(layout.len()),
+        offset: offset.min(*len),
     })
 }
 
@@ -337,17 +362,21 @@ fn word_at(segments: &[String], at: TextPosition) -> (TextPosition, TextPosition
     let Some(text) = segments.get(at.segment) else {
         return (at, at);
     };
+    let mut offset = at.offset.min(text.len());
+    while !text.is_char_boundary(offset) {
+        offset -= 1;
+    }
     let is_word = |c: char| c.is_alphanumeric() || c == '_';
-    let start = text[..at.offset]
+    let start = text[..offset]
         .char_indices()
         .rev()
         .take_while(|(_, c)| is_word(*c))
         .last()
-        .map_or(at.offset, |(ix, _)| ix);
-    let end = text[at.offset..]
+        .map_or(offset, |(ix, _)| ix);
+    let end = text[offset..]
         .char_indices()
         .find(|(_, c)| !is_word(*c))
-        .map_or(text.len(), |(ix, _)| at.offset + ix);
+        .map_or(text.len(), |(ix, _)| offset + ix);
     (
         TextPosition {
             segment: at.segment,
@@ -419,7 +448,7 @@ fn render_blocks(
                     .child(segment(inline, frame, color, None, cx))
                     .into_any_element(),
                 Block::Heading(level, inline) => {
-                    let size = frame.style.heading_size(*level, px(13.0));
+                    let size = frame.style.heading_size(*level, frame.font_size);
                     gap(div(), HEADING_GAP_REM)
                         .text_size(size)
                         .line_height(relative(HEADING_LINE_HEIGHT))
@@ -584,7 +613,7 @@ fn task_box(checked: bool, frame: &Frame) -> AnyElement {
     // Centred on the first line of the item's text.
     div()
         .flex_none()
-        .h(rems(frame.style.line_height * 0.8125))
+        .h(frame.font_size * frame.style.line_height)
         .flex()
         .items_center()
         .child(
@@ -696,6 +725,7 @@ fn code_segment(
 /// text drawn in the latest frame.
 struct SegmentText {
     segment: usize,
+    len: usize,
     text: StyledText,
     registry: Registry,
 }
@@ -714,6 +744,7 @@ impl SegmentText {
         };
         Self {
             segment: inline.segment,
+            len: inline.text.len(),
             text,
             registry: frame.registry.clone(),
         }
@@ -786,7 +817,7 @@ impl Element for SegmentText {
         // text below has prepainted.
         self.registry
             .borrow_mut()
-            .push((self.segment, self.text.layout().clone()));
+            .push((self.segment, self.len, self.text.layout().clone()));
         self.text.prepaint(id, inspector, bounds, state, window, cx)
     }
 

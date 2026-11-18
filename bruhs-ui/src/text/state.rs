@@ -2,6 +2,8 @@
 
 use gpui::{actions, App, ClipboardItem, Context, Global, KeyBinding, WeakEntity};
 
+use std::rc::Rc;
+
 use super::document::{parse_html, parse_markdown, Document};
 
 actions!(text_view, [CopySelection]);
@@ -24,7 +26,7 @@ pub struct TextPosition {
 pub struct TextViewState {
     format: TextFormat,
     source: String,
-    document: Document,
+    document: Rc<Document>,
     /// Where a selection was started and where it now ends.
     pub(super) selection: Option<(TextPosition, TextPosition)>,
     pub(super) selecting: bool,
@@ -43,7 +45,7 @@ impl TextViewState {
         Self {
             format,
             source: source.to_string(),
-            document: parse(format, source),
+            document: Rc::new(parse(format, source)),
             selection: None,
             selecting: false,
         }
@@ -53,7 +55,7 @@ impl TextViewState {
         &self.source
     }
 
-    pub fn document(&self) -> &Document {
+    pub fn document(&self) -> &Rc<Document> {
         &self.document
     }
 
@@ -81,13 +83,27 @@ impl TextViewState {
         if source == self.source {
             return false;
         }
-        let appended = source.starts_with(self.source.as_str());
+        let previous = std::mem::replace(&mut self.document, Rc::new(parse(self.format, source)));
         self.source = source.to_string();
-        self.document = parse(self.format, source);
-        // A selection survives text appended after it; a replacement may
-        // have moved everything, so it goes.
-        if !appended {
-            self.selection = None;
+        // A selection survives an append only if the text it covers is
+        // unchanged: appended Markdown can still rewrite earlier text (a
+        // closing `**`, a reference definition).
+        if let Some((start, end)) = self.selected_range() {
+            let same = (start.segment..=end.segment).all(|segment| {
+                let old = previous.segments.get(segment);
+                let new = self.document.segments.get(segment);
+                match (old, new) {
+                    (Some(old), Some(new)) if segment == end.segment => {
+                        old.get(..end.offset).is_some()
+                            && old.get(..end.offset) == new.get(..end.offset)
+                    }
+                    (Some(old), Some(new)) => old == new,
+                    _ => false,
+                }
+            });
+            if !same {
+                self.selection = None;
+            }
         }
         self.clamp_selection();
         true
@@ -225,12 +241,15 @@ pub fn init(cx: &mut App) {
         #[cfg(not(target_os = "macos"))]
         KeyBinding::new("ctrl-c", CopySelection, Some("Root")),
     ]);
-    cx.on_action(|_: &CopySelection, cx: &mut App| {
+    let copy = |cx: &mut App| {
         let text = TextSelection::current(cx);
         if !text.is_empty() {
             cx.write_to_clipboard(ClipboardItem::new_string(text));
         }
-    });
+    };
+    cx.on_action(move |_: &CopySelection, cx: &mut App| copy(cx));
+    // A focused field with nothing selected passes its ⌘C on.
+    cx.on_action(move |_: &crate::input::Copy, cx: &mut App| copy(cx));
 }
 
 #[cfg(test)]
@@ -302,6 +321,6 @@ mod tests {
             streamed.replace(&text[..ix]);
         }
         streamed.replace(text);
-        assert_eq!(streamed.document, state(text).document);
+        assert_eq!(*streamed.document, *state(text).document);
     }
 }

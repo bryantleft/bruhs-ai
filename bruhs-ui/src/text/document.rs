@@ -121,6 +121,20 @@ impl Document {
 /// A thin space: half a code chip's horizontal padding.
 const CODE_PAD: &str = "\u{2009}";
 
+/// A paragraph's trailing line breaks draw nothing in a browser.
+fn trim_trailing_newlines(inline: &mut Inline) {
+    let len = inline.text.trim_end_matches('\n').len();
+    if len == inline.text.len() {
+        return;
+    }
+    inline.text.truncate(len);
+    inline.spans.retain_mut(|(range, _)| {
+        range.end = range.end.min(len);
+        range.start < range.end
+    });
+    inline.pads.retain(|pad| pad.end <= len);
+}
+
 /// Builds blocks from a stream of block and inline events.
 #[derive(Default)]
 struct Builder {
@@ -190,7 +204,8 @@ impl Builder {
     /// Close the open inline text into a paragraph of the innermost
     /// container (a tight list item's text has no paragraph of its own).
     fn flush_paragraph(&mut self) {
-        if let Some(inline) = self.inline.take() {
+        if let Some(mut inline) = self.inline.take() {
+            trim_trailing_newlines(&mut inline);
             if !inline.is_empty() {
                 let inline = self.numbered(inline);
                 self.push_block(Block::Paragraph(inline));
@@ -215,7 +230,7 @@ impl Builder {
 
     fn start(&mut self, tag: Tag<'_>) {
         match tag {
-            Tag::Paragraph => self.flush_paragraph(),
+            Tag::Paragraph | Tag::HtmlBlock => self.flush_paragraph(),
             Tag::Heading { level, .. } => {
                 self.flush_paragraph();
                 self.stack.push(Container::Heading(heading_level(level)));
@@ -295,7 +310,7 @@ impl Builder {
 
     fn end(&mut self, tag: TagEnd) {
         match tag {
-            TagEnd::Paragraph => self.flush_paragraph(),
+            TagEnd::Paragraph | TagEnd::HtmlBlock => self.flush_paragraph(),
             TagEnd::Heading(_) => {
                 let level = match self.stack.pop() {
                     Some(Container::Heading(level)) => level,
@@ -414,6 +429,9 @@ impl Builder {
     }
 
     fn finish(mut self) -> Document {
+        if self.code.is_some() {
+            self.end(TagEnd::CodeBlock);
+        }
         self.flush_paragraph();
         // Close anything an unfinished stream left open.
         while let Some(container) = self.stack.pop() {
@@ -464,31 +482,123 @@ pub fn parse_markdown(source: &str) -> Document {
 pub fn parse_html(source: &str) -> Document {
     let mut builder = Builder::default();
     let mut rest = source;
+    let text = |builder: &mut Builder, raw: &str| {
+        let mut decoded = decode_entities(raw);
+        if builder.code.is_none() {
+            // Outside `pre`, runs of whitespace are one space, as in a page.
+            decoded = collapse_whitespace(&decoded);
+            // Whitespace between blocks is layout, not text.
+            if builder.inline.is_none() && decoded.trim().is_empty() {
+                return;
+            }
+        }
+        builder.event(Event::Text(decoded.into()));
+    };
     while !rest.is_empty() {
         let Some(open) = rest.find('<') else {
-            builder.event(Event::Text(decode_entities(rest).into()));
+            text(&mut builder, rest);
             break;
         };
         if open > 0 {
-            let text = decode_entities(&rest[..open]);
-            // Whitespace between blocks is layout, not text.
-            if builder.code.is_some() || builder.inline.is_some() || !text.trim().is_empty() {
-                builder.event(Event::Text(text.into()));
-            }
+            text(&mut builder, &rest[..open]);
         }
-        let Some(close) = rest[open..].find('>') else {
-            builder.event(Event::Text(decode_entities(&rest[open..]).into()));
+        let after = &rest[open + 1..];
+        // A comment, up to its end.
+        if let Some(comment) = after.strip_prefix("!--") {
+            rest = comment.find("-->").map_or("", |end| &comment[end + 3..]);
+            continue;
+        }
+        // A `<` that starts no tag is text.
+        if !after.starts_with(|c: char| c.is_ascii_alphabetic() || c == '/' || c == '!') {
+            text(&mut builder, "<");
+            rest = after;
+            continue;
+        }
+        let Some(close) = tag_end(after) else {
+            text(&mut builder, &rest[open..]);
             break;
         };
-        let tag = &rest[open + 1..open + close];
-        rest = &rest[open + close + 1..];
+        let tag = &after[..close];
+        rest = &after[close + 1..];
+        let name = tag_name(tag);
+        // A script or style shows nothing of its contents.
+        if !tag.starts_with('/') && matches!(name.as_str(), "script" | "style") {
+            let end = format!("</{name}");
+            rest = find_ignore_case(rest, &end)
+                .and_then(|at| rest[at..].find('>').map(|gt| &rest[at + gt + 1..]))
+                .unwrap_or("");
+            continue;
+        }
         html_tag(&mut builder, tag);
     }
     builder.finish()
 }
 
+/// The `>` that ends a tag, skipping any inside quoted attribute values.
+fn tag_end(tag: &str) -> Option<usize> {
+    let mut quote = None;
+    for (ix, c) in tag.char_indices() {
+        match (quote, c) {
+            (None, '"' | '\'') => quote = Some(c),
+            (Some(q), c) if c == q => quote = None,
+            (None, '>') => return Some(ix),
+            _ => {}
+        }
+    }
+    None
+}
+
+fn tag_name(tag: &str) -> String {
+    tag.trim_start_matches('/')
+        .split(|c: char| c.is_whitespace() || c == '/' || c == '>')
+        .next()
+        .unwrap_or_default()
+        .to_ascii_lowercase()
+}
+
+fn find_ignore_case(haystack: &str, needle: &str) -> Option<usize> {
+    haystack
+        .to_ascii_lowercase()
+        .find(&needle.to_ascii_lowercase())
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    let mut out = String::with_capacity(text.len());
+    let mut space = false;
+    for c in text.chars() {
+        if c.is_whitespace() && c != '\u{a0}' {
+            if !space {
+                out.push(' ');
+            }
+            space = true;
+        } else {
+            out.push(c);
+            space = false;
+        }
+    }
+    out
+}
+
 fn html_tag(builder: &mut Builder, tag: &str) {
     let closing = tag.starts_with('/');
+    // A closing tag with no matching open container is ignored, so it
+    // cannot close (and drop) another.
+    if closing {
+        let name = tag_name(tag);
+        let open = |builder: &Builder| match name.as_str() {
+            "li" => matches!(builder.stack.last(), Some(Container::Item { .. })),
+            "ul" | "ol" => matches!(builder.stack.last(), Some(Container::List { .. })),
+            "blockquote" => matches!(builder.stack.last(), Some(Container::Quote(_))),
+            "h1" | "h2" | "h3" | "h4" | "h5" | "h6" => {
+                matches!(builder.stack.last(), Some(Container::Heading(_)))
+            }
+            "pre" => builder.code.is_some(),
+            _ => true,
+        };
+        if !open(builder) {
+            return;
+        }
+    }
     let body = tag.trim_start_matches('/').trim_end_matches('/').trim();
     let name = body
         .split(|c: char| c.is_whitespace())
@@ -526,7 +636,12 @@ fn html_tag(builder: &mut Builder, tag: &str) {
         "del" | "s" => event(Tag::Strikethrough, TagEnd::Strikethrough),
         "blockquote" => event(Tag::BlockQuote(None), TagEnd::BlockQuote(None)),
         "ul" => event(Tag::List(None), TagEnd::List(false)),
-        "ol" => event(Tag::List(Some(1)), TagEnd::List(true)),
+        "ol" => {
+            let start = attribute(body, "start")
+                .and_then(|start| start.trim().parse().ok())
+                .unwrap_or(1);
+            event(Tag::List(Some(start)), TagEnd::List(true))
+        }
         "li" => event(Tag::Item, TagEnd::Item),
         "pre" => event(
             Tag::CodeBlock(CodeBlockKind::Fenced("".into())),
@@ -563,7 +678,13 @@ fn html_tag(builder: &mut Builder, tag: &str) {
 
 fn attribute(tag: &str, name: &str) -> Option<String> {
     let lower = tag.to_ascii_lowercase();
-    let at = lower.find(&format!("{name}="))? + name.len() + 1;
+    let needle = format!("{name}=");
+    // `href=` but not `data-href=`: the name starts after a space.
+    let at = lower
+        .match_indices(&needle)
+        .find(|(ix, _)| lower[..*ix].ends_with(char::is_whitespace))?
+        .0
+        + needle.len();
     let value = &tag[at..];
     let (quote, value) = match value.chars().next()? {
         q @ ('"' | '\'') => (Some(q), &value[1..]),
@@ -580,12 +701,59 @@ fn decode_entities(text: &str) -> String {
     if !text.contains('&') {
         return text.to_string();
     }
-    text.replace("&lt;", "<")
-        .replace("&gt;", ">")
-        .replace("&quot;", "\"")
-        .replace("&#39;", "'")
-        .replace("&nbsp;", "\u{a0}")
-        .replace("&amp;", "&")
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(amp) = rest.find('&') {
+        out.push_str(&rest[..amp]);
+        let after = &rest[amp + 1..];
+        let entity = after
+            .find(';')
+            .filter(|end| *end <= 10)
+            .and_then(|end| entity_char(&after[..end]).map(|c| (c, end)));
+        match entity {
+            Some((c, end)) => {
+                out.push(c);
+                rest = &after[end + 1..];
+            }
+            None => {
+                out.push('&');
+                rest = after;
+            }
+        }
+    }
+    out.push_str(rest);
+    out
+}
+
+fn entity_char(name: &str) -> Option<char> {
+    if let Some(number) = name.strip_prefix('#') {
+        let code = match number.strip_prefix(['x', 'X']) {
+            Some(hex) => u32::from_str_radix(hex, 16).ok()?,
+            None => number.parse().ok()?,
+        };
+        return char::from_u32(code);
+    }
+    Some(match name {
+        "amp" => '&',
+        "lt" => '<',
+        "gt" => '>',
+        "quot" => '"',
+        "apos" => '\'',
+        "nbsp" => '\u{a0}',
+        "hellip" => '…',
+        "mdash" => '—',
+        "ndash" => '–',
+        "lsquo" => '‘',
+        "rsquo" => '’',
+        "ldquo" => '“',
+        "rdquo" => '”',
+        "copy" => '©',
+        "reg" => '®',
+        "trade" => '™',
+        "middot" => '·',
+        "bull" => '•',
+        _ => return None,
+    })
 }
 
 #[cfg(test)]
@@ -659,6 +827,42 @@ mod tests {
     fn an_unfinished_stream_still_closes_its_blocks() {
         let doc = parse_markdown("- one\n- two\n\n```rust\nlet x");
         assert_eq!(kinds(&doc), ["list", "code"]);
+    }
+
+    #[test]
+    fn html_edge_cases() {
+        // A stray closing tag cannot drop the list it doesn't belong to.
+        let doc = parse_html("<blockquote><ul><li>a</blockquote>");
+        assert_eq!(doc.segments, ["a"]);
+        // An unclosed pre still shows; quoted `>` stays inside its tag;
+        // comments, scripts and a bare `<` behave as in a page.
+        let doc = parse_html("<p><a href=\"?a>b\">x</a> 1 < 2<!-- hidden > --></p><script>alert(1)</script><pre>code");
+        assert_eq!(doc.segments, ["x 1 < 2", "code"]);
+        let Block::Paragraph(p) = &doc.blocks[0] else {
+            panic!()
+        };
+        assert_eq!(p.link_at(0).unwrap().url.as_ref(), "?a>b");
+        assert_eq!(
+            decode_entities("&hellip; &#8217; &#x2014; &bogus;"),
+            "… ’ — &bogus;"
+        );
+        assert_eq!(collapse_whitespace("a \n  b"), "a b");
+        let doc =
+            parse_html("<ol start=\"3\"><li>c</li></ol><a data-href=\"/no\" href=\"/yes\">l</a>");
+        let Block::List { start, .. } = &doc.blocks[0] else {
+            panic!()
+        };
+        assert_eq!(*start, Some(3));
+        let Block::Paragraph(link) = &doc.blocks[1] else {
+            panic!()
+        };
+        assert_eq!(link.link_at(0).unwrap().url.as_ref(), "/yes");
+    }
+
+    #[test]
+    fn html_blocks_in_markdown_end_their_paragraph() {
+        let doc = parse_markdown("<div>one</div>\n\n<div>two</div>\n");
+        assert_eq!(doc.segments, ["<div>one</div>", "<div>two</div>"]);
     }
 
     #[test]

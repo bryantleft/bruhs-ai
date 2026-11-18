@@ -3,7 +3,7 @@
 
 use std::sync::Arc;
 
-use gpui::{rems, Hsla, Pixels, Rems, StyleRefinement};
+use gpui::{rems, Hsla, Pixels, Rems, StyleRefinement, Styled as _};
 
 use crate::theme;
 use crate::zoom::px;
@@ -44,7 +44,19 @@ impl Default for TextViewStyle {
                 2 => px(16.0),
                 _ => px(14.0),
             }),
-            code_block: StyleRefinement::default(),
+            // `.prose-msg pre`: longan-950, a longan-800 border, grape
+            // corners, 10px 12px padding, 0.75rem text at 1.55.
+            code_block: StyleRefinement::default()
+                .bg(theme::longan_950())
+                .border_1()
+                .border_color(theme::longan_800())
+                .rounded(px(8.0))
+                .px(px(12.0))
+                .py(px(10.0))
+                .text_size(px(12.0))
+                .line_height(gpui::relative(1.55))
+                .font_family(theme::CODE_FONT_FAMILY)
+                .text_color(theme::rambutan_300()),
             code_font_family: theme::CODE_FONT_FAMILY.into(),
             heading_color: theme::rambutan_100(),
             strong_color: theme::rambutan_200(),

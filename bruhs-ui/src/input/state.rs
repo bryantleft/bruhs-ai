@@ -765,8 +765,14 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     pub(super) fn copy(&mut self, _: &Copy, _: &mut Window, cx: &mut Context<'_, Self>) {
+        // Nothing selected here: the copy is for a text selection elsewhere
+        // (a reply the person selected while this field kept focus).
+        if self.core.selection.is_empty() {
+            cx.propagate();
+            return;
+        }
         // A masked field never hands its secret to the clipboard.
-        if self.masked || self.core.selection.is_empty() {
+        if self.masked {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(
