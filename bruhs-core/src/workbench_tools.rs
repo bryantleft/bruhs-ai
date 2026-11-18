@@ -54,7 +54,7 @@ fn endpoint() -> io::Result<String> {
 /// and every call reaches the run's permission handler and gate.
 pub(crate) fn configure_bruh(options: &mut ProviderQueryOptions, agent_id: &str) -> io::Result<()> {
     let ProviderQueryOptions::Claude(o) = options else {
-        return Err(io::Error::other("Computer needs a Claude model."));
+        return Err(io::Error::other(bruhs_models::crew::NEEDS_CLAUDE));
     };
     let executable = std::env::current_exe()?.to_string_lossy().into_owned();
     let env = HashMap::from([
@@ -235,10 +235,10 @@ fn bruh_catalogue() -> Value {
     let string = json!({"type":"string"});
     let number = json!({"type":"number"});
     let command = json!({"type":"object","properties":{
-        "action":{"enum":bruhs_models::local_tools::BRUH_BROWSER_ACTIONS},
+        "action":{"type":"string","enum":bruhs_models::local_tools::BRUH_BROWSER_ACTIONS},
         "url":string,"selector":string,"text":string,"x":number,"y":number,
         "key":string,"dx":number,"dy":number
-    },"required":["action"]});
+    },"required":["action"],"additionalProperties":false});
     json!({"tools":[{
         "name":"local_browser",
         "description":BRUH_BROWSER_DESCRIPTION,
@@ -546,39 +546,45 @@ impl Helper {
     }
 }
 
-pub async fn run_mcp_helper() -> io::Result<()> {
-    let env = |key| {
-        std::env::var(key).map_err(|_| io::Error::other(format!("Missing workbench scope {key}.")))
+/// Who a helper serves, read from its environment through `get`: one bruh's
+/// browser when [`BRUH_ENV`] is set, else a thread's turn. A bruh's helper
+/// has no thread scope, so its id is checked first.
+fn helper(get: impl Fn(&str) -> Option<String>, client: reqwest::Client) -> io::Result<Helper> {
+    let env = |key: &str| {
+        get(key).ok_or_else(|| io::Error::other(format!("Missing workbench scope {key}.")))
     };
     let endpoint = env(ENDPOINT_ENV)?;
     validate_endpoint(&endpoint)?;
+    if let Some(agent_id) = get(BRUH_ENV) {
+        return Ok(Helper::Bruh(BruhScope {
+            endpoint,
+            agent_id,
+            client,
+        }));
+    }
+    Ok(Helper::Thread(Scope {
+        endpoint,
+        project: env("BRUHS_WORKBENCH_PROJECT")?,
+        thread: env("BRUHS_WORKBENCH_THREAD")?,
+        mode: bruhs_models::PermissionMode::parse_lossy(&env("BRUHS_WORKBENCH_MODE")?),
+        read_only: env("BRUHS_WORKBENCH_READ_ONLY")? != "0",
+        wait_client: reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
+            .build()
+            .map_err(io::Error::other)?,
+        client,
+    }))
+}
+
+pub async fn run_mcp_helper() -> io::Result<()> {
     let client = reqwest::Client::builder()
         .no_proxy()
         .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
         .timeout(crate::capture_client::REQUEST_TIMEOUT)
         .build()
         .map_err(io::Error::other)?;
-    // A bruh's helper has no thread scope, so check for it first.
-    let helper = match std::env::var(BRUH_ENV) {
-        Ok(agent_id) => Helper::Bruh(BruhScope {
-            endpoint,
-            agent_id,
-            client,
-        }),
-        Err(_) => Helper::Thread(Scope {
-            endpoint,
-            project: env("BRUHS_WORKBENCH_PROJECT")?,
-            thread: env("BRUHS_WORKBENCH_THREAD")?,
-            mode: bruhs_models::PermissionMode::parse_lossy(&env("BRUHS_WORKBENCH_MODE")?),
-            read_only: env("BRUHS_WORKBENCH_READ_ONLY")? != "0",
-            wait_client: reqwest::Client::builder()
-                .no_proxy()
-                .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
-                .build()
-                .map_err(io::Error::other)?,
-            client,
-        }),
-    };
+    let helper = helper(|key| std::env::var(key).ok(), client)?;
     let mut reader = BufReader::new(tokio::io::stdin());
     let mut writer = tokio::io::stdout();
     loop {
@@ -725,11 +731,15 @@ mod tests {
             .collect();
         assert_eq!(names, ["local_browser"]);
         let schema = &tools["tools"][0]["inputSchema"];
-        let actions = &schema["properties"]["command"]["properties"]["action"]["enum"];
+        let command = &schema["properties"]["command"];
+        let action = &command["properties"]["action"];
         assert_eq!(
-            actions,
-            &json!(bruhs_models::local_tools::BRUH_BROWSER_ACTIONS)
+            action["enum"],
+            json!(bruhs_models::local_tools::BRUH_BROWSER_ACTIONS)
         );
+        assert_eq!(action["type"], "string");
+        assert_eq!(command["additionalProperties"], false);
+        assert_eq!(schema["additionalProperties"], false);
         // No session, grant or operation: the helper is bound to one bruh.
         let fields: Vec<_> = schema["properties"].as_object().unwrap().keys().collect();
         assert_eq!(fields, ["command"]);
@@ -792,6 +802,55 @@ mod tests {
             .await
             .unwrap_err();
         assert_eq!(error.to_string(), off);
+    }
+
+    /// A helper environment holding exactly `pairs`.
+    fn helper_env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let env: HashMap<String, String> = pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect();
+        move |key| env.get(key).cloned()
+    }
+
+    #[test]
+    fn the_helper_serves_a_bruh_when_its_id_is_set() {
+        let url = (ENDPOINT_ENV, "http://127.0.0.1:3001");
+        let thread = [
+            url,
+            ("BRUHS_WORKBENCH_PROJECT", "/p"),
+            ("BRUHS_WORKBENCH_THREAD", "t"),
+            ("BRUHS_WORKBENCH_MODE", "default"),
+            ("BRUHS_WORKBENCH_READ_ONLY", "1"),
+        ];
+        // The endpoint and the bruh's id alone are enough.
+        let bruh = helper(helper_env(&[url, (BRUH_ENV, "a")]), reqwest::Client::new());
+        assert!(matches!(bruh, Ok(Helper::Bruh(scope)) if scope.agent_id == "a"));
+        // The bruh's id wins over any thread scope beside it.
+        let both = helper(
+            helper_env(&[thread.as_slice(), &[(BRUH_ENV, "a")]].concat()),
+            reqwest::Client::new(),
+        );
+        assert!(matches!(both, Ok(Helper::Bruh(_))));
+        let turn = helper(helper_env(&thread), reqwest::Client::new());
+        assert!(
+            matches!(turn, Ok(Helper::Thread(scope)) if scope.read_only && scope.thread == "t")
+        );
+        // A thread helper still needs its whole scope.
+        let Err(missing) = helper(helper_env(&[url]), reqwest::Client::new()) else {
+            panic!("a thread helper without its scope starts");
+        };
+        assert_eq!(
+            missing.to_string(),
+            "Missing workbench scope BRUHS_WORKBENCH_PROJECT."
+        );
+        let Err(no_url) = helper(helper_env(&[(BRUH_ENV, "a")]), reqwest::Client::new()) else {
+            panic!("a helper without an endpoint starts");
+        };
+        assert_eq!(
+            no_url.to_string(),
+            "Missing workbench scope BRUHS_WORKBENCH_URL."
+        );
     }
 
     #[test]

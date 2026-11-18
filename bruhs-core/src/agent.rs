@@ -2269,36 +2269,52 @@ mod tests {
     #[test]
     fn a_bruh_turn_with_computer_gets_only_the_browser_server_and_no_preapproval() {
         let full = bruh_access(AccessLevel::Full, true);
-        let mut options = options(
-            AgentProvider::Claude,
-            PermissionMode::BypassPermissions,
-            None,
-        );
-        restrict_unattended(&mut options, &full, true);
-        crate::workbench_tools::configure_bruh(&mut options, "a").unwrap();
-        let options = claude(options);
-        let config: serde_json::Value =
-            serde_json::from_str(options.mcp_config.as_deref().unwrap()).unwrap();
-        let servers = config["mcpServers"].as_object().unwrap();
-        assert_eq!(servers.keys().collect::<Vec<_>>(), ["bruhs_workbench"]);
-        let server = &servers["bruhs_workbench"];
-        assert_eq!(server["env"]["BRUHS_WORKBENCH_BRUH"], "a");
-        assert_eq!(server["args"], serde_json::json!(["--workbench-mcp"]));
-        // Only the endpoint and the bruh: no thread, project or mode scope.
-        let mut env: Vec<_> = server["env"].as_object().unwrap().keys().collect();
-        env.sort();
-        assert_eq!(env, ["BRUHS_WORKBENCH_BRUH", "BRUHS_WORKBENCH_URL"]);
-        assert!(options.strict_mcp_config);
-        assert_eq!(
-            options.tools,
-            claude_sdk_rs::Tools::Allow(UNATTENDED_READ_TOOLS.map(String::from).to_vec())
-        );
-        let settings: serde_json::Value =
-            serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
-        assert!(!settings["permissions"]["deny"]
-            .as_array()
-            .unwrap()
-            .contains(&serde_json::json!("mcp__*")));
+        for level in [AccessLevel::Ask, AccessLevel::Full] {
+            let access = bruh_access(level, true);
+            let mut options = options(
+                AgentProvider::Claude,
+                PermissionMode::BypassPermissions,
+                None,
+            );
+            restrict_unattended(&mut options, &access, true);
+            // A server already there is replaced, not merged.
+            if let ProviderQueryOptions::Claude(o) = &mut options {
+                o.mcp_config = Some(
+                    serde_json::json!({"mcpServers":{"other":{"command":"other"}}}).to_string(),
+                );
+            }
+            crate::workbench_tools::configure_bruh(&mut options, "a").unwrap();
+            let options = claude(options);
+            let config: serde_json::Value =
+                serde_json::from_str(options.mcp_config.as_deref().unwrap()).unwrap();
+            let servers = config["mcpServers"].as_object().unwrap();
+            assert_eq!(
+                servers.keys().collect::<Vec<_>>(),
+                ["bruhs_workbench"],
+                "{level:?}"
+            );
+            let server = &servers["bruhs_workbench"];
+            assert_eq!(server["env"]["BRUHS_WORKBENCH_BRUH"], "a");
+            assert_eq!(server["args"], serde_json::json!(["--workbench-mcp"]));
+            // Only the endpoint and the bruh: no thread, project or mode scope.
+            let mut env: Vec<_> = server["env"].as_object().unwrap().keys().collect();
+            env.sort();
+            assert_eq!(env, ["BRUHS_WORKBENCH_BRUH", "BRUHS_WORKBENCH_URL"]);
+            assert!(options.strict_mcp_config);
+            // Pre-approved read tools only, never `ReadOnly`, which drops
+            // every server.
+            assert_eq!(
+                options.tools,
+                claude_sdk_rs::Tools::Allow(UNATTENDED_READ_TOOLS.map(String::from).to_vec()),
+                "{level:?}"
+            );
+            let settings: serde_json::Value =
+                serde_json::from_str(options.settings.as_deref().unwrap()).unwrap();
+            assert!(!settings["permissions"]["deny"]
+                .as_array()
+                .unwrap()
+                .contains(&serde_json::json!("mcp__*")));
+        }
         // A Computer needs Claude: other providers get no browser server.
         let mut codex = self::options(
             AgentProvider::Codex,
@@ -2307,7 +2323,7 @@ mod tests {
         );
         restrict_unattended(&mut codex, &full, true);
         let error = crate::workbench_tools::configure_bruh(&mut codex, "a").unwrap_err();
-        assert_eq!(error.to_string(), "Computer needs a Claude model.");
+        assert_eq!(error.to_string(), bruhs_models::crew::NEEDS_CLAUDE);
         assert!(codex_mcp_servers(&codex).is_empty());
     }
 
