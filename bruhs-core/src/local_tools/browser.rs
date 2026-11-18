@@ -57,6 +57,12 @@ impl LaunchOptions {
             proxy: None,
         }
     }
+
+    /// Only bruhs keep a profile. Their browsers, headless or in a window,
+    /// never write files to this computer behind the owner's back.
+    pub fn denies_downloads(&self) -> bool {
+        self.profile.is_some()
+    }
 }
 
 /// Chrome's command line for a launch on `profile`.
@@ -147,6 +153,8 @@ pub(super) struct Browser {
     /// The page target's `webSocketDebuggerUrl`.
     page_socket: String,
     viewport: Viewport,
+    /// A window, whose page view the owner can resize.
+    headed: bool,
     policy: ProcessPolicy,
 }
 
@@ -242,15 +250,12 @@ impl Browser {
             })?;
             // Only the initial about:blank page has run so far. Pause and mark
             // every page/worker before any untrusted navigation or script runs.
-            // Only bruhs keep a profile. Their browsers never write files to
-            // this computer behind the owner's back.
-            let deny_downloads = options.profile.is_some();
             let guard = BrowserGuard::start(
                 endpoint.as_str(),
                 target_id,
                 child.clone(),
                 policy,
-                deny_downloads,
+                options.denies_downloads(),
             )
             .await?;
             let mut cdp = Cdp::connect(socket, policy).await?;
@@ -273,8 +278,9 @@ impl Browser {
                 .await?;
                 COMPUTER_VIEWPORT
             } else {
-                // Measured on about:blank, before any page script can run.
-                measured_viewport(&mut cdp).await?
+                layout_viewport(&mut cdp)
+                    .await?
+                    .unwrap_or(COMPUTER_VIEWPORT)
             };
             cdp.navigate(&request.url).await?;
             guard.check()?;
@@ -313,6 +319,7 @@ impl Browser {
             endpoint: endpoint.into(),
             page_socket,
             viewport,
+            headed: !options.headless,
             policy,
         })
     }
@@ -321,6 +328,24 @@ impl Browser {
     /// the live view's.
     pub fn page_socket(&self) -> &str {
         &self.page_socket
+    }
+
+    /// The page view input is checked against.
+    pub fn viewport(&self) -> Viewport {
+        self.viewport
+    }
+
+    /// A window may have been resized since the last action: measure it
+    /// again. A failed measurement keeps the last size.
+    async fn remeasure(&mut self) {
+        if !self.headed {
+            return;
+        }
+        if let Ok(Ok(Some(viewport))) =
+            tokio::time::timeout(self.policy.timeout, layout_viewport(&mut self.cdp)).await
+        {
+            self.viewport = viewport;
+        }
     }
 
     pub async fn stop(&mut self) -> Result<(), ToolError> {
@@ -373,6 +398,7 @@ impl Browser {
         policy: ProcessPolicy,
     ) -> Result<ToolReply, ToolError> {
         self.guard.check()?;
+        self.remeasure().await;
         let navigated = match &action {
             BrowserAction::Navigate { url } => Some(url.clone()),
             _ => None,
@@ -419,17 +445,16 @@ impl Browser {
     /// One input from the owner's live view. Navigation follows the agent's
     /// URL rules.
     pub async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError> {
-        validate_input(input, self.viewport).map_err(|error| ToolError::Invalid(error.into()))?;
         self.guard.check()?;
+        self.remeasure().await;
+        validate_input(input, self.viewport).map_err(|error| ToolError::Invalid(error.into()))?;
         let cdp = &mut self.cdp;
         let operation = async {
             match input {
                 ComputerInput::Navigate { url } => {
                     cdp.navigate(url).await?;
                 }
-                ComputerInput::Back => {
-                    cdp.evaluate("history.back()").await?;
-                }
+                ComputerInput::Back => go_back(cdp).await?,
                 ComputerInput::Reload => {
                     cdp.call("Page.reload", json!({})).await?;
                 }
@@ -452,6 +477,22 @@ impl Browser {
         }
         Ok(())
     }
+}
+
+/// Back one history entry, through the browser rather than page script,
+/// which could redefine `history.back`. The first entry stays.
+pub(super) async fn go_back(cdp: &mut Cdp) -> Result<(), ToolError> {
+    let history = cdp.call("Page.getNavigationHistory", json!({})).await?;
+    let previous = history["currentIndex"]
+        .as_u64()
+        .and_then(|index| index.checked_sub(1))
+        .and_then(|index| usize::try_from(index).ok())
+        .and_then(|index| history["entries"][index]["id"].as_i64());
+    if let Some(entry) = previous {
+        cdp.call("Page.navigateToHistoryEntry", json!({"entryId": entry}))
+            .await?;
+    }
+    Ok(())
 }
 
 /// The current entry's URL in a `Page.getNavigationHistory` result.
@@ -717,19 +758,22 @@ async fn click(cdp: &mut Cdp, selector: &str, viewport: Viewport) -> Result<Valu
     Ok(json!({"clicked":true,"via":"script"}))
 }
 
-/// A headed window's page size in CSS px, or the computer view when Chrome
-/// gives none.
-async fn measured_viewport(cdp: &mut Cdp) -> Result<Viewport, ToolError> {
-    let size = cdp.evaluate("[innerWidth,innerHeight]").await?;
-    let side = |index: usize| {
-        size[index]
-            .as_u64()
-            .and_then(|side| u32::try_from(side).ok())
+/// A headed window's page view in CSS px, from the browser's layout
+/// metrics, which page script can't redefine as it can `innerWidth`. `None`
+/// when Chrome gives no usable size.
+pub(super) async fn layout_viewport(cdp: &mut Cdp) -> Result<Option<Viewport>, ToolError> {
+    use bruhs_models::num::ToIntSaturating;
+    let metrics = cdp.call("Page.getLayoutMetrics", json!({})).await?;
+    let view = &metrics["cssLayoutViewport"];
+    let side = |name: &str| {
+        view[name]
+            .as_f64()
+            .map(|side| side.floor().to_u32_saturating())
             .filter(|side| *side > 0)
     };
-    Ok(match (side(0), side(1)) {
-        (Some(width), Some(height)) => Viewport { width, height },
-        _ => COMPUTER_VIEWPORT,
+    Ok(match (side("clientWidth"), side("clientHeight")) {
+        (Some(width), Some(height)) => Some(Viewport { width, height }),
+        _ => None,
     })
 }
 

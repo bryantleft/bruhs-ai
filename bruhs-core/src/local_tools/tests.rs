@@ -359,6 +359,80 @@ fn headed_and_headless_bruh_launches_share_the_cookie_key() {
 }
 
 #[test]
+fn bruh_browsers_deny_downloads_in_a_window_too() {
+    use browser::LaunchOptions;
+    let bruh = |headless| LaunchOptions {
+        profile: Some("/data/bruhs/a/browser".into()),
+        headless,
+        proxy: Some("127.0.0.1:4100".parse().unwrap()),
+    };
+    assert!(bruh(true).denies_downloads());
+    assert!(bruh(false).denies_downloads());
+    assert!(!LaunchOptions::verification().denies_downloads());
+}
+
+#[tokio::test]
+async fn a_window_is_measured_from_its_layout_metrics() {
+    use serde_json::json;
+    let metrics = json!({
+        "cssLayoutViewport": {"pageX": 0, "pageY": 0, "clientWidth": 1440, "clientHeight": 812.5},
+        "cssVisualViewport": {"clientWidth": 1, "clientHeight": 1}
+    });
+    let (mut cdp, server) =
+        fake_page_answering(vec![], vec![("Page.getLayoutMetrics", metrics)]).await;
+    assert_eq!(
+        browser::layout_viewport(&mut cdp).await.unwrap(),
+        Some(Viewport {
+            width: 1440,
+            height: 812
+        })
+    );
+    drop(cdp);
+    let calls = server.await.unwrap();
+    assert!(
+        calls.iter().all(|(method, _)| method != "Runtime.evaluate"),
+        "no page script measures the window"
+    );
+    let (mut cdp, _server) = fake_page(vec![]).await;
+    assert_eq!(browser::layout_viewport(&mut cdp).await.unwrap(), None);
+}
+
+#[tokio::test]
+async fn owner_back_goes_through_the_navigation_history() {
+    use serde_json::json;
+    let history = |index: u64| {
+        json!({
+            "currentIndex": index,
+            "entries": [
+                {"id": 7, "url": "https://a.test/1"},
+                {"id": 9, "url": "https://a.test/2"}
+            ]
+        })
+    };
+    let (mut cdp, server) =
+        fake_page_answering(vec![], vec![("Page.getNavigationHistory", history(1))]).await;
+    browser::go_back(&mut cdp).await.unwrap();
+    drop(cdp);
+    let calls = server.await.unwrap();
+    assert_eq!(
+        calls,
+        [
+            ("Page.getNavigationHistory".to_owned(), json!({})),
+            (
+                "Page.navigateToHistoryEntry".to_owned(),
+                json!({"entryId": 7})
+            )
+        ]
+    );
+    // On the first entry there is nowhere to go.
+    let (mut cdp, server) =
+        fake_page_answering(vec![], vec![("Page.getNavigationHistory", history(0))]).await;
+    browser::go_back(&mut cdp).await.unwrap();
+    drop(cdp);
+    assert_eq!(server.await.unwrap().len(), 1);
+}
+
+#[test]
 fn the_snapshot_never_reads_input_values() {
     assert!(!browser::SNAPSHOT_EXPRESSION.contains("value"));
 }
@@ -367,6 +441,17 @@ fn the_snapshot_never_reads_input_values() {
 /// calls in turn from `evaluations`, everything else with `{}`.
 async fn fake_page(
     evaluations: Vec<serde_json::Value>,
+) -> (
+    browser::Cdp,
+    tokio::task::JoinHandle<Vec<(String, serde_json::Value)>>,
+) {
+    fake_page_answering(evaluations, Vec::new()).await
+}
+
+/// [`fake_page`], answering each method in `answers` with its result.
+async fn fake_page_answering(
+    evaluations: Vec<serde_json::Value>,
+    answers: Vec<(&'static str, serde_json::Value)>,
 ) -> (
     browser::Cdp,
     tokio::task::JoinHandle<Vec<(String, serde_json::Value)>>,
@@ -384,7 +469,10 @@ async fn fake_page(
         while let Some(Ok(Message::Text(text))) = socket.next().await {
             let request: serde_json::Value = serde_json::from_str(&text).unwrap();
             let method = request["method"].as_str().unwrap().to_owned();
-            let result = if method == "Runtime.evaluate" {
+            let answer = answers.iter().find(|(name, _)| *name == method);
+            let result = if let Some((_, answer)) = answer {
+                answer.clone()
+            } else if method == "Runtime.evaluate" {
                 json!({"result":{"value":evaluations.next().unwrap_or(serde_json::Value::Null)}})
             } else {
                 json!({})
@@ -843,6 +931,176 @@ async fn live_browser_clicks_types_presses_and_scrolls_with_real_input() {
     assert_eq!(
         browser.current_url().await.unwrap(),
         format!("http://{addr}/")
+    );
+    browser
+        .close(std::time::Duration::from_millis(
+            bruhs_models::crew::CLOSE_GRACE_MS,
+        ))
+        .await
+        .unwrap();
+    fixture.abort();
+}
+
+#[tokio::test]
+#[ignore = "launches Chrome headless and in a window on one temp profile; run explicitly for local acceptance"]
+async fn live_cookies_survive_opening_and_closing_a_window() {
+    use axum::{extract::Path, http::header, routing::get};
+    use browser::{Browser, LaunchOptions};
+    use std::sync::{Arc, Mutex};
+    let seen = Arc::new(Mutex::new(Vec::<String>::new()));
+    let observed = seen.clone();
+    let app = axum::Router::new()
+        .route(
+            "/set/{name}",
+            get(|Path(name): Path<String>| async move {
+                (
+                    [(
+                        header::SET_COOKIE,
+                        format!("{name}=kept; Max-Age=3600; Path=/"),
+                    )],
+                    axum::response::Html("<title>Set</title>"),
+                )
+            }),
+        )
+        .route(
+            "/check",
+            get(move |headers: axum::http::HeaderMap| {
+                let observed = observed.clone();
+                async move {
+                    let cookie = headers
+                        .get(header::COOKIE)
+                        .and_then(|value| value.to_str().ok())
+                        .unwrap_or("")
+                        .to_owned();
+                    observed.lock().unwrap().push(cookie);
+                    axum::response::Html("<title>Check</title>")
+                }
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let home = tempfile::tempdir().unwrap();
+    let profile = home.path().join("bruhs").join("a").join("browser");
+    let options = |headless| LaunchOptions {
+        profile: Some(profile.clone()),
+        headless,
+        proxy: None,
+    };
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let policy = ProcessPolicy::default();
+    let grace = std::time::Duration::from_millis(bruhs_models::crew::CLOSE_GRACE_MS);
+    let open = |path: &str, headless| {
+        let request = BrowserStart {
+            grant_id: "live".into(),
+            url: format!("http://{addr}{path}"),
+        };
+        let (client, options) = (client.clone(), options(headless));
+        async move { Browser::start(&client, request, policy, &options).await }
+    };
+    let close = |mut browser: Browser| async move {
+        browser.close(grace).await.unwrap();
+        let status = browser.exit_status().await.expect("Chrome exited");
+        assert!(status.success(), "Chrome was killed, not closed: {status}");
+    };
+    let last_check = |seen: &Mutex<Vec<String>>| seen.lock().unwrap().last().cloned();
+    close(open("/set/headless", true).await.unwrap()).await;
+    // Open in a window: the headless login is there.
+    let mut window = open("/check", false).await.unwrap();
+    let cookie = last_check(&seen).unwrap_or_default();
+    assert!(cookie.contains("headless=kept"), "{cookie:?}");
+    window
+        .command(
+            BrowserAction::Navigate {
+                url: format!("http://{addr}/set/window"),
+            },
+            policy,
+        )
+        .await
+        .unwrap();
+    close(window).await;
+    // Hand back: headless again, with the window's login too.
+    let headless = open("/check", true).await.unwrap();
+    let cookie = last_check(&seen).unwrap_or_default();
+    assert!(
+        cookie.contains("headless=kept") && cookie.contains("window=kept"),
+        "{cookie:?}"
+    );
+    close(headless).await;
+    fixture.abort();
+}
+
+#[tokio::test]
+#[ignore = "launches Chrome in a window on a temp profile; run explicitly for local acceptance"]
+async fn live_window_is_measured_by_the_browser_and_goes_back_through_history() {
+    use axum::routing::get;
+    use browser::{Browser, LaunchOptions};
+    let app = axum::Router::new()
+        .route("/", get(|| async { axum::response::Html("<title>One</title>") }))
+        .route(
+            "/two",
+            get(|| async {
+                // Page script can't trap the owner or fake the window's size.
+                axum::response::Html("<title>Two</title><script>history.back=()=>{};Object.defineProperty(window,'innerWidth',{get:()=>5})</script>")
+            }),
+        );
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let fixture = tokio::spawn(async move {
+        axum::serve(listener, app).await.unwrap();
+    });
+    let client = reqwest::Client::builder().no_proxy().build().unwrap();
+    let policy = ProcessPolicy::default();
+    let mut browser = Browser::start(
+        &client,
+        BrowserStart {
+            grant_id: "live".into(),
+            url: format!("http://{addr}/"),
+        },
+        policy,
+        &LaunchOptions::verification(),
+    )
+    .await
+    .unwrap();
+    browser
+        .command(
+            BrowserAction::Navigate {
+                url: format!("http://{addr}/two"),
+            },
+            policy,
+        )
+        .await
+        .unwrap();
+    // Measured again on page two, whose innerWidth reads 5.
+    browser.owner_input(&ComputerInput::Back).await.unwrap();
+    let viewport = browser.viewport();
+    let mut url = String::new();
+    for _ in 0..100 {
+        url = browser.current_url().await.unwrap();
+        if url == format!("http://{addr}/") {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    }
+    assert_eq!(url, format!("http://{addr}/"));
+    let size = browser
+        .command(
+            BrowserAction::Evaluate {
+                expression:
+                    "[document.documentElement.clientWidth,document.documentElement.clientHeight]"
+                        .into(),
+            },
+            policy,
+        )
+        .await
+        .unwrap()
+        .value;
+    assert_eq!(
+        size,
+        serde_json::json!([viewport.width, viewport.height]),
+        "{viewport:?}"
     );
     browser
         .close(std::time::Duration::from_millis(

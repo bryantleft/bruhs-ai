@@ -1,10 +1,14 @@
 use std::{path::Path, sync::Arc, time::Duration};
 
 use bruhs_models::crew::{
-    ACTION_STOPPED, COMPUTERS_FULL, COMPUTER_OFF_DENIAL, LOCAL_HOST_DENIAL, NOT_FOR_BRUHS,
-    TURN_ON_IN_SETTINGS,
+    handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, COMPUTERS_FULL, COMPUTER_OFF_DENIAL,
+    LOCAL_HOST_DENIAL, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
+    USE_THE_WINDOW,
 };
-use bruhs_models::local_tools::{BrowserAction, GrantRequest, ToolScope};
+use bruhs_models::local_tools::{
+    BrowserAction, ComputerInput, ComputerRequest, Control, GrantRequest, MouseButton, MouseKind,
+    ToolScope,
+};
 
 use super::{BruhComputer, LocalToolsHost};
 use crate::local_tools::ToolError;
@@ -393,6 +397,279 @@ async fn close_all_closes_every_bruh_browser() {
         .await
         .is_err());
     assert_eq!(fake.launches().len(), 2);
+}
+
+fn press(x: f64, y: f64) -> ComputerInput {
+    ComputerInput::Mouse {
+        kind: MouseKind::Down,
+        x,
+        y,
+        button: MouseButton::Left,
+        clicks: 1,
+        modifiers: 0,
+    }
+}
+
+#[tokio::test]
+async fn taking_control_refuses_the_bruh_until_hand_back() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.computer_request("a", ComputerRequest::Open)
+        .await
+        .unwrap();
+    let mut changes = host.control_changes("a").unwrap();
+    let held = host
+        .computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    assert_eq!(held.control, Control::Owner);
+    assert_eq!(changes.borrow_and_update().control, Control::Owner);
+    let error = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&error, ToolError::Refused(message) if message == OWNER_HAS_COMPUTER),
+        "{error:?}"
+    );
+    assert!(fake.actions("a").is_empty());
+    host.owner_input("a", press(10.0, 10.0)).await.unwrap();
+    assert_eq!(fake.inputs("a"), [press(10.0, 10.0)]);
+    let back = host
+        .computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    assert_eq!(back.control, Control::Bruh);
+    assert!(changes.has_changed().unwrap());
+    assert_eq!(changes.borrow_and_update().control, Control::Bruh);
+    assert_eq!(
+        fake.launches().len(),
+        1,
+        "a headless hand back keeps the page"
+    );
+    assert!(host.control_changes("b").is_none());
+}
+
+#[tokio::test]
+async fn taking_control_lets_an_action_in_flight_finish() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.open_computer("a").await.unwrap();
+    let held = fake.hold_next_action("a");
+    let pending = tokio::spawn({
+        let host = Arc::clone(&host);
+        async move { host.bruh_command("a", BrowserAction::Snapshot).await }
+    });
+    eventually(|| fake.actions("a").len() == 1).await;
+    let state = host
+        .computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    assert_eq!(state.control, Control::Owner);
+    held.notify_one();
+    pending.await.unwrap().unwrap();
+}
+
+#[tokio::test]
+async fn an_input_after_hand_back_is_refused_once_with_the_note() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.computer_request("a", ComputerRequest::Open)
+        .await
+        .unwrap();
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    fake.set_url("a", "https://a.test/after");
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    let click = || BrowserAction::Click {
+        selector: "#go".into(),
+    };
+    let error = host.bruh_command("a", click()).await.unwrap_err();
+    assert!(matches!(error, ToolError::Invalid(_)), "{error:?}");
+    assert_eq!(error.to_string(), handed_back_note("https://a.test/after"));
+    assert!(!fake.actions("a").contains(&click()));
+    host.bruh_command("a", click()).await.unwrap();
+    assert_eq!(fake.actions("a"), [click()]);
+    // A read runs and carries the note; the input after it runs.
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    fake.set_url("a", "https://a.test/again");
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    let reply = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.value["note"],
+        handed_back_note("https://a.test/again")
+    );
+    assert_eq!(reply.value["ok"], true);
+    host.bruh_command("a", click()).await.unwrap();
+    let later = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    assert!(later.value.get("note").is_none(), "the note is read once");
+    assert_eq!(
+        fake.actions("a"),
+        [
+            click(),
+            BrowserAction::Snapshot,
+            click(),
+            BrowserAction::Snapshot
+        ]
+    );
+}
+
+#[tokio::test]
+async fn owner_input_needs_control_and_stays_in_bounds() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    assert!(matches!(
+        host.owner_input("a", press(1.0, 1.0)).await,
+        Err(ToolError::NotFound(message)) if message == TURN_ON_IN_SETTINGS
+    ));
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.computer_request("a", ComputerRequest::Open)
+        .await
+        .unwrap();
+    let error = host.owner_input("a", press(10.0, 10.0)).await.unwrap_err();
+    assert_eq!(error.to_string(), TAKE_CONTROL_FIRST);
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    let error = host
+        .owner_input(
+            "a",
+            ComputerInput::Navigate {
+                url: "http://localhost:1".into(),
+            },
+        )
+        .await
+        .unwrap_err();
+    assert!(
+        matches!(&error, ToolError::Refused(message) if message == LOCAL_HOST_DENIAL),
+        "{error:?}"
+    );
+    let error = host
+        .owner_input("a", press(1281.0, 10.0))
+        .await
+        .unwrap_err();
+    assert!(matches!(error, ToolError::Invalid(_)), "{error:?}");
+    assert!(fake.inputs("a").is_empty());
+    assert!(fake.actions("a").is_empty());
+}
+
+#[tokio::test]
+async fn open_in_a_window_relaunches_headed_on_the_same_profile_and_back() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.bruh_command("a", navigate("https://a.test"))
+        .await
+        .unwrap();
+    let window = host
+        .computer_request("a", ComputerRequest::OpenWindow)
+        .await
+        .unwrap();
+    assert_eq!(fake.closes("a"), 1);
+    let launches = fake.launches();
+    assert_eq!(launches.len(), 2);
+    assert!(!launches[1].headless);
+    assert_eq!(launches[1].profile_dir, launches[0].profile_dir);
+    assert_eq!(launches[1].url, "https://a.test");
+    assert_eq!((window.control, window.headed), (Control::Owner, true));
+    assert_eq!(window.session_id, fake.session("a").map(|s| s.id));
+    let error = host.owner_input("a", press(10.0, 10.0)).await.unwrap_err();
+    assert_eq!(error.to_string(), USE_THE_WINDOW);
+    assert!(fake.inputs("a").is_empty());
+    let error = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), OWNER_HAS_COMPUTER);
+    fake.set_url("a", "https://a.test/signed-in");
+    let back = host
+        .computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    assert_eq!(fake.closes("a"), 2);
+    let launches = fake.launches();
+    assert_eq!(launches.len(), 3);
+    assert!(launches[2].headless);
+    assert_eq!(launches[2].profile_dir, launches[0].profile_dir);
+    assert_eq!(launches[2].url, "https://a.test/signed-in");
+    assert_eq!((back.control, back.headed), (Control::Bruh, false));
+    assert!(back.session_id.is_some());
+    let reply = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.value["note"],
+        handed_back_note("https://a.test/signed-in")
+    );
+}
+
+#[tokio::test]
+async fn closing_while_held_hands_back_with_a_note() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    assert_eq!(fake.launches().len(), 1, "taking control opens the browser");
+    let closed = host
+        .computer_request("a", ComputerRequest::Close)
+        .await
+        .unwrap();
+    assert_eq!(closed.control, Control::Bruh);
+    assert_eq!(closed.session_id, None);
+    assert_eq!(fake.closes("a"), 1);
+    let reply = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    assert_eq!(fake.launches().len(), 2);
+    assert_eq!(reply.value["note"], CLOSED_BY_OWNER);
+}
+
+#[tokio::test(start_paused = true)]
+async fn a_held_computer_never_closes_for_idleness() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    let reaper = host.start_idle_reaper();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.computer_request("a", ComputerRequest::Open)
+        .await
+        .unwrap();
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    for _ in 0..3 {
+        tokio::time::advance(Duration::from_secs(10 * 60)).await;
+        settle().await;
+    }
+    assert!(host.computer_state("a").await.unwrap().session_id.is_some());
+    assert_eq!(fake.closes("a"), 0);
+    // Handed back, it idles out like any other.
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    tokio::time::advance(Duration::from_secs(11 * 60)).await;
+    settle().await;
+    assert_eq!(fake.closes("a"), 1);
+    reaper.abort();
 }
 
 /// A stand-in for a Chrome a crash left behind: a shell whose command line

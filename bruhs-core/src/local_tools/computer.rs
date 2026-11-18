@@ -16,12 +16,14 @@ use std::{
 use async_trait::async_trait;
 use bruhs_models::{
     crew::{
-        ACTION_STOPPED, CLOSE_GRACE_MS, COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL,
-        LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS, TURN_ON_IN_SETTINGS,
+        handed_back_note, ACTION_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS, COMPUTERS_FULL,
+        COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS,
+        OWNER_HAS_COMPUTER, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
     },
     local_tools::{
-        validate_action, BrowserAction, BrowserSession, BrowserStart, ComputerInput, ComputerState,
-        Principal, ToolGrant, ToolReply, ToolScope, COMPUTER_VIEWPORT,
+        validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
+        BrowserStart, ComputerInput, ComputerRequest, ComputerState, Control, Principal, ToolGrant,
+        ToolReply, ToolScope, Viewport, COMPUTER_VIEWPORT,
     },
 };
 use futures_util::future::{join_all, BoxFuture};
@@ -61,12 +63,14 @@ pub(super) trait ComputerPage: Send {
     /// The page target's debugging socket, for the live view.
     #[expect(dead_code, reason = "used from Task 7")]
     fn page_socket(&self) -> Option<String>;
+    /// The page view in CSS px: [`COMPUTER_VIEWPORT`] headless, the
+    /// window's when headed.
+    fn viewport(&self) -> Viewport;
     async fn run(
         &mut self,
         action: BrowserAction,
         policy: ProcessPolicy,
     ) -> Result<ToolReply, ToolError>;
-    #[expect(dead_code, reason = "used from Task 6")]
     async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError>;
     async fn url(&mut self) -> Option<String>;
     /// Releases a mouse button an interrupted action left pressed.
@@ -83,6 +87,10 @@ impl ComputerPage for Browser {
 
     fn page_socket(&self) -> Option<String> {
         Some(Browser::page_socket(self).to_owned())
+    }
+
+    fn viewport(&self) -> Viewport {
+        Browser::viewport(self)
     }
 
     async fn run(
@@ -175,6 +183,12 @@ struct Slot {
 struct Meta {
     name: String,
     paused: bool,
+    /// Who drives the browser. While the owner does, agent commands are
+    /// refused.
+    control: Control,
+    /// What the bruh's next browser call learns: the owner handed back or
+    /// closed the browser.
+    note: Option<String>,
 }
 
 #[derive(Default)]
@@ -184,6 +198,8 @@ struct PageSlot {
     last_url: Option<String>,
     last_used: Option<Instant>,
     error: Option<String>,
+    /// The open page is a visible window, not headless.
+    headed: bool,
 }
 
 /// A running page with the guard its traffic goes through and its seat.
@@ -191,7 +207,7 @@ struct PageSlot {
 struct OpenPage {
     page: Box<dyn ComputerPage>,
     _guard: NetworkGuard,
-    _seat: Seat,
+    seat: Seat,
 }
 
 struct Seat {
@@ -242,6 +258,8 @@ impl Slot {
             meta: Mutex::new(Meta {
                 name: computer.name,
                 paused: computer.paused,
+                control: Control::Bruh,
+                note: None,
             }),
             interrupt: watch::channel(0).0,
             state,
@@ -269,7 +287,38 @@ impl Slot {
         self.meta().paused
     }
 
+    fn control(&self) -> Control {
+        self.meta().control
+    }
+
+    /// Hand the browser to `control`, published at once, leaving `note` for
+    /// the bruh's next browser call when given.
+    fn set_control(&self, control: Control, note: Option<String>) {
+        let mut meta = self.meta();
+        meta.control = control;
+        if note.is_some() {
+            meta.note = note;
+        }
+        // Under the meta lock, so a concurrent publish can't send a stale
+        // control after this one.
+        self.state.send_modify(|state| state.control = control);
+        drop(meta);
+    }
+
+    fn note(&self) -> Option<String> {
+        self.meta().note.clone()
+    }
+
+    /// The bruh has read `note`. A newer note stays.
+    fn clear_note(&self, note: &str) {
+        let mut meta = self.meta();
+        if meta.note.as_deref() == Some(note) {
+            meta.note = None;
+        }
+    }
+
     fn publish(&self, page: &PageSlot) {
+        let meta = self.meta();
         self.state.send_modify(|state| {
             state.session_id = page
                 .open
@@ -277,21 +326,66 @@ impl Slot {
                 .map(|open| open.page.session().id.clone());
             state.url.clone_from(&page.last_url);
             state.error.clone_from(&page.error);
+            state.control = meta.control;
+            state.headed = page.headed && page.open.is_some();
+            state.viewport = page
+                .open
+                .as_ref()
+                .map_or(COMPUTER_VIEWPORT, |open| open.page.viewport());
         });
+        drop(meta);
+    }
+
+    /// Close the open page gracefully, keeping where it was, and give back
+    /// its seat for a relaunch.
+    async fn close_page(&self, page: &mut PageSlot) -> Option<Seat> {
+        let mut open = page.open.take()?;
+        page.headed = false;
+        let name = self.meta().name.clone();
+        tracing::debug!(bruh = %name, "closing bruh browser");
+        // It reopens where it was, which a click may have changed.
+        if let Ok(Some(url)) = tokio::time::timeout(PAGE_URL_WAIT, open.page.url()).await {
+            page.last_url = Some(url);
+        }
+        open.page.close().await;
+        let OpenPage { seat, .. } = open;
+        Some(seat)
     }
 
     /// Close the page, if open, and publish that.
     async fn shut(&self, page: &mut PageSlot) {
-        if let Some(mut open) = page.open.take() {
-            let name = self.meta().name.clone();
-            tracing::debug!(bruh = %name, "closing bruh browser");
-            // It reopens where it was, which a click may have changed.
+        drop(self.close_page(page).await);
+        self.publish(page);
+    }
+
+    /// Ask the open page where it is now, else keep the last address.
+    async fn refresh_url(&self, page: &mut PageSlot) {
+        if let Some(open) = page.open.as_mut() {
             if let Ok(Some(url)) = tokio::time::timeout(PAGE_URL_WAIT, open.page.url()).await {
                 page.last_url = Some(url);
             }
-            open.page.close().await;
         }
-        self.publish(page);
+    }
+}
+
+/// `reply` with `note` beside its value.
+fn with_note(mut reply: ToolReply, note: String) -> ToolReply {
+    if let serde_json::Value::Object(value) = &mut reply.value {
+        value.insert("note".into(), note.into());
+    } else {
+        let value = std::mem::take(&mut reply.value);
+        reply.value = serde_json::json!({"result": value, "note": note});
+    }
+    reply
+}
+
+/// Validation errors as the host reports them: a host on this computer is
+/// refused, anything else is invalid.
+fn invalid(error: &'static str) -> ToolError {
+    if error == LOCAL_HOST_DENIAL {
+        ToolError::Refused(error.into())
+    } else {
+        ToolError::Invalid(error.into())
     }
 }
 
@@ -377,13 +471,17 @@ impl LocalToolsHost {
         Ok(state)
     }
 
-    /// The owner closes a bruh's browser. Its profile stays.
+    /// The owner closes a bruh's browser. Its profile stays. Closed while
+    /// the owner holds it, it goes back to the bruh with a note.
     pub async fn close_computer(&self, agent_id: &str) -> Result<ComputerState, ToolError> {
         let slot = self
             .computer_slot(agent_id)
             .ok_or_else(|| ToolError::NotFound(TURN_ON_IN_SETTINGS.into()))?;
         let mut page = slot.page.lock().await;
         slot.shut(&mut page).await;
+        if slot.control() == Control::Owner {
+            slot.set_control(Control::Bruh, Some(CLOSED_BY_OWNER.into()));
+        }
         drop(page);
         let state = slot.state.borrow().clone();
         Ok(state)
@@ -417,15 +515,12 @@ impl LocalToolsHost {
         }
         // Navigate's check refuses a host on this computer.
         let viewport = slot.state.borrow().viewport;
-        validate_action(&action, viewport).map_err(|error| {
-            if error == LOCAL_HOST_DENIAL {
-                ToolError::Refused(error.into())
-            } else {
-                ToolError::Invalid(error.into())
-            }
-        })?;
+        validate_action(&action, viewport).map_err(invalid)?;
         if slot.paused() {
             return Err(ToolError::Refused(ACTION_STOPPED.into()));
+        }
+        if slot.control() == Control::Owner {
+            return Err(ToolError::Refused(OWNER_HAS_COMPUTER.into()));
         }
         let mut revoked = slot.grant.revoked.subscribe();
         let mut interrupt = slot.interrupt.subscribe();
@@ -434,6 +529,19 @@ impl LocalToolsHost {
         }
         let work = async {
             let mut page = slot.page.lock().await;
+            // The owner may have taken control while this waited.
+            if slot.control() == Control::Owner {
+                return Err(ToolError::Refused(OWNER_HAS_COMPUTER.into()));
+            }
+            // The note is cleared only once the bruh has read it: from a
+            // refused input or a reply. A failed or cut-off read keeps it.
+            let note = slot.note();
+            if let Some(note) = note.as_deref() {
+                if action.kind() == BrowserActionKind::Input {
+                    slot.clear_note(note);
+                    return Err(ToolError::Invalid(note.into()));
+                }
+            }
             self.ensure_open(&slot, &mut page).await?;
             let navigated = match &action {
                 BrowserAction::Navigate { url } => Some(url.clone()),
@@ -457,7 +565,13 @@ impl LocalToolsHost {
             page.last_used = Some(Instant::now());
             slot.publish(&page);
             drop(page);
-            reply
+            match (reply, note) {
+                (Ok(reply), Some(note)) => {
+                    slot.clear_note(&note);
+                    Ok(with_note(reply, note))
+                }
+                (reply, _) => reply,
+            }
         };
         // The handlers only name the outcome: `work` (and the page lock it
         // may hold) is dropped when the `select!` ends.
@@ -481,6 +595,150 @@ impl LocalToolsHost {
             }
             Err(error) => Err(error),
         }
+    }
+
+    /// One of the owner's requests from a bruh's Computer tab.
+    pub async fn computer_request(
+        &self,
+        agent_id: &str,
+        request: ComputerRequest,
+    ) -> Result<ComputerState, ToolError> {
+        let slot = || {
+            self.computer_slot(agent_id)
+                .ok_or_else(|| ToolError::NotFound(TURN_ON_IN_SETTINGS.into()))
+        };
+        let state = |slot: &Slot| slot.state.borrow().clone();
+        match request {
+            ComputerRequest::Open => self.open_computer(agent_id).await,
+            ComputerRequest::Close => self.close_computer(agent_id).await,
+            ComputerRequest::TakeControl => {
+                let slot = slot()?;
+                self.take_control(&slot).await?;
+                Ok(state(&slot))
+            }
+            ComputerRequest::HandBack => {
+                let slot = slot()?;
+                self.hand_back(&slot).await;
+                Ok(state(&slot))
+            }
+            ComputerRequest::OpenWindow => {
+                let slot = slot()?;
+                self.open_window(&slot).await?;
+                Ok(state(&slot))
+            }
+        }
+    }
+
+    /// The owner takes the browser, opening it if it's closed. New agent
+    /// commands are refused at once; one already running finishes.
+    async fn take_control(&self, slot: &Slot) -> Result<(), ToolError> {
+        slot.set_control(Control::Owner, None);
+        // An open page isn't locked, so an action in flight isn't waited on.
+        if slot.state.borrow().session_id.is_some() {
+            return Ok(());
+        }
+        let mut page = slot.page.lock().await;
+        if let Err(error) = self.ensure_open(slot, &mut page).await {
+            slot.set_control(Control::Bruh, None);
+            return Err(error);
+        }
+        page.last_used = Some(Instant::now());
+        drop(page);
+        Ok(())
+    }
+
+    /// The owner hands the browser back. A window closes and the page
+    /// reopens headless where it was. The bruh's next browser call learns
+    /// where that is.
+    async fn hand_back(&self, slot: &Slot) {
+        let mut page = slot.page.lock().await;
+        if slot.control() != Control::Owner {
+            return;
+        }
+        if page.headed {
+            // A failed relaunch shows in the state's error; the next agent
+            // command opens it again.
+            if let Err(error) = self.relaunch(slot, &mut page, true).await {
+                tracing::warn!(%error, "bruh browser didn't reopen headless");
+            }
+        }
+        slot.refresh_url(&mut page).await;
+        let url = page
+            .last_url
+            .clone()
+            .unwrap_or_else(|| "about:blank".into());
+        page.last_used = Some(Instant::now());
+        slot.set_control(Control::Bruh, Some(handed_back_note(&url)));
+        slot.publish(&page);
+        drop(page);
+    }
+
+    /// The owner opens the bruh's browser in a window on this computer, for
+    /// what the live view can't do: the headless page closes gracefully and
+    /// the same profile opens headed where it was.
+    async fn open_window(&self, slot: &Slot) -> Result<(), ToolError> {
+        slot.set_control(Control::Owner, None);
+        let mut page = slot.page.lock().await;
+        if page.headed && page.open.is_some() {
+            return Ok(());
+        }
+        let opened = self.relaunch(slot, &mut page, false).await;
+        drop(page);
+        if opened.is_err() {
+            // No window: the bruh keeps its browser, which reopens headless
+            // where it was on its next step.
+            slot.set_control(Control::Bruh, None);
+        }
+        opened
+    }
+
+    /// One input from the owner's live view. Needs control, a headless page
+    /// (a window takes its own input) and a point inside the view.
+    pub async fn owner_input(&self, agent_id: &str, input: ComputerInput) -> Result<(), ToolError> {
+        let slot = self
+            .computer_slot(agent_id)
+            .ok_or_else(|| ToolError::NotFound(TURN_ON_IN_SETTINGS.into()))?;
+        let usable = |headed: bool| {
+            if slot.control() != Control::Owner {
+                Err(ToolError::Refused(TAKE_CONTROL_FIRST.into()))
+            } else if headed {
+                Err(ToolError::Refused(USE_THE_WINDOW.into()))
+            } else {
+                Ok(())
+            }
+        };
+        let (headed, viewport) = {
+            let state = slot.state.borrow();
+            (state.headed, state.viewport)
+        };
+        usable(headed)?;
+        validate_input(&input, viewport).map_err(invalid)?;
+        let mut page = slot.page.lock().await;
+        // Control or the window may have changed while this waited.
+        usable(page.headed)?;
+        self.ensure_open(&slot, &mut page).await?;
+        let open = page
+            .open
+            .as_mut()
+            .ok_or_else(|| ToolError::Unavailable("The bruh's browser didn't open.".into()))?;
+        let result = open.page.owner_input(&input).await;
+        if matches!(
+            input,
+            ComputerInput::Navigate { .. } | ComputerInput::Back | ComputerInput::Reload
+        ) {
+            slot.refresh_url(&mut page).await;
+        }
+        page.last_used = Some(Instant::now());
+        slot.publish(&page);
+        drop(page);
+        result
+    }
+
+    /// The bruh's Computer state as it changes, for runs that wait while
+    /// the owner holds it. `None` without a slot.
+    pub fn control_changes(&self, agent_id: &str) -> Option<watch::Receiver<ComputerState>> {
+        self.computer_slot(agent_id)
+            .map(|slot| slot.state.subscribe())
     }
 
     /// The address the bruh's page is on now: asked of the open page, else
@@ -520,7 +778,10 @@ impl LocalToolsHost {
     async fn close_idle(&self) {
         let idle = Duration::from_millis(COMPUTER_IDLE_MS);
         join_all(self.computer_slots().iter().map(|slot| async move {
-            // A page in use isn't idle.
+            // A page in use or held by the owner isn't idle.
+            if slot.control() == Control::Owner {
+                return;
+            }
             let Ok(mut page) = slot.page.try_lock() else {
                 return;
             };
@@ -543,10 +804,40 @@ impl LocalToolsHost {
         if page.open.is_some() {
             return Ok(());
         }
-        let launched = self.launch(slot, page.last_url.clone()).await;
+        let launched = self.launch(slot, page.last_url.clone(), true, None).await;
+        Self::opened(slot, page, launched, true)
+    }
+
+    /// Close the open page, if any, and open the same profile again where it
+    /// was: `headless`, or in a window. The page keeps its seat.
+    async fn relaunch(
+        &self,
+        slot: &Slot,
+        page: &mut PageSlot,
+        headless: bool,
+    ) -> Result<(), ToolError> {
+        let seat = slot.close_page(page).await;
+        slot.publish(page);
+        let launched = if *slot.grant.revoked.borrow() {
+            Err(ToolError::Refused(COMPUTER_OFF_DENIAL.into()))
+        } else {
+            self.launch(slot, page.last_url.clone(), headless, seat)
+                .await
+        };
+        Self::opened(slot, page, launched, headless)
+    }
+
+    /// Record a launch's outcome in the slot and publish it.
+    fn opened(
+        slot: &Slot,
+        page: &mut PageSlot,
+        launched: Result<OpenPage, ToolError>,
+        headless: bool,
+    ) -> Result<(), ToolError> {
         let result = match launched {
             Ok(open) => {
                 page.open = Some(open);
+                page.headed = !headless;
                 page.error = None;
                 page.last_used = Some(Instant::now());
                 Ok(())
@@ -560,8 +851,19 @@ impl LocalToolsHost {
         result
     }
 
-    async fn launch(&self, slot: &Slot, url: Option<String>) -> Result<OpenPage, ToolError> {
-        let seat = Seat::take(&self.computers.seats, &slot.grant.grant.id)?;
+    /// Open the slot's profile at `url`, on `seat` when a relaunch keeps
+    /// one.
+    async fn launch(
+        &self,
+        slot: &Slot,
+        url: Option<String>,
+        headless: bool,
+        seat: Option<Seat>,
+    ) -> Result<OpenPage, ToolError> {
+        let seat = match seat {
+            Some(seat) => seat,
+            None => Seat::take(&self.computers.seats, &slot.grant.grant.id)?,
+        };
         // One guard per browser, so one page can't starve another bruh's.
         let guard = NetworkGuard::start((self.network)()?)?;
         let url = url
@@ -578,14 +880,14 @@ impl LocalToolsHost {
             grant_id: slot.grant.grant.id.clone(),
             profile_dir: slot.profile_dir.clone(),
             url,
-            headless: true,
+            headless,
             proxy: guard.addr(),
         })
         .await?;
         Ok(OpenPage {
             page,
             _guard: guard,
-            _seat: seat,
+            seat,
         })
     }
 
@@ -610,7 +912,9 @@ mod fake {
     };
 
     use async_trait::async_trait;
-    use bruhs_models::local_tools::{BrowserAction, BrowserSession, ComputerInput, ToolReply};
+    use bruhs_models::local_tools::{
+        BrowserAction, BrowserSession, ComputerInput, ToolReply, Viewport, COMPUTER_VIEWPORT,
+    };
     use tokio::sync::Notify;
 
     use super::{ComputerPage, Launcher, LocalToolsHost, PageLaunch};
@@ -744,6 +1048,10 @@ mod fake {
             None
         }
 
+        fn viewport(&self) -> Viewport {
+            COMPUTER_VIEWPORT
+        }
+
         async fn run(
             &mut self,
             action: BrowserAction,
@@ -770,12 +1078,15 @@ mod fake {
         }
 
         async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError> {
-            self.pages
-                .seen()
-                .inputs
+            let mut seen = self.pages.seen();
+            seen.inputs
                 .entry(self.agent_id.clone())
                 .or_default()
                 .push(input.clone());
+            if let ComputerInput::Navigate { url } = input {
+                seen.urls.insert(self.agent_id.clone(), url.clone());
+            }
+            drop(seen);
             Ok(())
         }
 
