@@ -274,6 +274,19 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
 
 ### Fixed
 
+- Buttons on the web show their intended colors: blue text and tinted
+  fills (the selected Calendar view, Inbox filter and Agent workflows
+  grants, Today's Review) and some card fills were being dropped by the
+  stylesheet order.
+- The desktop app's Calendar, People and Inbox look like the web's: the
+  selected Calendar view is blue, due tasks are italic, Week and Day open
+  near the current hour, and a narrow window's week fits all seven days;
+  People's form and opened profile have the web's layout, labelled fields
+  and a multi-line Notes field; the Inbox list uses the web's spacing and
+  type. Italic text, page headers and People and Meetings text match the
+  web's sizes.
+- People controls are at least 24px with a mouse on both apps, and form
+  fields 32px (some were 18 to 20px).
 - In the desktop app, a failed save now reads like the web's: "Not saved",
   why, Retry save and Copy recovery data, under the page's top bar instead
   of under the window's close and minimize buttons.
