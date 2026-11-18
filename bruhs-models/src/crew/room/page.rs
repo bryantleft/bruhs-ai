@@ -17,6 +17,12 @@ pub const NO_LEAD: &str = "No lead";
 pub const NO_LEAD_HINT: &str = "No lead. Write @ and a name to hand a bruh work.";
 /// A room with no lines yet.
 pub const EMPTY_ROOM: &str = "Nothing here yet. Write @ and a name to hand a bruh work.";
+/// A room's page before the crew has loaded.
+pub const ROOM_LOADING: &str = "Loading this room…";
+/// A room's page once the room is deleted.
+pub const ROOM_GONE: &str = "This room no longer exists.";
+/// Heads an approval card, before what the bruh asks to do.
+pub const APPROVAL_WANTS: &str = "Wants to";
 /// A room with no members, in place of the composer.
 pub const NO_MEMBERS: &str = "Add a bruh in Room settings to start.";
 /// Asked before a room is deleted.

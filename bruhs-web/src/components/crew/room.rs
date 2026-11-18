@@ -5,7 +5,8 @@
 use bruhs_models::crew::room::{
     author_name, member_states, members_line, merge_messages, room_composer_block,
     room_composer_hint, room_line_key, room_lines, room_post, working_line, Room, RoomLine,
-    RoomMessage, APPROVAL_DECIDED, EMPTY_ROOM, ROOM_SETTINGS,
+    RoomMessage, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM, ROOM_GONE, ROOM_LOADING,
+    ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
 use leptos::html;
@@ -84,12 +85,12 @@ pub fn RoomPage(room_id: String) -> impl IntoView {
                         </div>
                     }.into_any(),
                     None => view! {
-                        <p id="room-title" role="status" class="p-6 text-body-sm text-rambutan-400">"Loading this room…"</p>
+                        <p id="room-title" role="status" class="p-6 text-body-sm text-rambutan-400">{ROOM_LOADING}</p>
                     }.into_any(),
                 },
                 Some(false) => view! {
                     <div class="p-6">
-                        <h1 id="room-title" node_ref=gone_ref tabindex="-1" class="text-h3 text-rambutan-100 focus:outline-none">"This room no longer exists."</h1>
+                        <h1 id="room-title" node_ref=gone_ref tabindex="-1" class="text-h3 text-rambutan-100 focus:outline-none">{ROOM_GONE}</h1>
                     </div>
                 }.into_any(),
                 Some(true) => ().into_any(),
@@ -349,7 +350,7 @@ fn room_line(line: RoomLine, bruhs: Memo<Vec<BruhState>>, data: CrewData) -> Any
             bruhs,
             view! {
                 <article class=CARD aria-label="Approval" data-room-line="asked">
-                    <p class="text-label-sm text-rambutan-400">"Wants to"</p>
+                    <p class="text-label-sm text-rambutan-400">{APPROVAL_WANTS}</p>
                     <p class="whitespace-pre-wrap break-words text-body text-rambutan-100">{summary}</p>
                     <p class="text-label-sm text-rambutan-400">{APPROVAL_DECIDED}</p>
                 </article>

@@ -16,7 +16,8 @@ use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     author_name, member_hits, member_states, members_line, mention_query, merge_messages,
     room_composer_block, room_composer_hint, room_line_key, room_lines, room_post, working_line,
-    Room, RoomLine, RoomMessage, RoomState, APPROVAL_DECIDED, EMPTY_ROOM, ROOM_LEAD, ROOM_SETTINGS,
+    Room, RoomLine, RoomMessage, RoomState, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM,
+    ROOM_GONE, ROOM_LEAD, ROOM_LOADING, ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhStatus, RAIL_FACE_PX};
 use bruhs_models::logic::context_chip::{
@@ -46,7 +47,6 @@ const MENTIONS_RING_OPACITY: f32 = 0.15;
 const MENTION_ROW_Y_PADDING_PX: f32 = 6.0;
 /// Shown in the `@` list when no member matches.
 const NO_MATCHES: &str = "No matches";
-const GONE: &str = "This room no longer exists.";
 
 /// Room settings on a room's page: the workspace opens the room dialog.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -462,8 +462,9 @@ impl ReactiveAutomations {
         cx.notify();
     }
 
-    /// A key in the composer: the `@` list's Up, Down, Enter, Tab and
-    /// Escape, and Backspace or Delete over a chip. True when it was used.
+    /// A key in the composer: the `@` list's Up, Down, Enter and Escape,
+    /// and Backspace or Delete over a chip. True when it was used. Tab
+    /// stays focus navigation, as in every `@` list on both apps.
     fn room_composer_key(
         &mut self,
         key: &str,
@@ -518,7 +519,7 @@ impl ReactiveAutomations {
                     page.hits_scroll.scroll_to_item(page.selected);
                 }
             }
-            "enter" | "tab" if !shift && count > 0 => {
+            "enter" if !shift && count > 0 => {
                 let index = page.selected.min(count - 1);
                 self.pick_room_member(index, window, cx);
                 return true;
@@ -658,7 +659,7 @@ impl ReactiveAutomations {
                         .font_family(theme::CODE_FONT_FAMILY)
                         .text_size(px(SMALL_TEXT_PX))
                         .text_color(theme::rambutan_400())
-                        .child("Loading this room…"),
+                        .child(ROOM_LOADING),
                 ),
             };
             return root.child(pending);
@@ -675,7 +676,7 @@ impl ReactiveAutomations {
                         .font_weight(FontWeight::MEDIUM)
                         .text_size(px(TITLE_TEXT_PX))
                         .text_color(theme::rambutan_100())
-                        .child(GONE),
+                        .child(ROOM_GONE),
                 ),
             );
         };
@@ -725,8 +726,11 @@ impl ReactiveAutomations {
             .px(px(layout.padding))
             .py_3()
             .child(
+                // Web `min-w-0 flex-1`: a long members line truncates
+                // instead of pushing Room settings to a row of its own.
                 div()
                     .min_w_0()
+                    .flex_1()
                     .flex()
                     .flex_col()
                     .child(
@@ -773,6 +777,7 @@ impl ReactiveAutomations {
                                     members_line(room, &self.crew.bruhs),
                                     theme::rambutan_500(),
                                 )
+                                .debug_selector(|| "desktop-room-members".to_string())
                                 .flex_1()
                                 .truncate(),
                             ),
@@ -994,7 +999,7 @@ impl ReactiveAutomations {
             } => {
                 let card = self
                     .render_bruh_card(message_id, "Approval", layout)
-                    .child(small_text("Wants to", theme::rambutan_400()))
+                    .child(small_text(APPROVAL_WANTS, theme::rambutan_400()))
                     .child(
                         div()
                             .font_family(theme::CODE_FONT_FAMILY)
@@ -1184,11 +1189,9 @@ impl ReactiveAutomations {
                     .find(|bruh| bruh.agent_id == *agent_id)?;
                 let chosen = index == page.selected;
                 let selector = format!("desktop-room-mention-{agent_id}");
-                let sub = if lead.as_deref() == Some(agent_id.as_str()) {
-                    ROOM_LEAD
-                } else {
-                    ""
-                };
+                let is_lead = lead.as_deref() == Some(agent_id.as_str());
+                let sub = if is_lead { ROOM_LEAD } else { "" };
+                let lead_selector = format!("desktop-room-mention-lead-{agent_id}");
                 Some(
                     div()
                         .id(SharedString::from(selector.clone()))
@@ -1235,7 +1238,12 @@ impl ReactiveAutomations {
                                 .font_weight(FontWeight::MEDIUM)
                                 .child(bruh.name.clone()),
                         )
-                        .child(small_text(sub, theme::rambutan_500()).flex_1().truncate()),
+                        .child(
+                            small_text(sub, theme::rambutan_500())
+                                .flex_1()
+                                .truncate()
+                                .when(is_lead, |el| el.debug_selector(move || lead_selector)),
+                        ),
                 )
             });
         Some(list.children(rows).into_any_element())
@@ -1244,10 +1252,10 @@ impl ReactiveAutomations {
 
 #[cfg(test)]
 mod tests {
-    use super::{ReactiveAutomations, ReactiveOpenRoomSettings, GONE};
+    use super::{ReactiveAutomations, ReactiveOpenRoomSettings};
     use crate::theme;
     use bruhs_models::crew::room::{
-        Room, RoomAuthor, RoomMessage, RoomState, NO_MEMBERS, ROOM_LEAD,
+        Room, RoomAuthor, RoomMessage, RoomState, NO_MEMBERS, ROOM_GONE, ROOM_LEAD,
     };
     use bruhs_models::crew::{
         BruhAccess, BruhLook, BruhState, BruhStatus, ServiceNotice, CREW_PROTOCOL,
@@ -1497,7 +1505,10 @@ mod tests {
             .expect("the @ list");
         let row = cx.debug_bounds("desktop-room-mention-b").expect("Bo's row");
         assert!(list.contains(&row.center()));
-        assert_eq!(ROOM_LEAD, "Lead");
+        let lead = cx
+            .debug_bounds("desktop-room-mention-lead-b")
+            .expect("Bo's row says Lead");
+        assert!(row.contains(&lead.center()));
         // Escape closes the list until the draft changes.
         press(cx, "escape");
         assert!(cx.debug_bounds("desktop-room-mentions").is_none());
@@ -1673,7 +1684,10 @@ mod tests {
             cx.notify();
         });
         cx.run_until_parked();
-        assert!(cx.debug_bounds("desktop-room-gone").is_some(), "{GONE}");
+        assert!(
+            cx.debug_bounds("desktop-room-gone").is_some(),
+            "{ROOM_GONE}"
+        );
         assert!(cx.debug_bounds("desktop-room-settings").is_none());
         assert!(cx.debug_bounds("desktop-room-composer").is_none());
         panel.update_in(cx, |panel, window, _| {
@@ -1714,5 +1728,78 @@ mod tests {
         });
         cx.run_until_parked();
         assert_eq!(read_for(&panel, cx), Some(6));
+    }
+
+    /// Up and Down move through the `@` list and wrap; Enter picks the
+    /// selected member; Tab leaves the list alone and inserts nothing.
+    #[gpui::test]
+    fn up_and_down_wrap_and_tab_inserts_nothing(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            snapshot(
+                CREW_PROTOCOL,
+                vec![named("a", "Ada"), named("b", "Bo")],
+                vec![room(&["a", "b"], Some("b"))],
+            ),
+        );
+        let selected = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| panel.room.as_ref().unwrap().selected)
+        };
+        type_in(&panel, cx, "@");
+        panel.update(cx, |panel, _| {
+            assert_eq!(panel.room.as_ref().unwrap().hits, ["a", "b"]);
+        });
+        // Only the lead's row says Lead.
+        assert!(cx.debug_bounds("desktop-room-mention-lead-b").is_some());
+        assert!(cx.debug_bounds("desktop-room-mention-lead-a").is_none());
+        assert_eq!(ROOM_LEAD, "Lead");
+        assert_eq!(selected(&panel, cx), 0);
+        press(cx, "down");
+        assert_eq!(selected(&panel, cx), 1);
+        press(cx, "down");
+        assert_eq!(selected(&panel, cx), 0, "Down from the last wraps");
+        press(cx, "up");
+        assert_eq!(selected(&panel, cx), 1, "Up from the first wraps");
+        press(cx, "enter");
+        assert_eq!(draft(&panel, cx), "@Bo ");
+        cx.simulate_input("@");
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-room-mentions").is_some());
+        press(cx, "tab");
+        panel.update(cx, |panel, _| {
+            let page = panel.room.as_ref().unwrap();
+            assert_eq!(page.chips.len(), 1, "Tab inserts no chip");
+        });
+        assert!(!draft(&panel, cx).contains("@Ada"));
+        assert!(sent(&panel, cx).is_empty());
+    }
+
+    /// Web `min-w-0 flex-1` on the title: a long members line truncates
+    /// and Room settings stays beside the name.
+    #[gpui::test]
+    fn a_long_members_line_keeps_room_settings_beside_the_name(cx: &mut gpui::TestAppContext) {
+        let ids = ["a", "b", "c", "d", "e", "f"];
+        let crew: Vec<BruhState> = ids
+            .iter()
+            .map(|id| named(id, &format!("Bruh with a long name {id}")))
+            .collect();
+        let (_, cx) = open(cx, snapshot(CREW_PROTOCOL, crew, vec![room(&ids, None)]));
+        cx.simulate_resize(gpui::size(gpui::px(640.0), gpui::px(480.0)));
+        cx.run_until_parked();
+        let name = cx.debug_bounds("desktop-room-name").expect("the name");
+        let settings = cx
+            .debug_bounds("desktop-room-settings")
+            .expect("Room settings");
+        let line = cx.debug_bounds("desktop-room-members").expect("members");
+        assert!(
+            settings.top() < name.bottom(),
+            "Room settings sits on the name's row: {settings:?} {name:?}"
+        );
+        assert!(line.right() <= settings.left(), "the line stops before it");
+        assert!(
+            line.size.height < gpui::px(20.0),
+            "one line: {:?}",
+            line.size.height
+        );
     }
 }
