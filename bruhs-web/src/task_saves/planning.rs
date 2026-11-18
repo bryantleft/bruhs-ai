@@ -15,6 +15,17 @@ pub struct DayPlanState {
     pub busy: bool,
     pub loaded: bool,
     pub error: Option<String>,
+    /// The banner (its id, then the message) that repeats a failed Apply's
+    /// or Undo's `error` over any page. It goes with that error.
+    pub(super) error_banner: Option<(String, String)>,
+}
+
+/// The banner to take down: it repeats an error that is no longer the day
+/// plan's, because it was dismissed, replaced, or resolved by a later Apply
+/// or Undo, as desktop's single error goes.
+pub(super) fn stale_error_banner(state: &DayPlanState) -> Option<&str> {
+    let (id, message) = state.error_banner.as_ref()?;
+    (state.error.as_deref() != Some(message.as_str())).then_some(id.as_str())
 }
 
 /// Commute only this transaction's link changes with a newer local edit.
@@ -229,15 +240,22 @@ impl TaskSaves {
     }
 
     fn finish_day_plan_error(self, message: String) {
-        self.banners.push(
+        let banner = self.banners.push_keyed(
             crate::components::banner::BannerKind::Error,
             message.clone(),
             None,
         );
-        let _ = self.day_plan.try_update(|state| {
-            state.busy = false;
-            state.error = Some(message);
-        });
+        let replaced = self
+            .day_plan
+            .try_update(|state| {
+                state.busy = false;
+                state.error = Some(message.clone());
+                state.error_banner.replace((banner, message))
+            })
+            .flatten();
+        if let Some((old, _)) = replaced {
+            self.banners.dismiss(&old);
+        }
         self.refresh_status();
         self.save();
     }
@@ -414,5 +432,28 @@ mod tests {
         let current = vec![local.clone(), c];
         preserve_newer(&mut loaded, &baseline, &current, |task| &task.id);
         assert_eq!(loaded, [local]);
+    }
+
+    /// A refused Undo's banner said "A focus block changed after planning"
+    /// long after the block was renamed back and Undo had worked.
+    #[test]
+    fn the_error_banner_goes_with_the_error_it_repeats() {
+        let refused = "A focus block changed after planning. Review it before undoing the plan.";
+        let mut state = DayPlanState {
+            error: Some(refused.into()),
+            error_banner: Some(("banner-1".into(), refused.into())),
+            ..DayPlanState::default()
+        };
+        assert_eq!(stale_error_banner(&state), None, "still the error");
+        state.error = None;
+        assert_eq!(
+            stale_error_banner(&state),
+            Some("banner-1"),
+            "dismissed or resolved"
+        );
+        state.error = Some("Your calendar changed. Review a new day plan.".into());
+        assert_eq!(stale_error_banner(&state), Some("banner-1"), "replaced");
+        state.error_banner = None;
+        assert_eq!(stale_error_banner(&state), None, "nothing to take down");
     }
 }

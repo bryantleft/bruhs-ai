@@ -287,6 +287,17 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   web's sizes.
 - People controls are at least 24px with a mouse on both apps, and form
   fields 32px (some were 18 to 20px).
+- On the web, leaving Agent workflows while a press in Workflow history
+  (Run, Pause, Resume or Undo, or Previous and Next) was still settling
+  could stop the app with an internal error, so pages no longer updated
+  until a reload. Leaving the page now just leaves it; the press is still
+  saved.
+- On the web, the error banner for a refused or failed day plan Apply or
+  Undo now goes with the error: when you dismiss it on Today, or when a later
+  Apply or Undo works. It used to stay on every page, still saying, for
+  example, that a focus block had changed after the Undo had gone through.
+- The workflow notice counts one saved step as "1 step saved", in both
+  apps.
 - In the desktop app, a failed save now reads like the web's: "Not saved",
   why, Retry save and Copy recovery data, under the page's top bar instead
   of under the window's close and minimize buttons.

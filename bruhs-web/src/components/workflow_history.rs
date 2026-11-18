@@ -110,6 +110,49 @@ impl Control {
     }
 }
 
+/// A frame after a press's save settles: put focus on what the press led to
+/// when the pressed control dropped it. Leaving the page before the frame
+/// runs disposes the history's signals; the frame then does nothing, since
+/// reading a disposed signal panics and a panic stops the app.
+fn refocus_after_press(
+    refocus: RwSignal<Option<Control>>,
+    locked: Signal<bool>,
+    panel: NodeRef<html::Div>,
+) {
+    let Some(Some(pressed)) = refocus.try_get_untracked() else {
+        return;
+    };
+    // A background run saved one step and started the next; wait on.
+    if locked.try_get_untracked().unwrap_or(true) {
+        return;
+    }
+    refocus.set(None);
+    let document = document();
+    let lost = document.active_element().is_none_or(|active| {
+        document
+            .body()
+            .is_some_and(|body| body.is_same_node(Some(active.unchecked_ref())))
+            || active.matches(":disabled").unwrap_or(false)
+    });
+    let Some(panel) = panel.try_get_untracked().flatten() else {
+        return;
+    };
+    if !lost {
+        return;
+    }
+    for id in pressed.focus_after() {
+        let found = panel
+            .query_selector(&format!("[data-testid=\"{id}\"]:not(:disabled)"))
+            .ok()
+            .flatten()
+            .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok());
+        if let Some(element) = found {
+            let _ = element.focus();
+            return;
+        }
+    }
+}
+
 #[component]
 pub fn WorkflowHistory(
     /// True while the controls must wait: the workflow store or the
@@ -151,12 +194,14 @@ pub fn WorkflowHistory(
                 return;
             };
             selected.set(Some(id));
+            // As in `refocus_after_press`: the page may be gone by then.
             request_animation_frame(move || {
                 if pressed
-                    .get_untracked()
+                    .try_get_untracked()
+                    .flatten()
                     .is_some_and(|button| button.disabled())
                 {
-                    if let Some(other) = other.get_untracked() {
+                    if let Some(other) = other.try_get_untracked().flatten() {
                         let _ = other.focus();
                     }
                 }
@@ -173,40 +218,7 @@ pub fn WorkflowHistory(
             return;
         }
         current.track();
-        request_animation_frame(move || {
-            let Some(pressed) = refocus.get_untracked() else {
-                return;
-            };
-            // A background run saved one step and started the next; wait on.
-            if locked.get_untracked() {
-                return;
-            }
-            refocus.set(None);
-            let document = document();
-            let lost = document.active_element().is_none_or(|active| {
-                document
-                    .body()
-                    .is_some_and(|body| body.is_same_node(Some(active.unchecked_ref())))
-                    || active.matches(":disabled").unwrap_or(false)
-            });
-            let Some(panel) = panel.get_untracked() else {
-                return;
-            };
-            if !lost {
-                return;
-            }
-            for id in pressed.focus_after() {
-                let found = panel
-                    .query_selector(&format!("[data-testid=\"{id}\"]:not(:disabled)"))
-                    .ok()
-                    .flatten()
-                    .and_then(|element| element.dyn_into::<web_sys::HtmlElement>().ok());
-                if let Some(element) = found {
-                    let _ = element.focus();
-                    return;
-                }
-            }
-        });
+        request_animation_frame(move || refocus_after_press(refocus, locked, panel));
     });
 
     // The paths the page's controls always used: the executor runs a step or
@@ -423,6 +435,25 @@ mod tests {
 
         assert!(state.mark_rolled_back(&older, 7));
         assert!(!shown(&state, Some(&older)).has_controls());
+    }
+
+    /// Pressing Resume (or any control) and then leaving Agent workflows
+    /// before the next frame disposed the history while that frame was
+    /// still queued. The frame must do nothing: reading a disposed signal
+    /// panics, and a panic stops the whole app.
+    #[test]
+    fn a_frame_after_the_history_is_gone_does_nothing() {
+        let owner = Owner::new();
+        let (refocus, locked, panel) = owner.with(|| {
+            (
+                RwSignal::new(Some(Control::Resume)),
+                Signal::derive(|| false),
+                NodeRef::<html::Div>::new(),
+            )
+        });
+        owner.cleanup();
+        assert!(refocus.is_disposed(), "the history's signals are gone");
+        refocus_after_press(refocus, locked, panel);
     }
 
     #[test]
