@@ -31,17 +31,27 @@ pub fn load(path: &str) -> Option<&'static [u8]> {
 pub enum IconName {
     Close,
     Delete,
+    Eye,
+    EyeOff,
     TriangleAlert,
 }
 
 impl IconName {
-    const ALL: [IconName; 3] = [IconName::Close, IconName::Delete, IconName::TriangleAlert];
+    const ALL: [IconName; 5] = [
+        IconName::Close,
+        IconName::Delete,
+        IconName::Eye,
+        IconName::EyeOff,
+        IconName::TriangleAlert,
+    ];
 
     /// The asset path [`load`] serves it at.
     pub fn path(self) -> &'static str {
         match self {
             IconName::Close => "bruhs-ui/icons/close.svg",
             IconName::Delete => "bruhs-ui/icons/delete.svg",
+            IconName::Eye => "bruhs-ui/icons/eye.svg",
+            IconName::EyeOff => "bruhs-ui/icons/eye-off.svg",
             IconName::TriangleAlert => "bruhs-ui/icons/triangle-alert.svg",
         }
     }
@@ -50,6 +60,8 @@ impl IconName {
         match self {
             IconName::Close => include_bytes!("../assets/icons/close.svg"),
             IconName::Delete => include_bytes!("../assets/icons/delete.svg"),
+            IconName::Eye => include_bytes!("../assets/icons/eye.svg"),
+            IconName::EyeOff => include_bytes!("../assets/icons/eye-off.svg"),
             IconName::TriangleAlert => include_bytes!("../assets/icons/triangle-alert.svg"),
         }
     }

@@ -5,11 +5,11 @@
 //! with [`Textarea`]. Forms that choose per field hold a [`TextField`], so
 //! their read, write and render helpers take either kind.
 
+use crate::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 use gpui::{
     App, AppContext as _, Context, Entity, FocusHandle, Focusable, SharedString, Styled,
     Subscription, Window,
 };
-use gpui_component::input::{Input, InputEvent, InputState, Textarea, TextareaState};
 
 /// A single-line or multi-line text field.
 #[derive(Clone)]

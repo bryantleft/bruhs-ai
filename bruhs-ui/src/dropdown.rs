@@ -3,15 +3,15 @@
 //! and per-option descriptions. The owning view holds the value and open
 //! state; the element retains focus targets and scroll position across renders.
 
-use gpui_component::zoom::px;
+use crate::zoom::px;
 use std::{
     collections::{HashMap, HashSet},
     rc::Rc,
 };
 
+use crate::scroll::ScrollableElement;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::scroll::ScrollableElement;
 
 use crate::actions::CloseOverlays;
 use crate::button::is_web_button_activation_key;
@@ -631,7 +631,7 @@ mod tests {
     #[gpui::test]
     fn dropdown_keyboard_selection_escape_and_trigger_focus(cx: &mut TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            crate::init(cx);
             cx.bind_keys([KeyBinding::new("escape", CloseOverlays, None)]);
         });
         let (view, cx) = cx.add_window_view(|_, _| DropdownHarness {
@@ -675,7 +675,7 @@ mod tests {
     /// label.
     #[gpui::test]
     fn dropdown_check_sits_at_the_right_of_the_chosen_option(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(crate::init);
         let (_view, cx) = cx.add_window_view(|_, _| DropdownHarness {
             open: true,
             value: "b",
@@ -699,7 +699,7 @@ mod tests {
 
     #[gpui::test]
     fn long_dropdown_keeps_keyboard_focused_option_in_view(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| DropdownHarness {
             open: false,
             value: "a",
@@ -747,7 +747,7 @@ mod tests {
 
     #[gpui::test]
     fn native_dropdown_keeps_content_still_during_keyboard_focus(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(crate::init);
         let (view, cx) = cx.add_window_view(|_, cx| TriggerGeometryHarness {
             focus: cx.focus_handle(),
         });

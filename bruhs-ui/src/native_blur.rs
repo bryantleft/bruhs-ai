@@ -210,7 +210,7 @@ impl BlurScrimHandle {
     pub fn clear_bounds(&self) -> Option<Bounds<Pixels>> {
         self.clear_bounds
             .borrow()
-            .map(|bounds| bounds.dilate(gpui_component::zoom::px(DIALOG_BORDER_PX)))
+            .map(|bounds| bounds.dilate(crate::zoom::px(DIALOG_BORDER_PX)))
     }
 }
 

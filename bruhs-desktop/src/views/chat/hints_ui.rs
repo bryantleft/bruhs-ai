@@ -684,8 +684,7 @@ impl ChatView {
 
         self.input_state.update(cx, |input, cx| {
             input.set_value(candidate, window, cx);
-            let position = input.text().offset_to_position(candidate_cursor);
-            input.set_cursor_position(position, window, cx);
+            input.set_selected_range(candidate_cursor..candidate_cursor, cx);
         });
         self.refresh_mention_hints(cx);
         cx.notify();

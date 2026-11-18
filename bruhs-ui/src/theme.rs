@@ -481,12 +481,12 @@ pub fn apply_bruhs_theme(cx: &mut App) {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::scroll::ScrollableElement;
     use gpui::prelude::FluentBuilder;
     use gpui::{
         div, point, px, Context, InteractiveElement, IntoElement, Modifiers, MouseButton,
         ParentElement, Render, ScrollHandle, StatefulInteractiveElement, Styled, Window,
     };
-    use gpui_component::scroll::ScrollableElement;
 
     struct ScrollbarHarness {
         scroll: ScrollHandle,
@@ -522,7 +522,7 @@ mod tests {
     #[gpui::test]
     fn themed_scrollbar_drag_reveals_the_last_row(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            crate::init(cx);
             apply_bruhs_theme(cx);
         });
         let (view, cx) = cx.add_window_view(|_, _| ScrollbarHarness {
@@ -549,7 +549,7 @@ mod tests {
     #[gpui::test]
     fn themed_scrollbar_drag_reveals_the_last_column(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            crate::init(cx);
             apply_bruhs_theme(cx);
         });
         let (view, cx) = cx.add_window_view(|_, _| ScrollbarHarness {
@@ -580,7 +580,7 @@ mod tests {
     #[gpui::test]
     fn theme_tokens_follow_the_bruhs_palette(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
-            gpui_component::init(cx);
+            crate::init(cx);
             gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
             apply_bruhs_theme(cx);
             let theme = gpui_component::Theme::global(cx);

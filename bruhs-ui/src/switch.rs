@@ -4,9 +4,9 @@
 //! The switch is drawn and named here; the caller attaches the press, e.g.
 //! `switch(..).when(enabled, |el| on_press_view(el, cx, toggle))`.
 
+use crate::zoom::px;
 use gpui::prelude::*;
 use gpui::{div, Div, Role, SharedString, Stateful, Toggled};
-use gpui_component::zoom::px;
 
 use crate::press::{focusable_control, Interactivity};
 use crate::theme;
@@ -93,7 +93,7 @@ mod tests {
 
     #[gpui::test]
     fn a_switch_has_the_webs_size_on_and_off(cx: &mut TestAppContext) {
-        cx.update(gpui_component::init);
+        cx.update(crate::init);
         let (_, cx) = cx.add_window_view(|_, _| Two);
         cx.run_until_parked();
         for id in ["on", "off"] {

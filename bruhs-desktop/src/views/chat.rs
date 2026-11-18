@@ -31,7 +31,7 @@ use bruhs_ui::input::{
 use bruhs_ui::scroll::ScrollableElement;
 use bruhs_ui::text::{TextView, TextViewStyle};
 use bruhs_ui::zoom::px;
-use bruhs_ui::{ActiveTheme, RopeExt};
+use bruhs_ui::ActiveTheme;
 use gpui::prelude::*;
 use gpui::*;
 use markdown::{mdast, ParseOptions};

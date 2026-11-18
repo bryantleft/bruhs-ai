@@ -1,7 +1,7 @@
 use crate::theme;
+use crate::zoom::px;
 use gpui::prelude::*;
 use gpui::*;
-use gpui_component::zoom::px;
 
 const WEB_BUTTON_FONT_FAMILY: &str = "Monaspace Argon";
 const WEB_BUTTON_GAP_PX: f32 = 6.0;
