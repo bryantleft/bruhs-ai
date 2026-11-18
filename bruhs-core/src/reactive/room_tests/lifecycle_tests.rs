@@ -394,7 +394,11 @@ async fn a_late_approval_resumes_a_room_run_in_its_room() {
     let snapshot = decide(&runtime, &id, true).await.unwrap();
     let [resumed] = queued_in(&snapshot, "r").try_into().unwrap();
     assert_eq!(resumed.agent_id, "b");
-    assert_eq!(resumed.trigger, room_trigger("r", &message_id, 1, true));
+    assert_eq!(
+        resumed.trigger,
+        room_trigger("r", &message_id, 0, true),
+        "the owner's decision restarts the hop count"
+    );
     assert_eq!(
         resumed.prompt,
         "The owner approved your request: Run cargo test. Do it now."

@@ -178,19 +178,19 @@ pub(in crate::reactive) fn ask_opened(
     Ok(())
 }
 
-/// The trigger for the run a late answer queues: a room run's own room and
-/// hop, marked resumed so it keeps the owner's answer as its prompt.
+/// The trigger for the run a late answer queues: a room run's own room,
+/// marked resumed so it keeps the owner's answer as its prompt. The answer
+/// is the owner's input, so the hop count starts again.
 pub(in crate::reactive) fn resume_trigger(original: &ReactiveRun) -> Option<RunTrigger> {
     match &original.trigger {
         Some(RunTrigger::Room {
             room_id,
             message_id,
-            hop,
             ..
         }) => Some(RunTrigger::Room {
             room_id: room_id.clone(),
             message_id: message_id.clone(),
-            hop: *hop,
+            hop: 0,
             resumed: true,
         }),
         _ => None,
@@ -334,9 +334,25 @@ fn prompt_history(
     Ok(history)
 }
 
+/// The run `agent_id` has queued in `room_id` and not yet started, unless
+/// the owner's decision resumed it (that one keeps its own prompt).
+fn queued_run(
+    connection: &Connection,
+    agent_id: &str,
+    room_id: &str,
+) -> Result<Option<ReactiveRun>, ReactiveError> {
+    let mut statement = connection.prepare(
+        "SELECT payload FROM reactive_runs WHERE agent_id=?1 AND status='queued' AND json_extract(payload,'$.trigger.room_id')=?2 AND COALESCE(json_extract(payload,'$.trigger.resumed'),0)=0 ORDER BY created,rowid LIMIT 1",
+    )?;
+    let mut rows =
+        statement.query_map(params![agent_id, room_id], |row| row.get::<_, String>(0))?;
+    rows.next().map(|row| decode(row?)).transpose()
+}
+
 /// Hand `message` to each of `agent_ids` that is a member. A paused or off
-/// bruh gets a System line instead; a bruh with a queued run in this room
-/// already will read the new line when that run starts.
+/// bruh gets a System line instead. A bruh with a run queued in this room
+/// already keeps that one run, now answering `message`: an owner post
+/// restarts its hop count, a bruh's line never lowers it.
 pub(in crate::reactive) fn hand_to(
     connection: &Connection,
     room: &Room,
@@ -368,16 +384,27 @@ pub(in crate::reactive) fn hand_to(
             )?;
             continue;
         }
-        let queued: bool = connection.query_row(
-            "SELECT EXISTS(SELECT 1 FROM reactive_runs WHERE agent_id=?1 AND status='queued' AND json_extract(payload,'$.trigger.room_id')=?2 AND COALESCE(json_extract(payload,'$.trigger.resumed'),0)=0)",
-            params![agent.id, room.id],
-            |row| row.get(0),
-        )?;
-        if queued {
+        let prompt = room_prompt(room, &names, &agent.name, &history, &message.id);
+        if let Some(mut run) = queued_run(connection, &agent.id, &room.id)? {
+            if let Some(RunTrigger::Room {
+                message_id,
+                hop: queued_hop,
+                ..
+            }) = run.trigger.as_mut()
+            {
+                *message_id = message.id.clone();
+                *queued_hop = if message.author == RoomAuthor::Owner {
+                    0
+                } else {
+                    (*queued_hop).max(hop)
+                };
+            }
+            run.prompt = prompt;
+            run.updated_at = EpochMs::now();
+            save_run(connection, &run)?;
             continue;
         }
         queue_capacity(connection)?;
-        let prompt = room_prompt(room, &names, &agent.name, &history, &message.id);
         let mut run = new_run(connection, agent, prompt, None, None, RunStatus::Queued, 0)?;
         run.trigger = Some(RunTrigger::Room {
             room_id: room.id.clone(),

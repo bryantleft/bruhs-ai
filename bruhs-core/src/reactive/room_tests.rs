@@ -1055,4 +1055,5 @@ async fn a_room_run_cannot_be_retried() {
     assert_eq!(run(&runtime, &id).await.status, RunStatus::Cancelled);
 }
 
+mod handoff_tests;
 mod lifecycle_tests;
