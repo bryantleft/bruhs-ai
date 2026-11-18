@@ -330,6 +330,40 @@ impl RoomForm {
     }
 }
 
+/// The form a room dialog opens with: blank for a new room, else the room
+/// without members who have left the crew (and a lead who left with them),
+/// so an untouched form still saves.
+#[must_use]
+pub fn room_form_for(room: Option<&Room>, crew: &[BruhState]) -> RoomForm {
+    let Some(room) = room else {
+        return RoomForm::default();
+    };
+    let mut form = RoomForm::from_room(room);
+    form.members
+        .retain(|id| crew.iter().any(|bruh| bruh.agent_id == *id));
+    if form
+        .lead
+        .as_ref()
+        .is_some_and(|lead| !form.members.contains(lead))
+    {
+        form.lead = None;
+    }
+    form
+}
+
+/// The lead picker's choices as (agent id, name): [`NO_LEAD`] with an empty
+/// id, then each checked member in crew order.
+#[must_use]
+pub fn lead_choices(form: &RoomForm, crew: &[BruhState]) -> Vec<(String, String)> {
+    std::iter::once((String::new(), NO_LEAD.to_string()))
+        .chain(
+            crew.iter()
+                .filter(|bruh| form.members.contains(&bruh.agent_id))
+                .map(|bruh| (bruh.agent_id.clone(), bruh.name.clone())),
+        )
+        .collect()
+}
+
 /// The command a saved form sends: create for a new room, update for a
 /// changed one, `None` when nothing changed, or the first rule it breaks.
 pub fn room_command(
@@ -648,5 +682,49 @@ mod tests {
             ),
             Err("Name the room.")
         );
+    }
+
+    #[test]
+    fn the_lead_list_follows_the_checked_members() {
+        let crew = [state("a", "Ada"), state("b", "Bo"), state("c", "Cy")];
+        // Checked out of crew order on purpose: the list keeps crew order.
+        let form = RoomForm {
+            name: "Launch".into(),
+            members: vec!["c".into(), "a".into()],
+            lead: None,
+        };
+        assert_eq!(
+            lead_choices(&form, &crew),
+            [
+                (String::new(), NO_LEAD.to_string()),
+                ("a".into(), "Ada".into()),
+                ("c".into(), "Cy".into()),
+            ]
+        );
+        assert_eq!(lead_choices(&RoomForm::default(), &crew).len(), 1);
+    }
+
+    #[test]
+    fn a_room_opens_without_members_who_left_the_crew() {
+        let crew = [state("a", "Ada"), state("b", "Bo")];
+        assert_eq!(room_form_for(None, &crew), RoomForm::default());
+        let room = Room {
+            id: "r".into(),
+            name: "Launch".into(),
+            members: vec!["gone".into(), "b".into()],
+            lead: Some("gone".into()),
+        };
+        let form = room_form_for(Some(&room), &crew);
+        assert_eq!(form.members, ["b"]);
+        assert_eq!(form.lead, None);
+        // What is left saves, where the room as stored would not.
+        let eligible = ["a", "b"];
+        assert!(room_command(Some(&room), "r", &form, &eligible).is_ok());
+        assert!(room_command(Some(&room), "r", &RoomForm::from_room(&room), &eligible).is_err());
+        let kept = Room {
+            lead: Some("b".into()),
+            ..room
+        };
+        assert_eq!(room_form_for(Some(&kept), &crew).lead.as_deref(), Some("b"));
     }
 }

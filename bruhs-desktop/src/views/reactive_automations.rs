@@ -738,26 +738,28 @@ impl ReactiveAutomations {
                             this.send_in(next, scope, cx);
                         }
                     }
-                    Err(error) => {
-                        this.queued.clear();
-                        let message = reactive_error(error);
-                        if scope == Scope::CreateBruh {
-                            this.create_failed();
-                        }
-                        if scope == Scope::Room {
-                            this.room_failed();
-                        }
-                        if scope == Scope::General {
-                            this.error = Some(message);
-                        } else {
-                            this.scoped_error = Some((scope, message));
-                        }
-                    }
+                    Err(error) => this.command_failed(scope, reactive_error(error)),
                 }
                 cx.notify();
             });
         }));
         cx.notify();
+    }
+    /// The service refused a command: drop what was queued behind it, let
+    /// the dialog that sent it try again, and show why where it was sent.
+    fn command_failed(&mut self, scope: Scope, message: String) {
+        self.queued.clear();
+        if scope == Scope::CreateBruh {
+            self.create_failed();
+        }
+        if scope == Scope::Room {
+            self.room_failed();
+        }
+        if scope == Scope::General {
+            self.error = Some(message);
+        } else {
+            self.scoped_error = Some((scope, message));
+        }
     }
     /// Send `commands` in order, after any command already on its way.
     fn send_all(
@@ -1602,6 +1604,13 @@ impl ReactiveAutomations {
     #[cfg(test)]
     pub(crate) fn sent_for_test(&self) -> &[ReactiveCommand] {
         &self.sent
+    }
+    /// Refuse the last command sent, from the room dialog, as the service
+    /// would.
+    #[cfg(test)]
+    pub(crate) fn refuse_room_for_test(&mut self, error: &str, cx: &mut Context<'_, Self>) {
+        self.command_failed(Scope::Room, error.to_string());
+        cx.notify();
     }
     /// Answer the last command sent as the service would on success:
     /// `snapshot`, then what the command closes or opens.

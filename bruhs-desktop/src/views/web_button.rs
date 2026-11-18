@@ -30,6 +30,31 @@ pub fn is_web_button_activation_key(key: &str) -> bool {
     matches!(key, "enter" | "space")
 }
 
+/// Run `action` on a click, or on Enter or Space while the control has
+/// focus, once per press. gpui also clicks a focused element on key up, so
+/// keyboard clicks are ignored here; the key down already acted.
+pub(crate) fn on_press<T: 'static>(
+    el: Stateful<Div>,
+    cx: &Context<'_, T>,
+    action: impl Fn(&mut T, &mut Window, &mut Context<'_, T>) + 'static,
+) -> Stateful<Div> {
+    let action = std::rc::Rc::new(action);
+    let key = std::rc::Rc::clone(&action);
+    el.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
+        if !event.is_keyboard() {
+            cx.stop_propagation();
+            action(this, window, cx);
+        }
+    }))
+    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
+        if is_web_button_activation_key(event.keystroke.key.as_str()) {
+            window.prevent_default();
+            cx.stop_propagation();
+            key(this, window, cx);
+        }
+    }))
+}
+
 /// Whether a button takes clicks, focus and hover styling.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum ButtonState {

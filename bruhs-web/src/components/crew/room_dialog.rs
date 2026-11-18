@@ -3,8 +3,9 @@
 //! rules; with a room, Delete room asks once inline before it sends.
 
 use bruhs_models::crew::room::{
-    room_command, Room, RoomForm, CREATE_ROOM, DELETE_ROOM, DELETE_ROOM_CONFIRM, DELETE_ROOM_NO,
-    DELETE_ROOM_YES, NEW_ROOM, NO_LEAD, ROOM_LEAD, ROOM_MEMBERS, ROOM_SETTINGS, SAVE_ROOM,
+    lead_choices, room_command, room_form_for, RoomForm, CREATE_ROOM, DELETE_ROOM,
+    DELETE_ROOM_CONFIRM, DELETE_ROOM_NO, DELETE_ROOM_YES, NEW_ROOM, ROOM_LEAD, ROOM_MEMBERS,
+    ROOM_SETTINGS, SAVE_ROOM,
 };
 use bruhs_models::crew::{BruhState, RAIL_FACE_PX};
 use bruhs_models::reactive::ReactiveCommand;
@@ -20,35 +21,12 @@ use crate::ui::{
 const LABEL: &str = "block min-w-0 space-y-1 text-label-sm text-rambutan-300";
 const MEMBER: &str = "bruhs-control flex min-h-control w-full min-w-0 items-center gap-2 rounded-grape px-2 py-1 text-left transition-colors hover:bg-longan-700/40 focus-visible:outline-2 focus-visible:outline-persimmon-400";
 
-/// The lead picker: no lead, then each checked member in crew order.
+/// The lead picker: the shared choices as dropdown options.
 fn lead_options(form: &RoomForm, bruhs: &[BruhState]) -> Vec<DropdownOption> {
-    std::iter::once(DropdownOption::new("", NO_LEAD))
-        .chain(
-            bruhs
-                .iter()
-                .filter(|bruh| form.members.contains(&bruh.agent_id))
-                .map(|bruh| DropdownOption::new(bruh.agent_id.clone(), bruh.name.clone())),
-        )
+    lead_choices(form, bruhs)
+        .into_iter()
+        .map(|(id, name)| DropdownOption::new(id, name))
         .collect()
-}
-
-/// The form a dialog opens with: blank for a new room, else the room
-/// without members who have left the crew, so an untouched form still saves.
-fn form_for(room: Option<&Room>, bruhs: &[BruhState]) -> RoomForm {
-    let Some(room) = room else {
-        return RoomForm::default();
-    };
-    let mut form = RoomForm::from_room(room);
-    form.members
-        .retain(|id| bruhs.iter().any(|bruh| bruh.agent_id == *id));
-    if form
-        .lead
-        .as_ref()
-        .is_some_and(|lead| !form.members.contains(lead))
-    {
-        form.lead = None;
-    }
-    form
 }
 
 /// What the dialog sent and is waiting on.
@@ -101,7 +79,7 @@ pub fn RoomDialog(
         let is_open = open.get();
         if is_open && was_open != Some(true) {
             form.set(untrack(|| {
-                bruhs.with(|bruhs| existing.with(|room| form_for(room.as_ref(), bruhs)))
+                bruhs.with(|bruhs| existing.with(|room| room_form_for(room.as_ref(), bruhs)))
             }));
             invalid.set(None);
             confirming.set(false);
@@ -341,72 +319,5 @@ pub fn RoomDialog(
                 </div>
             </form>
         </Dialog>
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use bruhs_models::crew::{BruhAccess, BruhLook, BruhStatus};
-
-    fn bruh(id: &str, name: &str) -> BruhState {
-        BruhState {
-            agent_id: id.into(),
-            name: name.into(),
-            look: BruhLook::default(),
-            access: BruhAccess::default(),
-            effort: None,
-            status: BruhStatus::Asleep,
-            next_wake_ms: None,
-            unread: 0,
-        }
-    }
-
-    #[test]
-    fn the_lead_list_follows_the_checked_members() {
-        let bruhs = [bruh("a", "Ada"), bruh("b", "Bo"), bruh("c", "Cy")];
-        // Checked out of crew order on purpose: the list keeps crew order.
-        let form = RoomForm {
-            name: "Launch".into(),
-            members: vec!["c".into(), "a".into()],
-            lead: None,
-        };
-        let options: Vec<(String, String)> = lead_options(&form, &bruhs)
-            .into_iter()
-            .map(|option| (option.value, option.label))
-            .collect();
-        assert_eq!(
-            options,
-            [
-                (String::new(), NO_LEAD.to_string()),
-                ("a".into(), "Ada".into()),
-                ("c".into(), "Cy".into()),
-            ]
-        );
-        assert_eq!(lead_options(&RoomForm::default(), &bruhs).len(), 1);
-    }
-
-    #[test]
-    fn a_room_opens_without_members_who_left_the_crew() {
-        let bruhs = [bruh("a", "Ada"), bruh("b", "Bo")];
-        assert_eq!(form_for(None, &bruhs), RoomForm::default());
-        let room = Room {
-            id: "r".into(),
-            name: "Launch".into(),
-            members: vec!["gone".into(), "b".into()],
-            lead: Some("gone".into()),
-        };
-        let form = form_for(Some(&room), &bruhs);
-        assert_eq!(form.members, ["b"]);
-        assert_eq!(form.lead, None);
-        // What is left saves, where the room as stored would not.
-        let eligible = ["a", "b"];
-        assert!(room_command(Some(&room), "r", &form, &eligible).is_ok());
-        assert!(room_command(Some(&room), "r", &RoomForm::from_room(&room), &eligible).is_err());
-        let kept = Room {
-            lead: Some("b".into()),
-            ..room
-        };
-        assert_eq!(form_for(Some(&kept), &bruhs).lead.as_deref(), Some("b"));
     }
 }

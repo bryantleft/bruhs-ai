@@ -7,9 +7,10 @@ use super::create_bruh::{hint, label, labelled, text_field, ERROR_FILL_OPACITY, 
 use super::*;
 use crate::views::crew_face::bruh_face;
 use crate::views::dropdown::{dropdown, DropdownGroup, DropdownOption, Listbox};
+use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
-    room_command, Room, RoomForm, RoomState, DELETE_ROOM_CONFIRM, DELETE_ROOM_NO, DELETE_ROOM_YES,
-    NEW_ROOM, NO_LEAD, ROOM_LEAD, ROOM_MEMBERS, ROOM_SETTINGS,
+    lead_choices, room_command, room_form_for, Room, RoomForm, RoomState, DELETE_ROOM_CONFIRM,
+    DELETE_ROOM_NO, DELETE_ROOM_YES, NEW_ROOM, ROOM_LEAD, ROOM_MEMBERS, ROOM_SETTINGS,
 };
 use bruhs_models::crew::RAIL_FACE_PX;
 use gpui_component::scroll::ScrollableElement;
@@ -65,38 +66,6 @@ pub(super) struct RoomDialog {
     _subscriptions: Vec<gpui::Subscription>,
 }
 
-/// The lead picker: no lead, then each checked member in crew order, as
-/// (agent id, label).
-fn lead_choices(form: &RoomForm, bruhs: &[BruhState]) -> Vec<(String, String)> {
-    std::iter::once((String::new(), NO_LEAD.to_string()))
-        .chain(
-            bruhs
-                .iter()
-                .filter(|bruh| form.members.contains(&bruh.agent_id))
-                .map(|bruh| (bruh.agent_id.clone(), bruh.name.clone())),
-        )
-        .collect()
-}
-
-/// The form a dialog opens with: blank for a new room, else the room
-/// without members who have left the crew, so an untouched form still saves.
-fn form_for(room: Option<&Room>, bruhs: &[BruhState]) -> RoomForm {
-    let Some(room) = room else {
-        return RoomForm::default();
-    };
-    let mut form = RoomForm::from_room(room);
-    form.members
-        .retain(|id| bruhs.iter().any(|bruh| bruh.agent_id == *id));
-    if form
-        .lead
-        .as_ref()
-        .is_some_and(|lead| !form.members.contains(lead))
-    {
-        form.lead = None;
-    }
-    form
-}
-
 /// The dropdown takes `'static` values; each agent id is kept once for the
 /// life of the app, so the set grows only with the crew.
 fn lead_value(id: &str) -> &'static str {
@@ -115,30 +84,6 @@ fn lead_value(id: &str) -> &'static str {
     let value: &'static str = Box::leak(id.to_owned().into_boxed_str());
     values.insert(value);
     value
-}
-
-/// A click, or Enter or Space on the focused control, once per press.
-fn on_press(
-    el: Stateful<Div>,
-    cx: &Context<'_, ReactiveAutomations>,
-    action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
-        + 'static,
-) -> Stateful<Div> {
-    let action = Rc::new(action);
-    let key = Rc::clone(&action);
-    el.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-        if !event.is_keyboard() {
-            cx.stop_propagation();
-            action(this, window, cx);
-        }
-    }))
-    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-        if super::super::web_button::is_web_button_activation_key(event.keystroke.key.as_str()) {
-            window.prevent_default();
-            cx.stop_propagation();
-            key(this, window, cx);
-        }
-    }))
 }
 
 impl ReactiveAutomations {
@@ -163,7 +108,7 @@ impl ReactiveAutomations {
         cx: &mut Context<'_, Self>,
     ) {
         let existing = room_id.as_deref().and_then(|id| self.room(id)).cloned();
-        let form = form_for(existing.as_ref(), &self.crew.bruhs);
+        let form = room_form_for(existing.as_ref(), &self.crew.bruhs);
         let name = cx.new(|cx| InputState::new(window, cx));
         name.update(cx, |input, cx| input.set_value(&form.name, window, cx));
         // Enter in the name saves, like the web form's submit.
@@ -309,6 +254,8 @@ impl ReactiveAutomations {
                 } else {
                     Pending::Create(id)
                 });
+                // A new try drops the last refusal's reason.
+                self.clear_room_error();
                 self.send_in(command, Scope::Room, cx);
                 cx.notify();
             }
@@ -459,7 +406,7 @@ impl ReactiveAutomations {
                             el.bg(theme::blueberry_400()).child(
                                 svg()
                                     .path(crate::assets::CHECK_ICON_PATH)
-                                    .size(px(theme::ICON_XS_PX))
+                                    .size(px(theme::ICON_INLINE_PX))
                                     .text_color(theme::longan_950()),
                             )
                         } else {
@@ -680,66 +627,7 @@ impl ReactiveAutomations {
 
 #[cfg(test)]
 mod tests {
-    use super::{form_for, lead_choices, lead_value, NO_LEAD};
-    use bruhs_models::crew::room::{room_command, Room, RoomForm};
-    use bruhs_models::crew::{BruhAccess, BruhLook, BruhState, BruhStatus};
-
-    fn bruh(id: &str, name: &str) -> BruhState {
-        BruhState {
-            agent_id: id.into(),
-            name: name.into(),
-            look: BruhLook::default(),
-            access: BruhAccess::default(),
-            effort: None,
-            status: BruhStatus::Asleep,
-            next_wake_ms: None,
-            unread: 0,
-        }
-    }
-
-    #[test]
-    fn the_lead_list_follows_the_checked_members() {
-        let bruhs = [bruh("a", "Ada"), bruh("b", "Bo"), bruh("c", "Cy")];
-        // Checked out of crew order on purpose: the list keeps crew order.
-        let form = RoomForm {
-            name: "Launch".into(),
-            members: vec!["c".into(), "a".into()],
-            lead: None,
-        };
-        assert_eq!(
-            lead_choices(&form, &bruhs),
-            [
-                (String::new(), NO_LEAD.to_string()),
-                ("a".into(), "Ada".into()),
-                ("c".into(), "Cy".into()),
-            ]
-        );
-        assert_eq!(lead_choices(&RoomForm::default(), &bruhs).len(), 1);
-    }
-
-    #[test]
-    fn a_room_opens_without_members_who_left_the_crew() {
-        let bruhs = [bruh("a", "Ada"), bruh("b", "Bo")];
-        assert_eq!(form_for(None, &bruhs), RoomForm::default());
-        let room = Room {
-            id: "r".into(),
-            name: "Launch".into(),
-            members: vec!["gone".into(), "b".into()],
-            lead: Some("gone".into()),
-        };
-        let form = form_for(Some(&room), &bruhs);
-        assert_eq!(form.members, ["b"]);
-        assert_eq!(form.lead, None);
-        // What is left saves, where the room as stored would not.
-        let eligible = ["a", "b"];
-        assert!(room_command(Some(&room), "r", &form, &eligible).is_ok());
-        assert!(room_command(Some(&room), "r", &RoomForm::from_room(&room), &eligible).is_err());
-        let kept = Room {
-            lead: Some("b".into()),
-            ..room
-        };
-        assert_eq!(form_for(Some(&kept), &bruhs).lead.as_deref(), Some("b"));
-    }
+    use super::lead_value;
 
     #[test]
     fn a_lead_value_is_kept_once_per_id() {

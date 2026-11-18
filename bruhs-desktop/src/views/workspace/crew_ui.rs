@@ -6,6 +6,7 @@
 use super::*;
 use crate::views::crew_face::bruh_face;
 use crate::views::reactive_automations::local_time;
+use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     new_room_block, room_order, room_status_line, RoomState, CREATE_ROOM, DELETE_ROOM, NEW_ROOM,
     SAVE_ROOM,
@@ -140,29 +141,6 @@ fn small_action(id: &'static str, label: &'static str, disabled: bool) -> Statef
                     })
             }
         })
-}
-
-/// Run `action` on a click or on Enter or Space, once per press.
-fn on_press(
-    el: Stateful<Div>,
-    cx: &Context<'_, Workspace>,
-    action: impl Fn(&mut Workspace, &mut Window, &mut Context<'_, Workspace>) + 'static,
-) -> Stateful<Div> {
-    let action = Rc::new(action);
-    let key = Rc::clone(&action);
-    el.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-        if !event.is_keyboard() {
-            cx.stop_propagation();
-            action(this, window, cx);
-        }
-    }))
-    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-            window.prevent_default();
-            cx.stop_propagation();
-            key(this, window, cx);
-        }
-    }))
 }
 
 impl Workspace {
@@ -731,7 +709,7 @@ impl Workspace {
         self.persist_and_notify(cx);
     }
 
-    /// The rail's +: a blank New bruh dialog, once the service speaks crew.
+    /// The rail's New bruh: a blank dialog, once the service speaks crew.
     pub(super) fn open_create_bruh_dialog(
         &mut self,
         window: &mut Window,
@@ -1519,12 +1497,13 @@ mod tests {
             &workspace,
             cx,
             vec![named("a", "Ada")],
-            vec![room("beta", &["a"]), room("Alpha", &[])],
+            // Byte order would put "Beta" first; the rail ignores case.
+            vec![room("Beta", &["a"]), room("alpha", &[])],
             CREW_PROTOCOL,
         );
         let ada = cx.debug_bounds("desktop-crew-row-a").expect("Ada");
-        let alpha = cx.debug_bounds("desktop-crew-room-Alpha").expect("Alpha");
-        let beta = cx.debug_bounds("desktop-crew-room-beta").expect("beta");
+        let alpha = cx.debug_bounds("desktop-crew-room-alpha").expect("alpha");
+        let beta = cx.debug_bounds("desktop-crew-room-Beta").expect("Beta");
         assert!(ada.bottom() <= alpha.top(), "rooms come after the bruhs");
         assert!(alpha.bottom() <= beta.top(), "rooms go by name, not case");
         assert!(
@@ -1535,7 +1514,7 @@ mod tests {
         );
         // The icon takes a face's width, so the names line up.
         let icon = cx
-            .debug_bounds("desktop-crew-room-icon-Alpha")
+            .debug_bounds("desktop-crew-room-icon-alpha")
             .expect("the room icon");
         assert_eq!(icon.size.width, gpui::px(RAIL_FACE_PX));
         let lists = cx
@@ -1543,12 +1522,12 @@ mod tests {
             .expect("one list region");
         assert!(lists.contains(&ada.center()) && lists.contains(&beta.center()));
         // Clicking a room opens it.
-        click(cx, "desktop-crew-room-beta");
+        click(cx, "desktop-crew-room-Beta");
         workspace.update(cx, |workspace, _| {
             assert_eq!(
                 workspace.active_view,
                 bruhs_models::AppView::Room {
-                    room_id: "beta".into()
+                    room_id: "Beta".into()
                 }
             );
         });
@@ -1598,6 +1577,57 @@ mod tests {
                 }
             );
         });
+    }
+
+    #[gpui::test]
+    fn a_refused_room_keeps_the_dialog_open_to_try_again(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        show_rooms(
+            &workspace,
+            cx,
+            vec![named("a", "Ada")],
+            Vec::new(),
+            CREW_PROTOCOL,
+        );
+        click(cx, "desktop-crew-new-room");
+        click(cx, "desktop-room-name");
+        cx.simulate_input("Launch");
+        click(cx, "desktop-room-member-a");
+        click(cx, "desktop-room-submit");
+        assert_eq!(sent(&workspace, cx).len(), 1);
+        workspace.update(cx, |workspace, cx| {
+            assert!(
+                workspace
+                    .reactive_automations
+                    .read(cx)
+                    .room_dialog_disabled(),
+                "one save at a time"
+            );
+        });
+        workspace.update_in(cx, |workspace, _, cx| {
+            workspace.reactive_automations.update(cx, |panel, cx| {
+                panel.refuse_room_for_test("A room needs a name.", cx);
+            });
+        });
+        cx.run_until_parked();
+        assert!(room_dialog_open(&workspace, cx), "the dialog stays");
+        assert!(
+            cx.debug_bounds("desktop-room-error").is_some(),
+            "with the reason"
+        );
+        workspace.update(cx, |workspace, cx| {
+            assert!(!workspace
+                .reactive_automations
+                .read(cx)
+                .room_dialog_disabled());
+        });
+        // Create works again, and the reason goes with the next try.
+        click(cx, "desktop-room-submit");
+        let sent = sent(&workspace, cx);
+        assert_eq!(sent.len(), 2);
+        assert!(matches!(sent[1], ReactiveCommand::CreateRoom { .. }));
+        assert!(cx.debug_bounds("desktop-room-error").is_none());
     }
 
     #[gpui::test]
