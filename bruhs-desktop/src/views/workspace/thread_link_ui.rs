@@ -19,11 +19,11 @@ use crate::views::chat::{ChatView, MessageRole, ThreadMessageAnswer};
 use bruhs_models::ids::ThreadId;
 use bruhs_models::reactive::{ReactiveCommand, ReactiveRun};
 use bruhs_models::thread_link::{
-    answer_reply, bruh_sent_reply, delivered_reply, due_bruh_answers, forget_bruh_waits_of,
-    list_reply, pick_role, plan_bruh_message, plan_message, read_reply, recipient_waiting_reply,
-    resolve_thread, Answer, BruhOutgoing, BruhWait, Created, Delivery, DeliveryState, Outgoing,
-    Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadRequest,
-    BRUH_SERVICE_OLD, BRUH_WAIT_POLL_MS,
+    answer_reply, bruh_sent_reply, bruh_service_refusal, delivered_reply, due_bruh_answers,
+    forget_bruh_waits_of, list_reply, pick_role, plan_bruh_message, plan_message, read_reply,
+    recipient_waiting_reply, resolve_thread, Answer, BruhOutgoing, BruhWait, Created, Delivery,
+    DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply,
+    ThreadRequest, BRUH_WAIT_POLL_MS,
 };
 use gpui::{Context, Entity, Task, Window};
 
@@ -601,8 +601,8 @@ impl Workspace {
             caller_full_access,
         } = *call;
         let panel = self.reactive_automations.clone();
-        if !panel.read(cx).rooms_ready() {
-            return ThreadAnswer::Now(ThreadReply::refused(BRUH_SERVICE_OLD));
+        if let Some(reason) = bruh_service_refusal(panel.read(cx).crew_protocol()) {
+            return ThreadAnswer::Now(ThreadReply::refused(reason));
         }
         let (Ok(caller_id), Some(sender)) = (
             ThreadId::try_from(caller),
@@ -1627,6 +1627,21 @@ mod tests {
         assert_eq!(sent_commands(&workspace, cx).len(), 1);
         let replies = take_resolved_for_test();
         assert!(replies.iter().any(|(_, reply)| reply.ok), "{replies:?}");
+        recipient.update(cx, |chat, _| chat.is_streaming = false);
+    }
+
+    #[gpui::test]
+    fn message_bruh_before_the_service_answers_says_so(cx: &mut TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        let (sender, _, recipient, _) = two_threads(&workspace, cx);
+        let refused = now(ask(&workspace, &sender, message_bo("check", false), cx));
+        assert!(!refused.ok);
+        assert_eq!(
+            refused.text,
+            "Not sent: the app hasn't heard from the background service yet. Try again in a moment, and tell the user if it keeps happening."
+        );
+        cx.run_until_parked();
+        assert!(sent_commands(&workspace, cx).is_empty());
         recipient.update(cx, |chat, _| chat.is_streaming = false);
     }
 

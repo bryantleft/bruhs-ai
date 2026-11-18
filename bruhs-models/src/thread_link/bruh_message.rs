@@ -12,17 +12,32 @@ use super::{
     bruh_delivery_prompt, clip, header_title, hop_limit_reply, next_hop, prompt_hops, short_id,
     Answer, ThreadReply, ANSWER_CHARS, MIN_PREFIX_CHARS, READ_MESSAGE_CHARS,
 };
-use crate::crew::{AccessLevel, BruhState, BruhStatus, STOPPED_LINE};
+use crate::crew::{rooms_ready, AccessLevel, BruhState, BruhStatus, STOPPED_LINE};
 use crate::ids::ThreadId;
 use crate::reactive::{ReactiveRun, RunStatus, HISTORY_LIMIT};
 
 /// How often an app reads a waited-for bruh run while it has no news.
 pub const BRUH_WAIT_POLL_MS: u32 = 2_000;
 
-/// What `message_bruh` says when the service is older than rooms (or not
-/// known yet): it would drop the run id, so a wait could never find the run.
+/// What `message_bruh` says when the service is older than rooms: it would
+/// drop the run id, so a wait could never find the run.
 pub const BRUH_SERVICE_OLD: &str =
     "Not sent: the background service is older and can't take messages for bruhs. Tell the user to update it.";
+
+/// What `message_bruh` says before the app knows the service's protocol.
+pub const BRUH_SERVICE_UNKNOWN: &str =
+    "Not sent: the app hasn't heard from the background service yet. Try again in a moment, and tell the user if it keeps happening.";
+
+/// Why `message_bruh` can't go to the service whose crew protocol is
+/// `protocol` (`None` while the app doesn't know it), if it can't.
+#[must_use]
+pub fn bruh_service_refusal(protocol: Option<u32>) -> Option<&'static str> {
+    match protocol {
+        None => Some(BRUH_SERVICE_UNKNOWN),
+        Some(protocol) if !rooms_ready(protocol) => Some(BRUH_SERVICE_OLD),
+        Some(_) => None,
+    }
+}
 
 /// One `message_bruh` call, as the app sees it.
 #[derive(Debug, Clone, Copy)]
@@ -425,6 +440,18 @@ mod tests {
                 .unwrap_err()
                 .ok
         );
+    }
+
+    #[test]
+    fn a_bruh_message_needs_a_service_known_to_speak_rooms() {
+        use crate::crew::{CREW_PROTOCOL, ROOMS_PROTOCOL};
+        assert_eq!(bruh_service_refusal(None), Some(BRUH_SERVICE_UNKNOWN));
+        assert_eq!(
+            bruh_service_refusal(Some(ROOMS_PROTOCOL - 1)),
+            Some(BRUH_SERVICE_OLD)
+        );
+        assert_eq!(bruh_service_refusal(Some(ROOMS_PROTOCOL)), None);
+        assert_eq!(bruh_service_refusal(Some(CREW_PROTOCOL)), None);
     }
 
     #[test]

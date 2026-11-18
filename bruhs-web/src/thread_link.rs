@@ -17,16 +17,16 @@
 //! run is read on every crew change and every [`BRUH_WAIT_POLL_MS`].
 
 use bruhs_models::agent::Role;
-use bruhs_models::crew::{rooms_ready, BruhState};
+use bruhs_models::crew::BruhState;
 use bruhs_models::ids::ThreadId;
 use bruhs_models::reactive::ReactiveCommand;
 use bruhs_models::roles::RoleBook;
 use bruhs_models::thread_link::{
-    answer_reply, bruh_sent_reply, delivered_reply, due_bruh_answers, forget_bruh_waits_of,
-    list_reply, pick_role, plan_bruh_message, plan_message, read_reply, recipient_waiting_reply,
-    resolve_thread, Answer, BruhOutgoing, BruhWait, Created, Delivery, DeliveryState, Outgoing,
-    Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply, ThreadReplySubmission,
-    ThreadRequest, BRUH_SERVICE_OLD, BRUH_WAIT_POLL_MS,
+    answer_reply, bruh_sent_reply, bruh_service_refusal, delivered_reply, due_bruh_answers,
+    forget_bruh_waits_of, list_reply, pick_role, plan_bruh_message, plan_message, read_reply,
+    recipient_waiting_reply, resolve_thread, Answer, BruhOutgoing, BruhWait, Created, Delivery,
+    DeliveryState, Outgoing, Recipient, ThreadCard, ThreadLine, ThreadOperation, ThreadReply,
+    ThreadReplySubmission, ThreadRequest, BRUH_WAIT_POLL_MS,
 };
 use leptos::prelude::*;
 
@@ -413,8 +413,8 @@ impl ThreadLink {
         caller_full_access: bool,
     ) -> Option<ThreadReply> {
         let caller = caller_id.as_str();
-        if !self.protocol.get_untracked().is_some_and(rooms_ready) {
-            return Some(ThreadReply::refused(BRUH_SERVICE_OLD));
+        if let Some(reason) = bruh_service_refusal(self.protocol.get_untracked()) {
+            return Some(ThreadReply::refused(reason));
         }
         let threads = self.threads.get_untracked();
         let Some(sender) = threads.iter().find(|thread| thread.id == caller) else {
