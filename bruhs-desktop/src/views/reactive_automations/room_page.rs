@@ -37,6 +37,9 @@ const COMPOSER_FOCUS_RING_OPACITY: f32 = 0.40;
 const COMPOSER_X_PADDING_PX: f32 = 12.0;
 const COMPOSER_TOP_PADDING_PX: f32 = 10.0;
 const COMPOSER_BOTTOM_PADDING_PX: f32 = 4.0;
+/// Web `EDITOR_MIN_HEIGHT_PX` (52) for the text area, less the 1px border
+/// above and below that the web's inset ring does not take.
+const COMPOSER_FIELD_MIN_HEIGHT_PX: f32 = 52.0 - 2.0;
 /// The composer grows from one line to eight, like the web textarea.
 const COMPOSER_MIN_ROWS: usize = 1;
 const COMPOSER_MAX_ROWS: usize = 8;
@@ -1074,12 +1077,16 @@ impl ReactiveAutomations {
                 el.child(
                     div()
                         .debug_selector(|| "desktop-room-input".to_string())
+                        .min_h(px(COMPOSER_FIELD_MIN_HEIGHT_PX))
                         .px(px(COMPOSER_X_PADDING_PX))
                         .pt(px(COMPOSER_TOP_PADDING_PX))
                         .pb(px(COMPOSER_BOTTOM_PADDING_PX))
                         .child(
+                            // The wrapper holds the web textarea's padding;
+                            // the field adds none of its own.
                             Input::new(composer)
                                 .aria_label("Message")
+                                .p_0()
                                 .appearance(false)
                                 .bordered(false)
                                 .focus_bordered(false)
@@ -1566,6 +1573,42 @@ mod tests {
             })
         );
         assert_eq!(draft(&panel, cx), "");
+    }
+
+    /// Web `px-3 pt-2.5` on the textarea: the text sits 12px in and 10px
+    /// down from the composer's ring, with no field padding on top.
+    #[gpui::test]
+    fn the_composer_text_starts_where_the_web_textarea_does(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(
+            cx,
+            snapshot(
+                CREW_PROTOCOL,
+                vec![named("a", "Ada")],
+                vec![room(&["a"], Some("a"))],
+            ),
+        );
+        type_in(&panel, cx, "Hi");
+        let surface = cx
+            .debug_bounds("desktop-room-composer")
+            .expect("the composer");
+        let glyph = panel
+            .update(cx, |panel, cx| {
+                let composer = panel.room.as_ref().unwrap().composer.clone().unwrap();
+                composer.read(cx).range_to_bounds(&(0..1))
+            })
+            .expect("the first letter is laid out");
+        // The desktop ring is a 1px border inside the bounds.
+        let left = f32::from(glyph.left() - surface.left()) - 1.0;
+        let top = f32::from(glyph.top() - surface.top()) - 1.0;
+        assert!((left - 12.0).abs() <= 1.0, "text starts {left}px in");
+        assert!((top - 10.0).abs() <= 3.0, "text starts {top}px down");
+        // Web `EDITOR_MIN_HEIGHT_PX` (52) for the field and 36 for the Send
+        // row: 88px in all.
+        let height = f32::from(surface.size.height);
+        assert!(
+            (height - 88.0).abs() <= 1.0,
+            "the composer is {height}px tall"
+        );
     }
 
     #[gpui::test]
