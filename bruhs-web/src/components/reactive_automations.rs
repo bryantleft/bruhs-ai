@@ -6,7 +6,7 @@ use bruhs_models::crew::{
 use bruhs_models::reactive::*;
 use leptos::prelude::*;
 
-use crate::ui::{Button, ButtonSize, ButtonVariant, Input, Textarea};
+use crate::ui::{button_class, Button, ButtonSize, ButtonVariant, Input, Textarea};
 mod calendar;
 mod memory;
 mod notifications;
@@ -71,6 +71,15 @@ fn Check(label: &'static str, value: RwSignal<bool>) -> impl IntoView {
         <input type="checkbox" class="size-4 accent-persimmon-500" prop:checked=move || value.get() on:change=move |event| value.set(event_target_checked(&event)) />
         <span>{label}</span>
     </label> }
+}
+
+/// Focus `target` once the view has drawn it.
+fn focus_after_render(target: NodeRef<leptos::html::Button>) {
+    request_animation_frame(move || {
+        if let Some(Some(button)) = target.try_get_untracked() {
+            let _ = button.focus();
+        }
+    });
 }
 
 fn command_button(
@@ -197,6 +206,9 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
     let enabled = RwSignal::new(false);
     let chat = RwSignal::new(String::new());
     let chat_agent = RwSignal::new(String::new());
+    // The agent whose Delete is asking first. It lives here, not in the
+    // card, so a snapshot that redraws the cards keeps the question open.
+    let deleting = RwSignal::new(None::<String>);
     let edit_agent = Callback::new(move |agent: ReactiveAgent| {
         agent_id.set(Some(agent.id.clone()));
         name.set(agent.name);
@@ -367,6 +379,15 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                 {move || snapshot.with(|s| s.as_ref().map(|s| s.agents.clone()).unwrap_or_default()).into_iter().map(|agent| {
                     let edit = agent.clone(); let mut toggle = agent.clone(); toggle.enabled = !toggle.enabled;
                     let chat_id = agent.id.clone();
+                    // Delete agent asks first, inline as Delete room does: the
+                    // question takes the button's place with focus on Keep, the
+                    // safe choice, and Keep gives focus back to Delete agent.
+                    let delete_ref = NodeRef::<leptos::html::Button>::new();
+                    let keep_ref = NodeRef::<leptos::html::Button>::new();
+                    let asking = { let id = agent.id.clone(); Signal::derive(move || deleting.with(|deleting| deleting.as_deref() == Some(id.as_str()))) };
+                    let ask_id = agent.id.clone();
+                    let confirm = bruhs_models::crew::delete_bruh_confirm(&agent.name);
+                    let delete = apply(ReactiveChange::DeleteAgent { id: agent.id.clone() });
                     // Automation cards already show the memory of their agents.
                     let in_automation = snapshot.with(|s| s.as_ref().is_some_and(|s| s.subscriptions.iter().any(|sub| sub.agent_id == agent.id && AutomationSetup::from_subscription(s, sub).is_some())));
                     view! { <article class=CARD>
@@ -374,8 +395,19 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                             <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(move |_| edit_agent.run(edit.clone()))>"Edit and memory"</Button>
                             <Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| chat_agent.set(chat_id.clone()))>"Chat"</Button>
                             {command_button(if agent.enabled { "Pause" } else { "Enable" }, apply(ReactiveChange::SaveAgent { agent: toggle }), send)}
-                            {command_button("Delete agent", apply(ReactiveChange::DeleteAgent { id: agent.id.clone() }), send)}
+                            {move || (!asking.get()).then(|| { let id = ask_id.clone(); view! {
+                                <button type="button" node_ref=delete_ref data-agent-delete="" class=button_class(ButtonVariant::Outline, ButtonSize::Small, "") on:click=move |_| { deleting.set(Some(id.clone())); focus_after_render(keep_ref); }>"Delete agent"</button>
+                            } })}
                         </div></div>
+                        {move || asking.get().then(|| { let delete = delete.clone(); view! {
+                            <div data-agent-delete-confirm="" class="mt-2 space-y-2 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50">
+                                <p class="text-body-sm text-rambutan-200">{confirm.clone()}</p>
+                                <div class="flex flex-wrap items-center gap-2">
+                                    <button type="button" data-agent-delete-yes="" class=button_class(ButtonVariant::Destructive, ButtonSize::Small, "") on:click=move |_| send.run(delete.clone())>"Delete"</button>
+                                    <button type="button" node_ref=keep_ref data-agent-delete-keep="" class=button_class(ButtonVariant::Ghost, ButtonSize::Small, "") on:click=move |_| { deleting.set(None); focus_after_render(delete_ref); }>"Keep"</button>
+                                </div>
+                            </div>
+                        } })}
                         {(!in_automation).then(|| view! { <memory::AgentMemoryPanel agent_id=agent.id snapshot=snapshot send=send /> })}
                     </article> }
                 }).collect_view()}
@@ -422,7 +454,7 @@ pub fn ReactiveAutomations(on_preview: Callback<DraftPreview>) -> impl IntoView 
                 <details class=CARD><summary class="cursor-pointer text-label text-rambutan-300">"Publish a custom event"</summary><div class="mt-3 space-y-3"><label class="block space-y-1 text-label-sm text-rambutan-300"><span>"Custom event source"</span><select aria-label="Custom event source" class=SELECT prop:value=move || publish_source.get() on:change=move |event| publish_source.set(event_target_value(&event))><option value="">"Choose source"</option>{move || snapshot.with(|s| s.as_ref().map(|s| s.sources.clone()).unwrap_or_default()).into_iter().filter(|s| matches!(s.kind, SourceKind::Custom)).map(|s| view! { <option value=s.id>{s.name}</option> }).collect_view()}</select></label><Field label="Unique event key" value=publish_key /><Field label="Event payload as JSON" value=publish_payload multiline=true /><p class="text-label-sm text-rambutan-500">"Reusing a key keeps the same event from running twice."</p><Button variant=ButtonVariant::Outline size=ButtonSize::Small on_click=Callback::new(move |_| match serde_json::from_str(&publish_payload.get_untracked()) { Ok(payload) => send.run(ReactiveCommand::Publish { source_id: publish_source.get_untracked(), key: publish_key.get_untracked(), payload }), Err(err) => error.set(Some(format!("Check the event JSON: {err}"))) })>"Publish event"</Button></div></details>
                 </div></details>
                 {move || snapshot.with(|s| s.as_ref().map(|s| s.proposals.clone()).unwrap_or_default()).into_iter().filter(|p| p.status==ProposalStatus::Pending).map(|proposal| {
-                    let level = match &proposal.change { ReactiveChange::SaveAutomation { automation } => snapshot.with(|s| bruhs_models::crew::agent_run_level(s.as_ref(), &automation.agent.id, &automation.agent.model)), _ => AccessLevel::ReadOnly }; let label = proposal_label(&proposal.change, level); let approve_label=match &proposal.change {ReactiveChange::SaveAutomation{automation} if automation.enabled()=>"Enable automation",ReactiveChange::SaveAutomation{..}=>"Save automation",_=>"Approve setup change"}; let fields=match &proposal.change{ReactiveChange::SaveAutomation{automation}=>Some(setup::review_fields(automation, level)),_=>None}; let payload=serde_json::to_string_pretty(&proposal.change).unwrap_or_else(|err| format!("Cannot display proposal: {err}"));
+                    let level = match &proposal.change { ReactiveChange::SaveAutomation { automation } => snapshot.with(|s| bruhs_models::crew::agent_run_level(s.as_ref(), &automation.agent.id, &automation.agent.model)), _ => AccessLevel::ReadOnly }; let label = snapshot.with(|s| proposal_label(&proposal.change, level, s.as_ref())); let approve_label=match &proposal.change {ReactiveChange::SaveAutomation{automation} if automation.enabled()=>"Enable automation",ReactiveChange::SaveAutomation{..}=>"Save automation",_=>"Approve setup change"}; let fields=match &proposal.change{ReactiveChange::SaveAutomation{automation}=>Some(setup::review_fields(automation, level)),_=>None}; let payload=serde_json::to_string_pretty(&proposal.change).unwrap_or_else(|err| format!("Cannot display proposal: {err}"));
                     view! { <article class=CARD><h3 class="text-label text-rambutan-100">"Setup proposal awaiting review"</h3><p class="mt-1 text-body-sm text-rambutan-300">{label}</p>{if let Some(fields)=fields { view! { <dl class="mt-3 space-y-3">{fields.into_iter().map(|(label,value)|view!{<div><dt class="text-label-sm text-rambutan-400">{label}</dt><dd class="mt-1 whitespace-pre-wrap break-words text-body-sm text-rambutan-200">{value}</dd></div>}).collect_view()}</dl><details class="mt-3"><summary class="cursor-pointer text-label-sm text-rambutan-400">"Advanced setup definition"</summary><pre class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-label-sm text-rambutan-300">{payload}</pre></details> }.into_any() }else{view!{<pre class="mt-2 max-h-80 overflow-auto whitespace-pre-wrap break-words text-label-sm text-rambutan-300">{payload}</pre>}.into_any()}}<div class="mt-3 flex gap-2">{command_button(approve_label, ReactiveCommand::DecideProposal { id: proposal.id.clone(), approve: true }, send)}{command_button("Decline", ReactiveCommand::DecideProposal { id: proposal.id, approve: false }, send)}</div></article> }
                 }).collect_view()}
                 <h3 class="text-label text-rambutan-100">"Activity and conversations"</h3>
@@ -520,14 +552,24 @@ fn source_kind(
     })
 }
 
-/// `level` is the level the automation's agent runs at.
-fn proposal_label(change: &ReactiveChange, level: AccessLevel) -> String {
+/// `level` is the level the automation's agent runs at; `snapshot` names
+/// the agent a delete would remove.
+fn proposal_label(
+    change: &ReactiveChange,
+    level: AccessLevel,
+    snapshot: Option<&ReactiveSnapshot>,
+) -> String {
     match change {
         ReactiveChange::SaveAutomation { automation } => format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"}, automation.agent.name,event_policy_line(automation.subscription.auto_run, level)),
         ReactiveChange::SaveAgent { agent } => format!("Save agent {} with model {}, working folder {}, enabled {}. Review its instructions and memory below.", agent.name,agent.model,agent.project_path,agent.enabled),
         ReactiveChange::SaveSource { source } => format!("Save {} source {}, enabled {}. Review the complete connection settings below.", source_label(&source.kind),source.name,source.enabled),
         ReactiveChange::SaveSubscription { subscription } => format!("Connect source {} to agent {}. Enabled: {}. Runs automatically: {}.", subscription.source_id,subscription.agent_id,subscription.enabled,subscription.auto_run),
-        ReactiveChange::DeleteAgent { id } => format!("Delete agent {id} and its subscriptions."),
+        ReactiveChange::DeleteAgent { id } => {
+            let name = snapshot
+                .and_then(|s| s.agents.iter().find(|agent| agent.id == *id))
+                .map_or(id.as_str(), |agent| agent.name.as_str());
+            bruhs_models::crew::delete_agent_line(name)
+        }
         ReactiveChange::DeleteSource { id } => format!("Delete source {id} and its subscriptions."),
         ReactiveChange::DeleteSubscription { id } => format!("Delete subscription {id}."),
         ReactiveChange::SetMemory { agent_id, .. } => format!("Replace the persistent memory of agent {agent_id}. Review the complete replacement below."),
@@ -537,6 +579,31 @@ fn proposal_label(change: &ReactiveChange, level: AccessLevel) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn a_delete_agent_proposal_names_the_agent_and_what_goes_with_it() {
+        let snapshot = ReactiveSnapshot {
+            agents: vec![ReactiveAgent {
+                id: "a1".into(),
+                name: "Ada".into(),
+                instructions: String::new(),
+                memory: String::new(),
+                model: bruhs_models::agent::DEFAULT_AGENT_MODEL.into(),
+                project_path: String::new(),
+                enabled: true,
+            }],
+            ..ReactiveSnapshot::default()
+        };
+        let delete = |id: &str| ReactiveChange::DeleteAgent { id: id.into() };
+        assert_eq!(
+            proposal_label(&delete("a1"), AccessLevel::ReadOnly, Some(&snapshot)),
+            bruhs_models::crew::delete_agent_line("Ada")
+        );
+        // An agent the app hasn't loaded is named by its id.
+        assert_eq!(
+            proposal_label(&delete("zz"), AccessLevel::ReadOnly, None),
+            bruhs_models::crew::delete_agent_line("zz")
+        );
+    }
     #[test]
     fn editor_preserves_subsecond_intervals_and_rejects_overflow_or_negative_values() {
         assert_eq!(milliseconds(&seconds(1_250), false), Ok(1_250));

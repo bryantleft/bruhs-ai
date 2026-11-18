@@ -1,12 +1,14 @@
 //! A bruh's settings: who it is, how it runs, what it may do and its face.
 //! Save sends `settings_commands`, so a face edit never touches the agent.
 
-use bruhs_models::agent::ModelId;
+use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::{
-    access_options, clamp_level, current_settings, settings_commands, AccessLevel, BruhAccess,
-    BruhLook, BruhSettings, SEND_AS_ME_HINT,
+    access_options, clamp_level, computer_reason, computer_unavailable, current_settings,
+    settings_commands, AccessLevel, BruhAccess, BruhLook, BruhSettings, COMPUTER_HINT,
+    COMPUTER_SWITCH, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
+use bruhs_models::reactive::ReactiveCommand;
 use leptos::prelude::*;
 
 use super::data::use_crew_snapshot;
@@ -18,6 +20,17 @@ const SECTION: &str =
     "min-w-0 space-y-3 rounded-grape bg-longan-950/60 p-3 inset-ring inset-ring-longan-700/50";
 const RADIO: &str = "bruhs-control inline-flex min-h-control flex-1 items-center justify-center rounded-seed px-3 text-label-sm transition-colors focus-visible:outline-2 focus-visible:outline-persimmon-400 disabled:cursor-not-allowed disabled:opacity-50";
 const DELIVER_NEEDS_FULL: &str = "Needs Full access.";
+
+/// Why the Computer switch is off: the bruh's model or level first, since
+/// the owner can change those here, then an older service.
+fn computer_switch_block(
+    level: AccessLevel,
+    model: &str,
+    protocol: Option<u32>,
+) -> Option<&'static str> {
+    computer_unavailable(level, AgentProvider::for_model(model))
+        .or_else(|| computer_reason(protocol))
+}
 
 fn effort_options() -> Vec<DropdownOption> {
     std::iter::once(DropdownOption::new("", "Default"))
@@ -48,6 +61,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
     let level = RwSignal::new(AccessLevel::ReadOnly);
     let send_as_me = RwSignal::new(false);
     let can_deliver = RwSignal::new(false);
+    let computer = RwSignal::new(false);
     let look = RwSignal::new(BruhLook::default());
     let invalid = RwSignal::new(None::<String>);
     let edited = move || BruhSettings {
@@ -61,9 +75,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             send_as_me: send_as_me.get(),
             can_deliver: can_deliver.get(),
         },
-        // No switch yet: Save keeps the stored value, so it never sends
-        // SetComputer.
-        computer: saved.with(|saved| saved.as_ref().is_some_and(|saved| saved.computer)),
+        computer: computer.get(),
     };
 
     // Fill the form from the service, unless the owner has unsaved edits.
@@ -85,6 +97,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
         level.set(next.access.level);
         send_as_me.set(next.access.send_as_me);
         can_deliver.set(next.access.can_deliver);
+        computer.set(next.computer);
         look.set(next.look.clone());
         shown.set_value(Some(next));
     });
@@ -102,6 +115,24 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
     Effect::new(move |_| {
         if level.get() != AccessLevel::Full && can_deliver.get_untracked() {
             can_deliver.set(false);
+        }
+    });
+
+    // The Computer switch is off while the bruh can't have one, or the
+    // service can't run one. It then shows the stored value, which stays
+    // stored for when the bruh can again.
+    let computer_block =
+        Memo::new(move |_| computer_switch_block(level.get(), &model.get(), data.protocol()));
+    let computer_off =
+        Signal::derive(move || computer_block.get().is_some() || !data.computer_ready());
+    Effect::new(move |_| {
+        if !computer_off.get() {
+            return;
+        }
+        let stored =
+            saved.with_untracked(|saved| saved.as_ref().is_some_and(|saved| saved.computer));
+        if computer.get_untracked() != stored {
+            computer.set(stored);
         }
     });
 
@@ -127,8 +158,12 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             let state = snapshot.bruhs.iter().find(|bruh| bruh.agent_id == *id)?;
             Some(settings_commands(agent, state, &edited))
         });
+        // An older service doesn't know SetComputer.
+        let computer_ready = data.computer_ready();
         for command in commands.unwrap_or_default() {
-            data.send.run(command);
+            if computer_ready || !matches!(command, ReactiveCommand::SetComputer { .. }) {
+                data.send.run(command);
+            }
         }
     };
 
@@ -200,6 +235,24 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                     </div>
                     <Switch label="Can deliver" checked=Signal::derive(move || can_deliver.get()) disabled=Signal::derive(move || level.get() != AccessLevel::Full) on_change=Callback::new(move |on| can_deliver.set(on)) />
                 </div>
+                <div class="flex min-h-control items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <span class="text-label-sm text-rambutan-300">{COMPUTER_SWITCH}</span>
+                        <p data-bruh-computer-hint="" class="text-label-sm text-rambutan-500">{COMPUTER_HINT}</p>
+                        {move || computer_block.get().map(|reason| view! { <p data-bruh-computer-reason="" class="text-label-sm text-rambutan-500">{reason}</p> })}
+                    </div>
+                    // The label makes the whole 44px touch target press the switch.
+                    <label class="bruhs-control inline-flex shrink-0 items-center justify-center">
+                        <Switch
+                            label=COMPUTER_SWITCH
+                            checked=Signal::derive(move || computer.get())
+                            disabled=computer_off
+                            on_change=Callback::new(move |on| computer.set(on))
+                            attr:data-bruh-computer=""
+                            attr:title=move || computer_block.get()
+                        />
+                    </label>
+                </div>
             </section>
             <section class=SECTION aria-labelledby="bruh-settings-face">
                 <h2 id="bruh-settings-face" class="text-label text-rambutan-100">"Face"</h2>
@@ -211,5 +264,36 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                 {move || data.service_reason().map(|reason| view! { <p class="min-w-0 text-label-sm text-rambutan-400">{reason}</p> })}
             </div>
         </form>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use bruhs_models::crew::{ServiceNotice, CREW_PROTOCOL};
+
+    #[test]
+    fn the_computer_switch_says_why_it_is_off() {
+        let claude = bruhs_models::agent::DEFAULT_AGENT_MODEL;
+        assert_eq!(
+            computer_switch_block(AccessLevel::ReadOnly, claude, Some(CREW_PROTOCOL)),
+            Some("Computer needs Ask first or Full access.")
+        );
+        assert_eq!(
+            computer_switch_block(AccessLevel::Full, "gpt-5.1-codex", Some(CREW_PROTOCOL)),
+            Some("Computer needs a Claude model.")
+        );
+        assert_eq!(
+            computer_switch_block(AccessLevel::Full, claude, Some(2)),
+            Some(ServiceNotice::ServingOld.message())
+        );
+        assert_eq!(
+            computer_switch_block(AccessLevel::Full, claude, Some(CREW_PROTOCOL)),
+            None
+        );
+        assert_eq!(
+            computer_switch_block(AccessLevel::Ask, claude, Some(CREW_PROTOCOL)),
+            None
+        );
     }
 }

@@ -26,6 +26,11 @@ mod reactive;
 pub use reactive::agent_runs;
 pub use reactive::room_messages;
 pub use reactive::{background_service, set_background_service};
+#[expect(
+    unused_imports,
+    reason = "the bruh page's Computer tab is the first caller, in the next change"
+)]
+pub use reactive::{computer_request, computer_state, screencast_url};
 pub use reactive::{reactive_command, reactive_hook_token, reactive_snapshot, ReactiveHookToken};
 pub use reactive::{weekly_report, weekly_report_command, weekly_reports};
 
