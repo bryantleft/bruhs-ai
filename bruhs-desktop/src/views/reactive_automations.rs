@@ -276,21 +276,13 @@ impl ReactiveButton for Stateful<Div> {
         action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
             + 'static,
     ) -> Self {
-        let action = Rc::new(action);
-        let click = Rc::clone(&action);
-        self.on_click(cx.listener(move |this, _, window, cx| {
+        // The shared press helper runs the action once per click or key
+        // press; the click a key press also makes is ignored.
+        super::web_button::on_press(self, cx, move |this, window, cx| {
             if !this.busy {
-                click(this, window, cx);
-            }
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if !this.busy
-                && super::web_button::is_web_button_activation_key(event.keystroke.key.as_str())
-            {
-                cx.stop_propagation();
                 action(this, window, cx);
             }
-        }))
+        })
     }
 }
 
@@ -2445,7 +2437,7 @@ mod tests {
         ReactiveSnapshot, ServerError,
     };
     use crate::theme;
-    use gpui::AppContext as _;
+    use gpui::{AppContext as _, Entity, VisualTestContext};
     use std::rc::Rc;
     #[test]
     fn native_interval_editor_round_trips_milliseconds_without_float_casts() {
@@ -2502,6 +2494,55 @@ mod tests {
         });
         cx.run_until_parked();
         assert!(cx.debug_bounds("reactive-Save agent").is_some());
+    }
+
+    /// One Space or Enter on a focused toggle flips it once, as a click
+    /// does: the keyboard's own click never runs the action a second time.
+    #[gpui::test]
+    fn a_key_press_on_a_toggle_flips_it_once(cx: &mut gpui::TestAppContext) {
+        cx.update(|cx| {
+            gpui_component::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let holder = Rc::new(std::cell::RefCell::new(None));
+        let capture = holder.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let panel = cx.new(ReactiveAutomations::new);
+            *capture.borrow_mut() = Some(panel.clone());
+            gpui_component::Root::new(panel, window, cx)
+        });
+        cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(2400.0)));
+        let panel = holder.borrow().clone().unwrap();
+        panel.update_in(cx, |panel, window, cx| {
+            panel.snapshot = Some(ReactiveSnapshot::default());
+            panel.loaded = true;
+            panel.open_agent(None, window, cx);
+        });
+        cx.run_until_parked();
+        let enabled = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+            panel.read_with(cx, |panel, _| match &panel.editor {
+                Some(Editor::Agent(editor)) => editor.agent.enabled,
+                _ => panic!("agent editor"),
+            })
+        };
+        let toggle = cx
+            .debug_bounds("reactive-Agent paused")
+            .expect("the toggle");
+        cx.simulate_click(toggle.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+        assert!(enabled(&panel, cx), "a click flips it once");
+        for key in ["space", "enter"] {
+            let before = enabled(&panel, cx);
+            let keystroke = gpui::Keystroke::parse(key).expect("keystroke");
+            cx.simulate_event(gpui::KeyDownEvent {
+                keystroke: keystroke.clone(),
+                is_held: false,
+                prefer_character_input: false,
+            });
+            cx.simulate_event(gpui::KeyUpEvent { keystroke });
+            cx.run_until_parked();
+            assert_ne!(enabled(&panel, cx), before, "{key} flips it once");
+        }
     }
 
     #[gpui::test]
