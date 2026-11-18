@@ -166,3 +166,26 @@ fn a_protocol_one_service_keeps_crew_commands_but_not_rooms() {
     assert_eq!(service_notice(1, None), Some(ServiceNotice::ServingOld));
     assert_eq!(stop_commands(1, &[]), vec![ReactiveCommand::StopAll]);
 }
+
+#[test]
+fn a_run_with_a_trigger_from_a_newer_service_still_decodes() {
+    use crate::reactive::RunTrigger;
+    let snapshot: ReactiveSnapshot = serde_json::from_value(serde_json::json!({
+        "agents": [], "sources": [], "subscriptions": [], "events": [], "proposals": [],
+        "runs": [{
+            "id": "r1", "agent_id": "a", "source_id": null, "subscription_id": null,
+            "event_id": null, "status": "completed", "prompt": "p", "thread_id": "t",
+            "session_id": null, "created_at": 1, "updated_at": 1, "not_before": 1,
+            "result": "done", "error": null,
+            "trigger": {"type": "something_new", "from": "later", "hop": 3},
+        }],
+    }))
+    .unwrap();
+    let trigger = snapshot.runs[0].trigger.as_ref().unwrap();
+    assert_eq!(trigger.label(), "Run");
+    assert_eq!(trigger.room_id(), None);
+    let bare: RunTrigger = serde_json::from_str(r#"{"type":"another"}"#).unwrap();
+    assert_eq!(&bare, trigger);
+    // A known trigger is still read strictly.
+    assert!(serde_json::from_str::<RunTrigger>(r#"{"type":"room","room_id":"r"}"#).is_err());
+}

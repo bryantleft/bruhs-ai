@@ -42,7 +42,9 @@ impl BusyPolicy {
     }
 }
 
-/// Why a run exists.
+/// Why a run exists. A trigger type this build doesn't know (one a newer
+/// service added) reads as [`RunTrigger::Other`], so the run, and the
+/// snapshot that lists it, still decode.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RunTrigger {
@@ -67,6 +69,9 @@ pub enum RunTrigger {
         #[serde(default)]
         resumed: bool,
     },
+    /// A trigger from a newer service. Never written by this build.
+    #[serde(other)]
+    Other,
 }
 
 impl RunTrigger {
@@ -88,6 +93,7 @@ impl RunTrigger {
             Self::DraftOutcome { .. } => "Draft decision",
             Self::Consolidation => "Memory tidy-up",
             Self::Room { .. } => "Room",
+            Self::Other => "Run",
         }
     }
 }
