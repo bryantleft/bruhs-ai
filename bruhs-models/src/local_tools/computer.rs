@@ -382,16 +382,41 @@ pub fn owner_key_route(key: &str, modifiers: u8, mac: bool) -> KeyRoute {
 /// map to nothing.
 #[must_use]
 pub fn to_viewport(x: f64, y: f64, shown: (f64, f64), viewport: Viewport) -> Option<(f64, f64)> {
+    let point = frame_point(x, y, shown, viewport)?;
+    in_view(point.0, point.1, viewport).then_some(point)
+}
+
+/// Like [`to_viewport`], but a point outside the frame clamps to its
+/// nearest edge, so a drag released outside the live view still ends, with
+/// its mouse up, inside the page. Nothing maps while the view has no size.
+#[must_use]
+pub fn to_viewport_clamped(
+    x: f64,
+    y: f64,
+    shown: (f64, f64),
+    viewport: Viewport,
+) -> Option<(f64, f64)> {
+    let (px, py) = frame_point(x, y, shown, viewport)?;
+    Some((
+        px.clamp(0.0, f64::from(viewport.width)),
+        py.clamp(0.0, f64::from(viewport.height)),
+    ))
+}
+
+/// The page view point under (`x`, `y`) on an element of size `shown` that
+/// draws the frame `object-fit: contain`, unbounded.
+fn frame_point(x: f64, y: f64, shown: (f64, f64), viewport: Viewport) -> Option<(f64, f64)> {
     let (shown_width, shown_height) = shown;
     let (width, height) = (f64::from(viewport.width), f64::from(viewport.height));
-    if !(shown_width > 0.0 && shown_height > 0.0 && width > 0.0 && height > 0.0) {
+    if !(shown_width > 0.0 && shown_height > 0.0 && width > 0.0 && height > 0.0)
+        || !(x.is_finite() && y.is_finite())
+    {
         return None;
     }
     let scale = (shown_width / width).min(shown_height / height);
     let left = (shown_width - width * scale) / 2.0;
     let top = (shown_height - height * scale) / 2.0;
-    let point = ((x - left) / scale, (y - top) / scale);
-    in_view(point.0, point.1, viewport).then_some(point)
+    Some(((x - left) / scale, (y - top) / scale))
 }
 
 #[cfg(test)]
@@ -621,6 +646,28 @@ mod tests {
             Some((1280.0, 800.0))
         );
         assert_eq!(to_viewport(1.0, 1.0, (0.0, 0.0), v), None);
+    }
+
+    #[test]
+    fn points_outside_the_frame_clamp_to_its_edges() {
+        let v = COMPUTER_VIEWPORT;
+        // Inside the frame both mappings agree.
+        assert_eq!(
+            to_viewport_clamped(320.0, 240.0, (640.0, 480.0), v),
+            to_viewport(320.0, 240.0, (640.0, 480.0), v)
+        );
+        // Below and right of a 640x480 view: the frame's bottom right corner.
+        assert_eq!(
+            to_viewport_clamped(900.0, 470.0, (640.0, 480.0), v),
+            Some((1280.0, 800.0))
+        );
+        // On the top band and left of the element: the top left corner.
+        assert_eq!(
+            to_viewport_clamped(-5.0, 10.0, (640.0, 480.0), v),
+            Some((0.0, 0.0))
+        );
+        assert_eq!(to_viewport_clamped(1.0, 1.0, (0.0, 0.0), v), None);
+        assert_eq!(to_viewport_clamped(f64::NAN, 1.0, (640.0, 480.0), v), None);
     }
 
     #[test]
