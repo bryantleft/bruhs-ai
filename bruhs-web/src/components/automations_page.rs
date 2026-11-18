@@ -95,6 +95,14 @@ pub fn AutomationsPage() -> impl IntoView {
         }
     };
 
+    let decline_dry_run = move |_| {
+        let Some(id) = active_workflow.get_untracked() else {
+            return;
+        };
+        automation.update(|state| {
+            let _ = state.decline_workflow(&id, crate::clock::now_ms());
+        });
+    };
     let executor = expect_context::<crate::workflow_executor::WorkflowExecutor>();
     // Controls that change records wait for the store, the executor and any
     // pending save.
@@ -186,9 +194,14 @@ pub fn AutomationsPage() -> impl IntoView {
                                 <Show when=move || preview.get().is_some_and(|preview| !preview.allowed) fallback=|| ()>
                                     <p role="alert" class="mt-3 text-body-sm text-durian-300">{move || preview.get().and_then(|preview| review::grant_write_for(&preview.blocked_domains)).unwrap_or_default()}</p>
                                 </Show>
-                                <div class="mt-3">
+                                <div class="mt-3 flex flex-wrap gap-2">
                                     <Button variant=ButtonVariant::Primary size=ButtonSize::Small disabled=Signal::derive(move || !preview.get().is_some_and(|preview| preview.allowed)) on_click=Callback::new(start_job)>
                                         {review::START_TRANSACTION}
+                                    </Button>
+                                    // A dry run you decide against is declined here, so it
+                                    // never holds up an MCP client's proposal.
+                                    <Button variant=ButtonVariant::Ghost size=ButtonSize::Small on_click=Callback::new(decline_dry_run)>
+                                        {review::DECLINE_PROPOSAL}
                                     </Button>
                                 </div>
                             </section>

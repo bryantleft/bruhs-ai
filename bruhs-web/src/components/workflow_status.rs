@@ -1,4 +1,4 @@
-use bruhs_models::{AutomationState, BackgroundJobStatus};
+use bruhs_models::AutomationState;
 use leptos::prelude::*;
 
 use crate::durable_metadata::SaveState;
@@ -57,13 +57,7 @@ pub fn WorkflowStatus() -> impl IntoView {
                             <div class="flex flex-wrap items-center gap-2">
                                 // As on desktop: stop every background run from any page.
                                 <Show when=move || automation.with(background_running)>
-                                    <button type="button" aria-label=PAUSE_BACKGROUND_LABEL class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-rambutan-300 cursor-pointer" on:click=move |_| automation.update(|state| {
-                                        let running: Vec<String> = state.jobs.iter().filter(|job| job.auto_run && job.status == BackgroundJobStatus::Running).map(|job| job.id.clone()).collect();
-                                        for id in running {
-                                            // Refused only when it finished meanwhile.
-                                            let _ = state.pause_job(&id, crate::clock::now_ms());
-                                        }
-                                    })>{PAUSE_BACKGROUND}</button>
+                                    <button type="button" aria-label=PAUSE_BACKGROUND_LABEL class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-rambutan-300 cursor-pointer" disabled=move || executor.pause_requested.get() on:click=move |_| executor.pause_requested.set(true)>{PAUSE_BACKGROUND}</button>
                                 </Show>
                                 <button type="button" class="bruhs-control min-h-control rounded-grape px-2 text-label-sm text-persimmon-300 cursor-pointer" on:click=move |_| set_active.set(AppView::Automations)>{OPEN_WORKFLOWS}</button>
                                 {item.dismiss_key.map(|key| view! {

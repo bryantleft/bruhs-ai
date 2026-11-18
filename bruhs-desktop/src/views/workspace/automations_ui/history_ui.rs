@@ -146,11 +146,15 @@ impl Workspace {
                                     )),
                                 )
                                 .child(
+                                    // Not gated on the save: the desktop saves after
+                                    // every step, so a running workflow is never
+                                    // "saved" for long, and the next save writes
+                                    // the pause. (The web's Pause waits instead.)
                                     web_button(
                                         "automation-pause",
                                         WebButtonVariant::Ghost,
                                         WebButtonSize::Small,
-                                        ButtonState::disabled_if(!saved),
+                                        ButtonState::Enabled,
                                     )
                                     .debug_selector(|| "desktop-pause-workflow".into())
                                     .aria_label(workflow_history::PAUSE_LABEL)

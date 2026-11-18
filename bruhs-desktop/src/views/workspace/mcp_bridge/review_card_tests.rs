@@ -193,3 +193,73 @@ async fn a_proposal_adds_the_webs_tab_stops(cx: &mut TestAppContext) {
     assert_eq!(tab_cycle(cx), before + 4);
     workspace.update_in(cx, |w, _, _| w.mcp_bridge = WorkspaceBridge::default());
 }
+
+/// A dry run you decide against is declined from Preview changes, and no
+/// longer holds up a client's proposal.
+#[gpui::test]
+async fn a_dry_run_can_be_declined_and_then_a_client_may_propose(cx: &mut TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    workspace.update_in(cx, |w, _, _| {
+        w.automation_state
+            .permissions
+            .set(AgentDomain::Tasks, AgentAccess::Write, true);
+    });
+    click(cx, "desktop-automation-new-dry-run");
+    let dry_run = workspace.update_in(cx, |w, _, _| {
+        w.shown_dry_run().map(str::to_owned).expect("on show")
+    });
+    click(cx, "desktop-decline-dry-run");
+    cx.condition(&workspace, |w, _| w.save_status.is_saved())
+        .await;
+    workspace.update_in(cx, |w, _, _| {
+        let declined = w
+            .automation_state
+            .workflows
+            .iter()
+            .find(|workflow| workflow.id == dry_run)
+            .map(|workflow| workflow.status);
+        assert_eq!(declined, Some(WorkflowStatus::Declined));
+        assert_eq!(w.shown_dry_run(), None);
+    });
+    assert!(cx.debug_bounds("desktop-preview-changes").is_none());
+    connect(&workspace, cx).await;
+    let BridgeResponse::Ok(proposal) = call(
+        &workspace,
+        cx,
+        BridgeRequest::Propose {
+            request_id: "after-dry-run".into(),
+            operation: WorkflowOperation::CreateTask {
+                title: "Client plan".into(),
+            },
+        },
+    )
+    .await
+    else {
+        panic!("the proposal is accepted once the dry run is declined")
+    };
+    assert_eq!(proposal["workflow_status"], "previewed");
+    workspace.update_in(cx, |w, _, _| w.mcp_bridge = WorkspaceBridge::default());
+}
+
+/// Leaving Agent workflows hands a waiting dry run to the waiting cards, as
+/// the web's page-owned dry run does.
+#[gpui::test]
+fn leaving_the_page_turns_the_dry_run_into_a_waiting_card(cx: &mut TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    click(cx, "desktop-automation-new-dry-run");
+    workspace.update_in(cx, |w, _, cx| {
+        assert!(w.shown_dry_run().is_some());
+        w.active_view = super::super::AppView::Today;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    workspace.update_in(cx, |w, _, cx| {
+        w.active_view = super::super::AppView::Automations;
+        cx.notify();
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("desktop-preview-changes").is_none());
+    assert!(cx
+        .debug_bounds("desktop-workflow-awaiting-review")
+        .is_some());
+}

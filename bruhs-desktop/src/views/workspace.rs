@@ -2826,6 +2826,11 @@ impl Render for Workspace {
     fn render(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.sync_api_client_visibility(window, cx);
         self.sync_mobile_offer();
+        // As on the web, a dry run belongs to Agent workflows: once another
+        // page shows, a dry run still waiting is reviewed in its own card.
+        if self.active_view != AppView::Automations {
+            self.dry_run_workflow_id = None;
+        }
         if !self.settings_visible() && self.credential_settings.read(cx).has_editor() {
             self.credential_settings
                 .update(cx, |view, _| view.clear_editor());

@@ -126,12 +126,7 @@ impl Workspace {
         if self.active_view == AppView::Automations {
             return None;
         }
-        let notice = review::workflow_notice(
-            &self.automation_state,
-            self.automation_error.is_some(),
-            self.save_status.is_saved(),
-            self.mcp_bridge.pending_review(&self.automation_state),
-        )?;
+        let notice = self.workflow_notice()?;
         if notice.dismiss_key.is_some() && notice.dismiss_key == self.dismissed_workflow_notice {
             return None;
         }
@@ -268,6 +263,20 @@ impl Workspace {
                         ),
                 )
                 .into_any_element(),
+        )
+    }
+
+    /// What the app-wide workflow notice says, by the shared rule.
+    pub(super) fn workflow_notice(
+        &self,
+    ) -> Option<bruhs_models::logic::workflow_review::WorkflowNotice> {
+        bruhs_models::logic::workflow_review::workflow_notice(
+            &self.automation_state,
+            // Like the web's failed store: a workflow error or a save that
+            // failed, which also stops background steps.
+            self.automation_error.is_some() || self.save_status.alert().is_some(),
+            self.save_status.is_saved(),
+            self.mcp_bridge.pending_review(&self.automation_state),
         )
     }
 

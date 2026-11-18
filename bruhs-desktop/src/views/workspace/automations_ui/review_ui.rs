@@ -419,7 +419,7 @@ impl Workspace {
         let saved = self.save_status.is_saved();
         let blocked = review::blocked_domains(&self.automation_state, &id);
         let operations = self.workflow_operations(&id);
-        let (recheck_id, start_id) = (id.clone(), id);
+        let (recheck_id, start_id, decline_id) = (id.clone(), id.clone(), id);
         Some(
             web_card(neutral_ring())
                 .id("automation-dry-run")
@@ -464,22 +464,43 @@ impl Workspace {
                     )
                 })
                 .child(
-                    div().mt_3().child(
-                        web_button(
-                            "automation-dry-run-start",
-                            WebButtonVariant::Primary,
-                            WebButtonSize::Small,
-                            ButtonState::disabled_if(!blocked.is_empty() || !saved),
+                    div()
+                        .mt_3()
+                        .flex()
+                        .flex_wrap()
+                        .gap_2()
+                        .child(
+                            web_button(
+                                "automation-dry-run-start",
+                                WebButtonVariant::Primary,
+                                WebButtonSize::Small,
+                                ButtonState::disabled_if(!blocked.is_empty() || !saved),
+                            )
+                            // Painted after the awaiting cards, so this one
+                            // answers to the name when both are shown.
+                            .debug_selector(|| "desktop-start-workflow".into())
+                            .aria_label(review::START_TRANSACTION)
+                            .child(review::START_TRANSACTION)
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| this.start_reviewed_automation(&start_id, cx),
+                            )),
                         )
-                        // Painted after the awaiting cards, so this one
-                        // answers to the name when both are shown.
-                        .debug_selector(|| "desktop-start-workflow".into())
-                        .aria_label(review::START_TRANSACTION)
-                        .child(review::START_TRANSACTION)
-                        .on_click(cx.listener(move |this, _, _, cx| {
-                            this.start_reviewed_automation(&start_id, cx)
-                        })),
-                    ),
+                        .child(
+                            web_button(
+                                "automation-dry-run-decline",
+                                WebButtonVariant::Ghost,
+                                WebButtonSize::Small,
+                                ButtonState::disabled_if(!saved),
+                            )
+                            .debug_selector(|| "desktop-decline-dry-run".into())
+                            .aria_label(review::DECLINE_PROPOSAL)
+                            .child(review::DECLINE_PROPOSAL)
+                            .on_click(cx.listener(
+                                move |this, _, _, cx| {
+                                    this.decline_reviewed_workflow(&decline_id, cx)
+                                },
+                            )),
+                        ),
                 )
                 .into_any_element(),
         )
@@ -529,6 +550,7 @@ impl Workspace {
                     BackgroundJobStatus::Running | BackgroundJobStatus::Paused
                 );
                 div()
+                    .id(SharedString::from(format!("automation-job-{}", job.id)))
                     .min_w_0()
                     .flex()
                     .flex_wrap()
