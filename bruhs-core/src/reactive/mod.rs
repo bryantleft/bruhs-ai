@@ -7,7 +7,7 @@ use std::{
     path::{Path, PathBuf},
     sync::{
         atomic::{AtomicBool, Ordering},
-        Arc,
+        Arc, OnceLock,
     },
 };
 use tokio::sync::{watch, Mutex};
@@ -18,6 +18,9 @@ mod approval;
 #[cfg(test)]
 mod automation_tests;
 pub mod clock;
+#[cfg(test)]
+mod computer_tests;
+mod computers;
 #[cfg(test)]
 mod crew_tests;
 mod notify;
@@ -67,23 +70,37 @@ pub struct ReactiveRuntime {
     connection: Arc<Mutex<Connection>>,
     _lock: Arc<store::RuntimeLock>,
     /// The resolved database file's parent. Every per-bruh path
-    /// (`bruhs/<id>/work`, and later ones such as a browser profile) lives
-    /// under this one root, so deleting a bruh has one tree to clean up.
+    /// (`bruhs/<id>/work`, `bruhs/<id>/browser`) lives under this one root,
+    /// so deleting a bruh has one tree to clean up.
     home: Arc<PathBuf>,
     started: Arc<AtomicBool>,
-    changes: watch::Sender<u64>,
+    changes: Arc<watch::Sender<u64>>,
     notifier: Arc<std::sync::RwLock<Notifier>>,
+    /// The host that runs bruh browsers, once attached.
+    computers: Arc<OnceLock<Arc<crate::local_tools::LocalToolsHost>>>,
+    /// Whether the computer sync loop runs; there is one per runtime.
+    syncing: Arc<AtomicBool>,
 }
 
 /// A bruh's work folder and the directories this call created for it.
 struct NewFolder {
     folder: PathBuf,
     created: Vec<PathBuf>,
+    /// The marker written in a tree this call created.
+    marker: Option<PathBuf>,
 }
 
 impl NewFolder {
-    /// Undo a folder made for a bruh that was not saved; never removes contents.
+    /// Undo a folder made for a bruh that was not saved; never removes contents
+    /// other than the marker it wrote.
     fn remove(&self) {
+        if let Some(marker) = &self.marker {
+            if let Err(error) = std::fs::remove_file(marker) {
+                if error.kind() != std::io::ErrorKind::NotFound {
+                    tracing::warn!(%error, "An unused bruh folder's marker could not be removed");
+                }
+            }
+        }
         for directory in self.created.iter().rev() {
             if let Err(error) = std::fs::remove_dir(directory) {
                 tracing::warn!(%error, "An unused bruh folder could not be removed");
@@ -92,15 +109,12 @@ impl NewFolder {
     }
 }
 
-/// Create `<home>/bruhs/<id>/work`, private to the owner on Unix.
+/// Create `<home>/bruhs/<id>/work`, private to the owner on Unix, in a tree
+/// marked as Bruhs' own.
 fn work_folder(home: &Path, id: &str) -> Result<NewFolder, ReactiveError> {
-    bruhs_models::ids::validate_id(id).map_err(|_| {
-        ReactiveError::Invalid(
-            "Use a nonempty ID without path separators or control characters.".into(),
-        )
-    })?;
-    let folder = home.join("bruhs").join(id).join("work");
-    let created = folder
+    let tree = computers::bruh_tree(home, id)?;
+    let folder = tree.join("work");
+    let created: Vec<PathBuf> = folder
         .ancestors()
         .take_while(|directory| *directory != home && !directory.exists())
         .map(Path::to_path_buf)
@@ -115,10 +129,22 @@ fn work_folder(home: &Path, id: &str) -> Result<NewFolder, ReactiveError> {
         use std::os::unix::fs::DirBuilderExt;
         builder.mode(0o700);
     }
+    let marker = created
+        .contains(&tree)
+        .then(|| tree.join(computers::OWNED_MARKER));
+    let work = NewFolder {
+        folder,
+        created,
+        marker,
+    };
     builder
-        .create(&folder)
+        .create(&work.folder)
         .map_err(|_| ReactiveError::Storage("Could not create the bruh's work folder.".into()))?;
-    Ok(NewFolder { folder, created })
+    if let Err(error) = computers::mark_tree(home, id) {
+        work.remove();
+        return Err(error);
+    }
+    Ok(work)
 }
 
 /// Field order closes the SQLite connection before releasing its ownership lock.
@@ -179,9 +205,31 @@ impl ReactiveRuntime {
             _lock: Arc::new(lock),
             home: Arc::new(home),
             started: Arc::new(AtomicBool::new(false)),
-            changes,
+            changes: Arc::new(changes),
             notifier: Arc::new(std::sync::RwLock::new(system_notifier())),
+            computers: Arc::new(OnceLock::new()),
+            syncing: Arc::new(AtomicBool::new(false)),
         })
+    }
+
+    /// Run bruh browsers on `host`: it gets every bruh whose Computer is on,
+    /// now and after each change, and closes the idle ones. Once per runtime.
+    pub fn attach_computers(
+        &self,
+        host: Arc<crate::local_tools::LocalToolsHost>,
+    ) -> Result<(), ReactiveError> {
+        self.computers.set(Arc::clone(&host)).map_err(|_| {
+            ReactiveError::Conflict("This reactive runtime already has its computers.".into())
+        })?;
+        drop(host.start_idle_reaper());
+        computers::spawn_sync(self);
+        self.changed();
+        Ok(())
+    }
+
+    /// The host that runs bruh browsers, once attached.
+    pub fn computers(&self) -> Option<Arc<crate::local_tools::LocalToolsHost>> {
+        self.computers.get().cloned()
     }
 
     /// Replace how system notifications are shown (tests, or a host with its own).
@@ -475,6 +523,8 @@ impl ReactiveRuntime {
         }
         // Created before spawning so cancellation before the task's first poll also releases it.
         let lease = Lease(self.started.clone());
+        // Marks older work folders and removes deleted bruhs' leftover trees.
+        computers::spawn_sync(self);
         let runtime = self.clone();
         Ok(tokio::spawn(async move {
             let _lease = lease;

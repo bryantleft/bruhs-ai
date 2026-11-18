@@ -935,10 +935,8 @@ pub(super) fn command(
             ReactiveCommand::DecideApproval { id, approve } => {
                 crew::decide_approval(connection, &id, approve)?;
             }
-            ReactiveCommand::SetComputer { .. } => {
-                return Err(ReactiveError::Invalid(
-                    "Computer is not available yet.".into(),
-                ))
+            ReactiveCommand::SetComputer { agent_id, on } => {
+                crew::set_computer(connection, &agent_id, on)?;
             }
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
