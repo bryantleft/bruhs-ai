@@ -51,7 +51,6 @@ pub async fn agent_runs(
 }
 
 /// One room's messages, newest first; `before` is the id of the last message already shown.
-#[expect(dead_code, reason = "the room transcript (Task 11) reads it")]
 pub async fn room_messages(
     room_id: &str,
     before: Option<&str>,

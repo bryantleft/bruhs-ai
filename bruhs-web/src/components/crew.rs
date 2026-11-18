@@ -7,6 +7,7 @@ pub mod face;
 pub mod face_editor;
 pub mod page;
 pub mod rail;
+pub mod room;
 pub mod room_dialog;
 pub mod settings;
 pub mod shortcuts;

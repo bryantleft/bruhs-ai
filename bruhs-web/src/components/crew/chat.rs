@@ -13,7 +13,7 @@ use super::data::{use_crew_snapshot, CrewData};
 use super::face_editor::still_view;
 use crate::ui::{BrailleBruh, Button, ButtonSize, ButtonVariant, Textarea};
 
-const CARD: &str =
+pub(super) const CARD: &str =
     "min-w-0 max-w-[80%] space-y-2 rounded-grape bg-longan-900 p-3 inset-ring inset-ring-longan-700";
 
 #[component]
@@ -230,7 +230,12 @@ fn line(item: TranscriptItem, look: Memo<BruhLook>, data: CrewData) -> AnyView {
 
 /// A run waiting for review: Run starts it, Dismiss cancels it. Both are
 /// commands every service knows, so an older one takes them too.
-fn review_card(run_id: String, trigger: &'static str, prompt: String, data: CrewData) -> AnyView {
+pub(super) fn review_card(
+    run_id: String,
+    trigger: &'static str,
+    prompt: String,
+    data: CrewData,
+) -> AnyView {
     let id = StoredValue::new(run_id);
     let disabled = Signal::derive(move || data.busy.get());
     view! {
@@ -246,7 +251,7 @@ fn review_card(run_id: String, trigger: &'static str, prompt: String, data: Crew
     .into_any()
 }
 
-fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
+pub(super) fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
     let (summary, detail) = item
         .approval
         .as_ref()
@@ -284,7 +289,7 @@ fn approval_card(item: OutboxItem, data: CrewData) -> AnyView {
     .into_any()
 }
 
-fn question_card(item: OutboxItem, data: CrewData) -> AnyView {
+pub(super) fn question_card(item: OutboxItem, data: CrewData) -> AnyView {
     let reply = RwSignal::new(String::new());
     let id = StoredValue::new(item.id.clone());
     let answer = move || {
