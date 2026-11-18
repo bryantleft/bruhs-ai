@@ -221,20 +221,23 @@ fn kind_button(
             Toggled::False
         })
         .tab_index(0)
-        .min_h(px(theme::APP_COMPACT_CONTROL_HEIGHT_PX))
+        .min_h(px(theme::CONTROL_XS_PX))
         .flex()
         .items_center()
         .rounded(px(4.0))
-        .px_2()
+        // Web `px-2`; the 1px focus border takes the rest.
+        .px(px(7.0))
         .border_1()
         .border_color(gpui::transparent_black())
         .focus_visible(|el| el.border_color(theme::persimmon_400()))
         .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
         .text_size(px(LABEL_SM_PX))
+        .line_height(relative(1.5))
         .cursor_pointer()
         .when(pressed, |el| {
             el.bg(theme::blueberry_500().opacity(0.15))
-                .text_color(theme::blueberry_200())
+                .text_color(theme::blueberry_300())
         })
         .when(!pressed, |el| {
             el.text_color(theme::rambutan_500())
@@ -249,7 +252,7 @@ impl Workspace {
     /// Load `person_id` into the relationship editor. Like the web, the
     /// contact that was loaded keeps its unsubmitted edits, and a contact
     /// with a kept draft comes back with it, refreshed where untouched.
-    pub(super) fn load_relationship_inputs(
+    pub(in crate::views::workspace) fn load_relationship_inputs(
         &mut self,
         person_id: &str,
         window: &mut Window,
@@ -287,23 +290,31 @@ impl Workspace {
             .unwrap_or_default()
     }
 
-    fn relationship_field_inputs(&self) -> [&Entity<InputState>; 6] {
+    /// The one-line relationship fields, in `RelationshipFields` order;
+    /// the notes, a multi-line field, come after them.
+    fn relationship_line_inputs(&self) -> [&Entity<InputState>; 5] {
         [
             &self.relationship_company_input,
             &self.relationship_role_input,
             &self.relationship_email_input,
             &self.relationship_phone_input,
             &self.relationship_location_input,
-            &self.relationship_notes_input,
         ]
+    }
+
+    /// Every relationship field as typed, the notes last.
+    fn relationship_field_values(&self, cx: &App) -> [String; 6] {
+        let [company, role, email, phone, location] = self
+            .relationship_line_inputs()
+            .map(|input| input.read(cx).value().to_string());
+        let notes = self.relationship_notes_input.read(cx).value().to_string();
+        [company, role, email, phone, location, notes]
     }
 
     /// The loaded contact's editor as a draft, exactly as typed.
     fn loaded_relationship_draft(&self, cx: &App) -> Option<(String, EditorDraft)> {
         let id = self.people_page.draft_contact.clone()?;
-        let fields = self
-            .relationship_field_inputs()
-            .map(|input| input.read(cx).value().to_string());
+        let fields = self.relationship_field_values(cx);
         Some((
             id,
             EditorDraft {
@@ -336,9 +347,13 @@ impl Workspace {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        let inputs = self.relationship_field_inputs().map(Entity::clone);
+        let inputs = self.relationship_line_inputs().map(Entity::clone);
         for (input, value) in inputs.iter().zip(&draft.fields) {
             input.update(cx, |input, cx| input.set_value(value.clone(), window, cx));
+        }
+        if let Some(notes) = draft.fields.get(inputs.len()).cloned() {
+            self.relationship_notes_input
+                .update(cx, |input, cx| input.set_value(notes, window, cx));
         }
         let text = draft.item_text.clone();
         self.relationship_item_input
@@ -1045,6 +1060,7 @@ impl Workspace {
     /// Web `PeoplePage`.
     pub(in crate::views::workspace) fn render_people_page(
         &self,
+        window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let people = self.people_matching_search(cx);
@@ -1064,7 +1080,9 @@ impl Workspace {
             .min_h_0()
             .overflow_y_scroll()
             .bg(theme::longan_950())
-            .p_4()
+            // Web `px-4 py-4 sm:px-6`; desktop windows are at least sm.
+            .px_6()
+            .py_4()
             .flex()
             .flex_col()
             .gap_3();
@@ -1076,20 +1094,21 @@ impl Workspace {
         }
         page_el = page_el.child(
             div()
+                // Web `grid gap-3 sm:grid-cols-2`: two equal columns from
+                // 640px, which every desktop window is.
                 .flex()
-                .flex_wrap()
                 .items_start()
                 .gap_3()
                 .child(
                     div()
                         .flex_1()
-                        .min_w(px(240.0))
+                        .min_w_0()
                         .child(self.render_people_create(cx)),
                 )
                 .child(
                     div()
                         .flex_1()
-                        .min_w(px(240.0))
+                        .min_w_0()
                         .child(self.render_people_search(cx)),
                 ),
         );
@@ -1184,7 +1203,7 @@ impl Workspace {
                     visible
                         .into_iter()
                         .enumerate()
-                        .map(|(i, p)| self.render_person_card(i, p, &all, cx)),
+                        .map(|(i, p)| self.render_person_card(i, p, &all, window, cx)),
                 ),
             );
         }
@@ -1226,19 +1245,21 @@ impl Workspace {
                 LABEL_SM_PX,
                 theme::rambutan_500(),
             ))
+            // Web `flex gap-2`: the field shrinks; the button keeps its width.
             .child(
                 div()
                     .flex()
-                    .flex_wrap()
                     .items_center()
                     .gap_2()
                     .child(
                         div()
                             .debug_selector(|| "desktop-people-create-input".into())
                             .flex_1()
-                            .min_w(px(160.0))
+                            .min_w_0()
                             .child(
+                                // Web: `text-body-sm`, not the shared input's 14px.
                                 Input::new(&self.people_page.create_input)
+                                    .text_size(px(BODY_SM_PX))
                                     .aria_label(copy::CREATE_LABEL),
                             ),
                     )
@@ -1250,7 +1271,12 @@ impl Workspace {
                             ButtonState::Enabled,
                         )
                         .debug_selector(|| "desktop-people-create".into())
+                        .flex_shrink_0()
                         .aria_label(copy::CREATE_BUTTON)
+                        // Web: `px-3 text-label-sm`.
+                        .px(px(11.0))
+                        .font_family(theme::UI_SMALL_FONT_FAMILY)
+                        .text_size(px(LABEL_SM_PX))
                         .child(copy::CREATE_BUTTON)
                         .on_click(cx.listener(|this, _ev, window, cx| {
                             this.create_person_from_page(window, cx)
@@ -1284,7 +1310,9 @@ impl Workspace {
                     .debug_selector(|| "desktop-people-search".into())
                     .w_full()
                     .child(
-                        Input::new(&self.people_page.search_input).aria_label(copy::SEARCH_LABEL),
+                        Input::new(&self.people_page.search_input)
+                            .text_size(px(BODY_SM_PX))
+                            .aria_label(copy::SEARCH_LABEL),
                     ),
             )
             .into_any_element()
@@ -1660,6 +1688,7 @@ impl Workspace {
         index: usize,
         profile: Arc<PersonProfile>,
         all: &[Arc<PersonProfile>],
+        window: &Window,
         cx: &Context<'_, Self>,
     ) -> AnyElement {
         let id = profile.id.clone();
@@ -1673,10 +1702,9 @@ impl Workspace {
         let tracked = profile.tracked;
         let obs_count = profile.observations.len();
         let display_name = profile.display_name.clone();
-        let expand_label = format!(
-            "{} {display_name}",
-            if expanded { "Collapse" } else { "Expand" }
-        );
+        // Web: the expander is named by the person; its expanded state says
+        // whether it opens or closes the profile.
+        let expand_label = display_name.clone();
 
         let id_toggle = id.clone();
         let (id_rename, name_rename) = (id.clone(), display_name.clone());
@@ -1724,7 +1752,8 @@ impl Workspace {
             .bg(theme::longan_900().opacity(0.5))
             .border_1()
             .border_color(theme::longan_700())
-            .p_3()
+            // Web `p-3` inside an inset ring; the border takes 1px of it.
+            .p(px(11.0))
             .flex()
             .flex_col()
             .gap_2()
@@ -1744,6 +1773,7 @@ impl Workspace {
                             .debug_selector(move || format!("desktop-person-expand-{index}"))
                             .flex_1()
                             .min_w(px(160.0))
+                            .min_h(px(theme::CONTROL_XS_PX))
                             .flex()
                             .items_center()
                             .gap_2()
@@ -1805,7 +1835,7 @@ impl Workspace {
                                 theme::rambutan_500(),
                             ))
                             .child(
-                                text_button(
+                                row_action(
                                     ("desktop-person-rename", index),
                                     "rename",
                                     theme::rambutan_500(),
@@ -1824,7 +1854,7 @@ impl Workspace {
                                 )),
                             )
                             .child(
-                                text_button(
+                                row_action(
                                     ("desktop-person-track", index),
                                     if tracked { "untrack" } else { "track" },
                                     if tracked {
@@ -1854,7 +1884,7 @@ impl Workspace {
                                 )),
                             )
                             .child(
-                                text_button(
+                                row_action(
                                     ("desktop-person-merge", index),
                                     "⋯",
                                     theme::rambutan_500(),
@@ -1886,7 +1916,7 @@ impl Workspace {
                                 )),
                             )
                             .child(
-                                text_button(
+                                row_action(
                                     ("desktop-person-enroll", index),
                                     "enroll",
                                     theme::rambutan_500(),
@@ -1902,7 +1932,7 @@ impl Workspace {
                                 )),
                             )
                             .child(
-                                text_button(
+                                row_action(
                                     ("desktop-person-delete", index),
                                     "delete",
                                     theme::rambutan_500(),
@@ -1934,21 +1964,30 @@ impl Workspace {
             card = card.child(self.render_merge_panel(&id, all, cx));
         }
         if expanded {
-            if !tracked {
-                card = card.child(
-                    label(
-                        "Observation tracking is off. Summaries add no observations about this person, and agents cannot read the saved ones.",
-                        LABEL_SM_PX,
-                        theme::rambutan_400(),
-                    )
-                    .debug_selector(|| "desktop-person-opt-out".into()),
-                );
-            }
-            card = card
-                .child(self.render_person_aliases(&profile, cx))
-                .child(self.render_person_links(&profile, cx))
-                .child(self.render_relationship_panel(&id, cx))
-                .child(self.render_observations_by_kind(index, &profile.observations, cx));
+            // Web: one block under a divider, `space-y-4 border-t pt-3`.
+            card = card.child(
+                div()
+                    .border_t_1()
+                    .border_color(theme::longan_700().opacity(0.7))
+                    .pt_3()
+                    .flex()
+                    .flex_col()
+                    .gap_4()
+                    .when(!tracked, |el| {
+                        el.child(
+                            label(
+                                "Observation tracking is off. Summaries add no observations about this person, and agents cannot read the saved ones.",
+                                LABEL_SM_PX,
+                                theme::rambutan_400(),
+                            )
+                            .debug_selector(|| "desktop-person-opt-out".into()),
+                        )
+                    })
+                    .child(self.render_person_aliases(&profile, cx))
+                    .child(self.render_person_links(&profile, cx))
+                    .child(self.render_relationship_panel(&id, window, cx))
+                    .child(self.render_observations_by_kind(index, &profile.observations, cx)),
+            );
         }
         card.into_any_element()
     }
@@ -2053,17 +2092,14 @@ impl Workspace {
             .debug_selector(|| "desktop-person-aliases".into())
             .role(Role::Group)
             .aria_label(copy::ALIASES_HEADING)
-            .mt_2()
-            .pt_3()
-            .border_t_1()
-            .border_color(theme::longan_700())
             .flex()
             .flex_col()
             .gap_2()
+            // Web `HEADING`: text-label in rambutan-200.
             .child(label(
                 copy::ALIASES_HEADING,
-                LABEL_SM_PX,
-                theme::rambutan_500(),
+                LABEL_PX,
+                theme::rambutan_200(),
             ))
             .child(aliases)
             .child(
@@ -2075,21 +2111,39 @@ impl Workspace {
                     .child(
                         div().flex_1().min_w(px(160.0)).child(
                             Input::new(&self.people_page.alias_input)
+                                .text_size(px(BODY_SM_PX))
                                 .aria_label(copy::ALIAS_INPUT_LABEL),
                         ),
                     )
                     .child(
-                        web_button(
-                            ("desktop-person-alias-add", element_key(&person_id)),
-                            WebButtonVariant::Outline,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label(copy::ALIAS_BUTTON)
-                        .child(copy::ALIAS_BUTTON)
-                        .on_click(cx.listener(
-                            move |this, _ev, window, cx| this.add_person_alias(&add_id, window, cx),
-                        )),
+                        // Web: a 32px `bg-blueberry-500/15 px-3 text-label-sm
+                        // text-blueberry-300` button.
+                        div()
+                            .id(("desktop-person-alias-add", element_key(&person_id)))
+                            .flex_shrink_0()
+                            .min_h(px(theme::CONTROL_PX))
+                            .flex()
+                            .items_center()
+                            .rounded(px(8.0))
+                            .px(px(11.0))
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .bg(theme::blueberry_500().opacity(0.15))
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_size(px(LABEL_SM_PX))
+                            .line_height(relative(1.5))
+                            .text_color(theme::blueberry_300())
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .cursor_pointer()
+                            .hover(|el| el.bg(theme::blueberry_500().opacity(0.25)))
+                            .aria_label(copy::ALIAS_BUTTON)
+                            .child(copy::ALIAS_BUTTON)
+                            .on_click(cx.listener(move |this, _ev, window, cx| {
+                                this.add_person_alias(&add_id, window, cx)
+                            })),
                     ),
             )
             .when_some(self.people_page.alias_error.clone(), |el, message| {
@@ -2104,8 +2158,40 @@ impl Workspace {
             .into_any_element()
     }
 
-    /// PEOPLE-06: the person's meetings and Inbox conversations.
+    /// PEOPLE-06: the person's meetings and Inbox conversations, as the
+    /// web's `LinkedRecords`: two columns of full-width rows, a meeting by
+    /// its title and a conversation by its subject with its source on the
+    /// right.
     fn render_person_links(&self, profile: &PersonProfile, cx: &Context<'_, Self>) -> AnyElement {
+        // Web `LINK`: a 24px row, body-sm in rambutan-200 (its blueberry
+        // hover text never reaches Chrome, see `calendar_ui`'s header).
+        let link_row = |id: (&'static str, usize), selector: String, name: String| {
+            div()
+                .id(id)
+                .debug_selector(move || selector)
+                .w_full()
+                .min_w_0()
+                .min_h(px(theme::CONTROL_XS_PX))
+                .flex()
+                .items_center()
+                .justify_between()
+                .gap_2()
+                .rounded(px(4.0))
+                // Web `px-2`; the 1px focus border takes the rest.
+                .px(px(7.0))
+                .border_1()
+                .border_color(gpui::transparent_black())
+                .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                .font_family(BODY_FONT)
+                .text_size(px(BODY_SM_PX))
+                .line_height(relative(1.5))
+                .text_color(theme::rambutan_200())
+                .tab_index(0)
+                .role(Role::Button)
+                .aria_label(name)
+                .cursor_pointer()
+                .hover(|el| el.bg(theme::longan_800().opacity(0.7)))
+        };
         let hub = self.meetings_hub.read(cx);
         let meetings = person_meetings(profile, &hub.meetings)
             .into_iter()
@@ -2114,32 +2200,16 @@ impl Workspace {
                 let person_id = profile.id.clone();
                 let meeting_id = meeting.id.clone();
                 let title = copy::meeting_link_title(&meeting.title).to_string();
-                div()
-                    .flex()
-                    .flex_wrap()
-                    .items_baseline()
-                    .gap_2()
-                    .child(
-                        text_button(
-                            ("desktop-person-meeting", index),
-                            title.clone(),
-                            theme::blueberry_200(),
-                            theme::rambutan_100(),
-                        )
-                        .debug_selector(move || format!("desktop-person-meeting-{index}"))
-                        .aria_label(format!("Open meeting {title}"))
-                        .on_click(cx.listener(
-                            move |this, _ev, _window, cx| {
-                                this.open_person_meeting(&person_id, meeting_id.clone(), cx)
-                            },
-                        )),
-                    )
-                    .child(label(
-                        format_started_at(meeting.started_at_ms),
-                        LABEL_SM_PX,
-                        theme::rambutan_500(),
-                    ))
-                    .into_any_element()
+                link_row(
+                    ("desktop-person-meeting", index),
+                    format!("desktop-person-meeting-{index}"),
+                    format!("Open meeting {title}"),
+                )
+                .on_click(cx.listener(move |this, _ev, _window, cx| {
+                    this.open_person_meeting(&person_id, meeting_id.clone(), cx)
+                }))
+                .child(div().min_w_0().truncate().child(title))
+                .into_any_element()
             })
             .collect::<Vec<_>>();
         let conversations = person_conversations(&profile.id, &self.inbox_conversations)
@@ -2149,35 +2219,47 @@ impl Workspace {
                 let person_id = profile.id.clone();
                 let conversation_id = conversation.id.clone();
                 let subject = conversation.subject.clone();
-                text_button(
+                link_row(
                     ("desktop-person-conversation", index),
-                    subject.clone(),
-                    theme::blueberry_200(),
-                    theme::rambutan_100(),
+                    format!("desktop-person-conversation-{index}"),
+                    format!("Open conversation {subject}"),
                 )
-                .debug_selector(move || format!("desktop-person-conversation-{index}"))
-                .aria_label(format!("Open conversation {subject}"))
                 .on_click(cx.listener(move |this, _ev, window, cx| {
                     this.open_person_conversation(&person_id, &conversation_id, window, cx)
                 }))
+                .child(div().min_w_0().truncate().child(subject))
+                .child(
+                    label(
+                        conversation.source.label(),
+                        LABEL_SM_PX,
+                        theme::rambutan_500(),
+                    )
+                    .flex_shrink_0(),
+                )
                 .into_any_element()
             })
             .collect::<Vec<_>>();
+        // Web: `space-y-1` sections with a text-label heading and
+        // `space-y-0.5` lists.
         let section = |heading: &'static str, empty: &'static str, rows: Vec<AnyElement>| {
             div()
+                .flex_1()
+                .min_w_0()
                 .flex()
                 .flex_col()
                 .gap_1()
-                .child(label(heading, LABEL_SM_PX, theme::rambutan_500()))
+                .child(label(heading, LABEL_PX, theme::rambutan_200()))
                 .when(rows.is_empty(), |el| {
                     el.child(label(empty, LABEL_SM_PX, theme::rambutan_500()))
                 })
-                .children(rows)
+                .when(!rows.is_empty(), |el| {
+                    el.child(div().flex().flex_col().gap(px(2.0)).children(rows))
+                })
         };
+        // Web `grid gap-3 sm:grid-cols-2`; desktop windows are at least sm.
         div()
             .debug_selector(|| "desktop-person-links".into())
             .flex()
-            .flex_col()
             .gap_3()
             .child(section(
                 copy::MEETINGS_HEADING,
@@ -2241,7 +2323,12 @@ impl Workspace {
         }
     }
 
-    fn render_relationship_panel(&self, person_id: &str, cx: &Context<'_, Self>) -> AnyElement {
+    fn render_relationship_panel(
+        &self,
+        person_id: &str,
+        window: &Window,
+        cx: &Context<'_, Self>,
+    ) -> AnyElement {
         let person_for_save = person_id.to_string();
         let person_for_add = person_id.to_string();
         let profile = self
@@ -2279,9 +2366,15 @@ impl Workspace {
                     text_button(
                         ("desktop-follow-up", index),
                         suggestion.reason.clone(),
+                        theme::rambutan_200(),
                         theme::blueberry_200(),
-                        theme::rambutan_100(),
                     )
+                    // Web `block w-full truncate text-body-sm`.
+                    .font_family(BODY_FONT)
+                    .font_weight(FontWeight::NORMAL)
+                    .text_size(px(BODY_SM_PX))
+                    .w_full()
+                    .truncate()
                     .debug_selector(move || format!("desktop-follow-up-{index}"))
                     .aria_label(format!("Open {}", suggestion.reason))
                     .on_click(cx.listener(move |this, _ev, window, cx| {
@@ -2290,7 +2383,7 @@ impl Workspace {
                     .into_any_element()
                 }
                 None => {
-                    label(suggestion.reason, LABEL_SM_PX, theme::blueberry_200()).into_any_element()
+                    body(suggestion.reason, BODY_SM_PX, theme::rambutan_200()).into_any_element()
                 }
             }
         })
@@ -2312,14 +2405,27 @@ impl Workspace {
             .draft_error
             .filter(|_| self.people_page.draft_contact.as_deref() == Some(person_id));
 
+        // Web `RelationshipDetails`: two field columns from sm, three from
+        // lg (desktop windows are at least sm), each field labelled, and
+        // the notes a four-row field across them.
+        let columns = if Self::narrower_than(window, crate::views::workspace::LG_BREAKPOINT_PX) {
+            2
+        } else {
+            3
+        };
+        let field = |name: &'static str, input: &Entity<InputState>| {
+            div()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .gap_1()
+                .child(label(name, LABEL_SM_PX, theme::rambutan_500()))
+                .child(Input::new(input).text_size(px(BODY_SM_PX)).aria_label(name))
+        };
         div()
-            .mt_2()
-            .pt_3()
-            .border_t_1()
-            .border_color(theme::longan_700())
             .flex()
             .flex_col()
-            .gap_2()
+            .gap_3()
             .when_some(draft_error, |el, message| {
                 el.child(
                     div()
@@ -2330,43 +2436,74 @@ impl Workspace {
                 )
             })
             .child(
+                // Web `items-baseline`: Save details sits on the title's
+                // line (gpui aligns a block's last line, so start instead).
                 div()
                     .flex()
-                    .items_center()
+                    .items_start()
                     .justify_between()
+                    .gap_3()
                     .child(
                         div()
-                            .text_size(px(12.0))
-                            .text_color(theme::rambutan_200())
-                            .child("Relationship"),
+                            .min_w_0()
+                            .child(label("Relationship", LABEL_PX, theme::rambutan_200()))
+                            .child(label(
+                                "Private context, commitments, and timely follow ups.",
+                                LABEL_SM_PX,
+                                theme::rambutan_500(),
+                            )),
                     )
                     .child(
-                        web_button(
-                            ("save-relationship", element_key(person_id)),
-                            WebButtonVariant::Ghost,
-                            WebButtonSize::Small,
-                            ButtonState::Enabled,
-                        )
-                        .aria_label("Save details")
-                        .child("Save details")
-                        .on_click(cx.listener(
-                            move |this, _event, window, cx| {
+                        // Web: a 24px persimmon text button, `px-2`.
+                        div()
+                            .id(("save-relationship", element_key(person_id)))
+                            .flex_shrink_0()
+                            .min_h(px(theme::CONTROL_XS_PX))
+                            .flex()
+                            .items_center()
+                            .rounded(px(4.0))
+                            .px(px(7.0))
+                            .border_1()
+                            .border_color(gpui::transparent_black())
+                            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_size(px(LABEL_SM_PX))
+                            .line_height(relative(1.5))
+                            .text_color(theme::persimmon_300())
+                            .tab_index(0)
+                            .role(Role::Button)
+                            .cursor_pointer()
+                            .hover(|el| el.bg(theme::longan_800()))
+                            .aria_label("Save details")
+                            .child("Save details")
+                            .on_click(cx.listener(move |this, _event, window, cx| {
                                 this.save_relationship_details(&person_for_save, window, cx)
-                            },
-                        )),
+                            })),
                     ),
             )
             .child(
                 div()
                     .grid()
-                    .grid_cols(3)
+                    .grid_cols(columns)
                     .gap_2()
-                    .child(Input::new(&self.relationship_company_input))
-                    .child(Input::new(&self.relationship_role_input))
-                    .child(Input::new(&self.relationship_email_input))
-                    .child(Input::new(&self.relationship_phone_input))
-                    .child(Input::new(&self.relationship_location_input))
-                    .child(Input::new(&self.relationship_notes_input)),
+                    .child(field("Company", &self.relationship_company_input))
+                    .child(field("Role", &self.relationship_role_input))
+                    .child(field("Email", &self.relationship_email_input))
+                    .child(field("Phone", &self.relationship_phone_input))
+                    .child(field("Location", &self.relationship_location_input)),
+            )
+            .child(
+                div()
+                    .flex()
+                    .flex_col()
+                    .gap_1()
+                    .child(label("Notes", LABEL_SM_PX, theme::rambutan_500()))
+                    .child(
+                        Textarea::new(&self.relationship_notes_input)
+                            .text_size(px(BODY_SM_PX))
+                            .aria_label("Notes"),
+                    ),
             )
             .when(!suggestions.is_empty(), |el| {
                 // Web: a blueberry note headed Suggested follow ups.
@@ -2377,7 +2514,7 @@ impl Workspace {
                         .border_1()
                         .border_color(theme::blueberry_500().opacity(0.2))
                         .bg(theme::blueberry_500().opacity(0.08))
-                        .p(px(10.0))
+                        .p(px(9.0))
                         .flex()
                         .flex_col()
                         .gap_1()
@@ -2389,50 +2526,82 @@ impl Workspace {
                         .children(suggestions),
                 )
             })
-            .child(div().flex().flex_wrap().gap_1().children(kinds))
             .child(
+                // Web: the new item's kind, text and Add on a tinted card.
                 div()
+                    .rounded(px(8.0))
+                    .bg(theme::longan_900().opacity(0.6))
+                    .border_1()
+                    .border_color(theme::longan_800())
+                    .p(px(9.0))
                     .flex()
-                    .flex_wrap()
-                    .items_center()
+                    .flex_col()
                     .gap_2()
                     .child(
                         div()
-                            .flex_1()
-                            .min_w(px(160.0))
-                            .child(Input::new(&self.relationship_item_input)),
+                            .id("desktop-relationship-kinds")
+                            .role(Role::Group)
+                            .aria_label("Item kind")
+                            .flex()
+                            .flex_wrap()
+                            .gap_1()
+                            .children(kinds),
                     )
-                    .when(due_applies, |el| {
-                        el.child(
-                            Checkbox::new("desktop-relationship-due")
-                                .label(copy::DUE_TOMORROW)
-                                .checked(self.people_page.due_tomorrow)
-                                .on_click(cx.listener(|this, checked: &bool, _window, cx| {
-                                    this.people_page.due_tomorrow = *checked;
-                                    cx.notify();
-                                })),
-                        )
-                    })
                     .child(
-                        web_button(
-                            ("add-relationship-item", element_key(person_id)),
-                            WebButtonVariant::Primary,
-                            WebButtonSize::Small,
-                            ButtonState::disabled_if(
-                                self.relationship_item_input
-                                    .read(cx)
-                                    .value()
-                                    .trim()
-                                    .is_empty(),
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap_2()
+                            .child(
+                                div().flex_1().min_w_0().child(
+                                    Input::new(&self.relationship_item_input)
+                                        .text_size(px(BODY_SM_PX))
+                                        .aria_label("New relationship item"),
+                                ),
+                            )
+                            .when(due_applies, |el| {
+                                el.child(
+                                    Checkbox::new("desktop-relationship-due")
+                                        .label(copy::DUE_TOMORROW)
+                                        .checked(self.people_page.due_tomorrow)
+                                        .on_click(cx.listener(
+                                            |this, checked: &bool, _window, cx| {
+                                                this.people_page.due_tomorrow = *checked;
+                                                cx.notify();
+                                            },
+                                        )),
+                                )
+                            })
+                            .child(
+                                // Web: a 32px `bg-blueberry-500/15 px-3
+                                // text-label-sm text-blueberry-300` button.
+                                div()
+                                    .id(("add-relationship-item", element_key(person_id)))
+                                    .flex_shrink_0()
+                                    .min_h(px(theme::CONTROL_PX))
+                                    .flex()
+                                    .items_center()
+                                    .rounded(px(8.0))
+                                    .px(px(11.0))
+                                    .border_1()
+                                    .border_color(gpui::transparent_black())
+                                    .focus_visible(|el| el.border_color(theme::persimmon_400()))
+                                    .bg(theme::blueberry_500().opacity(0.15))
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
+                                    .text_size(px(LABEL_SM_PX))
+                                    .line_height(relative(1.5))
+                                    .text_color(theme::blueberry_300())
+                                    .tab_index(0)
+                                    .role(Role::Button)
+                                    .cursor_pointer()
+                                    .hover(|el| el.bg(theme::blueberry_500().opacity(0.25)))
+                                    .aria_label("Add")
+                                    .child("Add")
+                                    .on_click(cx.listener(move |this, _event, window, cx| {
+                                        this.add_relationship_item(&person_for_add, window, cx)
+                                    })),
                             ),
-                        )
-                        .aria_label("Add")
-                        .child("Add")
-                        .on_click(cx.listener(
-                            move |this, _event, window, cx| {
-                                this.add_relationship_item(&person_for_add, window, cx)
-                            },
-                        )),
                     ),
             )
             .children(items)
@@ -2918,4 +3087,22 @@ impl Workspace {
             }))
             .into_any_element()
     }
+}
+
+/// A profile row's text action (web `action`): `text_button` grown to the
+/// 24px minimum target (docs/ui-standards.md).
+fn row_action(
+    id: impl Into<ElementId>,
+    text: impl Into<SharedString>,
+    color: Hsla,
+    hover: Hsla,
+) -> Stateful<Div> {
+    text_button(id, text, color, hover)
+        .min_h(px(theme::CONTROL_XS_PX))
+        .min_w(px(theme::CONTROL_XS_PX))
+        // The 1px focus border bleeds into the gap, like web's outline.
+        .mx(px(-1.0))
+        .flex()
+        .items_center()
+        .justify_center()
 }

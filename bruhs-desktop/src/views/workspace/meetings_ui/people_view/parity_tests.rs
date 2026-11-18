@@ -173,6 +173,33 @@ fn field(input: &gpui::Entity<gpui_component::input::InputState>, cx: &gpui::App
     input.read(cx).value().to_string()
 }
 
+/// `field` for the multi-line notes.
+fn notes(input: &gpui::Entity<gpui_component::input::TextareaState>, cx: &gpui::App) -> String {
+    input.read(cx).value().to_string()
+}
+
+/// Web: Notes is a four-row field, so Enter starts a new line in it (the
+/// desktop's one-line field could not hold line breaks typed here).
+#[gpui::test]
+fn notes_take_more_than_one_line_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = fixture(cx);
+    people_with_relationships(&workspace, cx);
+    workspace.update_in(cx, |w, window, cx| {
+        w.open_person_profile("ada", window, cx);
+        w.relationship_notes_input
+            .update(cx, |input, cx| input.set_value("", window, cx));
+        gpui::Focusable::focus_handle(w.relationship_notes_input.read(cx), cx).focus(window, cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    cx.simulate_input("first");
+    cx.simulate_keystrokes("enter");
+    cx.simulate_input("second");
+    workspace.update(cx, |w, cx| {
+        assert_eq!(notes(&w.relationship_notes_input, cx), "first\nsecond");
+    });
+}
+
 /// PM-37: like the web, each contact keeps its unsubmitted relationship
 /// edits while another contact is open, People lists them, and Discard
 /// returns the fields to the saved details.
@@ -183,7 +210,7 @@ fn relationship_edits_survive_opening_another_contact_like_web(cx: &mut gpui::Te
     workspace.update_in(cx, |w, window, cx| {
         w.open_person_profile("ada", window, cx);
         assert_eq!(
-            field(&w.relationship_notes_input, cx),
+            notes(&w.relationship_notes_input, cx),
             "Met at the conference"
         );
         w.relationship_notes_input.update(cx, |input, cx| {
@@ -193,7 +220,7 @@ fn relationship_edits_survive_opening_another_contact_like_web(cx: &mut gpui::Te
             .update(cx, |input, cx| input.set_value("Send the deck", window, cx));
 
         w.open_person_profile("grace", window, cx);
-        assert_eq!(field(&w.relationship_notes_input, cx), "");
+        assert_eq!(notes(&w.relationship_notes_input, cx), "");
         assert_eq!(field(&w.relationship_company_input, cx), "Navy");
         assert_eq!(field(&w.relationship_item_input, cx), "");
         let drafts = w.relationship_drafts_now(cx);
@@ -202,7 +229,7 @@ fn relationship_edits_survive_opening_another_contact_like_web(cx: &mut gpui::Te
         assert!(drafts.recovery_json().contains("Prefers mornings"));
 
         w.open_person_profile("ada", window, cx);
-        assert_eq!(field(&w.relationship_notes_input, cx), "Prefers mornings");
+        assert_eq!(notes(&w.relationship_notes_input, cx), "Prefers mornings");
         assert_eq!(field(&w.relationship_item_input, cx), "Send the deck");
         cx.notify();
     });
@@ -221,7 +248,7 @@ fn relationship_edits_survive_opening_another_contact_like_web(cx: &mut gpui::Te
     click(cx, discard);
     workspace.read_with(cx, |w, cx| {
         assert_eq!(
-            field(&w.relationship_notes_input, cx),
+            notes(&w.relationship_notes_input, cx),
             "Met at the conference"
         );
         assert_eq!(field(&w.relationship_item_input, cx), "");
@@ -253,7 +280,7 @@ fn save_details_keeps_a_conflicting_draft_like_web(cx: &mut gpui::TestAppContext
             Some(bruhs_models::people_copy::DETAILS_CHANGED)
         );
         assert_eq!(w.relationships[0].notes, "Theirs");
-        assert_eq!(field(&w.relationship_notes_input, cx), "Mine");
+        assert_eq!(notes(&w.relationship_notes_input, cx), "Mine");
         assert!(w.relationship_drafts_now(cx).contains("ada"));
         cx.notify();
     });
@@ -273,7 +300,7 @@ fn save_details_keeps_a_conflicting_draft_like_web(cx: &mut gpui::TestAppContext
             w.relationships[0].notes, "Latest",
             "an unrelated field is kept"
         );
-        assert_eq!(field(&w.relationship_notes_input, cx), "Latest");
+        assert_eq!(notes(&w.relationship_notes_input, cx), "Latest");
         assert!(w.relationship_drafts_now(cx).is_empty());
     });
 }

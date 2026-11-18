@@ -1211,6 +1211,10 @@ pub struct Workspace {
     mcp_bridge: mcp_bridge::WorkspaceBridge,
     /// Agent workflows' scroll area.
     automations_scroll: ScrollHandle,
+    /// Calendar's Week and Day grid. Like the web's, it opens two hours
+    /// before now each time it is shown (`calendar_timegrid_autoscroll`).
+    calendar_timegrid_scroll: ScrollHandle,
+    calendar_timegrid_autoscroll: std::cell::Cell<bool>,
     /// The page's own dry run (New dry run, a suggestion's or a draft's
     /// preview), reviewed in Preview changes while it waits.
     dry_run_workflow_id: Option<String>,
@@ -1431,7 +1435,7 @@ pub struct Workspace {
     relationship_email_input: Entity<InputState>,
     relationship_phone_input: Entity<InputState>,
     relationship_location_input: Entity<InputState>,
-    relationship_notes_input: Entity<InputState>,
+    relationship_notes_input: Entity<TextareaState>,
     relationship_item_input: Entity<InputState>,
     relationship_item_kind: RelationshipItemKind,
     scheduling_visible: bool,
@@ -1922,6 +1926,8 @@ impl Workspace {
             reviewed_workflow_id: None,
             mcp_bridge: mcp_bridge::WorkspaceBridge::default(),
             automations_scroll: ScrollHandle::new(),
+            calendar_timegrid_scroll: ScrollHandle::new(),
+            calendar_timegrid_autoscroll: std::cell::Cell::new(true),
             dry_run_workflow_id: None,
             workflow_disclosures: HashSet::new(),
             dismissed_workflow_notice: None,
@@ -2763,7 +2769,7 @@ impl Workspace {
                 .min_w_0()
                 .min_h_0()
                 .flex()
-                .child(self.render_people_page(cx)),
+                .child(self.render_people_page(window, cx)),
             AppView::Search => div()
                 .flex_1()
                 .h_full()
@@ -2832,6 +2838,11 @@ impl Render for Workspace {
         // page shows, a dry run still waiting is reviewed in its own card.
         if self.active_view != AppView::Automations {
             self.dry_run_workflow_id = None;
+        }
+        // The web mounts its time grid afresh whenever it appears.
+        if self.active_view != AppView::Calendar || self.calendar_mode == DesktopCalendarMode::Month
+        {
+            self.calendar_timegrid_autoscroll.set(true);
         }
         if !self.settings_visible() && self.credential_settings.read(cx).has_editor() {
             self.credential_settings

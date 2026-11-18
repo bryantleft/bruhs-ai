@@ -976,12 +976,12 @@ impl Workspace {
         .border_1()
         .map(|toggle| {
             if on {
-                // What Chrome draws for the web's granted toggle: its blue
-                // ring on the card, with no fill and rambutan-300 text (the
-                // class's blueberry fill and text never take effect there).
+                // Web `bg-blueberry-500/15 text-blueberry-200
+                // inset-ring-blueberry-400/20`.
                 toggle
+                    .bg(theme::blueberry_500().opacity(0.15))
                     .border_color(theme::blueberry_400().opacity(0.2))
-                    .text_color(theme::rambutan_300())
+                    .text_color(theme::blueberry_200())
             } else {
                 toggle
                     .bg(theme::longan_950().opacity(0.6))

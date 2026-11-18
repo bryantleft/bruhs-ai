@@ -196,7 +196,7 @@ pub fn PeoplePage() -> impl IntoView {
                     <label for="people-create" class="block text-label-sm text-rambutan-500">{people_copy::CREATE_LABEL}</label>
                     <div class="flex gap-2">
                         <input id="people-create" type="text" autocomplete="off"
-                            class="bruhs-control min-w-0 flex-1 rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                            class="bruhs-control min-h-control min-w-0 flex-1 rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
                             placeholder=people_copy::CREATE_PLACEHOLDER
                             aria-invalid=move || create_error.get().is_some().to_string()
                             aria-describedby="people-create-error"
@@ -205,7 +205,7 @@ pub fn PeoplePage() -> impl IntoView {
                                 new_name.set(event_target_value(&event));
                                 create_error.set(None);
                             } />
-                        <button type="submit" class="bruhs-control inline-flex shrink-0 items-center justify-center rounded-grape bg-persimmon-500 px-3 text-label-sm text-longan-950 hover:bg-persimmon-400 cursor-pointer">
+                        <button type="submit" class="bruhs-control inline-flex min-h-control shrink-0 items-center justify-center rounded-grape bg-persimmon-500 px-3 text-label-sm text-longan-950 hover:bg-persimmon-400 cursor-pointer">
                             {people_copy::CREATE_BUTTON}
                         </button>
                     </div>
@@ -214,7 +214,7 @@ pub fn PeoplePage() -> impl IntoView {
                 <div role="search" class="min-w-0 space-y-1">
                     <label for="people-search" class="block text-label-sm text-rambutan-500">{people_copy::SEARCH_LABEL}</label>
                     <input id="people-search" type="search" autocomplete="off"
-                        class="bruhs-control w-full rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                        class="bruhs-control min-h-control w-full rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
                         placeholder=people_copy::SEARCH_PLACEHOLDER
                         prop:value=move || query.get()
                         on:input=move |event| {
@@ -311,7 +311,8 @@ fn PersonCard(person_id: String, directory: Memo<Directory>, cards: CardState) -
             "bg-longan-900/50 inset-ring inset-ring-longan-700 rounded-seed p-3 space-y-2 opacity-60"
         }
     };
-    let action = "bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer";
+    // Every target is at least 24px (docs/ui-standards.md); 44px on touch.
+    let action = "bruhs-control inline-flex min-h-control-xs min-w-control-xs items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-300 cursor-pointer";
 
     view! {
         <li class=card_class>
@@ -324,7 +325,7 @@ fn PersonCard(person_id: String, directory: Memo<Directory>, cards: CardState) -
                             type="button"
                             id=format!("person-record-{}", id.get_value())
                             aria-expanded=move || is_expanded().to_string()
-                            class="bruhs-control flex min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 text-left cursor-pointer"
+                            class="bruhs-control flex min-h-control-xs min-w-0 flex-1 basis-40 flex-wrap items-center gap-2 text-left cursor-pointer"
                             on:click=move |_| {
                                 let current = id.get_value();
                                 expanded.update(|open| {
@@ -382,9 +383,9 @@ fn PersonCard(person_id: String, directory: Memo<Directory>, cards: CardState) -
                         title=move || if tracked.get() { "Stop collecting observations about this person and hide saved ones from agents" } else { "Collect observations about this person again" }
                         aria-label=move || format!("{} {}", if tracked.get() { "Untrack" } else { "Track" }, display_name.get())
                         class=move || if tracked.get() {
-                            "bruhs-control inline-flex items-center justify-center text-label-sm text-pandan-400 hover:text-pandan-200 cursor-pointer"
+                            "bruhs-control inline-flex min-h-control-xs min-w-control-xs items-center justify-center text-label-sm text-pandan-400 hover:text-pandan-200 cursor-pointer"
                         } else {
-                            "bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-400 cursor-pointer"
+                            "bruhs-control inline-flex min-h-control-xs min-w-control-xs items-center justify-center text-label-sm text-rambutan-500 hover:text-rambutan-400 cursor-pointer"
                         }
                         on:click=move |_| workflow_executor.set_person_tracked(id.get_value(), !tracked.get_untracked())
                     >
@@ -413,7 +414,7 @@ fn PersonCard(person_id: String, directory: Memo<Directory>, cards: CardState) -
                         type="button"
                         title="Record voice sample for this person"
                         aria-label=move || format!("Enroll voice for {}", display_name.get())
-                        class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-pandan-300 cursor-pointer"
+                        class="bruhs-control inline-flex min-h-control-xs min-w-control-xs items-center justify-center text-label-sm text-rambutan-500 hover:text-pandan-300 cursor-pointer"
                         on:click=move |_| cards.enroll_open.set(Some(id.get_value()))
                     >"enroll"</button>
                     <button
@@ -421,7 +422,7 @@ fn PersonCard(person_id: String, directory: Memo<Directory>, cards: CardState) -
                         title="Delete this profile"
                         aria-label=move || format!("Delete {}", display_name.get())
                         aria-expanded=move || is_delete_open().to_string()
-                        class="bruhs-control inline-flex items-center justify-center text-label-sm text-rambutan-500 hover:text-lychee-300 cursor-pointer"
+                        class="bruhs-control inline-flex min-h-control-xs min-w-control-xs items-center justify-center text-label-sm text-rambutan-500 hover:text-lychee-300 cursor-pointer"
                         on:click=move |_| {
                             let current = id.get_value();
                             cards.delete_open.update(|open| {

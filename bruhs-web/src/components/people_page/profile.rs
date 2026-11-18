@@ -8,7 +8,7 @@ use crate::state::{AppView, InboxConversationsSignal, MeetingsSignal, PeopleSign
 
 const HEADING: &str = "text-label text-rambutan-200";
 const EMPTY: &str = "text-label-sm text-rambutan-500";
-const LINK: &str = "bruhs-control flex w-full min-w-0 items-center justify-between gap-2 rounded-seed px-2 text-left text-body-sm text-rambutan-200 hover:bg-longan-800/70 hover:text-blueberry-200 cursor-pointer";
+const LINK: &str = "bruhs-control flex min-h-control-xs w-full min-w-0 items-center justify-between gap-2 rounded-seed px-2 text-left text-body-sm text-rambutan-200 hover:bg-longan-800/70 hover:text-blueberry-200 cursor-pointer";
 
 /// Inspect, add and remove aliases. A new alias is reviewed against every
 /// profile first; the server reviews it again before saving.
@@ -84,13 +84,13 @@ pub fn AliasesPanel(person_id: String) -> impl IntoView {
                     aria-label=people_copy::ALIAS_INPUT_LABEL
                     placeholder=people_copy::ALIAS_PLACEHOLDER
                     aria-invalid=move || problem.get().is_some().to_string()
-                    class="bruhs-control min-w-0 flex-1 rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                    class="bruhs-control min-h-control min-w-0 flex-1 rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
                     prop:value=move || draft.get()
                     on:input=move |event| {
                         draft.set(event_target_value(&event));
                         problem.set(None);
                     } />
-                <button type="submit" class="bruhs-control inline-flex shrink-0 items-center justify-center rounded-grape bg-blueberry-500/15 px-3 text-label-sm text-blueberry-300 hover:bg-blueberry-500/25 cursor-pointer">
+                <button type="submit" class="bruhs-control inline-flex min-h-control shrink-0 items-center justify-center rounded-grape bg-blueberry-500/15 px-3 text-label-sm text-blueberry-300 hover:bg-blueberry-500/25 cursor-pointer">
                     {people_copy::ALIAS_BUTTON}
                 </button>
             </form>

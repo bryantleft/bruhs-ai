@@ -357,12 +357,9 @@ impl Workspace {
 
         div().debug_selector(|| "desktop-inbox-page".into())
             .flex_1().h_full().min_w_0().bg(cx.theme().background).flex().flex_col()
-            .child(div().px_4().py_3().border_b_1().border_color(theme::longan_800())
-                .flex().flex_wrap().gap_3().items_center().justify_between()
-                .child(div().min_w_0()
-                    .child(div().font_family(theme::HEADING_FONT_FAMILY).text_size(px(18.0)).text_color(theme::rambutan_100()).child("Inbox"))
-                    .child(div().mt_0p5().text_size(px(12.0)).text_color(theme::rambutan_500()).child("Imported conversations and local reply drafts.")))
-                .child(div().flex().flex_wrap().gap_2()
+            // Web `PageHeader` with the two actions.
+            .child(crate::views::page_header::page_header("Inbox", Some("Imported conversations and local reply drafts.".into()))
+                .child(div().flex().flex_wrap().items_center().gap_2()
                 .child(web_button("desktop-inbox-email", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
                     .debug_selector(|| "desktop-inbox-email".into()).aria_label("Email").child("Email")
                     .map(|el| on_press_view(el, cx, |this, _, cx| this.open_connected_inbox(cx))))
@@ -370,21 +367,24 @@ impl Workspace {
                     .debug_selector(|| "desktop-import-conversation".into())
                     .aria_label("Import conversation").child("Import conversation")
                     .on_click(cx.listener(|this, _, window, cx| this.start_inbox_import(window, cx))))))
-            .child(div().flex_1().min_h_0().overflow_y_scrollbar().p_4().flex().justify_center()
-                .child(div().w_full().max_w(px(1024.0)).flex().flex_col().gap_4()
-                    .child(Input::new(&self.inbox_search_input).aria_label("Search inbox"))
-                    .child(div().id("desktop-inbox-filter-group").role(Role::Group).aria_label("Inbox filter").flex().flex_wrap().gap_1()
-                        .children(InboxFilter::ALL.into_iter().map(|value| self.inbox_filter_button(value, cx))))
+            // Web `max-w-5xl space-y-5 px-4 py-5 sm:px-6`; desktop windows are at least sm.
+            .child(div().flex_1().min_h_0().overflow_y_scrollbar().px_6().py_5().flex().justify_center()
+                .child(div().w_full().max_w(px(1024.0)).flex().flex_col().gap_5()
+                    .child(div().flex().flex_col().gap_3()
+                        .child(Input::new(&self.inbox_search_input).aria_label("Search inbox"))
+                        .child(div().id("desktop-inbox-filter-group").role(Role::Group).aria_label("Inbox filter").flex().flex_wrap().gap_1()
+                            .children(InboxFilter::ALL.into_iter().map(|value| self.inbox_filter_button(value, cx)))))
                     .child(div().flex().flex_col().rounded(px(8.0)).border_1().border_color(theme::longan_800()).overflow_hidden()
                         .children(cards)
                         .when(total == 0, |element| element.child(div().py_12().px_4().text_center()
                             .child(div().id("desktop-inbox-empty").debug_selector(|| "desktop-inbox-empty".into()).role(Role::Status).text_size(px(13.0)).text_color(theme::rambutan_300()).child(empty))
                             .child(div().mt_1().text_size(px(12.0)).text_color(theme::rambutan_500())
                                 .child(next_step)))))
-                    .child(div().id("desktop-inbox-counts").role(Role::Status).aria_label("Inbox counts").flex().flex_wrap().gap_4().text_size(px(12.0)).text_color(theme::rambutan_400())
+                    .child(div().id("desktop-inbox-counts").role(Role::Status).aria_label("Inbox counts").flex().flex_wrap().gap_x_5().gap_y_1()
+                        .font_family(theme::UI_SMALL_FONT_FAMILY).font_weight(FontWeight::MEDIUM).text_size(px(12.0)).line_height(relative(1.5)).text_color(theme::rambutan_400())
                         .child(format!("{} open", counts.open)).child(format!("{} unread", counts.unread))
                         .child(format!("{} need reply", counts.needs_reply)).child(format!("{} snoozed", counts.snoozed)))
-                    .child(div().text_size(px(12.0)).text_color(theme::rambutan_400())
+                    .child(div().font_family(theme::UI_SMALL_FONT_FAMILY).font_weight(FontWeight::MEDIUM).text_size(px(12.0)).line_height(relative(1.5)).text_color(theme::rambutan_400())
                         .child("Imported messages and replies stay on this device. Choose Email to read and sync connected Gmail."))))
             .when(total > INBOX_PAGE_SIZE, |element| element.child(
                 div().id("desktop-inbox-pages").aria_label("Inbox pages")
@@ -409,11 +409,20 @@ impl Workspace {
         } else {
             value.label().into()
         })
+        // Web: a 32px `px-2.5 py-1.5 text-label-sm` pill, rambutan-400 until
+        // selected, then blueberry with a ring.
+        .font_family(theme::UI_SMALL_FONT_FAMILY)
+        .font_weight(FontWeight::MEDIUM)
         .text_size(px(12.0))
         .rounded(px(4.0))
+        .px(px(9.0))
+        .border_1()
+        .border_color(gpui::transparent_black())
+        .text_color(theme::rambutan_400())
         .when(selected, |button| {
             button
                 .bg(theme::blueberry_500().opacity(0.15))
+                .border_color(theme::blueberry_500().opacity(0.3))
                 .text_color(theme::blueberry_400())
         })
         .child(value.label())
@@ -486,7 +495,7 @@ impl Workspace {
             .border_color(theme::longan_800())
             .px_3()
             .py_3()
-            .hover(|element| element.bg(theme::longan_800().opacity(0.7)))
+            .hover(|element| element.bg(theme::longan_800().opacity(0.6)))
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
             .map(|el| {
                 on_press_view(el, cx, move |this, window, cx| {
@@ -500,7 +509,7 @@ impl Workspace {
             .child(
                 div()
                     .debug_selector(move || format!("desktop-inbox-card-dot-{key}"))
-                    .mt(px(6.0))
+                    .mt(px(8.0))
                     .size(px(8.0))
                     .flex_shrink_0()
                     .rounded_full()
@@ -515,20 +524,25 @@ impl Workspace {
                     .min_w_0()
                     .flex_1()
                     .child(
+                        // Web: the sender in `text-label` (semibold while
+                        // unread), the date in `text-label-sm`.
                         div()
                             .flex()
-                            .items_center()
+                            .items_baseline()
                             .justify_between()
+                            .gap_3()
                             .child(
                                 div()
                                     .truncate()
+                                    .font_family(theme::UI_FONT_FAMILY)
                                     .text_size(px(13.0))
+                                    .line_height(relative(1.5))
                                     .min_w_0()
                                     .flex_1()
                                     .font_weight(if conversation.unread {
                                         FontWeight::SEMIBOLD
                                     } else {
-                                        FontWeight::NORMAL
+                                        FontWeight::MEDIUM
                                     })
                                     .text_color(if conversation.unread {
                                         theme::rambutan_100()
@@ -540,16 +554,22 @@ impl Workspace {
                             .child(
                                 div()
                                     .flex_shrink_0()
+                                    .font_family(theme::UI_SMALL_FONT_FAMILY)
+                                    .font_weight(FontWeight::MEDIUM)
                                     .text_size(px(12.0))
+                                    .line_height(relative(1.5))
                                     .text_color(theme::rambutan_500())
                                     .child(inbox_date(conversation.message_at_ms)),
                             ),
                     )
                     .child(
+                        // Web: subject and preview in `text-body-sm`.
                         div()
-                            .mt_1()
+                            .mt_0p5()
                             .truncate()
-                            .text_size(px(12.0))
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_300())
                             .child(if conversation.subject.trim().is_empty() {
                                 "(No subject)".to_string()
@@ -559,9 +579,11 @@ impl Workspace {
                     )
                     .child(
                         div()
-                            .mt_1()
+                            .mt_0p5()
                             .truncate()
-                            .text_size(px(12.0))
+                            .font_family(theme::CODE_FONT_FAMILY)
+                            .text_size(px(13.0))
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_500())
                             .overflow_hidden()
                             .child(preview),
@@ -571,7 +593,10 @@ impl Workspace {
                             .mt_1()
                             .flex()
                             .gap_3()
+                            .font_family(theme::UI_SMALL_FONT_FAMILY)
+                            .font_weight(FontWeight::MEDIUM)
                             .text_size(px(12.0))
+                            .line_height(relative(1.5))
                             .text_color(theme::rambutan_500())
                             .child(format!("{} import", conversation.source.label()))
                             .when(conversation.important, |element| element.child("Important")),

@@ -403,6 +403,35 @@ fn calendar_views_draw_their_controls_at_the_parity_cell(cx: &mut gpui::TestAppC
     }
 }
 
+/// CAL-17: in a 640×480 window the week's seven headers wrap ("Sun" over
+/// "15"), as the web's do, instead of pushing Saturday past the window's
+/// edge; and the grid opens two hours before now, as the web's does.
+#[gpui::test]
+fn the_week_fits_a_640_window_and_opens_near_now_like_web(cx: &mut gpui::TestAppContext) {
+    let (workspace, cx) = calendar_workspace(cx);
+    cx.simulate_resize(gpui::size(gpui::px(640.0), gpui::px(480.0)));
+    workspace.update_in(cx, |workspace, _window, cx| {
+        workspace.active_view = AppView::Calendar;
+        workspace.calendar_anchor = NaiveDate::from_ymd_opt(2026, 5, 12).expect("a date");
+        workspace.set_calendar_mode(DesktopCalendarMode::Week, cx);
+    });
+    cx.run_until_parked();
+    let saturday = rendered_bounds(cx, "desktop-calendar-week-header-2026-05-16");
+    let width = cx.update(|window, _| window.viewport_size().width);
+    assert!(
+        saturday.right() <= width,
+        "Saturday's header ends at {:?}, inside the {width:?} window",
+        saturday.right()
+    );
+    let expected = super::super::calendar_ui::timegrid_opening_scroll_px(chrono::Timelike::hour(
+        &chrono::Local::now(),
+    ));
+    workspace.update(cx, |workspace, _| {
+        let offset = workspace.calendar_timegrid_scroll.offset().y;
+        assert_eq!(f32::from(-offset), expected, "the grid opened near now");
+    });
+}
+
 fn day_list_event_selector(event_id: &str) -> &'static str {
     leaked_debug_selector(format!(
         "desktop-calendar-day-list-event-{}",

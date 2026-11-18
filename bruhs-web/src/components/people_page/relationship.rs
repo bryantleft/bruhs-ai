@@ -35,9 +35,9 @@ fn kind_buttons(
                     type="button"
                     aria-pressed=move || (selected.get() == kind).to_string()
                     class=move || if selected.get() == kind {
-                        "bruhs-control inline-flex items-center justify-center rounded-seed bg-blueberry-500/15 px-2 text-label-sm text-blueberry-300 cursor-pointer"
+                        "bruhs-control inline-flex min-h-control-xs items-center justify-center rounded-seed bg-blueberry-500/15 px-2 text-label-sm text-blueberry-300 cursor-pointer"
                     } else {
-                        "bruhs-control inline-flex items-center justify-center rounded-seed px-2 text-label-sm text-rambutan-500 hover:bg-longan-800 cursor-pointer"
+                        "bruhs-control inline-flex min-h-control-xs items-center justify-center rounded-seed px-2 text-label-sm text-rambutan-500 hover:bg-longan-800 cursor-pointer"
                     }
                     on:click=move |_| {
                         selected.set(kind);
@@ -247,7 +247,7 @@ pub fn RelationshipPanel(person_id: String) -> impl IntoView {
                     view! {
                         <button
                             type="button"
-                            class="bruhs-control block w-full truncate text-left text-body-sm text-rambutan-200 hover:text-blueberry-200 cursor-pointer"
+                            class="bruhs-control block min-h-control-xs w-full truncate text-left text-body-sm text-rambutan-200 hover:text-blueberry-200 cursor-pointer"
                             on:click=open
                         >
                             {suggestion.reason}
@@ -365,7 +365,7 @@ pub fn RelationshipPanel(person_id: String) -> impl IntoView {
                 </div>
                 <button
                     type="button"
-                    class="bruhs-control rounded-seed px-2 text-label-sm text-persimmon-300 hover:bg-longan-800 cursor-pointer"
+                    class="bruhs-control min-h-control-xs rounded-seed px-2 text-label-sm text-persimmon-300 hover:bg-longan-800 cursor-pointer"
                     on:click=move |_| save_details()
                 >
                     "Save details"
@@ -392,7 +392,7 @@ pub fn RelationshipPanel(person_id: String) -> impl IntoView {
                     <input
                         type="text"
                         aria-label="New relationship item"
-                        class="bruhs-control min-w-0 flex-1 rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                        class="bruhs-control min-h-control min-w-0 flex-1 rounded-grape bg-white/5 px-3 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
                         placeholder="Add interaction, commitment, reminder, or note…"
                         prop:value=move || item_text.get()
                         on:input=move |event| {
@@ -411,7 +411,7 @@ pub fn RelationshipPanel(person_id: String) -> impl IntoView {
                     </Show>
                     <button
                         type="button"
-                        class="bruhs-control rounded-grape bg-blueberry-500/15 px-3 text-label-sm text-blueberry-300 hover:bg-blueberry-500/25 cursor-pointer"
+                        class="bruhs-control min-h-control rounded-grape bg-blueberry-500/15 px-3 text-label-sm text-blueberry-300 hover:bg-blueberry-500/25 cursor-pointer"
                         on:click=move |_| add_item()
                     >
                         "Add"
@@ -436,7 +436,7 @@ fn RelationshipField(
             <span class="text-label-sm text-rambutan-500">{label}</span>
             <input
                 type="text"
-                class="bruhs-control block w-full rounded-seed bg-white/5 px-2.5 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
+                class="bruhs-control block min-h-control w-full rounded-seed bg-white/5 px-2.5 text-body-sm text-rambutan-100 placeholder:text-rambutan-500 inset-ring inset-ring-white/10 focus-visible:outline-2 focus-visible:outline-persimmon-400"
                 prop:value=move || value.get()
                 on:input=move |event| {
                     value.set(event_target_value(&event));
