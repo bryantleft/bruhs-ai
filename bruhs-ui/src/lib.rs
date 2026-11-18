@@ -52,8 +52,15 @@ pub mod zoom;
 // The kit pieces an app needs at its root. These move into bruhs-ui itself,
 // phase by phase (docs/ui-kit-replacement.md); the paths stay.
 pub use gpui_component::{
-    init, ActiveTheme, Disableable, FocusTrapElement, Root, RopeExt, Sizable, Theme, ThemeMode,
+    ActiveTheme, Disableable, FocusTrapElement, Root, RopeExt, Sizable, Theme, ThemeMode,
     ThemeTokens, WindowExt,
 };
 pub use icons::{Icon, IconName};
+
+/// Set up bruhs-ui for an app: the kit pieces still in use, then ours
+/// (text selection's copy binding).
+pub fn init(cx: &mut gpui::App) {
+    gpui_component::init(cx);
+    text::init(cx);
+}
 pub use title_bar::TitleBar;
