@@ -8,6 +8,8 @@
 //! - CAL-05: a Google all-day date (2026-11-02) arrives as a UTC midnight
 //!   and shows on that date only; a replayed frame and a restart from the
 //!   state file leave it there.
+//! - CAL-02: local timed and all-day events created and deleted in the
+//!   dialog survive restarts from the state file.
 
 use super::launch::{init, launch, quit, saved};
 use super::*;
@@ -240,16 +242,9 @@ async fn in_zone(cx: &mut gpui::TestAppContext, zone: &str) {
     });
 }
 
-#[gpui::test]
-async fn dst_days_and_all_day_dates_in_three_zones(cx: &mut gpui::TestAppContext) {
-    if let Ok(zone) = std::env::var(ZONE_CHILD) {
-        in_zone(cx, &zone).await;
-        return;
-    }
-    let full_name = concat!(
-        module_path!(),
-        "::dst_days_and_all_day_dates_in_three_zones"
-    );
+/// Runs the test named `full_name` once per zone, each in a child process
+/// with its own TZ.
+fn run_in_zones(full_name: &str) {
     let (_, name) = full_name.split_once("::").expect("a test path");
     for zone in ["America/Los_Angeles", "UTC", "Asia/Tokyo"] {
         let result = std::process::Command::new(std::env::current_exe().expect("the test binary"))
@@ -269,4 +264,187 @@ async fn dst_days_and_all_day_dates_in_three_zones(cx: &mut gpui::TestAppContext
             "the {zone} child must run the selected test: {stdout}"
         );
     }
+}
+
+#[gpui::test]
+async fn dst_days_and_all_day_dates_in_three_zones(cx: &mut gpui::TestAppContext) {
+    if let Ok(zone) = std::env::var(ZONE_CHILD) {
+        in_zone(cx, &zone).await;
+        return;
+    }
+    run_in_zones(concat!(
+        module_path!(),
+        "::dst_days_and_all_day_dates_in_three_zones"
+    ));
+}
+
+/// Fills the open event dialog and saves it.
+fn save_in_dialog(
+    workspace: &Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+    title: &str,
+    start: &str,
+    end: &str,
+) {
+    workspace.update_in(cx, |workspace, window, cx| {
+        assert!(workspace.event_create_visible());
+        for (input, value) in [
+            (&workspace.event_create_title_input, title),
+            (&workspace.event_create_start_input, start),
+            (&workspace.event_create_end_input, end),
+        ] {
+            input.update(cx, |input, cx| {
+                input.set_value(value.to_string(), window, cx)
+            });
+        }
+    });
+    click_debug_selector(cx, "desktop-event-create-submit");
+    cx.run_until_parked();
+}
+
+/// What a restart must bring back: an event's identity, wall times and
+/// saved instants.
+#[derive(Clone, Debug, PartialEq)]
+struct SavedEvent {
+    id: String,
+    title: String,
+    all_day: bool,
+    start_at: NaiveDateTime,
+    end_at: NaiveDateTime,
+    start_ms: Option<i64>,
+    end_ms: Option<i64>,
+}
+
+fn saved_events(
+    workspace: &Entity<Workspace>,
+    cx: &mut gpui::VisualTestContext,
+) -> Vec<SavedEvent> {
+    workspace.update_in(cx, |workspace, _window, _cx| {
+        workspace
+            .calendar_events
+            .iter()
+            .map(|event| {
+                let saved = persisted_calendar_event(event, local_offset_minutes_east);
+                SavedEvent {
+                    id: event.id.clone(),
+                    title: event.title.clone(),
+                    all_day: event.all_day,
+                    start_at: event.start_at,
+                    end_at: event.end_at,
+                    start_ms: saved.start_at_ms,
+                    end_ms: saved.end_at_ms,
+                }
+            })
+            .collect()
+    })
+}
+
+/// CAL-02 in one zone: a timed and an all-day event created in the dialog
+/// on 2026-11-01 (25 hours long in Los Angeles) come back after a restart;
+/// the all-day event spans local midnight to local midnight without
+/// spilling into 2026-11-02; both are deleted in the dialog and stay
+/// deleted after another restart.
+async fn local_events_in_zone(cx: &mut gpui::TestAppContext, zone: &str) {
+    init(cx);
+    let files = tempfile::tempdir().expect("a temporary directory");
+    let path = files.path().join("state.json");
+    let mut second_launch = cx.clone();
+    let mut third_launch = cx.clone();
+    let (workspace, cx) = launch(cx, &path);
+    let date = NaiveDate::from_ymd_opt(2026, 11, 1).expect("a date");
+    show(&workspace, cx, DesktopCalendarMode::Day, date);
+    click_debug_selector(cx, "desktop-calendar-new-event");
+    cx.run_until_parked();
+    save_in_dialog(
+        &workspace,
+        cx,
+        "Planning",
+        "2026-11-01T10:00",
+        "2026-11-01T11:30",
+    );
+    click_debug_selector(cx, "desktop-calendar-new-event");
+    cx.run_until_parked();
+    click_debug_selector(cx, "desktop-event-create-all-day");
+    cx.run_until_parked();
+    save_in_dialog(
+        &workspace,
+        cx,
+        "Offsite",
+        "2026-11-01T09:00",
+        "2026-11-01T10:00",
+    );
+    saved(&workspace, cx).await;
+    let created = saved_events(&workspace, cx);
+    assert_eq!(created.len(), 2, "{zone}: {created:?}");
+    let offsite = created
+        .iter()
+        .find(|event| event.title == "Offsite")
+        .expect("the all-day event");
+    assert!(offsite.all_day, "{zone}: all day");
+    assert_eq!(
+        offsite.start_ms,
+        Some(local_ms(date, 0)),
+        "{zone}: local midnight"
+    );
+    let next_midnight = local_ms(date.succ_opt().expect("a date"), 0);
+    assert_eq!(offsite.end_ms, Some(next_midnight), "{zone}");
+    if zone == "America/Los_Angeles" {
+        assert_eq!(
+            next_midnight - local_ms(date, 0),
+            25 * HOUR_MS,
+            "the long day"
+        );
+    }
+    let planning = created
+        .iter()
+        .find(|event| event.title == "Planning")
+        .expect("the timed event");
+    assert_eq!(planning.start_ms, Some(local_ms(date, 10)), "{zone}");
+    assert_eq!(
+        planning.end_ms,
+        Some(local_ms(date, 11) + HOUR_MS / 2),
+        "{zone}"
+    );
+    quit(&workspace, cx);
+
+    let (restarted, cx) = launch(&mut second_launch, &path);
+    assert_eq!(
+        saved_events(&restarted, cx),
+        created,
+        "{zone}: a restart keeps them"
+    );
+    show(&restarted, cx, DesktopCalendarMode::Month, date);
+    assert_rendered_bounds(cx, "desktop-calendar-day-open-2026-11-01");
+    assert_no_rendered_bounds(cx, "desktop-calendar-day-open-2026-11-02");
+    assert_no_rendered_bounds(cx, "desktop-calendar-day-open-2026-10-31");
+    for event in &created {
+        click_debug_selector(cx, "desktop-calendar-day-open-2026-11-01");
+        cx.run_until_parked();
+        let row = leaked_debug_selector(format!(
+            "desktop-calendar-day-list-event-{}",
+            crate::views::workspace::element_key(&event.id)
+        ));
+        click_debug_selector(cx, row);
+        cx.run_until_parked();
+        click_debug_selector(cx, "desktop-event-create-delete");
+        cx.run_until_parked();
+    }
+    saved(&restarted, cx).await;
+    assert!(saved_events(&restarted, cx).is_empty(), "{zone}: deleted");
+    quit(&restarted, cx);
+
+    let (third, cx) = launch(&mut third_launch, &path);
+    assert!(saved_events(&third, cx).is_empty(), "{zone}: still deleted");
+}
+
+#[gpui::test]
+async fn local_events_survive_restarts_in_three_zones(cx: &mut gpui::TestAppContext) {
+    if let Ok(zone) = std::env::var(ZONE_CHILD) {
+        local_events_in_zone(cx, &zone).await;
+        return;
+    }
+    run_in_zones(concat!(
+        module_path!(),
+        "::local_events_survive_restarts_in_three_zones"
+    ));
 }
