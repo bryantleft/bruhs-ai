@@ -508,7 +508,13 @@ fn said(text: &str) -> Option<String> {
 
 /// The run wrote no reply, only a question, and the room already shows that
 /// question as its card: saying it again would repeat it.
-fn question_only(connection: &Connection, run: &ReactiveRun) -> Result<bool, ReactiveError> {
+pub(in crate::reactive) fn question_only(
+    connection: &Connection,
+    run: &ReactiveRun,
+) -> Result<bool, ReactiveError> {
+    let Some(room_id) = run.trigger.as_ref().and_then(RunTrigger::room_id) else {
+        return Ok(false);
+    };
     if run.result.as_deref().and_then(said).is_some()
         || run
             .report
@@ -518,9 +524,10 @@ fn question_only(connection: &Connection, run: &ReactiveRun) -> Result<bool, Rea
         return Ok(false);
     }
     // The run's question is keyed by the run's id; its approvals are not.
+    // Only this room's messages count, which the (room_id,seq) index finds.
     Ok(connection.query_row(
-        "SELECT EXISTS(SELECT 1 FROM reactive_room_messages m JOIN reactive_outbox o ON json_extract(m.payload,'$.outbox_id')=o.id WHERE o.run_id=?1)",
-        [&run.id],
+        "SELECT EXISTS(SELECT 1 FROM reactive_room_messages m JOIN reactive_outbox o ON json_extract(m.payload,'$.outbox_id')=o.id WHERE m.room_id=?2 AND o.run_id=?1)",
+        params![run.id, room_id],
         |row| row.get(0),
     )?)
 }

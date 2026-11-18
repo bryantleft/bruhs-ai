@@ -430,6 +430,38 @@ async fn a_late_approval_resumes_a_room_run_in_its_room() {
 }
 
 #[tokio::test]
+async fn a_question_card_counts_only_in_its_own_room() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    create(&runtime, room("r", &["a"], None)).await;
+    create(&runtime, room("s", &["a"], None)).await;
+    post(&runtime, "r", "@Agent a one").await;
+    let claim = claim_one(&runtime).await.unwrap();
+    finish(
+        &runtime,
+        &claim.run.id,
+        &report("ask", "Which card?", "Work or personal?"),
+    )
+    .await;
+    let mut asked = run(&runtime, &claim.run.id).await;
+    let here = asked.clone();
+    assert!(runtime
+        .call(move |connection| store::rooms::question_only(connection, &here))
+        .await
+        .unwrap());
+    let Some(RunTrigger::Room { room_id, .. }) = asked.trigger.as_mut() else {
+        panic!("not a room run");
+    };
+    *room_id = "s".into();
+    assert!(
+        !runtime
+            .call(move |connection| store::rooms::question_only(connection, &asked))
+            .await
+            .unwrap(),
+        "the card is in room r, not s"
+    );
+}
+
+#[tokio::test]
 async fn a_late_answer_resumes_a_room_question_in_its_room() {
     let (_dir, runtime) = runtime_with(&[agent("a")]).await;
     create(&runtime, room("r", &["a"], None)).await;
