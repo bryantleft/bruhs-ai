@@ -181,6 +181,19 @@ impl ReactiveAutomations {
             .map(|dialog| (dialog.delete_focus.clone(), dialog.keep_focus.clone()))
     }
 
+    /// The Name field, which takes focus when the dialog opens.
+    pub(crate) fn room_name_input(&self) -> Option<Entity<InputState>> {
+        self.room_dialog.as_ref().map(|dialog| dialog.name.clone())
+    }
+
+    /// The Name field has focus.
+    #[cfg(test)]
+    pub(crate) fn room_name_focused_for_test(&self, window: &Window, cx: &App) -> bool {
+        self.room_dialog
+            .as_ref()
+            .is_some_and(|dialog| dialog.name.focus_handle(cx).is_focused(window))
+    }
+
     /// Save and Delete room are off while a command is on its way or the
     /// service has no rooms.
     pub(crate) fn room_dialog_disabled(&self) -> bool {

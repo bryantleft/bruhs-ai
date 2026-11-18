@@ -826,7 +826,13 @@ impl Workspace {
         self.reactive_automations
             .update(cx, |panel, cx| panel.open_room_dialog(room_id, window, cx));
         self.open_overlay(Overlay::RoomDialog);
-        self.focus_first_modal_tab_stop(window, cx);
+        // Like the web Dialog, focus starts on Name, not the close button.
+        match self.reactive_automations.read(cx).room_name_input() {
+            Some(name) => cx.defer_in(window, move |_, window, cx| {
+                name.update(cx, |input, cx| input.focus(window, cx));
+            }),
+            None => self.focus_first_modal_tab_stop(window, cx),
+        }
         cx.notify();
     }
 
@@ -1655,6 +1661,39 @@ mod tests {
             !room_dialog_open(&workspace, cx),
             "a second Escape closes it"
         );
+    }
+
+    /// Like the web Dialog, New room and Room settings open with focus
+    /// on Name, the first field, not on the close button.
+    #[gpui::test]
+    fn the_room_dialog_opens_with_focus_on_name(cx: &mut gpui::TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        cx.simulate_resize(gpui::size(gpui::px(1280.0), gpui::px(800.0)));
+        show_rooms(
+            &workspace,
+            cx,
+            vec![named("a", "Ada")],
+            vec![room("r", &["a"])],
+            CREW_PROTOCOL,
+        );
+        let name_focused = |workspace: &Entity<Workspace>, cx: &mut VisualTestContext| {
+            workspace.update_in(cx, |workspace, window, cx| {
+                workspace
+                    .reactive_automations
+                    .read(cx)
+                    .room_name_focused_for_test(window, cx)
+            })
+        };
+        click(cx, "desktop-crew-new-room");
+        assert!(room_dialog_open(&workspace, cx));
+        assert!(name_focused(&workspace, cx), "New room starts on Name");
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+        workspace.update_in(cx, |workspace, window, cx| {
+            workspace.open_room_dialog(Some("r".into()), window, cx);
+        });
+        cx.run_until_parked();
+        assert!(name_focused(&workspace, cx), "Room settings starts on Name");
     }
 
     #[gpui::test]
