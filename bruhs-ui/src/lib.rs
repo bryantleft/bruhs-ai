@@ -8,10 +8,10 @@
 //! The app's whole UI toolkit comes from this crate: text fields
 //! ([`input`]), rich text ([`text`]), scrolling ([`scroll`]), panels
 //! ([`resizable`]), [`tooltip`], [`checkbox`], zoom and the window [`Root`].
-//! Some of these still wrap the vendored GPUI Kit; each is being replaced by
-//! our own, behind the same paths (`docs/ui-kit-replacement.md`).
+//! All of it is written on gpui's public API; nothing comes from another UI
+//! library.
 //!
-//! * [`theme`] — design tokens and the gpui-component theme they configure.
+//! * [`theme`] — design tokens and the app theme (`cx.theme()`).
 //! * [`press`] — focus, naming and one action per click, Enter or Space.
 //! * [`button`] — the web's `Button` variants and sizes.
 //! * [`switch`] — the web's `Switch`.
@@ -40,6 +40,7 @@ pub mod page_header;
 pub mod press;
 pub mod resizable;
 pub mod resize_handle;
+pub mod root;
 pub mod scroll;
 pub mod switch;
 pub mod text;
@@ -49,16 +50,16 @@ pub mod title_bar;
 pub mod tooltip;
 pub mod zoom;
 
-// The kit pieces an app needs at its root. These move into bruhs-ui itself,
-// phase by phase (docs/ui-kit-replacement.md); the paths stay.
-pub use gpui_component::{ActiveTheme, FocusTrapElement, Root, Theme, ThemeMode, ThemeTokens};
 pub use icons::{Icon, IconName};
 pub use input::{Sizable, Size, WindowExt};
+pub use root::{FocusTrapElement, Root};
+pub use theme::{ActiveTheme, Theme, ThemeMode};
 
-/// Set up bruhs-ui for an app: the kit pieces still in use, then ours
-/// (text selection's copy binding).
+/// Set up bruhs-ui for an app: the theme, and the key bindings of the
+/// window root, text fields and text selection.
 pub fn init(cx: &mut gpui::App) {
-    gpui_component::init(cx);
+    cx.default_global::<Theme>();
+    root::init(cx);
     input::init(cx);
     text::init(cx);
 }

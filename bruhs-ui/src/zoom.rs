@@ -1,8 +1,8 @@
 //! Page zoom for the desktop window, the counterpart of a browser's
 //! ⌘+ / ⌘− / ⌘0 on the web app. The levels are Chrome's, from 67% to 300%;
 //! below 67% the window header gets shorter than the macOS traffic lights.
-//! Drawing at a zoom is `gpui_component::zoom`: design lengths are CSS pixels
-//! scaled by the zoom, so pages reflow at the web's widths.
+//! Drawing at a zoom is [`px`]: design lengths are CSS pixels scaled by the
+//! zoom, so pages reflow at the web's widths.
 
 use gpui::{App, Pixels};
 use std::cell::Cell;
@@ -47,9 +47,14 @@ pub fn set_zoom(zoom: f32, cx: &mut App) {
     if !(zoom.is_finite() && zoom > 0.0) || (zoom - self::zoom()).abs() < f32::EPSILON {
         return;
     }
+    let old = self::zoom();
     ZOOM.with(|cell| cell.set(zoom));
-    // Kit components not yet replaced read the kit's own factor and theme.
-    gpui_component::zoom::set_zoom(zoom, cx);
+    // The rem size follows the theme's font size (see `Root`), so rem-based
+    // styles scale too.
+    if cx.has_global::<crate::theme::Theme>() {
+        let theme = crate::theme::Theme::global_mut(cx);
+        theme.font_size *= zoom / old;
+    }
 }
 
 /// The zoom steps, smallest first.

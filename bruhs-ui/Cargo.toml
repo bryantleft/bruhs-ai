@@ -11,7 +11,7 @@ publish = false
 [features]
 # Lets a dependent crate's tests run the components without OS hooks (the
 # macOS reduced-motion observer), the way this crate's own tests do.
-test-support = ["gpui-component/test-support", "gpui-base/test-support"]
+test-support = []
 
 [lints]
 workspace = true
@@ -20,8 +20,6 @@ workspace = true
 async-channel = "2"
 bruhs-models = { workspace = true }
 gpui = { workspace = true }
-gpui-component = { path = "../third_party/gpui-component/crates/component" }
-gpui-base = { path = "../third_party/gpui-component/crates/base" }
 pulldown-cmark = { version = "0.13.3", default-features = false }
 serde = { workspace = true }
 tracing = { workspace = true }
@@ -35,4 +33,3 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 gpui = { workspace = true, features = ["test-support"] }
-gpui-component = { path = "../third_party/gpui-component/crates/component", features = ["test-support"] }

@@ -49,7 +49,7 @@ fn status_pulse_opacity(progress: f32) -> f32 {
 }
 /// Matches the chat and panel headers.
 pub const SIDEBAR_HEADER_HEIGHT_PX: f32 = theme::APP_HEADER_HEIGHT_PX;
-/// Room for the macOS traffic lights (gpui-component puts them at x=12).
+/// Room for the macOS traffic lights (`bruhs_ui::TitleBar` puts them at x=12).
 #[cfg(target_os = "macos")]
 pub const SIDEBAR_HEADER_LEFT_INSET_PX: f32 = 88.0;
 #[cfg(not(target_os = "macos"))]
@@ -1049,7 +1049,7 @@ impl Workspace {
                     return;
                 }
                 // Tab is routed by the workspace keystroke interceptor, which
-                // runs before gpui-component's Tab binding (`key_decision`).
+                // runs before the window root's Tab binding (`key_decision`).
                 let current = enabled
                     .iter()
                     .position(|item| this.thread_menu_items[item.slot()].is_focused(window));

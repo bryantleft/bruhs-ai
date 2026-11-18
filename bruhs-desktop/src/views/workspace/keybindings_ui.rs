@@ -51,10 +51,10 @@ enum KeyDecision {
     Undo,
     SidebarFocus(bool),
     /// Tab (true: Shift+Tab) in an open thread menu: close it and move on
-    /// from its "…" button, before gpui-component's Tab binding runs.
+    /// from its "…" button, before the window root's Tab binding runs.
     CloseThreadMenu(bool),
     /// Tab (true: Shift+Tab) in an open dialog: step within it, as the web
-    /// dialog's focus trap does. gpui-component's Tab binding runs before
+    /// dialog's focus trap does. The window root's Tab binding runs before
     /// the dialog's own key handler and would move focus to the page
     /// behind the dialog.
     DialogFocus(bool),

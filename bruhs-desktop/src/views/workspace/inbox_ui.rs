@@ -1238,9 +1238,9 @@ fn inbox_action_button(id: &'static str, label: &'static str) -> Stateful<Div> {
         .child(label)
 }
 
-/// ⌘↵ in the reply box logs the reply, as on the web. gpui-component inserts
-/// a newline at the cursor before it reports the key, and the web prevents
-/// it, so the reply is the text without that newline.
+/// ⌘↵ in the reply box logs the reply, as on the web. A field that inserted a
+/// newline at the cursor before reporting the key would differ from the web,
+/// which prevents it, so the reply is the text without any such newline.
 fn reply_without_submit_newline(value: &str, cursor: usize) -> String {
     match cursor.checked_sub(1) {
         Some(at) if value.get(at..cursor) == Some("\n") => {

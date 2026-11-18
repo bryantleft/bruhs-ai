@@ -1,6 +1,6 @@
 //! One handle for a text field that is single-line or multi-line.
 //!
-//! gpui-component keeps the two as separate types: [`InputState`] renders
+//! bruhs-ui keeps the two as separate types: [`InputState`] renders
 //! with [`Input`], and [`TextareaState`] (which has rows and auto-grow) renders
 //! with [`Textarea`]. Forms that choose per field hold a [`TextField`], so
 //! their read, write and render helpers take either kind.

@@ -30,7 +30,7 @@ const HELPERS: &[&str] = &[
     "activity_row_button",
     "dropdown_trigger",
     "stepper_side",
-    // gpui-component widgets carry their own accessibility.
+    // bruhs-ui widgets carry their own accessibility.
     "Checkbox::new",
     "Switch::new",
 ];

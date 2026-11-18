@@ -1,4 +1,4 @@
-// bruhs-desktop — native desktop client using GPUI + gpui-component primitives.
+// bruhs-desktop — native desktop client using GPUI and the bruhs-ui toolkit.
 
 mod app_state;
 mod assets;
@@ -215,8 +215,8 @@ fn main() {
                     MenuItem::action("Actual Size", ResetZoom),
                 ]),
             ]);
-            // ---- gpui-component setup ----
-            // Initializes Theme, Root, dialog/sheet/notification machinery, input system, etc.
+            // ---- bruhs-ui setup: the theme and the root, text field and
+            // text selection key bindings ----
             bruhs_ui::init(cx);
             motion::init(cx);
 

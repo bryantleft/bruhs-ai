@@ -14,7 +14,7 @@ workspace excludes it.
 
 0.4.0, the latest release, depends on `boa_engine ^0.21.1`, which pins the
 `icu_*` crates to `~2.0`. gpui at the zed revision the workspace pins (see
-`third_party/gpui-component/VENDORED.md`) requires `icu_segmenter ^2.3`. Cargo
+the root `Cargo.toml`) requires `icu_segmenter ^2.3`. Cargo
 cannot have both, so the lockfile cannot resolve. `boa_engine` 0.22 uses icu
 `~2.3`.
 

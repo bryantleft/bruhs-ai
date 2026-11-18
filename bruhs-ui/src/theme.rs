@@ -1,9 +1,7 @@
 // Bruhs design system color palette as GPUI Hsla values.
 // Approximates the OKLCH values from https://design.bruhs.dev/llms.txt
 
-use gpui::{hsla, rgb, App, FontFeatures, Hsla};
-use gpui_component::{scroll::ScrollbarMode, Theme, ThemeTokens};
-// The kit's own components still read `Theme`; ours read bruhs-ui globals.
+use gpui::{hsla, px, rgb, App, FontFeatures, Global, Hsla, Pixels, SharedString, Window};
 use std::sync::Arc;
 
 /// bruhs label/UI face (web: `Monaspace Argon`).
@@ -331,143 +329,93 @@ pub fn ring_modal() -> Hsla {
 }
 
 // =====================================================================
-// gpui-component Theme bridge
+// The app theme
 // =====================================================================
 
-/// Overwrites the (already-initialized) gpui-component dark theme with bruhs
-/// design tokens. Must be called *after* `gpui_component::init(cx)` and
-/// `Theme::change(ThemeMode::Dark, ...)`.
+/// Light or dark. Bruhs is dark-first; the mode is kept for callers that
+/// pass it.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub enum ThemeMode {
+    Light,
+    #[default]
+    Dark,
+}
+
+/// The few theme values the window and app read globally: the surface,
+/// its text and the font. Everything else is a token above.
+#[derive(Clone, Debug)]
+pub struct Theme {
+    pub mode: ThemeMode,
+    pub font_family: SharedString,
+    /// The rem size, which page zoom scales.
+    pub font_size: Pixels,
+    pub background: Hsla,
+    pub foreground: Hsla,
+    pub popover_foreground: Hsla,
+}
+
+impl Default for Theme {
+    fn default() -> Self {
+        Self {
+            mode: ThemeMode::Dark,
+            font_family: UI_FONT_FAMILY.into(),
+            font_size: px(16.0),
+            background: longan_950(),
+            foreground: rambutan_200(),
+            popover_foreground: rambutan_100(),
+        }
+    }
+}
+
+impl Global for Theme {}
+
+impl Theme {
+    /// Use `mode`, creating the theme if there is none yet.
+    pub fn change(mode: ThemeMode, window: Option<&mut Window>, cx: &mut App) {
+        cx.default_global::<Theme>().mode = mode;
+        if let Some(window) = window {
+            window.refresh();
+        }
+    }
+
+    pub fn is_dark(&self) -> bool {
+        self.mode == ThemeMode::Dark
+    }
+
+    pub fn global(cx: &App) -> &Theme {
+        cx.global::<Theme>()
+    }
+
+    pub fn global_mut(cx: &mut App) -> &mut Theme {
+        cx.default_global::<Theme>()
+    }
+}
+
+/// `cx.theme()`.
+pub trait ActiveTheme {
+    fn theme(&self) -> &Theme;
+}
+
+impl ActiveTheme for App {
+    fn theme(&self) -> &Theme {
+        static FALLBACK: std::sync::OnceLock<Theme> = std::sync::OnceLock::new();
+        self.try_global::<Theme>()
+            .unwrap_or_else(|| FALLBACK.get_or_init(Theme::default))
+    }
+}
+
+/// Install the bruhs theme: the window surface and text, and the scrollbar
+/// look (always shown, in warm tones, like the web's).
 pub fn apply_bruhs_theme(cx: &mut App) {
-    let theme = Theme::global_mut(cx);
-
-    // Surfaces
-    // All-mono typography (bruhs non-negotiable): Argon for UI text, Neon
-    // for code. The faces are embedded at startup (`assets::embedded_fonts`).
-    theme.font_family = UI_FONT_FAMILY.into();
-    theme.mono_font_family = CODE_FONT_FAMILY.into();
-    theme.background = longan_950();
-    theme.foreground = rambutan_200();
-    theme.border = ring_card();
-    theme.muted = longan_900();
-    theme.muted_foreground = rambutan_400();
-    theme.accent = longan_800();
-    theme.accent_foreground = rambutan_100();
-    theme.popover = longan_900();
-    theme.popover_foreground = rambutan_100();
-
-    // Primary (persimmon)
-    theme.primary = persimmon_500();
-    theme.primary_hover = persimmon_400();
-    theme.primary_active = persimmon_600();
-    theme.primary_foreground = longan_950();
-
-    // Secondary
-    theme.secondary = longan_800();
-    theme.secondary_hover = longan_700();
-    theme.secondary_active = longan_800();
-    theme.secondary_foreground = rambutan_100();
-
-    // Danger (lychee)
-    theme.danger = lychee_600();
-    theme.danger_hover = lychee_500();
-    theme.danger_active = lychee_600();
-    theme.danger_foreground = lychee_50();
-
-    // Warning (durian)
-    theme.warning = durian_400();
-    theme.warning_hover = durian_400();
-    theme.warning_active = durian_400();
-    theme.warning_foreground = longan_950();
-
-    // Success (pandan)
-    theme.success = pandan_500();
-    theme.success_hover = pandan_400();
-    theme.success_active = pandan_500();
-    theme.success_foreground = longan_950();
-
-    // Info (blueberry)
-    theme.info = blueberry_400();
-    theme.info_hover = blueberry_400();
-    theme.info_active = blueberry_400();
-    theme.info_foreground = longan_950();
-
-    // Focus ring + caret
-    theme.ring = persimmon_400();
-    theme.caret = persimmon_400();
-    theme.selection = persimmon_500();
-
-    // Sidebar
-    theme.sidebar = longan_900();
-    theme.sidebar_foreground = rambutan_300();
-    theme.sidebar_border = ring_panel();
-    theme.sidebar_accent = longan_800();
-    theme.sidebar_accent_foreground = rambutan_100();
-    theme.sidebar_primary = persimmon_500();
-    theme.sidebar_primary_foreground = longan_950();
-
-    // Title bar
-    theme.title_bar = longan_900();
-    theme.title_bar_border = ring_panel();
-
-    // Inputs
-    theme.input = ring_card();
-
-    // Lists
-    theme.list_hover = longan_800();
-    theme.list_active = longan_800();
-    theme.list_active_border = ring_card();
-    theme.list_head = longan_900();
-    theme.list_even = longan_900();
-
-    // Tables
-    theme.table = longan_900();
-    theme.table_hover = longan_800();
-    theme.table_active = longan_800();
-    theme.table_active_border = ring_card();
-    theme.table_head = longan_900();
-    theme.table_head_foreground = rambutan_400();
-    theme.table_row_border = ring_panel();
-    theme.table_even = longan_900();
-
-    // Tabs
-    theme.tab = longan_900();
-    theme.tab_active = longan_800();
-    theme.tab_active_foreground = rambutan_100();
-    theme.tab_foreground = rambutan_400();
-    theme.tab_bar = longan_900();
-    theme.tab_bar_segmented = longan_800();
-
-    // Misc
-    theme.skeleton = longan_800();
-    theme.scrollbar_mode = ScrollbarMode::Always;
-    theme.scrollbar = hsla(0.0, 0.0, 0.0, 0.0);
-    theme.scrollbar_thumb = rambutan_500();
-    theme.scrollbar_thumb_hover = rambutan_400();
-    theme.overlay = hsla(0.0, 0.0, 0.0, 0.5);
-    theme.drop_target = persimmon_400();
-    theme.drag_border = persimmon_400();
-
-    // Base palette aliases (used by chart helpers etc.)
-    theme.red = lychee_500();
-    theme.red_light = lychee_400();
-    theme.green = pandan_500();
-    theme.green_light = pandan_400();
-    theme.yellow = durian_400();
-    theme.yellow_light = durian_400();
-    theme.blue = blueberry_400();
-    theme.blue_light = blueberry_400();
-
-    // `Theme::tokens` is derived from the colors when the theme is built, so
-    // it still holds gpui-component's defaults after the assignments above.
-    // Widgets that paint from `tokens` (Checkbox's checked fill, for one) look
-    // unthemed until it is re-derived.
-    theme.tokens = ThemeTokens::from(&theme.colors);
-
-    // Scrollbars and resize handles paint from gpui-base's copy of the
-    // theme, which a direct field edit does not reach.
-    Theme::sync_base(cx);
-
-    // bruhs-ui's own scrollbars: always shown, like the web's, in warm tones.
+    let zoom = crate::zoom::zoom();
+    let mode = cx
+        .try_global::<Theme>()
+        .map_or(ThemeMode::Dark, |theme| theme.mode);
+    cx.set_global(Theme {
+        mode,
+        font_size: px(16.0) * zoom,
+        ..Theme::default()
+    });
     crate::scroll::set_scrollbar_style(
         crate::scroll::ScrollbarStyle {
             mode: crate::scroll::ScrollbarMode::Always,
@@ -573,24 +521,16 @@ mod tests {
         });
     }
 
-    /// `Theme::tokens` is derived when the theme is built, so the bruhs
-    /// colours have to be pushed into it after they are assigned — otherwise
-    /// widgets that paint from tokens (gpui-component's `Checkbox` fills its
-    /// box with `tokens.primary`) silently keep the library's defaults.
     #[gpui::test]
-    fn theme_tokens_follow_the_bruhs_palette(cx: &mut gpui::TestAppContext) {
+    fn the_bruhs_theme_sets_the_surface_and_text(cx: &mut gpui::TestAppContext) {
         cx.update(|cx| {
             crate::init(cx);
-            gpui_component::Theme::change(gpui_component::ThemeMode::Dark, None, cx);
+            Theme::change(ThemeMode::Dark, None, cx);
             apply_bruhs_theme(cx);
-            let theme = gpui_component::Theme::global(cx);
-            assert_eq!(theme.primary, persimmon_500(), "colors.primary");
-            assert_eq!(
-                theme.tokens.primary.color,
-                persimmon_500(),
-                "tokens.primary must track colors.primary"
-            );
-            assert_eq!(theme.tokens.primary_foreground.color, longan_950());
+            let theme = Theme::global(cx);
+            assert_eq!(theme.background, longan_950());
+            assert_eq!(theme.foreground, rambutan_200());
+            assert_eq!(theme.font_family.as_ref(), UI_FONT_FAMILY);
         });
     }
 

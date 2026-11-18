@@ -147,8 +147,5 @@ tags `v<version>`. Asset names carry no version, so
 
 ## Third-party code
 
-- `third_party/gpui-component` is a vendored copy of
-  [longbridge/gpui-component](https://github.com/longbridge/gpui-component)
-  (Apache-2.0); `VENDORED.md` lists the local changes.
 - gpui comes from upstream [zed](https://github.com/zed-industries/zed), pinned
   to one rev, with no patches.
