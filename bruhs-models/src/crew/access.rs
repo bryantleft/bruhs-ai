@@ -444,7 +444,7 @@ pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
             command.to_string()
         }
         "SandboxNetworkAccess" => return None,
-        BRUH_BROWSER_TOOL => browser_detail(input)?,
+        BRUH_BROWSER_TOOL => browser_detail(input, SUMMARY_MAX_CHARS)?,
         "Write" => input["content"].as_str()?.to_string(),
         "Edit" => edit_text(input),
         "MultiEdit" => input["edits"]

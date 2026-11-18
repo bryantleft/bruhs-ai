@@ -104,9 +104,16 @@ pub fn computer_reason(protocol: Option<u32>) -> Option<&'static str> {
 }
 
 /// Whether `host` is GitHub, GitLab or one of their subdomains, where a
-/// page acts in the owner's name.
+/// page acts in the owner's name. A port (`github.com:443`), a trailing dot
+/// and case are ignored.
 #[must_use]
 pub fn is_forge_host(host: &str) -> bool {
+    let host = match host.rsplit_once(':') {
+        Some((name, port)) if !name.contains(':') && port.bytes().all(|b| b.is_ascii_digit()) => {
+            name
+        }
+        _ => host,
+    };
     let host = host.trim_end_matches('.').to_ascii_lowercase();
     FORGE_COMMAND_HOSTS.iter().any(|forge| {
         host == *forge
@@ -117,7 +124,7 @@ pub fn is_forge_host(host: &str) -> bool {
 }
 
 /// The host of a page URL, lowercased, without its port or login.
-pub(super) fn page_host(url: &str) -> Option<String> {
+fn page_host(url: &str) -> Option<String> {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next()?;
     let authority = authority
@@ -133,6 +140,8 @@ pub(super) fn page_host(url: &str) -> Option<String> {
 
 /// The gate for one browser call of a bruh run. `input` is the tool's input
 /// (`{"command": {…}}`); `page_url` is the page the call acts on, if known.
+/// Input on a page whose host is unknown follows the forge rule, since the
+/// page may be GitHub or GitLab; `about:blank` is a known, plain page.
 #[must_use]
 pub fn browser_gate(
     access: &BruhAccess,
@@ -157,6 +166,7 @@ pub fn browser_gate(
     if let Err(reason) = validate_action(&action, COMPUTER_VIEWPORT) {
         return Gate::Deny(reason);
     }
+    // A backstop: `validate_action` already refuses these, and more strictly.
     if let BrowserAction::Navigate { url } = &action {
         if let Err(reason) = validate_browser_url(url) {
             return Gate::Deny(reason);
@@ -171,7 +181,7 @@ pub fn browser_gate(
         BrowserActionKind::Input
             if page_url
                 .and_then(page_host)
-                .is_some_and(|host| is_forge_host(&host)) =>
+                .is_none_or(|host| is_forge_host(&host)) =>
         {
             if level == AccessLevel::Full && access.send_as_me && access.can_deliver {
                 Gate::Allow
@@ -207,10 +217,14 @@ pub(super) fn browser_summary(input: &Value) -> Option<String> {
     })
 }
 
-/// The text a browser call types or fills, for the card to show in full.
-pub(super) fn browser_detail(input: &Value) -> Option<String> {
+/// What a browser call's card shows in full: the text it types or fills,
+/// or a URL to open whose summary is longer than `summary_max` characters.
+pub(super) fn browser_detail(input: &Value, summary_max: usize) -> Option<String> {
     match serde_json::from_value::<BrowserAction>(input["command"].clone()).ok()? {
         BrowserAction::Type { text, .. } | BrowserAction::Fill { text, .. } => Some(text),
+        BrowserAction::Navigate { url } => browser_summary(input)
+            .is_some_and(|summary| summary.chars().count() > summary_max)
+            .then_some(url),
         _ => None,
     }
 }
@@ -554,7 +568,46 @@ mod tests {
     }
 
     #[test]
+    fn input_on_an_unknown_page_follows_the_forge_rule() {
+        use serde_json::json;
+        let claude = AgentProvider::Claude;
+        let click = call(json!({"action": "click", "selector": "#buy"}));
+        assert_eq!(
+            browser_gate(
+                &access(AccessLevel::Full, false, false),
+                claude,
+                true,
+                &click,
+                None
+            ),
+            Gate::Approve
+        );
+        assert_eq!(
+            browser_gate(
+                &access(AccessLevel::Full, true, true),
+                claude,
+                true,
+                &click,
+                None
+            ),
+            Gate::Allow
+        );
+        assert_eq!(
+            browser_gate(
+                &access(AccessLevel::Full, false, false),
+                claude,
+                true,
+                &click,
+                Some("about:blank")
+            ),
+            Gate::Allow
+        );
+    }
+
+    #[test]
     fn forge_hosts_are_the_hosts_and_their_subdomains() {
+        assert!(is_forge_host("github.com:443") && is_forge_host("API.GitLab.com.:8443"));
+        assert!(!is_forge_host("shop.test:443"));
         assert!(
             is_forge_host("github.com")
                 && is_forge_host("api.github.com")
@@ -735,6 +788,13 @@ mod tests {
                 &json!({"command": {"action": "click", "selector": "#buy"}})
             ),
             "Click #buy"
+        );
+        let long = format!("https://a.test/?q={}", "x".repeat(300));
+        let open = json!({"command": {"action": "navigate", "url": long}});
+        assert!(approval_summary(BRUH_BROWSER_TOOL, &open).ends_with('…'));
+        assert_eq!(
+            approval_detail(BRUH_BROWSER_TOOL, &open).as_deref(),
+            Some(long.as_str())
         );
     }
 
