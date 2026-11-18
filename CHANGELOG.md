@@ -169,6 +169,8 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   copied, on both apps.
 - The workflow notice above every page now has Pause for running background
   workflows on the web too.
+- A dry run waiting in Preview changes can be declined there, on both apps,
+  so one you decided against no longer holds up an MCP client's proposal.
 - The desktop app runs on its UI framework, gpui, without patches. Long
   lines may now break at a `/` and no longer break after a `-`, so a line can
   wrap at a different word than on the web.
