@@ -3,7 +3,8 @@
 use bruhs_models::{
     inbox_agent_prompt, unique_person_named, InboxCard, InboxConversation, InboxDirectory,
     InboxFilter, InboxMessage, InboxParticipant, InboxSource, MessageDirection, MessageSendState,
-    DELETE_CONVERSATION_DETAIL, DELETE_CONVERSATION_TITLE, INBOX_PAGE_SIZE, REPLY_HINT,
+    DELETE_CONVERSATION_DETAIL, DELETE_CONVERSATION_TITLE, INBOX_LOADING, INBOX_LOAD_DETAIL,
+    INBOX_LOAD_FAILED, INBOX_PAGE_SIZE, REPLY_HINT,
 };
 use leptos::prelude::*;
 
@@ -149,7 +150,7 @@ fn InboxLibrary() -> impl IntoView {
                 <section aria-label="Conversations" class="overflow-hidden rounded-grape bg-longan-900/45 inset-ring inset-ring-longan-800">
                     <Show when=move || !matching.with(Vec::is_empty) fallback=move || {
                         if !executor.ready.get() {
-                            view! { <div class="px-5 py-14 text-center"><p role="status" class="text-label text-rambutan-300">{move || if executor.load_error.get().is_some() { "Conversations could not be loaded" } else { "Loading conversations…" }}</p><p class="mt-1 text-body-sm text-rambutan-500">"Your conversations will appear after local records load."</p></div> }.into_any()
+                            view! { <div class="px-5 py-14 text-center"><p role="status" class="text-label text-rambutan-300">{move || if executor.load_error.get().is_some() { INBOX_LOAD_FAILED } else { INBOX_LOADING }}</p><p class="mt-1 text-body-sm text-rambutan-500">{INBOX_LOAD_DETAIL}</p></div> }.into_any()
                         } else {
                             view! { <div class="px-5 py-14 text-center"><p role="status" class="text-label text-rambutan-300">{move || if !query.get().trim().is_empty() { "No matching conversations." } else { filter.get().empty_message() }}</p><p class="mt-1 text-body-sm text-rambutan-500">{move || if !query.get().trim().is_empty() { "Try another search or choose All." } else { "Import a message or choose another view." }}</p></div> }.into_any()
                         }
@@ -176,7 +177,7 @@ fn InboxLibrary() -> impl IntoView {
             <Dialog open=Signal::derive(move || import_open.get()) label="Import conversation" on_close=Callback::new(move |_| import_open.set(false))>
                 <div class="border-b border-longan-700/70 px-4 py-3"><h2 class="text-h4 text-rambutan-100">"Import conversation"</h2><p class="mt-1 text-body-sm text-rambutan-500">"Paste a message from any provider. It stays available offline."</p></div>
                 <form class="max-h-[calc(100dvh-8rem)] overflow-y-auto space-y-3 px-4 py-3" on:submit=move |event| { event.prevent_default(); save_import(); }>
-                    <div class="space-y-1"><label class="text-label-sm text-rambutan-400">"Provider"</label><div class="flex flex-wrap gap-1">{[InboxSource::Email, InboxSource::Slack, InboxSource::Discord, InboxSource::IMessage, InboxSource::X, InboxSource::Import].into_iter().map(|item| view! { <button type="button" aria-pressed=move || (source.get() == item).to_string() class=move || if source.get() == item { "bruhs-control min-h-[32px] rounded-seed bg-blueberry-500/15 px-2.5 py-1.5 text-label-sm text-blueberry-400 inset-ring inset-ring-blueberry-500/30 cursor-pointer" } else { "bruhs-control min-h-[32px] rounded-seed px-2.5 py-1.5 text-label-sm text-rambutan-400 inset-ring inset-ring-longan-700 hover:bg-longan-800 cursor-pointer" } on:click=move |_| source.set(item)>{item.label()}</button> }).collect_view()}</div></div>
+                    <div class="space-y-1"><label class="text-label-sm text-rambutan-400">"Provider"</label><div class="flex flex-wrap gap-1">{InboxSource::ALL.into_iter().map(|item| view! { <button type="button" aria-pressed=move || (source.get() == item).to_string() class=move || if source.get() == item { "bruhs-control min-h-[32px] rounded-seed bg-blueberry-500/15 px-2.5 py-1.5 text-label-sm text-blueberry-400 inset-ring inset-ring-blueberry-500/30 cursor-pointer" } else { "bruhs-control min-h-[32px] rounded-seed px-2.5 py-1.5 text-label-sm text-rambutan-400 inset-ring inset-ring-longan-700 hover:bg-longan-800 cursor-pointer" } on:click=move |_| source.set(item)>{item.label()}</button> }).collect_view()}</div></div>
                     <div class="space-y-1"><label class="text-label-sm text-rambutan-400">"Sender"</label><Input aria_label="Sender" value=Signal::derive(move || sender.get()) on_input=Callback::new(move |value| sender.set(value)) autofocus=true placeholder="Name or handle".to_string() /></div>
                     <div class="space-y-1"><label class="text-label-sm text-rambutan-400">"Subject"</label><Input aria_label="Subject" value=Signal::derive(move || subject.get()) on_input=Callback::new(move |value| subject.set(value)) placeholder="Optional".to_string() /></div>
                     <div class="space-y-1"><label class="text-label-sm text-rambutan-400">"Message"</label><Textarea aria_label="Message" value=Signal::derive(move || body.get()) on_input=Callback::new(move |value| body.set(value)) rows=5 placeholder="Paste the message…".to_string() /></div>

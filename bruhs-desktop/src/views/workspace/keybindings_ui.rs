@@ -855,7 +855,7 @@ impl PendingBinding {
 }
 
 /// The host OS, which resolves `secondary-` in a shortcut.
-fn host_os() -> OperatingSystem {
+pub(super) fn host_os() -> OperatingSystem {
     if cfg!(target_os = "macos") {
         OperatingSystem::Mac
     } else if cfg!(target_os = "windows") {

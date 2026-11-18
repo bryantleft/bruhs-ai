@@ -329,7 +329,8 @@ impl Workspace {
         });
         self.credential_settings
             .update(cx, |view, cx| view.refresh(cx));
-        self.focus_first_modal_tab_stop(window, cx);
+        // A page on the web: nothing inside is focused until the first Tab.
+        self.focus_modal_dialog(window, cx);
         cx.notify();
     }
 

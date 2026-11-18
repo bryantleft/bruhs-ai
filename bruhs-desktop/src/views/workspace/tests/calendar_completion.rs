@@ -664,9 +664,10 @@ fn calendar_records_open_from_the_keyboard(cx: &mut gpui::TestAppContext) {
     let more = added_stops(&three, &four);
     assert_eq!(more.len(), 1, "+N more is one Tab stop");
 
-    // +N more by Enter: focus moves into the day list; its Google row opens
-    // the read-only detail by Enter. The day list's stops are its close
-    // button, then each record in order.
+    // +N more by Enter: focus moves into the day list, onto its first
+    // record as on the web; its Google row opens the read-only detail by
+    // Enter. The day list's stops are each record in order, then its close
+    // button.
     focus_page(&workspace, cx);
     tab_to(cx, &more[0], "+N more");
     press(cx, "enter");
@@ -674,7 +675,7 @@ fn calendar_records_open_from_the_keyboard(cx: &mut gpui::TestAppContext) {
         assert_eq!(workspace.overlay, Some(Overlay::CalendarDay { date }));
     });
     assert!(in_dialog(&workspace, cx), "focus moved into the day list");
-    for _ in 0..4 {
+    for _ in 0..2 {
         cx.simulate_keystrokes("tab");
     }
     press(cx, "enter");
@@ -696,7 +697,7 @@ fn calendar_records_open_from_the_keyboard(cx: &mut gpui::TestAppContext) {
         assert_eq!(workspace.overlay, Some(Overlay::CalendarDay { date }));
     });
     assert!(in_dialog(&workspace, cx), "focus moved into the day list");
-    for _ in 0..5 {
+    for _ in 0..3 {
         cx.simulate_keystrokes("tab");
     }
     press(cx, "space");
