@@ -496,6 +496,54 @@ pub fn refused_draft(
     posted.filter(|_| draft.trim().is_empty())
 }
 
+/// The web composer's last post until the service takes it or refuses it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PendingPost {
+    pub text: String,
+    pub chips: Vec<ContextChip>,
+    /// An error that showed while the post was on its way. A refusal ends
+    /// the wait in the same step, so this one is not the post's and never
+    /// brings it back.
+    seen_error: Option<String>,
+}
+
+impl PendingPost {
+    #[must_use]
+    pub fn new(text: String, chips: Vec<ContextChip>) -> Self {
+        Self {
+            text,
+            chips,
+            seen_error: None,
+        }
+    }
+}
+
+/// What became of `posted`, as the crew's `error` and `busy` (a command on
+/// its way) now say: the draft to put back when the service refused it
+/// (see [`refused_draft`]). A post the service took is forgotten, and so is
+/// one whose only error showed while it was still on its way, so a second
+/// Send never posts it twice.
+#[must_use]
+pub fn settle_post(
+    posted: &mut Option<PendingPost>,
+    draft: &str,
+    error: Option<&str>,
+    busy: bool,
+) -> Option<(String, Vec<ContextChip>)> {
+    let post = posted.as_mut()?;
+    if busy {
+        if let Some(error) = error {
+            post.seen_error = Some(error.to_string());
+        }
+        return None;
+    }
+    let refused = error.is_some_and(|error| post.seen_error.as_deref() != Some(error));
+    let post = posted.take()?;
+    refused
+        .then(|| refused_draft(draft, Some((post.text, post.chips))))
+        .flatten()
+}
+
 /// The room settings form.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]
 pub struct RoomForm {
@@ -1089,6 +1137,61 @@ mod tests {
             rooms_reason(Some(1)),
             Some(ServiceNotice::ServingOld.message())
         );
+    }
+
+    #[test]
+    fn an_error_that_shows_while_a_post_is_on_its_way_never_brings_it_back() {
+        let mut posted = Some(PendingPost::new("@Ada go".into(), Vec::new()));
+        assert_eq!(settle_post(&mut posted, "", None, true), None);
+        // Stop all, say, fails while the post waits.
+        assert_eq!(
+            settle_post(&mut posted, "", Some("Stop failed."), true),
+            None
+        );
+        assert!(posted.is_some(), "the post is still on its way");
+        // The post went through; the other error still shows.
+        assert_eq!(
+            settle_post(&mut posted, "", Some("Stop failed."), false),
+            None
+        );
+        assert_eq!(posted, None, "Send again would post it twice");
+    }
+
+    #[test]
+    fn a_refused_post_comes_back_even_after_another_error_showed() {
+        let mut posted = Some(PendingPost::new("@Ada go".into(), Vec::new()));
+        assert_eq!(
+            settle_post(&mut posted, "", Some("Stop failed."), true),
+            None
+        );
+        assert_eq!(
+            settle_post(&mut posted, "", Some("Room is gone."), false),
+            Some(("@Ada go".into(), Vec::new()))
+        );
+        assert_eq!(posted, None);
+    }
+
+    #[test]
+    fn a_post_the_service_took_or_refused_settles_once() {
+        let mut taken = Some(PendingPost::new("@Ada go".into(), Vec::new()));
+        assert_eq!(settle_post(&mut taken, "", None, false), None);
+        assert_eq!(taken, None);
+        let mut refused = Some(PendingPost::new("@Ada go".into(), Vec::new()));
+        assert_eq!(
+            settle_post(&mut refused, "", Some("Room is gone."), false),
+            Some(("@Ada go".into(), Vec::new()))
+        );
+        assert_eq!(
+            settle_post(&mut refused, "", Some("Room is gone."), false),
+            None
+        );
+        // Typed again meanwhile: the new words stay.
+        let mut typed = Some(PendingPost::new("@Ada go".into(), Vec::new()));
+        assert_eq!(
+            settle_post(&mut typed, "next", Some("Room is gone."), false),
+            None
+        );
+        assert_eq!(typed, None);
     }
 
     #[test]

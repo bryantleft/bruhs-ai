@@ -3,10 +3,10 @@
 //! and a composer whose `@` lists only the room's members.
 
 use bruhs_models::crew::room::{
-    asked_words, author_name, member_states, members_line, merge_messages, refused_draft,
-    room_announcement, room_composer_block, room_composer_hint, room_follow_key, room_line_key,
-    room_lines, room_markdown, room_post, working_line, Room, RoomLine, RoomMessage, EMPTY_ROOM,
-    LOAD_EARLIER, ROOM_GONE, ROOM_LOADING, ROOM_SETTINGS,
+    asked_words, author_name, member_states, members_line, merge_messages, room_announcement,
+    room_composer_block, room_composer_hint, room_follow_key, room_line_key, room_lines,
+    room_markdown, room_post, settle_post, working_line, PendingPost, Room, RoomLine, RoomMessage,
+    EMPTY_ROOM, LOAD_EARLIER, ROOM_GONE, ROOM_LOADING, ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
 use leptos::html;
@@ -22,7 +22,6 @@ use super::room_dialog::RoomDialog;
 use crate::components::mention_editor::MentionEditor;
 use crate::state::{ChipRetargetGuard, ComposerChips};
 use crate::ui::{BrailleBruh, Button, ButtonSize, ButtonVariant};
-use bruhs_models::logic::context_chip::ContextChip;
 
 const ERROR: &str = "rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee-200";
 const OWNER: &str = "min-w-0 max-w-[80%] whitespace-pre-wrap break-words rounded-grape bg-longan-800 px-3 py-2 text-body text-rambutan-100";
@@ -480,7 +479,7 @@ fn room_composer(
     };
     // The last post's draft until the service takes it: a refused post
     // comes back to write again.
-    let posted = StoredValue::new(None::<(String, Vec<ContextChip>)>);
+    let posted = StoredValue::new(None::<PendingPost>);
     let send = move || {
         if blocked.get_untracked().is_some() {
             return;
@@ -491,7 +490,10 @@ fn room_composer(
         let Some(command) = command else {
             return;
         };
-        posted.set_value(Some((draft.get_untracked(), chips.get_untracked())));
+        posted.set_value(Some(PendingPost::new(
+            draft.get_untracked(),
+            chips.get_untracked(),
+        )));
         data.send.run(command);
         guard.set_value(true);
         chips.set(Vec::new());
@@ -501,20 +503,18 @@ fn room_composer(
         focus_composer();
     };
     Effect::new(move |_| {
-        let refused = data.error.with(Option::is_some);
         let busy = data.busy.get();
-        if refused {
-            let back = posted
-                .try_update_value(Option::take)
+        let back = data.error.with(|error| {
+            posted
+                .try_update_value(|posted| {
+                    settle_post(posted, &draft.get_untracked(), error.as_deref(), busy)
+                })
                 .flatten()
-                .and_then(|post| refused_draft(&draft.get_untracked(), Some(post)));
-            if let Some((text, kept)) = back {
-                guard.set_value(true);
-                chips.set(kept);
-                set_draft.set(text);
-            }
-        } else if !busy {
-            posted.set_value(None);
+        });
+        if let Some((text, kept)) = back {
+            guard.set_value(true);
+            chips.set(kept);
+            set_draft.set(text);
         }
     });
     // A room just made opens with focus in its composer.
