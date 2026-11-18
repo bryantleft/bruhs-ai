@@ -1,7 +1,7 @@
 //! Dedicated local verification tools. A grant is required before every action.
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::Duration,
 };
 
@@ -71,6 +71,9 @@ pub struct LocalToolsHost {
     network: fn() -> Result<network::Upstream, ToolError>,
     client: reqwest::Client,
     policy: ProcessPolicy,
+    /// The host itself, for tasks that outlive a call, such as a bruh's
+    /// window watcher. It never keeps the host alive.
+    this: Weak<Self>,
 }
 
 impl LocalToolsHost {
@@ -98,7 +101,7 @@ impl LocalToolsHost {
                 "Local tools need a nonzero command deadline and capture budget.".into(),
             ));
         }
-        Ok(Arc::new(Self {
+        Ok(Arc::new_cyclic(|this| Self {
             grants: Mutex::new(HashMap::new()),
             browsers: tokio::sync::Mutex::new(HashMap::new()),
             opening: Mutex::new(HashSet::new()),
@@ -108,6 +111,7 @@ impl LocalToolsHost {
             network,
             client,
             policy,
+            this: this.clone(),
         }))
     }
 

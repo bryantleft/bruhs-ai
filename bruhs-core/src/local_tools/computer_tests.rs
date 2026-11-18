@@ -441,6 +441,9 @@ async fn taking_control_refuses_the_bruh_until_hand_back() {
         .await
         .unwrap();
     assert_eq!(back.control, Control::Bruh);
+    let error = host.owner_input("a", press(10.0, 10.0)).await.unwrap_err();
+    assert_eq!(error.to_string(), TAKE_CONTROL_FIRST);
+    assert_eq!(fake.inputs("a").len(), 1, "nothing after hand back");
     assert!(changes.has_changed().unwrap());
     assert_eq!(changes.borrow_and_update().control, Control::Bruh);
     assert_eq!(
@@ -587,6 +590,11 @@ async fn open_in_a_window_relaunches_headed_on_the_same_profile_and_back() {
     assert!(!launches[1].headless);
     assert_eq!(launches[1].profile_dir, launches[0].profile_dir);
     assert_eq!(launches[1].url, "https://a.test");
+    assert!(
+        launches[1].proxy.ip().is_loopback() && launches[1].proxy.port() != 0,
+        "the window goes through a network guard too: {}",
+        launches[1].proxy
+    );
     assert_eq!((window.control, window.headed), (Control::Owner, true));
     assert_eq!(window.session_id, fake.session("a").map(|s| s.id));
     let error = host.owner_input("a", press(10.0, 10.0)).await.unwrap_err();
@@ -617,6 +625,133 @@ async fn open_in_a_window_relaunches_headed_on_the_same_profile_and_back() {
     assert_eq!(
         reply.value["note"],
         handed_back_note("https://a.test/signed-in")
+    );
+}
+
+#[tokio::test]
+async fn a_failed_read_keeps_the_note_for_the_next_call() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    fake.set_url("a", "https://a.test/after");
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    fake.fail_next_action("a");
+    host.bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap_err();
+    let reply = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.value["note"],
+        handed_back_note("https://a.test/after")
+    );
+}
+
+#[tokio::test]
+async fn a_window_closed_by_hand_hands_back_where_the_owner_ended_up() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.bruh_command("a", navigate("https://a.test"))
+        .await
+        .unwrap();
+    host.computer_request("a", ComputerRequest::OpenWindow)
+        .await
+        .unwrap();
+    // The owner signs in; the window's page is never asked where it is.
+    fake.browse_window("a", "https://a.test/signed-in");
+    let mut changes = host.control_changes("a").unwrap();
+    tokio::time::timeout(
+        Duration::from_secs(5),
+        changes.wait_for(|state| state.url.as_deref() == Some("https://a.test/signed-in")),
+    )
+    .await
+    .expect("the address follows the window")
+    .unwrap();
+    fake.close_window("a");
+    let state = tokio::time::timeout(
+        Duration::from_secs(5),
+        changes.wait_for(|state| state.control == Control::Bruh),
+    )
+    .await
+    .expect("a closed window is handed back")
+    .unwrap()
+    .clone();
+    assert!(!state.headed);
+    assert!(state.session_id.is_some());
+    let launches = fake.launches();
+    assert_eq!(launches.len(), 3);
+    assert!(launches[2].headless);
+    assert_eq!(launches[2].profile_dir, launches[0].profile_dir);
+    assert_eq!(launches[2].url, "https://a.test/signed-in");
+    assert_eq!(fake.closes("a"), 2, "the dead window is closed too");
+    let reply = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap();
+    assert_eq!(
+        reply.value["note"],
+        handed_back_note("https://a.test/signed-in")
+    );
+    // An older window's feed ending changes nothing.
+    host.computer_request("a", ComputerRequest::OpenWindow)
+        .await
+        .unwrap();
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    settle().await;
+    assert_eq!(fake.launches().len(), 5);
+    assert_eq!(
+        host.computer_state("a").await.unwrap().control,
+        Control::Bruh
+    );
+}
+
+#[tokio::test]
+async fn a_failed_window_leaves_control_where_it_was() {
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.computer_request("a", ComputerRequest::TakeControl)
+        .await
+        .unwrap();
+    fake.fail_next_launch("a");
+    let error = host
+        .computer_request("a", ComputerRequest::OpenWindow)
+        .await
+        .unwrap_err();
+    let state = host.computer_state("a").await.unwrap();
+    assert_eq!(state.control, Control::Owner, "the owner still holds it");
+    assert!(!state.headed);
+    assert!(state.session_id.is_some(), "the live view has a page again");
+    assert_eq!(state.error, Some(error.to_string()));
+    assert!(fake.launches().last().unwrap().headless);
+    assert_eq!(
+        host.bruh_command("a", BrowserAction::Snapshot)
+            .await
+            .unwrap_err()
+            .to_string(),
+        OWNER_HAS_COMPUTER
+    );
+    // From the bruh, a failed window gives the browser back to it.
+    host.computer_request("a", ComputerRequest::HandBack)
+        .await
+        .unwrap();
+    fake.fail_next_launch("a");
+    host.computer_request("a", ComputerRequest::OpenWindow)
+        .await
+        .unwrap_err();
+    assert_eq!(
+        host.computer_state("a").await.unwrap().control,
+        Control::Bruh
     );
 }
 

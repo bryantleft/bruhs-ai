@@ -398,6 +398,87 @@ async fn a_window_is_measured_from_its_layout_metrics() {
 }
 
 #[tokio::test]
+async fn a_window_feed_follows_the_main_frame_and_ends_with_the_page() {
+    use futures_util::{SinkExt, StreamExt};
+    use serde_json::json;
+    use tokio_tungstenite::tungstenite::Message;
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let (go, started) = tokio::sync::oneshot::channel::<()>();
+    let server = tokio::spawn(async move {
+        let (stream, _) = listener.accept().await.unwrap();
+        let mut socket = tokio_tungstenite::accept_async(stream).await.unwrap();
+        let Some(Ok(Message::Text(text))) = socket.next().await else {
+            panic!("Page.enable first");
+        };
+        let request: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(request["method"], "Page.enable");
+        socket
+            .send(Message::Text(
+                json!({"id": request["id"], "result": {}})
+                    .to_string()
+                    .into(),
+            ))
+            .await
+            .unwrap();
+        let Some(Ok(Message::Text(text))) = socket.next().await else {
+            panic!("then the history");
+        };
+        let request: serde_json::Value = serde_json::from_str(&text).unwrap();
+        assert_eq!(request["method"], "Page.getNavigationHistory");
+        let history = json!({"id": request["id"], "result": {"currentIndex": 0, "entries": [{"id": 1, "url": "https://a.test/0"}]}});
+        socket
+            .send(Message::Text(history.to_string().into()))
+            .await
+            .unwrap();
+        // The test has read where the page already was.
+        started.await.unwrap();
+        let events = [
+            json!({"method": "Page.frameNavigated", "params": {"frame": {"id": "main", "url": "https://a.test/1"}}}),
+            json!({"method": "Page.navigatedWithinDocument", "params": {"frameId": "main", "url": "https://a.test/2"}}),
+            json!({"method": "Page.frameNavigated", "params": {"frame": {"id": "ad", "parentId": "main", "url": "https://ads.test/"}}}),
+            json!({"method": "Page.navigatedWithinDocument", "params": {"frameId": "ad", "url": "https://ads.test/x"}}),
+        ];
+        for event in events {
+            socket
+                .send(Message::Text(event.to_string().into()))
+                .await
+                .unwrap();
+        }
+        // The window closes.
+        socket.close(None).await.unwrap();
+    });
+    let mut cdp = browser::Cdp::connect(&format!("ws://{addr}"), ProcessPolicy::default())
+        .await
+        .unwrap();
+    let (urls, mut feed) = tokio::sync::watch::channel(None);
+    let mut seen = Vec::new();
+    let mut go = Some(go);
+    let follow = browser::follow_window(&mut cdp, &urls);
+    tokio::pin!(follow);
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            tokio::select! {
+                () = &mut follow => break,
+                Ok(()) = feed.changed() => {
+                    seen.extend(feed.borrow_and_update().clone());
+                    if let Some(go) = go.take() {
+                        go.send(()).unwrap();
+                    }
+                }
+            }
+        }
+    })
+    .await
+    .expect("the feed ends with the page");
+    seen.extend(feed.borrow_and_update().clone());
+    assert_eq!(seen.first().map(String::as_str), Some("https://a.test/0"));
+    assert_eq!(seen.last().map(String::as_str), Some("https://a.test/2"));
+    assert!(!seen.iter().any(|url| url.contains("ads.test")), "{seen:?}");
+    server.await.unwrap();
+}
+
+#[tokio::test]
 async fn owner_back_goes_through_the_navigation_history() {
     use serde_json::json;
     let history = |index: u64| {
@@ -1064,6 +1145,7 @@ async fn live_window_is_measured_by_the_browser_and_goes_back_through_history() 
     )
     .await
     .unwrap();
+    let mut window = browser.watch_window();
     browser
         .command(
             BrowserAction::Navigate {
@@ -1073,6 +1155,13 @@ async fn live_window_is_measured_by_the_browser_and_goes_back_through_history() 
         )
         .await
         .unwrap();
+    tokio::time::timeout(
+        std::time::Duration::from_secs(10),
+        window.wait_for(|url| url.as_deref() == Some(&format!("http://{addr}/two"))),
+    )
+    .await
+    .expect("the window feed sees page two")
+    .unwrap();
     // Measured again on page two, whose innerWidth reads 5.
     browser.owner_input(&ComputerInput::Back).await.unwrap();
     let viewport = browser.viewport();
@@ -1102,6 +1191,27 @@ async fn live_window_is_measured_by_the_browser_and_goes_back_through_history() 
         serde_json::json!([viewport.width, viewport.height]),
         "{viewport:?}"
     );
+    // Closing the window's page by hand ends the feed.
+    let page = url::Url::parse(browser.page_socket()).unwrap();
+    let target = page
+        .path_segments()
+        .unwrap()
+        .next_back()
+        .unwrap()
+        .to_owned();
+    client
+        .get(format!(
+            "http://127.0.0.1:{}/json/close/{target}",
+            page.port().unwrap()
+        ))
+        .send()
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(10), async {
+        while window.changed().await.is_ok() {}
+    })
+    .await
+    .expect("the feed ends when the page closes");
     browser
         .close(std::time::Duration::from_millis(
             bruhs_models::crew::CLOSE_GRACE_MS,

@@ -15,7 +15,7 @@ use tokio::{
     io::{AsyncBufReadExt, BufReader},
     net::TcpStream,
     process::{Child, Command},
-    sync::Mutex,
+    sync::{watch, Mutex},
 };
 use tokio_tungstenite::{
     tungstenite::{protocol::WebSocketConfig, Message},
@@ -342,10 +342,24 @@ impl Browser {
             return;
         }
         if let Ok(Ok(Some(viewport))) =
-            tokio::time::timeout(self.policy.timeout, layout_viewport(&mut self.cdp)).await
+            tokio::time::timeout(MEASURE_WAIT, layout_viewport(&mut self.cdp)).await
         {
             self.viewport = viewport;
         }
+    }
+
+    /// The page's main-frame address as the owner browses it, on a
+    /// connection of its own. The sender drops when the page is gone: its
+    /// window closed by hand, or Chrome quit.
+    pub fn watch_window(&self) -> watch::Receiver<Option<String>> {
+        let (urls, receiver) = watch::channel(None);
+        let (socket, policy) = (self.page_socket.clone(), self.policy);
+        tokio::spawn(async move {
+            if let Ok(mut cdp) = Cdp::connect(&socket, policy).await {
+                follow_window(&mut cdp, &urls).await;
+            }
+        });
+        receiver
     }
 
     pub async fn stop(&mut self) -> Result<(), ToolError> {
@@ -476,6 +490,59 @@ impl Browser {
             self.info.url.clone_from(url);
         }
         Ok(())
+    }
+}
+
+/// How long measuring a window may take before an action goes ahead.
+const MEASURE_WAIT: Duration = Duration::from_secs(2);
+
+/// Send the page's address, then each main-frame address it navigates to,
+/// until its connection ends or nothing listens.
+pub(super) async fn follow_window(cdp: &mut Cdp, urls: &watch::Sender<Option<String>>) {
+    if cdp.call("Page.enable", json!({})).await.is_err() {
+        return;
+    }
+    // Where the page already is: a navigation before `Page.enable` sent no
+    // event to this connection.
+    match cdp.call("Page.getNavigationHistory", json!({})).await {
+        Ok(history) => {
+            if let Some(url) = current_entry_url(&history) {
+                urls.send_replace(Some(url));
+            }
+        }
+        Err(_) => return,
+    }
+    let mut main: Option<String> = None;
+    loop {
+        let frame = tokio::select! {
+            frame = cdp.socket.next() => frame,
+            () = urls.closed() => return,
+        };
+        let Some(Ok(frame)) = frame else {
+            return;
+        };
+        let Message::Text(text) = frame else {
+            continue;
+        };
+        let Ok(value) = serde_json::from_str::<Value>(&text) else {
+            continue;
+        };
+        let params = &value["params"];
+        let url = match value["method"].as_str() {
+            Some("Page.frameNavigated") if params["frame"]["parentId"].is_null() => {
+                main = params["frame"]["id"].as_str().map(str::to_owned);
+                params["frame"]["url"].as_str()
+            }
+            Some("Page.navigatedWithinDocument")
+                if main.is_some() && params["frameId"].as_str() == main.as_deref() =>
+            {
+                params["url"].as_str()
+            }
+            _ => None,
+        };
+        if let Some(url) = url {
+            urls.send_replace(Some(url.to_owned()));
+        }
     }
 }
 

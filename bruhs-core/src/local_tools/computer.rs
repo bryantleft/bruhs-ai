@@ -73,6 +73,9 @@ pub(super) trait ComputerPage: Send {
     ) -> Result<ToolReply, ToolError>;
     async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError>;
     async fn url(&mut self) -> Option<String>;
+    /// For a window: its main-frame address as the owner browses. The
+    /// sender drops when the page is gone (closed by hand, or Chrome quit).
+    fn watch_window(&self) -> watch::Receiver<Option<String>>;
     /// Releases a mouse button an interrupted action left pressed.
     async fn release_pointer(&mut self);
     /// A graceful close: Chrome writes its profile, then exits.
@@ -107,6 +110,10 @@ impl ComputerPage for Browser {
 
     async fn url(&mut self) -> Option<String> {
         self.current_url().await.ok()
+    }
+
+    fn watch_window(&self) -> watch::Receiver<Option<String>> {
+        Browser::watch_window(self)
     }
 
     async fn release_pointer(&mut self) {
@@ -200,6 +207,18 @@ struct PageSlot {
     error: Option<String>,
     /// The open page is a visible window, not headless.
     headed: bool,
+}
+
+impl PageSlot {
+    /// Whether the open page is still the window `session` names. A window
+    /// that was closed or relaunched since isn't.
+    fn is_window(&self, session: &str) -> bool {
+        self.headed
+            && self
+                .open
+                .as_ref()
+                .is_some_and(|open| open.page.session().id == session)
+    }
 }
 
 /// A running page with the guard its traffic goes through and its seat.
@@ -637,7 +656,11 @@ impl LocalToolsHost {
         if slot.state.borrow().session_id.is_some() {
             return Ok(());
         }
-        let mut page = slot.page.lock().await;
+        // A closed page that is locked is opening for the bruh's action,
+        // which isn't waited on either; owner input opens it if it didn't.
+        let Ok(mut page) = slot.page.try_lock() else {
+            return Ok(());
+        };
         if let Err(error) = self.ensure_open(slot, &mut page).await {
             slot.set_control(Control::Bruh, None);
             return Err(error);
@@ -652,24 +675,74 @@ impl LocalToolsHost {
     /// where that is.
     async fn hand_back(&self, slot: &Slot) {
         let mut page = slot.page.lock().await;
-        if slot.control() != Control::Owner {
-            return;
+        if slot.control() == Control::Owner {
+            self.give_back(slot, &mut page).await;
         }
+        drop(page);
+    }
+
+    /// Hand back under the page lock: a window reopens headless where it
+    /// was, then control and the note go to the bruh.
+    async fn give_back(&self, slot: &Slot, page: &mut PageSlot) {
         if page.headed {
             // A failed relaunch shows in the state's error; the next agent
             // command opens it again.
-            if let Err(error) = self.relaunch(slot, &mut page, true).await {
+            if let Err(error) = self.relaunch(slot, page, true).await {
                 tracing::warn!(%error, "bruh browser didn't reopen headless");
             }
         }
-        slot.refresh_url(&mut page).await;
+        slot.refresh_url(page).await;
         let url = page
             .last_url
             .clone()
             .unwrap_or_else(|| "about:blank".into());
         page.last_used = Some(Instant::now());
         slot.set_control(Control::Bruh, Some(handed_back_note(&url)));
-        slot.publish(&page);
+        slot.publish(page);
+    }
+
+    /// Follow a window's page: where the owner browses becomes the slot's
+    /// address, and a window closed by hand (or a Chrome that quit) is
+    /// handed back as if the owner pressed Hand back.
+    fn watch_window(&self, agent_id: &str, open: &OpenPage) {
+        let mut window = open.page.watch_window();
+        let (host, agent_id) = (self.this.clone(), agent_id.to_owned());
+        let session = open.page.session().id.clone();
+        tokio::spawn(async move {
+            while window.changed().await.is_ok() {
+                let url = window.borrow_and_update().clone();
+                let (Some(url), Some(host)) = (url, host.upgrade()) else {
+                    continue;
+                };
+                host.window_moved(&agent_id, &session, url).await;
+            }
+            if let Some(host) = host.upgrade() {
+                host.window_gone(&agent_id, &session).await;
+            }
+        });
+    }
+
+    async fn window_moved(&self, agent_id: &str, session: &str, url: String) {
+        let Some(slot) = self.computer_slot(agent_id) else {
+            return;
+        };
+        let mut page = slot.page.lock().await;
+        if page.is_window(session) {
+            page.last_url = Some(url);
+            slot.publish(&page);
+        }
+        drop(page);
+    }
+
+    async fn window_gone(&self, agent_id: &str, session: &str) {
+        let Some(slot) = self.computer_slot(agent_id) else {
+            return;
+        };
+        let mut page = slot.page.lock().await;
+        if page.is_window(session) {
+            tracing::debug!(bruh = %agent_id, "bruh window closed by hand");
+            self.give_back(&slot, &mut page).await;
+        }
         drop(page);
     }
 
@@ -677,18 +750,27 @@ impl LocalToolsHost {
     /// what the live view can't do: the headless page closes gracefully and
     /// the same profile opens headed where it was.
     async fn open_window(&self, slot: &Slot) -> Result<(), ToolError> {
+        let before = slot.control();
         slot.set_control(Control::Owner, None);
         let mut page = slot.page.lock().await;
         if page.headed && page.open.is_some() {
             return Ok(());
         }
         let opened = self.relaunch(slot, &mut page, false).await;
-        drop(page);
-        if opened.is_err() {
-            // No window: the bruh keeps its browser, which reopens headless
-            // where it was on its next step.
-            slot.set_control(Control::Bruh, None);
+        if let Err(error) = &opened {
+            if before == Control::Owner {
+                // The owner keeps control and the live view: headless again
+                // where it was, still showing why the window didn't open.
+                let _ = self.ensure_open(slot, &mut page).await;
+                page.error = Some(error.to_string());
+                slot.publish(&page);
+            } else {
+                // The bruh keeps its browser, which reopens headless where
+                // it was on its next step.
+                slot.set_control(Control::Bruh, None);
+            }
         }
+        drop(page);
         opened
     }
 
@@ -805,7 +887,7 @@ impl LocalToolsHost {
             return Ok(());
         }
         let launched = self.launch(slot, page.last_url.clone(), true, None).await;
-        Self::opened(slot, page, launched, true)
+        self.opened(slot, page, launched, true)
     }
 
     /// Close the open page, if any, and open the same profile again where it
@@ -824,11 +906,13 @@ impl LocalToolsHost {
             self.launch(slot, page.last_url.clone(), headless, seat)
                 .await
         };
-        Self::opened(slot, page, launched, headless)
+        self.opened(slot, page, launched, headless)
     }
 
-    /// Record a launch's outcome in the slot and publish it.
+    /// Record a launch's outcome in the slot and publish it. A window is
+    /// watched from here on.
     fn opened(
+        &self,
         slot: &Slot,
         page: &mut PageSlot,
         launched: Result<OpenPage, ToolError>,
@@ -836,6 +920,9 @@ impl LocalToolsHost {
     ) -> Result<(), ToolError> {
         let result = match launched {
             Ok(open) => {
+                if !headless {
+                    self.watch_window(&slot.agent_id, &open);
+                }
                 page.open = Some(open);
                 page.headed = !headless;
                 page.error = None;
@@ -915,7 +1002,7 @@ mod fake {
     use bruhs_models::local_tools::{
         BrowserAction, BrowserSession, ComputerInput, ToolReply, Viewport, COMPUTER_VIEWPORT,
     };
-    use tokio::sync::Notify;
+    use tokio::sync::{watch, Notify};
 
     use super::{ComputerPage, Launcher, LocalToolsHost, PageLaunch};
     use crate::local_tools::{network::Upstream, ProcessPolicy, ToolError};
@@ -936,6 +1023,13 @@ mod fake {
         releases: HashMap<String, usize>,
         urls: HashMap<String, String>,
         holds: HashMap<String, Arc<Notify>>,
+        /// Each bruh's latest page's window feed. Dropping it closes the
+        /// window.
+        windows: HashMap<String, watch::Sender<Option<String>>>,
+        /// Sessions whose window was closed by hand: they answer nothing.
+        gone: std::collections::HashSet<String>,
+        fail_actions: std::collections::HashSet<String>,
+        fail_launches: std::collections::HashSet<String>,
     }
 
     impl FakePages {
@@ -1001,11 +1095,44 @@ mod fake {
             notify
         }
 
+        /// The owner browses the bruh's window to `url`. The page itself
+        /// isn't asked, as if it couldn't answer.
+        pub fn browse_window(&self, agent_id: &str, url: &str) {
+            if let Some(window) = self.seen().windows.get(agent_id) {
+                window.send_replace(Some(url.into()));
+            }
+        }
+
+        /// The owner closes the bruh's window by hand: its page answers
+        /// nothing from now on.
+        pub fn close_window(&self, agent_id: &str) {
+            let mut seen = self.seen();
+            if let Some(session) = seen.sessions.get(agent_id).map(|s| s.id.clone()) {
+                seen.gone.insert(session);
+            }
+            let window = seen.windows.remove(agent_id);
+            drop(seen);
+            drop(window);
+        }
+
+        /// The bruh's next action fails, as on a page that errors.
+        pub fn fail_next_action(&self, agent_id: &str) {
+            self.seen().fail_actions.insert(agent_id.into());
+        }
+
+        /// The bruh's next launch fails, as when Chrome can't open.
+        pub fn fail_next_launch(&self, agent_id: &str) {
+            self.seen().fail_launches.insert(agent_id.into());
+        }
+
         fn launcher(&self) -> Launcher {
             let pages = self.clone();
             Arc::new(move |launch: PageLaunch| {
                 let pages = pages.clone();
                 Box::pin(async move {
+                    if pages.seen().fail_launches.remove(&launch.agent_id) {
+                        return Err(ToolError::Unavailable("Chrome didn't open.".into()));
+                    }
                     std::fs::create_dir_all(&launch.profile_dir)?;
                     std::fs::write(launch.profile_dir.join("Cookies"), b"fake")?;
                     let session = BrowserSession {
@@ -1013,13 +1140,16 @@ mod fake {
                         grant_id: launch.grant_id.clone(),
                         url: launch.url.clone(),
                     };
+                    let (window, feed) = watch::channel(None);
                     let page = FakePage {
                         agent_id: launch.agent_id.clone(),
                         profile_dir: launch.profile_dir.clone(),
                         session: session.clone(),
                         pages: pages.clone(),
+                        window: feed,
                     };
                     let mut seen = pages.seen();
+                    seen.windows.insert(launch.agent_id.clone(), window);
                     seen.urls
                         .insert(launch.agent_id.clone(), launch.url.clone());
                     seen.sessions.insert(launch.agent_id.clone(), session);
@@ -1036,6 +1166,13 @@ mod fake {
         profile_dir: PathBuf,
         session: BrowserSession,
         pages: FakePages,
+        window: watch::Receiver<Option<String>>,
+    }
+
+    impl FakePage {
+        fn gone(&self) -> bool {
+            self.pages.seen().gone.contains(&self.session.id)
+        }
     }
 
     #[async_trait]
@@ -1057,16 +1194,20 @@ mod fake {
             action: BrowserAction,
             _policy: ProcessPolicy,
         ) -> Result<ToolReply, ToolError> {
-            let hold = {
+            let (hold, fail) = {
                 let mut seen = self.pages.seen();
+                let fail = seen.fail_actions.remove(&self.agent_id);
                 seen.actions
                     .entry(self.agent_id.clone())
                     .or_default()
                     .push(action.clone());
-                seen.holds.remove(&self.agent_id)
+                (seen.holds.remove(&self.agent_id), fail)
             };
             if let Some(hold) = hold {
                 hold.notified().await;
+            }
+            if fail {
+                return Err(ToolError::Unavailable("The page failed.".into()));
             }
             if let BrowserAction::Navigate { url } = action {
                 self.pages.seen().urls.insert(self.agent_id.clone(), url);
@@ -1091,7 +1232,14 @@ mod fake {
         }
 
         async fn url(&mut self) -> Option<String> {
+            if self.gone() {
+                return None;
+            }
             self.pages.seen().urls.get(&self.agent_id).cloned()
+        }
+
+        fn watch_window(&self) -> watch::Receiver<Option<String>> {
+            self.window.clone()
         }
 
         async fn release_pointer(&mut self) {
