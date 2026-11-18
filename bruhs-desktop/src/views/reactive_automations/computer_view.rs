@@ -8,6 +8,12 @@
 //! frame waiting wins. While the owner holds control, the view's pointer,
 //! wheel, keys and paste go to the page. Keys are taken before the app's
 //! bindings (gpui-component's root binds Tab), except the app's ⌘ shortcuts.
+mod input;
+mod live;
+#[cfg(test)]
+mod tests;
+
+use self::live::Live;
 use super::bruh_page::{
     alert, small_text, Layout, LABEL_TEXT_PX, PAGE_PADDING_PX, RADIUS_GRAPE_PX, SMALL_TEXT_PX,
 };
@@ -15,7 +21,7 @@ use super::create_bruh::{FIELD_TEXT_PX, FIELD_X_PADDING_PX};
 use super::ReactiveAutomations;
 #[cfg(not(test))]
 use crate::app_state::spawn_tokio;
-use crate::server_client::{Screencast, ScreencastEvent, ServerClient};
+use crate::server_client::ServerClient;
 use crate::theme;
 use crate::views::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use bruhs_models::agent::AgentProvider;
@@ -25,18 +31,15 @@ use bruhs_models::crew::{
     RELOAD, TAKE_CONTROL, TAKE_CONTROL_FIRST, USE_THE_WINDOW,
 };
 use bruhs_models::local_tools::{
-    owner_key_route, to_viewport, to_viewport_clamped, ComputerInput, ComputerRequest,
-    ComputerState, KeyKind, KeyRoute, MouseButton, MouseKind, Viewport, MAX_SCROLL_PX,
-    MODIFIER_ALT, MODIFIER_CTRL, MODIFIER_META, MODIFIER_SHIFT,
+    ComputerInput, ComputerRequest, ComputerState, HeldKeys, MouseButton, Viewport,
 };
 use bruhs_ui::press::on_press_view;
 use gpui::prelude::*;
 use gpui::Focusable as _;
 use gpui::{
-    canvas, div, img, App, Bounds, Context, DispatchPhase, Div, Entity, FocusHandle, KeyUpEvent,
-    Keystroke, Modifiers, MouseDownEvent, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, Point,
-    RenderImage, Role, ScrollDelta, ScrollEvent, SharedString, Stateful, Subscription, Task,
-    WeakEntity, Window,
+    canvas, div, img, App, Bounds, Context, DispatchPhase, Div, Entity, FocusHandle,
+    HitboxBehavior, MouseMoveEvent, MouseUpEvent, ObjectFit, Pixels, RenderImage, Role,
+    SharedString, Stateful, Subscription, Task, WeakEntity, Window,
 };
 use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::scroll::ScrollableElement;
@@ -46,14 +49,6 @@ use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 /// How often the tab asks for the state while no live view runs, so a
 /// browser the bruh opens shows up (web `CLOSED_POLL_MS`).
 const CLOSED_POLL: Duration = Duration::from_secs(5);
-/// The first wait before a closed live view reconnects, doubled after each
-/// failure up to [`BACKOFF_MAX_MS`] (web `live.rs`).
-const BACKOFF_START_MS: u64 = 1_000;
-const BACKOFF_MAX_MS: u64 = 10_000;
-/// CSS px per wheel line, as browsers scroll a line.
-const WHEEL_LINE_PX: f64 = 16.0;
-/// The largest frame the view decodes, in pixels a side.
-const MAX_FRAME_SIDE: u32 = 4_096;
 /// Web `max-w-5xl`.
 const COLUMN_MAX_PX: f32 = 1024.0;
 /// Web `max-w-[min(100%,max(20rem,calc((100dvh_-_20rem)*1.6)))]` on the
@@ -65,259 +60,8 @@ const LIVE_RATIO: f32 = 1.6;
 const ADDRESS_BASIS_PX: f32 = 192.0;
 /// Web `aria-busy:opacity-60` on a button whose request runs.
 const BUSY_OPACITY: f32 = 0.6;
-/// The app's own modifier: ⌘ on a Mac, Ctrl elsewhere.
+/// The app's own modifier is ⌘ on a Mac, Ctrl elsewhere.
 const MAC: bool = cfg!(target_os = "macos");
-
-/// The DOM `key` and `code` of a GPUI keystroke, for the page. `None` for
-/// keys the live view doesn't forward.
-pub(crate) fn dom_key(keystroke: &Keystroke) -> Option<(String, String)> {
-    let named = |key: &str, code: &str| Some((key.to_string(), code.to_string()));
-    match keystroke.key.as_str() {
-        "enter" => named("Enter", "Enter"),
-        "backspace" => named("Backspace", "Backspace"),
-        "tab" => named("Tab", "Tab"),
-        "escape" => named("Escape", "Escape"),
-        "space" => named(" ", "Space"),
-        "left" => named("ArrowLeft", "ArrowLeft"),
-        "right" => named("ArrowRight", "ArrowRight"),
-        "up" => named("ArrowUp", "ArrowUp"),
-        "down" => named("ArrowDown", "ArrowDown"),
-        "home" => named("Home", "Home"),
-        "end" => named("End", "End"),
-        "pageup" => named("PageUp", "PageUp"),
-        "pagedown" => named("PageDown", "PageDown"),
-        "delete" => named("Delete", "Delete"),
-        key => {
-            if let Some(number) = key.strip_prefix('f') {
-                return match number.parse::<u8>() {
-                    Ok(1..=12) => {
-                        let name = format!("F{number}");
-                        Some((name.clone(), name))
-                    }
-                    _ => None,
-                };
-            }
-            let mut chars = key.chars();
-            let (Some(first), None) = (chars.next(), chars.next()) else {
-                return None;
-            };
-            // What the key types, or with ⌘ or Ctrl held, the key itself.
-            let typed = keystroke
-                .key_char
-                .clone()
-                .filter(|typed| !typed.is_empty() && !typed.chars().any(char::is_control))
-                .unwrap_or_else(|| {
-                    if keystroke.modifiers.shift {
-                        key.to_uppercase()
-                    } else {
-                        key.to_string()
-                    }
-                });
-            Some((typed, dom_code(first)))
-        }
-    }
-}
-
-/// The DOM `code` of the physical key that types `key` on a US layout.
-fn dom_code(key: char) -> String {
-    if key.is_ascii_alphabetic() {
-        return format!("Key{}", key.to_ascii_uppercase());
-    }
-    if key.is_ascii_digit() {
-        return format!("Digit{key}");
-    }
-    let code = match key {
-        '.' => "Period",
-        ',' => "Comma",
-        '/' => "Slash",
-        ';' => "Semicolon",
-        '\'' => "Quote",
-        '[' => "BracketLeft",
-        ']' => "BracketRight",
-        '\\' => "Backslash",
-        '-' => "Minus",
-        '=' => "Equal",
-        '`' => "Backquote",
-        _ => "",
-    };
-    code.to_string()
-}
-
-/// The `MODIFIER_*` bits of GPUI's modifier keys.
-pub(crate) fn modifiers(held: &Modifiers) -> u8 {
-    [
-        (held.alt, MODIFIER_ALT),
-        (held.control, MODIFIER_CTRL),
-        (held.platform, MODIFIER_META),
-        (held.shift, MODIFIER_SHIFT),
-    ]
-    .into_iter()
-    .filter(|(on, _)| *on)
-    .fold(0, |bits, (_, bit)| bits | bit)
-}
-
-/// The page's button for a GPUI one; back and forward don't map.
-fn page_button(button: gpui::MouseButton) -> MouseButton {
-    match button {
-        gpui::MouseButton::Left => MouseButton::Left,
-        gpui::MouseButton::Middle => MouseButton::Middle,
-        gpui::MouseButton::Right => MouseButton::Right,
-        gpui::MouseButton::Navigate(_) => MouseButton::None,
-    }
-}
-
-/// A wheel turn in the page's CSS px, signed as the DOM signs it (down is
-/// positive), within the scroll budget.
-fn wheel_px(delta: &ScrollDelta) -> (f64, f64) {
-    let (dx, dy) = match delta {
-        ScrollDelta::Pixels(delta) => (f64::from(css_px(delta.x)), f64::from(css_px(delta.y))),
-        ScrollDelta::Lines(delta) => (
-            f64::from(delta.x) * WHEEL_LINE_PX,
-            f64::from(delta.y) * WHEEL_LINE_PX,
-        ),
-    };
-    let page = |turn: f64| {
-        if turn.is_finite() {
-            (-turn).clamp(-MAX_SCROLL_PX, MAX_SCROLL_PX)
-        } else {
-            0.0
-        }
-    };
-    (page(dx), page(dy))
-}
-
-/// Where a key pressed in the live view goes.
-#[derive(Debug, Clone, PartialEq)]
-enum KeyAction {
-    /// To the page, as this input.
-    Send(ComputerInput),
-    /// Send the clipboard's text.
-    Paste,
-    /// Move focus to the toolbar.
-    Leave,
-    /// Leave it to the app's shortcuts.
-    App,
-}
-
-/// Where a key goes, through the shared [`owner_key_route`]. A paste is
-/// taken on key down only.
-fn key_action(key: &str, code: &str, modifiers: u8, down: bool) -> KeyAction {
-    match owner_key_route(key, modifiers, MAC) {
-        KeyRoute::Leave => KeyAction::Leave,
-        KeyRoute::Paste if down => KeyAction::Paste,
-        KeyRoute::Paste | KeyRoute::App => KeyAction::App,
-        KeyRoute::Page => KeyAction::Send(ComputerInput::Key {
-            kind: if down { KeyKind::Down } else { KeyKind::Up },
-            key: key.into(),
-            code: code.into(),
-            modifiers,
-        }),
-    }
-}
-
-/// The keys whose press went to the page (web `HeldKeys`), so each gets
-/// its release whatever modifiers are held by then, and none is left down
-/// when the view loses focus. Keys are told apart by their `code`.
-#[derive(Debug, Default)]
-struct HeldKeys(Vec<(String, String)>);
-
-impl HeldKeys {
-    fn route(&mut self, key: &str, code: &str, modifiers: u8, down: bool) -> KeyAction {
-        let id = if code.is_empty() { key } else { code };
-        let action = key_action(key, code, modifiers, down);
-        if down {
-            if matches!(action, KeyAction::Send(_)) && !self.0.iter().any(|(held, _)| held == id) {
-                self.0.push((id.to_string(), key.to_string()));
-            }
-            return action;
-        }
-        match self.0.iter().position(|(held, _)| held == id) {
-            Some(index) => {
-                let (_, pressed) = self.0.remove(index);
-                KeyAction::Send(ComputerInput::Key {
-                    kind: KeyKind::Up,
-                    key: pressed,
-                    code: code.into(),
-                    modifiers,
-                })
-            }
-            None if action == KeyAction::Leave => KeyAction::Leave,
-            None => KeyAction::App,
-        }
-    }
-
-    /// Releases for every key still held, which are no longer.
-    fn release_all(&mut self) -> Vec<ComputerInput> {
-        self.0
-            .drain(..)
-            .map(|(code, key)| ComputerInput::Key {
-                kind: KeyKind::Up,
-                key,
-                code,
-                modifiers: 0,
-            })
-            .collect()
-    }
-}
-
-/// How long a closed live view waits before it connects again. Only a
-/// frame proves the view works: the service sends its state first even
-/// when the stream then fails, so a state message resets nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Backoff {
-    wait_ms: u64,
-    /// This socket has shown a frame.
-    framed: bool,
-}
-
-impl Default for Backoff {
-    fn default() -> Self {
-        Self {
-            wait_ms: BACKOFF_START_MS,
-            framed: false,
-        }
-    }
-}
-
-impl Backoff {
-    /// A frame arrived. True for the socket's first, which resets the wait.
-    fn frame(&mut self) -> bool {
-        let first = !self.framed;
-        self.framed = true;
-        self.wait_ms = BACKOFF_START_MS;
-        first
-    }
-
-    /// The socket closed: the wait before the next one, doubled for the
-    /// time after.
-    fn closed(&mut self) -> u64 {
-        let wait = self.wait_ms;
-        self.wait_ms = wait.saturating_mul(2).min(BACKOFF_MAX_MS);
-        self.framed = false;
-        wait
-    }
-}
-
-/// Decode one JPEG frame into GPUI's BGRA image, as the whiteboard decodes
-/// a raster (`whiteboard/catalog/files.rs`).
-fn decode_frame(bytes: &[u8]) -> Result<Arc<RenderImage>, String> {
-    let mut reader = image::ImageReader::new(std::io::Cursor::new(bytes))
-        .with_guessed_format()
-        .map_err(|error| error.to_string())?;
-    let mut limits = image::Limits::default();
-    limits.max_image_width = Some(MAX_FRAME_SIDE);
-    limits.max_image_height = Some(MAX_FRAME_SIDE);
-    limits.max_alloc = Some(bruhs_models::logic::attachments::MAX_IMAGE_TOTAL_BYTES);
-    reader.limits(limits);
-    let mut rgba = reader
-        .decode()
-        .map_err(|error| error.to_string())?
-        .to_rgba8();
-    for pixel in rgba.as_chunks_mut::<4>().0 {
-        pixel.swap(0, 2);
-    }
-    Ok(Arc::new(RenderImage::new(vec![image::Frame::new(rgba)])))
-}
 
 /// What the panel knows of this bruh's Computer.
 #[derive(Debug, Clone, Default)]
@@ -358,22 +102,6 @@ impl ReactiveAutomations {
             reason: self.computer_reason(),
         }
     }
-}
-
-/// The live view's socket and its reconnects.
-#[derive(Default)]
-struct Live {
-    /// The browser session this view watches, while it is connected,
-    /// connecting or waiting to retry.
-    session: Option<String>,
-    screencast: Option<Screencast>,
-    /// Opening the socket, then reading its events.
-    task: Option<Task<()>>,
-    retry: Option<Task<()>>,
-    /// Bumped whenever a socket goes, so its late events do nothing.
-    generation: u64,
-    backoff: Backoff,
-    connected: bool,
 }
 
 /// A bruh's Computer tab.
@@ -456,6 +184,13 @@ impl ComputerView {
             cx.on_blur(&focus, window, |this, _, cx| {
                 this.release_held(cx);
                 cx.notify();
+            }),
+            // Switching apps keeps focus on the view, but the keys and the
+            // button held then come up elsewhere: release them here.
+            cx.observe_window_activation(window, |this, window, cx| {
+                if !window.is_window_active() {
+                    this.release_held(cx);
+                }
             }),
             // Before the app's bindings, which take Tab (F22).
             cx.intercept_keystrokes(move |event, window, cx| {
@@ -695,453 +430,6 @@ impl ComputerView {
         cx.notify();
     }
 
-    /// Open the live view of browser `session`, replacing any socket.
-    fn connect(&mut self, session: String, cx: &mut Context<'_, Self>) {
-        self.disconnect();
-        self.live.session = Some(session.clone());
-        #[cfg(test)]
-        {
-            // Tests never reach a server; they apply events themselves.
-            let _ = (session, cx);
-            self.live.connected = true;
-        }
-        #[cfg(not(test))]
-        {
-            let generation = self.live.generation;
-            let client = self.client.clone();
-            let opening = spawn_tokio(cx, async move { client.screencast(&session).await });
-            self.live.task = Some(cx.spawn(async move |this, cx| {
-                let events = match opening.await {
-                    Ok(screencast) => {
-                        let events = screencast.events.clone();
-                        let kept = this.update(cx, |this, cx| {
-                            if this.live.generation != generation {
-                                return false;
-                            }
-                            this.live.screencast = Some(screencast);
-                            this.live.connected = true;
-                            cx.notify();
-                            true
-                        });
-                        if !matches!(kept, Ok(true)) {
-                            return;
-                        }
-                        events
-                    }
-                    Err(error) => {
-                        let _ = this.update(cx, |this, cx| {
-                            if this.live.generation == generation {
-                                this.stream_failed = true;
-                                this.error = Some(error.to_string());
-                                this.closed(generation, cx);
-                                cx.notify();
-                            }
-                        });
-                        return;
-                    }
-                };
-                loop {
-                    // A closed channel means the socket has gone too.
-                    let event = events.recv().await.unwrap_or(ScreencastEvent::Closed);
-                    let closed = event == ScreencastEvent::Closed;
-                    let current = this.update(cx, |this, cx| {
-                        if this.live.generation != generation {
-                            return false;
-                        }
-                        this.apply_event(event, cx);
-                        true
-                    });
-                    if closed || !matches!(current, Ok(true)) {
-                        break;
-                    }
-                }
-            }));
-        }
-    }
-
-    /// Close the socket, if any, and cancel a pending retry.
-    fn disconnect(&mut self) {
-        self.live.generation = self.live.generation.wrapping_add(1);
-        self.live.retry = None;
-        self.live.task = None;
-        self.live.screencast = None;
-        self.live.session = None;
-        self.live.connected = false;
-        self.live.backoff.framed = false;
-        self.held = None;
-        self.pending_move = None;
-        self.pending_wheel = None;
-    }
-
-    /// Clear the frame on screen; a frame still decoding is dropped.
-    fn clear_frame(&mut self) {
-        self.epoch = self.epoch.wrapping_add(1);
-        self.next_frame = None;
-        let old = self.frame.take();
-        self.retire(old);
-    }
-
-    /// The socket closed: wait, read the state again, then connect to what
-    /// it says.
-    fn closed(&mut self, generation: u64, cx: &mut Context<'_, Self>) {
-        if generation != self.live.generation || self.live.session.is_none() {
-            return;
-        }
-        self.live.screencast = None;
-        self.live.connected = false;
-        let wait = self.live.backoff.closed();
-        self.live.retry = Some(cx.spawn(async move |this, cx| {
-            cx.background_executor()
-                .timer(Duration::from_millis(wait))
-                .await;
-            let _ = this.update(cx, |this, cx| {
-                if this.live.generation == generation {
-                    this.live.retry = None;
-                    this.load(Some(generation), cx);
-                }
-            });
-        }));
-    }
-
-    /// One event from the live view.
-    fn apply_event(&mut self, event: ScreencastEvent, cx: &mut Context<'_, Self>) {
-        match event {
-            ScreencastEvent::State(next) => {
-                self.revision = self.revision.wrapping_add(1);
-                self.state = Some(next);
-                self.sync(cx);
-            }
-            ScreencastEvent::Error(error) => {
-                self.stream_failed = true;
-                self.error = Some(error);
-            }
-            ScreencastEvent::Frame(bytes) => {
-                if self.live.backoff.frame() && self.stream_failed {
-                    self.stream_failed = false;
-                    self.error = None;
-                }
-                if self.decoding {
-                    self.next_frame = Some(bytes);
-                } else {
-                    self.decode(bytes, cx);
-                }
-            }
-            ScreencastEvent::Closed => self.closed(self.live.generation, cx),
-        }
-        cx.notify();
-    }
-
-    #[cfg(test)]
-    pub(super) fn apply_event_for_test(
-        &mut self,
-        event: ScreencastEvent,
-        _window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        self.apply_event(event, cx);
-    }
-
-    /// Decode a frame off the main thread.
-    fn decode(&mut self, bytes: Vec<u8>, cx: &mut Context<'_, Self>) {
-        self.decoding = true;
-        let (generation, epoch) = (self.live.generation, self.epoch);
-        cx.spawn(async move |this, cx| {
-            let decoded = cx
-                .background_executor()
-                .spawn(async move { decode_frame(&bytes) })
-                .await;
-            let _ = this.update(cx, |this, cx| this.decoded(generation, epoch, decoded, cx));
-        })
-        .detach();
-    }
-
-    /// A frame is decoded: show it, acknowledge it (a frame that failed to
-    /// decode too, so the next comes) and decode the newest one waiting.
-    fn decoded(
-        &mut self,
-        generation: u64,
-        epoch: u64,
-        decoded: Result<Arc<RenderImage>, String>,
-        cx: &mut Context<'_, Self>,
-    ) {
-        self.decoding = false;
-        if epoch == self.epoch {
-            match decoded {
-                Ok(image) => {
-                    let old = self.frame.replace(image);
-                    self.retire(old);
-                }
-                Err(error) => tracing::debug!("Live view frame skipped: {error}"),
-            }
-        }
-        if generation == self.live.generation {
-            self.ack();
-        }
-        if let Some(next) = self.next_frame.take() {
-            self.decode(next, cx);
-        }
-        cx.notify();
-    }
-
-    /// Let go of a frame no longer shown: one that was drawn waits for the
-    /// next draw to leave the atlas.
-    fn retire(&mut self, old: Option<Arc<RenderImage>>) {
-        if std::mem::take(&mut self.frame_drawn) {
-            self.retired.extend(old);
-        }
-    }
-
-    fn ack(&mut self) {
-        #[cfg(test)]
-        {
-            self.acks += 1;
-        }
-        if let Some(screencast) = &self.live.screencast {
-            screencast.ack();
-        }
-    }
-
-    /// Owner input, only while the owner holds control.
-    fn send_now(&mut self, input: ComputerInput, cx: &mut Context<'_, Self>) {
-        if !self.controls(cx).input {
-            return;
-        }
-        let Some(panel) = self.panel.upgrade() else {
-            return;
-        };
-        let screencast = self.live.screencast.as_ref();
-        panel.update(cx, |panel, _| panel.screencast_input(screencast, input));
-    }
-
-    /// Send waiting moves and wheel turns, then `input`, so order holds.
-    fn send(&mut self, input: ComputerInput, cx: &mut Context<'_, Self>) {
-        self.flush(cx);
-        self.send_now(input, cx);
-    }
-
-    fn flush(&mut self, cx: &mut Context<'_, Self>) {
-        self.frame_asked = false;
-        for input in [self.pending_move.take(), self.pending_wheel.take()]
-            .into_iter()
-            .flatten()
-        {
-            self.send_now(input, cx);
-        }
-    }
-
-    /// Send waiting moves and turns with the next frame: one per frame.
-    fn send_next_frame(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.frame_asked {
-            return;
-        }
-        self.frame_asked = true;
-        let view = cx.weak_entity();
-        window.on_next_frame(move |_, cx| {
-            let _ = view.update(cx, |this, cx| this.flush(cx));
-        });
-    }
-
-    /// A press whose release the view won't see (focus lost, F6) is
-    /// released where it last was, and so is every key still held.
-    fn release_held(&mut self, cx: &mut Context<'_, Self>) {
-        if let Some((button, clicks, x, y)) = self.held.take() {
-            self.send(
-                ComputerInput::Mouse {
-                    kind: MouseKind::Up,
-                    x,
-                    y,
-                    button,
-                    clicks,
-                    modifiers: 0,
-                },
-                cx,
-            );
-        }
-        for input in self.held_keys.release_all() {
-            self.send(input, cx);
-        }
-    }
-
-    /// The page point under `position`, a window point; with `clamp`, one
-    /// outside the frame clamps to its edge.
-    fn page_point(&self, position: Point<Pixels>, clamp: bool) -> Option<(f64, f64)> {
-        let bounds = self.bounds.get();
-        let x = f64::from(f32::from(position.x - bounds.origin.x));
-        let y = f64::from(f32::from(position.y - bounds.origin.y));
-        let shown = (
-            f64::from(f32::from(bounds.size.width)),
-            f64::from(f32::from(bounds.size.height)),
-        );
-        if clamp {
-            to_viewport_clamped(x, y, shown, self.viewport())
-        } else {
-            to_viewport(x, y, shown, self.viewport())
-        }
-    }
-
-    fn mouse_down(
-        &mut self,
-        event: &MouseDownEvent,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if !self.controls(cx).input {
-            return;
-        }
-        self.focus.focus(window, cx);
-        let button = page_button(event.button);
-        if button == MouseButton::None {
-            return;
-        }
-        let Some((x, y)) = self.page_point(event.position, false) else {
-            return;
-        };
-        let clicks = u8::try_from(event.click_count.clamp(1, 3)).unwrap_or(1);
-        self.held = Some((button, clicks, x, y));
-        self.send(
-            ComputerInput::Mouse {
-                kind: MouseKind::Down,
-                x,
-                y,
-                button,
-                clicks,
-                modifiers: modifiers(&event.modifiers),
-            },
-            cx,
-        );
-    }
-
-    /// A move over the view, or anywhere while a press of the view is held.
-    fn mouse_moved(
-        &mut self,
-        event: &MouseMoveEvent,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) {
-        if !self.controls(cx).input {
-            return;
-        }
-        let dragging = self.held.is_some();
-        if !dragging && !self.bounds.get().contains(&event.position) {
-            return;
-        }
-        let button = match self.held {
-            Some((button, ..)) => button,
-            None => event.pressed_button.map_or(MouseButton::None, page_button),
-        };
-        let Some((x, y)) = self.page_point(event.position, dragging) else {
-            return;
-        };
-        if let Some(held) = self.held.as_mut() {
-            (held.2, held.3) = (x, y);
-        }
-        self.pending_move = Some(ComputerInput::Mouse {
-            kind: MouseKind::Move,
-            x,
-            y,
-            button,
-            clicks: 0,
-            modifiers: modifiers(&event.modifiers),
-        });
-        self.send_next_frame(window, cx);
-    }
-
-    /// A release ends the view's press wherever it happens, clamped to the
-    /// frame, so the page always sees the button come up.
-    fn mouse_released(&mut self, event: &MouseUpEvent, cx: &mut Context<'_, Self>) {
-        let Some((button, clicks, x, y)) = self.held.take() else {
-            return;
-        };
-        let (x, y) = self.page_point(event.position, true).unwrap_or((x, y));
-        self.send(
-            ComputerInput::Mouse {
-                kind: MouseKind::Up,
-                x,
-                y,
-                button,
-                clicks,
-                modifiers: modifiers(&event.modifiers),
-            },
-            cx,
-        );
-    }
-
-    fn wheel(&mut self, event: &ScrollEvent, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if !self.controls(cx).input {
-            return;
-        }
-        // The page scrolls, not the tab.
-        cx.stop_propagation();
-        let Some((x, y)) = self.page_point(event.position, false) else {
-            return;
-        };
-        let (dx, dy) = wheel_px(&event.delta);
-        let (before_x, before_y) = match self.pending_wheel {
-            Some(ComputerInput::Wheel { dx, dy, .. }) => (dx, dy),
-            _ => (0.0, 0.0),
-        };
-        self.pending_wheel = Some(ComputerInput::Wheel {
-            x,
-            y,
-            dx: (before_x + dx).clamp(-MAX_SCROLL_PX, MAX_SCROLL_PX),
-            dy: (before_y + dy).clamp(-MAX_SCROLL_PX, MAX_SCROLL_PX),
-        });
-        self.send_next_frame(window, cx);
-    }
-
-    /// A key down in this window, before the app's bindings. True when the
-    /// live view took it.
-    fn key_down(
-        &mut self,
-        keystroke: &Keystroke,
-        window: &mut Window,
-        cx: &mut Context<'_, Self>,
-    ) -> bool {
-        if !self.focus.is_focused(window) || !self.controls(cx).input {
-            return false;
-        }
-        let Some((key, code)) = dom_key(keystroke) else {
-            return false;
-        };
-        match self
-            .held_keys
-            .route(&key, &code, modifiers(&keystroke.modifiers), true)
-        {
-            KeyAction::Send(input) => self.send(input, cx),
-            KeyAction::Paste => {
-                let text = cx
-                    .read_from_clipboard()
-                    .and_then(|item| item.text())
-                    .unwrap_or_default();
-                if !text.is_empty() {
-                    self.send(ComputerInput::Text { text }, cx);
-                }
-            }
-            KeyAction::Leave => {
-                self.release_held(cx);
-                self.address.focus_handle(cx).focus(window, cx);
-            }
-            KeyAction::App => return false,
-        }
-        true
-    }
-
-    /// Key ups come here: bindings never take them. A release whose press
-    /// went to the page goes there too.
-    fn key_up(&mut self, event: &KeyUpEvent, _: &mut Window, cx: &mut Context<'_, Self>) {
-        if !self.controls(cx).input {
-            return;
-        }
-        let Some((key, code)) = dom_key(&event.keystroke) else {
-            return;
-        };
-        let held = modifiers(&event.keystroke.modifiers);
-        if let KeyAction::Send(input) = self.held_keys.route(&key, &code, held, false) {
-            self.send(input, cx);
-            cx.stop_propagation();
-        }
-    }
-
     /// Enter in the address: go there.
     fn navigate_to_address(&mut self, cx: &mut Context<'_, Self>) {
         if !self.controls(cx).navigate {
@@ -1327,19 +615,28 @@ impl ComputerView {
         &self,
         controls: ComputerControls,
         width: f32,
+        hint: Option<&'static str>,
         cx: &Context<'_, Self>,
     ) -> Stateful<Div> {
         let bounds = self.bounds.clone();
         let view = cx.weak_entity();
         // Measures the frame's box, and follows a press of it anywhere in
-        // the window so a drag released outside still ends.
+        // the window so a drag released outside still ends. Its hitbox says
+        // whether the pointer is over the view, not over a palette or dialog
+        // drawn on top.
         let pointer = canvas(
-            move |frame, _, _| bounds.set(frame),
-            move |_, (), window, _| {
+            move |frame, window, _| {
+                bounds.set(frame);
+                window.insert_hitbox(frame, HitboxBehavior::Normal)
+            },
+            move |_, hitbox, window, _| {
                 let moved = view.clone();
                 window.on_mouse_event(move |event: &MouseMoveEvent, phase, window, cx| {
                     if phase == DispatchPhase::Bubble {
-                        let _ = moved.update(cx, |this, cx| this.mouse_moved(event, window, cx));
+                        let hovered = hitbox.is_hovered(window);
+                        let _ = moved.update(cx, |this, cx| {
+                            this.mouse_moved(event, hovered, window, cx);
+                        });
                     }
                 });
                 let released = view;
@@ -1378,12 +675,18 @@ impl ComputerView {
                         .child(img(frame).size_full().object_fit(ObjectFit::Contain)),
                 )
             });
+        // Web: the image's `alt` once a frame shows, and while the owner
+        // holds control, its label and the hint as its description.
+        let live = live
+            .role(Role::Image)
+            .when(self.frame.is_some() || controls.input, |live| {
+                live.aria_label(LIVE_VIEW_LABEL)
+            });
         if !controls.input {
             return live;
         }
-        live.track_focus(&self.focus)
-            .role(Role::Image)
-            .aria_label(LIVE_VIEW_LABEL)
+        live.when_some(hint, |live, hint| live.aria_description(hint))
+            .track_focus(&self.focus)
             .focus(|style| style.border_color(theme::persimmon_400()))
             .on_any_mouse_down(cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::wheel))
@@ -1426,7 +729,8 @@ impl Render for ComputerView {
             .text_size(px(SMALL_TEXT_PX))
             .text_color(theme::rambutan_300())
             .child(self.status(cx));
-        let hint: SharedString = self.hint(window, cx).unwrap_or_default().into();
+        let hint_line = self.hint(window, cx);
+        let hint: SharedString = hint_line.unwrap_or_default().into();
         let body = div()
             .w(px(column))
             .min_w_0()
@@ -1446,7 +750,7 @@ impl Render for ComputerView {
                     div()
                         .flex()
                         .justify_center()
-                        .child(self.render_live(controls, live_width, cx)),
+                        .child(self.render_live(controls, live_width, hint_line, cx)),
                 )
             })
             .child(
@@ -1491,488 +795,5 @@ impl Render for ComputerView {
                     .overflow_y_scrollbar()
                     .child(body),
             )
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::super::bruh_page::BruhTab;
-    use super::{
-        dom_key, modifiers, Backoff, ComputerView, HeldKeys, KeyAction, ReactiveAutomations,
-    };
-    use crate::server_client::ScreencastEvent;
-    use crate::theme;
-    use crate::views::workspace::StopAll;
-    use bruhs_models::crew::{
-        computer_status_line, AccessLevel, BruhAccess, BruhLook, BruhState, BruhStatus,
-        CREW_PROTOCOL, LIVE_VIEW_HINT, USE_THE_WINDOW,
-    };
-    use bruhs_models::local_tools::{
-        ComputerInput, ComputerRequest, ComputerState, Control, KeyKind, MouseButton, MouseKind,
-        MODIFIER_CTRL, MODIFIER_META, MODIFIER_SHIFT,
-    };
-    use bruhs_models::reactive::{ReactiveAgent, ReactiveSnapshot};
-    use gpui::{
-        AppContext as _, ClipboardItem, Entity, Focusable as _, KeyBinding, KeyUpEvent, Keystroke,
-        Modifiers, VisualTestContext,
-    };
-    use std::{cell::Cell, cell::RefCell, rc::Rc};
-
-    fn snapshot() -> ReactiveSnapshot {
-        ReactiveSnapshot {
-            agents: vec![ReactiveAgent {
-                id: "a".into(),
-                name: "Ada".into(),
-                instructions: String::new(),
-                memory: String::new(),
-                model: "claude-sonnet-4-6".into(),
-                project_path: String::new(),
-                enabled: true,
-            }],
-            bruhs: vec![BruhState {
-                agent_id: "a".into(),
-                name: "Ada".into(),
-                look: BruhLook::default(),
-                access: BruhAccess {
-                    level: AccessLevel::Full,
-                    ..BruhAccess::default()
-                },
-                effort: None,
-                status: BruhStatus::Asleep,
-                next_wake_ms: None,
-                unread: 0,
-                computer: true,
-            }],
-            protocol: CREW_PROTOCOL,
-            ..ReactiveSnapshot::default()
-        }
-    }
-
-    fn browser(control: Control, headed: bool) -> ComputerState {
-        ComputerState {
-            agent_id: "a".into(),
-            session_id: Some("s".into()),
-            url: Some("https://example.com/".into()),
-            control,
-            headed,
-            ..ComputerState::default()
-        }
-    }
-
-    /// A standalone panel window (F13) on the bruh's Computer tab.
-    fn open(
-        cx: &mut gpui::TestAppContext,
-        width: f32,
-        height: f32,
-    ) -> (
-        Entity<ReactiveAutomations>,
-        Entity<ComputerView>,
-        &mut VisualTestContext,
-    ) {
-        cx.update(|cx| {
-            gpui_component::init(cx);
-            theme::apply_bruhs_theme(cx);
-        });
-        let holder = Rc::new(RefCell::new(None));
-        let capture = holder.clone();
-        let (_, cx) = cx.add_window_view(|window, cx| {
-            let panel = cx.new(ReactiveAutomations::new);
-            *capture.borrow_mut() = Some(panel.clone());
-            gpui_component::Root::new(panel, window, cx)
-        });
-        cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
-        let panel = holder.borrow().clone().unwrap();
-        panel.update(cx, |panel, cx| {
-            panel.loaded = true;
-            panel.set_snapshot(snapshot(), cx);
-            panel.open_bruh_for_test("a", BruhTab::Computer, cx);
-        });
-        cx.run_until_parked();
-        let view = panel
-            .read_with(cx, |panel, _| panel.computer_view_for_test())
-            .expect("the Computer tab shows its view");
-        (panel, view, cx)
-    }
-
-    fn apply(view: &Entity<ComputerView>, cx: &mut VisualTestContext, event: ScreencastEvent) {
-        view.update_in(cx, |view, window, cx| {
-            view.apply_event_for_test(event, window, cx);
-        });
-    }
-
-    fn inputs(
-        panel: &Entity<ReactiveAutomations>,
-        cx: &mut VisualTestContext,
-    ) -> Vec<ComputerInput> {
-        panel.read_with(cx, |panel, _| panel.screencast_inputs_for_test().to_vec())
-    }
-
-    fn shown(cx: &mut VisualTestContext, selector: &'static str) -> bool {
-        cx.debug_bounds(selector).is_some()
-    }
-
-    fn click(cx: &mut VisualTestContext, selector: &'static str) {
-        let bounds = cx.debug_bounds(selector).expect(selector);
-        cx.simulate_click(bounds.center(), Modifiers::default());
-        cx.run_until_parked();
-    }
-
-    /// A 2×2 JPEG.
-    fn jpeg() -> Vec<u8> {
-        let mut bytes = Vec::new();
-        image::codecs::jpeg::JpegEncoder::new(&mut bytes)
-            .encode_image(&image::RgbImage::new(2, 2))
-            .unwrap();
-        bytes
-    }
-
-    #[gpui::test]
-    fn a_closed_browser_offers_open_and_sends_it(cx: &mut gpui::TestAppContext) {
-        let (panel, view, cx) = open(cx, 900.0, 1200.0);
-        let status = view.read_with(cx, |view, cx| view.status(cx));
-        assert_eq!(status, computer_status_line(None, true, "Ada"));
-        assert!(shown(cx, "desktop-computer-status"));
-        assert!(!shown(cx, "desktop-computer-take"), "no browser to take");
-        click(cx, "desktop-computer-open");
-        panel.read_with(cx, |panel, _| {
-            assert_eq!(
-                panel.computer_requests_for_test(),
-                [("a".to_string(), ComputerRequest::Open)]
-            );
-        });
-    }
-
-    #[gpui::test]
-    fn frames_draw_and_are_acked_after_decode(cx: &mut gpui::TestAppContext) {
-        let (_panel, view, cx) = open(cx, 900.0, 1200.0);
-        apply(
-            &view,
-            cx,
-            ScreencastEvent::State(browser(Control::Bruh, false)),
-        );
-        cx.run_until_parked();
-        assert!(
-            !shown(cx, "desktop-computer-frame"),
-            "nothing until a frame"
-        );
-        apply(&view, cx, ScreencastEvent::Frame(jpeg()));
-        assert_eq!(
-            view.read_with(cx, |view, _| view.acks),
-            0,
-            "acked after decode"
-        );
-        cx.run_until_parked();
-        assert_eq!(view.read_with(cx, |view, _| view.acks), 1);
-        assert!(shown(cx, "desktop-computer-frame"));
-        let first = view.read_with(cx, |view, _| view.frame.clone()).unwrap();
-        let painted = cx.update(|window, _| window.has_image_atlas_entry(&first));
-        assert!(painted, "the frame is drawn");
-        // Two more before the next decode ends: neither is acked early.
-        apply(&view, cx, ScreencastEvent::Frame(jpeg()));
-        apply(&view, cx, ScreencastEvent::Frame(jpeg()));
-        assert_eq!(view.read_with(cx, |view, _| view.acks), 1);
-        cx.run_until_parked();
-        assert_eq!(view.read_with(cx, |view, _| view.acks), 3);
-        // The frame it replaced leaves the atlas.
-        let kept = cx.update(|window, _| window.has_image_atlas_entry(&first));
-        assert!(!kept, "the old frame is dropped");
-        // A frame that can't be decoded is still acked, so the next comes.
-        apply(&view, cx, ScreencastEvent::Frame(vec![1, 2, 3]));
-        cx.run_until_parked();
-        assert_eq!(view.read_with(cx, |view, _| view.acks), 4);
-        assert!(
-            shown(cx, "desktop-computer-frame"),
-            "the last good frame stays"
-        );
-    }
-
-    #[gpui::test]
-    fn owner_keys_go_to_the_page_except_app_shortcuts(cx: &mut gpui::TestAppContext) {
-        // The app's own modifier.
-        let (stop, paste) = if cfg!(target_os = "macos") {
-            ("cmd-.", "cmd-v")
-        } else {
-            ("ctrl-.", "ctrl-v")
-        };
-        let stops = Rc::new(Cell::new(0));
-        let counted = stops.clone();
-        cx.update(|cx| {
-            cx.bind_keys([KeyBinding::new(stop, StopAll, None)]);
-            cx.on_action(move |_: &StopAll, _| counted.set(counted.get() + 1));
-        });
-        let (panel, view, cx) = open(cx, 900.0, 1200.0);
-        apply(
-            &view,
-            cx,
-            ScreencastEvent::State(browser(Control::Owner, false)),
-        );
-        cx.run_until_parked();
-        let focus = |view: &Entity<ComputerView>, cx: &mut VisualTestContext| {
-            view.update_in(cx, |view, window, cx| view.focus.focus(window, cx));
-            cx.run_until_parked();
-        };
-        focus(&view, cx);
-        let hint = view.update_in(cx, |view, window, cx| view.hint(window, cx));
-        assert_eq!(hint, Some(LIVE_VIEW_HINT), "the hint shows while focused");
-        cx.simulate_keystrokes("a");
-        cx.simulate_event(KeyUpEvent {
-            keystroke: Keystroke::parse("a").unwrap(),
-        });
-        let key = |kind, key: &str, code: &str, modifiers| ComputerInput::Key {
-            kind,
-            key: key.into(),
-            code: code.into(),
-            modifiers,
-        };
-        assert_eq!(
-            inputs(&panel, cx),
-            [
-                key(KeyKind::Down, "a", "KeyA", 0),
-                key(KeyKind::Up, "a", "KeyA", 0)
-            ]
-        );
-        // Tab goes to the page, not to the next control.
-        cx.simulate_keystrokes("tab");
-        assert_eq!(
-            inputs(&panel, cx).last(),
-            Some(&key(KeyKind::Down, "Tab", "Tab", 0))
-        );
-        assert!(view.update_in(cx, |view, window, _| view.focus.is_focused(window)));
-        cx.simulate_event(KeyUpEvent {
-            keystroke: Keystroke::parse("tab").unwrap(),
-        });
-        let sent = inputs(&panel, cx).len();
-        // ⌘. stays with the app and reaches its action.
-        cx.simulate_keystrokes(stop);
-        assert_eq!(inputs(&panel, cx).len(), sent, "no input");
-        assert_eq!(stops.get(), 1, "the stop action ran");
-        // ⌘V pastes the clipboard as text.
-        cx.write_to_clipboard(ClipboardItem::new_string("pw".into()));
-        cx.simulate_keystrokes(paste);
-        assert_eq!(
-            inputs(&panel, cx).last(),
-            Some(&ComputerInput::Text { text: "pw".into() })
-        );
-        // F6 leaves for the address, releasing a key still held.
-        cx.simulate_keystrokes("shift-b");
-        assert_eq!(
-            inputs(&panel, cx).last(),
-            Some(&key(KeyKind::Down, "B", "KeyB", MODIFIER_SHIFT))
-        );
-        cx.simulate_keystrokes("f6");
-        assert_eq!(
-            inputs(&panel, cx).last(),
-            Some(&key(KeyKind::Up, "B", "KeyB", 0)),
-            "the held key comes up"
-        );
-        let at_address = view.update_in(cx, |view, window, cx| {
-            view.address.focus_handle(cx).is_focused(window)
-        });
-        assert!(at_address, "focus is on the address");
-        let hint = view.update_in(cx, |view, window, cx| view.hint(window, cx));
-        assert_eq!(hint, None, "the hint goes");
-    }
-
-    #[gpui::test]
-    fn clicks_map_through_the_letterbox(cx: &mut gpui::TestAppContext) {
-        let (panel, view, cx) = open(cx, 640.0, 480.0);
-        apply(
-            &view,
-            cx,
-            ScreencastEvent::State(browser(Control::Owner, false)),
-        );
-        cx.run_until_parked();
-        let bounds = cx.debug_bounds("desktop-computer-live").unwrap();
-        cx.simulate_mouse_down(
-            bounds.center(),
-            gpui::MouseButton::Left,
-            Modifiers::default(),
-        );
-        assert_eq!(
-            inputs(&panel, cx),
-            [ComputerInput::Mouse {
-                kind: MouseKind::Down,
-                x: 640.0,
-                y: 400.0,
-                button: MouseButton::Left,
-                clicks: 1,
-                modifiers: 0,
-            }]
-        );
-        // A drag out past the left edge, released there, ends inside the page.
-        let outside = gpui::point(bounds.left() - gpui::px(40.0), bounds.center().y);
-        cx.simulate_mouse_move(outside, gpui::MouseButton::Left, Modifiers::default());
-        cx.update(|window, cx| {
-            window.simulate_next_frame(cx);
-        });
-        cx.simulate_mouse_up(outside, gpui::MouseButton::Left, Modifiers::default());
-        let sent = inputs(&panel, cx);
-        assert!(
-            matches!(
-                sent[1],
-                ComputerInput::Mouse { kind: MouseKind::Move, x, button: MouseButton::Left, .. } if x == 0.0
-            ),
-            "{sent:?}"
-        );
-        assert!(
-            matches!(
-                sent[2],
-                ComputerInput::Mouse { kind: MouseKind::Up, x, button: MouseButton::Left, clicks: 1, .. } if x == 0.0
-            ),
-            "{sent:?}"
-        );
-        assert_eq!(sent.len(), 3);
-        // A press on the frame focuses the view.
-        assert!(view.update_in(cx, |view, window, _| view.focus.is_focused(window)));
-    }
-
-    #[gpui::test]
-    fn controls_follow_the_state(cx: &mut gpui::TestAppContext) {
-        let (panel, view, cx) = open(cx, 900.0, 1200.0);
-        apply(
-            &view,
-            cx,
-            ScreencastEvent::State(browser(Control::Bruh, false)),
-        );
-        cx.run_until_parked();
-        assert!(shown(cx, "desktop-computer-take"));
-        assert!(shown(cx, "desktop-computer-window"));
-        assert!(shown(cx, "desktop-computer-close"));
-        assert!(!shown(cx, "desktop-computer-hand-back"));
-        assert!(!shown(cx, "desktop-computer-back"));
-        assert!(!view.read_with(cx, |view, cx| view.address_editable(cx)));
-        click(cx, "desktop-computer-window");
-        panel.read_with(cx, |panel, _| {
-            assert_eq!(
-                panel.computer_requests_for_test(),
-                [("a".to_string(), ComputerRequest::OpenWindow)]
-            );
-        });
-
-        apply(
-            &view,
-            cx,
-            ScreencastEvent::State(browser(Control::Owner, false)),
-        );
-        cx.run_until_parked();
-        assert!(shown(cx, "desktop-computer-hand-back"));
-        assert!(shown(cx, "desktop-computer-back"));
-        assert!(shown(cx, "desktop-computer-reload"));
-        assert!(!shown(cx, "desktop-computer-take"));
-        assert!(view.read_with(cx, |view, cx| view.address_editable(cx)));
-        let url = view.read_with(cx, |view, cx| view.address.read(cx).value().to_string());
-        assert_eq!(url, "https://example.com/");
-
-        apply(
-            &view,
-            cx,
-            ScreencastEvent::State(browser(Control::Owner, true)),
-        );
-        cx.run_until_parked();
-        assert!(shown(cx, "desktop-computer-hand-back"));
-        assert!(!shown(cx, "desktop-computer-take"));
-        assert!(!shown(cx, "desktop-computer-window"));
-        assert!(!shown(cx, "desktop-computer-back"));
-        let (status, hint) = view.update_in(cx, |view, window, cx| {
-            (view.status(cx), view.hint(window, cx))
-        });
-        assert_eq!(
-            status,
-            computer_status_line(Some(&browser(Control::Owner, true)), true, "Ada")
-        );
-        assert_eq!(hint, Some(USE_THE_WINDOW));
-
-        // A failed request's state error shows on the status line.
-        let mut failed = browser(Control::Bruh, false);
-        failed.error = Some("The window couldn't open.".into());
-        apply(&view, cx, ScreencastEvent::State(failed));
-        cx.run_until_parked();
-        let status = view.read_with(cx, |view, cx| view.status(cx));
-        assert_eq!(status, "The window couldn't open.");
-    }
-
-    #[test]
-    fn the_backoff_grows_until_a_frame_arrives() {
-        let mut backoff = Backoff::default();
-        let waits: Vec<u64> = (0..6).map(|_| backoff.closed()).collect();
-        assert_eq!(waits, [1_000, 2_000, 4_000, 8_000, 10_000, 10_000]);
-        assert!(backoff.frame(), "a socket's first frame resets the wait");
-        assert!(!backoff.frame());
-        assert_eq!(backoff.closed(), 1_000);
-        assert!(backoff.frame(), "a new socket's first frame is first again");
-    }
-
-    #[test]
-    fn a_key_released_with_the_app_modifier_held_still_reaches_the_page() {
-        let mut held = HeldKeys::default();
-        assert!(matches!(
-            held.route("a", "KeyA", 0, true),
-            KeyAction::Send(_)
-        ));
-        // A repeat doesn't hold the key twice.
-        assert!(matches!(
-            held.route("a", "KeyA", 0, true),
-            KeyAction::Send(_)
-        ));
-        // Its release with ⌘ (or Ctrl) held still goes to the page.
-        let app = if cfg!(target_os = "macos") {
-            MODIFIER_META
-        } else {
-            MODIFIER_CTRL
-        };
-        assert_eq!(
-            held.route("a", "KeyA", app, false),
-            KeyAction::Send(ComputerInput::Key {
-                kind: KeyKind::Up,
-                key: "a".into(),
-                code: "KeyA".into(),
-                modifiers: app,
-            })
-        );
-        // A release whose press never reached the page stays with the app.
-        assert_eq!(held.route("a", "KeyA", 0, false), KeyAction::App);
-        assert_eq!(held.route(".", "Period", app, true), KeyAction::App);
-        assert_eq!(held.route("v", "KeyV", app, true), KeyAction::Paste);
-        assert_eq!(held.route("v", "KeyV", app, false), KeyAction::App);
-        assert_eq!(held.route("F6", "F6", 0, true), KeyAction::Leave);
-        assert!(held.release_all().is_empty());
-    }
-
-    #[test]
-    fn gpui_keys_become_dom_keys() {
-        let dom = |source: &'static str| {
-            let keystroke = Keystroke::parse(source).unwrap().with_simulated_ime();
-            dom_key(&keystroke)
-        };
-        let pair = |key: &str, code: &str| Some((key.to_string(), code.to_string()));
-        assert_eq!(dom("enter"), pair("Enter", "Enter"));
-        assert_eq!(dom("backspace"), pair("Backspace", "Backspace"));
-        assert_eq!(dom("tab"), pair("Tab", "Tab"));
-        assert_eq!(dom("escape"), pair("Escape", "Escape"));
-        assert_eq!(dom("space"), pair(" ", "Space"));
-        assert_eq!(dom("left"), pair("ArrowLeft", "ArrowLeft"));
-        assert_eq!(dom("down"), pair("ArrowDown", "ArrowDown"));
-        assert_eq!(dom("pageup"), pair("PageUp", "PageUp"));
-        assert_eq!(dom("pagedown"), pair("PageDown", "PageDown"));
-        assert_eq!(dom("home"), pair("Home", "Home"));
-        assert_eq!(dom("end"), pair("End", "End"));
-        assert_eq!(dom("delete"), pair("Delete", "Delete"));
-        assert_eq!(dom("f1"), pair("F1", "F1"));
-        assert_eq!(dom("f12"), pair("F12", "F12"));
-        assert_eq!(dom("a"), pair("a", "KeyA"));
-        assert_eq!(dom("shift-a"), pair("A", "KeyA"));
-        assert_eq!(dom("7"), pair("7", "Digit7"));
-        assert_eq!(dom("."), pair(".", "Period"));
-        assert_eq!(dom("cmd-v"), pair("v", "KeyV"));
-        assert_eq!(dom("f13"), None, "keys the page view doesn't know stay");
-        let all = Modifiers {
-            control: true,
-            alt: true,
-            shift: true,
-            platform: true,
-            function: false,
-        };
-        assert_eq!(modifiers(&all), 15);
-        assert_eq!(modifiers(&Modifiers::command()), MODIFIER_META);
     }
 }

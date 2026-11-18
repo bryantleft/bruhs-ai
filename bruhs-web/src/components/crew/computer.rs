@@ -19,15 +19,15 @@ use bruhs_models::crew::{
     TAKE_CONTROL_FIRST, USE_THE_WINDOW,
 };
 use bruhs_models::local_tools::{
-    ComputerInput, ComputerRequest, ComputerState, MouseButton, MouseKind,
+    wheel_input, ComputerInput, ComputerRequest, ComputerState, HeldKeys, KeyAction, MouseButton,
+    MouseKind,
 };
 use leptos::ev;
 use leptos::html;
 use leptos::prelude::*;
 
 use self::input::{
-    click_count, modifier_bits, pointer_input, pressed_button, wheel_input, wheel_px, with_clicks,
-    HeldKeys, KeyAction, Press,
+    click_count, modifier_bits, pointer_input, pressed_button, wheel_px, with_clicks, Press,
 };
 use self::live::{LiveEvents, LiveView};
 use super::data::use_crew_snapshot;

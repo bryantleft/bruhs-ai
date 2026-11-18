@@ -2,7 +2,9 @@
 use serde::{Deserialize, Serialize};
 
 mod computer;
+mod live_input;
 pub use computer::*;
+pub use live_input::*;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

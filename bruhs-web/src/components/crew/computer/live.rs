@@ -5,55 +5,13 @@
 use std::time::Duration;
 
 use bruhs_models::local_tools::{
-    ComputerInput, ComputerState, ScreencastClientMessage, ScreencastMessage, FRAME_ACK,
+    Backoff, ComputerInput, ComputerState, ScreencastClientMessage, ScreencastMessage,
+    BACKOFF_MAX_MS, FRAME_ACK,
 };
 use leptos::html;
 use leptos::prelude::*;
 use wasm_bindgen::prelude::*;
 use wasm_bindgen::JsCast;
-
-/// The first wait before a closed live view reconnects, doubled after each
-/// failure up to [`BACKOFF_MAX_MS`].
-const BACKOFF_START_MS: u32 = 1_000;
-const BACKOFF_MAX_MS: u32 = 10_000;
-
-/// How long a closed live view waits before it connects again. Only a
-/// frame proves the view works: the service sends its state first even
-/// when the stream then fails, so a state message resets nothing.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct Backoff {
-    wait_ms: u32,
-    /// This socket has shown a frame.
-    framed: bool,
-}
-
-impl Default for Backoff {
-    fn default() -> Self {
-        Self {
-            wait_ms: BACKOFF_START_MS,
-            framed: false,
-        }
-    }
-}
-
-impl Backoff {
-    /// A frame arrived. True for the socket's first, which resets the wait.
-    fn frame(&mut self) -> bool {
-        let first = !self.framed;
-        self.framed = true;
-        self.wait_ms = BACKOFF_START_MS;
-        first
-    }
-
-    /// The socket closed: the wait before the next one, doubled for the
-    /// time after.
-    fn closed(&mut self) -> u32 {
-        let wait = self.wait_ms;
-        self.wait_ms = wait.saturating_mul(2).min(BACKOFF_MAX_MS);
-        self.framed = false;
-        wait
-    }
-}
 
 /// What the live view tells the tab.
 #[derive(Clone, Copy)]
@@ -243,6 +201,8 @@ impl LiveView {
     /// Open the live view of browser `session`, replacing any socket.
     pub(super) fn connect(self, session: &str, events: LiveEvents) {
         self.disconnect();
+        // A new socket's first frame resets the wait again.
+        self.backoff.update_value(Backoff::new_socket);
         let Ok(socket) = web_sys::WebSocket::new(&crate::api::screencast_url(session)) else {
             return;
         };
@@ -298,7 +258,7 @@ impl LiveView {
                             events.closed.run(mine);
                         }
                     },
-                    Duration::from_millis(u64::from(wait)),
+                    Duration::from_millis(wait),
                 );
                 if let Ok(handle) = handle {
                     self.retry.set_value(Some(handle));
@@ -313,25 +273,5 @@ impl LiveView {
             _message: message,
             _close: close,
         }));
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn the_backoff_grows_until_a_frame_arrives() {
-        let mut backoff = Backoff::default();
-        // A stream that sends its state and fails: no frame, so each close
-        // waits longer, up to the cap.
-        let waits: Vec<u32> = (0..6).map(|_| backoff.closed()).collect();
-        assert_eq!(waits, [1_000, 2_000, 4_000, 8_000, 10_000, 10_000]);
-        // The first frame resets it; later frames on the socket aren't first.
-        assert!(backoff.frame());
-        assert!(!backoff.frame());
-        assert_eq!(backoff.closed(), 1_000);
-        // A new socket's first frame is first again.
-        assert!(backoff.frame());
     }
 }
