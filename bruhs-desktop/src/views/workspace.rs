@@ -1206,6 +1206,15 @@ pub struct Workspace {
     automation_error: Option<String>,
     reviewed_workflow_id: Option<String>,
     mcp_bridge: mcp_bridge::WorkspaceBridge,
+    /// Agent workflows' scroll area.
+    automations_scroll: ScrollHandle,
+    /// The page's own dry run (New dry run, a suggestion's or a draft's
+    /// preview), reviewed in Preview changes while it waits.
+    dry_run_workflow_id: Option<String>,
+    /// Opened "Review workflow" disclosures, by place and workflow.
+    workflow_disclosures: HashSet<String>,
+    /// The app-wide workflow notice put away, until it changes.
+    dismissed_workflow_notice: Option<String>,
     mobile: mobile::MobileUi,
     local_servers: Vec<LocalServer>,
     local_servers_loading: bool,
@@ -1899,7 +1908,7 @@ impl Workspace {
                                     .into(),
                             );
                         }
-                        this.reviewed_workflow_id = Some(id);
+                        this.show_dry_run(id);
                         this.persist_and_notify(cx);
                     },
                 ));
@@ -1909,6 +1918,10 @@ impl Workspace {
             automation_error: None,
             reviewed_workflow_id: None,
             mcp_bridge: mcp_bridge::WorkspaceBridge::default(),
+            automations_scroll: ScrollHandle::new(),
+            dry_run_workflow_id: None,
+            workflow_disclosures: HashSet::new(),
+            dismissed_workflow_notice: None,
             mobile: mobile::MobileUi::new(window, cx),
             local_servers: Vec::new(),
             local_servers_loading: false,
@@ -2974,6 +2987,10 @@ impl Render for Workspace {
                     .when(!booking, |el| {
                         el.child(self.render_workspace_navigation(sidebar_drawer, cx))
                     })
+                    // Web: under the navigation, above the page.
+                    .when_some(self.render_workflow_status(cx), |el, status| {
+                        el.child(status)
+                    })
                     .child(
                         div()
                             .relative()
@@ -3198,9 +3215,6 @@ impl Render for Workspace {
             .flex()
             .flex_col()
             .when_some(self.render_save_status(cx), |el, status| el.child(status))
-            .when_some(self.render_workflow_status(cx), |el, status| {
-                el.child(status)
-            })
             .when_some(self.persistence_error.clone(), |el, error| {
                 el.child(self.render_persistence_error(error, cx))
             })

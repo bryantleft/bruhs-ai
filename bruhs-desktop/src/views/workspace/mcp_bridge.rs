@@ -1,6 +1,5 @@
 //! User-controlled session boundary; never restored from the workspace file.
 use super::*;
-use gpui_component::zoom::px;
 
 #[cfg(all(test, unix))]
 mod batch_tests;
@@ -42,6 +41,8 @@ mod person_merge_tests;
 mod projected_read_tests;
 #[cfg(unix)]
 mod requests;
+#[cfg(all(test, unix))]
+mod review_card_tests;
 mod rollback_review;
 #[cfg(all(test, unix))]
 mod rollback_tests;
@@ -59,20 +60,20 @@ mod tests;
 #[cfg(unix)]
 use bruhs_models::workspace_bridge::{
     mcp_client_config, CONNECTION_FAILED_NOTE as MCP_CONNECTION_FAILED_NOTE,
-    SESSION_ACTIVE_NOTE as MCP_SESSION_ACTIVE_NOTE, SESSION_OFF_NOTE as MCP_OFF_NOTE,
+    COPIED_NOTE as MCP_COPIED_NOTE, SESSION_ACTIVE_NOTE as MCP_SESSION_ACTIVE_NOTE,
+    SESSION_OFF_NOTE as MCP_OFF_NOTE,
 };
 
-fn mcp_bridge_panel() -> Div {
-    div()
-        .mb_3()
-        .p_3()
-        .rounded(px(8.0))
-        .border_1()
-        .border_color(theme::longan_800())
-        .bg(theme::longan_900())
-        .text_size(px(12.0))
-        .text_color(theme::rambutan_300())
+/// Web `McpConnectionPanel`'s card and title.
+fn mcp_bridge_panel() -> Stateful<Div> {
+    super::automations_ui::web_card(super::automations_ui::neutral_ring())
+        .id("mcp-connection")
+        .role(Role::Region)
+        .aria_label(MCP_PANEL_TITLE)
+        .child(super::automations_ui::card_title(MCP_PANEL_TITLE))
 }
+
+const MCP_PANEL_TITLE: &str = "MCP workspace connection";
 
 #[derive(Default)]
 pub(super) struct WorkspaceBridge {
@@ -82,6 +83,9 @@ pub(super) struct WorkspaceBridge {
     state: ConnectionState,
     #[cfg(unix)]
     worker: Option<gpui::Task<()>>,
+    /// Copy MCP config was pressed in this session: show what it copied.
+    #[cfg(unix)]
+    copied: bool,
 }
 
 #[cfg(unix)]
@@ -98,18 +102,35 @@ enum ConnectionState {
 }
 
 impl WorkspaceBridge {
-    pub(super) fn pending_review(&self, state: &AutomationState) -> bool {
-        self.reviews.pending_review(state)
+    /// Whether the connected client proposed `workflow_id`.
+    pub(super) fn owns(&self, workflow_id: &str) -> bool {
+        self.reviews
+            .proposals
+            .values()
+            .any(|(id, _)| id == workflow_id)
     }
 
-    pub(super) fn pending_review_id<'a>(&'a self, state: &AutomationState) -> Option<&'a str> {
-        self.reviews.pending_review_id(state)
+    /// Workflows whose undo a client asked for, in a stable order.
+    pub(super) fn rollback_requests(&self) -> Vec<String> {
+        let mut ids: Vec<String> = self
+            .reviews
+            .rollback_reviews
+            .keys()
+            .filter(|id| self.reviews.rollback_pending(id))
+            .cloned()
+            .collect();
+        ids.sort();
+        ids
+    }
+
+    pub(super) fn pending_review(&self, state: &AutomationState) -> bool {
+        self.reviews.pending_review(state)
     }
 }
 
 impl Workspace {
     #[cfg(unix)]
-    fn enable_mcp_bridge(&mut self, cx: &mut Context<'_, Self>) {
+    pub(super) fn enable_mcp_bridge(&mut self, cx: &mut Context<'_, Self>) {
         if matches!(
             self.mcp_bridge.state,
             ConnectionState::Starting(_) | ConnectionState::Connected { .. }
@@ -156,42 +177,94 @@ impl Workspace {
         cx.notify();
     }
 
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=mcp-copied`: the connection on and its
+    /// config copied, for the web comparison, without touching the clipboard.
+    #[cfg(unix)]
+    pub(super) fn smoke_mcp_copied(&mut self, cx: &mut Context<'_, Self>) {
+        self.enable_mcp_bridge(cx);
+        self.mcp_bridge.copied = true;
+    }
+
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=mcp-undo-requested`: the newest workflow
+    /// with an undoable step, as if the connected client had proposed it and
+    /// then asked to undo it. Only what the review shows; nothing is approved.
+    #[cfg(unix)]
+    pub(super) fn smoke_mcp_undo_requested(&mut self, cx: &mut Context<'_, Self>) {
+        self.enable_mcp_bridge(cx);
+        let Some(workflow) = self
+            .automation_state
+            .workflows
+            .iter()
+            .rev()
+            .find(|workflow| workflow.can_rollback())
+        else {
+            return;
+        };
+        let id = workflow.id.clone();
+        let proposal = bruhs_models::workspace_bridge::WorkflowProposal {
+            title: workflow.title.clone(),
+            operations: workflow
+                .steps
+                .iter()
+                .map(|step| step.operation.clone())
+                .collect(),
+        };
+        self.mcp_bridge
+            .reviews
+            .proposals
+            .insert("smoke-undo".into(), (id.clone(), proposal));
+        self.mcp_bridge
+            .reviews
+            .rollback_reviews
+            .insert(id, bruhs_models::workspace_bridge::RollbackReview::Pending);
+        cx.notify();
+    }
+
     #[cfg(not(unix))]
-    pub(super) fn render_mcp_bridge(&self, _cx: &Context<'_, Self>) -> Div {
-        mcp_bridge_panel().child("Local MCP connection is not available on this platform yet.")
+    pub(super) fn render_mcp_bridge(&self, _cx: &Context<'_, Self>) -> Stateful<Div> {
+        mcp_bridge_panel().child(
+            super::automations_ui::body_sm(
+                "Local MCP connection is not available on this platform yet.",
+                theme::rambutan_500(),
+            )
+            .mt_1(),
+        )
     }
 
     #[cfg(unix)]
-    pub(super) fn render_mcp_bridge(&self, cx: &Context<'_, Self>) -> Div {
-        let panel = mcp_bridge_panel();
+    pub(super) fn render_mcp_bridge(&self, cx: &Context<'_, Self>) -> Stateful<Div> {
         let connected = matches!(self.mcp_bridge.state, ConnectionState::Connected { .. });
         let starting = matches!(self.mcp_bridge.state, ConnectionState::Starting(_));
-        panel
-            .child("MCP workspace connection")
+        let busy = connected || starting;
+        mcp_bridge_panel()
             .child(
-                div()
-                    .mt_1()
-                    .text_color(theme::rambutan_500())
-                    .child(if connected {
+                super::automations_ui::body_sm(
+                    if connected {
                         MCP_SESSION_ACTIVE_NOTE
                     } else {
                         MCP_OFF_NOTE
-                    }),
+                    },
+                    theme::rambutan_500(),
+                )
+                .mt_1(),
             )
             .when(
                 matches!(self.mcp_bridge.state, ConnectionState::Failed),
                 |panel| {
                     panel.child(
-                        div()
-                            .id("mcp-connection-error")
-                            .role(Role::Alert)
-                            .child(MCP_CONNECTION_FAILED_NOTE),
+                        super::automations_ui::body_sm(
+                            MCP_CONNECTION_FAILED_NOTE,
+                            theme::lychee_300(),
+                        )
+                        .id("mcp-connection-error")
+                        .mt_2()
+                        .role(Role::Alert),
                     )
                 },
             )
             .child(
                 div()
-                    .mt_2()
+                    .mt_3()
                     .flex()
                     .flex_wrap()
                     .gap_2()
@@ -203,21 +276,22 @@ impl Workspace {
                             ButtonState::Enabled,
                         )
                         .debug_selector(|| "desktop-mcp-connection-toggle".into())
-                        .aria_label(if connected || starting {
+                        .aria_label(if busy {
                             "Disable MCP connection"
                         } else {
                             "Enable MCP connection for this session"
                         })
-                        .child(if connected || starting {
+                        .child(if busy {
                             "Disable connection"
                         } else {
                             "Enable for this session"
                         })
                         .on_click(cx.listener(move |this, _, _, cx| {
-                            if connected || starting {
+                            if busy {
                                 this.mcp_bridge = WorkspaceBridge::default();
                                 cx.notify();
                             } else {
+                                this.mcp_bridge.copied = false;
                                 this.enable_mcp_bridge(cx);
                             }
                         })),
@@ -230,6 +304,7 @@ impl Workspace {
                                 WebButtonSize::Small,
                                 ButtonState::Enabled,
                             )
+                            .debug_selector(|| "desktop-mcp-copy-config".into())
                             .aria_label("Copy MCP client configuration")
                             .child("Copy MCP config")
                             .on_click(cx.listener(|this, _, _, cx| {
@@ -242,10 +317,21 @@ impl Workspace {
                                     cx.write_to_clipboard(ClipboardItem::new_string(
                                         config.to_string(),
                                     ));
+                                    this.mcp_bridge.copied = true;
+                                    cx.notify();
                                 }
                             })),
                         )
                     }),
             )
+            .when(connected && self.mcp_bridge.copied, |panel| {
+                panel.child(
+                    super::automations_ui::label_sm(MCP_COPIED_NOTE, theme::pandan_300())
+                        .id("mcp-copied")
+                        .debug_selector(|| "desktop-mcp-copied".into())
+                        .mt_2()
+                        .role(Role::Status),
+                )
+            })
     }
 }

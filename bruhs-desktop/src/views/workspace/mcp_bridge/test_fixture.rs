@@ -30,6 +30,11 @@ pub(super) fn fixture(cx: &mut TestAppContext) -> (Entity<Workspace>, &mut Visua
         workspace.active_view = AppView::Automations;
         cx.notify();
     });
+    // Agent workflows gives each waiting workflow a card with its full
+    // payload (PARITY-05), so its Start and the history's Run sit low on the
+    // page; a control must be on screen to be clicked.
+    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(3200.0)));
+    cx.run_until_parked();
     (workspace, cx)
 }
 
@@ -41,7 +46,8 @@ pub(super) fn workflow_fixture(
     cx: &mut TestAppContext,
 ) -> (Entity<Workspace>, &mut VisualTestContext) {
     let (workspace, cx) = fixture(cx);
-    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(2000.0)));
+    // Tall enough for every Agent workflows card, review cards included.
+    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(3200.0)));
     cx.run_until_parked();
     (workspace, cx)
 }

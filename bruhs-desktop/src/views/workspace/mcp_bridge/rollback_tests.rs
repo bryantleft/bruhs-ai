@@ -197,10 +197,13 @@ async fn declined_undo_cannot_be_resurfaced_by_repeating_the_request(cx: &mut Te
     .await);
     ok(call(&workspace, cx, request(&id, false)).await);
     workspace.update_in(cx, |w, _, _| {
+        // The new proposal waits in its own card, and the declined undo
+        // opens nothing again.
         assert_eq!(
-            w.reviewed_workflow_id.as_deref(),
-            next["workflow_id"].as_str()
+            bruhs_models::logic::workflow_review::awaiting_review(&w.automation_state, None),
+            vec![next["workflow_id"].as_str().unwrap().to_owned()]
         );
+        assert!(w.mcp_bridge.rollback_requests().is_empty());
         assert_eq!(w.work_items.len(), 1);
         w.mcp_bridge = WorkspaceBridge::default();
     });

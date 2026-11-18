@@ -164,6 +164,50 @@ impl Workspace {
                 self.set_settings_section(SettingsSection::About, cx);
             }
             "search" => self.activate_sidebar_view(AppView::Search, window, cx),
+            // Agent workflows with the MCP connection on, to compare with the
+            // web (PARITY-05); a client then connects through its file.
+            // The foot of Agent workflows' cards (jobs, audit, safety and
+            // history) where the web page ends, above desktop's Phone access.
+            "automations-grid-bottom" => {
+                let scroll = &self.automations_scroll;
+                let grid = if self.automation_error.is_some() {
+                    3
+                } else {
+                    2
+                };
+                // From the page's foot, back up past Phone access and its gap.
+                if let Some(mobile) = scroll.bounds_for_item(grid + 1) {
+                    let max = scroll.max_offset();
+                    let up = mobile.size.height + px(12.0);
+                    scroll.set_offset(point(px(0.0), -(max.y - up).max(px(0.0))));
+                    cx.notify();
+                }
+            }
+            "mcp-off" => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+                self.automations_scroll.scroll_to_top_of_item(1);
+            }
+            #[cfg(unix)]
+            "mcp-copied" => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+                self.smoke_mcp_copied(cx);
+                self.automations_scroll.scroll_to_top_of_item(1);
+            }
+            #[cfg(unix)]
+            "mcp-undo-requested" => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+                self.smoke_mcp_undo_requested(cx);
+                self.automations_scroll.scroll_to_top_of_item(1);
+            }
+            #[cfg(unix)]
+            "mcp-connected" => {
+                self.activate_sidebar_view(AppView::Automations, window, cx);
+                self.enable_mcp_bridge(cx);
+                // The panel is the page's second item, after the crew. Repeat
+                // the scene (`mcp-connected;mcp-connected`) once the crew has
+                // loaded, since that moves the panel down.
+                self.automations_scroll.scroll_to_top_of_item(1);
+            }
             "search-query" => {
                 self.activate_sidebar_view(AppView::Search, window, cx);
                 self.search_query_input

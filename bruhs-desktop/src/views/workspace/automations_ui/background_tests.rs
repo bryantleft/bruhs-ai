@@ -39,6 +39,8 @@ fn fixture(
         gpui_component::Root::new(workspace, window, cx)
     });
     let workspace = cell.borrow().clone().unwrap();
+    // Tall enough for every Agent workflows card.
+    cx.simulate_resize(gpui::size(gpui::px(1920.0), gpui::px(3200.0)));
     let fixture = Fixture(
         std::env::temp_dir().join(format!("bruhs-native-background-{}", uuid::Uuid::new_v4())),
     );

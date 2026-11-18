@@ -24,8 +24,8 @@ impl Workspace {
             dry_run,
             completed_steps,
         )?;
+        // The request gets its own Undo requested card, as on the web.
         if opened {
-            self.reviewed_workflow_id = Some(id.into());
             cx.notify();
         }
         Ok(response)
