@@ -60,6 +60,32 @@ pub(crate) fn window_size() -> Option<Size<Pixels>> {
     parse_window_size(&env::var(DESKTOP_WINDOW_SIZE_ENV).ok()?)
 }
 
+/// `"1600,40"`: where the main window opens, in points from the main
+/// screen's top left, for captures that keep it out of the way.
+const DESKTOP_WINDOW_ORIGIN_ENV: &str = "BRUHS_DESKTOP_WINDOW_ORIGIN";
+
+/// Any value: open without taking focus from the frontmost app.
+const DESKTOP_WINDOW_BACKGROUND_ENV: &str = "BRUHS_DESKTOP_WINDOW_BACKGROUND";
+
+/// The main window's origin from `BRUHS_DESKTOP_WINDOW_ORIGIN`, if set.
+pub(crate) fn window_origin() -> Option<Point<Pixels>> {
+    let raw = env::var(DESKTOP_WINDOW_ORIGIN_ENV).ok()?;
+    let (x, y) = raw.trim().split_once(',')?;
+    let x: f32 = x.trim().parse().ok()?;
+    let y: f32 = y.trim().parse().ok()?;
+    (x.is_finite() && y.is_finite()).then(|| {
+        point(
+            gpui_component::zoom::window_px(x),
+            gpui_component::zoom::window_px(y),
+        )
+    })
+}
+
+/// Whether the window opens without taking focus (`BRUHS_DESKTOP_WINDOW_BACKGROUND`).
+pub(crate) fn window_in_background() -> bool {
+    env::var_os(DESKTOP_WINDOW_BACKGROUND_ENV).is_some()
+}
+
 /// `"1280x800"` as points; at least the 640×480 minimum window.
 pub(crate) fn parse_window_size(raw: &str) -> Option<Size<Pixels>> {
     let (width, height) = raw.trim().split_once('x')?;

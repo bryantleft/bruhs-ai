@@ -317,8 +317,12 @@ fn main() {
                 window_min_size: Some(size(px(640.0), px(480.0))),
                 // Same-size comparisons with the web (debug builds only).
                 #[cfg(debug_assertions)]
-                window_bounds: smoke::window_size()
-                    .map(|size| WindowBounds::Windowed(Bounds::centered(None, size, cx))),
+                window_bounds: smoke::window_size().map(|size| {
+                    WindowBounds::Windowed(match smoke::window_origin() {
+                        Some(origin) => Bounds { origin, size },
+                        None => Bounds::centered(None, size, cx),
+                    })
+                }),
                 ..Default::default()
             };
             let link_workspace: Rc<RefCell<Option<Entity<views::workspace::Workspace>>>> =
@@ -332,8 +336,17 @@ fn main() {
             #[cfg(debug_assertions)]
             let workspace_for_window = workspace_cell.clone();
             // Bring the window to the front even when launched from a shell;
-            // an unfocused, off-screen window never draws a frame.
-            cx.activate(true);
+            // an unfocused, off-screen window never draws a frame. A capture
+            // run can ask to stay in the background, at the screen's edge, so
+            // it never takes the keyboard or a click from the person at the
+            // machine.
+            #[cfg(debug_assertions)]
+            let in_background = smoke::window_in_background();
+            #[cfg(not(debug_assertions))]
+            let in_background = false;
+            if !in_background {
+                cx.activate(true);
+            }
             let opened = cx.open_window(window_options, |window, cx| {
                 // The first level on the window MUST be a gpui_component::Root —
                 // it provides the dialog/sheet/notification overlays and applies
