@@ -179,7 +179,7 @@ impl Workspace {
 
     /// `BRUHS_DESKTOP_SMOKE_SCENE=mcp-copied`: the connection on and its
     /// config copied, for the web comparison, without touching the clipboard.
-    #[cfg(unix)]
+    #[cfg(all(unix, debug_assertions))]
     pub(super) fn smoke_mcp_copied(&mut self, cx: &mut Context<'_, Self>) {
         self.enable_mcp_bridge(cx);
         self.mcp_bridge.copied = true;
@@ -188,7 +188,7 @@ impl Workspace {
     /// `BRUHS_DESKTOP_SMOKE_SCENE=mcp-undo-requested`: the newest workflow
     /// with an undoable step, as if the connected client had proposed it and
     /// then asked to undo it. Only what the review shows; nothing is approved.
-    #[cfg(unix)]
+    #[cfg(all(unix, debug_assertions))]
     pub(super) fn smoke_mcp_undo_requested(&mut self, cx: &mut Context<'_, Self>) {
         self.enable_mcp_bridge(cx);
         let Some(workflow) = self

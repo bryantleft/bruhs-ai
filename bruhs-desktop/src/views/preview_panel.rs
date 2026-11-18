@@ -301,13 +301,13 @@ impl PreviewPanelView {
         view
     }
 
-    #[cfg(any(test, debug_assertions))]
     /// Debug captures only: run `script` in the page (see [`WebViewHost::evaluate`]).
     #[cfg(debug_assertions)]
     pub fn smoke_evaluate(&self, script: &str) -> Result<(), String> {
         self.host.evaluate(script)
     }
 
+    #[cfg(any(test, debug_assertions))]
     pub fn url(&self) -> Option<&str> {
         self.url.as_deref()
     }
