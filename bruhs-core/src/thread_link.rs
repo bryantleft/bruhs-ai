@@ -120,15 +120,19 @@ impl ThreadLinks {
             .map_err(|_| ThreadLinkError::NotPending)
     }
 
+    /// A turn's scope. `full_access`: the turn runs with Full access
+    /// (bypass permissions), which `message_bruh` passes on to the app.
     pub(crate) fn turn(
         &self,
         thread_id: ThreadId,
         tx: &mpsc::Sender<OrchestratorEvent>,
+        full_access: bool,
     ) -> Arc<ThreadScope> {
         let (cancel, _) = watch::channel(false);
         Arc::new(ThreadScope {
             id: uuid::Uuid::new_v4().to_string(),
             thread_id,
+            full_access,
             active: AtomicBool::new(true),
             cancel,
             tx: tx.downgrade(),
@@ -141,6 +145,8 @@ impl ThreadLinks {
 pub(crate) struct ThreadScope {
     id: String,
     thread_id: ThreadId,
+    /// The turn runs with Full access.
+    full_access: bool,
     active: AtomicBool,
     cancel: watch::Sender<bool>,
     tx: mpsc::WeakSender<OrchestratorEvent>,
@@ -288,8 +294,13 @@ impl ThreadScope {
         } else {
             ANSWER
         };
-        if let ThreadOperation::Whiteboard { turn_id, .. } = &mut operation {
-            *turn_id = self.id.clone();
+        match &mut operation {
+            ThreadOperation::Whiteboard { turn_id, .. } => *turn_id = self.id.clone(),
+            // The app refuses a Full access bruh to a turn that isn't one.
+            ThreadOperation::MessageBruh {
+                caller_full_access, ..
+            } => *caller_full_access = self.full_access,
+            _ => {}
         }
         let request = ThreadRequest {
             id: uuid::Uuid::new_v4().to_string(),
@@ -726,7 +737,7 @@ mod tests {
     fn turn_in(links: ThreadLinks) -> Turn {
         let thread_id = ThreadId::new_v4();
         let (tx, events) = mpsc::channel(16);
-        let scope = links.turn(thread_id.clone(), &tx);
+        let scope = links.turn(thread_id.clone(), &tx, false);
         Turn {
             links,
             thread_id,
@@ -1103,6 +1114,7 @@ mod tests {
             name_or_id: "Bo".into(),
             message: "check".into(),
             wait,
+            caller_full_access: false,
         };
         for can_wait in [true, false] {
             let mut turn = turn_in(ThreadLinks::default().with_waits(can_wait));
@@ -1204,6 +1216,40 @@ mod tests {
             panic!("expected an allow list");
         };
         assert!(!allowed.iter().any(|tool| tool.ends_with("message_bruh")));
+    }
+
+    #[tokio::test]
+    async fn message_bruh_carries_the_turns_own_access_whatever_the_model_sends() {
+        for (full_access, sent) in [(false, true), (true, false), (false, false)] {
+            let links = ThreadLinks::default();
+            let thread_id = ThreadId::new_v4();
+            let (tx, mut events) = mpsc::channel(16);
+            let scope = links.turn(thread_id.clone(), &tx, full_access);
+            let broker = scope.start(false).await.unwrap();
+            let connection = broker.connection.clone();
+            let called = tokio::spawn(async move {
+                call_tool(
+                    &connection,
+                    &json!({"name": "message_bruh", "arguments": {"name_or_id": "Bo", "message": "check", "caller_full_access": sent}}),
+                )
+                .await
+            });
+            let request = next_request(&mut events).await;
+            assert_eq!(
+                request.operation,
+                ThreadOperation::MessageBruh {
+                    name_or_id: "Bo".into(),
+                    message: "check".into(),
+                    wait: false,
+                    caller_full_access: full_access,
+                },
+                "a {full_access} turn whose model sent {sent}"
+            );
+            links
+                .resolve(&thread_id, &request.id, ThreadReply::ok("Sent."))
+                .unwrap();
+            assert_eq!(called.await.unwrap()["isError"], false);
+        }
     }
 
     #[tokio::test]

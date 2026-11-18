@@ -74,6 +74,16 @@ struct Outbound<'a> {
     wait: bool,
 }
 
+/// One `message_bruh` call's arguments.
+#[derive(Clone, Copy)]
+struct BruhCall<'a> {
+    name_or_id: &'a str,
+    message: &'a str,
+    wait: bool,
+    /// Set by the broker: the calling turn runs with Full access.
+    caller_full_access: bool,
+}
+
 /// What the app does with one request.
 #[derive(Debug, PartialEq, Eq)]
 pub(super) enum ThreadAnswer {
@@ -328,7 +338,18 @@ impl Workspace {
                 name_or_id,
                 message,
                 wait,
-            } => self.bruh_message_reply(&caller, name_or_id, message, *wait, request_id, cx),
+                caller_full_access,
+            } => self.bruh_message_reply(
+                &caller,
+                &BruhCall {
+                    name_or_id,
+                    message,
+                    wait: *wait,
+                    caller_full_access: *caller_full_access,
+                },
+                request_id,
+                cx,
+            ),
         }
     }
 
@@ -569,12 +590,16 @@ impl Workspace {
     fn bruh_message_reply(
         &mut self,
         caller: &str,
-        name_or_id: &str,
-        message: &str,
-        wait: bool,
+        call: &BruhCall<'_>,
         request_id: &str,
         cx: &mut Context<'_, Self>,
     ) -> ThreadAnswer {
+        let BruhCall {
+            name_or_id,
+            message,
+            wait,
+            caller_full_access,
+        } = *call;
         let panel = self.reactive_automations.clone();
         if !panel.read(cx).rooms_ready() {
             return ThreadAnswer::Now(ThreadReply::refused(BRUH_SERVICE_OLD));
@@ -611,6 +636,7 @@ impl Workspace {
                 message,
                 wait,
                 max_hops: self.thread_hops,
+                caller_full_access,
             },
             panel.read(cx).crew(),
         ) {
@@ -1506,6 +1532,7 @@ mod tests {
             name_or_id: "Bo".into(),
             message: text.into(),
             wait,
+            caller_full_access: false,
         }
     }
 
@@ -1563,6 +1590,43 @@ mod tests {
         workspace.read_with(cx, |workspace, _| {
             assert!(workspace.bruh_waits.waits.is_empty())
         });
+        recipient.update(cx, |chat, _| chat.is_streaming = false);
+    }
+
+    #[gpui::test]
+    fn a_full_access_bruh_takes_messages_only_from_a_full_access_turn(cx: &mut TestAppContext) {
+        let (workspace, cx) = fixture(cx);
+        let (sender, _, recipient, _) = two_threads(&workspace, cx);
+        let mut full = bo();
+        full.access.level = bruhs_models::crew::AccessLevel::Full;
+        workspace.update(cx, |workspace, cx| {
+            workspace.reactive_automations.update(cx, |panel, cx| {
+                panel.show_crew_for_test(vec![full], bruhs_models::crew::CREW_PROTOCOL, cx)
+            });
+        });
+        let refused = now(ask(&workspace, &sender, message_bo("deploy", false), cx));
+        assert!(!refused.ok);
+        assert_eq!(
+            refused.text,
+            "Not sent: Bo has Full access, and this thread doesn't. Ask the user to message Bo themselves, or to give this thread Full access."
+        );
+        cx.run_until_parked();
+        assert!(sent_commands(&workspace, cx).is_empty());
+
+        let from_full = ThreadOperation::MessageBruh {
+            name_or_id: "Bo".into(),
+            message: "deploy".into(),
+            wait: false,
+            caller_full_access: true,
+        };
+        assert_eq!(
+            ask(&workspace, &sender, from_full, cx),
+            ThreadAnswer::Pending
+        );
+        cx.run_until_parked();
+        assert_eq!(sent_commands(&workspace, cx).len(), 1);
+        let replies = take_resolved_for_test();
+        assert!(replies.iter().any(|(_, reply)| reply.ok), "{replies:?}");
         recipient.update(cx, |chat, _| chat.is_streaming = false);
     }
 

@@ -155,6 +155,11 @@ pub enum ThreadOperation {
         /// Hold the tool call until the bruh has replied.
         #[serde(default, skip_serializing_if = "is_false")]
         wait: bool,
+        /// The calling turn runs with Full access. Only the broker sets
+        /// it, from the turn's own mode; whatever a model sends is
+        /// replaced.
+        #[serde(default, skip_serializing_if = "is_false")]
+        caller_full_access: bool,
     },
 }
 

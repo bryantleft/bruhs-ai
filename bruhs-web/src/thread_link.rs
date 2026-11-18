@@ -282,8 +282,16 @@ impl ThreadLink {
                     name_or_id,
                     message,
                     wait,
+                    caller_full_access,
                 } => match self
-                    .send_bruh(&request.thread_id, &request.id, &name_or_id, &message, wait)
+                    .send_bruh(
+                        &request.thread_id,
+                        &request.id,
+                        &name_or_id,
+                        &message,
+                        wait,
+                        caller_full_access,
+                    )
                     .await
                 {
                     Some(reply) => reply,
@@ -402,6 +410,7 @@ impl ThreadLink {
         name_or_id: &str,
         message: &str,
         wait: bool,
+        caller_full_access: bool,
     ) -> Option<ThreadReply> {
         let caller = caller_id.as_str();
         if !self.protocol.get_untracked().is_some_and(rooms_ready) {
@@ -430,6 +439,7 @@ impl ThreadLink {
                 message,
                 wait,
                 max_hops: self.hops.get_untracked(),
+                caller_full_access,
             },
             &bruhs,
         ) {

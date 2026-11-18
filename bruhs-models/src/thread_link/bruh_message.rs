@@ -12,7 +12,7 @@ use super::{
     bruh_delivery_prompt, clip, header_title, hop_limit_reply, next_hop, prompt_hops, short_id,
     Answer, ThreadReply, ANSWER_CHARS, MIN_PREFIX_CHARS, READ_MESSAGE_CHARS,
 };
-use crate::crew::{BruhState, BruhStatus, STOPPED_LINE};
+use crate::crew::{AccessLevel, BruhState, BruhStatus, STOPPED_LINE};
 use crate::ids::ThreadId;
 use crate::reactive::{ReactiveRun, RunStatus, HISTORY_LIMIT};
 
@@ -39,6 +39,9 @@ pub struct BruhOutgoing<'a> {
     pub wait: bool,
     /// The user's hop limit.
     pub max_hops: u32,
+    /// The sending turn runs with Full access
+    /// (`ThreadOperation::MessageBruh`'s `caller_full_access`).
+    pub caller_full_access: bool,
 }
 
 /// A message ready to send to a bruh: [`plan_bruh_message`]'s approval.
@@ -100,7 +103,8 @@ pub fn resolve_bruh<'a>(
 /// # Errors
 ///
 /// The refusal to return to the model: the hop limit, an unknown or
-/// ambiguous bruh, or one that is paused or off.
+/// ambiguous bruh, one that is paused or off, or a Full access bruh when
+/// the sending turn doesn't run with Full access.
 pub fn plan_bruh_message(
     outgoing: &BruhOutgoing<'_>,
     bruhs: &[BruhState],
@@ -123,6 +127,13 @@ pub fn plan_bruh_message(
             )))
         }
         BruhStatus::Asleep | BruhStatus::Working | BruhStatus::NeedsYou => {}
+    }
+    // A Full bruh runs anything without asking, so only a turn that may do
+    // as much hands it work. Read only and Ask first bruhs ask the owner.
+    if bruh.access.level == AccessLevel::Full && !outgoing.caller_full_access {
+        return Err(ThreadReply::refused(format!(
+            "Not sent: {name} has Full access, and this thread doesn't. Ask the user to message {name} themselves, or to give this thread Full access."
+        )));
     }
     Ok(BruhDelivery {
         agent_id: bruh.agent_id.clone(),
@@ -302,6 +313,7 @@ mod tests {
             message,
             wait,
             max_hops: MAX_HOPS,
+            caller_full_access: false,
         }
     }
 
@@ -416,6 +428,29 @@ mod tests {
     }
 
     #[test]
+    fn a_full_access_bruh_takes_messages_only_from_a_full_access_turn() {
+        let mut bruhs = crew();
+        bruhs[2].access.level = AccessLevel::Full;
+        let refused = plan_bruh_message(&outgoing("Bo", "deploy", false, ""), &bruhs).unwrap_err();
+        assert!(!refused.ok);
+        assert_eq!(
+            refused.text,
+            "Not sent: Bo has Full access, and this thread doesn't. Ask the user to message Bo themselves, or to give this thread Full access."
+        );
+        let full = BruhOutgoing {
+            caller_full_access: true,
+            ..outgoing("Bo", "deploy", false, "")
+        };
+        assert_eq!(plan_bruh_message(&full, &bruhs).unwrap().agent_id, "b9");
+        // Read only and Ask first bruhs take messages from any writing turn;
+        // an Ask first bruh asks the owner before it acts.
+        for level in [AccessLevel::ReadOnly, AccessLevel::Ask] {
+            bruhs[2].access.level = level;
+            assert!(plan_bruh_message(&outgoing("Bo", "deploy", false, ""), &bruhs).is_ok());
+        }
+    }
+
+    #[test]
     fn a_waited_chat_answers_from_its_run_or_the_run_it_merged_into() {
         let mut done = run("r1", RunStatus::Completed);
         done.result = Some("done".into());
@@ -497,6 +532,7 @@ mod tests {
                 name_or_id: "Bo".into(),
                 message: "hi".into(),
                 wait: true,
+                caller_full_access: false,
             }
         );
         let plain: ThreadOperation =
@@ -517,6 +553,7 @@ mod tests {
             name_or_id: name_or_id.into(),
             message,
             wait: false,
+            caller_full_access: false,
         };
         let not_a_bruh = Err("name_or_id is not a bruh name or id.");
         assert_eq!(bruh_op(" ", "hi".into()).validate(), not_a_bruh);
