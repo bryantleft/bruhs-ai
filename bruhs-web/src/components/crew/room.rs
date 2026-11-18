@@ -4,8 +4,8 @@
 
 use bruhs_models::crew::room::{
     author_name, member_states, members_line, merge_messages, room_composer_block,
-    room_composer_hint, room_line_key, room_lines, room_post, working_line, Room, RoomLine,
-    RoomMessage, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM, ROOM_GONE, ROOM_LOADING,
+    room_composer_hint, room_follow_key, room_line_key, room_lines, room_post, working_line, Room,
+    RoomLine, RoomMessage, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM, ROOM_GONE, ROOM_LOADING,
     ROOM_SETTINGS,
 };
 use bruhs_models::crew::{may_have_more, BruhLook, BruhState, BruhStatus, RAIL_FACE_PX};
@@ -245,16 +245,16 @@ fn room_transcript(
         })
     });
 
-    // Follow the room: a new last line scrolls it into view.
+    // Follow the room: a new line scrolls it into view.
     let scroller = NodeRef::<html::Div>::new();
-    Effect::new(move |previous: Option<Option<String>>| {
-        let last = lines.with(|lines| lines.last().map(room_line_key));
-        if previous.as_ref() != Some(&last) {
+    Effect::new(move |previous: Option<(usize, Option<String>)>| {
+        let shown = lines.with(|lines| room_follow_key(lines));
+        if previous.as_ref() != Some(&shown) {
             if let Some(element) = scroller.get_untracked() {
                 element.set_scroll_top(element.scroll_height());
             }
         }
-        last
+        shown
     });
 
     view! {

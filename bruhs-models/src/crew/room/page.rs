@@ -200,6 +200,14 @@ pub fn room_line_key(line: &RoomLine) -> String {
     }
 }
 
+/// What a transcript follows: it scrolls to its newest line whenever this
+/// changes. A room's first messages load above any working line, which
+/// stays last, so the count changes even when the last line does not.
+#[must_use]
+pub fn room_follow_key(lines: &[RoomLine]) -> (usize, Option<String>) {
+    (lines.len(), lines.last().map(room_line_key))
+}
+
 /// Puts a page of messages into those shown, replacing repeats by id, in
 /// `seq` order.
 pub fn merge_messages(shown: &mut Vec<RoomMessage>, page: Vec<RoomMessage>) {
@@ -590,6 +598,36 @@ mod tests {
             agent_id: "a".into(),
         };
         assert_eq!(room_line_key(&working), "working:run1");
+    }
+
+    #[test]
+    fn the_transcript_follows_messages_that_load_above_a_working_line() {
+        let runs = [run("run1", "a", "running", 5, "r")];
+        // Opened while Ada works: only her working line until the page loads.
+        let opened = room_follow_key(&room_lines(&[], &runs, &[], "r"));
+        let messages = [
+            msg(1, RoomAuthor::Owner, "@Ada go"),
+            msg(2, bruh("b"), "Hi"),
+        ];
+        let loaded = room_follow_key(&room_lines(&messages, &runs, &[], "r"));
+        assert_ne!(opened, loaded, "the last line is the same working line");
+        assert_eq!(
+            loaded,
+            room_follow_key(&room_lines(&messages, &runs, &[], "r"))
+        );
+        // Ada's reply replaces her working line.
+        let mut done = runs;
+        done[0].status = RunStatus::Completed;
+        let replied = [
+            messages[0].clone(),
+            messages[1].clone(),
+            msg(3, bruh("a"), "Done"),
+        ];
+        assert_ne!(
+            loaded,
+            room_follow_key(&room_lines(&replied, &done, &[], "r"))
+        );
+        assert_eq!(room_follow_key(&[]), (0, None));
     }
 
     #[test]

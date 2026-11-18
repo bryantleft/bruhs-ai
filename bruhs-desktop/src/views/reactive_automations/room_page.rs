@@ -15,7 +15,7 @@ use crate::views::crew_face::bruh_face;
 use crate::views::web_button::on_press;
 use bruhs_models::crew::room::{
     author_name, member_hits, member_states, members_line, mention_query, merge_messages,
-    room_composer_block, room_composer_hint, room_line_key, room_lines, room_post, working_line,
+    room_composer_block, room_composer_hint, room_follow_key, room_lines, room_post, working_line,
     Room, RoomLine, RoomMessage, RoomState, APPROVAL_DECIDED, APPROVAL_WANTS, EMPTY_ROOM,
     ROOM_GONE, ROOM_LEAD, ROOM_LOADING, ROOM_SETTINGS,
 };
@@ -94,8 +94,8 @@ pub(super) struct RoomPage {
     /// The snapshot revision and messages version `lines` was built from.
     built_for: Option<(u64, u64)>,
     scroll: ScrollHandle,
-    /// The last transcript line drawn; a new one scrolls into view.
-    last_line: Option<String>,
+    /// What the transcript last followed; a new line scrolls into view.
+    followed: (usize, Option<String>),
     width: Rc<Cell<f32>>,
     /// Room settings, so focus can leave it when the room is deleted.
     settings_focus: FocusHandle,
@@ -131,7 +131,7 @@ impl RoomPage {
             lines: Rc::new(Vec::new()),
             built_for: None,
             scroll: ScrollHandle::new(),
-            last_line: None,
+            followed: (0, None),
             width: Rc::new(Cell::new(0.0)),
             settings_focus: cx.focus_handle().tab_index(0).tab_stop(true),
             gone_focus: cx.focus_handle(),
@@ -400,10 +400,10 @@ impl ReactiveAutomations {
                     slot.insert((input, watch));
                 }
             }
-            let last = page.lines.last().map(room_line_key);
-            if last != page.last_line {
+            let shown = room_follow_key(&page.lines);
+            if shown != page.followed {
                 page.scroll.scroll_to_bottom();
-                page.last_line = last;
+                page.followed = shown;
             }
         }
         if reload {
