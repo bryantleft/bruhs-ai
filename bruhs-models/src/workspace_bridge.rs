@@ -80,6 +80,9 @@ pub const CONNECTION_FAILED_NOTE: &str =
 /// never names the workflow or its payload.
 pub const PENDING_REVIEW_NOTICE: &str =
     "An MCP proposal is awaiting your review. Open workflows to inspect the full payload.";
+/// After Copy MCP config: what the copied config holds.
+pub const COPIED_NOTE: &str =
+    "Copied. The config names a private connection file; the session token stays in that file.";
 /// Shown beside an undo request in workflow review.
 pub const ROLLBACK_REVIEW_NOTE: &str = "An MCP client requests undo. Review this workflow's completed steps. Undo removes unchanged created records and restores prior relationship context for reminders; Keep changes declines the request.";
 
