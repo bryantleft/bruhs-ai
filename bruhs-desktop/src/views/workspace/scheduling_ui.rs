@@ -1,6 +1,7 @@
 //! Smart scheduling side panel on the calendar: availability, scheduling links, conflicts and placing a task.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 impl Workspace {
@@ -254,7 +255,6 @@ impl Workspace {
             .enumerate()
             .map(|(index, link)| {
                 let click_slug = link.slug.clone();
-                let key_slug = link.slug.clone();
                 // Web: the row's `#/book/{slug}` is a link to the booking page.
                 div()
                     .id(("desktop-scheduling-link", index))
@@ -291,18 +291,11 @@ impl Workspace {
                             .cursor_pointer()
                             .hover(|el| el.text_color(theme::blueberry_200()))
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .on_click(cx.listener(move |this, _ev, window, cx| {
-                                this.open_booking_page(click_slug.clone(), window, cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.open_booking_page(key_slug.clone(), window, cx);
-                                    }
-                                },
-                            ))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, window, cx| {
+                                    this.open_booking_page(click_slug.clone(), window, cx);
+                                })
+                            })
                             .child(format!("#/book/{}", link.slug)),
                     )
                     .into_any_element()

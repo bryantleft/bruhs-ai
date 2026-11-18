@@ -1,4 +1,5 @@
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 impl Workspace {
@@ -22,7 +23,6 @@ impl Workspace {
         let content = match bruhs_models::MeetingNote::find_unique(&self.meeting_notes, note_id) {
             Ok(note) => {
                 let edit_id = note.id.clone();
-                let key_id = edit_id.clone();
                 div()
                     .min_w_0()
                     .child(
@@ -35,31 +35,20 @@ impl Workspace {
                         .debug_selector(|| "desktop-edit-meeting-note".into())
                         .aria_label("Edit note")
                         .min_h(px(theme::CONTROL_PX))
-                        .on_click(cx.listener(move |this, _, window, cx| {
-                            this.edit_note_by_id(&edit_id, window, cx)
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                this.edit_note_by_id(&key_id, window, cx);
-                            }
-                        }))
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, window, cx| {
+                                this.edit_note_by_id(&edit_id, window, cx)
+                            })
+                        })
                         .child("Edit note"),
                     )
                     .child(body(note.title.clone(), BODY_PX, theme::rambutan_100()))
                     .when_some(note.recording_id.as_ref(), |el, id| {
                         let available = self.meetings_hub.read(cx).meetings.iter().filter(|meeting| meeting.id == *id).count() == 1;
-                        let click_id = id.clone(); let key_id = id.clone();
+                        let click_id = id.clone();
                         el.child(web_button("desktop-open-linked-recording", WebButtonVariant::Ghost, WebButtonSize::Default, ButtonState::disabled_if(!available))
                             .debug_selector(|| "desktop-open-linked-recording".into()).aria_label("Open linked recording").min_h(px(theme::CONTROL_PX))
-                            .when(available, |button| button
-                                .on_click(cx.listener(move |this, _, _, cx| this.open_meeting_detail(click_id.clone(), cx)))
-                                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default(); cx.stop_propagation(); this.open_meeting_detail(key_id.clone(), cx);
-                                    }
-                                })))
+                            .when(available, |button| on_press_view(button, cx, move |this, _, cx| this.open_meeting_detail(click_id.clone(), cx)))
                             .child("Open linked recording"))
                           .when(!available, |el| el.child(body("Linked recording is not available locally. The note and link are retained.", BODY_SM_PX, theme::rambutan_400())))
                     })
@@ -117,14 +106,11 @@ impl Workspace {
                             .debug_selector(|| "desktop-back-to-meeting-notes".into())
                             .min_h(px(theme::CONTROL_PX))
                             .aria_label("Back to meeting notes")
-                            .on_click(cx.listener(|this, _, window, cx| {
-                                this.activate_sidebar_view(AppView::Meetings, window, cx)
-                            }))
-                            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    this.activate_sidebar_view(AppView::Meetings, window, cx);
-                                }
-                            }))
+                            .map(|el| {
+                                on_press_view(el, cx, |this, window, cx| {
+                                    this.activate_sidebar_view(AppView::Meetings, window, cx)
+                                })
+                            })
                             .child("Back to meeting notes"),
                         )
                         .child(label("Local text note", LABEL_SM_PX, theme::rambutan_400())),

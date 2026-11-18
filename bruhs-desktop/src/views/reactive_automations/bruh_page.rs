@@ -15,7 +15,6 @@ use crate::views::crew_face::bruh_face;
 use crate::views::dropdown::{
     dropdown, DropdownGroup, DropdownOption, Listbox, SelectHandler, ToggleHandler,
 };
-use crate::views::web_button::is_web_button_activation_key;
 use bruhs_models::agent::ModelId;
 use bruhs_models::crew::{
     access_options, approval_outcome, clamp_level, composer_block, current_settings, job_line,
@@ -24,6 +23,8 @@ use bruhs_models::crew::{
     SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
+use bruhs_ui::press::on_press_view;
+use bruhs_ui::{press::Interactivity, switch::switch};
 use gpui_component::scroll::{ScrollableElement, Scrollbar};
 use std::cell::Cell;
 
@@ -61,12 +62,6 @@ const FIVE_ROWS_PX: f32 = 118.0;
 /// Web `p-0.5` around the access segments.
 const SEGMENT_GROUP_PADDING_PX: f32 = 2.0;
 /// Web `Switch`.
-const SWITCH_WIDTH_PX: f32 = 44.0;
-const SWITCH_HEIGHT_PX: f32 = 24.0;
-const SWITCH_THUMB_PX: f32 = 20.0;
-const SWITCH_THUMB_OFF_X_PX: f32 = 2.0;
-const SWITCH_THUMB_ON_X_PX: f32 = 22.0;
-const SWITCH_RING_OPACITY: f32 = 0.10;
 const DISABLED_OPACITY: f32 = 0.5;
 const EFFORT_DROPDOWN: &str = "desktop-bruh-effort";
 const DELIVER_NEEDS_FULL: &str = "Needs Full access.";
@@ -320,30 +315,6 @@ impl BruhPage {
     }
 }
 
-/// A page button: a click or Enter or Space runs `action` once.
-fn press(
-    el: Stateful<Div>,
-    cx: &Context<'_, ReactiveAutomations>,
-    action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
-        + 'static,
-) -> Stateful<Div> {
-    let action = Rc::new(action);
-    let key = Rc::clone(&action);
-    el.on_click(cx.listener(move |this, event: &ClickEvent, window, cx| {
-        if !event.is_keyboard() {
-            cx.stop_propagation();
-            action(this, window, cx);
-        }
-    }))
-    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-            window.prevent_default();
-            cx.stop_propagation();
-            key(this, window, cx);
-        }
-    }))
-}
-
 /// A web `Button`: handlers only while enabled.
 fn page_button(
     id: impl Into<SharedString>,
@@ -368,7 +339,7 @@ fn page_button(
     if disabled {
         button.cursor_not_allowed()
     } else {
-        press(button, cx, action)
+        on_press_view(button, cx, action)
     }
 }
 
@@ -382,54 +353,11 @@ fn page_switch(
     action: impl Fn(&mut ReactiveAutomations, &mut Window, &mut Context<'_, ReactiveAutomations>)
         + 'static,
 ) -> Stateful<Div> {
-    let border = 1.0;
-    let thumb_x = if checked {
-        SWITCH_THUMB_ON_X_PX
-    } else {
-        SWITCH_THUMB_OFF_X_PX
-    } - border;
-    let thumb_y = (SWITCH_HEIGHT_PX - SWITCH_THUMB_PX) / 2.0 - border;
-    let switch = div()
-        .id(id)
-        .debug_selector(move || id.to_string())
-        .role(Role::Switch)
-        .aria_label(text)
-        .aria_toggled(checked.into())
-        .relative()
-        .flex_shrink_0()
-        .w(px(SWITCH_WIDTH_PX))
-        .h(px(SWITCH_HEIGHT_PX))
-        .rounded_full()
-        .border_1()
-        .map(|el| {
-            if checked {
-                el.bg(theme::persimmon_500())
-                    .border_color(gpui::transparent_black())
-            } else {
-                el.bg(theme::longan_700())
-                    .border_color(gpui::white().opacity(SWITCH_RING_OPACITY))
-            }
-        })
-        .child(
-            div()
-                .absolute()
-                .left(px(thumb_x))
-                .top(px(thumb_y))
-                .size(px(SWITCH_THUMB_PX))
-                .rounded_full()
-                .bg(theme::rambutan_100()),
-        );
+    let switch = switch(id, text, checked, Interactivity::disabled_if(disabled));
     if disabled {
-        switch.opacity(DISABLED_OPACITY).cursor_not_allowed()
+        switch
     } else {
-        press(
-            switch
-                .tab_index(0)
-                .cursor_pointer()
-                .focus_visible(|el| el.border_color(theme::persimmon_400())),
-            cx,
-            action,
-        )
+        on_press_view(switch, cx, action)
     }
 }
 
@@ -981,7 +909,7 @@ impl ReactiveAutomations {
                             .text_color(theme::rambutan_100())
                             .child("This bruh no longer exists."),
                     )
-                    .child(press(
+                    .child(on_press_view(
                         div()
                             .id("desktop-bruh-open-workflows")
                             .debug_selector(|| "desktop-bruh-open-workflows".to_string())
@@ -1179,7 +1107,7 @@ impl ReactiveAutomations {
                     .children(BruhTab::ALL.into_iter().map(|option| {
                         let chosen = option == tab;
                         let selector = format!("desktop-bruh-tab-{}", option.key());
-                        press(
+                        on_press_view(
                             div()
                                 .id(SharedString::from(selector.clone()))
                                 .debug_selector(move || selector)
@@ -1797,7 +1725,7 @@ impl ReactiveAutomations {
                         if reason.is_some() {
                             segment.opacity(DISABLED_OPACITY).cursor_not_allowed()
                         } else {
-                            press(
+                            on_press_view(
                                 segment
                                     .tab_index(0)
                                     .cursor_pointer()

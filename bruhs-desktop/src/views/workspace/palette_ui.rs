@@ -2,6 +2,7 @@
 
 use super::*;
 use bruhs_models::logic::preview;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 
 pub(super) const COMMAND_ACTIONS: &[CommandAction] = &[
@@ -942,8 +943,7 @@ impl Workspace {
         let debug_selector = selector.clone();
         let label = item.label();
         let hint = item.hint();
-        let item_for_click = item.clone();
-        let item_for_key = item;
+        let item_for_click = item;
         div()
             .id(ElementId::Name(selector.into()))
             .debug_selector(move || debug_selector)
@@ -981,16 +981,11 @@ impl Workspace {
                     cx.notify();
                 }
             }))
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                this.execute_palette_item(item_for_click.clone(), window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.execute_palette_item(item_for_key.clone(), window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.execute_palette_item(item_for_click.clone(), window, cx);
+                })
+            })
             .child(div().min_w_0().truncate().child(label))
             .child(
                 div()
@@ -1049,16 +1044,11 @@ impl Workspace {
                     cx.notify();
                 }
             }))
-            .on_click(cx.listener(move |this, _ev, window, cx| {
-                this.execute_command_action(action_id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
                     this.execute_command_action(action_id, window, cx);
-                }
-            }))
+                })
+            })
             .child(div().child(action.label))
             .child(
                 div()

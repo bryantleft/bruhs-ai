@@ -23,6 +23,7 @@ members = [
     "bruhs-core",
     "bruhs-models",
     "bruhs-desktop",
+    "bruhs-ui",
     "bruhs-mcp",
     "bruhs-capture",
     "claude-sdk-rs",
@@ -45,6 +46,7 @@ rust-version = "1.95"
 # Internal crates
 bruhs-core = { path = "bruhs-core" }
 bruhs-models = { path = "bruhs-models" }
+bruhs-ui = { path = "bruhs-ui" }
 
 # Async runtime and futures
 tokio = "1"

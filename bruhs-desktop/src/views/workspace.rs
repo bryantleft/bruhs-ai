@@ -61,6 +61,7 @@ use bruhs_models::{
     RelationshipItemKind, RelationshipProfile, SchedulingLink, SchedulingPreferences, SourceClip,
     TodaySnapshot, WorkItem, WorkItemPlanning,
 };
+use bruhs_ui::press::on_press_view;
 
 mod app_links;
 mod automations_ui;
@@ -158,6 +159,8 @@ use task_forms_ui::*;
 use tasks_ui::*;
 
 // --- Actions ---
+/// Escape closes overlays; shared with the `bruhs-ui` components.
+pub use bruhs_ui::actions::CloseOverlays;
 actions!(
     workspace,
     [
@@ -170,7 +173,6 @@ actions!(
         StopAll,
         OpenTaskCreateShortcut,
         OpenCapture,
-        CloseOverlays,
         OpenChatView,
         OpenTodayView,
         OpenInboxView,
@@ -2641,21 +2643,11 @@ impl Workspace {
                     .border_color(gpui::hsla(0.0, 0.0, 0.0, 0.0))
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
-                    .on_click(cx.listener(|this, event: &ClickEvent, window, cx| {
-                        cx.stop_propagation();
-                        // Keys toggle on key down; GPUI's key-up click would
-                        // toggle back.
-                        if !event.is_keyboard() {
+                    .map(|el| {
+                        on_press_view(el, cx, |this, window, cx| {
                             this.toggle_sidebar_for_window(window, cx);
-                        }
-                    }))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.toggle_sidebar_for_window(window, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(
                         svg()
                             .path("icons/panel-left.svg")

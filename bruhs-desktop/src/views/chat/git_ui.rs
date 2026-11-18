@@ -2,6 +2,7 @@
 
 use super::*;
 use bruhs_models::logic::run_place::WorkspaceChoice;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 pub(super) const GIT_BRANCH_EMPTY_LABEL: &str = "No branches";
 pub(super) const GIT_BRANCH_CURRENT_MARK: &str = assets::CHECK_ICON_PATH;
@@ -122,7 +123,6 @@ impl ChatView {
                 .iter()
                 .map(|branch| {
                     let branch_for_click = branch.clone();
-                    let branch_for_key = branch.clone();
                     let debug_branch = branch.clone();
                     let is_current = marked.as_deref() == Some(branch.as_str());
                     div()
@@ -151,17 +151,11 @@ impl ChatView {
                         .focus_visible(|el| el.border_color(theme::persimmon_400()))
                         .cursor_pointer()
                         .hover(|el| el.bg(theme::longan_800()))
-                        .on_click(cx.listener(move |this, _ev, _window, cx| {
-                            cx.stop_propagation();
-                            this.checkout_branch(&branch_for_click, cx);
-                        }))
-                        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                window.prevent_default();
-                                cx.stop_propagation();
-                                this.checkout_branch(&branch_for_key, cx);
-                            }
-                        }))
+                        .map(|el| {
+                            on_press_view(el, cx, move |this, _window, cx| {
+                                this.checkout_branch(&branch_for_click, cx);
+                            })
+                        })
                         .child(
                             div()
                                 .size(px(GIT_BRANCH_CURRENT_MARK_WIDTH_PX))

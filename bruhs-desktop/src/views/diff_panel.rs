@@ -24,8 +24,8 @@ use crate::views::chat::{DesktopToolCall, Message, MessageRole};
 use crate::views::dropdown::{
     dropdown_list, DropdownGroup, DropdownOption, SelectHandler, ToggleHandler,
 };
-use crate::views::web_button::is_web_button_activation_key;
 use crate::{assets, theme};
+use bruhs_ui::press::{on_press, on_press_view};
 
 const PANEL_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 const PANEL_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
@@ -740,7 +740,6 @@ impl DiffPanelView {
                 .get(i)
                 .map_or_else(|| SCOPE_LABEL.to_string(), |t| t.label.clone()),
         };
-        let scope_toggle_for_key = scope_toggle.clone();
         div()
             .h(px(TOOLBAR_HEIGHT_PX))
             .px_3()
@@ -777,14 +776,7 @@ impl DiffPanelView {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800().opacity(0.8)))
-                    .on_click(move |_ev, window, cx| scope_toggle(window, cx))
-                    .on_key_down(move |event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            scope_toggle_for_key(window, cx);
-                        }
-                    })
+                    .map(|el| on_press(el, move |window, cx| scope_toggle(window, cx)))
                     .child(
                         div()
                             .min_w_0()
@@ -835,14 +827,8 @@ impl DiffPanelView {
                 WRAP_LABEL,
                 assets::WRAP_TEXT_ICON_PATH,
                 self.wrap,
-                cx.listener(|this, _ev: &ClickEvent, _window, cx| this.toggle_wrap(cx)),
-                cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.toggle_wrap(cx);
-                    }
-                }),
+                cx,
+                |this, _window, cx| this.toggle_wrap(cx),
             ))
             .when(scope_count > 0, |el| {
                 el.child(self.render_toolbar_icon_button(
@@ -850,14 +836,8 @@ impl DiffPanelView {
                     REFRESH_LABEL,
                     assets::REFRESH_ICON_PATH,
                     false,
-                    cx.listener(|this, _ev: &ClickEvent, _window, cx| this.refresh(cx)),
-                    cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.refresh(cx);
-                        }
-                    }),
+                    cx,
+                    |this, _window, cx| this.refresh(cx),
                 ))
             })
     }
@@ -875,8 +855,8 @@ impl DiffPanelView {
         label: &'static str,
         icon_path: &'static str,
         active: bool,
-        on_click: impl Fn(&ClickEvent, &mut Window, &mut App) + 'static,
-        on_key_down: impl Fn(&KeyDownEvent, &mut Window, &mut App) + 'static,
+        cx: &Context<'_, Self>,
+        action: impl Fn(&mut Self, &mut Window, &mut Context<'_, Self>) + 'static,
     ) -> AnyElement {
         let color = if active {
             theme::rambutan_100()
@@ -904,8 +884,7 @@ impl DiffPanelView {
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY)))
             .tooltip(move |window, cx| Tooltip::new(label).build(window, cx))
-            .on_click(on_click)
-            .on_key_down(on_key_down)
+            .map(|el| on_press_view(el, cx, action))
             .child(
                 svg()
                     .path(icon_path)
@@ -1005,16 +984,11 @@ impl DiffPanelView {
                 el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY))
                     .text_color(theme::rambutan_100())
             })
-            .on_click(cx.listener(move |this, _, _, cx| {
-                this.set_review_filter(filter, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
+            .map(|el| {
+                on_press_view(el, cx, move |this, _, cx| {
                     this.set_review_filter(filter, cx);
-                }
-            }))
+                })
+            })
             .child(filter.label())
     }
 
@@ -1042,16 +1016,11 @@ impl DiffPanelView {
                 el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY))
                     .text_color(theme::rambutan_100())
             })
-            .on_click(cx.listener(|this, _, _, cx| {
-                this.toggle_reviewed_fold(cx);
-            }))
-            .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
+            .map(|el| {
+                on_press_view(el, cx, |this, _, cx| {
                     this.toggle_reviewed_fold(cx);
-                }
-            }))
+                })
+            })
             .child(label)
     }
 
@@ -1232,7 +1201,6 @@ impl DiffPanelView {
         let additions = file.additions();
         let deletions = file.deletions();
         let path_for_toggle = file.path.clone();
-        let path_for_toggle_key = file.path.clone();
         let path_for_open = file.path.clone();
         let open_line = first_new_line(file);
         let fingerprint = file_fingerprint(file);
@@ -1245,9 +1213,7 @@ impl DiffPanelView {
         let viewed = mark == ViewedState::Viewed;
         let changed = mark == ViewedState::Changed;
         let path_for_mark = file.path.clone();
-        let path_for_mark_key = file.path.clone();
-        let fingerprint_for_mark = fingerprint.clone();
-        let fingerprint_for_key = fingerprint;
+        let fingerprint_for_mark = fingerprint;
         let viewed_box = div()
             .id(("desktop-diff-viewed", key))
             .debug_selector(move || format!("desktop-diff-viewed-{key}"))
@@ -1283,17 +1249,11 @@ impl DiffPanelView {
                     cx.stop_propagation();
                 }),
             )
-            .on_click(cx.listener(move |this, _, _, cx| {
-                cx.stop_propagation();
-                this.set_file_viewed(&path_for_mark, &fingerprint_for_mark, !viewed, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.set_file_viewed(&path_for_mark_key, &fingerprint_for_key, !viewed, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, _, cx| {
+                    this.set_file_viewed(&path_for_mark, &fingerprint_for_mark, !viewed, cx);
+                })
+            })
             .child(
                 svg()
                     .path(assets::CHECK_ICON_PATH)
@@ -1327,16 +1287,11 @@ impl DiffPanelView {
             .focus_visible(|el| el.border_color(theme::persimmon_400()))
             .cursor_pointer()
             .hover(|el| el.bg(theme::longan_800().opacity(HOVER_BG_OPACITY)))
-            .on_click(cx.listener(move |this, _ev, _window, cx| {
-                this.toggle_file(&path_for_toggle, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    cx.stop_propagation();
-                    this.toggle_file(&path_for_toggle_key, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, _window, cx| {
+                    this.toggle_file(&path_for_toggle, cx);
+                })
+            })
             .child(viewed_box)
             .when(changed, |el| {
                 el.child(

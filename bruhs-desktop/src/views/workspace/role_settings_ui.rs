@@ -8,6 +8,7 @@ use super::*;
 use bruhs_models::agent::{AgentProvider, MODEL_CATALOG};
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use bruhs_models::roles::{Role as ThreadRole, RoleOverride, MAX_ROLES};
+use bruhs_ui::press::on_press_view;
 use gpui_component::input::Input;
 use gpui_component::zoom::px;
 
@@ -355,17 +356,7 @@ fn settings_button(
                     el.bg(theme::longan_800().opacity(0.6))
                         .text_color(theme::rambutan_100())
                 })
-                .on_click(cx.listener(move |this, _ev, window, cx| {
-                    cx.stop_propagation();
-                    on_press(this, window, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        on_press(this, window, cx);
-                    }
-                }))
+                .map(|el| on_press_view(el, cx, on_press))
         })
         .child(label)
         .into_any_element()

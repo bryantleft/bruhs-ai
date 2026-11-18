@@ -11,9 +11,10 @@ use gpui_component::input::{Input, InputEvent, InputState};
 use gpui_component::tooltip::Tooltip;
 use gpui_component::zoom::px;
 
-use super::{is_web_button_activation_key, Workspace};
+use super::Workspace;
 use crate::{assets, theme};
 use bruhs_models::time::days_in_month;
+use bruhs_ui::press::on_press_view;
 
 pub(crate) const MONTHS: [&str; 12] = [
     "January",
@@ -361,16 +362,11 @@ impl Workspace {
                     .focus_visible(focus_ring)
                     .cursor_pointer()
                     .hover(|el| el.border_color(gpui::white().opacity(0.20)))
-                    .on_click(cx.listener(move |this, _ev, window, cx| {
-                        this.toggle_date_picker(target, window, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, window, cx| {
                             this.toggle_date_picker(target, window, cx);
-                        }
-                    }))
+                        })
+                    })
             })
             .child(
                 svg()
@@ -467,16 +463,11 @@ impl Workspace {
                 .focus_visible(focus_ring)
                 .cursor_pointer()
                 .hover(|el| el.bg(theme::longan_800()))
-                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                    this.step_date_picker_month(delta, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
+                .map(|el| {
+                    on_press_view(el, cx, move |this, _window, cx| {
                         this.step_date_picker_month(delta, cx);
-                    }
-                }))
+                    })
+                })
                 .child(
                     svg()
                         .path(path)
@@ -544,18 +535,11 @@ impl Workspace {
                             .border_color(gpui::transparent_black())
                             .focus_visible(focus_ring)
                             .cursor_pointer()
-                            .on_click(cx.listener(move |this, _ev, window, cx| {
-                                this.pick_date_picker_day(day, window, cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                move |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.pick_date_picker_day(day, window, cx);
-                                    }
-                                },
-                            ))
+                            .map(|el| {
+                                on_press_view(el, cx, move |this, window, cx| {
+                                    this.pick_date_picker_day(day, window, cx);
+                                })
+                            })
                             .child(day.to_string()),
                     ),
                 );

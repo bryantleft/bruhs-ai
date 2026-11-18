@@ -4,6 +4,7 @@ use super::*;
 use bruhs_models::logic::task_detail::{
     dependency_candidates, dependency_title, ADD_DEPENDENCY_LABEL, REMOVE_DEPENDENCY_LABEL,
 };
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 pub(super) const TASK_DIALOG_BODY_FONT_FAMILY: &str = "Monaspace Neon";
 pub(super) const TASK_DIALOG_LABEL_FONT_FAMILY: &str = "Monaspace Argon";
@@ -226,7 +227,6 @@ impl Workspace {
             .enumerate()
             .map(|(index, status)| {
                 let item_id = item.id.clone();
-                let item_id_for_key = item.id.clone();
                 let status = *status;
                 let is_active = item.status == status;
                 div()
@@ -267,16 +267,11 @@ impl Workspace {
                                 .text_color(theme::rambutan_100())
                         })
                     })
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.click_task_detail_status_chip(&item_id, status, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.click_task_detail_status_chip(&item_id_for_key, status, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
+                            this.click_task_detail_status_chip(&item_id, status, cx);
+                        })
+                    })
                     .child(
                         div()
                             .text_color(status_glyph_color(status))
@@ -343,16 +338,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.border_color(theme::ring_floating()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.toggle_task_detail_menu(menu, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
                             this.toggle_task_detail_menu(menu, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(div().flex_1().min_w_0().truncate().child(value))
                     .child(
                         div()
@@ -388,7 +378,6 @@ impl Workspace {
     ) -> Div {
         let mut rows: Vec<AnyElement> = Vec::new();
         let item_id = item.id.clone();
-        let item_id_for_key = item.id.clone();
         let none_selected = item.project_id.is_none();
         rows.push(
             div()
@@ -416,24 +405,17 @@ impl Workspace {
                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
                 .hover(|el| el.bg(theme::longan_800()))
-                .on_click(cx.listener(move |this, _ev, _window, cx| {
-                    this.update_work_item_project(&item_id, None, cx);
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
-                        this.update_work_item_project(&item_id_for_key, None, cx);
-                    }
-                }))
+                .map(|el| {
+                    on_press_view(el, cx, move |this, _window, cx| {
+                        this.update_work_item_project(&item_id, None, cx);
+                    })
+                })
                 .child(div().min_w_0().truncate().child("No project"))
                 .into_any_element(),
         );
         for (index, project) in self.projects.iter().enumerate() {
             let item_id = item.id.clone();
-            let item_id_for_key = item.id.clone();
             let project_id = project.id.clone();
-            let project_id_for_key = project.id.clone();
             let debug_project_id = project.id.clone();
             let is_selected = item.project_id.as_deref() == Some(project.id.as_str());
             rows.push(
@@ -467,20 +449,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.update_work_item_project(&item_id, Some(project_id.clone()), cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.update_work_item_project(
-                                &item_id_for_key,
-                                Some(project_id_for_key.clone()),
-                                cx,
-                            );
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
+                            this.update_work_item_project(&item_id, Some(project_id.clone()), cx);
+                        })
+                    })
                     .child(div().min_w_0().truncate().child(project.name.clone()))
                     .into_any_element(),
             );
@@ -506,7 +479,6 @@ impl Workspace {
             .enumerate()
             .map(|(index, status)| {
                 let item_id = item.id.clone();
-                let item_id_for_key = item.id.clone();
                 let status = *status;
                 let is_selected = item.status == status;
                 div()
@@ -536,16 +508,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.select_task_detail_status_option(&item_id, status, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.select_task_detail_status_option(&item_id_for_key, status, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
+                            this.select_task_detail_status_option(&item_id, status, cx);
+                        })
+                    })
                     .child(format!("{} {}", status.glyph(), status.label()))
                     .into_any_element()
             })
@@ -571,7 +538,6 @@ impl Workspace {
             .enumerate()
             .map(|(index, priority)| {
                 let item_id = item.id.clone();
-                let item_id_for_key = item.id.clone();
                 let priority = *priority;
                 let is_selected = item.priority == priority;
                 div()
@@ -601,16 +567,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.update_work_item_priority(&item_id, priority, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.update_work_item_priority(&item_id_for_key, priority, cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
+                            this.update_work_item_priority(&item_id, priority, cx);
+                        })
+                    })
                     .child(format!("{} {}", priority.glyph(), priority.label()))
                     .into_any_element()
             })
@@ -826,22 +787,13 @@ impl Workspace {
                         .tooltip(|window, cx| {
                             Tooltip::new(TASK_DETAIL_CLOSE_LABEL).build(window, cx)
                         })
-                        .on_click(cx.listener(|this, _ev, _window, cx| {
-                            this.selected_work_item_id = None;
-                            this.task_detail_menu_open = None;
-                            this.persist_and_notify(cx);
-                        }))
-                        .on_key_down(cx.listener(
-                            |this, event: &KeyDownEvent, window, cx| {
-                                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                    window.prevent_default();
-                                    cx.stop_propagation();
-                                    this.selected_work_item_id = None;
-                                    this.task_detail_menu_open = None;
-                                    this.persist_and_notify(cx);
-                                }
-                            },
-                        )),
+                        .map(|el| {
+                            on_press_view(el, cx, |this, _window, cx| {
+                                this.selected_work_item_id = None;
+                                this.task_detail_menu_open = None;
+                                this.persist_and_notify(cx);
+                            })
+                        }),
                     ),
             )
             .child(
@@ -1126,16 +1078,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.border_color(theme::ring_floating()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.toggle_task_create_menu(menu, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
                             this.toggle_task_create_menu(menu, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(div().flex_1().min_w_0().truncate().child(value))
                     .child(
                         div()
@@ -1192,22 +1139,16 @@ impl Workspace {
                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
                 .cursor_pointer()
                 .hover(|el| el.bg(theme::longan_800()))
-                .on_click(cx.listener(|this, _ev, _window, cx| {
-                    this.set_task_create_project(None, cx);
-                }))
-                .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        cx.stop_propagation();
+                .map(|el| {
+                    on_press_view(el, cx, |this, _window, cx| {
                         this.set_task_create_project(None, cx);
-                    }
-                }))
+                    })
+                })
                 .child(div().min_w_0().truncate().child("No project"))
                 .into_any_element(),
         );
         for (index, project) in self.projects.iter().enumerate() {
             let project_id = project.id.clone();
-            let project_id_for_key = project.id.clone();
             let debug_index = index;
             let is_selected = self.task_create_project_id.as_deref() == Some(project.id.as_str());
             rows.push(
@@ -1238,16 +1179,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.set_task_create_project(Some(project_id.clone()), cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
-                            this.set_task_create_project(Some(project_id_for_key.clone()), cx);
-                        }
-                    }))
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
+                            this.set_task_create_project(Some(project_id.clone()), cx);
+                        })
+                    })
                     .child(div().min_w_0().truncate().child(project.name.clone()))
                     .into_any_element(),
             );
@@ -1298,16 +1234,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.set_task_create_status(status, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
                             this.set_task_create_status(status, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(format!("{} {}", status.glyph(), status.label()))
                     .into_any_element()
             })
@@ -1362,16 +1293,11 @@ impl Workspace {
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
                     .hover(|el| el.bg(theme::longan_800()))
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.set_task_create_priority(priority, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
                             this.set_task_create_priority(priority, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(format!("{} {}", priority.glyph(), priority.label()))
                     .into_any_element()
             })
@@ -1549,18 +1475,11 @@ impl Workspace {
                                         .size(px(14.0))
                                         .text_color(theme::rambutan_400()),
                                 )
-                                .on_click(cx.listener(|this, _, _, cx| this.close_task_create(cx)))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.close_task_create(cx);
-                                        }
-                                    },
-                                )),
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, _window, cx| {
+                                        this.close_task_create(cx);
+                                    })
+                                }),
                             ),
                     )
                     .child(
@@ -1600,20 +1519,11 @@ impl Workspace {
                                 .tab_index(0)
                                 .role(Role::Button)
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .on_click(cx.listener(|this, _ev, _window, cx| {
-                                    this.close_task_create(cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.close_task_create(cx);
-                                        }
-                                    },
-                                )),
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, _window, cx| {
+                                        this.close_task_create(cx);
+                                    })
+                                }),
                             )
                             .child(
                                 web_button(
@@ -1625,20 +1535,11 @@ impl Workspace {
                                 .aria_label("Create task")
                                 .debug_selector(|| "desktop-task-create-submit".to_string())
                                 .child("Create")
-                                .on_click(cx.listener(|this, _ev, window, cx| {
-                                    this.create_task_from_title_input(window, cx);
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.create_task_from_title_input(window, cx);
-                                        }
-                                    },
-                                )),
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, window, cx| {
+                                        this.create_task_from_title_input(window, cx);
+                                    })
+                                }),
                             ),
                     )
                     .child(self.render_modal_focus_sentinel()),

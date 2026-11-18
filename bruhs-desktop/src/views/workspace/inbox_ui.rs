@@ -8,6 +8,7 @@ use gpui_component::input::{Input, InputEvent};
 use gpui_component::zoom::px;
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 
 /// The Linked person dropdown's trigger and options.
 const LINKED_PERSON_DROPDOWN_ID: &str = "desktop-inbox-linked-person";
@@ -369,13 +370,7 @@ impl Workspace {
                 .child(div().flex().flex_wrap().gap_2()
                 .child(web_button("desktop-inbox-email", WebButtonVariant::Outline, WebButtonSize::Small, ButtonState::Enabled)
                     .debug_selector(|| "desktop-inbox-email".into()).aria_label("Email").child("Email")
-                    .on_click(cx.listener(|this, _, _, cx| this.open_connected_inbox(cx)))
-                    .on_key_down(cx.listener(|this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            this.open_connected_inbox(cx);
-                        }
-                    })))
+                    .map(|el| on_press_view(el, cx, |this, _, cx| this.open_connected_inbox(cx))))
                 .child(web_button("desktop-import-conversation", WebButtonVariant::Primary, WebButtonSize::Small, ButtonState::Enabled)
                     .aria_label("Import conversation").child("Import conversation")
                     .on_click(cx.listener(|this, _, window, cx| this.start_inbox_import(window, cx))))))
@@ -426,19 +421,13 @@ impl Workspace {
                 .text_color(theme::blueberry_400())
         })
         .child(value.label())
-        .on_click(cx.listener(move |this, _, _, cx| {
-            this.inbox_filter = value;
-            this.inbox_page = 0;
-            cx.notify();
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
+        .map(|el| {
+            on_press_view(el, cx, move |this, _, cx| {
                 this.inbox_filter = value;
                 this.inbox_page = 0;
                 cx.notify();
-            }
-        }))
+            })
+        })
         .into_any_element()
     }
 
@@ -460,18 +449,10 @@ impl Workspace {
         .aria_label(label)
         .min_h(px(theme::CONTROL_PX))
         .when(!disabled, |button| {
-            button
-                .on_click(cx.listener(move |this, _, _, cx| {
-                    this.inbox_page = page;
-                    cx.notify();
-                }))
-                .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                        window.prevent_default();
-                        this.inbox_page = page;
-                        cx.notify();
-                    }
-                }))
+            on_press_view(button, cx, move |this, _, cx| {
+                this.inbox_page = page;
+                cx.notify();
+            })
         })
         .child(label)
         .into_any_element()
@@ -479,7 +460,6 @@ impl Workspace {
 
     fn render_inbox_card(&self, conversation: &InboxCard, cx: &Context<'_, Self>) -> AnyElement {
         let id = conversation.id.clone();
-        let keyboard_id = id.clone();
         let sender = conversation.sender.clone();
         let preview = conversation.preview.clone();
         let key = element_key(&id);
@@ -512,15 +492,11 @@ impl Workspace {
             .py_3()
             .hover(|element| element.bg(theme::longan_800().opacity(0.7)))
             .focus_visible(|element| element.border_color(theme::persimmon_400()))
-            .on_click(cx.listener(move |this, _event, window, cx| {
-                this.select_inbox_conversation(&id, window, cx);
-            }))
-            .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                    window.prevent_default();
-                    this.select_inbox_conversation(&keyboard_id, window, cx);
-                }
-            }))
+            .map(|el| {
+                on_press_view(el, cx, move |this, window, cx| {
+                    this.select_inbox_conversation(&id, window, cx);
+                })
+            })
             .flex()
             .items_start()
             .gap_3()

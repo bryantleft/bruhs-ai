@@ -1199,6 +1199,7 @@ dependencies = [
  "block2 0.6.2",
  "bruhs-core",
  "bruhs-models",
+ "bruhs-ui",
  "chrono",
  "cpal",
  "directories",
@@ -1293,6 +1294,22 @@ dependencies = [
  "tracing-subscriber",
  "uuid",
  "wiremock",
+]
+
+[[package]]
+name = "bruhs-ui"
+version = "0.1.0"
+dependencies = [
+ "async-channel",
+ "block2 0.6.2",
+ "bruhs-models",
+ "gpui",
+ "gpui-component",
+ "objc2 0.6.4",
+ "objc2-app-kit 0.3.2",
+ "objc2-foundation 0.3.2",
+ "raw-window-handle",
+ "tracing",
 ]
 
 [[package]]

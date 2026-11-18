@@ -1,6 +1,7 @@
 //! The settings dialog shell: section nav, scroll spy, rows, cards, and the General, Keyboard and About sections.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::input::Input;
 use gpui_component::zoom::px;
 
@@ -43,17 +44,11 @@ fn follow_up_button(
         .border_1()
         .border_color(gpui::transparent_black())
         .focus_visible(|el| el.border_color(theme::persimmon_400()))
-        .on_click(cx.listener(move |this, _ev, _window, cx| {
-            cx.stop_propagation();
-            this.set_follow_up_steer(steer, cx);
-        }))
-        .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-            if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                window.prevent_default();
-                cx.stop_propagation();
+        .map(|el| {
+            on_press_view(el, cx, move |this, _window, cx| {
                 this.set_follow_up_steer(steer, cx);
-            }
-        }))
+            })
+        })
         .child(label)
         .into_any_element()
 }
@@ -774,16 +769,11 @@ impl Workspace {
                     .border_color(gpui::transparent_black())
                     .focus_visible(|el| el.border_color(theme::persimmon_400()))
                     .cursor_pointer()
-                    .on_click(cx.listener(move |this, _ev, _window, cx| {
-                        this.set_settings_section(section, cx);
-                    }))
-                    .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                        if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                            window.prevent_default();
-                            cx.stop_propagation();
+                    .map(|el| {
+                        on_press_view(el, cx, move |this, _window, cx| {
                             this.set_settings_section(section, cx);
-                        }
-                    }))
+                        })
+                    })
                     .child(
                         svg()
                             .path(section.icon_path())
@@ -1297,22 +1287,12 @@ impl Workspace {
                                     .tooltip(|window, cx| {
                                         Tooltip::new(SETTINGS_CLOSE_LABEL).build(window, cx)
                                     })
-                                    .on_click(cx.listener(|this, _ev, _window, cx| {
-                                        this.close_transient_surfaces();
-                                        cx.notify();
-                                    }))
-                                    .on_key_down(cx.listener(
-                                        |this, event: &KeyDownEvent, window, cx| {
-                                            if is_web_button_activation_key(
-                                                event.keystroke.key.as_str(),
-                                            ) {
-                                                window.prevent_default();
-                                                cx.stop_propagation();
-                                                this.close_transient_surfaces();
-                                                cx.notify();
-                                            }
-                                        },
-                                    ))
+                                    .map(|el| {
+                                        on_press_view(el, cx, |this, _window, cx| {
+                                            this.close_transient_surfaces();
+                                            cx.notify();
+                                        })
+                                    })
                                     .child(
                                         svg()
                                             .path(assets::CLOSE_ICON_PATH)

@@ -37,6 +37,7 @@ alacritty_terminal = "0.26"
 async-channel = "2"
 bruhs-core = { workspace = true }
 bruhs-models = { workspace = true }
+bruhs-ui = { workspace = true }
 chrono = { workspace = true, features = ["serde"] }
 cpal = { workspace = true }
 directories = { workspace = true }
@@ -93,6 +94,7 @@ raw-window-handle = "0.6"
 
 [dev-dependencies]
 bruhs-core = { workspace = true, features = ["test-support"] }
+bruhs-ui = { workspace = true, features = ["test-support"] }
 gpui = { workspace = true, features = ["test-support"] }
 gpui-component = { path = "../third_party/gpui-component/crates/ui", features = ["test-support"] }
 tempfile = { workspace = true }

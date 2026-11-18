@@ -17,6 +17,7 @@ use super::*;
 use crate::app_state::DesktopState;
 use crate::server_client::ServerError;
 use crate::views::workspace::{DesktopPriority, DesktopWorkItem, DesktopWorkItemStatus};
+use bruhs_ui::press::on_press_view;
 
 /// How often the automatic loop checks the transcript; the shared rules
 /// decide whether a round is due.
@@ -336,13 +337,7 @@ impl Workspace {
             } else {
                 "Show suggestions"
             })
-            .on_click(cx.listener(|this, _, _, cx| this.toggle_meeting_suggestions(cx)))
-            .on_key_down(cx.listener(|this, ev: &KeyDownEvent, _, cx| {
-                if is_web_button_activation_key(&ev.keystroke.key) {
-                    cx.stop_propagation();
-                    this.toggle_meeting_suggestions(cx);
-                }
-            }))
+            .map(|el| on_press_view(el, cx, |this, _, cx| this.toggle_meeting_suggestions(cx)))
             .child(if open { "Hide" } else { "Suggestions" })
             .into_any_element(),
         );
@@ -549,29 +544,20 @@ fn small_action(
     text: &'static str,
     enabled: bool,
     cx: &Context<'_, Workspace>,
-    run: impl Fn(&mut Workspace, &mut Context<'_, Workspace>) + Clone + 'static,
+    run: impl Fn(&mut Workspace, &mut Context<'_, Workspace>) + 'static,
 ) -> AnyElement {
     let state = if enabled {
         ButtonState::Enabled
     } else {
         ButtonState::Disabled
     };
-    let on_key = run.clone();
     let button = web_button(id, WebButtonVariant::Ghost, WebButtonSize::Small, state)
         .aria_label(text)
         .child(text);
     if !enabled {
         return button.into_any_element();
     }
-    button
-        .on_click(cx.listener(move |this, _, _, cx| run(this, cx)))
-        .on_key_down(cx.listener(move |this, ev: &KeyDownEvent, _, cx| {
-            if is_web_button_activation_key(&ev.keystroke.key) {
-                cx.stop_propagation();
-                on_key(this, cx);
-            }
-        }))
-        .into_any_element()
+    on_press_view(button, cx, move |this, _, cx| run(this, cx)).into_any_element()
 }
 
 /// The same context the web sends: the meeting with its attendees, open

@@ -3,6 +3,7 @@
 //! modal shell.
 
 use super::*;
+use bruhs_ui::press::on_press_view;
 use gpui_component::zoom::px;
 pub(super) const DESKTOP_MODAL_FOCUS_TRAP_KEY: &str = "tab";
 pub(super) const DESKTOP_MODAL_FOCUS_START_TAB_INDEX: isize = 0;
@@ -443,18 +444,11 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.cancel_project_delete(cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.cancel_project_delete(cx);
-                                    }
-                                },
-                            )),
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
+                                    this.cancel_project_delete(cx);
+                                })
+                            }),
                         )
                         .child(
                             web_button(
@@ -469,18 +463,11 @@ impl Workspace {
                             .tab_index(0)
                             .role(Role::Button)
                             .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                            .on_click(cx.listener(|this, _ev, _window, cx| {
-                                this.confirm_project_delete(cx);
-                            }))
-                            .on_key_down(cx.listener(
-                                |this, event: &KeyDownEvent, window, cx| {
-                                    if is_web_button_activation_key(event.keystroke.key.as_str()) {
-                                        window.prevent_default();
-                                        cx.stop_propagation();
-                                        this.confirm_project_delete(cx);
-                                    }
-                                },
-                            )),
+                            .map(|el| {
+                                on_press_view(el, cx, |this, _window, cx| {
+                                    this.confirm_project_delete(cx);
+                                })
+                            }),
                         ),
                 ),
             None,
@@ -681,22 +668,12 @@ impl Workspace {
                                 .tab_index(0)
                                 .role(Role::Button)
                                 .focus_visible(|el| el.border_color(theme::persimmon_400()))
-                                .on_click(cx.listener(|this, _ev, _window, cx| {
-                                    this.close_transient_surfaces();
-                                    cx.notify();
-                                }))
-                                .on_key_down(cx.listener(
-                                    |this, event: &KeyDownEvent, window, cx| {
-                                        if is_web_button_activation_key(
-                                            event.keystroke.key.as_str(),
-                                        ) {
-                                            window.prevent_default();
-                                            cx.stop_propagation();
-                                            this.close_transient_surfaces();
-                                            cx.notify();
-                                        }
-                                    },
-                                )),
+                                .map(|el| {
+                                    on_press_view(el, cx, |this, _window, cx| {
+                                        this.close_transient_surfaces();
+                                        cx.notify();
+                                    })
+                                }),
                             ),
                     )
                     .child(
