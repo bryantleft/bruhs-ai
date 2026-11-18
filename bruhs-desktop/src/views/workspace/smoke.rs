@@ -122,6 +122,15 @@ impl Workspace {
             "today" => self.activate_sidebar_view(AppView::Today, window, cx),
             "tasks" => self.activate_primary_view(AppView::Tasks, window, cx),
             "calendar" => self.activate_primary_view(AppView::Calendar, window, cx),
+            "calendar-week" | "calendar-day" => {
+                self.activate_primary_view(AppView::Calendar, window, cx);
+                let mode = if scene == "calendar-week" {
+                    DesktopCalendarMode::Week
+                } else {
+                    DesktopCalendarMode::Day
+                };
+                self.set_calendar_mode(mode, cx);
+            }
             "terminal" => self.activate_primary_view(AppView::Terminal, window, cx),
             "command-bar" => self.focus_command_bar(&FocusCommandBar, window, cx),
             "model-picker" => self.toggle_model_picker(&ToggleModelPicker, window, cx),
@@ -144,6 +153,33 @@ impl Workspace {
                 }
             }
             "people" => self.activate_sidebar_view(AppView::People, window, cx),
+            "codex-login" => {
+                if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
+                    chat.update(cx, |chat, cx| chat.smoke_start_codex_login(cx));
+                }
+            }
+            "codex-report" => {
+                if let Some(chat) = self.active_thread().map(|thread| thread.chat.clone()) {
+                    eprintln!(
+                        "BRUHS_DESKTOP_SMOKE codex {}",
+                        chat.read(cx).smoke_codex_auth()
+                    );
+                }
+            }
+            // The first profile opened, as a click on its name does.
+            "person-expand" => {
+                self.activate_sidebar_view(AppView::People, window, cx);
+                if let Some(id) = self
+                    .meetings_hub
+                    .read(cx)
+                    .people
+                    .first()
+                    .map(|p| p.id.clone())
+                {
+                    self.expanded_person_id = Some(id.clone());
+                    self.load_relationship_inputs(&id, window, cx);
+                }
+            }
             // Life opens on Finance; this is its Health tab, to compare with
             // the web's.
             "life-health" => {

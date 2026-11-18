@@ -255,6 +255,21 @@ impl ChatView {
     }
 }
 
+impl ChatView {
+    /// `BRUHS_DESKTOP_SMOKE_SCENE=codex-login`: the banner's Log in, for a
+    /// real sign-in check in a debug build.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_start_codex_login(&mut self, cx: &mut Context<'_, Self>) {
+        self.start_codex_login(cx);
+    }
+
+    /// What the Codex banner knows, for the same check.
+    #[cfg(debug_assertions)]
+    pub(crate) fn smoke_codex_auth(&self) -> String {
+        format!("{:?}", self.codex_auth)
+    }
+}
+
 #[cfg(all(test, unix))]
 mod tests {
     // Named imports: `use super::*` here recurses through `#[gpui::test]`.
