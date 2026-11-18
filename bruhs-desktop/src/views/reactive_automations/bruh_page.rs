@@ -668,7 +668,7 @@ impl ReactiveAutomations {
     }
 
     /// Why crew commands are off, once the service is known to be older.
-    fn crew_reason(&self) -> Option<&'static str> {
+    pub(crate) fn crew_reason(&self) -> Option<&'static str> {
         if self.crew_ready() {
             return None;
         }

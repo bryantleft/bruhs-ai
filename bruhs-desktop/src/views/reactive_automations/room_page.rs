@@ -27,6 +27,7 @@ use bruhs_models::logic::context_chip::{
     backspace_chip, delete_forward_chip, insert_chip, replace_range, retarget, ChipKind,
     ContextChip,
 };
+use gpui_component::tooltip::Tooltip;
 use std::cell::Cell;
 use std::collections::hash_map::Entry;
 
@@ -586,16 +587,24 @@ impl ReactiveAutomations {
                                     .children(members.into_iter().map(|bruh| {
                                         let selector =
                                             format!("desktop-room-face-{}", bruh.agent_id);
-                                        div().debug_selector(move || selector).child(bruh_face(
-                                            SharedString::from(format!(
-                                                "room-{}-{}",
-                                                room.id, bruh.agent_id
-                                            )),
-                                            RAIL_FACE_PX,
-                                            bruh.look,
-                                            bruh.status,
-                                            cx,
-                                        ))
+                                        // Web `title`: the face names its bruh.
+                                        let name = SharedString::from(bruh.name.clone());
+                                        div()
+                                            .id(SharedString::from(selector.clone()))
+                                            .debug_selector(move || selector)
+                                            .tooltip(move |window, cx| {
+                                                Tooltip::new(name.clone()).build(window, cx)
+                                            })
+                                            .child(bruh_face(
+                                                SharedString::from(format!(
+                                                    "room-{}-{}",
+                                                    room.id, bruh.agent_id
+                                                )),
+                                                RAIL_FACE_PX,
+                                                bruh.look,
+                                                bruh.status,
+                                                cx,
+                                            ))
                                     })),
                             )
                             .child(

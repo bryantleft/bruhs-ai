@@ -131,6 +131,7 @@ impl Workspace {
         let panel = self.reactive_automations.read(cx);
         let open = self.crew_rail_open;
         let ready = panel.crew_ready();
+        let new_title = self.new_bruh_title(cx);
         let rows = rail_rows(panel.crew());
         let any_paused = rows.iter().any(|bruh| bruh.status == BruhStatus::Paused);
         let any_awake = rows
@@ -193,6 +194,7 @@ impl Workspace {
                     .debug_selector(|| "desktop-crew-new".to_string())
                     .role(Role::Button)
                     .aria_label(NEW_BRUH_LABEL)
+                    .tooltip(move |window, cx| Tooltip::new(new_title).build(window, cx))
                     .size(px(theme::CONTROL_SM_PX))
                     .flex()
                     .items_center()
@@ -497,6 +499,15 @@ impl Workspace {
 
     /// Why New room is off, or `None` when it works: read from the serving
     /// service, whose frames bring the crew and its version together.
+    /// New bruh's tooltip: why it is off, as the web's title says, or its
+    /// name.
+    pub(super) fn new_bruh_title(&self, cx: &App) -> &'static str {
+        self.reactive_automations
+            .read(cx)
+            .crew_reason()
+            .unwrap_or(NEW_BRUH_LABEL)
+    }
+
     pub(super) fn new_room_block(&self, cx: &App) -> Option<&'static str> {
         let panel = self.reactive_automations.read(cx);
         new_room_block(panel.crew_protocol(), panel.crew().len())
@@ -972,6 +983,17 @@ mod tests {
         cx.simulate_click(new.center(), gpui::Modifiers::default());
         cx.run_until_parked();
         workspace.update(cx, |workspace, _| assert!(workspace.overlay.is_none()));
+        // Like the web title, New bruh says why it is off.
+        workspace.update(cx, |workspace, cx| {
+            assert_eq!(
+                workspace.new_bruh_title(cx),
+                ServiceNotice::ServingOld.message()
+            );
+        });
+        show(&workspace, cx, Vec::new(), CREW_PROTOCOL);
+        workspace.update(cx, |workspace, cx| {
+            assert_eq!(workspace.new_bruh_title(cx), super::NEW_BRUH_LABEL);
+        });
     }
 
     #[gpui::test]
