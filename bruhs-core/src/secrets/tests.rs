@@ -210,9 +210,7 @@ async fn management_does_not_wait_for_an_unread_turn_stream() {
     let request = fixture.request().await;
     fixture.provide(&request, true).await.unwrap();
     call.await.unwrap().unwrap();
-    let id = fixture.manager.list_credentials().await.unwrap()[0]
-        .id
-        .clone();
+    let id = fixture.manager.vault_entries().await.unwrap()[0].id.clone();
     let call = fixture.call("exit 0");
     let request = fixture.request().await;
     while fixture
@@ -222,7 +220,7 @@ async fn management_does_not_wait_for_an_unread_turn_stream() {
     {}
     let result = tokio::time::timeout(
         std::time::Duration::from_secs(5),
-        fixture.manager.delete_credential(&id),
+        fixture.manager.vault_delete(&id),
     )
     .await;
     assert!(
@@ -247,19 +245,24 @@ async fn management_updates_pending_metadata_without_approving_any_command() {
     let request = fixture.request().await;
     fixture.provide(&request, true).await.unwrap();
     call.await.unwrap().unwrap();
-    let id = fixture.manager.list_credentials().await.unwrap()[0]
-        .id
-        .clone();
+    let id = fixture.manager.vault_entries().await.unwrap()[0].id.clone();
     let call = fixture.call("exit 0");
     let request = fixture.request().await;
     fixture
         .manager
-        .replace_credential(&id, "private-rotated".into())
+        .vault_update(
+            &id,
+            VaultUpdate {
+                secret: bruhs_models::vault::VaultSecretInput::Value {
+                    value: Some("private-rotated".into()),
+                },
+            },
+        )
         .await
         .unwrap();
     assert!(fixture.request().await.saved_available);
     assert!(!call.is_finished());
-    fixture.manager.delete_credential(&id).await.unwrap();
+    fixture.manager.vault_delete(&id).await.unwrap();
     assert!(!fixture.request().await.saved_available);
     assert!(!call.is_finished());
     fixture

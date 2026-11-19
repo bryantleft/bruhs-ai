@@ -245,30 +245,6 @@ impl Default for SecretManager {
 }
 
 impl SecretManager {
-    pub async fn list_credentials(
-        &self,
-    ) -> Result<Vec<bruhs_models::secrets::SavedCredential>, SecretError> {
-        self.store.list().await
-    }
-
-    pub async fn replace_credential(&self, id: &str, value: String) -> Result<(), SecretError> {
-        self.store.replace(id, value).await?;
-        if let Some(name) = self.entry_name(id).await {
-            self.refresh_saved_requests(&name).await;
-        }
-        Ok(())
-    }
-
-    pub async fn delete_credential(&self, id: &str) -> Result<(), SecretError> {
-        let name = self.entry_name(id).await;
-        self.store.delete_saved(id).await?;
-        self.forget_attention([id]);
-        if let Some(name) = name {
-            self.refresh_saved_requests(&name).await;
-        }
-        Ok(())
-    }
-
     /// Every vault entry, value free, sorted by scope then name.
     pub async fn vault_entries(&self) -> Result<Vec<bruhs_models::vault::VaultEntry>, SecretError> {
         self.store.vault_list().await

@@ -166,13 +166,6 @@ pub enum SavedCredentialState {
     NeedsAttention,
 }
 
-/// Write-only replacement, separate from all public metadata types.
-#[derive(Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
-pub struct CredentialReplacement {
-    pub value: String,
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
