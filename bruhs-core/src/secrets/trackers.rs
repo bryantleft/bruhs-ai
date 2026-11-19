@@ -33,7 +33,7 @@ impl SecretStore {
         } else {
             token.to_string()
         });
-        let mut header = reqwest::header::HeaderValue::from_str(&authorization).map_err(|_| DeliveryError::Invalid("The saved tracker token is not a valid HTTP credential. Replace it in Settings → Credentials.".into()))?;
+        let mut header = reqwest::header::HeaderValue::from_str(&authorization).map_err(|_| DeliveryError::Invalid("The saved tracker token is not a valid HTTP credential. Replace it in Settings, Vault.".into()))?;
         header.set_sensitive(true);
         let api_origin = if config.provider == TrackerProvider::Jira && config.oauth {
             let response = client.get("https://api.atlassian.com/oauth/token/accessible-resources").header(reqwest::header::AUTHORIZATION, header.clone()).header(reqwest::header::ACCEPT, "application/json").send().await.map_err(|_| DeliveryError::Command("Atlassian site discovery failed. Check the OAuth token and network connection.".into()))?;

@@ -127,7 +127,7 @@ pub(crate) fn request(
         reqwest::header::HeaderValue::from_str(&value)
             .map_err(|_| invalid("A header value contains invalid characters or a line break."))?;
         if sensitive_header(name.as_str()) && !has_secret {
-            return Err(invalid("Sensitive headers require a keychain variable, for example Authorization: Bearer {{api_key}} with api_key listed under Keychain references. Save its value in Settings → Credentials."));
+            return Err(invalid("Sensitive headers require a keychain variable, for example Authorization: Bearer {{api_key}} with api_key listed under Keychain references. Save its value in Settings, Vault."));
         }
     }
     template(&request.body, |key| {
