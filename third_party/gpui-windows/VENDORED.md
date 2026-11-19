@@ -9,9 +9,9 @@ windows appear above the GPUI scene. That was a local change; zed made the same
 change upstream before this revision, so it is no longer a difference. Chat
 hides native embeds when overlays occlude them.
 
-The one local change: dropping a window clears its activation callback before native destruction is
+Dropping a window clears its activation callback before native destruction is
 queued. An already queued activation notification then observes no callback
-instead of updating a logical window GPUI has removed.
+instead of updating a logical window GPUI has removed. Native destruction also marks the window as closing before its callbacks run, and the dispatcher retires its hidden HWND before teardown so background tasks cannot post a wake to a destroyed window.
 
 The manifest expands the upstream workspace dependency declarations, pins its
 internal crates to the same revision, and keeps this vendor outside the app

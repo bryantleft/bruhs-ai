@@ -99,6 +99,14 @@ jobs:
       - name: Cache cargo registry and build output
         uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2.9.3
 
+      # sherpa's build script caches its native libraries outside Cargo's target
+      # directory. Re-run it when a restored build references a missing SDK.
+      - name: Refresh missing native capture libraries
+        run: |
+          if ! find "$HOME/Library/Caches/sherpa-rs" -name 'libonnxruntime*.dylib' -print -quit 2>/dev/null | grep -q .; then
+            cargo clean -p sherpa-rs-sys
+          fi
+
       - name: Strict lint
         run: cargo clippy -p bruhs-desktop -p bruhs-capture --all-targets --all-features --locked -- -D warnings
 

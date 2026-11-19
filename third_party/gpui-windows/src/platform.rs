@@ -1453,6 +1453,7 @@ unsafe fn power_saving_status(lparam: LPARAM) -> Option<bool> {
 
 impl Drop for WindowsPlatform {
     fn drop(&mut self) {
+        self.inner.dispatcher.close_window();
         if let Some(stop) = self.vsync_stop.borrow_mut().take() {
             stop.store(true, Ordering::Release);
         }
@@ -1862,6 +1863,9 @@ unsafe extern "system" fn window_procedure(
     }
     let inner = unsafe { &*ptr };
     let result = if let Some(inner) = inner.upgrade() {
+        if msg == WM_DESTROY {
+            inner.dispatcher.close_window();
+        }
         if cfg!(debug_assertions) {
             let inner = std::panic::AssertUnwindSafe(inner);
             match std::panic::catch_unwind(|| { inner }.handle_msg(hwnd, msg, wparam, lparam)) {
