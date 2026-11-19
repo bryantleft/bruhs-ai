@@ -489,9 +489,11 @@ impl Browser {
     }
 
     /// Type a vault value into `selector` on the page's main document while
-    /// it is on `origin` ([`fill_secret`]). Every failure, a timeout or the
-    /// guard's included, reads `FILL_FAILED` but the page's own refusals;
-    /// a broken guard still says so on the next step.
+    /// it is on `origin` ([`fill_secret`]), submitting only off the
+    /// documents in `typed`. Every failure, a timeout or the guard's
+    /// included, reads `FILL_FAILED` but the page's own refusals; a broken
+    /// guard still says so on the next step.
+    #[expect(clippy::too_many_arguments, reason = "one fill's fixed inputs")]
     pub async fn fill_secret(
         &mut self,
         selector: &str,
@@ -499,6 +501,7 @@ impl Browser {
         origin: &str,
         value: &str,
         submit: bool,
+        typed: &FilledDocuments,
         filled: &mut FilledDocuments,
     ) -> Result<ToolReply, ToolError> {
         let failed = || ToolError::Invalid(FILL_FAILED.into());
@@ -512,6 +515,7 @@ impl Browser {
                 origin,
                 value,
                 submit,
+                typed,
                 filled,
             ),
         )
@@ -547,9 +551,11 @@ impl Browser {
         url: &str,
         filled: &mut FilledDocuments,
     ) -> Result<(), ToolError> {
-        let checked = vault_fill::check(&mut self.cdp, selector, field, origin, false).await?;
+        let checked = vault_fill::check(&mut self.cdp, selector, field, origin, None).await?;
         self.cdp.navigate(url).await?;
-        vault_fill::write(&mut self.cdp, checked, field, origin, value, filled).await
+        vault_fill::write(&mut self.cdp, checked, field, origin, value, filled)
+            .await
+            .map(drop)
     }
 
     /// Releases a mouse button an interrupted action left pressed.

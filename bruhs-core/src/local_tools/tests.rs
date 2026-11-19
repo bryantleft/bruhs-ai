@@ -781,6 +781,7 @@ async fn only_the_value_call_carries_the_value() {
         "https://shop.test",
         &value,
         true,
+        &computer::FilledDocuments::default(),
         &mut filled,
     )
     .await
@@ -861,6 +862,7 @@ async fn a_document_that_changed_under_the_check_gets_no_value() {
         "https://shop.test",
         &value,
         false,
+        &computer::FilledDocuments::default(),
         &mut filled,
     )
     .await
@@ -875,6 +877,82 @@ async fn a_document_that_changed_under_the_check_gets_no_value() {
         .count();
     assert_eq!(functions, 1);
     assert!(calls.iter().all(|(.., text)| !text.contains(&value)));
+}
+
+/// A page whose main frame stays on loader `L1` while its history entry
+/// reads these ids in turn: the check's two reads, then the write's.
+fn sign_in_page_on_entries(entries: [i64; 3]) -> Vec<(&'static str, serde_json::Value)> {
+    use serde_json::json;
+    let mut replies = vec![(
+        "Page.createIsolatedWorld",
+        json!({"result": {"executionContextId": 9}}),
+    )];
+    for entry in entries {
+        let history = json!({"result": {"currentIndex": 0, "entries": [{"id": entry, "url": "https://shop.test/in"}]}});
+        let tree = json!({"result": {"frameTree": {"frame": {"id": "F", "loaderId": "L1"}}}});
+        replies.push(("Page.getNavigationHistory", history));
+        replies.push(("Page.getFrameTree", tree));
+    }
+    replies
+}
+
+/// Rereview M2: a submitting fill reads which document it is on itself and
+/// refuses on one the bruh typed on, whichever of its reads finds it: no
+/// value before the write, no Enter after it. A fill without submit, or a
+/// submit on a document never typed on, goes through.
+#[tokio::test]
+async fn a_fill_refuses_its_submit_on_a_document_it_finds_typed_on() {
+    use bruhs_models::crew::SUBMIT_ONLY_SIGNS_IN;
+    use bruhs_models::vault::SecretField;
+    use serde_json::json;
+    let mut typed = computer::FilledDocuments::default();
+    typed.mark(["entry:8".to_string()]);
+    // (entries read, submit, value calls, Enter pressed, refused)
+    for (entries, submit, value_calls, entered, refused) in [
+        ([8, 8, 8], true, 0, false, true),
+        ([7, 8, 8], true, 1, false, true),
+        ([7, 7, 8], true, 2, false, true),
+        ([8, 8, 8], false, 2, false, false),
+        ([7, 7, 7], true, 2, true, false),
+    ] {
+        let value = vault_canary();
+        let mut replies = sign_in_page_on_entries(entries);
+        replies.push(("Runtime.callFunctionOn", answer(json!({"ok": true}))));
+        replies.push(("Runtime.callFunctionOn", answer(json!({"ok": true}))));
+        let (mut cdp, server) = fake_page_replying(replies).await;
+        let mut filled = computer::FilledDocuments::default();
+        let result = browser::fill_secret(
+            &mut cdp,
+            "#pw",
+            SecretField::Password,
+            "https://shop.test",
+            &value,
+            submit,
+            &typed,
+            &mut filled,
+        )
+        .await;
+        let case = format!("{entries:?} submit {submit}");
+        match result {
+            Err(ToolError::Refused(message)) => {
+                assert!(refused, "{case}");
+                assert_eq!(message, SUBMIT_ONLY_SIGNS_IN, "{case}");
+            }
+            Ok(_) => assert!(!refused, "{case}"),
+            Err(error) => panic!("{case}: {error:?}"),
+        }
+        drop(cdp);
+        let calls = server.await.unwrap();
+        let functions = calls
+            .iter()
+            .filter(|(method, ..)| method == "Runtime.callFunctionOn")
+            .count();
+        assert_eq!(functions, value_calls, "{case}");
+        let keys = calls
+            .iter()
+            .any(|(method, ..)| method == "Input.dispatchKeyEvent");
+        assert_eq!(keys, entered, "{case}");
+    }
 }
 
 #[tokio::test]
@@ -907,6 +985,7 @@ async fn a_field_of_the_wrong_kind_is_refused_before_typing() {
             "https://shop.test",
             &value,
             true,
+            &computer::FilledDocuments::default(),
             &mut filled,
         )
         .await
@@ -956,6 +1035,7 @@ async fn chrome_errors_after_typing_never_travel() {
             "https://shop.test",
             &value,
             false,
+            &computer::FilledDocuments::default(),
             &mut filled,
         )
         .await
@@ -978,6 +1058,7 @@ async fn chrome_errors_after_typing_never_travel() {
         "https://shop.test",
         &value,
         false,
+        &computer::FilledDocuments::default(),
         &mut computer::FilledDocuments::default(),
     )
     .await
@@ -2084,6 +2165,7 @@ async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
             origin,
             &value,
             false,
+            &computer::FilledDocuments::default(),
             &mut filled,
         )
         .await
@@ -2123,7 +2205,15 @@ async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
     ] {
         let other = vault_canary();
         let result = browser
-            .fill_secret(selector, field, origin, &other, false, &mut filled)
+            .fill_secret(
+                selector,
+                field,
+                origin,
+                &other,
+                false,
+                &computer::FilledDocuments::default(),
+                &mut filled,
+            )
             .await;
         assert_eq!(refusal(result), expected, "{selector}");
     }
@@ -2135,6 +2225,7 @@ async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
             origin,
             &value,
             true,
+            &computer::FilledDocuments::default(),
             &mut filled,
         )
         .await
@@ -2167,6 +2258,7 @@ async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
             origin,
             &renamed,
             true,
+            &computer::FilledDocuments::default(),
             &mut filled,
         )
         .await;
@@ -2191,6 +2283,7 @@ async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
             origin,
             &username,
             true,
+            &computer::FilledDocuments::default(),
             &mut filled,
         )
         .await
@@ -2225,6 +2318,7 @@ async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
             origin,
             &declared,
             true,
+            &computer::FilledDocuments::default(),
             &mut filled,
         )
         .await;
@@ -2244,6 +2338,7 @@ async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
                 origin,
                 &held,
                 true,
+                &computer::FilledDocuments::default(),
                 &mut filled,
             )
             .await

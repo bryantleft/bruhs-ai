@@ -81,16 +81,19 @@ const MAX_FILLED_MARKS: usize = 64;
 pub(super) struct FilledDocuments(VecDeque<String>);
 
 impl FilledDocuments {
-    /// A document a fill may type into, marked before it does.
-    pub(super) fn mark(&mut self, marks: impl IntoIterator<Item = String>) {
+    /// A document a fill may type into, marked before it does. Returns
+    /// whether an older mark was dropped for room.
+    pub(super) fn mark(&mut self, marks: impl IntoIterator<Item = String>) -> bool {
         for mark in marks {
             if !self.0.contains(&mark) {
                 self.0.push_back(mark);
             }
         }
+        let dropped = self.0.len() > MAX_FILLED_MARKS;
         while self.0.len() > MAX_FILLED_MARKS {
             self.0.pop_front();
         }
+        dropped
     }
 
     pub(super) fn is_empty(&self) -> bool {
@@ -130,8 +133,10 @@ pub(super) trait ComputerPage: Send {
     ) -> Result<ToolReply, ToolError>;
     async fn owner_input(&mut self, input: &ComputerInput) -> Result<(), ToolError>;
     /// Type a vault value into `selector` on the main document, only while
-    /// it is on `origin`, and press Enter when `submit`. Each document it
-    /// may type into is marked in `filled` before it types.
+    /// it is on `origin`, and press Enter when `submit`, never on a
+    /// document in `typed`. Each document it may type into is marked in
+    /// `filled` before it types.
+    #[expect(clippy::too_many_arguments, reason = "one fill's fixed inputs")]
     async fn fill_secret(
         &mut self,
         selector: &str,
@@ -139,6 +144,7 @@ pub(super) trait ComputerPage: Send {
         origin: &str,
         value: &str,
         submit: bool,
+        typed: &FilledDocuments,
         filled: &mut FilledDocuments,
     ) -> Result<ToolReply, ToolError>;
     /// The main document's marks ([`FilledDocuments`]), or `None` when the
@@ -190,9 +196,10 @@ impl ComputerPage for Browser {
         origin: &str,
         value: &str,
         submit: bool,
+        typed: &FilledDocuments,
         filled: &mut FilledDocuments,
     ) -> Result<ToolReply, ToolError> {
-        Browser::fill_secret(self, selector, field, origin, value, submit, filled).await
+        Browser::fill_secret(self, selector, field, origin, value, submit, typed, filled).await
     }
 
     async fn document_ids(&mut self) -> Option<Vec<String>> {
@@ -352,7 +359,8 @@ struct OpenPage {
     filled: FilledDocuments,
     /// The documents the bruh typed on itself, where a vault fill never
     /// submits (ruling A2 I1), and whether it typed on one that couldn't
-    /// say which it was (then no fill on this page submits).
+    /// say which it was or dropped a typed mark for room (rereview M3):
+    /// then no fill on this page submits.
     typed: FilledDocuments,
     typed_unknown: bool,
 }
@@ -592,23 +600,6 @@ async fn after_fill_refusal(open: &mut OpenPage, action: &BrowserAction) -> Opti
         Some(marks) if !open.filled.holds_any(&marks) => None,
         _ => Some(refusal),
     }
-}
-
-/// Whether a vault fill's submit would press Enter on a document the bruh
-/// typed on itself, which its own `key` must submit through the gate. A
-/// page that can't say which document it is counts as typed on.
-async fn submits_where_typed(open: &mut OpenPage) -> bool {
-    if open.typed_unknown {
-        return true;
-    }
-    if open.typed.is_empty() {
-        return false;
-    }
-    let marks = tokio::time::timeout(PAGE_URL_WAIT, open.page.document_ids())
-        .await
-        .ok()
-        .flatten();
-    marks.is_none_or(|marks| open.typed.holds_any(&marks))
 }
 
 /// Validation errors as the host reports them: a host on this computer is
@@ -930,16 +921,18 @@ impl LocalToolsHost {
             }
             if action.types_on_page() {
                 // Marked before it types: a step cut off may have typed.
-                match tokio::time::timeout(PAGE_URL_WAIT, open.page.document_ids())
+                // A dropped mark could be the document Back returns to.
+                let marks = tokio::time::timeout(PAGE_URL_WAIT, open.page.document_ids())
                     .await
                     .ok()
-                    .flatten()
-                {
-                    Some(marks) => open.typed.mark(marks),
-                    None => open.typed_unknown = true,
+                    .flatten();
+                if marks.is_none_or(|marks| open.typed.mark(marks)) {
+                    open.typed_unknown = true;
                 }
             }
-            if matches!(fill, Some((_, _, true))) && submits_where_typed(open).await {
+            // The fill itself refuses a submit on a document in `typed`,
+            // by the marks it reads (rereview M2).
+            if matches!(fill, Some((_, _, true))) && open.typed_unknown {
                 return Err(ToolError::Refused(SUBMIT_ONLY_SIGNS_IN.into()));
             }
             // Anything but a read may have landed before a page dies.
@@ -955,13 +948,19 @@ impl LocalToolsHost {
                     if until <= now {
                         return Err(timed_out());
                     }
-                    let OpenPage { page, filled, .. } = &mut *open;
+                    let OpenPage {
+                        page,
+                        filled,
+                        typed,
+                        ..
+                    } = &mut *open;
                     let typed = page.fill_secret(
                         &selector,
                         field,
                         &value.origin,
                         &value.value,
                         submit,
+                        typed,
                         filled,
                     );
                     // A fill cut off here may have typed or submitted; its
@@ -1839,8 +1838,15 @@ mod fake {
             _origin: &str,
             value: &str,
             submit: bool,
+            typed: &FilledDocuments,
             filled: &mut FilledDocuments,
         ) -> Result<ToolReply, ToolError> {
+            // As a real page does, by the marks it reads itself.
+            if submit && typed.holds_any(&[self.document()]) {
+                return Err(ToolError::Refused(
+                    bruhs_models::crew::SUBMIT_ONLY_SIGNS_IN.into(),
+                ));
+            }
             // As a real page does, before anything is typed.
             filled.mark([self.document()]);
             let hold = self.pages.seen().holds.remove(&self.agent_id);

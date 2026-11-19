@@ -1474,6 +1474,47 @@ async fn a_fill_never_submits_where_the_bruh_typed() {
     assert!(refused_with(fill(true).await, SUBMIT_ONLY_SIGNS_IN));
 }
 
+/// Rereview M3: once the bruh has typed on more documents than the page
+/// keeps marks for, an old one could come back by Back unmarked, so no fill
+/// on the page submits again.
+#[tokio::test]
+async fn a_dropped_typed_mark_ends_submit_on_the_page() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    let page = Some("https://shop.test/in");
+    let value = canary();
+    let fill = |submit| {
+        host.bruh_fill_on(
+            "a",
+            vault_fill("#pw", SecretField::Password, submit),
+            fill_value("https://shop.test", SecretField::Password, &value),
+            page,
+            later(),
+        )
+    };
+    let type_on = |document: String| {
+        fake.set_document("a", &document);
+        host.bruh_command_on(
+            "a",
+            BrowserAction::Type {
+                text: "x".into(),
+                selector: Some("#q".into()),
+            },
+            page,
+        )
+    };
+    // The fake marks one per document: 64 fit.
+    for n in 0..64 {
+        type_on(format!("t{n}")).await.unwrap();
+    }
+    fake.set_document("a", "fresh");
+    fill(true).await.unwrap();
+    type_on("t64".into()).await.unwrap();
+    fake.set_document("a", "fresh2");
+    assert!(refused_with(fill(true).await, SUBMIT_ONLY_SIGNS_IN));
+    // Without submit it still fills.
+    fill(false).await.unwrap();
+}
+
 fn unavailable_with(result: Result<ToolReply, ToolError>, expected: &str) -> bool {
     matches!(result, Err(ToolError::Unavailable(message)) if message == expected)
 }

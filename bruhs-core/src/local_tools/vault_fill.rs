@@ -84,9 +84,13 @@ pub(super) async fn document_marks(cdp: &mut Cdp) -> Result<(String, Vec<String>
 
 /// Type `value` into the one input `selector` names on the main document,
 /// only while that document is on `origin`, then press Enter when
-/// `submit`. Each document it may type into is marked in `filled` before
-/// the value is sent; a fill refused before that marks nothing. Every failure reads [`FILL_FAILED`], apart from the
-/// page's own answers: another origin or the wrong kind of field.
+/// `submit`. A submit is refused on a document in `typed`, the ones the
+/// bruh typed on itself, by the marks this call reads (rereview M2). Each
+/// document it may type into is marked in `filled` before the value is
+/// sent; a fill refused before that marks nothing. Every failure reads
+/// [`FILL_FAILED`], apart from the page's own answers: another origin, the
+/// wrong kind of field, or a submit outside a sign-in step.
+#[expect(clippy::too_many_arguments, reason = "one fill's fixed inputs")]
 pub(in crate::local_tools) async fn fill_secret(
     cdp: &mut Cdp,
     selector: &str,
@@ -94,17 +98,23 @@ pub(in crate::local_tools) async fn fill_secret(
     origin: &str,
     value: &str,
     submit: bool,
+    typed: &FilledDocuments,
     filled: &mut FilledDocuments,
 ) -> Result<ToolReply, ToolError> {
+    let submit = submit.then_some(typed);
     let checked = check(cdp, selector, field, origin, submit).await?;
-    write(cdp, checked, field, origin, value, filled).await?;
-    if submit {
+    let now = write(cdp, checked, field, origin, value, filled).await?;
+    if let Some(typed) = submit {
+        // Enter goes to whichever document is loaded now.
+        if now.is_none_or(|marks| typed.holds_any(&marks)) {
+            return Err(ToolError::Refused(SUBMIT_ONLY_SIGNS_IN.into()));
+        }
         let enter = cdp_key("Enter").ok_or_else(fill_failed)?;
         for event in key_events(&enter, 0) {
             cdp.call(KEY, event).await.map_err(|_| fill_failed())?;
         }
     }
-    Ok(filled_reply(field, submit))
+    Ok(filled_reply(field, submit.is_some()))
 }
 
 /// A field [`CHECK`] found and kept: the isolated world it is kept in,
@@ -115,15 +125,20 @@ pub(super) struct Checked {
 }
 
 /// Creates an isolated world on the main frame's document and runs
-/// [`CHECK`] in it, with the submit rule when `submit`. Types nothing.
+/// [`CHECK`] in it, with the submit rule when `submit` holds the documents
+/// the bruh typed on, which it refuses to submit on. Types nothing.
 pub(super) async fn check(
     cdp: &mut Cdp,
     selector: &str,
     field: SecretField,
     origin: &str,
-    submit: bool,
+    submit: Option<&FilledDocuments>,
 ) -> Result<Checked, ToolError> {
+    let typed_on = |marks: &[String]| submit.is_some_and(|typed| typed.holds_any(marks));
     let (frame, marks) = document_marks(cdp).await.map_err(|_| fill_failed())?;
+    if typed_on(&marks) {
+        return Err(ToolError::Refused(SUBMIT_ONLY_SIGNS_IN.into()));
+    }
     let world = cdp
         .call(
             "Page.createIsolatedWorld",
@@ -145,7 +160,7 @@ pub(super) async fn check(
                     {"value": origin},
                     {"value": secret_input_types(field)},
                     {"value": stays_out_of_addresses(field)},
-                    {"value": submit},
+                    {"value": submit.is_some()},
                     {"value": SIGN_IN_AUTOCOMPLETE},
                 ],
                 "returnByValue": true,
@@ -163,12 +178,17 @@ pub(super) async fn check(
     if again.first() != marks.first() {
         return Err(fill_failed());
     }
+    // Its history entry may have changed under the same document.
+    if typed_on(&again) {
+        return Err(ToolError::Refused(SUBMIT_ONLY_SIGNS_IN.into()));
+    }
     Ok(Checked { context, marks })
 }
 
 /// Marks the checked document, runs [`WRITE`] with the value in its world,
 /// then marks the main document again: one that changed while the world
-/// was made is marked too.
+/// was made is marked too. Returns the main document's marks after the
+/// write, `None` when Chrome didn't say.
 pub(super) async fn write(
     cdp: &mut Cdp,
     Checked { context, marks }: Checked,
@@ -176,7 +196,7 @@ pub(super) async fn write(
     origin: &str,
     value: &str,
     filled: &mut FilledDocuments,
-) -> Result<(), ToolError> {
+) -> Result<Option<Vec<String>>, ToolError> {
     #[derive(Serialize)]
     #[serde(rename_all = "camelCase")]
     struct Params<'a> {
@@ -229,11 +249,13 @@ pub(super) async fn write(
     let written = cdp
         .call_secret("Runtime.callFunctionOn", &params, room)
         .await;
-    if let Ok((_, marks)) = document_marks(cdp).await {
-        filled.mark(marks);
+    let now = document_marks(cdp).await.ok().map(|(_, marks)| marks);
+    if let Some(marks) = &now {
+        filled.mark(marks.iter().cloned());
     }
     // Chrome's error, which may quote what it was sent, is dropped here.
-    answered(&written.map_err(|_| fill_failed())?)
+    answered(&written.map_err(|_| fill_failed())?)?;
+    Ok(now)
 }
 
 /// The page's `{ok, why}` answer as a result.
