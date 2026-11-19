@@ -72,6 +72,10 @@ configuration. OpenCode connects additional API providers and local models.
 Every action is reachable from the command bar (`⌘K`), and most are one
 shortcut away.
 
+The [personal suite roadmap](PERSONAL-SUITE.md) covers Finance, Health,
+Life Admin, Weekly Review, and the optional connection to Ditz for travel,
+places, shopping, and household plans.
+
 ## Install
 
 Choose a build on the [download page](https://bruhs.ai/download).
