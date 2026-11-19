@@ -11,8 +11,8 @@ use bruhs_models::{
     agent::AgentProvider,
     crew::{
         approval_detail, approval_fingerprint, approval_summary, computer_on, effective_level,
-        level_unavailable, rail_order, status_for, ApprovalRequest, ApprovalState, BruhAccess,
-        BruhLook, BruhProfile, BruhState,
+        level_unavailable, normalize_grants, rail_order, status_for, ApprovalRequest,
+        ApprovalState, BruhAccess, BruhLook, BruhProfile, BruhState,
     },
     logic::run_place::claude_effort,
     reactive::{
@@ -130,6 +130,24 @@ pub(in crate::reactive) fn set_computer(
             ..old
         },
     )
+}
+
+/// Replace the Global vault entries granted to the bruh (D3), sorted and
+/// deduped. Its runs, approvals and session stay: every use checks the
+/// grants live.
+pub(in crate::reactive) fn set_vault(
+    connection: &Connection,
+    agent_id: &str,
+    entries: Vec<String>,
+) -> Result<(), ReactiveError> {
+    required::<ReactiveAgent>(connection, "reactive_agents", agent_id, "agent")?;
+    let vault =
+        normalize_grants(entries).map_err(|reason| ReactiveError::Invalid(reason.into()))?;
+    let old = profile(connection, agent_id)?;
+    if old.vault == vault {
+        return Ok(());
+    }
+    save(connection, agent_id, &BruhProfile { vault, ..old })
 }
 
 /// The bruhs whose Computer is on (switched on, and available at their
@@ -593,6 +611,7 @@ pub(in crate::reactive) fn bruh_states(
             next_wake_ms,
             unread,
             computer: profile.computer,
+            vault: profile.vault,
         });
     }
     rail_order(&mut states);

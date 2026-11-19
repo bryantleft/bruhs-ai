@@ -21,11 +21,13 @@ pub use page::*;
 pub mod room;
 mod transcript;
 pub use transcript::*;
+mod vault;
+pub use vault::*;
 #[cfg(test)]
 mod wire_tests;
 
 /// Version of the crew wire format the background service speaks.
-pub const CREW_PROTOCOL: u32 = 3;
+pub const CREW_PROTOCOL: u32 = 4;
 
 /// First version that has Stop, access and the other crew commands.
 pub const CREW_COMMANDS_PROTOCOL: u32 = 1;
@@ -35,6 +37,9 @@ pub const ROOMS_PROTOCOL: u32 = 2;
 
 /// First version that has a bruh's Computer.
 pub const COMPUTER_PROTOCOL: u32 = 3;
+
+/// First version that has vault grants on a bruh.
+pub const VAULT_PROTOCOL: u32 = 4;
 
 /// Which way a bruh looks.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -253,6 +258,10 @@ pub struct BruhProfile {
     /// `ReactiveCommand::SetComputer`; see [`computer_on`] for whether it runs.
     #[serde(default)]
     pub computer: bool,
+    /// The Global vault entries granted to the bruh, sorted and deduped.
+    /// Set only by `ReactiveCommand::SetVault`; see [`usable_by`].
+    #[serde(default)]
+    pub vault: Vec<String>,
 }
 
 /// A bruh as the rail and pages show it.
@@ -272,6 +281,9 @@ pub struct BruhState {
     /// The owner turned the bruh's Computer on.
     #[serde(default)]
     pub computer: bool,
+    /// The Global vault entries granted to the bruh.
+    #[serde(default)]
+    pub vault: Vec<String>,
 }
 
 /// Status by priority: off, paused, needs you, working, asleep.
@@ -446,6 +458,7 @@ mod tests {
             next_wake_ms: None,
             unread: 0,
             computer: false,
+            vault: Vec::new(),
         }
     }
 

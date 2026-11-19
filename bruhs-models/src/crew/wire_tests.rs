@@ -208,8 +208,8 @@ fn computer_is_its_own_command_and_survives_an_access_save() {
     )
     .unwrap();
     assert!(!state.computer, "an older service's bruh reads as off");
-    assert!(computer_ready(3) && !computer_ready(2) && CREW_PROTOCOL == 3);
-    assert_eq!(COMPUTER_PROTOCOL, CREW_PROTOCOL);
+    assert!(computer_ready(3) && !computer_ready(2) && computer_ready(CREW_PROTOCOL));
+    assert_eq!(COMPUTER_PROTOCOL, 3);
 
     let agent = crate::reactive::ReactiveAgent {
         id: "a".into(),
@@ -228,6 +228,7 @@ fn computer_is_its_own_command_and_survives_an_access_save() {
         look: BruhLook::default(),
         access: BruhAccess::default(),
         computer: false,
+        vault: Vec::new(),
     };
     let on = BruhSettings {
         computer: true,
@@ -264,4 +265,143 @@ fn computer_is_its_own_command_and_survives_an_access_save() {
             ReactiveCommand::SetComputer { on: true, .. }
         ]
     ));
+}
+
+fn vault_agent() -> crate::reactive::ReactiveAgent {
+    crate::reactive::ReactiveAgent {
+        id: "a".into(),
+        name: "A".into(),
+        instructions: String::new(),
+        memory: String::new(),
+        model: "sonnet".into(),
+        project_path: String::new(),
+        enabled: true,
+    }
+}
+
+#[test]
+fn set_vault_is_its_own_command_and_never_sent_to_an_older_service() {
+    assert_eq!(
+        serde_json::from_str::<ReactiveCommand>(
+            r#"{"action":"set_vault","agent_id":"a","entries":["v1-g"]}"#
+        )
+        .unwrap(),
+        ReactiveCommand::SetVault {
+            agent_id: "a".into(),
+            entries: vec!["v1-g".into()]
+        }
+    );
+    assert!(serde_json::from_str::<BruhProfile>("{}")
+        .unwrap()
+        .vault
+        .is_empty());
+    let state: BruhState = serde_json::from_str(
+        r#"{"agent_id":"a","name":"A","look":{},"access":{},"status":"asleep"}"#,
+    )
+    .unwrap();
+    assert!(
+        state.vault.is_empty(),
+        "an older service's bruh has no grants"
+    );
+    assert!(vault_ready(4) && !vault_ready(3) && CREW_PROTOCOL == 4);
+    assert_eq!(VAULT_PROTOCOL, CREW_PROTOCOL);
+    assert_eq!(
+        vault_reason(Some(3)),
+        Some(ServiceNotice::ServingOld.message())
+    );
+    assert_eq!(vault_reason(Some(CREW_PROTOCOL)), None);
+    assert_eq!(vault_reason(None), None);
+
+    let agent = vault_agent();
+    let settings = BruhSettings {
+        name: "A".into(),
+        instructions: String::new(),
+        model: "sonnet".into(),
+        effort: None,
+        look: BruhLook::default(),
+        access: BruhAccess::default(),
+        computer: false,
+        vault: Vec::new(),
+    };
+    let granted = BruhSettings {
+        vault: vec!["v1-g".into()],
+        ..settings
+    };
+    let set_vault = ReactiveCommand::SetVault {
+        agent_id: "a".into(),
+        entries: vec!["v1-g".into()],
+    };
+    assert_eq!(
+        settings_commands(&agent, &state, &granted),
+        vec![set_vault.clone()]
+    );
+    assert_eq!(
+        settings_commands_for(Some(4), &agent, &state, &granted),
+        vec![set_vault.clone()]
+    );
+    for protocol in [Some(3), None] {
+        assert!(settings_commands_for(protocol, &agent, &state, &granted).is_empty());
+    }
+    // Protocol 3 has Computer, so SetComputer still goes there; SetVault
+    // follows it on a current service.
+    let both = BruhSettings {
+        computer: true,
+        ..granted
+    };
+    let set_computer = ReactiveCommand::SetComputer {
+        agent_id: "a".into(),
+        on: true,
+    };
+    assert_eq!(
+        settings_commands_for(Some(3), &agent, &state, &both),
+        vec![set_computer.clone()]
+    );
+    assert_eq!(
+        settings_commands_for(Some(4), &agent, &state, &both),
+        vec![set_computer, set_vault]
+    );
+}
+
+#[test]
+fn the_same_grants_in_another_order_send_nothing() {
+    let agent = vault_agent();
+    let state = BruhState {
+        agent_id: "a".into(),
+        name: "A".into(),
+        look: BruhLook::default(),
+        access: BruhAccess::default(),
+        effort: None,
+        status: BruhStatus::Asleep,
+        next_wake_ms: None,
+        unread: 0,
+        computer: false,
+        vault: vec!["v1-a".into(), "v1-b".into()],
+    };
+    let mut edited = BruhSettings {
+        name: "A".into(),
+        instructions: String::new(),
+        model: "sonnet".into(),
+        effort: None,
+        look: BruhLook::default(),
+        access: BruhAccess::default(),
+        computer: false,
+        vault: vec!["v1-b".into(), "v1-a".into(), "v1-b".into()],
+    };
+    assert!(settings_commands(&agent, &state, &edited).is_empty());
+    edited.vault = vec!["v1-c".into(), "v1-a".into()];
+    assert_eq!(
+        settings_commands(&agent, &state, &edited),
+        vec![ReactiveCommand::SetVault {
+            agent_id: "a".into(),
+            entries: vec!["v1-a".into(), "v1-c".into()]
+        }]
+    );
+}
+
+#[test]
+fn deleting_a_bruh_names_its_vault_entries() {
+    assert_eq!(
+        delete_bruh_confirm("Ada"),
+        "Delete Ada? Its chat, memory, browser, own vault entries and private work folder go with it. A folder you chose stays."
+    );
 }

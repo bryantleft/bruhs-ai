@@ -1902,4 +1902,104 @@ async fn an_answer_after_expiry_resumes_even_while_the_run_wraps_up() {
     assert_eq!(decided(task).await, Some(crate::PermissionDecision::Allow));
 }
 
+#[tokio::test]
+async fn set_vault_keeps_runs_sessions_and_other_fields() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    runtime
+        .command(set_bruh("a", pandan(), AccessLevel::Full))
+        .await
+        .unwrap();
+    runtime
+        .command(ReactiveCommand::SetComputer {
+            agent_id: "a".into(),
+            on: true,
+        })
+        .await
+        .unwrap();
+    finished_with_session(&runtime).await;
+    let queued = chat(&runtime, "a", "Queued").await;
+    let set_vault = |agent_id: &str, entries: Vec<String>| ReactiveCommand::SetVault {
+        agent_id: agent_id.into(),
+        entries,
+    };
+    let snapshot = runtime
+        .command(set_vault("a", vec!["v1-b".into(), "v1-a".into()]))
+        .await
+        .unwrap();
+    let bruh = &snapshot.bruhs[0];
+    assert_eq!(bruh.vault, ["v1-a", "v1-b"]);
+    assert!(bruh.computer);
+    assert_eq!(
+        (bruh.access.level, bruh.look.face),
+        (AccessLevel::Full, BruhColor::Pandan)
+    );
+    assert_eq!(run(&runtime, &queued.id).await.status, RunStatus::Queued);
+    assert_eq!(session(&runtime, "a").await.as_deref(), Some("s1"));
+
+    // An older-style SetBruh, which knows nothing of grants, keeps them.
+    let snapshot = runtime
+        .command(set_bruh("a", BruhLook::default(), AccessLevel::Full))
+        .await
+        .unwrap();
+    assert_eq!(snapshot.bruhs[0].vault, ["v1-a", "v1-b"]);
+    assert!(snapshot.bruhs[0].computer);
+
+    let too_many = runtime
+        .command(set_vault("a", (0..65).map(|i| format!("v{i}")).collect()))
+        .await;
+    assert!(
+        matches!(&too_many, Err(ReactiveError::Invalid(message)) if message == "Grant at most 64 vault entries."),
+        "{too_many:?}"
+    );
+    let bad = runtime.command(set_vault("a", vec!["../x".into()])).await;
+    assert!(
+        matches!(&bad, Err(ReactiveError::Invalid(message)) if message == "That isn't a vault entry."),
+        "{bad:?}"
+    );
+    let missing = runtime.command(set_vault("nobody", vec![])).await;
+    assert!(
+        matches!(missing, Err(ReactiveError::NotFound(_))),
+        "{missing:?}"
+    );
+
+    // Nothing above stopped the queued run or its session.
+    let claim = claim_one(&runtime).await.unwrap();
+    assert_eq!(claim.run.id, queued.id);
+    assert_eq!(claim.bruh.vault, ["v1-a", "v1-b"]);
+    assert_eq!(claim.run.session_id.as_deref(), Some("s1"));
+    assert!(!claim.run.fresh_session);
+}
+
+#[tokio::test]
+async fn set_vault_is_refused_for_report_agents() {
+    use bruhs_models::weekly_reports::{WeeklyReportCommand, WeeklyReportPreset};
+    let (dir, runtime) = runtime_with(&[]).await;
+    let preset = WeeklyReportPreset {
+        id: uuid::Uuid::new_v4().to_string(),
+        project_path: dir.path().display().to_string(),
+        model: bruhs_models::agent::DEFAULT_AGENT_MODEL.into(),
+        local_git: true,
+        github_pull_requests: false,
+        github_deployments: false,
+        scheduled: false,
+        schedule: None,
+    };
+    runtime
+        .weekly_report_command(WeeklyReportCommand::SavePreset {
+            preset: preset.clone(),
+        })
+        .await
+        .unwrap();
+    let refused = runtime
+        .command(ReactiveCommand::SetVault {
+            agent_id: format!("weekly-report-{}", preset.id),
+            entries: vec!["v1-g".into()],
+        })
+        .await;
+    assert!(
+        matches!(&refused, Err(ReactiveError::Conflict(message)) if message.contains("weekly report preset")),
+        "{refused:?}"
+    );
+}
+
 mod approval_lifecycle_tests;

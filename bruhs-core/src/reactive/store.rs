@@ -938,6 +938,9 @@ pub(super) fn command(
             ReactiveCommand::SetComputer { agent_id, on } => {
                 crew::set_computer(connection, &agent_id, on)?;
             }
+            ReactiveCommand::SetVault { agent_id, entries } => {
+                crew::set_vault(connection, &agent_id, entries)?;
+            }
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
                 if run.status == RunStatus::Queued {

@@ -4,8 +4,9 @@
 use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::{
     access_options, clamp_level, computer_switch_follows, computer_switch_off,
-    computer_switch_reason, current_settings, settings_commands_for, AccessLevel, BruhAccess,
-    BruhLook, BruhSettings, COMPUTER_HINT, COMPUTER_SWITCH, SEND_AS_ME_HINT,
+    computer_switch_reason, current_settings, settings_commands_for, vault_grants_follow,
+    AccessLevel, BruhAccess, BruhLook, BruhSettings, COMPUTER_HINT, COMPUTER_SWITCH,
+    SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use leptos::prelude::*;
@@ -50,6 +51,9 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
     let send_as_me = RwSignal::new(false);
     let can_deliver = RwSignal::new(false);
     let computer = RwSignal::new(false);
+    // Vault grants have no picker yet: they follow the stored grants, so
+    // Save never sends SetVault.
+    let vault = RwSignal::new(Vec::<String>::new());
     let look = RwSignal::new(BruhLook::default());
     let invalid = RwSignal::new(None::<String>);
     let edited = move || BruhSettings {
@@ -64,6 +68,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             can_deliver: can_deliver.get(),
         },
         computer: computer.get(),
+        vault: vault.get(),
     };
 
     // Fill the form from the service, unless the owner has unsaved edits.
@@ -86,6 +91,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
         send_as_me.set(next.access.send_as_me);
         can_deliver.set(next.access.can_deliver);
         computer.set(next.computer);
+        vault.set(next.vault.clone());
         look.set(next.look.clone());
         shown.set_value(Some(next));
     });
@@ -147,6 +153,32 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             });
             if switch != stored {
                 computer.set(stored);
+            }
+        }
+    });
+
+    // The grants follow the stored ones while the owner hasn't changed them
+    // since the fill (`vault_grants_follow`), so a Save made here can't put
+    // back grants another app replaced.
+    Effect::new(move |_| {
+        let Some(stored) = saved.with(|saved| saved.as_ref().map(|saved| saved.vault.clone()))
+        else {
+            return;
+        };
+        let Some(filled) =
+            shown.with_value(|shown| shown.as_ref().map(|shown| shown.vault.clone()))
+        else {
+            return;
+        };
+        let picked = vault.get();
+        if let Some(stored) = vault_grants_follow(&picked, &filled, &stored) {
+            shown.update_value(|shown| {
+                if let Some(shown) = shown.as_mut() {
+                    shown.vault.clone_from(&stored);
+                }
+            });
+            if picked != stored {
+                vault.set(stored);
             }
         }
     });

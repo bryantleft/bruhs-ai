@@ -1140,7 +1140,7 @@ try {
     await click('[data-agent-delete-yes]');
     const gone = await until('Pix is deleted', async () => !(await snapshot()).agents.some((agent) => agent.id === ids.Pix), 5000).catch(() => false);
     const removed = await until("Pix's folder goes", async () => !fs.existsSync(tree(ids.Pix)), 10000).catch(() => false);
-    const expected = 'Delete Pix? Its chat, memory, browser and private work folder go with it. A folder you chose stays.';
+    const expected = 'Delete Pix? Its chat, memory, browser, own vault entries and private work folder go with it. A folder you chose stays.';
     record('Delete Pix asks first; after Delete its bruhs/<id> folder and browser cache are gone',
       confirm.startsWith(expected) && !!onKeep && kept && !!gone && !!removed && !fs.existsSync(cacheDir) && homeCaches().length === 0,
       `asked ${js(confirm.slice(0, 120))}; focus on Keep ${!!onKeep}; kept until Delete ${kept}; deleted ${!!gone}; folder gone ${!!removed}; cache gone ${!fs.existsSync(cacheDir)}`);

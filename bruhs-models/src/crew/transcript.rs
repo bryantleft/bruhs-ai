@@ -1,7 +1,7 @@
 //! One bruh's conversation as every surface shows it, the Stop fallback for
 //! older services and the commands a settings edit turns into.
 
-use super::{crew_commands_ready, BruhAccess, BruhDraft, BruhLook, BruhState};
+use super::{crew_commands_ready, grant_set, BruhAccess, BruhDraft, BruhLook, BruhState};
 use crate::reactive::{
     OutboxItem, OutboxKind, ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveRun, RunStatus,
     RunTrigger,
@@ -220,10 +220,13 @@ pub struct BruhSettings {
     pub look: BruhLook,
     pub access: BruhAccess,
     pub computer: bool,
+    /// The Global vault entries granted to the bruh.
+    pub vault: Vec<String>,
 }
 
 /// The commands a settings edit needs: the agent first, then the bruh, then
-/// its Computer. A look only edit never touches the agent.
+/// its Computer, then its vault grants (compared as sets). A look only edit
+/// never touches the agent.
 #[must_use]
 pub fn settings_commands(
     agent: &ReactiveAgent,
@@ -258,6 +261,13 @@ pub fn settings_commands(
         commands.push(ReactiveCommand::SetComputer {
             agent_id: agent.id.clone(),
             on: edited.computer,
+        });
+    }
+    let grants = grant_set(&edited.vault);
+    if grant_set(&state.vault) != grants {
+        commands.push(ReactiveCommand::SetVault {
+            agent_id: agent.id.clone(),
+            entries: grants,
         });
     }
     commands
@@ -659,6 +669,7 @@ mod tests {
             next_wake_ms: None,
             unread: 0,
             computer: false,
+            vault: Vec::new(),
         };
         let edited = BruhSettings {
             name: "Bill".into(),
@@ -668,6 +679,7 @@ mod tests {
             look: BruhLook::default(),
             access: BruhAccess::default(),
             computer: false,
+            vault: Vec::new(),
         };
         (agent, state, edited)
     }

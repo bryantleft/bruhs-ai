@@ -5,8 +5,8 @@ use serde_json::Value;
 
 use super::{
     computer_ready, effective_level, gate, is_local_host, service_notice, settings_commands,
-    AccessLevel, BruhAccess, BruhSettings, BruhState, Gate, GatedAction, FORGE_COMMAND_HOSTS,
-    LOCAL_HOST_DENIAL,
+    vault_ready, AccessLevel, BruhAccess, BruhSettings, BruhState, Gate, GatedAction,
+    FORGE_COMMAND_HOSTS, LOCAL_HOST_DENIAL,
 };
 use crate::agent::AgentProvider;
 use crate::local_tools::{
@@ -179,7 +179,7 @@ pub fn computer_switch_off(
 }
 
 /// What Save sends for a bruh's Settings: [`settings_commands`], without
-/// SetComputer for a service that doesn't know it.
+/// SetComputer or SetVault for a service that doesn't know it.
 #[must_use]
 pub fn settings_commands_for(
     protocol: Option<u32>,
@@ -188,9 +188,14 @@ pub fn settings_commands_for(
     edited: &BruhSettings,
 ) -> Vec<ReactiveCommand> {
     let computer = protocol.is_some_and(computer_ready);
+    let vault = protocol.is_some_and(vault_ready);
     settings_commands(agent, state, edited)
         .into_iter()
-        .filter(|command| computer || !matches!(command, ReactiveCommand::SetComputer { .. }))
+        .filter(|command| match command {
+            ReactiveCommand::SetComputer { .. } => computer,
+            ReactiveCommand::SetVault { .. } => vault,
+            _ => true,
+        })
         .collect()
 }
 
@@ -530,7 +535,7 @@ pub fn computer_hint(
 #[must_use]
 pub fn delete_bruh_confirm(name: &str) -> String {
     format!(
-        "Delete {name}? Its chat, memory, browser and private work folder go with it. A folder you chose stays."
+        "Delete {name}? Its chat, memory, browser, own vault entries and private work folder go with it. A folder you chose stays."
     )
 }
 
@@ -1003,6 +1008,7 @@ mod tests {
                 next_wake_ms: None,
                 unread: 0,
                 computer,
+                vault: Vec::new(),
             }],
             ..ReactiveSnapshot::default()
         }
@@ -1245,7 +1251,7 @@ mod tests {
     fn deleting_a_bruh_says_what_goes_with_it() {
         assert_eq!(
             delete_bruh_confirm("Ada"),
-            "Delete Ada? Its chat, memory, browser and private work folder go with it. A folder you chose stays."
+            "Delete Ada? Its chat, memory, browser, own vault entries and private work folder go with it. A folder you chose stays."
         );
         assert_eq!(
             delete_agent_line("Ada"),

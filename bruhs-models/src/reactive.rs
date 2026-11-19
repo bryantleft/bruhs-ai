@@ -379,6 +379,12 @@ pub enum ReactiveCommand {
         agent_id: String,
         on: bool,
     },
+    /// Replace the Global vault entries granted to a bruh. Cancels no runs
+    /// and keeps the session; every use checks the grants live.
+    SetVault {
+        agent_id: String,
+        entries: Vec<String>,
+    },
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]

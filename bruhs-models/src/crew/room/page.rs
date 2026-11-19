@@ -648,6 +648,7 @@ mod tests {
             next_wake_ms: None,
             unread: 0,
             computer: false,
+            vault: Vec::new(),
         }
     }
 

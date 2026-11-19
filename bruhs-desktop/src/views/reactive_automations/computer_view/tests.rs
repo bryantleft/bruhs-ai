@@ -45,6 +45,7 @@ fn snapshot() -> ReactiveSnapshot {
             next_wake_ms: None,
             unread: 0,
             computer: true,
+            vault: Vec::new(),
         }],
         protocol: CREW_PROTOCOL,
         ..ReactiveSnapshot::default()

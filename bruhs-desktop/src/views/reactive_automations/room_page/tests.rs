@@ -25,6 +25,7 @@ fn named(id: &str, name: &str) -> BruhState {
         next_wake_ms: None,
         unread: 0,
         computer: false,
+        vault: Vec::new(),
     }
 }
 

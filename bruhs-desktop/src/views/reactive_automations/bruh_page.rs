@@ -24,8 +24,9 @@ use bruhs_models::crew::{
     access_options, approval_outcome, chat_follow_key, chat_markdown, clamp_level, composer_block,
     computer_switch_follows, computer_switch_off, computer_switch_reason, current_settings,
     job_line, line_key, may_have_more, merge_runs, settings_commands_for, status_line, transcript,
-    AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus, TranscriptItem, COMPUTER_HINT,
-    COMPUTER_SWITCH, COMPUTER_TAB, PAGE_FACE_PX, RAIL_FACE_PX, SEND_AS_ME_HINT,
+    vault_grants_follow, AccessLevel, BruhAccess, BruhLook, BruhSettings, BruhStatus,
+    TranscriptItem, COMPUTER_HINT, COMPUTER_SWITCH, COMPUTER_TAB, PAGE_FACE_PX, RAIL_FACE_PX,
+    SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::rich_response::markdown_with_allowed_images;
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
@@ -175,6 +176,9 @@ struct SettingsForm {
     send_as_me: bool,
     can_deliver: bool,
     computer: bool,
+    /// Vault grants have no picker yet: they follow the stored grants
+    /// ([`Self::sync_vault`]), so Save never sends SetVault.
+    vault: Vec<String>,
     look: BruhLook,
     invalid: Option<String>,
     _subscriptions: Vec<gpui::Subscription>,
@@ -226,6 +230,7 @@ impl SettingsForm {
             send_as_me: settings.access.send_as_me,
             can_deliver: settings.access.can_deliver,
             computer: settings.computer,
+            vault: settings.vault.clone(),
             look: settings.look.clone(),
             invalid: None,
             _subscriptions: subscriptions,
@@ -245,6 +250,7 @@ impl SettingsForm {
                 can_deliver: self.can_deliver,
             },
             computer: self.computer,
+            vault: self.vault.clone(),
         }
     }
 
@@ -264,6 +270,7 @@ impl SettingsForm {
         self.send_as_me = settings.access.send_as_me;
         self.can_deliver = settings.access.can_deliver;
         self.computer = settings.computer;
+        self.vault.clone_from(&settings.vault);
         self.look = settings.look.clone();
         self.shown = settings.clone();
     }
@@ -301,6 +308,15 @@ impl SettingsForm {
         {
             self.computer = stored;
             self.shown.computer = stored;
+        }
+    }
+
+    /// The grants follow the stored ones while the owner hasn't changed
+    /// them since the fill (`vault_grants_follow`).
+    fn sync_vault(&mut self, stored: &[String]) {
+        if let Some(stored) = vault_grants_follow(&self.vault, &self.shown.vault, stored) {
+            self.vault.clone_from(&stored);
+            self.shown.vault = stored;
         }
     }
 }
@@ -664,18 +680,22 @@ impl ReactiveAutomations {
         self.bruh.as_mut()?.settings.as_mut()
     }
 
-    /// Keep the open settings' Computer switch on the stored value where
-    /// the owner can't or didn't change it.
+    /// Keep the open settings' Computer switch and vault grants on the
+    /// stored values where the owner can't or didn't change them.
     pub(super) fn sync_bruh_computer(&mut self, cx: &App) {
         let protocol = self.crew.protocol;
         let Some(agent_id) = self.bruh_page_agent() else {
             return;
         };
-        let Some(stored) = self.bruh_state(agent_id).map(|state| state.computer) else {
+        let Some((stored, vault)) = self
+            .bruh_state(agent_id)
+            .map(|state| (state.computer, state.vault.clone()))
+        else {
             return;
         };
         if let Some(form) = self.bruh_settings_mut() {
             form.sync_computer(stored, protocol, cx);
+            form.sync_vault(&vault);
         }
     }
 
@@ -2200,6 +2220,7 @@ mod tests {
             next_wake_ms: None,
             unread: 0,
             computer: false,
+            vault: Vec::new(),
         }
     }
 

@@ -148,6 +148,7 @@ pub fn current_settings(snapshot: &ReactiveSnapshot, agent_id: &str) -> Option<B
         look: state.look.clone(),
         access: state.access.clone(),
         computer: state.computer,
+        vault: state.vault.clone(),
     })
 }
 
@@ -308,6 +309,7 @@ mod tests {
             next_wake_ms: None,
             unread: 0,
             computer: false,
+            vault: Vec::new(),
         };
         let mut snapshot = ReactiveSnapshot {
             agents: vec![agent],

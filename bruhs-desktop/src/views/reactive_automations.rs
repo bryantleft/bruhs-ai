@@ -3097,6 +3097,7 @@ mod crew_tests {
             next_wake_ms: None,
             unread: 2,
             computer: false,
+            vault: Vec::new(),
         };
         panel.update(cx, |panel, cx| {
             assert_eq!(panel.crew_protocol(), None);
