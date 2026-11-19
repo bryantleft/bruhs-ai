@@ -14,7 +14,9 @@
 use bruhs_models::api::live_events::REACTIVE;
 use bruhs_models::crew::room::RoomState;
 use bruhs_models::crew::BruhState;
-use bruhs_models::reactive::{DraftOutcomeKind, OutboxItem, OutboxSignal, ReactiveCommand};
+use bruhs_models::reactive::{
+    DraftOutcomeKind, OutboxItem, OutboxMark, OutboxSignal, ReactiveCommand,
+};
 use bruhs_models::{DraftOutcomeReport, EpochMs, WorkflowStatus};
 use leptos::prelude::*;
 
@@ -39,6 +41,11 @@ pub struct AgentUpdates {
     /// When a run last changed. A run that starts and ends between two
     /// frames leaves `bruhs` as it was, so crew pages read again on this too.
     pub runs_at: RwSignal<Option<EpochMs>>,
+    /// The outbox as the latest frame sums it up. A bruh's second approval
+    /// in one run leaves `bruhs` as it was (it still needs you) and moves no
+    /// run, so crew pages read again on this too, or the new card never
+    /// shows.
+    pub outbox: RwSignal<OutboxMark>,
 }
 
 impl AgentUpdates {
@@ -50,6 +57,7 @@ impl AgentUpdates {
             rooms: RwSignal::new(Vec::new()),
             protocol: RwSignal::new(None),
             runs_at: RwSignal::new(None),
+            outbox: RwSignal::new(OutboxMark::default()),
         });
         if let Some(AutomationStateSignal(automation)) = use_context::<AutomationStateSignal>() {
             reconcile_draft_outcomes(automation);
@@ -71,6 +79,10 @@ impl AgentUpdates {
         }
         if self.runs_at.get_untracked() != signal.runs_at {
             self.runs_at.set(signal.runs_at);
+        }
+        let outbox = signal.outbox_mark();
+        if self.outbox.with_untracked(|mark| *mark != outbox) {
+            self.outbox.set(outbox);
         }
     }
 
@@ -304,6 +316,38 @@ mod tests {
                 ..signal(None)
             });
             assert_eq!((bruhs.get_untracked(), runs.get_untracked()), (0, 1));
+        });
+    }
+
+    #[test]
+    fn a_new_card_while_the_crew_looks_the_same_moves_outbox() {
+        let owner = Owner::new();
+        owner.with(|| {
+            AgentUpdates::install();
+            let updates = expect_context::<AgentUpdates>();
+            let open = |id: &str| OutboxSignal {
+                open_questions: 1,
+                ..signal(Some(item(id, 10)))
+            };
+            updates.apply(&open("first"));
+            let (bruhs, outbox) = (
+                Memo::new(move |count: Option<&u32>| {
+                    updates.bruhs.track();
+                    count.map_or(0, |count| count + 1)
+                }),
+                Memo::new(move |count: Option<&u32>| {
+                    updates.outbox.track();
+                    count.map_or(0, |count| count + 1)
+                }),
+            );
+            assert_eq!((bruhs.get_untracked(), outbox.get_untracked()), (0, 0));
+            // The first card was answered and a second one opened between
+            // two frames: the counts and the bruhs look the same.
+            updates.apply(&open("second"));
+            assert_eq!((bruhs.get_untracked(), outbox.get_untracked()), (0, 1));
+            // The same frame again changes nothing.
+            updates.apply(&open("second"));
+            assert_eq!((bruhs.get_untracked(), outbox.get_untracked()), (0, 1));
         });
     }
 

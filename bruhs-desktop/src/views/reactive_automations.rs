@@ -112,6 +112,9 @@ struct CrewState {
     /// When a run last changed, as the latest frame says. A run that starts
     /// and ends between two frames leaves `bruhs` as it was.
     runs_at: Option<bruhs_models::EpochMs>,
+    /// The outbox as the latest frame sums it up. A bruh's second approval
+    /// in one run leaves `bruhs` and `runs_at` as they were.
+    outbox: bruhs_models::reactive::OutboxMark,
     /// The installed login service's protocol; `None` when none is installed.
     installed_protocol: Option<u32>,
     /// The serving protocol the installed service was last read for.
@@ -1909,6 +1912,7 @@ impl ReactiveAutomations {
     }
     fn apply_crew_signal(&mut self, signal: OutboxSignal, cx: &mut Context<'_, Self>) {
         let mut changed = false;
+        let outbox = signal.outbox_mark();
         if self.crew.bruhs != signal.bruhs {
             self.crew.bruhs = signal.bruhs;
             cx.emit(ReactiveCrewChanged);
@@ -1924,8 +1928,12 @@ impl ReactiveAutomations {
             self.crew.runs_at = signal.runs_at;
             changed = true;
         }
-        // A bruh or room page reads the crew again when its bruhs, rooms or
-        // runs change, like the web's.
+        if self.crew.outbox != outbox {
+            self.crew.outbox = outbox;
+            changed = true;
+        }
+        // A bruh or room page reads the crew again when its bruhs, rooms,
+        // runs or outbox change, like the web's.
         if changed && (self.bruh.is_some() || self.room.is_some()) {
             self.refresh_snapshot(cx);
         }

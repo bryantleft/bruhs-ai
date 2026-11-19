@@ -705,6 +705,39 @@ fn a_frame_with_a_newer_run_reads_the_snapshot_again(cx: &mut gpui::TestAppConte
     assert!(reads(&panel, cx), "a run changed");
 }
 
+/// A bruh's second approval in one run leaves the bruhs, rooms and runs as
+/// they were; the outbox's newest item still reads the snapshot again, so
+/// the new card shows.
+#[gpui::test]
+fn a_frame_with_a_new_card_reads_the_snapshot_again(cx: &mut gpui::TestAppContext) {
+    let crew = vec![named("a", "Ada")];
+    let (panel, cx) = open(
+        cx,
+        snapshot(CREW_PROTOCOL, crew.clone(), vec![room(&["a"], None)]),
+    );
+    let frame = |latest: &str| OutboxSignal {
+        unread: 1,
+        open_questions: 1,
+        latest_unread: Some(approval(latest)),
+        bruhs: crew.clone(),
+        rooms: vec![room(&["a"], None)],
+        protocol: CREW_PROTOCOL,
+        ..OutboxSignal::default()
+    };
+    let reads = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+        panel.read_with(cx, |panel, _| panel.last_refresh.is_some())
+    };
+    panel.update(cx, |panel, cx| {
+        panel.apply_crew_signal(frame("first"), cx);
+        panel.reading = false;
+        panel.last_refresh = None;
+        panel.apply_crew_signal(frame("first"), cx);
+    });
+    assert!(!reads(&panel, cx), "nothing changed");
+    panel.update(cx, |panel, cx| panel.apply_crew_signal(frame("second"), cx));
+    assert!(reads(&panel, cx), "a new card");
+}
+
 /// Up and Down move through the `@` list and wrap; Enter picks the
 /// selected member; Tab leaves the list alone and inserts nothing.
 #[gpui::test]

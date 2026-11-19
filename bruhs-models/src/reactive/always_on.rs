@@ -182,6 +182,28 @@ pub struct OutboxSignal {
     pub runs_at: Option<crate::EpochMs>,
 }
 
+/// What a frame says about the outbox: its counts and the newest unread
+/// item. A bruh's second approval in one run can leave every bruh's state
+/// and `runs_at` as they were (it still needs you), so a crew page reads
+/// the crew again when this changes too, or the new card never shows.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct OutboxMark {
+    pub unread: usize,
+    pub open_questions: usize,
+    pub latest: Option<String>,
+}
+
+impl OutboxSignal {
+    #[must_use]
+    pub fn outbox_mark(&self) -> OutboxMark {
+        OutboxMark {
+            unread: self.unread,
+            open_questions: self.open_questions,
+            latest: self.latest_unread.as_ref().map(|item| item.id.clone()),
+        }
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum MemoryKind {
