@@ -87,8 +87,32 @@ pub const WAIT_FOR_CHECK: &str = "Wait for the check to finish.";
 pub const NO_BRUHS: &str = "Make a bruh first to give it an entry of its own.";
 /// The listing refused to a page on another address (ruling F26 and its
 /// Task 10 amendment): the page can neither show nor change the vault.
+/// [`open_from_own_address`] names the address when it knows the port.
 pub const OPEN_FROM_OWN_ADDRESS: &str =
     "Open Bruhs from its own address to see and change the vault.";
+
+/// [`OPEN_FROM_OWN_ADDRESS`] naming the exact address that may change the
+/// vault (rereview I1): the server binds only `127.0.0.1`, so another
+/// loopback name of its port can be another program's page. `server` is the
+/// client's own server URL; with no port in it the copy names none.
+#[must_use]
+pub fn open_from_own_address(server: &str) -> String {
+    server_port(server).map_or_else(
+        || OPEN_FROM_OWN_ADDRESS.to_owned(),
+        |port| format!("Open Bruhs at http://127.0.0.1:{port} to see and change the vault."),
+    )
+}
+
+/// The explicit port of an `http(s)://host:port` URL.
+fn server_port(url: &str) -> Option<u16> {
+    let (_, rest) = url.split_once("://")?;
+    let authority = rest.split(['/', '?', '#']).next()?;
+    let authority = authority
+        .rsplit_once('@')
+        .map_or(authority, |(_, authority)| authority);
+    let (_, port) = authority.rsplit_once(':')?;
+    port.parse().ok()
+}
 
 /// A vault call that got no answer: the service isn't reachable.
 pub const VAULT_UNREACHABLE: &str =
@@ -863,6 +887,31 @@ pub fn same_origin(page_url: Option<&str>, origin: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Rereview I1: the notice names `127.0.0.1` and the server's own port,
+    /// whichever loopback name the client calls it by.
+    #[test]
+    fn the_own_address_notice_names_127_0_0_1_and_the_servers_port() {
+        for (server, notice) in [
+            (
+                "http://127.0.0.1:3001",
+                "Open Bruhs at http://127.0.0.1:3001 to see and change the vault.",
+            ),
+            (
+                "http://localhost:4100/",
+                "Open Bruhs at http://127.0.0.1:4100 to see and change the vault.",
+            ),
+            (
+                "http://[::1]:3005/api",
+                "Open Bruhs at http://127.0.0.1:3005 to see and change the vault.",
+            ),
+            ("https://api.bruhs.localhost", OPEN_FROM_OWN_ADDRESS),
+            ("http://[::1]", OPEN_FROM_OWN_ADDRESS),
+            ("not a url", OPEN_FROM_OWN_ADDRESS),
+        ] {
+            assert_eq!(open_from_own_address(server), notice, "{server}");
+        }
+    }
     use serde_json::json;
 
     /// Both apps show a failed vault call this way (V Task 14 minor): only

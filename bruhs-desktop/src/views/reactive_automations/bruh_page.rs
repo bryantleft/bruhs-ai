@@ -2149,6 +2149,7 @@ impl ReactiveAutomations {
                 &page.agent_id,
                 &form.vault,
                 vault_block,
+                self.client.base_url(),
                 cx,
             ));
         let face = section("Face").child(self.render_face_editor(&form.look, cx));

@@ -329,6 +329,11 @@ impl ServerClient {
         self
     }
 
+    /// The server's base URL, as this client calls it.
+    pub fn base_url(&self) -> &str {
+        &self.base
+    }
+
     fn url(&self, path: &str) -> String {
         format!("{}{}", self.base, path)
     }

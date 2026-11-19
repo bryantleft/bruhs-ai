@@ -7,7 +7,7 @@ use bruhs_models::crew::{
     toggle_vault_grant, vault_grant_rows, ServiceNotice, VaultGrantRow as GrantRow,
     VAULT_GRANTS_HINT, VAULT_GRANTS_LABEL, VAULT_GRANTS_NONE,
 };
-use bruhs_models::vault::{VaultListing, LOADING, LOAD_RETRY, OPEN_FROM_OWN_ADDRESS, REFRESH};
+use bruhs_models::vault::{open_from_own_address, VaultListing, LOADING, LOAD_RETRY, REFRESH};
 use leptos::prelude::*;
 
 use crate::ui::{Button, ButtonSize, Switch};
@@ -138,7 +138,7 @@ pub fn VaultGrants(
                     .is_none()
                     .then(|| view! { <p role="status" data-vault-grants-notice="" class="text-label-sm text-durian-300">{ServiceNotice::ServingOld.message()}</p> })
                     .into_any(),
-                Load::OwnerOnly => view! { <p role="status" data-vault-grants-notice="" class="text-label-sm text-durian-300">{OPEN_FROM_OWN_ADDRESS}</p> }.into_any(),
+                Load::OwnerOnly => view! { <p role="status" data-vault-grants-notice="" class="text-label-sm text-durian-300">{open_from_own_address(crate::api::BASE_URL)}</p> }.into_any(),
                 Load::Ready(_) => ().into_any(),
             }}
             <Show when=move || ready.get()>

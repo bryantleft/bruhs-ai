@@ -11,7 +11,7 @@ use bruhs_models::crew::{
     vault_grant_rows as grant_rows, VaultGrantRow as GrantRow, VAULT_GRANTS_HINT,
     VAULT_GRANTS_LABEL, VAULT_GRANTS_NONE,
 };
-use bruhs_models::vault::{VaultListing, LOADING, LOAD_RETRY, OPEN_FROM_OWN_ADDRESS, REFRESH};
+use bruhs_models::vault::{open_from_own_address, VaultListing, LOADING, LOAD_RETRY, REFRESH};
 use std::sync::Mutex;
 
 /// A switch's id is `'static`; each one is kept once for the life of the
@@ -144,6 +144,7 @@ pub(crate) fn vault_grants(
     agent_id: &str,
     grants: &[String],
     disabled: Option<&'static str>,
+    server: &str,
     cx: &Context<'_, ReactiveAutomations>,
 ) -> impl IntoElement {
     let head = div()
@@ -159,7 +160,7 @@ pub(crate) fn vault_grants(
                     .child(hint(reason)),
             )
         });
-    let notice = |text: &'static str| {
+    let notice = |text: SharedString| {
         div()
             .id("desktop-bruh-vault-notice")
             .debug_selector(|| "desktop-bruh-vault-notice".to_string())
@@ -207,8 +208,8 @@ pub(crate) fn vault_grants(
         // An older service already says so through `disabled`.
         Load::ServingOld => disabled
             .is_none()
-            .then(|| notice(ServiceNotice::ServingOld.message()).into_any_element()),
-        Load::OwnerOnly => Some(notice(OPEN_FROM_OWN_ADDRESS).into_any_element()),
+            .then(|| notice(ServiceNotice::ServingOld.message().into()).into_any_element()),
+        Load::OwnerOnly => Some(notice(open_from_own_address(server).into()).into_any_element()),
         Load::Ready(listing) => {
             let rows = grant_rows(listing, agent_id, grants);
             let none = !rows

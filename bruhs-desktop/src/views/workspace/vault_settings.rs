@@ -15,16 +15,16 @@ use crate::server_client::ServerError;
 use bruhs_models::crew::ServiceNotice;
 use bruhs_models::vault::{
     bruh_choice_label, delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for,
-    form_update, kind_label, matches_search, option_for, option_key, row_label, vault_row,
-    wait_reason, FormField, FormKind, FormScope, FormSource, LoginFields, LoginMeta, VaultBusy,
-    VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK,
-    CHOOSE_BRUH, DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME,
-    FIELD_PASSWORD, FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP,
-    FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME,
-    FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT, KIND_OPTIONS, LOADING,
-    LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH, OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT,
-    REFERENCE_HINT, REFRESH, SAVE_ENTRY, SCOPE_OPTIONS, SEARCH_PLACEHOLDER, SOURCE_OPTIONS,
-    STATE_NEEDS_ATTENTION, TOTP_HINT,
+    form_update, kind_label, matches_search, open_from_own_address, option_for, option_key,
+    row_label, vault_row, wait_reason, FormField, FormKind, FormScope, FormSource, LoginFields,
+    LoginMeta, VaultBusy, VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate,
+    CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND,
+    FIELD_NAME, FIELD_PASSWORD, FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE,
+    FIELD_REMOVE_TOTP, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY,
+    FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT, KIND_OPTIONS,
+    LOADING, LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH, OP_MISSING_HINT, REFERENCE_HINT, REFRESH,
+    SAVE_ENTRY, SCOPE_OPTIONS, SEARCH_PLACEHOLDER, SOURCE_OPTIONS, STATE_NEEDS_ATTENTION,
+    TOTP_HINT,
 };
 use bruhs_ui::checkbox::Checkbox;
 use bruhs_ui::input::InputContentType;
@@ -369,7 +369,7 @@ impl VaultSettings {
             Load::Loading => Some(LOADING.into()),
             Load::Failed(message) => Some(format!("{message} {LOAD_RETRY}")),
             Load::ServingOld => Some(ServiceNotice::ServingOld.message().into()),
-            Load::OwnerOnly => Some(OPEN_FROM_OWN_ADDRESS.into()),
+            Load::OwnerOnly => Some(open_from_own_address(self.client.base_url())),
             Load::Ready => self.listing.entries.is_empty().then(|| EMPTY.into()),
         }
     }
@@ -1776,7 +1776,7 @@ mod tests {
     use bruhs_models::vault::{
         delete_entry_confirm, vault_row, CredentialScope, LoginFields, LoginInput, LoginMeta,
         TotpInput, VaultAttention, VaultBruh, VaultBusy, VaultEntry, VaultKind, VaultListing,
-        VaultSecretInput, VaultUpdate, ENTRY_UPDATED, OPEN_FROM_OWN_ADDRESS,
+        VaultSecretInput, VaultUpdate, ENTRY_UPDATED,
     };
     use bruhs_models::vault::{FormKind, FormSource};
     use gpui::{
@@ -2189,7 +2189,8 @@ mod tests {
         assert!(rendered(cx, "desktop-vault-notice"));
         assert_eq!(
             view.read_with(cx, |view, _| view.status_line()),
-            Some(OPEN_FROM_OWN_ADDRESS.to_string())
+            // Rereview I1: the page's own server, `127.0.0.1:9` here.
+            Some("Open Bruhs at http://127.0.0.1:9 to see and change the vault.".to_string())
         );
         click(cx, "desktop-vault-new");
         assert!(!rendered(cx, "desktop-vault-form"), "New entry stays off");

@@ -12,14 +12,14 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use bruhs_models::crew::ServiceNotice;
 use bruhs_models::vault::{
     bruh_choice_label, delete_entry_confirm, fixed_hint_after, form_create, form_fields, form_for,
-    form_update, kind_label, matches_search, option_for, option_key, row_label, vault_row,
-    wait_reason, FormField, FormScope, LoginFields, LoginMeta, VaultBruh, VaultBusy as Busy,
-    VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate, CANCEL, CHECK,
-    CHOOSE_BRUH, DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND, FIELD_NAME,
-    FIELD_PASSWORD, FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE, FIELD_REMOVE_TOTP,
-    FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY, FIELD_USERNAME,
-    FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT, KIND_OPTIONS as KINDS, LOADING,
-    LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH, OPEN_FROM_OWN_ADDRESS, OP_MISSING_HINT,
+    form_update, kind_label, matches_search, open_from_own_address, option_for, option_key,
+    row_label, vault_row, wait_reason, FormField, FormScope, LoginFields, LoginMeta, VaultBruh,
+    VaultBusy as Busy, VaultCreate, VaultEntry, VaultForm, VaultKind, VaultListing, VaultUpdate,
+    CANCEL, CHECK, CHOOSE_BRUH, DELETE, EDIT, EMPTY, ENTRY_UPDATED, FIELD_BRUH, FIELD_KIND,
+    FIELD_NAME, FIELD_PASSWORD, FIELD_PASSWORD_REF, FIELD_PROJECT, FIELD_REFERENCE,
+    FIELD_REMOVE_TOTP, FIELD_SIGN_IN, FIELD_STORED_IN, FIELD_TOTP, FIELD_TOTP_REF, FIELD_USED_BY,
+    FIELD_USERNAME, FIELD_USERNAME_REF, FIELD_VALUE, FIXED_HINT, KEEP, KEEP_HINT,
+    KIND_OPTIONS as KINDS, LOADING, LOAD_RETRY, NEW_ENTRY, NO_BRUHS, NO_MATCH, OP_MISSING_HINT,
     REFERENCE_HINT, REFRESH, SAVE_ENTRY, SCOPE_OPTIONS as SCOPES, SEARCH_PLACEHOLDER,
     SOURCE_OPTIONS as SOURCES, STATE_NEEDS_ATTENTION, TOTP_HINT,
 };
@@ -186,7 +186,7 @@ pub fn VaultSettings() -> impl IntoView {
                 Load::Loading => view! { <p role="status" class="mt-3 text-label-sm text-rambutan-400">{LOADING}</p> }.into_any(),
                 Load::Failed(message) => view! { <p role="alert" class="mt-3 text-label-sm text-lychee-300">{format!("{message} {LOAD_RETRY}")}</p> }.into_any(),
                 Load::ServingOld => view! { <p role="status" data-vault-notice="" class="mt-3 text-label-sm text-durian-300">{ServiceNotice::ServingOld.message()}</p> }.into_any(),
-                Load::OwnerOnly => view! { <p role="status" data-vault-notice="" class="mt-3 text-label-sm text-durian-300">{OPEN_FROM_OWN_ADDRESS}</p> }.into_any(),
+                Load::OwnerOnly => view! { <p role="status" data-vault-notice="" class="mt-3 text-label-sm text-durian-300">{open_from_own_address(crate::api::BASE_URL)}</p> }.into_any(),
                 Load::Ready if listing.with(|listing| listing.entries.is_empty()) => view! { <p role="status" class="mt-3 text-label-sm text-rambutan-400">{EMPTY}</p> }.into_any(),
                 Load::Ready => ().into_any(),
             }}</div>
