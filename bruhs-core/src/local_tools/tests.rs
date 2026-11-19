@@ -824,6 +824,13 @@ async fn only_the_value_call_carries_the_value() {
     assert_eq!(check["arguments"][1]["value"], "https://shop.test");
     assert_eq!(check["arguments"][2]["value"], json!(["password"]));
     assert_eq!(check["arguments"][3]["value"], true);
+    // The submit rule (ruling A2 I1): submitting, and the autocomplete
+    // tokens that mark a sign-in field.
+    assert_eq!(check["arguments"][4]["value"], true);
+    assert_eq!(
+        check["arguments"][5]["value"],
+        json!(["username", "email", "one-time-code"])
+    );
     let arguments = write["arguments"].as_array().unwrap();
     assert_eq!(arguments.last().unwrap()["value"], value.as_str());
     assert_eq!(write["userGesture"], false);
@@ -873,7 +880,7 @@ async fn a_document_that_changed_under_the_check_gets_no_value() {
 #[tokio::test]
 async fn a_field_of_the_wrong_kind_is_refused_before_typing() {
     use bruhs_models::crew::{
-        FILL_FAILED, FILL_GET_FORM, LOGIN_WRONG_ORIGIN, SECRET_FIELD_MISMATCH,
+        FILL_FAILED, FILL_GET_FORM, LOGIN_WRONG_ORIGIN, SECRET_FIELD_MISMATCH, SUBMIT_ONLY_SIGNS_IN,
     };
     use bruhs_models::vault::SecretField;
     use serde_json::json;
@@ -883,6 +890,7 @@ async fn a_field_of_the_wrong_kind_is_refused_before_typing() {
         ("origin", ToolError::Refused(LOGIN_WRONG_ORIGIN.into())),
         ("missing", ToolError::Invalid(FILL_FAILED.into())),
         ("editable", ToolError::Invalid(FILL_FAILED.into())),
+        ("submit", ToolError::Refused(SUBMIT_ONLY_SIGNS_IN.into())),
     ] {
         let value = vault_canary();
         let mut replies = sign_in_page();
@@ -2012,6 +2020,14 @@ pub(super) async fn vault_sites() -> (
                 ("shop.test", "/other") => {
                     "<title>Other</title><button id=back onclick=history.back()>Back</button>"
                 }
+                ("shop.test", "/rename") => concat!(
+                    "<title>Settings</title><form method=post action=/done>",
+                    "<input id=n name=n><button>Rename</button></form>"
+                ),
+                ("shop.test", "/first-step") => concat!(
+                    "<title>Sign in</title><form method=post action=/done>",
+                    "<input id=u name=u autocomplete=username><button>Next</button></form>"
+                ),
                 ("shop.test", "/done") => "<title>Done</title>",
                 ("evil.test", _) => "<title>Evil</title><input id=p type=password autofocus>",
                 _ => "<title>Nothing here</title>",
@@ -2037,7 +2053,7 @@ pub(super) async fn vault_sites() -> (
 async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
     use browser::{Browser, LaunchOptions};
     use bruhs_models::crew::{
-        FILL_FAILED, FILL_GET_FORM, LOGIN_WRONG_ORIGIN, SECRET_FIELD_MISMATCH,
+        FILL_FAILED, FILL_GET_FORM, LOGIN_WRONG_ORIGIN, SECRET_FIELD_MISMATCH, SUBMIT_ONLY_SIGNS_IN,
     };
     use bruhs_models::vault::SecretField;
     use serde_json::json;
@@ -2136,6 +2152,66 @@ async fn live_a_vault_fill_lands_and_a_navigation_mid_fill_types_nothing() {
     .await
     .expect("the form was posted with the value");
     let go = |url: &str| BrowserAction::Navigate { url: url.into() };
+    // Ruling A2 I1: submit only signs in. A form with no password field
+    // and no sign-in autocomplete is refused before anything is typed; a
+    // username step marked as one submits.
+    browser
+        .command(go("http://shop.test/rename"), policy)
+        .await
+        .unwrap();
+    let renamed = vault_canary();
+    let result = browser
+        .fill_secret(
+            "#n",
+            SecretField::Username,
+            origin,
+            &renamed,
+            true,
+            &mut filled,
+        )
+        .await;
+    assert_eq!(refusal(result), SUBMIT_ONLY_SIGNS_IN);
+    let untouched = browser
+        .command(
+            evaluate("[document.querySelector('#n').value,location.pathname]".into()),
+            policy,
+        )
+        .await
+        .unwrap();
+    assert_eq!(untouched.value, json!(["", "/rename"]));
+    browser
+        .command(go("http://shop.test/first-step"), policy)
+        .await
+        .unwrap();
+    let username = vault_canary();
+    browser
+        .fill_secret(
+            "#u",
+            SecretField::Username,
+            origin,
+            &username,
+            true,
+            &mut filled,
+        )
+        .await
+        .unwrap();
+    tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        while !seen
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|request| request.starts_with("shop.test/done ") && request.contains(&username))
+        {
+            tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        }
+    })
+    .await
+    .expect("the username step was posted");
+    assert!(seen
+        .lock()
+        .unwrap()
+        .iter()
+        .all(|request| !request.contains(&renamed)));
     // A form that declares GET is refused before anything is typed.
     browser
         .command(go("http://shop.test/get-explicit"), policy)

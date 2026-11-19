@@ -547,7 +547,7 @@ impl Browser {
         url: &str,
         filled: &mut FilledDocuments,
     ) -> Result<(), ToolError> {
-        let checked = vault_fill::check(&mut self.cdp, selector, field, origin).await?;
+        let checked = vault_fill::check(&mut self.cdp, selector, field, origin, false).await?;
         self.cdp.navigate(url).await?;
         vault_fill::write(&mut self.cdp, checked, field, origin, value, filled).await
     }

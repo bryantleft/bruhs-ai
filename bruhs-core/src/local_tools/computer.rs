@@ -21,8 +21,8 @@ use bruhs_models::{
         COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED, FILL_FAILED,
         FILL_MAY_HAVE_RUN, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, LOGIN_WRONG_ORIGIN, MAX_COMPUTERS,
         NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN, SCREENSHOT_AFTER_FILL,
-        SELECTOR_AFTER_FILL, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
-        VAULT_FOR_BRUHS,
+        SELECTOR_AFTER_FILL, SUBMIT_ONLY_SIGNS_IN, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
+        USE_THE_WINDOW, VAULT_FOR_BRUHS,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
@@ -350,6 +350,11 @@ struct OpenPage {
     /// The documents vault fills touched, on which the bruh's screenshots
     /// and value-probing selectors are refused.
     filled: FilledDocuments,
+    /// The documents the bruh typed on itself, where a vault fill never
+    /// submits (ruling A2 I1), and whether it typed on one that couldn't
+    /// say which it was (then no fill on this page submits).
+    typed: FilledDocuments,
+    typed_unknown: bool,
 }
 
 struct Seat {
@@ -587,6 +592,23 @@ async fn after_fill_refusal(open: &mut OpenPage, action: &BrowserAction) -> Opti
         Some(marks) if !open.filled.holds_any(&marks) => None,
         _ => Some(refusal),
     }
+}
+
+/// Whether a vault fill's submit would press Enter on a document the bruh
+/// typed on itself, which its own `key` must submit through the gate. A
+/// page that can't say which document it is counts as typed on.
+async fn submits_where_typed(open: &mut OpenPage) -> bool {
+    if open.typed_unknown {
+        return true;
+    }
+    if open.typed.is_empty() {
+        return false;
+    }
+    let marks = tokio::time::timeout(PAGE_URL_WAIT, open.page.document_ids())
+        .await
+        .ok()
+        .flatten();
+    marks.is_none_or(|marks| open.typed.holds_any(&marks))
 }
 
 /// Validation errors as the host reports them: a host on this computer is
@@ -905,6 +927,20 @@ impl LocalToolsHost {
             }
             if let Some(refusal) = after_fill_refusal(open, &action).await {
                 return Err(ToolError::Refused(refusal.into()));
+            }
+            if action.types_on_page() {
+                // Marked before it types: a step cut off may have typed.
+                match tokio::time::timeout(PAGE_URL_WAIT, open.page.document_ids())
+                    .await
+                    .ok()
+                    .flatten()
+                {
+                    Some(marks) => open.typed.mark(marks),
+                    None => open.typed_unknown = true,
+                }
+            }
+            if matches!(fill, Some((_, _, true))) && submits_where_typed(open).await {
+                return Err(ToolError::Refused(SUBMIT_ONLY_SIGNS_IN.into()));
             }
             // Anything but a read may have landed before a page dies.
             let acts = action.kind() != BrowserActionKind::Read;
@@ -1435,6 +1471,8 @@ impl LocalToolsHost {
             seat,
             screencast: None,
             filled: FilledDocuments::default(),
+            typed: FilledDocuments::default(),
+            typed_unknown: false,
         })
     }
 

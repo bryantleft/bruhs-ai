@@ -159,6 +159,19 @@ impl BrowserAction {
         }
     }
 
+    /// Whether this step types into the page itself: text, a key, or a
+    /// text fill (never a vault fill). A vault fill never submits on a
+    /// document such a step touched (ruling A2 I1).
+    #[must_use]
+    pub fn types_on_page(&self) -> bool {
+        matches!(
+            self,
+            BrowserAction::Type { .. }
+                | BrowserAction::Key { .. }
+                | BrowserAction::Fill { secret: None, .. }
+        )
+    }
+
     /// Whether a bruh may use this action. Scripts, the console and the
     /// network log are never offered to bruhs and the host refuses them.
     #[must_use]

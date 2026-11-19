@@ -12,7 +12,7 @@ use std::io::Write as _;
 use bruhs_models::{
     crew::{
         secret_input_types, stays_out_of_addresses, FILL_FAILED, FILL_GET_FORM, LOGIN_WRONG_ORIGIN,
-        SECRET_FIELD_MISMATCH,
+        SECRET_FIELD_MISMATCH, SIGN_IN_AUTOCOMPLETE, SUBMIT_ONLY_SIGNS_IN,
     },
     local_tools::{cdp_key, ToolReply},
     vault::SecretField,
@@ -34,8 +34,11 @@ const WORLD: &str = "bruhs-vault";
 
 /// Takes no value. Checks the document's origin, finds the one field,
 /// applies the field-kind rule, refuses (`g`) a field whose form declares
-/// `method=get`, and keeps the field for [`WRITE`].
-const CHECK: &str = r"function(s,o,t,g){if(location.origin!==o)return{ok:false,why:'origin'};let es;try{es=document.querySelectorAll(s)}catch(_){return{ok:false,why:'missing'}}if(es.length!==1)return{ok:false,why:'missing'};const e=es[0];if(!(e instanceof HTMLInputElement)||!t.includes(e.type))return{ok:false,why:'kind'};if(e.disabled||e.readOnly)return{ok:false,why:'editable'};if(g&&e.form&&(e.form.getAttribute('method')||'').trim().toLowerCase()==='get')return{ok:false,why:'get'};globalThis.__bruhsVaultField=e;return{ok:true}}";
+/// `method=get`, refuses a submit (`u`) outside a sign-in step, and keeps
+/// the field for [`WRITE`]. A sign-in step is a field whose form (or the
+/// document, for a field in none) holds a password field, or whose
+/// `autocomplete` names one of `a` ([`SIGN_IN_AUTOCOMPLETE`]).
+const CHECK: &str = r"function(s,o,t,g,u,a){if(location.origin!==o)return{ok:false,why:'origin'};let es;try{es=document.querySelectorAll(s)}catch(_){return{ok:false,why:'missing'}}if(es.length!==1)return{ok:false,why:'missing'};const e=es[0];if(!(e instanceof HTMLInputElement)||!t.includes(e.type))return{ok:false,why:'kind'};if(e.disabled||e.readOnly)return{ok:false,why:'editable'};if(g&&e.form&&(e.form.getAttribute('method')||'').trim().toLowerCase()==='get')return{ok:false,why:'get'};if(u&&!(e.form||document).querySelector('input[type=password]')&&!(e.getAttribute('autocomplete')||'').toLowerCase().split(/\s+/).some(x=>a.includes(x)))return{ok:false,why:'submit'};globalThis.__bruhsVaultField=e;return{ok:true}}";
 
 /// Checks the origin and the kept field again, focuses it (which runs page
 /// code, so the kind is checked once more after), sets the value through
@@ -93,7 +96,7 @@ pub(in crate::local_tools) async fn fill_secret(
     submit: bool,
     filled: &mut FilledDocuments,
 ) -> Result<ToolReply, ToolError> {
-    let checked = check(cdp, selector, field, origin).await?;
+    let checked = check(cdp, selector, field, origin, submit).await?;
     write(cdp, checked, field, origin, value, filled).await?;
     if submit {
         let enter = cdp_key("Enter").ok_or_else(fill_failed)?;
@@ -112,12 +115,13 @@ pub(super) struct Checked {
 }
 
 /// Creates an isolated world on the main frame's document and runs
-/// [`CHECK`] in it. Types nothing.
+/// [`CHECK`] in it, with the submit rule when `submit`. Types nothing.
 pub(super) async fn check(
     cdp: &mut Cdp,
     selector: &str,
     field: SecretField,
     origin: &str,
+    submit: bool,
 ) -> Result<Checked, ToolError> {
     let (frame, marks) = document_marks(cdp).await.map_err(|_| fill_failed())?;
     let world = cdp
@@ -141,6 +145,8 @@ pub(super) async fn check(
                     {"value": origin},
                     {"value": secret_input_types(field)},
                     {"value": stays_out_of_addresses(field)},
+                    {"value": submit},
+                    {"value": SIGN_IN_AUTOCOMPLETE},
                 ],
                 "returnByValue": true,
                 "awaitPromise": false,
@@ -243,6 +249,7 @@ fn answered(result: &Value) -> Result<(), ToolError> {
         Some("origin") => ToolError::Refused(LOGIN_WRONG_ORIGIN.into()),
         Some("kind") => ToolError::Invalid(SECRET_FIELD_MISMATCH.into()),
         Some("get") => ToolError::Refused(FILL_GET_FORM.into()),
+        Some("submit") => ToolError::Refused(SUBMIT_ONLY_SIGNS_IN.into()),
         _ => fill_failed(),
     })
 }

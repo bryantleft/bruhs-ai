@@ -78,6 +78,13 @@ pub const FILL_TEXT_OR_SECRET: &str = "Fill with text or with a vault secret, no
 pub const FILL_NEEDS_VALUE: &str = "Fill needs text or a vault secret.";
 pub const SUBMIT_NEEDS_SECRET: &str =
     "submit goes with a vault secret. Press Enter with the key action.";
+/// A vault fill with `submit` outside a sign-in form, or on a page the bruh
+/// typed on itself (ruling A2 I1). Nothing was typed.
+pub const SUBMIT_ONLY_SIGNS_IN: &str = "submit works only in a sign-in form you haven't typed in yourself. Fill without submit, then press Enter with the key action.";
+/// The `autocomplete` tokens that mark a field of a sign-in step with no
+/// password field (a username page, a one-time code page), where a vault
+/// fill may still submit.
+pub const SIGN_IN_AUTOCOMPLETE: [&str; 3] = ["username", "email", "one-time-code"];
 pub const LOGIN_NOT_GRANTED: &str =
     "That vault login isn't granted to you. The owner can grant it in your Settings.";
 pub const LOGIN_NO_FIELD: &str = "That login has no such field. logins lists each login's fields.";

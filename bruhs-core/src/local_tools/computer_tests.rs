@@ -4,8 +4,8 @@ use bruhs_models::crew::{
     handed_back_note, ACTION_STOPPED, ACTION_TIMED_OUT, CLOSED_BY_OWNER, COMPUTERS_FULL,
     COMPUTER_OFF_DENIAL, FILL_FAILED, FILL_MAY_HAVE_RUN, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL,
     LOGIN_WRONG_ORIGIN, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN,
-    SCREENSHOT_AFTER_FILL, SELECTOR_AFTER_FILL, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
-    USE_THE_WINDOW, VAULT_FOR_BRUHS,
+    SCREENSHOT_AFTER_FILL, SELECTOR_AFTER_FILL, SUBMIT_ONLY_SIGNS_IN, TAKE_CONTROL_FIRST,
+    TURN_ON_IN_SETTINGS, USE_THE_WINDOW, VAULT_FOR_BRUHS,
 };
 use bruhs_models::local_tools::{
     BrowserAction, ComputerInput, ComputerRequest, Control, GrantRequest, MouseButton, MouseKind,
@@ -1401,6 +1401,77 @@ async fn a_login_fills_on_its_origin_and_the_reply_has_no_value() {
         .actions("a")
         .iter()
         .all(|action| !matches!(action, BrowserAction::Fill { .. })));
+}
+
+/// Ruling A2 I1: `submit` never presses Enter on a document the bruh typed
+/// into itself, so a form it edited still goes through the gated `key`.
+/// Nothing is typed when it is refused; another document submits again.
+#[tokio::test]
+async fn a_fill_never_submits_where_the_bruh_typed() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    let page = Some("https://shop.test/in");
+    let value = canary();
+    let fill = |submit| {
+        host.bruh_fill_on(
+            "a",
+            vault_fill("#pw", SecretField::Password, submit),
+            fill_value("https://shop.test", SecretField::Password, &value),
+            page,
+            later(),
+        )
+    };
+    fake.set_document("a", "d1");
+    host.bruh_command_on(
+        "a",
+        BrowserAction::Type {
+            text: "new-name".into(),
+            selector: Some("#rename".into()),
+        },
+        page,
+    )
+    .await
+    .unwrap();
+    assert!(refused_with(fill(true).await, SUBMIT_ONLY_SIGNS_IN));
+    assert!(fake.secret_fills("a").is_empty(), "nothing was typed");
+    // Without submit it fills, and the bruh presses Enter through the gate.
+    fill(false).await.unwrap();
+    for (document, typed) in [
+        (
+            "d2",
+            BrowserAction::Key {
+                key: "Enter".into(),
+            },
+        ),
+        (
+            "d3",
+            BrowserAction::Fill {
+                selector: "#rename".into(),
+                text: Some("x".into()),
+                secret: None,
+                submit: false,
+            },
+        ),
+    ] {
+        fake.set_document("a", document);
+        fill(true).await.unwrap();
+        host.bruh_command_on("a", typed, page).await.unwrap();
+        assert!(refused_with(fill(true).await, SUBMIT_ONLY_SIGNS_IN));
+    }
+    // A click types nothing; a document never typed on submits.
+    fake.set_document("a", "d4");
+    host.bruh_command_on(
+        "a",
+        BrowserAction::Click {
+            selector: "#next".into(),
+        },
+        page,
+    )
+    .await
+    .unwrap();
+    fill(true).await.unwrap();
+    // Going back to a typed document doesn't make it new.
+    fake.set_document("a", "d1");
+    assert!(refused_with(fill(true).await, SUBMIT_ONLY_SIGNS_IN));
 }
 
 fn unavailable_with(result: Result<ToolReply, ToolError>, expected: &str) -> bool {
