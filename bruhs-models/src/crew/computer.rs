@@ -52,6 +52,10 @@ pub const ACTION_STOPPED: &str = "Stopped by the owner.";
 /// closed itself.
 pub const BROWSER_PAGE_STOPPED: &str =
     "Your browser's page stopped. It opens again on your next step, so try the step again.";
+/// The page target ended during a step that acts (input or a navigation),
+/// which may have landed first: a click on something that closes the page.
+pub const BROWSER_PAGE_CLOSED_DURING_STEP: &str =
+    "Your browser's page closed during this step, so the step may have run. It opens again on your next step. Take a snapshot to see where things stand before you do anything else.";
 pub const PAGE_CHANGED: &str =
     "The page changed while the owner decided. Take a snapshot and try again.";
 /// Input on a page the browser didn't name: nothing can say which site it

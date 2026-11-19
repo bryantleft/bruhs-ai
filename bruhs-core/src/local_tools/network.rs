@@ -538,7 +538,12 @@ async fn handle(
         ));
     }
     if is_probe(&request) {
-        return Ok(Failure(StatusCode::OK, GUARD_PROBE_REPLY).response());
+        let mut reply = Failure(StatusCode::OK, GUARD_PROBE_REPLY).response();
+        // Never cached, so no later load can replay it.
+        reply
+            .headers_mut()
+            .insert(header::CACHE_CONTROL, HeaderValue::from_static("no-store"));
+        return Ok(reply);
     }
     if request.method() == Method::CONNECT {
         return tunnel(request, shared, permit).await;

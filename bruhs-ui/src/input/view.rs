@@ -473,7 +473,8 @@ impl Input {
     /// Web `readonly`: the field still takes focus, moves its caret, selects
     /// and copies, but typing, pasting, cutting, deleting and undo do nothing.
     /// The state keeps the flag, so every path that edits refuses, the edit
-    /// menu's Cut and Paste among them, which draw disabled.
+    /// menu's Cut and Paste among them, which draw disabled. Only the app's
+    /// own `set_value` still sets the text.
     pub fn readonly(mut self, readonly: bool) -> Self {
         self.chrome.readonly = readonly;
         self

@@ -313,6 +313,40 @@ async fn a_dead_page_reopens_on_the_next_step() {
     assert_eq!(fake.launches().len(), 3);
 }
 
+/// A step that acts (a click on something that closes the page, say) may
+/// have landed before the page died, so the bruh isn't told to repeat it.
+#[tokio::test]
+async fn a_page_that_dies_during_a_step_that_acts_says_it_may_have_run() {
+    use bruhs_models::crew::{BROWSER_PAGE_CLOSED_DURING_STEP, BROWSER_PAGE_STOPPED};
+    let home = tempfile::tempdir().unwrap();
+    let (host, fake) = LocalToolsHost::with_fake_pages();
+    host.sync_bruhs(vec![bruh_in(home.path(), "a")]).await;
+    host.bruh_command("a", navigate("https://a.test/x"))
+        .await
+        .unwrap();
+    for action in [
+        BrowserAction::Click {
+            selector: "#close".into(),
+        },
+        navigate("https://a.test/y"),
+    ] {
+        fake.kill_target("a");
+        let error = host.bruh_command("a", action).await.unwrap_err();
+        assert_eq!(error.to_string(), BROWSER_PAGE_CLOSED_DURING_STEP);
+        host.bruh_command("a", BrowserAction::Snapshot)
+            .await
+            .unwrap();
+    }
+    assert!(!BROWSER_PAGE_CLOSED_DURING_STEP.contains("try"));
+    // A read changes nothing, so it can simply be tried again.
+    fake.kill_target("a");
+    let error = host
+        .bruh_command("a", BrowserAction::Snapshot)
+        .await
+        .unwrap_err();
+    assert_eq!(error.to_string(), BROWSER_PAGE_STOPPED);
+}
+
 #[tokio::test(start_paused = true)]
 async fn the_idle_reaper_ends_with_its_host() {
     let (host, _fake) = LocalToolsHost::with_fake_pages();

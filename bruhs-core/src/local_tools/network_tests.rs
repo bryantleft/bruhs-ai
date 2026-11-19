@@ -260,6 +260,12 @@ async fn the_guard_answers_its_probe_itself() {
     let probe = format!("GET {GUARD_PROBE_URL} HTTP/1.1\r\nHost: {GUARD_PROBE_HOST}\r\n\r\n");
     let (head, body) = exchange(guard.addr(), &probe).await;
     assert!(head.starts_with("HTTP/1.1 200"), "{head}");
+    // Never cached, so no later load can replay it.
+    assert!(
+        head.to_ascii_lowercase()
+            .contains("cache-control: no-store"),
+        "{head}"
+    );
     assert_eq!(body, GUARD_PROBE_REPLY);
     assert!(heads.lock().unwrap().is_empty());
     // Only that exact name and port.

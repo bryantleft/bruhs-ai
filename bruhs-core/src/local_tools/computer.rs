@@ -16,11 +16,11 @@ use std::{
 use async_trait::async_trait;
 use bruhs_models::{
     crew::{
-        handed_back_note, same_page_host, ACTION_STOPPED, BROWSER_PAGE_STOPPED, CLOSED_BY_OWNER,
-        CLOSE_GRACE_MS, COMPUTERS_FULL, COMPUTER_IDLE_MS, COMPUTER_OFF_DENIAL,
-        COMPUTER_UNSUPPORTED, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL, MAX_COMPUTERS, NOT_FOR_BRUHS,
-        OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
-        USE_THE_WINDOW,
+        handed_back_note, same_page_host, ACTION_STOPPED, BROWSER_PAGE_CLOSED_DURING_STEP,
+        BROWSER_PAGE_STOPPED, CLOSED_BY_OWNER, CLOSE_GRACE_MS, COMPUTERS_FULL, COMPUTER_IDLE_MS,
+        COMPUTER_OFF_DENIAL, COMPUTER_UNSUPPORTED, LIVE_VIEW_ENDED, LOCAL_HOST_DENIAL,
+        MAX_COMPUTERS, NOT_FOR_BRUHS, OWNER_HAS_COMPUTER, PAGE_CHANGED, PAGE_UNKNOWN,
+        TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS, USE_THE_WINDOW,
     },
     local_tools::{
         validate_action, validate_input, BrowserAction, BrowserActionKind, BrowserSession,
@@ -711,17 +711,24 @@ impl LocalToolsHost {
                     }
                 }
             }
+            // Anything but a read may have landed before a page dies.
+            let acts = action.kind() != BrowserActionKind::Read;
             let reply =
                 tokio::time::timeout(self.policy.timeout, open.page.run(action, self.policy))
                     .await
                     .unwrap_or_else(|_| Err(ToolError::Unavailable(ACTION_TIMED_OUT.into())));
             if open.page.gone() {
                 // The page target ended under Chrome. Close it where it was
-                // last, so the next step reopens it, and say the step can
-                // be tried again.
+                // last, so the next step reopens it. A read can be tried
+                // again; a step that acts may have run, so it isn't.
                 drop(slot.close_page(&mut page).await);
                 slot.publish(&page);
-                return Err(ToolError::Unavailable(BROWSER_PAGE_STOPPED.into()));
+                let reason = if acts {
+                    BROWSER_PAGE_CLOSED_DURING_STEP
+                } else {
+                    BROWSER_PAGE_STOPPED
+                };
+                return Err(ToolError::Unavailable(reason.into()));
             }
             let url = tokio::time::timeout(PAGE_URL_WAIT, open.page.url())
                 .await

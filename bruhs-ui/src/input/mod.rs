@@ -240,6 +240,26 @@ mod tests {
         assert!(!events.borrow().contains(&InputEvent::Change));
     }
 
+    /// The public edits honour read-only too, and a composition range the
+    /// platform hands a read-only field leaves no mark behind.
+    #[gpui::test]
+    fn a_read_only_field_refuses_its_public_edits(cx: &mut TestAppContext) {
+        let (field, events, cx) = form_with(cx, true);
+        cx.update(|window, cx| field.update(cx, |field, cx| field.set_value("abc", window, cx)));
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            field.update(cx, |field, cx| {
+                field.insert("x", window, cx);
+                field.replace_all("y", window, cx);
+                field.clean(window, cx);
+                field.replace_text_in_range(Some(0..1), "z", window, cx);
+                assert!(field.marked_text_range(window, cx).is_none());
+            })
+        });
+        assert_eq!(cx.read(|cx| field.read(cx).value()), "abc");
+        assert!(!events.borrow().contains(&InputEvent::Change));
+    }
+
     /// The same menu edits an editable field, so the test above reaches it.
     #[gpui::test]
     fn an_editable_fields_menu_pastes(cx: &mut TestAppContext) {
