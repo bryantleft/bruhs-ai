@@ -276,7 +276,11 @@ impl SecretManager {
         id: &str,
         update: VaultUpdate,
     ) -> Result<VaultEntry, SecretError> {
-        let entry = self.store.vault_update(id, update).await?;
+        // A kept password or setup key is read as a fill reads it: bounded
+        // by the read wait, and joined to a read already waiting (ruling A1
+        // M1).
+        let kept = || self.attended(id, self.keychain(id), false);
+        let entry = self.store.vault_update_keeping(id, update, kept).await?;
         self.refresh_saved_requests(&entry.name).await;
         Ok(entry)
     }

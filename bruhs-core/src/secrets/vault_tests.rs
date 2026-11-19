@@ -405,6 +405,95 @@ async fn a_stuck_keychain_read_is_not_stacked() {
     assert_eq!(attention_of(&manager, &login.id).await, None);
 }
 
+/// Ruling A1 M1: an update that keeps the stored password reads it as a
+/// fill does, so a read stuck on a keychain prompt fails it within the
+/// read wait, and parks no second read.
+#[tokio::test]
+async fn an_update_keeping_the_password_waits_no_longer_than_a_read() {
+    let folder = tempfile::tempdir().unwrap();
+    let manager = manager(folder.path()).with_read_wait(Duration::from_millis(200));
+    let password = canary("password");
+    let login = manager
+        .vault_create(saved_login("Saved", &password, TotpInput::Keep))
+        .await
+        .unwrap();
+    let release = Release::hold(&manager.store);
+    let stuck = {
+        let manager = manager.clone();
+        let id = login.id.clone();
+        tokio::spawn(async move { manager.resolve_login(&id, SecretField::Password).await })
+    };
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while manager.store.held_reads() < 1 {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the fill's read reaches the keychain");
+    let rename = || VaultUpdate {
+        secret: VaultSecretInput::Login {
+            url: "https://shop.test/in".into(),
+            fields: LoginInput::Saved {
+                username: "new@shop.test".into(),
+                password: None,
+                // Adding a code keeps the stored password, so it is read.
+                totp: TotpInput::Set {
+                    setup: SETUP_KEY.into(),
+                },
+            },
+        },
+    };
+    for _ in 0..3 {
+        let started = std::time::Instant::now();
+        let update = tokio::time::timeout(
+            Duration::from_secs(5),
+            manager.vault_update(&login.id, rename()),
+        )
+        .await
+        .expect("the update ends within the read wait");
+        assert!(matches!(update, Err(SecretError::Storage)), "{update:?}");
+        assert!(started.elapsed() < Duration::from_secs(2));
+    }
+    assert_eq!(manager.store.held_reads(), 1, "no read was parked again");
+    assert_eq!(
+        attention_of(&manager, &login.id).await,
+        Some(VaultAttention::KeychainNeedsYou)
+    );
+    drop(release);
+    let _ = stuck.await.unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while !manager
+            .reading
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .is_empty()
+        {
+            tokio::time::sleep(Duration::from_millis(5)).await;
+        }
+    })
+    .await
+    .expect("the parked read ends once the keychain answers");
+    // Answered, the same update keeps the password.
+    let entry = manager.vault_update(&login.id, rename()).await.unwrap();
+    assert_eq!(
+        entry.state,
+        bruhs_models::secrets::SavedCredentialState::Saved
+    );
+    let got = manager
+        .resolve_login(&login.id, SecretField::Password)
+        .await
+        .unwrap();
+    assert_eq!(got.as_str(), password);
+    assert_eq!(
+        manager
+            .resolve_login(&login.id, SecretField::Username)
+            .await
+            .unwrap()
+            .as_str(),
+        "new@shop.test"
+    );
+}
+
 #[tokio::test]
 async fn a_second_read_waits_for_the_first_instead_of_failing() {
     let folder = tempfile::tempdir().unwrap();

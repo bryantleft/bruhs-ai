@@ -569,6 +569,33 @@ impl SecretStore {
         id: &str,
         update: VaultUpdate,
     ) -> Result<VaultEntry, SecretError> {
+        let store = self.clone();
+        let owned = id.to_owned();
+        let kept = move || async move {
+            match tokio::time::timeout(crate::secrets::VAULT_READ_WAIT, store.vault_secret(&owned))
+                .await
+            {
+                Ok(read) => read?.ok_or(SecretError::NotSaved),
+                Err(_) => Err(SecretError::Storage),
+            }
+        };
+        self.vault_update_keeping(id, update, kept).await
+    }
+
+    /// [`Self::vault_update`] whose Saved login reads a part it keeps (the
+    /// stored password or setup key) with `kept`, after the snapshot, so
+    /// the revision check still catches a write that crossed it. The
+    /// manager passes its bounded read, which a stuck keychain prompt fails
+    /// within the read wait without parking another read (ruling A1 M1).
+    pub(in crate::secrets) async fn vault_update_keeping<F>(
+        &self,
+        id: &str,
+        update: VaultUpdate,
+        kept: impl FnOnce() -> F,
+    ) -> Result<VaultEntry, SecretError>
+    where
+        F: std::future::Future<Output = Result<VaultSecret, SecretError>>,
+    {
         let checked = match self.snapshot().await {
             Ok(snapshot) => match snapshot.entry(id) {
                 Ok(Some(existing)) => update
@@ -613,7 +640,7 @@ impl SecretStore {
                 ..
             } => {
                 let (password, totp) = (password.map(Zeroizing::new), TotpChange::from(totp));
-                saved_login_change(&snapshot, &existing, kind, password, totp).await?
+                saved_login_change(&existing, kind, password, totp, kept).await?
             }
         };
         let revision = snapshot.vault()?.revision(id);
@@ -753,14 +780,18 @@ impl SecretStore {
 
 /// The metadata and keychain item of a Saved login update. A missing
 /// password keeps the stored one and `Keep` keeps a stored setup key (and
-/// `totp: true`); a kept part is read before the lock (ruling F13).
-async fn saved_login_change(
-    snapshot: &Snapshot,
+/// `totp: true`); a kept part is read with `kept`, before the lock (ruling
+/// F13).
+async fn saved_login_change<F>(
     existing: &VaultEntry,
     kind: VaultKind,
     password: Option<Zeroizing<String>>,
     totp: TotpChange,
-) -> Result<(VaultKind, Item), SecretError> {
+    kept: impl FnOnce() -> F,
+) -> Result<(VaultKind, Item), SecretError>
+where
+    F: std::future::Future<Output = Result<VaultSecret, SecretError>>,
+{
     let (stored_login, stored_totp) = match &existing.kind {
         VaultKind::Login(LoginMeta {
             fields: LoginFields::Saved { totp, .. },
@@ -772,18 +803,12 @@ async fn saved_login_change(
     let unchanged = stored_login && password.is_none() && keep_totp;
     let keeps_part = stored_login && (password.is_none() || (stored_totp && keep_totp));
     let stored = if keeps_part && !unchanged {
-        let keys = snapshot.keys.handle();
-        let account = account(existing);
-        let text = tokio::task::spawn_blocking(move || keys.read(&account))
-            .await
-            .map_err(|_| SecretError::Catalog)??
-            .ok_or(SecretError::NotSaved)?;
-        Some(LoginBlob::parse(&text)?)
+        Some(kept().await?)
     } else {
         None
     };
     let (stored_password, stored_setup) = match stored {
-        Some(blob) => (Some(blob.password), blob.totp),
+        Some(secret) => (secret.password, secret.totp),
         None => (None, None),
     };
     let totp = match totp {
