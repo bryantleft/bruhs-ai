@@ -179,7 +179,7 @@ pub fn is_forge_host(host: &str) -> bool {
 }
 
 /// The host of a page URL, lowercased, without its port or login.
-fn page_host(url: &str) -> Option<String> {
+pub(super) fn page_host(url: &str) -> Option<String> {
     let rest = url.split_once("://").map_or(url, |(_, rest)| rest);
     let authority = rest.split(['/', '?', '#']).next()?;
     let authority = authority

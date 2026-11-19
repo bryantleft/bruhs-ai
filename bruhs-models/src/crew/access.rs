@@ -130,6 +130,11 @@ pub fn permission_gate(
     if matches!(tool, "Read" | "Grep" | "Glob" | "LS") {
         return gate(access, level, GatedAction::Read);
     }
+    // At every level, as the browser: a fetch of the local Bruhs API could
+    // read the bruh's own live view session or approve its own steps.
+    if tool == "WebFetch" && input["url"].as_str().is_some_and(is_local_url) {
+        return Gate::Deny(LOCAL_HOST_DENIAL);
+    }
     if level == AccessLevel::ReadOnly {
         return Gate::Deny(READ_ONLY_DENIAL);
     }
@@ -277,6 +282,27 @@ pub fn is_local_host(host: &str) -> bool {
     loose_ipv4(bare).is_some_and(|ip| is_local_ip(ip.into()))
 }
 
+/// The host a network tool call of a bruh run reaches, lowercased and
+/// without its port or brackets: SandboxNetworkAccess's `host` and
+/// WebFetch's URL host. `None` for any other tool.
+#[must_use]
+pub fn network_host(tool: &str, input: &Value) -> Option<String> {
+    let target = match tool {
+        "SandboxNetworkAccess" => input["host"].as_str()?,
+        "WebFetch" => input["url"].as_str()?,
+        _ => return None,
+    };
+    super::computer::page_host(target)
+}
+
+/// Whether a URL's host is this computer by name or literal address
+/// ([`is_local_host`]). A name that resolves here takes a lookup the
+/// service makes before it asks.
+#[must_use]
+pub fn is_local_url(url: &str) -> bool {
+    super::computer::page_host(url).is_some_and(|host| is_local_host(&host))
+}
+
 /// Whether an address is this computer: loopback, unspecified, `0.0.0.0/8`,
 /// or the IPv4-mapped IPv6 form of one of those.
 #[must_use]
@@ -404,6 +430,7 @@ pub fn approval_summary(tool: &str, input: &Value) -> String {
             input["host"].as_str().map(|host| format!("Reach {host}")),
             0,
         ),
+        "WebFetch" => (input["url"].as_str().map(|url| format!("Fetch {url}")), 0),
         BRUH_BROWSER_TOOL => (browser_summary(input), 0),
         _ => (None, 0),
     };
@@ -891,6 +918,77 @@ mod tests {
         );
     }
 
+    /// WebFetch of this computer is denied at every level with the same
+    /// reason, like the browser; another site still asks first.
+    #[test]
+    fn web_fetch_never_reaches_this_computer() {
+        let levels = [
+            BruhAccess::default(),
+            BruhAccess {
+                level: AccessLevel::Ask,
+                ..BruhAccess::default()
+            },
+            full(true),
+            full(false),
+        ];
+        let fetch = |access: &BruhAccess, url: &str| {
+            permission_gate(
+                access,
+                AgentProvider::Claude,
+                "WebFetch",
+                &serde_json::json!({"url": url, "prompt": "Read it"}),
+                "/w",
+                true,
+            )
+        };
+        for url in [
+            "http://127.0.0.1:3001/api/reactive/agents/a/computer",
+            "https://bruhs.localhost/api/reactive/agents/a/computer",
+            "http://[::1]/",
+            "http://0x7f000001/",
+            "http://localhost:8080",
+            "https://user@127.0.0.1/x",
+        ] {
+            assert!(is_local_url(url), "{url}");
+            for access in &levels {
+                assert_eq!(
+                    fetch(access, url),
+                    Gate::Deny(LOCAL_HOST_DENIAL),
+                    "{url} {:?}",
+                    access.level
+                );
+            }
+        }
+        assert!(!is_local_url("https://example.com/localhost"));
+        let host = |tool: &str, input: serde_json::Value| network_host(tool, &input);
+        assert_eq!(
+            host(
+                "WebFetch",
+                serde_json::json!({"url": "https://Api.Example.com:8443/x"})
+            )
+            .as_deref(),
+            Some("api.example.com")
+        );
+        assert_eq!(
+            host(
+                "SandboxNetworkAccess",
+                serde_json::json!({"host": "[::1]:3001"})
+            )
+            .as_deref(),
+            Some("::1")
+        );
+        assert_eq!(
+            host(
+                "SandboxNetworkAccess",
+                serde_json::json!({"host": "cdn.example"})
+            )
+            .as_deref(),
+            Some("cdn.example")
+        );
+        assert_eq!(host("Bash", serde_json::json!({"command": "curl x"})), None);
+        assert_eq!(fetch(&full(true), "https://example.com/"), Gate::Approve);
+    }
+
     #[test]
     fn this_computer_is_never_reachable() {
         for host in [
@@ -1119,6 +1217,13 @@ mod tests {
         assert_eq!(
             approval_summary("WebFetch", &serde_json::json!({})),
             "WebFetch"
+        );
+        assert_eq!(
+            approval_summary(
+                "WebFetch",
+                &serde_json::json!({"url": "https://example.com/a", "prompt": "Summarize"})
+            ),
+            "Fetch https://example.com/a"
         );
         assert_eq!(
             approval_summary(
