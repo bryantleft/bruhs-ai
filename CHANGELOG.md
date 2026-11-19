@@ -16,14 +16,13 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   your checkout, measured by Pith's scanner on macOS. Removal keeps the
   branch and refuses uncommitted work, and the task's next message checks
   the branch out again. You can swap the meter for your own command or turn
-  it off; see `docs/worktree-disk.md`.
+  it off.
 - New worktrees start with your checkout's build output on macOS (APFS) and
   on Linux with Btrfs or reflink XFS. Its ignored Cargo `target/debug` and,
   when the lockfiles match, `node_modules` are cloned copy-on-write, so an
   agent's first build or install starts warm at almost no disk cost. On this
   repository, 89 GB of build output arrives in about 7 seconds for under
-  70 MiB. Projects can turn it off or add folders in `.bruhs/config.json`;
-  see `docs/worktree-disk.md`.
+  70 MiB. Projects can turn it off or add folders in `.bruhs/config.json`.
 - The web's Agent workflows page can step back through older workflows, as
   the desktop app's can. Workflow history opens on the newest one; Previous
   workflow and Next workflow move through every workflow you previewed,
@@ -96,25 +95,24 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   workflow step. The copied config names a private file; the session token
   never reaches the clipboard. Disabling, closing or reloading the tab, or
   stopping bruhs-server ends the session. One tab holds the connection at a
-  time. See `docs/local-mcp-workspace.md`.
+  time.
 - The model picker now lists the models your Cursor account can run, under
   Cursor default, on the web and in the desktop app. Bruhs reads them from
   `cursor-agent --list-models`. When Cursor cannot list them, the picker says
   why and how to fix it, such as updating or signing in to the CLI. Typing
-  `cursor/model` still works. See `docs/agent-providers.md`.
+  `cursor/model` still works.
 - Added a task board to Workbench Tasks. Agent tasks sit in four lanes,
   Building, Validating, In review and Ready, placed by what the work is doing:
   verification runs, and the branch and pull requests of each task's worktree,
   including checks, reviews and conflicts. Each card shows its branch, pull
   requests, comments, delegates, model and status, and cards that need you
   sort first. Archive files finished tasks away. The same board appears on the
-  web, the desktop app and a paired phone. See `docs/task-workspaces.md`.
+  web, the desktop app and a paired phone.
 - Added live meeting suggestions. While a meeting records, the meeting dock
   can offer private action items, open questions, conflicts with your tasks or
   calendar, and related records. Add one as a task, copy it, or dismiss it;
   what you keep tunes how selective it is. Choose Off, When I ask (the
   default), Automatic or Automatic with alerts, and the model, under General.
-  See `docs/meeting-suggestions.md`.
 - Added messages between threads. An agent can list your threads, read one,
   and send one a message or start a new thread; the other thread's agent can
   answer back. A message waits in that thread's queue like one you typed, so
@@ -128,7 +126,7 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   instructions that an agent can start a thread with, so one thread can
   orchestrate while others write or run on the models you chose. A project
   can override a role, and a role can narrow your access mode but never widen
-  it. See `docs/model-roles.md`.
+  it.
 - Added models by task under General: choose the model for meeting summaries
   and for each provider's second opinion.
 - Added `/role`. `/role <name>` gives the thread you are in a role, `/role

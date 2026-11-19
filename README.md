@@ -8,7 +8,6 @@ bruhs runs on macOS as a native app (GPUI) and in the browser (a Leptos WASM
 app served by a local Rust server). Agents run through Claude Code, Codex,
 Cursor, Antigravity, Grok or OpenCode, using each CLI's own login and
 configuration. OpenCode connects additional API providers and local models.
-See [agent runtimes and models](docs/agent-providers.md) for setup and access modes.
 
 ## What it does
 
@@ -24,12 +23,9 @@ See [agent runtimes and models](docs/agent-providers.md) for setup and access mo
   browser/device verification, local dictation, ACP runtimes and measured usage.
   Existing chats can explicitly continue as host-owned work. Runs and evidence stay
   on your own machine; remote supervision uses your private network or SSH tunnel.
-  See [setup and boundaries](docs/local-agent-workbench.md),
-  [task workspaces](docs/task-workspaces.md) and [GitHub delivery](docs/local-delivery.md).
 - **Rich replies.** Inline images, video, audio, PDFs, and sandboxed
   interactive charts or widgets on web and desktop, with saved widget state,
-  durable media, published HTML artifacts, and portable reply bundles. See
-  [response formats and boundaries](docs/rich-responses.md).
+  durable media, published HTML artifacts, and portable reply bundles.
 - **Today.** `⌘⇧Y` combines the schedule, ready focus work, overdue triage,
   waiting-on items, relationship follow-ups and recent meeting decisions.
   "Plan my day" proposes conflict-aware focus blocks, previews every change,
@@ -58,34 +54,16 @@ See [agent runtimes and models](docs/agent-providers.md) for setup and access mo
   changes, webhooks, schedules and meeting events while the local server runs.
   One reviewed setup enables each automation, with a single Pause/Resume control.
   Setup can also be proposed through chat; drafts enter workflow review before
-  writes. See [reactive agents](docs/reactive-agents.md).
+  writes.
 - **Private credentials.** When an agent needs a secret, it asks through a
   separate form; the value goes to the OS keychain and never into the chat.
-  See [credential requests](docs/secure-credential-requests.md).
 - **MCP.** `bruhs-mcp` exposes the workspace to MCP clients as typed tools
-  that propose changes for you to approve. See
-  [local MCP setup](docs/local-mcp-workspace.md).
+  that propose changes for you to approve.
 - **Pith storage.** Claude and Codex can use Pith for scoped storage scans,
-  cleanup recommendations and reclaimable-space estimates. See the
-  [connection and live acceptance test](docs/pith-storage.md).
+  cleanup recommendations and reclaimable-space estimates.
 
 Every action is reachable from the command bar (`⌘K`), and most are one
 shortcut away.
-
-The standing [configurability goal](docs/configurability-goal-2026-11-09.md)
-tracks user control over models, project profiles, summaries, privacy,
-recording, automation, memory, and appearance across web and desktop.
-
-The standing [product completion goal](docs/product-completion-goal-2026-11-13.md)
-covers Inbox and every other product pillar, starting with Inbox. Each pillar
-must pass functional, Bruhs design, accessibility, persistence/privacy, and
-web/desktop parity checks before it is called complete. The goal records current
-Inbox gaps and acceptance criteria; it does not claim those features have shipped.
-
-The standing [web and desktop parity goal](docs/web-desktop-parity-goal-2026-11-15.md)
-requires every capability present in either app to reach both, including settings,
-agent tools, and recovery paths. It tracks missing features in both directions
-and the evidence needed to verify equivalent behavior and appearance.
 
 ## Install
 
@@ -171,14 +149,12 @@ through the server's `/api/capture/*` proxy.
   directory, or `BRUHS_MEETING_DB`). Back it up with a SQLite-aware tool.
 - **The local server only answers local pages.** It checks Host and Origin
   before routing and accepts loopback origins plus the ones you configure
-  (`BRUHS_API_URL`, `BRUHS_WEB_ORIGIN`). See
-  [local server access](docs/local-server-access.md).
+  (`BRUHS_API_URL`, `BRUHS_WEB_ORIGIN`).
 - **The capture daemon needs a token.** It writes a fresh bearer token at
   every launch (`capture/daemon-token` in the app data directory,
   owner-only); the server and the desktop read it, the browser never does.
 - **The microphone opens only when you ask.** Recording is explicit;
   audio-driven auto-record needs a separate, expiring opt-in each session.
-  See [microphone activity consent](docs/microphone-activity-consent.md).
 - **Update checks are optional.** Settings → Updates → **Check for updates**
   turns off every online lookup.
 
@@ -253,8 +229,7 @@ is down, **+ Record** is disabled.
   like. Models download on first use. Settings → Transcription also supports a
   configured **OpenAI-compatible server** and its model for the final pass;
   selecting it uploads recorded audio to that server after Stop. Live previews
-  stay on device. See [provider setup](docs/transcription-providers.md) and the
-  standing [quality improvement goal](docs/transcription-goal-2026-11-09.md).
+  stay on device.
 - **Speakers.** Microphone segments are **Me** and system-audio segments
   **Them**. sherpa-onnx voice embeddings split **Them** into Speaker 1,
   Speaker 2…, and match voices to People profiles across meetings (cosine

@@ -23,7 +23,7 @@ cd bruhs-site && npm test           # landing page (Node 22.18+)
 The desktop and web apps are two renderings of one product. Every capability
 present in either must reach both; assess new features and fixes on both
 surfaces. Web is the visual reference. Track missing counterparts and verify
-actual behavior under the [bidirectional parity goal](docs/web-desktop-parity-goal-2026-11-15.md).
+actual behavior on both platforms.
 
 ## The gate
 
