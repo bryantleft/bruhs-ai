@@ -594,6 +594,11 @@ impl AgentOrchestrator {
         self
     }
 
+    pub(crate) fn with_one_password(mut self, one_password: crate::secrets::OnePassword) -> Self {
+        self.secrets = self.secrets.with_one_password(one_password);
+        self
+    }
+
     /// Write `prompt` into the Claude turn that is streaming for `thread_id`.
     pub async fn steer(&self, thread_id: &ThreadId, prompt: &str) -> Result<(), SteerError> {
         let responder = self

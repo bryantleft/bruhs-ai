@@ -128,6 +128,7 @@ pub struct AppState {
 #[derive(Default)]
 pub struct AppStateBuilder {
     secret_store: Option<crate::secrets::SecretStore>,
+    one_password: Option<crate::secrets::OnePassword>,
     connections: Option<crate::connections::Connections>,
     thread_waits: bool,
     meetings: Option<Arc<dyn MeetingStore>>,
@@ -141,6 +142,12 @@ impl AppStateBuilder {
     }
     pub fn secret_store(mut self, store: crate::secrets::SecretStore) -> Self {
         self.secret_store = Some(store);
+        self
+    }
+    /// The `op` that reads 1Password references (default:
+    /// [`crate::secrets::OnePassword::system`]). Tests pass a stand-in.
+    pub fn one_password(mut self, one_password: crate::secrets::OnePassword) -> Self {
+        self.one_password = Some(one_password);
         self
     }
     /// Let an agent wait, inside one tool call, for another thread's reply.
@@ -168,11 +175,14 @@ impl AppStateBuilder {
     /// should run the background loops.
     pub fn build(self) -> AppState {
         let registry = Arc::new(BackgroundTaskRegistry::new());
-        let orchestrator = AgentOrchestrator::new(registry.clone())
-            .with_secret_store(
-                self.secret_store
-                    .unwrap_or_else(crate::secrets::SecretStore::os),
-            )
+        let mut orchestrator = AgentOrchestrator::new(registry.clone()).with_secret_store(
+            self.secret_store
+                .unwrap_or_else(crate::secrets::SecretStore::os),
+        );
+        if let Some(one_password) = self.one_password {
+            orchestrator = orchestrator.with_one_password(one_password);
+        }
+        let orchestrator = orchestrator
             .with_connections(self.connections.unwrap_or_default())
             .with_thread_waits(self.thread_waits);
         let (meeting_events_tx, _) = broadcast::channel(MEETING_EVENT_CHANNEL_CAPACITY);

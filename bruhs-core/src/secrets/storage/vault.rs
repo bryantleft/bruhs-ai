@@ -63,7 +63,6 @@ impl VaultCatalog {
 
 /// An entry's keychain values, read for one use. No `Debug` or `Clone`.
 /// Only the fields of the entry's kind are set.
-#[cfg_attr(not(test), expect(dead_code, reason = "used from Task 6"))]
 pub(in crate::secrets) struct VaultSecret {
     /// A key's value.
     pub value: Option<Zeroizing<String>>,
@@ -158,6 +157,11 @@ impl LoginBlob {
             None => None,
             Some(totp) => {
                 let encoded = Zeroizing::new(totp.secret);
+                // D6's rules, so a damaged blob never reaches the code
+                // maker with a zero period or a digit count it can't hold.
+                if !matches!(totp.digits, 6 | 8) || !(15..=120).contains(&totp.period) {
+                    return Err(SecretError::NotSaved);
+                }
                 let secret = Zeroizing::new(base32_decode(&encoded).ok_or(SecretError::NotSaved)?);
                 Some(StoredTotp {
                     secret,
@@ -700,7 +704,6 @@ impl SecretStore {
     /// F13). `Ok(None)` only for a 1Password kind, which keeps no item; an
     /// unknown entry, or a key or Saved login whose item is missing, is
     /// `NotSaved`.
-    #[cfg_attr(not(test), expect(dead_code, reason = "used from Task 6"))]
     pub(in crate::secrets) async fn vault_secret(
         &self,
         id: &str,

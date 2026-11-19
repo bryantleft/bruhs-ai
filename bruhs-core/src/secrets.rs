@@ -3,30 +3,41 @@
 mod api_client;
 mod database;
 pub(crate) mod mcp;
+mod one_password;
 pub(crate) mod private;
 mod storage;
 #[cfg(test)]
 mod tests;
+mod totp;
 mod trackers;
+#[cfg(test)]
+#[cfg(unix)]
+mod vault_tests;
 
 pub use mcp::{is_mcp_helper, run_mcp_helper};
+pub use one_password::{OnePassword, OnePasswordError};
 pub use storage::SecretStore;
 
 use crate::{OrchestratorEvent, QueryEvent};
 use bruhs_models::{
     ids::ThreadId,
     secrets::{SecretDecision, SecretOperation, SecretRequest},
+    vault::{
+        LoginFields, LoginMeta, SecretField, VaultAttention, VaultCheck, VaultEntry, VaultKind,
+        VaultListing, CHECK_OK,
+    },
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     path::PathBuf,
     process::Stdio,
     sync::{
         atomic::{AtomicBool, Ordering},
         Arc, Mutex, MutexGuard, PoisonError,
     },
+    time::Duration,
 };
 use tokio::{
     io::{AsyncReadExt, AsyncWriteExt},
@@ -39,6 +50,9 @@ use zeroize::Zeroizing;
 /// Matches the existing local MCP bridge's frame budget. Only metadata crosses it.
 const MAX_FRAME_BYTES: usize = 64 * 1024;
 const BROKER_ENV: &str = "BRUHS_SECRET_BROKER";
+/// Longest a vault read waits on the keychain or 1Password (D16). A
+/// keychain prompt nobody answers must not hang a run.
+pub const VAULT_READ_WAIT: Duration = Duration::from_secs(30);
 const INSTRUCTIONS: &str = "When you need a password, token, or API key, use the bruhs_secrets request_secret tool. Never ask the user to paste credentials into chat. Supply the exact command as an argv array and the credential environment variable. The user reviews that operation in a private form. The harness runs it in this turn's working directory and returns ONLY exit status; stdout/stderr are discarded. Never print, persist, or exfiltrate credentials, or request them as ordinary tool arguments. A shell must be explicit in argv. Saved credentials still require approval. Do not claim success on cancellation or nonzero exit. For Google Workspace, Microsoft 365, and GitHub service access, use request_connection with the provider, reason, exact argv, and access-token variable. The private form offers browser SSO using the user's existing session; connecting an account does not approve its operation. Never ask for SSO passwords, browser cookies, or refresh tokens.";
 
 #[derive(Debug, thiserror::Error)]
@@ -60,6 +74,19 @@ pub enum SecretError {
     /// Another save changed the entry first; nothing was written.
     #[error("{}", bruhs_models::vault::ENTRY_CHANGED)]
     Conflict,
+    #[error("{0}")]
+    OnePassword(#[from] OnePasswordError),
+}
+
+impl SecretError {
+    /// What a failed vault read shows on its entry (D15).
+    fn attention(&self) -> VaultAttention {
+        match self {
+            Self::OnePassword(error) => error.attention(),
+            Self::Storage => VaultAttention::KeychainNeedsYou,
+            _ => VaultAttention::Failed,
+        }
+    }
 }
 
 struct Pending {
@@ -82,6 +109,47 @@ pub struct SecretManager {
     pending: Arc<Mutex<HashMap<String, Pending>>>,
     store: SecretStore,
     connections: crate::connections::Connections,
+    one_password: OnePassword,
+    /// The last failed read per entry id, cleared by the next success.
+    attention: Arc<Mutex<HashMap<String, VaultAttention>>>,
+    /// Entries whose keychain item has a read in flight. Each id names one
+    /// keychain account. A read whose waiter gave up keeps its blocking
+    /// thread until the keychain answers; until then another read of that
+    /// item is refused at once instead of parking another thread (F13).
+    reading: Arc<Mutex<HashSet<String>>>,
+    read_wait: Duration,
+}
+
+/// Where one value of an entry comes from.
+enum Source {
+    /// A Saved login's username, kept as metadata.
+    Metadata(String),
+    Keychain(Pick),
+    OnePassword(String),
+}
+
+/// Which part of a keychain item to hand back.
+#[derive(Clone, Copy)]
+enum Pick {
+    Value,
+    Password,
+    Code,
+}
+
+/// Clears an entry's in-flight read when the read itself ends, not when
+/// its waiter gives up.
+struct InFlight {
+    reading: Arc<Mutex<HashSet<String>>>,
+    id: String,
+}
+
+impl Drop for InFlight {
+    fn drop(&mut self) {
+        self.reading
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .remove(&self.id);
+    }
 }
 
 impl Default for SecretManager {
@@ -163,12 +231,226 @@ impl SecretManager {
         }
     }
 
+    /// The server and the desktop build theirs here, so both find `op`
+    /// (ruling F12).
     pub fn new(store: SecretStore) -> Self {
         Self {
             pending: Arc::default(),
             store,
             connections: crate::connections::Connections::default(),
+            one_password: OnePassword::system(),
+            attention: Arc::default(),
+            reading: Arc::default(),
+            read_wait: VAULT_READ_WAIT,
         }
+    }
+
+    /// Read 1Password references with this `op` (tests use a stand-in).
+    #[must_use]
+    pub fn with_one_password(mut self, one_password: OnePassword) -> Self {
+        self.one_password = one_password;
+        self
+    }
+
+    /// Bound vault reads by `wait` instead of [`VAULT_READ_WAIT`].
+    #[cfg(any(test, feature = "test-support"))]
+    #[must_use]
+    pub fn with_read_wait(mut self, wait: Duration) -> Self {
+        self.read_wait = wait;
+        self
+    }
+
+    /// The vault page's listing: every entry with its last failure, and
+    /// whether `op` was found (never running it). `bruhs` is left empty for
+    /// the server to fill.
+    pub async fn vault_listing(&self) -> Result<VaultListing, SecretError> {
+        let mut entries = self.store.vault_list().await?;
+        let attention = self
+            .attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        for entry in &mut entries {
+            entry.attention = attention.get(&entry.id).copied();
+        }
+        drop(attention);
+        Ok(VaultListing {
+            entries,
+            bruhs: Vec::new(),
+            one_password: self.one_password.installed(),
+        })
+    }
+
+    /// A key's value, from the keychain or 1Password. A login, or an id no
+    /// entry has, is `NotSaved`.
+    pub async fn resolve_value(&self, id: &str) -> Result<Zeroizing<String>, SecretError> {
+        let entry = self.known(id).await?;
+        let source = match entry.kind {
+            VaultKind::Value => Source::Keychain(Pick::Value),
+            VaultKind::OnePassword { reference } => Source::OnePassword(reference),
+            VaultKind::Login(_) => return Err(SecretError::NotSaved),
+        };
+        let one_password = matches!(source, Source::OnePassword(_));
+        self.attended(id, self.read(id, source), one_password).await
+    }
+
+    /// One field of a login. A Saved login's username is its metadata, its
+    /// password comes from the keychain and its code is made now from the
+    /// stored setup; a 1Password login reads that field's reference. A
+    /// field the login lacks is `NotSaved`.
+    pub async fn resolve_login(
+        &self,
+        id: &str,
+        field: SecretField,
+    ) -> Result<Zeroizing<String>, SecretError> {
+        let entry = self.known(id).await?;
+        let VaultKind::Login(meta) = entry.kind else {
+            return Err(SecretError::NotSaved);
+        };
+        if !meta.fields().contains(&field) {
+            return Err(SecretError::NotSaved);
+        }
+        let source = match (meta.fields, field) {
+            (LoginFields::Saved { username, .. }, SecretField::Username) => {
+                Source::Metadata(username)
+            }
+            (LoginFields::Saved { .. }, SecretField::Password) => Source::Keychain(Pick::Password),
+            (LoginFields::Saved { .. }, SecretField::Totp) => Source::Keychain(Pick::Code),
+            (LoginFields::OnePassword { username, .. }, SecretField::Username) => {
+                Source::OnePassword(username)
+            }
+            (LoginFields::OnePassword { password, .. }, SecretField::Password) => {
+                Source::OnePassword(password)
+            }
+            (LoginFields::OnePassword { totp, .. }, SecretField::Totp) => {
+                Source::OnePassword(totp.ok_or(SecretError::NotSaved)?)
+            }
+        };
+        let one_password = matches!(source, Source::OnePassword(_));
+        self.attended(id, self.read(id, source), one_password).await
+    }
+
+    /// Read every value of an entry once and drop it: whether that worked,
+    /// with `CHECK_OK` or the failure's owner copy, never a value.
+    pub async fn vault_check(&self, id: &str) -> Result<VaultCheck, SecretError> {
+        let entry = self.known(id).await?;
+        let references = match entry.kind {
+            VaultKind::Value
+            | VaultKind::Login(LoginMeta {
+                fields: LoginFields::Saved { .. },
+                ..
+            }) => None,
+            VaultKind::OnePassword { reference } => Some(vec![reference]),
+            VaultKind::Login(LoginMeta {
+                fields:
+                    LoginFields::OnePassword {
+                        username,
+                        password,
+                        totp,
+                    },
+                ..
+            }) => Some([username, password].into_iter().chain(totp).collect()),
+        };
+        let one_password = references.is_some();
+        let read = async {
+            match references {
+                None => drop(self.keychain(id).await?),
+                Some(references) => {
+                    for reference in references {
+                        drop(self.one_password.read(&reference).await?);
+                    }
+                }
+            }
+            Ok(())
+        };
+        Ok(match self.attended(id, read, one_password).await {
+            Ok(()) => VaultCheck {
+                ok: true,
+                message: CHECK_OK.into(),
+            },
+            Err(error) => VaultCheck {
+                ok: false,
+                message: error.attention().message().into(),
+            },
+        })
+    }
+
+    async fn known(&self, id: &str) -> Result<VaultEntry, SecretError> {
+        self.store
+            .vault_entry(id)
+            .await?
+            .ok_or(SecretError::NotSaved)
+    }
+
+    /// Run a read within the read wait and record its outcome on the
+    /// entry. Past the wait, a 1Password read needs the owner (its `op` is
+    /// killed); a keychain read means a prompt nobody answered.
+    async fn attended<T>(
+        &self,
+        id: &str,
+        read: impl std::future::Future<Output = Result<T, SecretError>>,
+        one_password: bool,
+    ) -> Result<T, SecretError> {
+        let result = match tokio::time::timeout(self.read_wait, read).await {
+            Ok(result) => result,
+            Err(_) if one_password => Err(OnePasswordError::NeedsOwner.into()),
+            Err(_) => Err(SecretError::Storage),
+        };
+        let mut attention = self
+            .attention
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner);
+        match &result {
+            Ok(_) => attention.remove(id),
+            Err(error) => attention.insert(id.to_owned(), error.attention()),
+        };
+        drop(attention);
+        result
+    }
+
+    async fn read(&self, id: &str, source: Source) -> Result<Zeroizing<String>, SecretError> {
+        let pick = match source {
+            Source::Metadata(text) => return Ok(Zeroizing::new(text)),
+            Source::OnePassword(reference) => {
+                return Ok(self.one_password.read(&reference).await?);
+            }
+            Source::Keychain(pick) => pick,
+        };
+        let secret = self.keychain(id).await?;
+        match pick {
+            Pick::Value => secret.value.ok_or(SecretError::NotSaved),
+            Pick::Password => secret.password.ok_or(SecretError::NotSaved),
+            Pick::Code => {
+                let setup = secret.totp.ok_or(SecretError::NotSaved)?;
+                Ok(Zeroizing::new(totp::totp_now(&setup).await))
+            }
+        }
+    }
+
+    /// An entry's keychain item, read on its own task so a waiter that
+    /// gives up leaves the read to finish. While one is in flight, another
+    /// for the same entry is `Storage` at once.
+    async fn keychain(&self, id: &str) -> Result<storage::VaultSecret, SecretError> {
+        if !self
+            .reading
+            .lock()
+            .unwrap_or_else(PoisonError::into_inner)
+            .insert(id.to_owned())
+        {
+            return Err(SecretError::Storage);
+        }
+        let flight = InFlight {
+            reading: self.reading.clone(),
+            id: id.to_owned(),
+        };
+        let store = self.store.clone();
+        let id = id.to_owned();
+        tokio::spawn(async move {
+            let _flight = flight;
+            store.vault_secret(&id).await
+        })
+        .await
+        .map_err(|_| SecretError::Catalog)??
+        .ok_or(SecretError::NotSaved)
     }
 
     pub fn connections(&self) -> &crate::connections::Connections {

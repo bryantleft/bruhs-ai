@@ -13,6 +13,7 @@ use std::{
     sync::{Arc, LockResult, Mutex, MutexGuard, PoisonError},
 };
 use vault::VaultCatalog;
+pub(super) use vault::{StoredTotp, VaultSecret};
 use zeroize::Zeroizing;
 
 mod vault;
@@ -407,6 +408,47 @@ impl SecretStore {
     pub async fn delete_saved(&self, id: &str) -> Result<(), SecretError> {
         let id = id.to_owned();
         self.access(move |vault| vault.delete_saved(&id)).await
+    }
+}
+
+/// Hooks for the manager's tests, on a memory or file test store.
+#[cfg(test)]
+impl SecretStore {
+    fn memory_keys(&self) -> MemoryKeys {
+        match &self.0 {
+            Backend::Memory(vault) => {
+                match &vault.lock().unwrap_or_else(PoisonError::into_inner).keys {
+                    Keys::Memory(keys) => keys.clone(),
+                    _ => unreachable!("memory stores keep memory keys"),
+                }
+            }
+            Backend::FileTest(_, keys) => keys.clone(),
+            _ => unreachable!("tests use memory keys"),
+        }
+    }
+
+    /// While held, every keychain read waits, like an unanswered prompt.
+    pub(super) fn hold_reads(&self, hold: bool) {
+        self.memory_keys().hold_reads(hold);
+    }
+
+    /// How many keychain reads are waiting on [`Self::hold_reads`].
+    pub(super) fn held_reads(&self) -> usize {
+        self.memory_keys().held_reads()
+    }
+
+    /// Remove a keychain item behind the catalog's back.
+    pub(super) fn remove_item(&self, account: &str) {
+        self.memory_keys()
+            .remove(account)
+            .expect("test stores accept removals");
+    }
+
+    /// Write a keychain item as is, to stand in for a damaged one.
+    pub(super) fn put_item(&self, account: &str, text: &str) {
+        self.memory_keys()
+            .write(account, text)
+            .expect("test stores accept writes");
     }
 }
 
