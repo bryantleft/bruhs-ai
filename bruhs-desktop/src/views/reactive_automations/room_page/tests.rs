@@ -24,6 +24,7 @@ fn named(id: &str, name: &str) -> BruhState {
         status: BruhStatus::Asleep,
         next_wake_ms: None,
         unread: 0,
+        computer: false,
     }
 }
 
@@ -671,6 +672,36 @@ fn only_a_changed_crew_frame_reads_the_snapshot_again(cx: &mut gpui::TestAppCont
         panel.apply_crew_signal(frame(vec![working]), cx)
     });
     assert!(reads(&panel, cx), "the room changed");
+}
+
+/// A run that started and ended between two frames leaves the bruhs and
+/// rooms as they were; its newer `runs_at` still reads the snapshot again.
+#[gpui::test]
+fn a_frame_with_a_newer_run_reads_the_snapshot_again(cx: &mut gpui::TestAppContext) {
+    let crew = vec![named("a", "Ada")];
+    let (panel, cx) = open(
+        cx,
+        snapshot(CREW_PROTOCOL, crew.clone(), vec![room(&["a"], None)]),
+    );
+    let frame = |ms: i64| OutboxSignal {
+        bruhs: crew.clone(),
+        rooms: vec![room(&["a"], None)],
+        protocol: CREW_PROTOCOL,
+        runs_at: Some(bruhs_models::EpochMs::saturating_from_i64(ms)),
+        ..OutboxSignal::default()
+    };
+    let reads = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+        panel.read_with(cx, |panel, _| panel.last_refresh.is_some())
+    };
+    panel.update(cx, |panel, cx| {
+        panel.apply_crew_signal(frame(10), cx);
+        panel.reading = false;
+        panel.last_refresh = None;
+        panel.apply_crew_signal(frame(10), cx);
+    });
+    assert!(!reads(&panel, cx), "nothing changed");
+    panel.update(cx, |panel, cx| panel.apply_crew_signal(frame(20), cx));
+    assert!(reads(&panel, cx), "a run changed");
 }
 
 /// Up and Down move through the `@` list and wrap; Enter picks the

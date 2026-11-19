@@ -30,6 +30,10 @@ and [bruhs.ai/changelog](https://bruhs.ai/changelog) shows the same entries.
   and a bruh's reply that mentions another hands the work on, up to 6 times
   in a row. Approvals show in the room. Agents in your threads can message a
   bruh with message_bruh. See `docs/crew.md`.
+- Computer: a bruh can have its own browser that keeps its logins. Watch it
+  live in the bruh's Computer tab, take control, and hand it back; the bruh
+  waits while you have it. Deleting a bruh now deletes its private folder
+  and browser. See `docs/crew.md`.
 - The desktop app zooms like a browser: ⌘+ and ⌘− (or View → Zoom In and
   Zoom Out) step from 67% to 300%, ⌘0 returns to 100%, and the level is
   remembered. Pages reflow for the larger text at the web's widths.

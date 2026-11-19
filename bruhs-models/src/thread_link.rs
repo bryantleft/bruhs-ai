@@ -1045,6 +1045,7 @@ mod tests {
             status,
             next_wake_ms: None,
             unread: 0,
+            computer: false,
         };
         let crew = [
             bruh(A, "Ada", crate::crew::BruhStatus::NeedsYou),

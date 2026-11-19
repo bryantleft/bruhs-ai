@@ -1,10 +1,11 @@
 //! A bruh's settings: who it is, how it runs, what it may do and its face.
 //! Save sends `settings_commands`, so a face edit never touches the agent.
 
-use bruhs_models::agent::ModelId;
+use bruhs_models::agent::{AgentProvider, ModelId};
 use bruhs_models::crew::{
-    access_options, clamp_level, current_settings, settings_commands, AccessLevel, BruhAccess,
-    BruhLook, BruhSettings, SEND_AS_ME_HINT,
+    access_options, clamp_level, computer_switch_follows, computer_switch_off,
+    computer_switch_reason, current_settings, settings_commands_for, AccessLevel, BruhAccess,
+    BruhLook, BruhSettings, COMPUTER_HINT, COMPUTER_SWITCH, SEND_AS_ME_HINT,
 };
 use bruhs_models::logic::run_place::CLAUDE_EFFORTS;
 use leptos::prelude::*;
@@ -48,6 +49,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
     let level = RwSignal::new(AccessLevel::ReadOnly);
     let send_as_me = RwSignal::new(false);
     let can_deliver = RwSignal::new(false);
+    let computer = RwSignal::new(false);
     let look = RwSignal::new(BruhLook::default());
     let invalid = RwSignal::new(None::<String>);
     let edited = move || BruhSettings {
@@ -61,6 +63,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
             send_as_me: send_as_me.get(),
             can_deliver: can_deliver.get(),
         },
+        computer: computer.get(),
     };
 
     // Fill the form from the service, unless the owner has unsaved edits.
@@ -82,6 +85,7 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
         level.set(next.access.level);
         send_as_me.set(next.access.send_as_me);
         can_deliver.set(next.access.can_deliver);
+        computer.set(next.computer);
         look.set(next.look.clone());
         shown.set_value(Some(next));
     });
@@ -99,6 +103,51 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
     Effect::new(move |_| {
         if level.get() != AccessLevel::Full && can_deliver.get_untracked() {
             can_deliver.set(false);
+        }
+    });
+
+    // The Computer switch is off while the bruh can't have one, or the
+    // service can't run one. It then shows the stored value, which stays
+    // stored for when the bruh can again.
+    let computer_block = Memo::new(move |_| {
+        computer_switch_reason(
+            level.get(),
+            AgentProvider::for_model(&model.get()),
+            data.protocol(),
+            data.computer_unsupported.get(),
+        )
+    });
+    let computer_off = Signal::derive(move || {
+        computer_switch_off(
+            level.get(),
+            AgentProvider::for_model(&model.get()),
+            data.protocol(),
+        )
+    });
+    // It also follows the stored value while the owner hasn't changed it
+    // since the fill, even with other edits unsaved, and once the owner's
+    // value matches it (`computer_switch_follows`). Tracked, so a change
+    // from elsewhere shows at once and a Save made here can't put a stale
+    // value back.
+    Effect::new(move |_| {
+        let off = computer_off.get();
+        let Some(stored) = saved.with(|saved| saved.as_ref().map(|saved| saved.computer)) else {
+            return;
+        };
+        let Some(filled) = shown.with_value(|shown| shown.as_ref().map(|shown| shown.computer))
+        else {
+            return;
+        };
+        let switch = computer.get();
+        if let Some(stored) = computer_switch_follows(switch, filled, stored, off) {
+            shown.update_value(|shown| {
+                if let Some(shown) = shown.as_mut() {
+                    shown.computer = stored;
+                }
+            });
+            if switch != stored {
+                computer.set(stored);
+            }
         }
     });
 
@@ -122,7 +171,12 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
         let commands = id.with_value(|id| {
             let agent = snapshot.agents.iter().find(|agent| agent.id == *id)?;
             let state = snapshot.bruhs.iter().find(|bruh| bruh.agent_id == *id)?;
-            Some(settings_commands(agent, state, &edited))
+            Some(settings_commands_for(
+                data.protocol(),
+                agent,
+                state,
+                &edited,
+            ))
         });
         for command in commands.unwrap_or_default() {
             data.send.run(command);
@@ -196,6 +250,25 @@ pub fn BruhSettingsTab(agent_id: String) -> impl IntoView {
                         </Show>
                     </div>
                     <Switch label="Can deliver" checked=Signal::derive(move || can_deliver.get()) disabled=Signal::derive(move || level.get() != AccessLevel::Full) on_change=Callback::new(move |on| can_deliver.set(on)) />
+                </div>
+                <div class="flex min-h-control items-center justify-between gap-3">
+                    <div class="min-w-0">
+                        <span class="text-label-sm text-rambutan-300">{COMPUTER_SWITCH}</span>
+                        <p id="bruh-computer-hint" data-bruh-computer-hint="" class="text-label-sm text-rambutan-500">{COMPUTER_HINT}</p>
+                        {move || computer_block.get().map(|reason| view! { <p id="bruh-computer-reason" data-bruh-computer-reason="" class="text-label-sm text-rambutan-500">{reason}</p> })}
+                    </div>
+                    // The label makes the whole 44px touch target press the switch.
+                    <label class="bruhs-control inline-flex shrink-0 items-center justify-center">
+                        <Switch
+                            label=COMPUTER_SWITCH
+                            checked=Signal::derive(move || computer.get())
+                            disabled=computer_off
+                            on_change=Callback::new(move |on| computer.set(on))
+                            attr:data-bruh-computer=""
+                            attr:title=move || computer_block.get()
+                            attr:aria-describedby=move || if computer_block.with(Option::is_some) { "bruh-computer-hint bruh-computer-reason" } else { "bruh-computer-hint" }
+                        />
+                    </label>
                 </div>
             </section>
             <section class=SECTION aria-labelledby="bruh-settings-face">

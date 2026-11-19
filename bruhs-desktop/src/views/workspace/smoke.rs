@@ -437,7 +437,13 @@ impl Workspace {
                 let room_id = scene.trim_start_matches("room-settings:").to_string();
                 self.open_room_dialog(Some(room_id), window, cx);
             }
-            scene if scene.starts_with("bruh:") || scene.starts_with("bruh-settings:") => {
+            // The Computer tab, and with `-held` the owner holding control.
+            scene
+                if scene.starts_with("bruh:")
+                    || scene.starts_with("bruh-settings:")
+                    || scene.starts_with("bruh-computer:")
+                    || scene.starts_with("bruh-computer-held:") =>
+            {
                 let (kind, agent_id) = scene.split_once(':').unwrap_or_default();
                 self.activate_sidebar_view(
                     AppView::Bruh {
@@ -446,9 +452,20 @@ impl Workspace {
                     window,
                     cx,
                 );
-                if kind == "bruh-settings" {
-                    self.reactive_automations
-                        .update(cx, |panel, cx| panel.smoke_show_bruh_settings(agent_id, cx));
+                match kind {
+                    "bruh-settings" => self
+                        .reactive_automations
+                        .update(cx, |panel, cx| panel.smoke_show_bruh_settings(agent_id, cx)),
+                    "bruh-computer" | "bruh-computer-held" => {
+                        self.reactive_automations.update(cx, |panel, cx| {
+                            panel.smoke_show_bruh_computer(
+                                agent_id,
+                                kind == "bruh-computer-held",
+                                cx,
+                            );
+                        });
+                    }
+                    _ => {}
                 }
             }
             "notice" => self

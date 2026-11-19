@@ -4,7 +4,8 @@
 use serde_json::Value;
 use sha2::{Digest as _, Sha256};
 
-use super::{AccessLevel, BruhAccess};
+use super::computer::{browser_detail, browser_summary};
+use super::{AccessLevel, BruhAccess, BRUH_BROWSER_TOOL};
 use crate::agent::AgentProvider;
 
 /// How long a run waits for the owner to answer an approval.
@@ -32,6 +33,14 @@ pub const APP_TOOL_DENIAL: &str = "App tools aren't available to bruh runs.";
 pub const DELIVERY_DENIAL: &str =
     "Pushing, merging and opening pull requests need Full access with Can deliver on.";
 pub const LOCAL_HOST_DENIAL: &str = "Bruhs can't reach services on this computer.";
+/// A file tool call whose path, once resolved, is in a bruh's browser
+/// profile, which holds the owner's logins.
+pub const PROFILE_DENIAL: &str =
+    "That path leads into a bruh's browser profile, which holds the owner's logins. Leave it alone.";
+/// A file tool call that opens a file in the bruhs' folders with a second
+/// name: a hard link, which could be a profile file under another path.
+pub const LINKED_FILE_DENIAL: &str =
+    "That file is also linked somewhere else, so it could be a private file. Bruhs doesn't open linked files in a bruh's folder.";
 
 /// Forge hosts a shell command can act on as the owner. Plain `gh`, `glab`
 /// and commands naming one of these ask first at Full; see
@@ -128,6 +137,11 @@ pub fn permission_gate(
     }
     if matches!(tool, "Read" | "Grep" | "Glob" | "LS") {
         return gate(access, level, GatedAction::Read);
+    }
+    // At every level, as the browser: a fetch of the local Bruhs API could
+    // read the bruh's own live view session or approve its own steps.
+    if tool == "WebFetch" && input["url"].as_str().is_some_and(is_local_url) {
+        return Gate::Deny(LOCAL_HOST_DENIAL);
     }
     if level == AccessLevel::ReadOnly {
         return Gate::Deny(READ_ONLY_DENIAL);
@@ -270,13 +284,44 @@ pub fn is_local_host(host: &str) -> bool {
     if bare == "localhost" || bare.ends_with(".localhost") {
         return true;
     }
-    let local_v4 = |ip: std::net::Ipv4Addr| ip.is_loopback() || ip.octets()[0] == 0;
     if let Ok(ip) = bare.parse::<std::net::Ipv6Addr>() {
-        return ip.is_loopback()
-            || ip.is_unspecified()
-            || ip.to_ipv4_mapped().is_some_and(local_v4);
+        return is_local_ip(ip.into());
     }
-    loose_ipv4(bare).is_some_and(local_v4)
+    loose_ipv4(bare).is_some_and(|ip| is_local_ip(ip.into()))
+}
+
+/// The host a network tool call of a bruh run reaches, lowercased and
+/// without its port or brackets: SandboxNetworkAccess's `host` and
+/// WebFetch's URL host. `None` for any other tool.
+#[must_use]
+pub fn network_host(tool: &str, input: &Value) -> Option<String> {
+    let target = match tool {
+        "SandboxNetworkAccess" => input["host"].as_str()?,
+        "WebFetch" => input["url"].as_str()?,
+        _ => return None,
+    };
+    super::computer::page_host(target)
+}
+
+/// Whether a URL's host is this computer by name or literal address
+/// ([`is_local_host`]). A name that resolves here takes a lookup the
+/// service makes before it asks.
+#[must_use]
+pub fn is_local_url(url: &str) -> bool {
+    super::computer::page_host(url).is_some_and(|host| is_local_host(&host))
+}
+
+/// Whether an address is this computer: loopback, unspecified, `0.0.0.0/8`,
+/// or the IPv4-mapped IPv6 form of one of those.
+#[must_use]
+pub fn is_local_ip(ip: std::net::IpAddr) -> bool {
+    let local_v4 = |ip: std::net::Ipv4Addr| ip.is_loopback() || ip.octets()[0] == 0;
+    match ip {
+        std::net::IpAddr::V4(ip) => local_v4(ip),
+        std::net::IpAddr::V6(ip) => {
+            ip.is_loopback() || ip.is_unspecified() || ip.to_ipv4_mapped().is_some_and(local_v4)
+        }
+    }
 }
 
 /// An IPv4 address in the forms `inet_aton` accepts: one to four parts,
@@ -393,6 +438,8 @@ pub fn approval_summary(tool: &str, input: &Value) -> String {
             input["host"].as_str().map(|host| format!("Reach {host}")),
             0,
         ),
+        "WebFetch" => (input["url"].as_str().map(|url| format!("Fetch {url}")), 0),
+        BRUH_BROWSER_TOOL => (browser_summary(input), 0),
         _ => (None, 0),
     };
     let summary = summary.unwrap_or_else(|| tool.to_string());
@@ -432,6 +479,7 @@ pub fn approval_detail(tool: &str, input: &Value) -> Option<String> {
             command.to_string()
         }
         "SandboxNetworkAccess" => return None,
+        BRUH_BROWSER_TOOL => browser_detail(input, SUMMARY_MAX_CHARS)?,
         "Write" => input["content"].as_str()?.to_string(),
         "Edit" => edit_text(input),
         "MultiEdit" => input["edits"]
@@ -474,15 +522,19 @@ pub fn approval_fingerprint(tool: &str, input: &Value) -> String {
     format!("{:x}", Sha256::digest(format!("{tool}\n{input}")))
 }
 
-/// The opening lines of every bruh run: its name and what it may do.
+/// The opening lines of every bruh run: its name, what it may do and, when
+/// its Computer is on, its browser.
 #[must_use]
-pub fn run_preamble(name: &str, access: &BruhAccess, level: AccessLevel) -> String {
+pub fn run_preamble(name: &str, access: &BruhAccess, level: AccessLevel, computer: bool) -> String {
     let access_line = match level {
         AccessLevel::ReadOnly => "Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.",
         AccessLevel::Ask => "Access: ask first. You may edit files and run commands in your working folder. Each change waits for the owner's approval; if one is denied, continue without it and say so.",
         AccessLevel::Full => "Access: full. You may edit files and run commands in your working folder without asking.",
     };
     let mut lines = vec![format!("Your name is {name}."), access_line.to_string()];
+    if computer {
+        lines.push("You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back.".to_string());
+    }
     if gate(access, level, GatedAction::Delivery) != Gate::Allow {
         lines.push("Never push, merge or open pull requests.".to_string());
     }
@@ -874,6 +926,77 @@ mod tests {
         );
     }
 
+    /// WebFetch of this computer is denied at every level with the same
+    /// reason, like the browser; another site still asks first.
+    #[test]
+    fn web_fetch_never_reaches_this_computer() {
+        let levels = [
+            BruhAccess::default(),
+            BruhAccess {
+                level: AccessLevel::Ask,
+                ..BruhAccess::default()
+            },
+            full(true),
+            full(false),
+        ];
+        let fetch = |access: &BruhAccess, url: &str| {
+            permission_gate(
+                access,
+                AgentProvider::Claude,
+                "WebFetch",
+                &serde_json::json!({"url": url, "prompt": "Read it"}),
+                "/w",
+                true,
+            )
+        };
+        for url in [
+            "http://127.0.0.1:3001/api/reactive/agents/a/computer",
+            "https://bruhs.localhost/api/reactive/agents/a/computer",
+            "http://[::1]/",
+            "http://0x7f000001/",
+            "http://localhost:8080",
+            "https://user@127.0.0.1/x",
+        ] {
+            assert!(is_local_url(url), "{url}");
+            for access in &levels {
+                assert_eq!(
+                    fetch(access, url),
+                    Gate::Deny(LOCAL_HOST_DENIAL),
+                    "{url} {:?}",
+                    access.level
+                );
+            }
+        }
+        assert!(!is_local_url("https://example.com/localhost"));
+        let host = |tool: &str, input: serde_json::Value| network_host(tool, &input);
+        assert_eq!(
+            host(
+                "WebFetch",
+                serde_json::json!({"url": "https://Api.Example.com:8443/x"})
+            )
+            .as_deref(),
+            Some("api.example.com")
+        );
+        assert_eq!(
+            host(
+                "SandboxNetworkAccess",
+                serde_json::json!({"host": "[::1]:3001"})
+            )
+            .as_deref(),
+            Some("::1")
+        );
+        assert_eq!(
+            host(
+                "SandboxNetworkAccess",
+                serde_json::json!({"host": "cdn.example"})
+            )
+            .as_deref(),
+            Some("cdn.example")
+        );
+        assert_eq!(host("Bash", serde_json::json!({"command": "curl x"})), None);
+        assert_eq!(fetch(&full(true), "https://example.com/"), Gate::Approve);
+    }
+
     #[test]
     fn this_computer_is_never_reachable() {
         for host in [
@@ -1105,6 +1228,13 @@ mod tests {
         );
         assert_eq!(
             approval_summary(
+                "WebFetch",
+                &serde_json::json!({"url": "https://example.com/a", "prompt": "Summarize"})
+            ),
+            "Fetch https://example.com/a"
+        );
+        assert_eq!(
+            approval_summary(
                 "SandboxNetworkAccess",
                 &serde_json::json!({"host": "example.com"})
             ),
@@ -1134,15 +1264,17 @@ mod tests {
 
     #[test]
     fn the_preamble_names_the_bruh_and_its_access() {
-        let text = run_preamble("Penny", &full(false), AccessLevel::Full);
+        let text = run_preamble("Penny", &full(false), AccessLevel::Full, false);
         assert!(text.starts_with("Your name is Penny."));
         assert!(
             text.contains("without asking")
                 && text.contains("Never push, merge or open pull requests.")
         );
-        assert!(!run_preamble("Penny", &full(true), AccessLevel::Full).contains("Never push"));
+        assert!(
+            !run_preamble("Penny", &full(true), AccessLevel::Full, false).contains("Never push")
+        );
         assert_eq!(
-            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly),
+            run_preamble("Penny", &BruhAccess::default(), AccessLevel::ReadOnly, false),
             "Your name is Penny.\n\
              Access: read only. You can read files in your working folder but change nothing. Produce a reviewable answer or draft.\n\
              Never push, merge or open pull requests.\n\
@@ -1156,9 +1288,44 @@ mod tests {
                 ..Default::default()
             },
             AccessLevel::Ask,
+            false,
         );
         assert!(ask.contains("Access: ask first.") && ask.contains("Never push"));
-        assert!(run_preamble("Penny", &full(true), AccessLevel::Full)
+        assert!(run_preamble("Penny", &full(true), AccessLevel::Full, false)
             .ends_with("Never send messages in the owner's name."));
+    }
+
+    #[test]
+    fn local_addresses_include_mapped_and_unspecified_forms() {
+        for ip in [
+            "127.0.0.1",
+            "::1",
+            "0.0.0.0",
+            "::",
+            "::ffff:127.0.0.1",
+            "0.1.2.3",
+        ] {
+            assert!(is_local_ip(ip.parse().unwrap()), "{ip}");
+        }
+        for ip in ["10.0.0.1", "192.168.1.2", "8.8.8.8", "2001:db8::1"] {
+            assert!(!is_local_ip(ip.parse().unwrap()), "{ip}");
+        }
+    }
+
+    #[test]
+    fn the_run_preamble_mentions_the_browser_only_when_on() {
+        let full = BruhAccess {
+            level: AccessLevel::Full,
+            ..Default::default()
+        };
+        let on = run_preamble("Ada", &full, AccessLevel::Full, true);
+        assert!(on.contains("the local_browser tool"));
+        let lines: Vec<&str> = on.lines().collect();
+        assert!(lines[1].starts_with("Access: full."), "{on}");
+        assert_eq!(
+            lines[2],
+            "You have your own browser, the local_browser tool. It keeps its logins between runs. If the owner takes control, your next step waits until they hand it back."
+        );
+        assert!(!run_preamble("Ada", &full, AccessLevel::Full, false).contains("local_browser"));
     }
 }

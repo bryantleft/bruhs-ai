@@ -6,11 +6,11 @@ use super::{
     always_on, cancel_runs, decode, enabled_agent, encode, get, new_run, queue_capacity, records,
     required, rooms, run_record, save_run, ReactiveError,
 };
-use crate::reactive::clock;
+use crate::{local_tools::BruhComputer, reactive::clock};
 use bruhs_models::{
     agent::AgentProvider,
     crew::{
-        approval_detail, approval_fingerprint, approval_summary, effective_level,
+        approval_detail, approval_fingerprint, approval_summary, computer_on, effective_level,
         level_unavailable, rail_order, status_for, ApprovalRequest, ApprovalState, BruhAccess,
         BruhLook, BruhProfile, BruhState,
     },
@@ -24,6 +24,7 @@ use bruhs_models::{
 };
 use rusqlite::{params, Connection, OptionalExtension};
 use serde_json::Value;
+use std::path::Path;
 
 const ACCESS_CHANGED: &str = "Access changed. Review the new access before starting another run.";
 /// How long a late approval's grant stays usable.
@@ -107,6 +108,59 @@ pub(in crate::reactive) fn set_bruh(
             ..old
         },
     )
+}
+
+/// Turn the bruh's Computer switch on or off. Its runs and approvals stay:
+/// the host closes the browser of a bruh whose Computer goes off.
+pub(in crate::reactive) fn set_computer(
+    connection: &Connection,
+    agent_id: &str,
+    on: bool,
+) -> Result<(), ReactiveError> {
+    required::<ReactiveAgent>(connection, "reactive_agents", agent_id, "agent")?;
+    let old = profile(connection, agent_id)?;
+    if old.computer == on {
+        return Ok(());
+    }
+    save(
+        connection,
+        agent_id,
+        &BruhProfile {
+            computer: on,
+            ..old
+        },
+    )
+}
+
+/// The bruhs whose Computer is on (switched on, and available at their
+/// access and model), with their profile under `home`. Disabled agents and
+/// report agents have none.
+pub(in crate::reactive) fn computers(
+    connection: &Connection,
+    home: &Path,
+) -> Result<Vec<BruhComputer>, ReactiveError> {
+    let mut computers = Vec::new();
+    for agent in records::<ReactiveAgent>(connection, "reactive_agents")?
+        .into_iter()
+        .filter(|agent| agent.enabled && managed_preset_id(&agent.id).is_none())
+    {
+        let profile = profile(connection, &agent.id)?;
+        let provider = AgentProvider::for_model(&agent.model);
+        if !computer_on(profile.computer, &profile.access, provider) {
+            continue;
+        }
+        // The path comes from the store's id, never from a principal.
+        let Ok(tree) = crate::reactive::computers::bruh_tree(home, &agent.id) else {
+            continue;
+        };
+        computers.push(BruhComputer {
+            paused: profile.paused_at.is_some(),
+            profile_dir: tree.join("browser"),
+            agent_id: agent.id,
+            name: agent.name,
+        });
+    }
+    Ok(computers)
 }
 
 const STOPPED: &str = "Stopped by the owner.";
@@ -538,6 +592,7 @@ pub(in crate::reactive) fn bruh_states(
             effort: profile.effort,
             next_wake_ms,
             unread,
+            computer: profile.computer,
         });
     }
     rail_order(&mut states);

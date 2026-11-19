@@ -37,9 +37,6 @@ const CHECK_RADIUS_SEED_PX: f32 = 4.0;
 const CHECK_FILL_OPACITY: f32 = 0.05;
 const CHECK_RING_OPACITY: f32 = 0.15;
 const MEMBER_HOVER_OPACITY: f32 = 0.40;
-/// Web `bg-longan-950/60 inset-ring-longan-700/50` around the confirm.
-const CONFIRM_FILL_OPACITY: f32 = 0.60;
-const CONFIRM_RING_OPACITY: f32 = 0.50;
 const LEAD_DROPDOWN: &str = "desktop-room-lead";
 
 /// What the dialog sent and is waiting on.

@@ -9,6 +9,7 @@ pub mod calendar_google;
 pub mod capture_proxy;
 pub mod capture_status;
 pub mod cli;
+pub mod computer;
 pub mod connections;
 pub mod coordination;
 pub mod database;

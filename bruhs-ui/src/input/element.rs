@@ -17,6 +17,8 @@ pub(super) struct EditorElement<K: FieldKind> {
     pub text: StyledText,
     pub caret_color: Hsla,
     pub disabled: bool,
+    /// No platform text input (typing, IME), but the mouse still selects.
+    pub readonly: bool,
 }
 
 pub(super) struct Prepainted {
@@ -188,11 +190,13 @@ impl<K: FieldKind> Element for EditorElement<K> {
         let focus = gpui::Focusable::focus_handle(self.state.read(cx), cx);
         let focused = focus.is_focused(window);
         if !self.disabled {
-            window.handle_input(
-                &focus,
-                ElementInputHandler::new(bounds, self.state.clone()),
-                cx,
-            );
+            if !self.readonly {
+                window.handle_input(
+                    &focus,
+                    ElementInputHandler::new(bounds, self.state.clone()),
+                    cx,
+                );
+            }
             window.set_cursor_style(CursorStyle::IBeam, &prepainted.hitbox);
         }
         window.with_content_mask(Some(ContentMask { bounds }), |window| {
@@ -206,7 +210,8 @@ impl<K: FieldKind> Element for EditorElement<K> {
                 cx,
             );
             let state = self.state.read(cx);
-            if focused && state.caret_visible && state.core.selection.is_empty() {
+            // A read-only field draws no caret, as a browser's doesn't.
+            if focused && !self.readonly && state.caret_visible && state.core.selection.is_empty() {
                 if let Some(drawn) = &state.drawn {
                     let caret = drawn.map.to_display(state.core.selection.head);
                     if let Some(at) = drawn.layout.position_for_index(caret) {

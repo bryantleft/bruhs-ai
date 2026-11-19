@@ -12,6 +12,8 @@ mod access;
 pub use access::*;
 mod automation;
 pub use automation::*;
+mod computer;
+pub use computer::*;
 mod face;
 pub use face::*;
 mod page;
@@ -23,13 +25,16 @@ pub use transcript::*;
 mod wire_tests;
 
 /// Version of the crew wire format the background service speaks.
-pub const CREW_PROTOCOL: u32 = 2;
+pub const CREW_PROTOCOL: u32 = 3;
 
 /// First version that has Stop, access and the other crew commands.
 pub const CREW_COMMANDS_PROTOCOL: u32 = 1;
 
 /// First version that has rooms.
 pub const ROOMS_PROTOCOL: u32 = 2;
+
+/// First version that has a bruh's Computer.
+pub const COMPUTER_PROTOCOL: u32 = 3;
 
 /// Which way a bruh looks.
 #[derive(Serialize, Deserialize, Debug, Clone, Copy, PartialEq, Eq, Default)]
@@ -244,6 +249,10 @@ pub struct BruhProfile {
     pub effort: Option<String>,
     #[serde(default)]
     pub paused_at: Option<EpochMs>,
+    /// The owner turned the bruh's Computer on. Set only by
+    /// `ReactiveCommand::SetComputer`; see [`computer_on`] for whether it runs.
+    #[serde(default)]
+    pub computer: bool,
 }
 
 /// A bruh as the rail and pages show it.
@@ -260,6 +269,9 @@ pub struct BruhState {
     pub next_wake_ms: Option<EpochMs>,
     #[serde(default)]
     pub unread: usize,
+    /// The owner turned the bruh's Computer on.
+    #[serde(default)]
+    pub computer: bool,
 }
 
 /// Status by priority: off, paused, needs you, working, asleep.
@@ -329,6 +341,12 @@ pub fn crew_commands_ready(protocol: u32) -> bool {
 #[must_use]
 pub fn rooms_ready(protocol: u32) -> bool {
     protocol >= ROOMS_PROTOCOL
+}
+
+/// Whether a service understands a bruh's Computer.
+#[must_use]
+pub fn computer_ready(protocol: u32) -> bool {
+    protocol >= COMPUTER_PROTOCOL
 }
 
 /// Which older service the person should update.
@@ -427,6 +445,7 @@ mod tests {
             status,
             next_wake_ms: None,
             unread: 0,
+            computer: false,
         }
     }
 

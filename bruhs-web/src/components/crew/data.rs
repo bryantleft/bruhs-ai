@@ -24,6 +24,8 @@ pub struct CrewData {
     pub busy: RwSignal<bool>,
     /// Loads the snapshot again, such as after a failed load.
     pub reload: Callback<()>,
+    /// The last Computer state read said this system runs no bruh browser.
+    pub computer_unsupported: RwSignal<bool>,
     /// The protocol the live stream reports, when the app has the stream.
     live_protocol: Option<RwSignal<Option<u32>>>,
 }
@@ -163,13 +165,14 @@ fn new_crew_data() -> CrewData {
         }
     });
 
-    // Load now, and again whenever the service reports a change to the crew
-    // or its rooms.
+    // Load now, and again whenever the service reports a change to the crew,
+    // its rooms or a run.
     let updates = use_context::<AgentUpdates>();
     if let Some(updates) = updates {
         Effect::new(move |_| {
             updates.bruhs.track();
             updates.rooms.track();
+            updates.runs_at.track();
             reload.run(());
         });
     } else {
@@ -183,6 +186,7 @@ fn new_crew_data() -> CrewData {
         error,
         busy,
         reload,
+        computer_unsupported: RwSignal::new(false),
         live_protocol: updates.map(|updates| updates.protocol),
     }
 }
@@ -198,6 +202,7 @@ mod tests {
             error: RwSignal::new(None),
             busy: RwSignal::new(false),
             reload: Callback::new(|()| {}),
+            computer_unsupported: RwSignal::new(false),
             live_protocol: None,
         }
     }
@@ -228,6 +233,29 @@ mod tests {
                 (current.service_reason(), current.rooms_reason()),
                 (None, None)
             );
+        });
+    }
+
+    #[test]
+    fn a_protocol_two_snapshot_offers_rooms_but_not_computers() {
+        let owner = Owner::new();
+        owner.with(|| {
+            // The Computer tab reads the service through the shared gate.
+            let gate =
+                |data: CrewData| bruhs_models::crew::computer_gate(None, "a", data.protocol());
+            let old = data_at(2);
+            assert!(old.rooms_ready() && !gate(old).ready);
+            assert_eq!(
+                gate(old).reason,
+                Some(bruhs_models::crew::ServiceNotice::ServingOld.message())
+            );
+            let current = data_at(bruhs_models::crew::COMPUTER_PROTOCOL);
+            assert!(gate(current).ready);
+            assert_eq!(gate(current).reason, None);
+            // Unknown counts as not yet, with no reason to show.
+            let unknown = data();
+            assert!(!gate(unknown).ready);
+            assert_eq!(gate(unknown).reason, None);
         });
     }
 

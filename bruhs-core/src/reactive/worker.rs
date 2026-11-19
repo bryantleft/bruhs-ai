@@ -2,12 +2,12 @@ use super::{sources, store, ReactiveError, ReactiveRuntime};
 use crate::{AgentTurn, AppState, OrchestratorEvent, PermissionDecision, QueryEvent};
 use bruhs_models::{
     agent::{AgentProvider, PermissionMode},
-    crew::{effective_level, run_preamble, BruhProfile, APPROVAL_WAIT_MS},
+    crew::{computer_on, effective_level, run_preamble, BruhProfile, APPROVAL_WAIT_MS},
     reactive::{ReactiveAgent, ReactiveRun, RunStatus, MAX_TEXT_CHARS, REPORT_PROTOCOL},
     secrets::SecretDecision,
     thread_link::ThreadAccess,
 };
-use std::{sync::Arc, time::Duration};
+use std::{path::Path, sync::Arc, time::Duration};
 use tokio_stream::StreamExt;
 
 struct AbortOnDrop(tokio::task::JoinHandle<()>);
@@ -36,7 +36,7 @@ pub(super) async fn run(runtime: ReactiveRuntime, app: Arc<AppState>) {
         }
         // Fill free lanes; each claim takes one agent's queued work.
         loop {
-            match runtime.call(store::claim_next).await {
+            match runtime.claim_next().await {
                 Ok(Some(claim)) => {
                     runtime.changed();
                     let (runtime, app, halted) = (runtime.clone(), app.clone(), halted.clone());
@@ -45,6 +45,10 @@ pub(super) async fn run(runtime: ReactiveRuntime, app: Arc<AppState>) {
                             tracing::error!("Reactive run could not be recorded: {error}");
                             halted.store(true, std::sync::atomic::Ordering::Release);
                         }
+                        // The run has left Running: its steps can't be sent.
+                        runtime
+                            .allowances
+                            .forget_run(&claim.run.id, claim.generation);
                         runtime.changed();
                     });
                 }
@@ -93,16 +97,19 @@ pub(super) fn turn(
     bruh: &BruhProfile,
     run: &ReactiveRun,
     context: &str,
+    home: &Path,
 ) -> AgentTurn {
     let instructions = system_instructions(agent);
     let provider = AgentProvider::for_model(&agent.model);
     // Instructions stay identical across runs so providers can cache them;
     // the name, access, memory and history that change ride in the run's
     // own message.
+    let computer = computer_on(bruh.computer, &bruh.access, provider);
     let mut prompt = run_preamble(
         &agent.name,
         &bruh.access,
         effective_level(bruh.access.level, provider),
+        computer,
     );
     prompt.push_str("\n\n");
     if !context.is_empty() {
@@ -122,7 +129,10 @@ pub(super) fn turn(
     .thread_access(ThreadAccess::Off)
     .instructions(Some(instructions))
     .effort(bruh.effort.as_deref())
-    .unattended_with(bruh.access.clone());
+    .unattended_with(bruh.access.clone())
+    .computer(computer.then(|| agent.id.clone()))
+    // Every run, Computer on or off: the profile outlives Computer off.
+    .hide_folders(super::computers::hidden_folders(home, &agent.id));
     // `resume(None)` otherwise falls back to the orchestrator's in-memory session.
     if run.session_id.is_none() {
         turn.fresh()
@@ -207,7 +217,13 @@ async fn execute(
         return Ok(());
     }
     let mut stream = match app
-        .send_message(turn(&effective_agent, &bruh, &effective_run, &context))
+        .send_message(turn(
+            &effective_agent,
+            &bruh,
+            &effective_run,
+            &context,
+            &runtime.home,
+        ))
         .await
     {
         Ok(stream) => stream,
@@ -275,11 +291,14 @@ async fn execute(
                     OrchestratorEvent::Query(QueryEvent::Error(error)) => { failure = Some(error); }
                     OrchestratorEvent::Query(QueryEvent::PermissionRequest { id, tool, input, .. }) => {
                         // The bruh's access gate answers, or the owner through an outbox approval.
+                        let provider = AgentProvider::for_model(&effective_agent.model);
                         let decision = super::approval::decide(
                             runtime,
                             &bruh.access,
-                            AgentProvider::for_model(&effective_agent.model),
+                            provider,
+                            computer_on(bruh.computer, &bruh.access, provider),
                             &effective_run,
+                            claim.generation,
                             &effective_agent.project_path,
                             &tool,
                             &input,

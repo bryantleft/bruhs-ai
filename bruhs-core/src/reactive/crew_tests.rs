@@ -39,7 +39,7 @@ pub(super) async fn runtime_with(agents: &[ReactiveAgent]) -> (tempfile::TempDir
 }
 
 pub(super) async fn claim_one(runtime: &ReactiveRuntime) -> Option<store::Claim> {
-    runtime.call(store::claim_next).await.unwrap()
+    runtime.claim_next().await.unwrap()
 }
 
 pub(super) async fn finish(runtime: &ReactiveRuntime, id: &str, answer: &str) {
@@ -403,6 +403,28 @@ async fn snapshot_and_signal_carry_bruh_states() {
         .await
         .unwrap();
     assert_eq!(snapshot.bruhs[0].status, BruhStatus::Off);
+}
+
+/// A run can start and end between two live frames, leaving every bruh's
+/// state as it was. The signal still changes, so a chat shows the reply.
+#[tokio::test]
+async fn a_run_that_starts_and_ends_between_frames_changes_the_signal() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let first = chat(&runtime, "a", "First").await;
+    claim_one(&runtime).await.unwrap();
+    finish(&runtime, &first.id, "Done").await;
+    let before = runtime.outbox_signal().await.unwrap();
+    tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    let second = chat(&runtime, "a", "Second").await;
+    claim_one(&runtime).await.unwrap();
+    finish(&runtime, &second.id, "Done again").await;
+    let after = runtime.outbox_signal().await.unwrap();
+    assert_eq!(after.bruhs, before.bruhs, "the bruh looks the same");
+    assert_ne!(after, before, "the signal still moved");
+    assert_eq!(
+        after.runs_at,
+        Some(run(&runtime, &second.id).await.updated_at)
+    );
 }
 
 #[tokio::test]
@@ -974,7 +996,13 @@ fn profile(level: AccessLevel, effort: Option<&str>) -> BruhProfile {
 fn each_run_names_the_bruh_and_its_access() {
     use bruhs_models::agent::PermissionMode;
     let (claude, run) = (agent("a"), queued_run("Do the thing."));
-    let full = worker::turn(&claude, &profile(AccessLevel::Full, None), &run, "ctx");
+    let full = worker::turn(
+        &claude,
+        &profile(AccessLevel::Full, None),
+        &run,
+        "ctx",
+        std::path::Path::new("/home"),
+    );
     assert!(full.prompt.starts_with("Your name is Agent a.\n"));
     assert!(full.prompt.contains("Access: full."));
     assert!(full.prompt.contains("\n\nctx\n\n---\n\n"));
@@ -986,11 +1014,23 @@ fn each_run_names_the_bruh_and_its_access() {
     assert!(!full.fresh_session);
     assert_eq!(full.effort, None);
 
-    let no_context = worker::turn(&claude, &profile(AccessLevel::Full, None), &run, "");
+    let no_context = worker::turn(
+        &claude,
+        &profile(AccessLevel::Full, None),
+        &run,
+        "",
+        std::path::Path::new("/home"),
+    );
     assert!(no_context.prompt.ends_with("without asking.\nNever push, merge or open pull requests.\nNever send messages in the owner's name.\n\nDo the thing."));
     assert!(!no_context.prompt.contains("---"));
 
-    let ask = worker::turn(&claude, &profile(AccessLevel::Ask, Some("high")), &run, "");
+    let ask = worker::turn(
+        &claude,
+        &profile(AccessLevel::Ask, Some("high")),
+        &run,
+        "",
+        std::path::Path::new("/home"),
+    );
     assert_eq!(ask.permission_mode, PermissionMode::Default);
     assert!(ask.prompt.contains("Access: ask first."));
     assert_eq!(ask.effort.as_deref(), Some("high"));
@@ -999,18 +1039,88 @@ fn each_run_names_the_bruh_and_its_access() {
         model: "gpt-5.3-codex".into(),
         ..agent("a")
     };
-    let codex_ask = worker::turn(&codex, &profile(AccessLevel::Ask, None), &run, "");
+    let codex_ask = worker::turn(
+        &codex,
+        &profile(AccessLevel::Ask, None),
+        &run,
+        "",
+        std::path::Path::new("/home"),
+    );
     assert_eq!(codex_ask.permission_mode, PermissionMode::Plan);
     assert!(codex_ask.prompt.contains("Access: read only."));
     assert_eq!(codex_ask.unattended_access.level, AccessLevel::ReadOnly);
 }
 
+/// Every bruh run, with its Computer on or off, is kept out of every
+/// bruh's browser profile and cache, and by name its own.
+#[test]
+fn every_bruh_run_hides_the_browser_profiles() {
+    let run = queued_run("Look it up.");
+    let home = std::path::Path::new("/data");
+    let expected: Vec<std::path::PathBuf> = [
+        "/data/bruhs/a/browser",
+        "/data/bruhs/a/browser-cache",
+        "/data/bruhs/*/browser",
+        "/data/bruhs/*/browser-cache",
+    ]
+    .map(std::path::PathBuf::from)
+    .to_vec();
+    for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+        for on in [false, true] {
+            let bruh = BruhProfile {
+                computer: on,
+                ..profile(level, None)
+            };
+            let turn = worker::turn(&agent("a"), &bruh, &run, "", home);
+            assert_eq!(turn.hidden_folders, expected, "{level:?} computer={on}");
+        }
+    }
+}
+
+#[test]
+fn the_worker_turns_computer_on_only_when_available() {
+    const BROWSER_LINE: &str = "You have your own browser, the local_browser tool.";
+    let run = queued_run("Look it up.");
+    let with_computer = |level, on| BruhProfile {
+        computer: on,
+        ..profile(level, None)
+    };
+    for level in [AccessLevel::Ask, AccessLevel::Full] {
+        let turn = worker::turn(
+            &agent("a"),
+            &with_computer(level, true),
+            &run,
+            "",
+            std::path::Path::new("/home"),
+        );
+        assert_eq!(turn.computer.as_deref(), Some("a"), "{level:?}");
+        assert!(turn.prompt.contains(BROWSER_LINE), "{level:?}");
+    }
+    let codex = ReactiveAgent {
+        model: "gpt-5.3-codex".into(),
+        ..agent("a")
+    };
+    for (agent, profile) in [
+        (agent("a"), with_computer(AccessLevel::ReadOnly, true)),
+        (agent("a"), with_computer(AccessLevel::Full, false)),
+        (codex, with_computer(AccessLevel::Full, true)),
+    ] {
+        let turn = worker::turn(&agent, &profile, &run, "", std::path::Path::new("/home"));
+        assert_eq!(
+            turn.computer, None,
+            "{} {:?}",
+            agent.model, profile.access.level
+        );
+        assert!(!turn.prompt.contains(BROWSER_LINE));
+    }
+}
+
 // ── Approvals ──────────────────────────────────────────────────────────────
 
-const LONG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
-const SHORT_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
+pub(super) const LONG_WAIT: std::time::Duration = std::time::Duration::from_secs(30);
+pub(super) const SHORT_WAIT: std::time::Duration = std::time::Duration::from_millis(50);
 const DENIED: &str = "The owner denied this. Continue without it.";
-const NOT_ANSWERED: &str =
+pub(super) const NOT_ANSWERED: &str =
     "The owner has not answered yet. Stop here and say you are waiting on their approval.";
 
 fn access(level: AccessLevel) -> BruhAccess {
@@ -1028,7 +1138,7 @@ async fn claimed(runtime: &ReactiveRuntime, agent_id: &str) -> ReactiveRun {
     claim.run
 }
 
-type Decision = Result<Option<crate::PermissionDecision>, ReactiveError>;
+pub(super) type Decision = Result<Option<crate::PermissionDecision>, ReactiveError>;
 
 /// `approval::decide` on a Claude bruh run, in the background.
 fn spawn_decide(
@@ -1047,7 +1157,12 @@ fn spawn_decide(
             &runtime,
             &access(level),
             bruhs_models::agent::AgentProvider::Claude,
+            false,
             &run,
+            runtime
+                .allowances
+                .current_claim(&run.id)
+                .unwrap_or_default(),
             &project_path,
             &tool,
             &input,
@@ -1057,7 +1172,9 @@ fn spawn_decide(
     })
 }
 
-async fn decided(task: tokio::task::JoinHandle<Decision>) -> Option<crate::PermissionDecision> {
+pub(super) async fn decided(
+    task: tokio::task::JoinHandle<Decision>,
+) -> Option<crate::PermissionDecision> {
     tokio::time::timeout(std::time::Duration::from_secs(5), task)
         .await
         .expect("the approval wait should end")
@@ -1065,13 +1182,13 @@ async fn decided(task: tokio::task::JoinHandle<Decision>) -> Option<crate::Permi
         .unwrap()
 }
 
-fn deny(reason: &str) -> Option<crate::PermissionDecision> {
+pub(super) fn deny(reason: &str) -> Option<crate::PermissionDecision> {
     Some(crate::PermissionDecision::Deny {
         reason: Some(reason.into()),
     })
 }
 
-async fn approvals(runtime: &ReactiveRuntime, agent_id: &str) -> Vec<OutboxItem> {
+pub(super) async fn approvals(runtime: &ReactiveRuntime, agent_id: &str) -> Vec<OutboxItem> {
     runtime
         .snapshot()
         .await
@@ -1091,7 +1208,7 @@ async fn approval_item(runtime: &ReactiveRuntime, id: &str) -> OutboxItem {
 }
 
 /// The newest waiting approval for `agent_id`, once the worker has opened it.
-async fn waiting_approval(runtime: &ReactiveRuntime, agent_id: &str) -> OutboxItem {
+pub(super) async fn waiting_approval(runtime: &ReactiveRuntime, agent_id: &str) -> OutboxItem {
     let mut changes = runtime.watch_changes();
     tokio::time::timeout(std::time::Duration::from_secs(5), async {
         loop {
@@ -1108,7 +1225,11 @@ async fn waiting_approval(runtime: &ReactiveRuntime, agent_id: &str) -> OutboxIt
     .expect("an approval should open")
 }
 
-async fn decide_approval(runtime: &ReactiveRuntime, id: &str, approve: bool) -> ReactiveSnapshot {
+pub(super) async fn decide_approval(
+    runtime: &ReactiveRuntime,
+    id: &str,
+    approve: bool,
+) -> ReactiveSnapshot {
     runtime
         .command(ReactiveCommand::DecideApproval {
             id: id.into(),
@@ -1128,6 +1249,172 @@ async fn take_grant(runtime: &ReactiveRuntime, agent_id: &str, fingerprint: &str
 
 fn project() -> String {
     std::env::temp_dir().to_string_lossy().into_owned()
+}
+
+/// A network tool call whose host is this computer by name, by literal or
+/// by one of this computer's own interface addresses is denied before any
+/// approval opens, at Ask and Full.
+#[tokio::test]
+async fn network_calls_to_this_computer_are_denied_without_asking() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    let mut calls = vec![
+        (
+            "WebFetch",
+            json!({"url": "https://bruhs.localhost/api/reactive/agents/a/computer", "prompt": "Read"}),
+        ),
+        (
+            "WebFetch",
+            json!({"url": "http://127.0.0.1:3001/", "prompt": "Read"}),
+        ),
+        ("SandboxNetworkAccess", json!({"host": "[::1]:3001"})),
+    ];
+    let own = crate::local_tools::interface_addresses_for_tests()
+        .into_iter()
+        .find(
+            |ip| matches!(ip, std::net::IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_link_local()),
+        );
+    if let Some(own) = own {
+        calls.push((
+            "WebFetch",
+            json!({"url": format!("http://{own}:3001/api"), "prompt": "Read"}),
+        ));
+        calls.push(("SandboxNetworkAccess", json!({"host": own.to_string()})));
+    }
+    for level in [AccessLevel::Ask, AccessLevel::Full] {
+        for (tool, input) in &calls {
+            let task = spawn_decide(
+                &runtime,
+                level,
+                &run,
+                &project(),
+                tool,
+                input.clone(),
+                LONG_WAIT,
+            );
+            assert_eq!(
+                decided(task).await,
+                deny(bruhs_models::crew::LOCAL_HOST_DENIAL),
+                "{level:?} {tool} {input}"
+            );
+        }
+    }
+    assert!(approvals(&runtime, "a").await.is_empty());
+}
+
+/// A file tool call that reaches a browser profile through a symlink or a
+/// change of case, or opens a hard-linked file in the bruhs' trees, is
+/// denied at every level before any approval opens. A `browser` folder of
+/// the bruh's own work stays open.
+#[cfg(unix)]
+#[tokio::test]
+async fn file_calls_never_reach_a_browser_profile_by_another_name() {
+    let (dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    // The tempdir path is not canonical on macOS (/var is a symlink).
+    let tree = dir.path().join("bruhs").join("a");
+    let work = tree.join("work");
+    let profile = tree.join("browser").join("Default");
+    std::fs::create_dir_all(&profile).unwrap();
+    std::fs::create_dir_all(work.join("x").join("browser")).unwrap();
+    std::fs::write(profile.join("Cookies"), "cookie").unwrap();
+    std::fs::write(work.join("x").join("browser").join("f"), "work").unwrap();
+    std::os::unix::fs::symlink("../browser", work.join("b")).unwrap();
+    std::fs::hard_link(profile.join("Cookies"), work.join("p")).unwrap();
+    let at = |path: &std::path::Path| path.to_string_lossy().into_owned();
+    let through_link = at(&work.join("b").join("Default").join("Cookies"));
+    let other_case = at(&dir
+        .path()
+        .join("BRUHS")
+        .join("A")
+        .join("BROWSER")
+        .join("Default")
+        .join("Cookies"));
+    let edit = |path: &str| json!({"file_path": path, "old_string": "c", "new_string": "d"});
+    let refused = [
+        ("Read", json!({"file_path": through_link}), PROFILE_DENIAL),
+        ("Edit", edit(&through_link), PROFILE_DENIAL),
+        (
+            "Write",
+            json!({"file_path": at(&work.join("b").join("Default").join("New")), "content": "x"}),
+            PROFILE_DENIAL,
+        ),
+        ("Read", json!({"file_path": other_case}), PROFILE_DENIAL),
+        (
+            "Grep",
+            json!({"pattern": ".", "path": at(&work.join("b"))}),
+            PROFILE_DENIAL,
+        ),
+        // Relative to the bruh's folder.
+        (
+            "Glob",
+            json!({"pattern": "**", "path": "b"}),
+            PROFILE_DENIAL,
+        ),
+        (
+            "Read",
+            json!({"file_path": at(&tree.join("browser-cache").join("f"))}),
+            PROFILE_DENIAL,
+        ),
+        (
+            "Read",
+            json!({"file_path": at(&work.join("p"))}),
+            LINKED_FILE_DENIAL,
+        ),
+        ("Edit", edit(&at(&work.join("p"))), LINKED_FILE_DENIAL),
+    ];
+    let open = [
+        (
+            "Read",
+            json!({"file_path": at(&work.join("x").join("browser").join("f"))}),
+        ),
+        ("Grep", json!({"pattern": ".", "path": at(&tree)})),
+    ];
+    for level in [AccessLevel::ReadOnly, AccessLevel::Ask, AccessLevel::Full] {
+        for (tool, input, reason) in &refused {
+            let task = spawn_decide(
+                &runtime,
+                level,
+                &run,
+                &at(&work),
+                tool,
+                input.clone(),
+                LONG_WAIT,
+            );
+            assert_eq!(
+                decided(task).await,
+                deny(reason),
+                "{level:?} {tool} {input}"
+            );
+        }
+        for (tool, input) in &open {
+            let task = spawn_decide(
+                &runtime,
+                level,
+                &run,
+                &at(&work),
+                tool,
+                input.clone(),
+                LONG_WAIT,
+            );
+            assert_eq!(
+                decided(task).await,
+                Some(crate::PermissionDecision::Allow),
+                "{level:?} {tool} {input}"
+            );
+        }
+    }
+    let task = spawn_decide(
+        &runtime,
+        AccessLevel::Full,
+        &run,
+        &at(&work),
+        "Edit",
+        edit(&at(&work.join("x").join("browser").join("f"))),
+        LONG_WAIT,
+    );
+    assert_eq!(decided(task).await, Some(crate::PermissionDecision::Allow));
+    assert!(approvals(&runtime, "a").await.is_empty());
 }
 
 #[tokio::test]

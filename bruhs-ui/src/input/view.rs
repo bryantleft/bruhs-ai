@@ -77,6 +77,8 @@ struct Chrome {
     bordered: bool,
     focus_bordered: bool,
     disabled: bool,
+    /// Web `readonly`: focusable, selectable and copyable, never edited.
+    readonly: bool,
     aria_label: Option<SharedString>,
     tab_index: isize,
     role: Option<Role>,
@@ -92,6 +94,7 @@ impl Default for Chrome {
             bordered: true,
             focus_bordered: true,
             disabled: false,
+            readonly: false,
             aria_label: None,
             tab_index: 0,
             role: None,
@@ -266,7 +269,8 @@ fn frame<K: FieldKind>(
                 })
         })
         .when(chrome.disabled, |el| el.opacity(DISABLED_OPACITY));
-    if !chrome.disabled {
+    // A read-only field keeps its moves, selection and copy, not its edits.
+    if !chrome.disabled && !chrome.readonly {
         el = el
             .on_action(window.listener_for(state, EditorState::backspace))
             .on_action(window.listener_for(state, EditorState::delete))
@@ -274,6 +278,13 @@ fn frame<K: FieldKind>(
             .on_action(window.listener_for(state, EditorState::delete_to_end_of_line))
             .on_action(window.listener_for(state, EditorState::delete_to_previous_word_start))
             .on_action(window.listener_for(state, EditorState::delete_to_next_word_end))
+            .on_action(window.listener_for(state, EditorState::cut))
+            .on_action(window.listener_for(state, EditorState::paste))
+            .on_action(window.listener_for(state, EditorState::undo))
+            .on_action(window.listener_for(state, EditorState::redo));
+    }
+    if !chrome.disabled {
+        el = el
             .on_action(window.listener_for(state, EditorState::left))
             .on_action(window.listener_for(state, EditorState::right))
             .on_action(window.listener_for(state, EditorState::up))
@@ -296,10 +307,6 @@ fn frame<K: FieldKind>(
             .on_action(window.listener_for(state, EditorState::select_to_next_word_end))
             .on_action(window.listener_for(state, EditorState::select_all))
             .on_action(window.listener_for(state, EditorState::copy))
-            .on_action(window.listener_for(state, EditorState::cut))
-            .on_action(window.listener_for(state, EditorState::paste))
-            .on_action(window.listener_for(state, EditorState::undo))
-            .on_action(window.listener_for(state, EditorState::redo))
             .on_action(window.listener_for(state, EditorState::enter))
             .on_action(window.listener_for(state, EditorState::escape))
             .on_action(window.listener_for(state, EditorState::tab))
@@ -339,6 +346,7 @@ fn edit_menu<K: FieldKind>(state: &Entity<EditorState<K>>, cx: &App) -> Option<A
     let s = state.read(cx);
     let at = s.context_menu?;
     let can_copy = s.can_copy();
+    let editable = !s.readonly;
     let entity = state.entity_id();
     let item = |id: &'static str,
                 label: &'static str,
@@ -357,6 +365,7 @@ fn edit_menu<K: FieldKind>(state: &Entity<EditorState<K>>, cx: &App) -> Option<A
             .py(css_px(4.0))
             .rounded(css_px(4.0))
             .text_size(css_px(12.0))
+            .debug_selector(move || id.to_string())
             .child(label);
         if !enabled {
             return row.text_color(theme::rambutan_500()).into_any_element();
@@ -389,13 +398,13 @@ fn edit_menu<K: FieldKind>(state: &Entity<EditorState<K>>, cx: &App) -> Option<A
         .on_mouse_down_out(move |_, _, cx| {
             close.update(cx, |state, cx| state.close_context_menu(cx))
         })
-        .child(item("edit-cut", "Cut", can_copy, |s, w, cx| {
+        .child(item("edit-cut", "Cut", can_copy && editable, |s, w, cx| {
             s.cut(&Cut, w, cx)
         }))
         .child(item("edit-copy", "Copy", can_copy, |s, w, cx| {
             s.copy(&Copy, w, cx)
         }))
-        .child(item("edit-paste", "Paste", true, |s, w, cx| {
+        .child(item("edit-paste", "Paste", editable, |s, w, cx| {
             s.paste(&Paste, w, cx)
         }))
         .child(item("edit-select-all", "Select All", true, |s, w, cx| {
@@ -461,6 +470,16 @@ impl Input {
         self
     }
 
+    /// Web `readonly`: the field still takes focus, moves its caret, selects
+    /// and copies, but typing, pasting, cutting, deleting and undo do nothing.
+    /// The state keeps the flag, so every path that edits refuses, the edit
+    /// menu's Cut and Paste among them, which draw disabled. Only the app's
+    /// own `set_value` still sets the text.
+    pub fn readonly(mut self, readonly: bool) -> Self {
+        self.chrome.readonly = readonly;
+        self
+    }
+
     pub fn aria_label(mut self, label: impl Into<SharedString>) -> Self {
         self.chrome.aria_label = Some(label.into());
         self
@@ -496,9 +515,17 @@ impl Styled for Input {
     }
 }
 
+/// The state learns the component's read-only flag, which its edits obey.
+fn sync_readonly<K: FieldKind>(state: &Entity<EditorState<K>>, readonly: bool, cx: &mut App) {
+    if state.read(cx).readonly != readonly {
+        state.update(cx, |state, _| state.readonly = readonly);
+    }
+}
+
 impl RenderOnce for Input {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.clone();
+        sync_readonly(&state, self.chrome.readonly, cx);
         let size = self.chrome.size;
         let text = text_element(&state, &self.chrome, window, cx);
         let editor = EditorElement {
@@ -506,9 +533,13 @@ impl RenderOnce for Input {
             text,
             caret_color: theme::persimmon_400(),
             disabled: self.chrome.disabled,
+            readonly: self.chrome.readonly,
         };
         let s = state.read(cx);
-        let show_clear = self.cleanable && !s.core.text.is_empty() && !self.chrome.disabled;
+        let show_clear = self.cleanable
+            && !s.core.text.is_empty()
+            && !self.chrome.disabled
+            && !self.chrome.readonly;
         let masked = s.masked;
         let mut el = frame(
             ("input", state.entity_id()).into(),
@@ -631,6 +662,7 @@ impl Styled for Textarea {
 impl RenderOnce for Textarea {
     fn render(self, window: &mut Window, cx: &mut App) -> impl IntoElement {
         let state = self.state.clone();
+        sync_readonly(&state, self.chrome.readonly, cx);
         let size = self.chrome.size;
         let text = text_element(&state, &self.chrome, window, cx);
         let editor = EditorElement {
@@ -638,6 +670,7 @@ impl RenderOnce for Textarea {
             text,
             caret_color: theme::persimmon_400(),
             disabled: self.chrome.disabled,
+            readonly: self.chrome.readonly,
         };
         let s = state.read(cx);
         let line = window.rem_size() * LINE_HEIGHT_REM;

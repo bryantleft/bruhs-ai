@@ -430,7 +430,13 @@ async fn explicit_approval_and_opted_in_subscriptions_both_keep_plan_permissions
         .await
         .unwrap();
     let store::Claim { agent, run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
-    let turn = worker::turn(&agent, &BruhProfile::default(), &run, "");
+    let turn = worker::turn(
+        &agent,
+        &BruhProfile::default(),
+        &run,
+        "",
+        std::path::Path::new("/home"),
+    );
     assert_eq!(turn.permission_mode, PermissionMode::Plan);
     assert_eq!(
         turn.thread_access,
@@ -462,7 +468,14 @@ async fn explicit_approval_and_opted_in_subscriptions_both_keep_plan_permissions
     runtime.publish("scans", "two", json!({})).await.unwrap();
     let store::Claim { run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
     assert_eq!(
-        worker::turn(&agent, &BruhProfile::default(), &run, "").permission_mode,
+        worker::turn(
+            &agent,
+            &BruhProfile::default(),
+            &run,
+            "",
+            std::path::Path::new("/home")
+        )
+        .permission_mode,
         PermissionMode::Plan
     );
 }
@@ -698,7 +711,13 @@ async fn memory_changes_drop_the_provider_session_and_fence_older_approved_turns
         .await
         .unwrap();
     let store::Claim { agent, run, .. } = runtime.call(store::claim_next).await.unwrap().unwrap();
-    let turn = worker::turn(&agent, &BruhProfile::default(), &run, "");
+    let turn = worker::turn(
+        &agent,
+        &BruhProfile::default(),
+        &run,
+        "",
+        std::path::Path::new("/home"),
+    );
     assert!(run.session_id.is_none() && turn.fresh_session);
     assert!(turn.instructions.unwrap().contains("Prefer a table."));
 }

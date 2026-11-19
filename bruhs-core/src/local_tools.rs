@@ -1,7 +1,7 @@
 //! Dedicated local verification tools. A grant is required before every action.
 use std::{
     collections::{HashMap, HashSet},
-    sync::{Arc, Mutex},
+    sync::{Arc, Mutex, Weak},
     time::Duration,
 };
 
@@ -10,13 +10,23 @@ use tokio::sync::watch;
 use uuid::Uuid;
 
 mod browser;
+mod computer;
 mod devices;
+mod network;
 mod process;
+mod screencast;
 #[cfg(test)]
 mod tests;
 mod video;
 
+pub use computer::BruhComputer;
+#[cfg(any(test, feature = "test-support"))]
+pub use computer::{FakePages, PageLaunch};
+#[cfg(test)]
+pub(crate) use network::interface_addresses_for_tests;
+pub(crate) use network::is_this_computer;
 pub use process::ProcessPolicy;
+pub use screencast::{ComputerWatch, Viewer};
 pub use video::DeviceVideo;
 
 #[derive(Debug, thiserror::Error)]
@@ -27,6 +37,12 @@ pub enum ToolError {
     Invalid(String),
     #[error("{0}")]
     Unavailable(String),
+    /// The host refuses this, whatever the request's shape (403).
+    #[error("{0}")]
+    Refused(String),
+    /// What the request names doesn't exist (404).
+    #[error("{0}")]
+    NotFound(String),
     #[error("Local tool I/O failed: {0}")]
     Io(#[from] std::io::Error),
     #[error("Browser connection failed: {0}")]
@@ -52,8 +68,17 @@ pub struct LocalToolsHost {
     browsers: tokio::sync::Mutex<BrowserSessions>,
     opening: Mutex<HashSet<String>>,
     video: Mutex<HashSet<String>>,
+    /// Bruh computers. Their grants and pages never enter `grants` or
+    /// `browsers`, so Verification and the thread routes can't see them.
+    computers: computer::Computers,
+    launcher: computer::Launcher,
+    /// The owner's upstream proxies, read at each bruh browser launch.
+    network: fn() -> Result<network::Upstream, ToolError>,
     client: reqwest::Client,
     policy: ProcessPolicy,
+    /// The host itself, for tasks that outlive a call, such as a bruh's
+    /// window watcher. It never keeps the host alive.
+    this: Weak<Self>,
 }
 
 impl LocalToolsHost {
@@ -62,30 +87,59 @@ impl LocalToolsHost {
     }
 
     pub fn with_policy(policy: ProcessPolicy) -> Result<Arc<Self>, ToolError> {
+        let client = reqwest::Client::builder()
+            .no_proxy()
+            .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
+            .build()?;
+        let launcher = computer::browser_launcher(client.clone(), policy);
+        Self::with_parts(
+            policy,
+            client,
+            launcher,
+            network::Upstream::from_env,
+            computer::platform_refusal(),
+        )
+    }
+
+    /// `refusal` says why no bruh browser opens on this system, if none does.
+    fn with_parts(
+        policy: ProcessPolicy,
+        client: reqwest::Client,
+        launcher: computer::Launcher,
+        network: fn() -> Result<network::Upstream, ToolError>,
+        refusal: Option<&'static str>,
+    ) -> Result<Arc<Self>, ToolError> {
         if policy.timeout.is_zero() || policy.max_output_bytes == 0 {
             return Err(ToolError::Invalid(
                 "Local tools need a nonzero command deadline and capture budget.".into(),
             ));
         }
-        Ok(Arc::new(Self {
+        Ok(Arc::new_cyclic(|this| Self {
             grants: Mutex::new(HashMap::new()),
             browsers: tokio::sync::Mutex::new(HashMap::new()),
             opening: Mutex::new(HashSet::new()),
             video: Mutex::new(HashSet::new()),
-            client: reqwest::Client::builder()
-                .no_proxy()
-                .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
-                .build()?,
+            computers: computer::Computers::new(refusal),
+            launcher,
+            network,
+            client,
             policy,
+            this: this.clone(),
         }))
     }
 
     /// Only user-facing permission controls call this, never agent tools.
+    /// A bruh's browser comes from its Computer switch, never from a grant.
     pub fn grant(&self, request: GrantRequest) -> Result<ToolGrant, ToolError> {
         let principal = request.principal.trim();
         if principal.is_empty() || principal.chars().any(char::is_control) {
             return Err(ToolError::Invalid(
                 "Choose a named task or user before allowing tools.".into(),
+            ));
+        }
+        if principal.starts_with(BRUH_PRINCIPAL_PREFIX) {
+            return Err(ToolError::Invalid(
+                bruhs_models::crew::TURN_ON_IN_SETTINGS.into(),
             ));
         }
         let mut grants = self.grants.lock().map_err(|_| {
@@ -191,10 +245,11 @@ impl LocalToolsHost {
             ));
         }
         let launch = BrowserLaunch::acquire(&self.opening, &request.grant_id)?;
+        let options = browser::LaunchOptions::verification();
         let browser = tokio::select! {
             biased;
             _ = revoked.changed() => return Err(ToolError::Revoked),
-            result = browser::Browser::start(&self.client, request, self.policy) => result?,
+            result = browser::Browser::start(&self.client, request, self.policy, &options) => result?,
         };
         let info = browser.info.clone();
         // A revoked launch must not become a usable session.

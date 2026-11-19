@@ -6,6 +6,10 @@ use tokio::io::{AsyncBufReadExt, AsyncReadExt, AsyncWriteExt, BufReader};
 
 const FLAG: &str = "--workbench-mcp";
 const SERVER: &str = "bruhs_workbench";
+/// Set on a bruh's helper: the agent id whose own browser it drives. The
+/// helper then offers only that browser (see [`BruhScope`]).
+pub(crate) const BRUH_ENV: &str = "BRUHS_WORKBENCH_BRUH";
+const ENDPOINT_ENV: &str = "BRUHS_WORKBENCH_URL";
 static ENDPOINT: OnceLock<String> = OnceLock::new();
 pub fn set_endpoint(url: String) -> io::Result<()> {
     validate_endpoint(&url)?;
@@ -33,6 +37,38 @@ pub fn is_mcp_helper() -> bool {
     std::env::args_os().any(|a| a == FLAG)
 }
 
+/// The loopback service the helper calls.
+fn endpoint() -> io::Result<String> {
+    let endpoint = ENDPOINT
+        .get()
+        .cloned()
+        .or_else(|| std::env::var("BRUHS_SERVER_URL").ok())
+        .unwrap_or_else(|| "http://127.0.0.1:3001".into());
+    validate_endpoint(&endpoint)?;
+    Ok(endpoint)
+}
+
+/// Give a bruh's unattended Claude turn its own browser: the helper as the
+/// turn's only MCP server, bound to `agent_id`, with no thread, project or
+/// grant scope. `tools` stays as it is, so nothing pre-approves the browser
+/// and every call reaches the run's permission handler and gate.
+pub(crate) fn configure_bruh(options: &mut ProviderQueryOptions, agent_id: &str) -> io::Result<()> {
+    let ProviderQueryOptions::Claude(o) = options else {
+        return Err(io::Error::other(bruhs_models::crew::NEEDS_CLAUDE));
+    };
+    let executable = std::env::current_exe()?.to_string_lossy().into_owned();
+    let env = HashMap::from([
+        (ENDPOINT_ENV, endpoint()?),
+        (BRUH_ENV, agent_id.to_string()),
+    ]);
+    // Replace, never merge: this is the turn's one server.
+    o.mcp_config = Some(
+        json!({"mcpServers":{SERVER:{"command":executable,"args":[FLAG],"env":env}}}).to_string(),
+    );
+    o.strict_mcp_config = true;
+    Ok(())
+}
+
 pub(crate) fn configure(
     options: &mut ProviderQueryOptions,
     project: &str,
@@ -40,15 +76,10 @@ pub(crate) fn configure(
     read_only: bool,
     mode: bruhs_models::PermissionMode,
 ) -> io::Result<()> {
-    let endpoint = ENDPOINT
-        .get()
-        .cloned()
-        .or_else(|| std::env::var("BRUHS_SERVER_URL").ok())
-        .unwrap_or_else(|| "http://127.0.0.1:3001".into());
-    validate_endpoint(&endpoint)?;
+    let endpoint = endpoint()?;
     let executable = std::env::current_exe()?.to_string_lossy().into_owned();
     let env = HashMap::from([
-        ("BRUHS_WORKBENCH_URL".into(), endpoint),
+        (ENDPOINT_ENV.into(), endpoint),
         ("BRUHS_WORKBENCH_PROJECT".into(), project.into()),
         ("BRUHS_WORKBENCH_THREAD".into(), thread.into()),
         ("BRUHS_WORKBENCH_MODE".into(), mode.as_str().into()),
@@ -119,6 +150,7 @@ fn names(read_only: bool) -> Vec<&'static str> {
 }
 fn input_schema(name: &str) -> Value {
     let string = json!({"type":"string"});
+    let number = json!({"type":"number"});
     let forge = json!({"enum":["auto","git_hub","git_lab"],"default":"auto"});
     let isolation = json!({"type":"object","properties":{"kind":{"enum":["shared","worktree"]},"base_branch":string},"required":["kind"]});
     let task = json!({"type":"object","properties":{
@@ -149,7 +181,7 @@ fn input_schema(name: &str) -> Value {
             vec!["action", "timeout_seconds"],
         ),
         "local_browser" => (
-            json!({"operation":{"enum":["start","command"]},"url":string,"session_id":string,"command":{"type":"object","properties":{"action":{"enum":["navigate","snapshot","click","fill","evaluate","screenshot","console","network"]},"url":string,"selector":string,"text":string,"expression":string},"required":["action"]}}),
+            json!({"operation":{"enum":["start","command"]},"url":string,"session_id":string,"command":{"type":"object","properties":{"action":{"enum":["navigate","snapshot","click","click_at","type","key","scroll","fill","evaluate","screenshot","console","network"]},"url":string,"selector":string,"text":string,"expression":string,"x":number,"y":number,"key":string,"dx":number,"dy":number},"required":["action"]}}),
             vec!["operation"],
         ),
         "local_device" => (
@@ -184,7 +216,7 @@ fn catalogue(read_only: bool) -> Value {
         ),
         (
             "local_browser",
-            "Operate the dedicated local browser using an existing grant for this thread. arguments.operation='start' with url, or operation='command' with session_id and command (navigate/snapshot/click/fill/evaluate/screenshot/console/network). Cannot create a grant.",
+            "Operate the dedicated local browser using an existing grant for this thread. arguments.operation='start' with url, or operation='command' with session_id and command (navigate/snapshot/click/click_at/type/key/scroll/fill/evaluate/screenshot/console/network). click presses the element's centre (via: input) or clicks it by script when covered (via: script); click_at takes x and y in CSS px; type inserts text into selector or the focused element; key presses one named key (Enter, Tab, Escape, Backspace, Delete, Space, arrows, Home, End, PageUp, PageDown); scroll wheels by dx and dy px. Cannot create a grant.",
         ),
         (
             "local_device",
@@ -192,6 +224,88 @@ fn catalogue(read_only: bool) -> Value {
         ),
     ];
     json!({"tools":definitions.into_iter().filter(|(name,_)|names(read_only).contains(name)).map(|(name,description)|json!({"name":name,"description":description,"inputSchema":input_schema(name),"annotations":{"readOnlyHint":matches!(name,"workspace_status"|"task_read"|"delivery_read")}})).collect::<Vec<_>>()})
+}
+
+/// The model-facing description of a bruh's browser.
+const BRUH_BROWSER_DESCRIPTION: &str = "Use your own browser. It keeps its logins between runs and starts on first use. command.action is one of navigate, snapshot, screenshot, click, click_at, type, key, scroll, fill. Take a snapshot to read the page; screenshots are 1280 by 800 CSS pixels, the coordinates click_at uses. If the owner has taken control, your step waits until they hand it back.";
+
+/// What a bruh's helper offers: its own browser, and nothing else. No
+/// evaluate, console or network action, no session or grant.
+fn bruh_catalogue() -> Value {
+    let string = json!({"type":"string"});
+    let number = json!({"type":"number"});
+    let command = json!({"type":"object","properties":{
+        "action":{"type":"string","enum":bruhs_models::local_tools::BRUH_BROWSER_ACTIONS},
+        "url":string,"selector":string,"text":string,"x":number,"y":number,
+        "key":string,"dx":number,"dy":number
+    },"required":["action"],"additionalProperties":false});
+    json!({"tools":[{
+        "name":"local_browser",
+        "description":BRUH_BROWSER_DESCRIPTION,
+        "inputSchema":{"type":"object","properties":{"command":command},"required":["command"],"additionalProperties":false},
+        "annotations":{"readOnlyHint":false}
+    }]})
+}
+
+/// A bruh's helper: bound to one agent id, it reaches only that bruh's
+/// browser route. The host checks the Computer and the action again.
+struct BruhScope {
+    endpoint: String,
+    agent_id: String,
+    client: reqwest::Client,
+}
+impl BruhScope {
+    /// `/api/reactive/agents/{id}/computer/command`, the id escaped as one
+    /// path segment.
+    fn route(&self) -> io::Result<String> {
+        if matches!(self.agent_id.as_str(), "" | "." | "..") {
+            return Err(io::Error::other("This bruh has no computer."));
+        }
+        let mut url = url::Url::parse(&self.endpoint).map_err(io::Error::other)?;
+        url.path_segments_mut()
+            .map_err(|()| io::Error::other("The workbench endpoint has no path."))?
+            .pop_if_empty()
+            .extend([
+                "api",
+                "reactive",
+                "agents",
+                &self.agent_id,
+                "computer",
+                "command",
+            ]);
+        Ok(url.into())
+    }
+    async fn call(&self, name: &str, args: &Value) -> io::Result<Value> {
+        if name != "local_browser" {
+            return Err(io::Error::other("Unknown workbench tool."));
+        }
+        // Only the command: a model-supplied session, grant or page URL
+        // never reaches the host.
+        let command = args.get("command").cloned().unwrap_or(Value::Null);
+        send(
+            &self.client,
+            &self.route()?,
+            Some(json!({ "command": command })),
+        )
+        .await
+    }
+}
+
+/// Send one request to the host; a failure carries the host's `error` text.
+async fn send(client: &reqwest::Client, url: &str, body: Option<Value>) -> io::Result<Value> {
+    let request = match body {
+        Some(body) => client.post(url).json(&body),
+        None => client.get(url),
+    };
+    let response = request.send().await.map_err(io::Error::other)?;
+    let status = response.status();
+    let body: Value = response.json().await.map_err(io::Error::other)?;
+    if !status.is_success() {
+        return Err(io::Error::other(body["error"].as_str().unwrap_or(
+            "Workbench request failed. Open Workbench to inspect the service status.",
+        )));
+    }
+    Ok(body)
 }
 
 struct Scope {
@@ -274,19 +388,7 @@ impl Scope {
         body: Option<Value>,
     ) -> io::Result<Value> {
         let url = format!("{}{path}", self.endpoint.trim_end_matches('/'));
-        let request = match body {
-            Some(body) => client.post(url).json(&body),
-            None => client.get(url),
-        };
-        let response = request.send().await.map_err(io::Error::other)?;
-        let status = response.status();
-        let body: Value = response.json().await.map_err(io::Error::other)?;
-        if !status.is_success() {
-            return Err(io::Error::other(body["error"].as_str().unwrap_or(
-                "Workbench request failed. Open Workbench to inspect the service status.",
-            )));
-        }
-        Ok(body)
+        send(client, &url, body).await
     }
     fn project_matches(&self, path: &str) -> bool {
         std::path::Path::new(path)
@@ -424,13 +526,43 @@ impl Scope {
     }
 }
 
-pub async fn run_mcp_helper() -> io::Result<()> {
-    let env = |key| {
-        std::env::var(key).map_err(|_| io::Error::other(format!("Missing workbench scope {key}.")))
+/// Who a helper process serves: a thread's turn, or one bruh's browser.
+enum Helper {
+    Thread(Scope),
+    Bruh(BruhScope),
+}
+impl Helper {
+    fn catalogue(&self) -> Value {
+        match self {
+            Helper::Thread(scope) => catalogue(scope.read_only),
+            Helper::Bruh(_) => bruh_catalogue(),
+        }
+    }
+    async fn call(&self, name: &str, args: &Value) -> io::Result<Value> {
+        match self {
+            Helper::Thread(scope) => scope.call(name, args).await,
+            Helper::Bruh(scope) => scope.call(name, args).await,
+        }
+    }
+}
+
+/// Who a helper serves, read from its environment through `get`: one bruh's
+/// browser when [`BRUH_ENV`] is set, else a thread's turn. A bruh's helper
+/// has no thread scope, so its id is checked first.
+fn helper(get: impl Fn(&str) -> Option<String>, client: reqwest::Client) -> io::Result<Helper> {
+    let env = |key: &str| {
+        get(key).ok_or_else(|| io::Error::other(format!("Missing workbench scope {key}.")))
     };
-    let endpoint = env("BRUHS_WORKBENCH_URL")?;
+    let endpoint = env(ENDPOINT_ENV)?;
     validate_endpoint(&endpoint)?;
-    let scope = Scope {
+    if let Some(agent_id) = get(BRUH_ENV) {
+        return Ok(Helper::Bruh(BruhScope {
+            endpoint,
+            agent_id,
+            client,
+        }));
+    }
+    Ok(Helper::Thread(Scope {
         endpoint,
         project: env("BRUHS_WORKBENCH_PROJECT")?,
         thread: env("BRUHS_WORKBENCH_THREAD")?,
@@ -441,13 +573,18 @@ pub async fn run_mcp_helper() -> io::Result<()> {
             .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
             .build()
             .map_err(io::Error::other)?,
-        client: reqwest::Client::builder()
-            .no_proxy()
-            .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
-            .timeout(crate::capture_client::REQUEST_TIMEOUT)
-            .build()
-            .map_err(io::Error::other)?,
-    };
+        client,
+    }))
+}
+
+pub async fn run_mcp_helper() -> io::Result<()> {
+    let client = reqwest::Client::builder()
+        .no_proxy()
+        .connect_timeout(crate::capture_client::CONNECT_TIMEOUT)
+        .timeout(crate::capture_client::REQUEST_TIMEOUT)
+        .build()
+        .map_err(io::Error::other)?;
+    let helper = helper(|key| std::env::var(key).ok(), client)?;
     let mut reader = BufReader::new(tokio::io::stdin());
     let mut writer = tokio::io::stdout();
     loop {
@@ -471,8 +608,8 @@ pub async fn run_mcp_helper() -> io::Result<()> {
             Some("initialize") => {
                 json!({"protocolVersion":request["params"]["protocolVersion"].as_str().unwrap_or("2024-11-05"),"capabilities":{"tools":{}},"serverInfo":{"name":SERVER,"version":env!("CARGO_PKG_VERSION")}})
             }
-            Some("tools/list") => catalogue(scope.read_only),
-            Some("tools/call") => match scope
+            Some("tools/list") => helper.catalogue(),
+            Some("tools/call") => match helper
                 .call(
                     request["params"]["name"].as_str().unwrap_or(""),
                     &request["params"]["arguments"],
@@ -512,6 +649,24 @@ mod tests {
         assert!(tools.contains("workspace_status"));
         assert!(!tools.contains("local_browser"));
         assert!(!tools.contains("task_work"));
+    }
+    #[test]
+    fn the_thread_browser_offers_real_input_actions() {
+        let schema = input_schema("local_browser");
+        let command = &schema["properties"]["command"]["properties"];
+        for action in ["click_at", "type", "key", "scroll"] {
+            assert!(command["action"]["enum"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(action)));
+        }
+        for field in ["x", "y", "dx", "dy"] {
+            assert_eq!(command[field]["type"], "number", "{field}");
+        }
+        assert_eq!(command["key"]["type"], "string");
+        assert!(catalogue(false)
+            .to_string()
+            .contains("navigate/snapshot/click/click_at/type/key/scroll/fill"));
     }
     #[test]
     fn forge_and_tracker_tools_prepare_without_an_owner_execution_capability() {
@@ -565,6 +720,151 @@ mod tests {
             assert!(validate_endpoint(url).is_err(), "{url}");
         }
     }
+    #[test]
+    fn the_bruh_catalogue_offers_only_the_browser() {
+        let tools = bruh_catalogue();
+        let names: Vec<_> = tools["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap())
+            .collect();
+        assert_eq!(names, ["local_browser"]);
+        let schema = &tools["tools"][0]["inputSchema"];
+        let command = &schema["properties"]["command"];
+        let action = &command["properties"]["action"];
+        assert_eq!(
+            action["enum"],
+            json!(bruhs_models::local_tools::BRUH_BROWSER_ACTIONS)
+        );
+        assert_eq!(action["type"], "string");
+        assert_eq!(command["additionalProperties"], false);
+        assert_eq!(schema["additionalProperties"], false);
+        // No session, grant or operation: the helper is bound to one bruh.
+        let fields: Vec<_> = schema["properties"].as_object().unwrap().keys().collect();
+        assert_eq!(fields, ["command"]);
+        let text = tools.to_string();
+        for hidden in ["evaluate", "expression", "console", "network", "session_id"] {
+            assert!(!text.contains(hidden), "{hidden}");
+        }
+    }
+
+    fn bruh_scope(endpoint: String) -> BruhScope {
+        BruhScope {
+            endpoint,
+            agent_id: "a".into(),
+            client: reqwest::Client::new(),
+        }
+    }
+
+    #[tokio::test]
+    async fn the_bruh_helper_calls_its_own_computer_route() {
+        use wiremock::matchers::{body_json, method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .and(path("/api/reactive/agents/a/computer/command"))
+            .and(body_json(json!({"command":{"action":"snapshot"}})))
+            .respond_with(ResponseTemplate::new(200).set_body_json(json!({"text":"page"})))
+            .expect(1)
+            .mount(&server)
+            .await;
+        let scope = bruh_scope(server.uri());
+        // Only `command` is sent, whatever else the model adds.
+        let reply = scope
+            .call(
+                "local_browser",
+                &json!({"command":{"action":"snapshot"},"session_id":"other","page_url":"x"}),
+            )
+            .await
+            .unwrap();
+        assert_eq!(reply, json!({"text":"page"}));
+        for name in ["workspace_status", "task_work", "local_device", ""] {
+            let error = scope.call(name, &json!({})).await.unwrap_err();
+            assert_eq!(error.to_string(), "Unknown workbench tool.", "{name}");
+        }
+        server.verify().await;
+    }
+
+    #[tokio::test]
+    async fn the_bruh_helper_returns_the_route_refusal() {
+        use wiremock::matchers::{method, path};
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+        let server = MockServer::start().await;
+        let off = bruhs_models::crew::COMPUTER_OFF_DENIAL;
+        Mock::given(method("POST"))
+            .and(path("/api/reactive/agents/a/computer/command"))
+            .respond_with(ResponseTemplate::new(403).set_body_json(json!({"error": off})))
+            .mount(&server)
+            .await;
+        let error = bruh_scope(server.uri())
+            .call("local_browser", &json!({"command":{"action":"snapshot"}}))
+            .await
+            .unwrap_err();
+        assert_eq!(error.to_string(), off);
+    }
+
+    /// A helper environment holding exactly `pairs`.
+    fn helper_env(pairs: &[(&str, &str)]) -> impl Fn(&str) -> Option<String> {
+        let env: HashMap<String, String> = pairs
+            .iter()
+            .map(|(key, value)| ((*key).to_owned(), (*value).to_owned()))
+            .collect();
+        move |key| env.get(key).cloned()
+    }
+
+    #[test]
+    fn the_helper_serves_a_bruh_when_its_id_is_set() {
+        let url = (ENDPOINT_ENV, "http://127.0.0.1:3001");
+        let thread = [
+            url,
+            ("BRUHS_WORKBENCH_PROJECT", "/p"),
+            ("BRUHS_WORKBENCH_THREAD", "t"),
+            ("BRUHS_WORKBENCH_MODE", "default"),
+            ("BRUHS_WORKBENCH_READ_ONLY", "1"),
+        ];
+        // The endpoint and the bruh's id alone are enough.
+        let bruh = helper(helper_env(&[url, (BRUH_ENV, "a")]), reqwest::Client::new());
+        assert!(matches!(bruh, Ok(Helper::Bruh(scope)) if scope.agent_id == "a"));
+        // The bruh's id wins over any thread scope beside it.
+        let both = helper(
+            helper_env(&[thread.as_slice(), &[(BRUH_ENV, "a")]].concat()),
+            reqwest::Client::new(),
+        );
+        assert!(matches!(both, Ok(Helper::Bruh(_))));
+        let turn = helper(helper_env(&thread), reqwest::Client::new());
+        assert!(
+            matches!(turn, Ok(Helper::Thread(scope)) if scope.read_only && scope.thread == "t")
+        );
+        // A thread helper still needs its whole scope.
+        let Err(missing) = helper(helper_env(&[url]), reqwest::Client::new()) else {
+            panic!("a thread helper without its scope starts");
+        };
+        assert_eq!(
+            missing.to_string(),
+            "Missing workbench scope BRUHS_WORKBENCH_PROJECT."
+        );
+        let Err(no_url) = helper(helper_env(&[(BRUH_ENV, "a")]), reqwest::Client::new()) else {
+            panic!("a helper without an endpoint starts");
+        };
+        assert_eq!(
+            no_url.to_string(),
+            "Missing workbench scope BRUHS_WORKBENCH_URL."
+        );
+    }
+
+    #[test]
+    fn the_bruh_route_escapes_the_agent_id() {
+        let scope = BruhScope {
+            agent_id: "../x?y".into(),
+            ..bruh_scope("http://127.0.0.1:3001".into())
+        };
+        assert_eq!(
+            scope.route().unwrap(),
+            "http://127.0.0.1:3001/api/reactive/agents/..%2Fx%3Fy/computer/command"
+        );
+    }
+
     #[test]
     fn delegation_scope_follows_lineage_across_worktrees_and_rejects_siblings() {
         let root = tempfile::tempdir().unwrap();

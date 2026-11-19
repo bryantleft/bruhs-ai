@@ -560,7 +560,13 @@ async fn a_room_run_shares_the_bruhs_session_and_names_the_room() {
     assert!(in_room(&claim.run, "r"));
     assert_eq!(claim.run.session_id.as_deref(), Some("s1"));
     assert!(!claim.run.fresh_session);
-    let turn = worker::turn(&claim.agent, &claim.bruh, &claim.run, &claim.context);
+    let turn = worker::turn(
+        &claim.agent,
+        &claim.bruh,
+        &claim.run,
+        &claim.context,
+        std::path::Path::new("/home"),
+    );
     assert!(turn.prompt.starts_with("Your name is Agent a.\n"));
     assert!(turn.prompt.contains("[Room \"Launch\" with "));
     assert_eq!(turn.session_id.as_deref(), Some("s1"));

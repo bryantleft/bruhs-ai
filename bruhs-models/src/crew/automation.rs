@@ -147,6 +147,7 @@ mod tests {
                 status: BruhStatus::Asleep,
                 next_wake_ms: None,
                 unread: 0,
+                computer: false,
             }],
             ..ReactiveSnapshot::default()
         };

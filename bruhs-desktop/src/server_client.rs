@@ -10,6 +10,8 @@
 
 #[path = "server_client/api_client.rs"]
 mod api_client;
+#[path = "server_client/computer.rs"]
+mod computer;
 #[path = "server_client/database.rs"]
 mod database;
 #[path = "server_client/mail.rs"]
@@ -22,6 +24,8 @@ mod reactive;
 mod rich_response_io;
 #[path = "server_client/workbench.rs"]
 mod workbench;
+pub use computer::Screencast;
+pub use computer::ScreencastEvent;
 pub use reactive::ReactiveHookToken;
 
 use std::sync::Arc;

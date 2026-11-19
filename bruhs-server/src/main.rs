@@ -115,6 +115,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     let addr = format!("127.0.0.1:{}", config.port);
     let listener = tokio::net::TcpListener::bind(&addr).await?;
     bruhs_core::workbench_tools::set_endpoint(format!("http://{}", listener.local_addr()?))?;
+    // Bruh browsers: the host gets every bruh whose Computer is on, before
+    // the worker can run one of their steps.
+    let tools = bruhs_core::local_tools::LocalToolsHost::new()?;
+    reactive.attach_computers(Arc::clone(&tools))?;
     let _reactive_worker = reactive.start(Arc::clone(&state))?;
     let _reactive_events = reactive_events::start(reactive.clone(), Arc::clone(&state));
     // Google Calendar sync (when BRUHS_GOOGLE_* is configured).
@@ -197,7 +201,6 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .flatten()
         .collect(),
     )?;
-    let tools = bruhs_core::local_tools::LocalToolsHost::new()?;
     let remote_hosts = bruhs_core::remote_hosts::RemoteHostManager::open(
         bruhs_core::remote_hosts::RemoteHostManager::default_path()?,
     )
@@ -210,7 +213,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         ))
         .layer(axum::Extension(coordination.clone()))
         .layer(axum::Extension(board_links.clone()))
-        .layer(axum::Extension(tools))
+        .layer(axum::Extension(tools.clone()))
         .layer(axum::Extension(databases))
         .layer(axum::Extension(api_client));
     if let Ok(bind) = std::env::var("BRUHS_TASK_BIND") {
@@ -230,6 +233,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     tracing::info!("bruhs-server listening on http://{addr}");
     let result = serve(listener, app).await;
     remote_hosts.shutdown();
+    // Bruh browsers keep profiles; a graceful close writes their cookies.
+    tools.close_all().await;
     result?;
     Ok(())
 }
@@ -436,6 +441,10 @@ fn router_with_capture_daemon(
             get(routes::local_tools::device_video),
         )
         .route(
+            "/api/local-tools/browser/{session}/screencast",
+            get(routes::computer::screencast),
+        )
+        .route(
             "/api/local-tools/dictation",
             post(routes::local_tools::dictation).layer(DefaultBodyLimit::max(UPLOAD_BODY_BYTES)),
         )
@@ -449,6 +458,14 @@ fn router_with_capture_daemon(
         .route(
             "/api/reactive/agents/{id}/runs",
             get(routes::reactive::agent_runs),
+        )
+        .route(
+            "/api/reactive/agents/{id}/computer",
+            get(routes::computer::state).post(routes::computer::request),
+        )
+        .route(
+            "/api/reactive/agents/{id}/computer/command",
+            post(routes::computer::command),
         )
         .route(
             "/api/reactive/rooms/{id}/messages",

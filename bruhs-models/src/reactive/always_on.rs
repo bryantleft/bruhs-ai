@@ -175,6 +175,11 @@ pub struct OutboxSignal {
     pub rooms: Vec<crate::crew::room::RoomState>,
     #[serde(default)]
     pub protocol: u32,
+    /// When a run last changed. A run can start and end between two frames,
+    /// leaving every bruh's state as it was, so a client reads the crew again
+    /// when this moves too. An older service sends none.
+    #[serde(default)]
+    pub runs_at: Option<crate::EpochMs>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

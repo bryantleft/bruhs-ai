@@ -42,7 +42,7 @@ use crate::state::{
 use crate::ui::copy_to_clipboard;
 
 /// `mod` is Command on Apple platforms and Control everywhere else.
-fn host_mod_is_command() -> bool {
+pub(crate) fn host_mod_is_command() -> bool {
     let platform = web_sys::window()
         .and_then(|window| window.navigator().platform().ok())
         .unwrap_or_default()

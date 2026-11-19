@@ -11,7 +11,9 @@ use serde_json::{json, Value};
 
 use crate::error::AppError;
 
-fn runtime(value: Option<Extension<ReactiveRuntime>>) -> Result<ReactiveRuntime, AppError> {
+pub(super) fn runtime(
+    value: Option<Extension<ReactiveRuntime>>,
+) -> Result<ReactiveRuntime, AppError> {
     value.map(|Extension(runtime)| runtime).ok_or_else(|| {
         AppError::Unavailable(
             "Reactive agents are not running in this server. Restart the companion server.".into(),

@@ -2,7 +2,7 @@
 use super::web_button::{web_button, ButtonState, WebButtonSize, WebButtonVariant};
 use crate::{
     app_state::spawn_tokio,
-    server_client::{ReactiveHookToken, ServerClient, ServerError},
+    server_client::{ReactiveHookToken, Screencast, ServerClient, ServerError},
     theme,
 };
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
@@ -11,9 +11,11 @@ use bruhs_models::crew::{
     rooms_ready, run_reviewed_label, saved_agent_level, service_notice, AccessLevel, BruhState,
     ServiceNotice,
 };
+use bruhs_models::local_tools::{ComputerInput, ComputerRequest, ComputerState};
 use bruhs_models::reactive::*;
 use bruhs_ui::zoom::px;
 mod bruh_page;
+mod computer_view;
 mod create_bruh;
 mod editor_fields;
 mod face_editor;
@@ -106,12 +108,17 @@ struct CrewState {
     rooms: Vec<bruhs_models::crew::room::RoomState>,
     /// The serving service's crew protocol, once a frame or snapshot says.
     protocol: Option<u32>,
+    /// When a run last changed, as the latest frame says. A run that starts
+    /// and ends between two frames leaves `bruhs` as it was.
+    runs_at: Option<bruhs_models::EpochMs>,
     /// The installed login service's protocol; `None` when none is installed.
     installed_protocol: Option<u32>,
     /// The serving protocol the installed service was last read for.
     installed_read_for: Option<u32>,
     /// The answering server is a debug build.
     serving_debug: bool,
+    /// The last Computer state read said this system runs no bruh browser.
+    computer_unsupported: bool,
     stream: Option<Task<()>>,
     service_request: Option<Task<()>>,
     updating: bool,
@@ -124,6 +131,26 @@ const REFRESH: Duration = Duration::from_secs(2);
 const BACKGROUND_REFRESH: Duration = Duration::from_secs(15);
 /// Web's `lg` breakpoint: Notifications and Background service side by side.
 const SETTINGS_TWO_COLUMNS_PX: f32 = 1024.0;
+/// Web `bg-longan-950/60 inset-ring-longan-700/50` around Delete agent's
+/// and Delete room's questions.
+const CONFIRM_FILL_OPACITY: f32 = 0.6;
+const CONFIRM_RING_OPACITY: f32 = 0.5;
+
+/// Delete agent asks first, inline in the agent's card, as Delete room
+/// does.
+struct AgentDelete {
+    /// The agent whose Delete agent asked last. Its button holds
+    /// `delete_focus`, so Keep can give focus back to it.
+    agent_id: String,
+    /// The question is showing.
+    confirming: bool,
+    delete_focus: FocusHandle,
+    keep_focus: FocusHandle,
+    new_agent_focus: FocusHandle,
+    /// The agent went while its question showed: New agent takes focus
+    /// on the next frame.
+    focus_new_agent: bool,
+}
 
 struct AgentEditor {
     agent: ReactiveAgent,
@@ -251,9 +278,16 @@ pub(crate) struct ReactiveAutomations {
     queued: VecDeque<(ReactiveCommand, Scope)>,
     /// Bumped whenever the snapshot changes.
     snapshot_rev: u64,
+    agent_delete: AgentDelete,
     /// Every command sent, in order; tests never reach a server.
     #[cfg(test)]
     sent: Vec<ReactiveCommand>,
+    /// Every Computer request, by agent id, in order.
+    #[cfg(test)]
+    computer_requests: Vec<(String, ComputerRequest)>,
+    /// Every live view input, in order.
+    #[cfg(test)]
+    screencast_inputs: Vec<ComputerInput>,
     /// What each stop command of ⌘. fails with in a test.
     #[cfg(test)]
     stop_failure: Option<String>,
@@ -563,8 +597,20 @@ impl ReactiveAutomations {
             focus_room: None,
             queued: VecDeque::new(),
             snapshot_rev: 0,
+            agent_delete: AgentDelete {
+                agent_id: String::new(),
+                confirming: false,
+                delete_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+                keep_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+                new_agent_focus: cx.focus_handle().tab_index(0).tab_stop(true),
+                focus_new_agent: false,
+            },
             #[cfg(test)]
             sent: Vec::new(),
+            #[cfg(test)]
+            computer_requests: Vec::new(),
+            #[cfg(test)]
+            screencast_inputs: Vec::new(),
             #[cfg(test)]
             stop_failure: None,
             #[cfg(test)]
@@ -654,6 +700,19 @@ impl ReactiveAutomations {
             });
         }
         let snapshot = bruhs_models::weekly_reports::editable_automation_snapshot(snapshot);
+        // Once the agent has gone, so have its card and buttons: the
+        // question closes and focus moves to New agent, never to another
+        // agent's Delete.
+        let asking = &mut self.agent_delete;
+        if asking.confirming
+            && !snapshot
+                .agents
+                .iter()
+                .any(|agent| agent.id == asking.agent_id)
+        {
+            asking.confirming = false;
+            asking.focus_new_agent = true;
+        }
         let changed = self.snapshot.as_ref() != Some(&snapshot);
         self.snapshot = Some(snapshot);
         if changed {
@@ -828,6 +887,91 @@ impl ReactiveAutomations {
     ) -> Stateful<Div> {
         control(SharedString::from(key), label, self.busy)
             .on_activate(cx, move |this, _, cx| this.send(command.clone(), cx))
+    }
+    /// Delete agent: ask first, with focus on Keep, the safe choice.
+    fn ask_delete_agent(
+        &mut self,
+        agent_id: &str,
+        window: &mut Window,
+        cx: &mut Context<'_, Self>,
+    ) {
+        let asking = &mut self.agent_delete;
+        agent_id.clone_into(&mut asking.agent_id);
+        asking.confirming = true;
+        asking.keep_focus.focus(window, cx);
+        cx.notify();
+    }
+    /// Keep: drop the question, with focus back on Delete agent.
+    fn keep_agent(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
+        self.agent_delete.confirming = false;
+        self.agent_delete.delete_focus.focus(window, cx);
+        cx.notify();
+    }
+    /// Delete agent's question in the agent's card: Delete goes ahead and
+    /// Keep, which has focus, closes it.
+    fn render_agent_delete(&self, agent_id: &str, question: String, cx: &Context<'_, Self>) -> Div {
+        let delete = apply(ReactiveChange::DeleteAgent {
+            id: agent_id.to_string(),
+        });
+        // Delete stays on while the delete is on its way, so focus stays
+        // on it; `on_activate` sends only while nothing is in flight.
+        let yes = web_button(
+            "desktop-delete-agent-yes",
+            WebButtonVariant::Destructive,
+            WebButtonSize::Small,
+            ButtonState::Enabled,
+        )
+        .debug_selector(|| "desktop-delete-agent-yes".to_string())
+        .aria_label(bruhs_models::crew::DELETE_BRUH_YES)
+        .focus_visible(|el| el.border_color(theme::persimmon_400()))
+        .child(bruhs_models::crew::DELETE_BRUH_YES)
+        .on_activate(cx, move |this, _, cx| this.send(delete.clone(), cx));
+        let keep = bruhs_ui::press::on_press_view(
+            web_button(
+                "desktop-delete-agent-keep",
+                WebButtonVariant::Ghost,
+                WebButtonSize::Small,
+                ButtonState::Enabled,
+            )
+            .debug_selector(|| "desktop-delete-agent-keep".to_string())
+            .aria_label(bruhs_models::crew::DELETE_BRUH_NO)
+            .track_focus(&self.agent_delete.keep_focus)
+            .focus_visible(|el| el.border_color(theme::persimmon_400()))
+            .child(bruhs_models::crew::DELETE_BRUH_NO),
+            cx,
+            |this, window, cx| this.keep_agent(window, cx),
+        );
+        div()
+            .debug_selector(|| "desktop-delete-agent-confirm".to_string())
+            .p_3()
+            .rounded(px(8.0))
+            .bg(theme::longan_950().opacity(CONFIRM_FILL_OPACITY))
+            .border_1()
+            .border_color(theme::longan_700().opacity(CONFIRM_RING_OPACITY))
+            .flex()
+            .flex_col()
+            .gap_2()
+            .child(
+                div()
+                    .text_size(px(theme::APP_BODY_TEXT_SIZE_PX))
+                    .text_color(theme::rambutan_200())
+                    .child(question),
+            )
+            .child(div().flex().items_center().gap_2().child(yes).child(keep))
+    }
+    /// What Delete agent asks, while it asks.
+    fn agent_delete_question(&self) -> Option<String> {
+        let asking = &self.agent_delete;
+        if !asking.confirming {
+            return None;
+        }
+        let agent = self
+            .snapshot
+            .as_ref()?
+            .agents
+            .iter()
+            .find(|agent| agent.id == asking.agent_id)?;
+        Some(bruhs_models::crew::delete_bruh_confirm(&agent.name))
     }
     fn command_in(
         &self,
@@ -1450,6 +1594,87 @@ impl ReactiveAutomations {
     pub(crate) fn rooms_reason(&self) -> Option<&'static str> {
         bruhs_models::crew::room::rooms_reason(self.crew.protocol)
     }
+    /// Whether the service runs bruh Computers. Unknown counts as not yet.
+    pub(crate) fn computer_ready(&self) -> bool {
+        self.crew
+            .protocol
+            .is_some_and(bruhs_models::crew::computer_ready)
+    }
+    /// Bruh `agent_id`'s Computer as the snapshot and the service have it.
+    pub(crate) fn computer_gate(&self, agent_id: &str) -> bruhs_models::crew::ComputerGate {
+        bruhs_models::crew::computer_gate(self.snapshot.as_ref(), agent_id, self.crew.protocol)
+    }
+    /// Whether the last Computer state read said this system runs no bruh
+    /// browser.
+    pub(crate) fn computer_unsupported(&self) -> bool {
+        self.crew.computer_unsupported
+    }
+    /// A Computer state was read: Settings learns whether this system runs
+    /// a bruh's browser.
+    pub(crate) fn set_computer_unsupported(
+        &mut self,
+        unsupported: bool,
+        cx: &mut Context<'_, Self>,
+    ) {
+        if self.crew.computer_unsupported != unsupported {
+            self.crew.computer_unsupported = unsupported;
+            cx.notify();
+        }
+    }
+    /// Ask for something of `agent_id`'s Computer: open or close its
+    /// browser, take or hand back control, or open it in a window. `None`
+    /// when the service doesn't run Computers, so nothing is sent; the task
+    /// ends with the new state or why it failed.
+    pub(crate) fn computer_request(
+        &mut self,
+        agent_id: &str,
+        request: ComputerRequest,
+        cx: &mut Context<'_, Self>,
+    ) -> Option<Task<Result<ComputerState, String>>> {
+        if !self.computer_ready() {
+            return None;
+        }
+        #[cfg(test)]
+        {
+            let _ = cx;
+            self.computer_requests.push((agent_id.to_string(), request));
+            Some(Task::ready(Ok(ComputerState {
+                agent_id: agent_id.to_string(),
+                ..ComputerState::default()
+            })))
+        }
+        #[cfg(not(test))]
+        {
+            let client = self.client.clone();
+            let agent_id = agent_id.to_string();
+            Some(spawn_tokio(cx, async move {
+                client
+                    .computer_request(&agent_id, &request)
+                    .await
+                    .map_err(reactive_error)
+            }))
+        }
+    }
+    /// Pass the owner's input to the live view, when one is open.
+    pub(crate) fn screencast_input(
+        &mut self,
+        screencast: Option<&Screencast>,
+        input: ComputerInput,
+    ) {
+        #[cfg(test)]
+        self.screencast_inputs.push(input.clone());
+        if let Some(screencast) = screencast {
+            screencast.send(input);
+        }
+    }
+    #[cfg(test)]
+    pub(crate) fn computer_requests_for_test(&self) -> &[(String, ComputerRequest)] {
+        &self.computer_requests
+    }
+    #[cfg(test)]
+    pub(crate) fn screencast_inputs_for_test(&self) -> &[ComputerInput] {
+        &self.screencast_inputs
+    }
     /// Which older service to update, once the serving protocol is known.
     pub(crate) fn crew_notice(&self) -> Option<ServiceNotice> {
         service_notice(self.crew.protocol?, self.crew.installed_protocol)
@@ -1680,8 +1905,12 @@ impl ReactiveAutomations {
             cx.notify();
             changed = true;
         }
-        // A bruh or room page reads the crew again when its bruhs or rooms
-        // change, like the web's.
+        if self.crew.runs_at != signal.runs_at {
+            self.crew.runs_at = signal.runs_at;
+            changed = true;
+        }
+        // A bruh or room page reads the crew again when its bruhs, rooms or
+        // runs change, like the web's.
         if changed && (self.bruh.is_some() || self.room.is_some()) {
             self.refresh_snapshot(cx);
         }
@@ -1801,6 +2030,8 @@ pub(crate) struct ReactiveCrewChanged;
 impl Render for ReactiveAutomations {
     fn render(&mut self, _window: &mut Window, cx: &mut Context<'_, Self>) -> impl IntoElement {
         self.last_render = Instant::now();
+        // Taken on every frame: only the panel's own view draws New agent.
+        let focus_new_agent = std::mem::take(&mut self.agent_delete.focus_new_agent);
         if !self.loaded && cfg!(not(test)) {
             self.refresh(cx);
         }
@@ -1809,6 +2040,7 @@ impl Render for ReactiveAutomations {
         }
         if let Some(agent_id) = self.bruh_page_agent().map(str::to_string) {
             self.ensure_bruh_page(_window, cx);
+            self.sync_bruh_computer(cx);
             return self
                 .render_bruh_page(&agent_id, _window, cx)
                 .into_any_element();
@@ -1818,6 +2050,9 @@ impl Render for ReactiveAutomations {
             return self
                 .render_room_page(&room_id, _window, cx)
                 .into_any_element();
+        }
+        if focus_new_agent && self.advanced_open {
+            self.agent_delete.new_agent_focus.focus(_window, cx);
         }
         let disabled = self.busy || self.snapshot.is_none();
         self.ensure_weekly_inputs(_window, cx);
@@ -1896,7 +2131,7 @@ impl Render for ReactiveAutomations {
         if let Some(snapshot) = &self.snapshot {
             if self.advanced_open {
                 panel=panel.child(muted("Manage separate agents, sources, and subscriptions, or inspect private integration credentials."))
-                .child(div().flex().flex_wrap().gap_2().child(control("reactive-new-agent","New agent",disabled).on_activate(cx, |this,window,cx|this.open_agent(None,window,cx))).child(control("reactive-scans","Watch scans",disabled).on_activate(cx, |this,window,cx|this.open_source(None,window,cx))).child(control("reactive-new-subscription","Connect source to agent",disabled).on_activate(cx, |this,window,cx|this.open_subscription(None,window,cx))));
+                .child(div().flex().flex_wrap().gap_2().child(control("reactive-new-agent","New agent",disabled).track_focus(&self.agent_delete.new_agent_focus).on_activate(cx, |this,window,cx|this.open_agent(None,window,cx))).child(control("reactive-scans","Watch scans",disabled).on_activate(cx, |this,window,cx|this.open_source(None,window,cx))).child(control("reactive-new-subscription","Connect source to agent",disabled).on_activate(cx, |this,window,cx|this.open_subscription(None,window,cx))));
                 if !matches!(
                     &self.editor,
                     Some(Editor::Automation(_) | Editor::Chat { .. })
@@ -1909,11 +2144,14 @@ impl Render for ReactiveAutomations {
                     panel=panel.child(muted("Start with a bill assistant: create an agent, choose Watch scans, then connect the two. New agents and sources stay paused until you enable them."));
                 }
                 let on_cards = setup::automation_agent_ids(snapshot);
+                let question = self.agent_delete_question();
                 for agent in &snapshot.agents {
                     let edit = agent.clone();
                     let mut toggle = agent.clone();
                     toggle.enabled = !toggle.enabled;
                     let chat_id = agent.id.clone();
+                    let asking = self.agent_delete.agent_id == agent.id;
+                    let confirming = asking && self.agent_delete.confirming;
                     panel =
                         panel.child(
                             card()
@@ -1964,15 +2202,33 @@ impl Render for ReactiveAutomations {
                                             apply(ReactiveChange::SaveAgent { agent: toggle }),
                                             cx,
                                         ))
-                                        .child(self.command(
-                                            format!("reactive-delete-agent-{}", agent.id),
-                                            "Delete agent",
-                                            apply(ReactiveChange::DeleteAgent {
-                                                id: agent.id.clone(),
-                                            }),
-                                            cx,
-                                        )),
+                                        .when(!confirming, |row| {
+                                            let id = agent.id.clone();
+                                            row.child(
+                                                control(
+                                                    SharedString::from(format!(
+                                                        "reactive-delete-agent-{}",
+                                                        agent.id
+                                                    )),
+                                                    "Delete agent",
+                                                    self.busy,
+                                                )
+                                                .when(asking, |el| {
+                                                    el.track_focus(&self.agent_delete.delete_focus)
+                                                })
+                                                .on_activate(cx, move |this, window, cx| {
+                                                    this.ask_delete_agent(&id, window, cx)
+                                                }),
+                                            )
+                                        }),
                                 )
+                                .when(confirming, |card| {
+                                    card.child(self.render_agent_delete(
+                                        &agent.id,
+                                        question.clone().unwrap_or_default(),
+                                        cx,
+                                    ))
+                                })
                                 .when(!on_cards.contains(&agent.id), |card| {
                                     card.child(self.render_agent_records(&agent.id, cx))
                                 }),
@@ -2213,7 +2469,7 @@ impl Render for ReactiveAutomations {
                     ),
                     _ => AccessLevel::ReadOnly,
                 };
-                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,event_policy_line(automation.subscription.auto_run,level)),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic run setting below.".into(),ReactiveChange::DeleteAgent{id}=>format!("Delete agent {id} and its subscriptions."),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
+                let label=match &proposal.change {ReactiveChange::SaveAutomation{automation}=>format!("{} {}. Review its complete purpose, source, model, folder, memory, and timing below. {}",if automation.enabled(){"Enable automation"}else{"Save paused automation"},automation.agent.name,event_policy_line(automation.subscription.auto_run,level)),ReactiveChange::SaveAgent{agent}=>format!("Save agent {}. Review its instructions, model, folder, memory, and enabled state below.",agent.name),ReactiveChange::SaveSource{source}=>format!("Save {} source {}. Review all connection settings below.",source_label(&source.kind),source.name),ReactiveChange::SaveSubscription{..}=>"Connect an event source to an agent. Review its instructions and automatic run setting below.".into(),ReactiveChange::DeleteAgent{id}=>bruhs_models::crew::delete_agent_line_for(self.snapshot.as_ref(),id),ReactiveChange::DeleteSource{id}=>format!("Delete source {id} and its subscriptions."),ReactiveChange::DeleteSubscription{id}=>format!("Delete subscription {id}."),ReactiveChange::SetMemory{agent_id,..}=>format!("Replace persistent memory for agent {agent_id}. Review the complete replacement below.")};
                 let payload = serde_json::to_string_pretty(&proposal.change)
                     .unwrap_or_else(|error| format!("Cannot display proposal: {error}"));
                 let mut proposal_card = card()
@@ -2601,6 +2857,172 @@ mod tests {
 }
 
 #[cfg(test)]
+mod computer_tests {
+    use super::ReactiveAutomations;
+    use crate::theme;
+    use bruhs_models::crew::{delete_agent_line, delete_bruh_confirm, ServiceNotice};
+    use bruhs_models::local_tools::{ComputerInput, ComputerRequest};
+    use bruhs_models::reactive::{
+        ReactiveAgent, ReactiveChange, ReactiveCommand, ReactiveSnapshot,
+    };
+    use gpui::{AppContext as _, Entity, VisualTestContext};
+    use std::{cell::RefCell, rc::Rc};
+
+    fn agent(id: &str, name: &str) -> ReactiveAgent {
+        ReactiveAgent {
+            id: id.into(),
+            name: name.into(),
+            instructions: String::new(),
+            memory: String::new(),
+            model: bruhs_models::agent::DEFAULT_AGENT_MODEL.into(),
+            project_path: String::new(),
+            enabled: true,
+        }
+    }
+
+    fn snapshot(agents: Vec<ReactiveAgent>, protocol: u32) -> ReactiveSnapshot {
+        ReactiveSnapshot {
+            agents,
+            protocol,
+            ..ReactiveSnapshot::default()
+        }
+    }
+
+    /// A standalone panel window (F13) with Advanced settings open.
+    fn open(
+        cx: &mut gpui::TestAppContext,
+        snapshot: ReactiveSnapshot,
+    ) -> (Entity<ReactiveAutomations>, &mut VisualTestContext) {
+        cx.update(|cx| {
+            bruhs_ui::init(cx);
+            theme::apply_bruhs_theme(cx);
+        });
+        let holder = Rc::new(RefCell::new(None));
+        let capture = holder.clone();
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            let panel = cx.new(ReactiveAutomations::new);
+            *capture.borrow_mut() = Some(panel.clone());
+            bruhs_ui::Root::new(panel, window, cx)
+        });
+        cx.simulate_resize(gpui::size(gpui::px(900.0), gpui::px(2400.0)));
+        let panel = holder.borrow().clone().unwrap();
+        panel.update(cx, |panel, cx| {
+            panel.loaded = true;
+            panel.advanced_open = true;
+            panel.set_snapshot(snapshot, cx);
+        });
+        cx.run_until_parked();
+        (panel, cx)
+    }
+
+    fn click(cx: &mut VisualTestContext, selector: &'static str) {
+        let bounds = cx.debug_bounds(selector).expect(selector);
+        cx.simulate_click(bounds.center(), gpui::Modifiers::default());
+        cx.run_until_parked();
+    }
+
+    #[gpui::test]
+    fn delete_agent_asks_first_and_names_what_goes(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(cx, snapshot(vec![agent("a", "Ada")], 3));
+        assert!(cx.debug_bounds("desktop-delete-agent-confirm").is_none());
+        click(cx, "reactive-Delete agent");
+        assert!(cx.debug_bounds("desktop-delete-agent-confirm").is_some());
+        assert!(
+            cx.debug_bounds("reactive-Delete agent").is_none(),
+            "the question takes the button's place"
+        );
+        panel.read_with(cx, |panel, _| {
+            assert_eq!(
+                panel.agent_delete_question(),
+                Some(delete_bruh_confirm("Ada"))
+            );
+            assert!(panel.sent_for_test().is_empty(), "nothing yet");
+        });
+        let focus = |panel: &Entity<ReactiveAutomations>, cx: &mut VisualTestContext| {
+            panel.update_in(cx, |panel, window, _| {
+                let asking = &panel.agent_delete;
+                (
+                    asking.delete_focus.is_focused(window),
+                    asking.keep_focus.is_focused(window),
+                    asking.new_agent_focus.is_focused(window),
+                )
+            })
+        };
+        assert_eq!(focus(&panel, cx), (false, true, false), "focus is on Keep");
+        click(cx, "desktop-delete-agent-keep");
+        assert!(cx.debug_bounds("desktop-delete-agent-confirm").is_none());
+        assert_eq!(
+            focus(&panel, cx),
+            (true, false, false),
+            "back on Delete agent"
+        );
+        panel.read_with(cx, |panel, _| assert!(panel.sent_for_test().is_empty()));
+        click(cx, "reactive-Delete agent");
+        click(cx, "desktop-delete-agent-yes");
+        panel.read_with(cx, |panel, _| {
+            assert_eq!(
+                panel.sent_for_test(),
+                [ReactiveCommand::Apply {
+                    change: ReactiveChange::DeleteAgent { id: "a".into() }
+                }]
+            );
+        });
+        panel.update(cx, |panel, cx| {
+            panel.answer_last_for_test(snapshot(Vec::new(), 3), cx);
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("desktop-delete-agent-confirm").is_none());
+        assert_eq!(
+            focus(&panel, cx),
+            (false, false, true),
+            "focus moves to New agent"
+        );
+    }
+
+    #[test]
+    fn a_delete_agent_proposal_names_the_agent_and_what_goes_with_it() {
+        use bruhs_models::crew::delete_agent_line_for;
+        let snapshot = snapshot(vec![agent("a1", "Ada")], 3);
+        assert_eq!(
+            delete_agent_line_for(Some(&snapshot), "a1"),
+            delete_agent_line("Ada")
+        );
+        // An agent the app hasn't loaded is named by its id.
+        assert_eq!(delete_agent_line_for(None, "zz"), delete_agent_line("zz"));
+    }
+
+    /// Computer requests and live view input reach only a service that
+    /// runs Computers; an older one says why.
+    #[gpui::test]
+    fn computer_requests_wait_for_a_service_with_computers(cx: &mut gpui::TestAppContext) {
+        let (panel, cx) = open(cx, snapshot(vec![agent("a", "Ada")], 2));
+        panel.update(cx, |panel, cx| {
+            assert!(!panel.computer_ready());
+            assert_eq!(
+                panel.computer_gate("a").reason,
+                Some(ServiceNotice::ServingOld.message())
+            );
+            assert!(panel
+                .computer_request("a", ComputerRequest::Open, cx)
+                .is_none());
+            assert!(panel.computer_requests_for_test().is_empty());
+            panel.set_snapshot(snapshot(vec![agent("a", "Ada")], 3), cx);
+            assert!(panel.computer_ready());
+            assert_eq!(panel.computer_gate("a").reason, None);
+            assert!(panel
+                .computer_request("a", ComputerRequest::Open, cx)
+                .is_some());
+            assert_eq!(
+                panel.computer_requests_for_test(),
+                [("a".to_string(), ComputerRequest::Open)]
+            );
+            panel.screencast_input(None, ComputerInput::Reload);
+            assert_eq!(panel.screencast_inputs_for_test(), [ComputerInput::Reload]);
+        });
+    }
+}
+
+#[cfg(test)]
 mod crew_tests {
     use super::{
         auto_update_allowed, installed_protocol, service_update, ReactiveAutomations, ServiceUpdate,
@@ -2674,6 +3096,7 @@ mod crew_tests {
             status: BruhStatus::Working,
             next_wake_ms: None,
             unread: 2,
+            computer: false,
         };
         panel.update(cx, |panel, cx| {
             assert_eq!(panel.crew_protocol(), None);

@@ -41,3 +41,6 @@ wiremock = "0.6"
 rusqlite = { workspace = true }
 tempfile = { workspace = true }
 tokio = { workspace = true, features = ["full", "test-util"] }
+tokio-tungstenite = "0.29"
+# The desktop's server client (included above for tests) queues live view frames.
+async-channel = "2"

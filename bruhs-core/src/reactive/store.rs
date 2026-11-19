@@ -935,6 +935,9 @@ pub(super) fn command(
             ReactiveCommand::DecideApproval { id, approve } => {
                 crew::decide_approval(connection, &id, approve)?;
             }
+            ReactiveCommand::SetComputer { agent_id, on } => {
+                crew::set_computer(connection, &agent_id, on)?;
+            }
             ReactiveCommand::ApproveRun { id } => {
                 let mut run: ReactiveRun = required(connection, "reactive_runs", &id, "run")?;
                 if run.status == RunStatus::Queued {
@@ -1354,6 +1357,9 @@ pub(super) struct Claim {
     pub bruh: bruhs_models::crew::BruhProfile,
     pub run: ReactiveRun,
     pub context: String,
+    /// This attempt at the run, which a retry keeps the id of. The runtime's
+    /// claim sets it; the store leaves 0.
+    pub generation: u64,
 }
 
 fn item_label(run: &ReactiveRun) -> &'static str {
@@ -1526,6 +1532,7 @@ pub(super) fn claim_next(connection: &mut Connection) -> Result<Option<Claim>, R
             bruh,
             run,
             context,
+            generation: 0,
         }))
     })
 }

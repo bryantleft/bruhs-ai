@@ -161,6 +161,11 @@ pub struct EditorState<K: FieldKind> {
     pub(super) reveal_pending: bool,
     /// Where a right click opened the edit menu.
     pub(super) context_menu: Option<Point<Pixels>>,
+    /// Web `readonly`, as the component last drew it: every edit is
+    /// refused here, whatever asks for it (a key, the edit menu, the
+    /// platform's input handler, `insert`, `replace_all`, `clean`). Only
+    /// `set_value`, the app's own value, still sets the text.
+    pub(super) readonly: bool,
     blink: Option<Task<()>>,
     /// The caret's x on a vertical move, kept across lines.
     preferred_x: Option<Pixels>,
@@ -211,6 +216,7 @@ impl<K: FieldKind> EditorState<K> {
             caret_visible: false,
             reveal_pending: false,
             context_menu: None,
+            readonly: false,
             blink: None,
             preferred_x: None,
             _subscriptions: subscriptions,
@@ -277,9 +283,10 @@ impl<K: FieldKind> EditorState<K> {
         window.focus(&self.focus_handle, cx);
     }
 
-    /// Clear the text, as the clear button does; reports a change.
+    /// Clear the text, as the clear button does; reports a change. Does
+    /// nothing in a read-only field.
     pub fn clean(&mut self, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.core.text.is_empty() {
+        if self.readonly || self.core.text.is_empty() {
             return;
         }
         let len = self.core.text.len();
@@ -289,13 +296,17 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     /// Insert `text` at the selection, as typing would: an undoable edit
-    /// that reports a change and leaves the caret after it.
+    /// that reports a change and leaves the caret after it. Does nothing in
+    /// a read-only field.
     pub fn insert(
         &mut self,
         text: impl AsRef<str>,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.readonly {
+            return;
+        }
         let text = Self::clean_text(text.as_ref());
         let range = self.core.selection.range();
         if self.core.replace(range, &text, EditKind::Other).is_some() {
@@ -304,13 +315,16 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     /// Replace the whole text as an edit (undoable, reported), unlike
-    /// [`Self::set_value`].
+    /// [`Self::set_value`]. Does nothing in a read-only field.
     pub fn replace_all(
         &mut self,
         text: impl AsRef<str>,
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.readonly {
+            return;
+        }
         let text = Self::clean_text(text.as_ref());
         let len = self.core.text.len();
         if self.core.replace(0..len, &text, EditKind::Other).is_some() {
@@ -436,6 +450,9 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     fn type_text(&mut self, text: &str, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.readonly {
+            return;
+        }
         let text = Self::clean_text(text);
         let kind = if text.chars().count() == 1 {
             EditKind::Type
@@ -476,7 +493,7 @@ impl<K: FieldKind> EditorState<K> {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
-        if range.is_empty() {
+        if range.is_empty() || self.readonly {
             return;
         }
         if self.core.replace(range, "", EditKind::Other).is_some() {
@@ -816,7 +833,7 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     pub(super) fn cut(&mut self, _: &Cut, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.masked || self.core.selection.is_empty() {
+        if self.masked || self.readonly || self.core.selection.is_empty() {
             return;
         }
         cx.write_to_clipboard(ClipboardItem::new_string(
@@ -827,6 +844,9 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     pub(super) fn paste(&mut self, _: &Paste, window: &mut Window, cx: &mut Context<'_, Self>) {
+        if self.readonly {
+            return;
+        }
         if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
             let text = Self::clean_text(&text);
             let range = self.core.selection.range();
@@ -837,13 +857,13 @@ impl<K: FieldKind> EditorState<K> {
     }
 
     pub(super) fn undo(&mut self, _: &Undo, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.core.undo() {
+        if !self.readonly && self.core.undo() {
             self.after_edit(window, cx);
         }
     }
 
     pub(super) fn redo(&mut self, _: &Redo, window: &mut Window, cx: &mut Context<'_, Self>) {
-        if self.core.redo() {
+        if !self.readonly && self.core.redo() {
             self.after_edit(window, cx);
         }
     }
@@ -1161,6 +1181,11 @@ impl<K: FieldKind> EntityInputHandler for EditorState<K> {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.readonly {
+            // Nothing is composed in a field that can't change.
+            self.marked = None;
+            return;
+        }
         if let Some(range) = range {
             let doc = &self.core.text;
             let range = from_utf16(doc, range.start)..from_utf16(doc, range.end);
@@ -1177,6 +1202,9 @@ impl<K: FieldKind> EntityInputHandler for EditorState<K> {
         window: &mut Window,
         cx: &mut Context<'_, Self>,
     ) {
+        if self.readonly {
+            return;
+        }
         let doc = &self.core.text;
         let range = range
             .map(|range| from_utf16(doc, range.start)..from_utf16(doc, range.end))

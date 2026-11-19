@@ -26,7 +26,8 @@ pub(super) fn initialize(connection: &Connection) -> Result<(), ReactiveError> {
         CREATE TABLE IF NOT EXISTS reactive_agent_state(agent_id TEXT PRIMARY KEY,memory_rev INTEGER NOT NULL DEFAULT 0,memory_seen_rev INTEGER NOT NULL DEFAULT -1,last_consolidation INTEGER NOT NULL DEFAULT 0);
         CREATE TABLE IF NOT EXISTS reactive_settings(id TEXT PRIMARY KEY,payload TEXT NOT NULL);
         CREATE TABLE IF NOT EXISTS reactive_session_stamps(agent_id TEXT PRIMARY KEY,stamp TEXT NOT NULL);
-        CREATE TABLE IF NOT EXISTS reactive_draft_outcomes(workflow_id TEXT NOT NULL,outcome TEXT NOT NULL,run_id TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(workflow_id,outcome));",
+        CREATE TABLE IF NOT EXISTS reactive_draft_outcomes(workflow_id TEXT NOT NULL,outcome TEXT NOT NULL,run_id TEXT NOT NULL,created INTEGER NOT NULL,PRIMARY KEY(workflow_id,outcome));
+        CREATE INDEX IF NOT EXISTS reactive_runs_updated ON reactive_runs(json_extract(payload,'$.updated_at'));",
     )?;
     Ok(())
 }
@@ -245,6 +246,9 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
             |row| row.get(0),
         )
         .optional()?;
+    // When a run last changed: a run that starts and ends between two
+    // frames moves this even though no bruh's state does.
+    let runs_at: Option<i64> = connection.query_row(RUNS_AT, [], |row| row.get(0))?;
     Ok(OutboxSignal {
         unread: usize::try_from(unread).unwrap_or_default(),
         open_questions: usize::try_from(open_questions).unwrap_or_default(),
@@ -252,8 +256,14 @@ pub(in crate::reactive) fn signal(connection: &Connection) -> Result<OutboxSigna
         bruhs: super::crew::bruh_states(connection, EpochMs::now())?,
         rooms: super::rooms::room_states(connection)?,
         protocol: bruhs_models::crew::CREW_PROTOCOL,
+        runs_at: runs_at.and_then(|ms| EpochMs::new(ms).ok()),
     })
 }
+
+/// When a run last changed. Every signal asks, for every stream client, and
+/// nothing prunes the runs, so it reads the `reactive_runs_updated` index's
+/// last entry instead of every run's JSON.
+const RUNS_AT: &str = "SELECT MAX(json_extract(payload,'$.updated_at')) FROM reactive_runs";
 
 /// Items waiting for a system notification, oldest first.
 pub(in crate::reactive) fn pending_deliveries(
@@ -884,4 +894,31 @@ fn schedule_follow_up(
             fired_run_id: None,
         },
     )
+}
+
+#[cfg(test)]
+mod tests {
+    /// The signal's last-run time is one index lookup, not a scan of every
+    /// run's JSON.
+    #[test]
+    fn the_last_run_change_reads_an_index() {
+        let dir = tempfile::tempdir().unwrap();
+        let (connection, _lock) = super::super::open(&dir.path().join("reactive.db")).unwrap();
+        let plan: Vec<String> = connection
+            .prepare(&format!("EXPLAIN QUERY PLAN {}", super::RUNS_AT))
+            .unwrap()
+            .query_map([], |row| row.get::<_, String>(3))
+            .unwrap()
+            .collect::<Result<_, _>>()
+            .unwrap();
+        assert!(
+            plan.iter()
+                .any(|step| step.contains("INDEX reactive_runs_updated")),
+            "{plan:?}"
+        );
+        assert!(
+            !plan.iter().any(|step| step.starts_with("SCAN")),
+            "{plan:?}"
+        );
+    }
 }

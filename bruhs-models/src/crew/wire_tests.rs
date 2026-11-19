@@ -189,3 +189,79 @@ fn a_run_with_a_trigger_from_a_newer_service_still_decodes() {
     // A known trigger is still read strictly.
     assert!(serde_json::from_str::<RunTrigger>(r#"{"type":"room","room_id":"r"}"#).is_err());
 }
+
+#[test]
+fn computer_is_its_own_command_and_survives_an_access_save() {
+    assert_eq!(
+        serde_json::from_str::<ReactiveCommand>(
+            r#"{"action":"set_computer","agent_id":"a","on":true}"#
+        )
+        .unwrap(),
+        ReactiveCommand::SetComputer {
+            agent_id: "a".into(),
+            on: true
+        }
+    );
+    assert!(!serde_json::from_str::<BruhProfile>("{}").unwrap().computer);
+    let state: BruhState = serde_json::from_str(
+        r#"{"agent_id":"a","name":"A","look":{},"access":{},"status":"asleep"}"#,
+    )
+    .unwrap();
+    assert!(!state.computer, "an older service's bruh reads as off");
+    assert!(computer_ready(3) && !computer_ready(2) && CREW_PROTOCOL == 3);
+    assert_eq!(COMPUTER_PROTOCOL, CREW_PROTOCOL);
+
+    let agent = crate::reactive::ReactiveAgent {
+        id: "a".into(),
+        name: "A".into(),
+        instructions: String::new(),
+        memory: String::new(),
+        model: "sonnet".into(),
+        project_path: String::new(),
+        enabled: true,
+    };
+    let settings = BruhSettings {
+        name: "A".into(),
+        instructions: String::new(),
+        model: "sonnet".into(),
+        effort: None,
+        look: BruhLook::default(),
+        access: BruhAccess::default(),
+        computer: false,
+    };
+    let on = BruhSettings {
+        computer: true,
+        ..settings.clone()
+    };
+    assert_eq!(
+        settings_commands(&agent, &state, &on),
+        vec![ReactiveCommand::SetComputer {
+            agent_id: "a".into(),
+            on: true
+        }]
+    );
+    let full = BruhSettings {
+        access: BruhAccess {
+            level: AccessLevel::Full,
+            ..BruhAccess::default()
+        },
+        ..settings
+    };
+    let commands = settings_commands(&agent, &state, &full);
+    assert!(matches!(
+        commands.as_slice(),
+        [ReactiveCommand::SetBruh { .. }]
+    ));
+    let both = BruhSettings {
+        computer: true,
+        ..full
+    };
+    let commands = settings_commands(&agent, &state, &both);
+    assert!(matches!(
+        commands.as_slice(),
+        [
+            ReactiveCommand::SetBruh { .. },
+            ReactiveCommand::SetComputer { on: true, .. }
+        ]
+    ));
+}

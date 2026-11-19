@@ -1,11 +1,12 @@
 //! A bruh's own page: its face, name, job and status, Stop or Resume, and
-//! tabs for its chat, memory, routines and settings.
+//! tabs for its chat, computer, memory, routines and settings.
 
-use bruhs_models::crew::{job_line, status_line, BruhStatus, PAGE_FACE_PX};
+use bruhs_models::crew::{job_line, status_line, BruhStatus, COMPUTER_TAB, PAGE_FACE_PX};
 use bruhs_models::reactive::ReactiveCommand;
 use leptos::prelude::*;
 
 use super::chat::BruhChat;
+use super::computer::BruhComputer;
 use super::data::use_crew_snapshot;
 use super::face::BruhFace;
 use super::settings::BruhSettingsTab;
@@ -19,17 +20,25 @@ const TAB_OFF: &str = "bruhs-control inline-flex min-h-control items-center roun
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum Tab {
     Chat,
+    Computer,
     Memory,
     Routines,
     Settings,
 }
 
 impl Tab {
-    const ALL: [Tab; 4] = [Tab::Chat, Tab::Memory, Tab::Routines, Tab::Settings];
+    const ALL: [Tab; 5] = [
+        Tab::Chat,
+        Tab::Computer,
+        Tab::Memory,
+        Tab::Routines,
+        Tab::Settings,
+    ];
 
     fn label(self) -> &'static str {
         match self {
             Tab::Chat => "Chat",
+            Tab::Computer => COMPUTER_TAB,
             Tab::Memory => "Memory",
             Tab::Routines => "Routines",
             Tab::Settings => "Settings",
@@ -150,6 +159,11 @@ pub fn BruhPage(agent_id: String) -> impl IntoView {
                         let agent_id = id.get_value();
                         match tab.get() {
                             Tab::Chat => view! { <BruhChat agent_id=agent_id /> }.into_any(),
+                            Tab::Computer => view! {
+                                <div class="min-h-0 flex-1 overflow-y-auto">
+                                    <BruhComputer agent_id=agent_id />
+                                </div>
+                            }.into_any(),
                             Tab::Memory => view! {
                                 <div class="min-h-0 flex-1 overflow-y-auto">
                                     <div class="mx-auto w-full max-w-3xl min-w-0 p-4 sm:px-6">
@@ -178,5 +192,18 @@ pub fn BruhPage(agent_id: String) -> impl IntoView {
                 })}
             </Show>
         </section>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn the_tab_order_puts_computer_after_chat() {
+        assert_eq!(
+            Tab::ALL.map(Tab::label),
+            ["Chat", "Computer", "Memory", "Routines", "Settings"]
+        );
     }
 }

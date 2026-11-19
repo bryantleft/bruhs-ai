@@ -1,6 +1,7 @@
 //! Server-owned event agents; these records never enter browser metadata storage.
-use super::{get_json, segment, send_json, ApiError};
+use super::{get_json, segment, send_json, ApiError, BASE_URL};
 use bruhs_models::api::{BackgroundService, BackgroundServiceAction};
+use bruhs_models::local_tools::{ComputerRequest, ComputerState};
 use bruhs_models::reactive::{ReactiveCommand, ReactiveRun, ReactiveSnapshot};
 use bruhs_models::weekly_reports::{EngineeringReport, WeeklyReportCommand, WeeklyReportsSnapshot};
 use gloo_net::http::Method;
@@ -60,6 +61,34 @@ pub async fn room_messages(
         format!("{base}?before={}", segment(before))
     }))
     .await
+}
+
+/// A bruh's Computer as the service has it now.
+pub async fn computer_state(agent_id: &str) -> Result<ComputerState, ApiError> {
+    get_json(&format!(
+        "/api/reactive/agents/{}/computer",
+        segment(agent_id)
+    ))
+    .await
+}
+
+/// Opens, closes, takes control of, hands back or opens a window for a
+/// bruh's Computer.
+pub async fn computer_request(
+    agent_id: &str,
+    request: &ComputerRequest,
+) -> Result<ComputerState, ApiError> {
+    send_json(
+        Method::POST,
+        &format!("/api/reactive/agents/{}/computer", segment(agent_id)),
+        Some(request),
+    )
+    .await
+}
+
+/// The live view's WebSocket address for a browser session.
+pub fn screencast_url(session_id: &str) -> String {
+    bruhs_models::local_tools::screencast_url(BASE_URL, session_id)
 }
 
 pub async fn reactive_hook_token(source_id: &str) -> Result<ReactiveHookToken, ApiError> {

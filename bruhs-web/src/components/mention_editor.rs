@@ -1557,6 +1557,7 @@ mod tests {
             status: BruhStatus::Working,
             next_wake_ms: None,
             unread: 0,
+            computer: false,
         };
         let members = [bruh("c", "Cy"), bruh("b", "Bobby"), bruh("a", "Abo")];
         let rows = member_rows(&members, Some("a"), "bo");
