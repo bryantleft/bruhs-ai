@@ -272,6 +272,10 @@ async fn dst_days_and_all_day_dates_in_three_zones(cx: &mut gpui::TestAppContext
         in_zone(cx, &zone).await;
         return;
     }
+    if cfg!(windows) {
+        in_zone(cx, "system").await;
+        return;
+    }
     run_in_zones(concat!(
         module_path!(),
         "::dst_days_and_all_day_dates_in_three_zones"
@@ -441,6 +445,10 @@ async fn local_events_in_zone(cx: &mut gpui::TestAppContext, zone: &str) {
 async fn local_events_survive_restarts_in_three_zones(cx: &mut gpui::TestAppContext) {
     if let Ok(zone) = std::env::var(ZONE_CHILD) {
         local_events_in_zone(cx, &zone).await;
+        return;
+    }
+    if cfg!(windows) {
+        local_events_in_zone(cx, "system").await;
         return;
     }
     run_in_zones(concat!(

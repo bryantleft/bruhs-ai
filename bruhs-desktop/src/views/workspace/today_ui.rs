@@ -1772,7 +1772,10 @@ mod clock_tests {
     #[test]
     fn native_workday_preserves_local_hours_on_dst_transition_dates() {
         const CHILD: &str = "BRUHS_PLANNING_CLOCK_TEST_CHILD";
-        if let Ok(zone) = std::env::var(CHILD) {
+        let zone = std::env::var(CHILD)
+            .ok()
+            .or_else(|| cfg!(windows).then(|| String::from("system")));
+        if let Some(zone) = zone {
             for (month, day, la_start, la_end) in [
                 (3, 8, 1_772_985_600_000_i64, 1_773_018_000_000_i64),
                 (11, 1, 1_793_552_400_000_i64, 1_793_584_800_000_i64),
@@ -1781,6 +1784,15 @@ mod clock_tests {
                 let window = native_workday_window(date).unwrap();
                 let (start, end) = if zone == "America/Los_Angeles" {
                     (la_start, la_end)
+                } else if zone == "system" {
+                    let local = |hour| {
+                        chrono::Local
+                            .from_local_datetime(&date.and_hms_opt(hour, 0, 0).unwrap())
+                            .single()
+                            .unwrap()
+                            .timestamp_millis()
+                    };
+                    (local(9), local(18))
                 } else {
                     (
                         chrono::Utc

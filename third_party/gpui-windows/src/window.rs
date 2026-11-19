@@ -95,6 +95,7 @@ pub struct WindowsWindowState {
 
 pub(crate) struct WindowsWindowInner {
     hwnd: HWND,
+    destroying: Cell<bool>,
     pub(crate) dialog_owner: Rc<crate::dialog::DialogOwner>,
     drop_target_helper: IDropTargetHelper,
     pub(crate) state: WindowsWindowState,
@@ -286,6 +287,7 @@ impl WindowsWindowInner {
 
         Ok(Rc::new(Self {
             hwnd,
+            destroying: Cell::new(false),
             dialog_owner: crate::dialog::DialogOwner::new(hwnd),
             drop_target_helper: context.drop_target_helper.clone(),
             state,
@@ -613,6 +615,9 @@ impl rwh::HasDisplayHandle for WindowsWindow {
 impl Drop for WindowsWindow {
     fn drop(&mut self) {
         self.0.dialog_owner.close();
+        if self.0.destroying.get() {
+            return;
+        }
         unsafe { ShowWindowAsync(self.0.hwnd, SW_HIDE).ok().log_err() };
         // `DestroyWindow` below sends `WM_SHOWWINDOW`; without a callback the
         // resulting visibility report has nothing to notify.
@@ -626,6 +631,9 @@ impl Drop for WindowsWindow {
             .executor
             .spawn(async move {
                 this.dialog_owner.when_idle().await;
+                if this.destroying.get() {
+                    return;
+                }
                 let handle = this.hwnd;
                 unsafe {
                     RevokeDragDrop(handle).log_err();
@@ -1474,6 +1482,10 @@ unsafe extern "system" fn window_procedure(
     }
     let inner = unsafe { &*ptr };
     let result = if let Some(inner) = inner.upgrade() {
+        if msg == WM_DESTROY {
+            // WM_CLOSE can destroy the HWND before GPUI drops its Window.
+            inner.destroying.set(true);
+        }
         if msg == WM_NCDESTROY {
             inner.dialog_owner.close();
         }

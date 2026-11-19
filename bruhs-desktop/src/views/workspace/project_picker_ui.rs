@@ -60,7 +60,7 @@ pub(super) fn path_display_name(path: &Path) -> String {
 }
 
 pub(super) fn home_dir_path() -> Option<PathBuf> {
-    std::env::var_os("HOME").map(PathBuf::from)
+    std::env::home_dir()
 }
 
 pub(super) fn project_picker_start_path() -> PathBuf {

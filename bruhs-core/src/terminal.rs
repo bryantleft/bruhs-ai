@@ -153,6 +153,9 @@ pub fn pick_shell(shell_env: Option<&str>) -> PathBuf {
             return p.to_path_buf();
         }
     }
+    if cfg!(windows) {
+        return std::env::var_os("COMSPEC").map_or_else(|| PathBuf::from("cmd.exe"), PathBuf::from);
+    }
     for candidate in ["/bin/zsh", "/bin/bash", "/bin/sh"] {
         if Path::new(candidate).is_file() {
             return PathBuf::from(candidate);
@@ -308,7 +311,9 @@ impl TerminalManager {
             _ => {
                 let shell = pick_shell(std::env::var("SHELL").ok().as_deref());
                 let mut c = CommandBuilder::new(&shell);
-                c.arg("-l");
+                if !cfg!(windows) {
+                    c.arg("-l");
+                }
                 c
             }
         };
@@ -634,7 +639,7 @@ mod tests {
     fn pick_shell_falls_back_to_an_existing_binary() {
         let picked = pick_shell(Some("/definitely/not/a/shell"));
         assert!(picked.is_file(), "{picked:?} should exist");
-        assert_eq!(pick_shell(Some("/bin/sh")), PathBuf::from("/bin/sh"));
+        assert_eq!(pick_shell(picked.to_str()), picked);
     }
 
     #[test]

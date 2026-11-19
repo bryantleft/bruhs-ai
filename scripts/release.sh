@@ -60,7 +60,7 @@ gh release create "$tag" \
   --title "Bruhs $tag" \
   --notes "$notes
 
-**Install:** On Windows x64, extract the ZIP and run bruhs-desktop.exe (WebView2 required). On Ubuntu 24.04 x64, install the .deb with apt. On Mac, open \`Bruhs-macOS-$(uname -m).dmg\` and drag Bruhs to Applications (macOS 13 or later, Apple silicon). Installed Mac copies update themselves from Settings → Updates. Every release: https://bruhs.ai/changelog" \
+**Install:** On Windows x64, extract the ZIP and run bruhs-desktop.exe ([WebView2](https://developer.microsoft.com/microsoft-edge/webview2/) and the [Visual C++ x64 runtime](https://aka.ms/vc14/vc_redist.x64.exe) required). On Ubuntu 24.04 x64, install the .deb with apt. On Mac, open \`Bruhs-macOS-$(uname -m).dmg\` and drag Bruhs to Applications (macOS 13 or later, Apple silicon). Installed Mac copies update themselves from Settings → Updates. Every release: https://bruhs.ai/changelog" \
   "dist/Bruhs-macOS-$arch.dmg" \
   "dist/Bruhs-macOS-$arch.zip" \
   dist/Bruhs-Windows-x64.zip dist/Bruhs-Linux-x64.deb \

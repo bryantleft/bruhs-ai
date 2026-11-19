@@ -4,7 +4,7 @@ import Base from "../layouts/Base.astro";
 const releases = "https://github.com/bryantleft/bruhs-ai/releases/latest";
 const packages = [
   { os: "mac", name: "macOS", requirement: "Apple silicon · macOS 13 or later", file: "Bruhs-macOS-arm64.dmg", format: "DMG" },
-  { os: "windows", name: "Windows", requirement: "x64 · Microsoft WebView2 Runtime", file: "Bruhs-Windows-x64.zip", format: "ZIP" },
+  { os: "windows", name: "Windows", requirement: "x64 · WebView2 and Visual C++ runtimes", file: "Bruhs-Windows-x64.zip", format: "ZIP" },
   { os: "linux", name: "Linux", requirement: "x86_64 · Ubuntu 24.04", file: "Bruhs-Linux-x64.deb", format: "DEB" },
 ];
 ---
