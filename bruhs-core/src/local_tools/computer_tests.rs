@@ -1341,6 +1341,7 @@ fn canary() -> String {
 
 fn fill_value(origin: &str, field: SecretField, value: &str) -> FillValue {
     FillValue {
+        login_id: "v1-login".into(),
         origin: origin.into(),
         field,
         value: zeroize::Zeroizing::new(value.into()),
@@ -1527,22 +1528,39 @@ async fn value_probing_selectors_are_refused_on_a_filled_document() {
         );
     }
     // A vault fill's own selector too.
+    let username = |selector: &str| {
+        let host = Arc::clone(&host);
+        let selector = selector.to_owned();
+        async move {
+            host.bruh_fill_on(
+                "a",
+                vault_fill(&selector, SecretField::Username, false),
+                fill_value("https://shop.test", SecretField::Username, "owner"),
+                Some("https://shop.test/in"),
+            )
+            .await
+        }
+    };
     assert!(refused_with(
-        host.bruh_fill_on(
-            "a",
-            vault_fill("input[type=text]", SecretField::Username, false),
-            fill_value("https://shop.test", SecretField::Username, "owner"),
-            Some("https://shop.test/in"),
-        )
-        .await,
+        username("input[value=\"\"]").await,
         SELECTOR_AFTER_FILL
     ));
+    // Exact matches on attributes nobody mirrors a value into stay open,
+    // so a sign-in goes on after the first fill.
+    username("input[name=\"user\"]").await.unwrap();
+    for allowed in [
+        "input[type=password]",
+        "button[type=submit]",
+        "[id=\"a:b\"]",
+    ] {
+        host.bruh_command("a", click(allowed)).await.unwrap();
+    }
     host.bruh_command("a", click("#go")).await.unwrap();
     fake.set_document("a", "d2");
     host.bruh_command("a", click("#pw[value^=\"a\"]"))
         .await
         .unwrap();
-    assert_eq!(fake.secret_fills("a").len(), 1);
+    assert_eq!(fake.secret_fills("a").len(), 2);
 }
 
 #[tokio::test]
@@ -1588,10 +1606,92 @@ async fn a_fill_waits_for_the_owner_and_obeys_stop() {
     ));
 }
 
+/// The page goes back to a filled document by itself while a screenshot
+/// is captured: the image is dropped and the screenshot refused.
+#[tokio::test]
+async fn a_screenshot_that_lands_on_a_filled_document_is_dropped() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    fake.set_document("a", "d1");
+    host.bruh_fill_on(
+        "a",
+        vault_fill("#pw", SecretField::Password, false),
+        fill_value("https://shop.test", SecretField::Password, &canary()),
+        Some("https://shop.test/in"),
+    )
+    .await
+    .unwrap();
+    fake.set_document("a", "d2");
+    fake.set_document_during_next_action("a", "d1");
+    assert!(refused_with(
+        host.bruh_command("a", BrowserAction::Screenshot).await,
+        SCREENSHOT_AFTER_FILL
+    ));
+}
+
+/// A relaunched browser is a new page: the documents the last one filled
+/// are gone with it.
+#[tokio::test]
+async fn a_relaunched_browser_starts_with_no_filled_documents() {
+    let (_home, host, fake) = bruh_on("https://shop.test/in").await;
+    fake.set_document("a", "d1");
+    host.bruh_fill_on(
+        "a",
+        vault_fill("#pw", SecretField::Password, false),
+        fill_value("https://shop.test", SecretField::Password, &canary()),
+        Some("https://shop.test/in"),
+    )
+    .await
+    .unwrap();
+    assert!(refused_with(
+        host.bruh_command("a", BrowserAction::Screenshot).await,
+        SCREENSHOT_AFTER_FILL
+    ));
+    host.close_computer("a").await.unwrap();
+    host.bruh_command("a", BrowserAction::Screenshot)
+        .await
+        .unwrap();
+    assert_eq!(fake.launches().len(), 2);
+}
+
+/// At most 64 marks (32 documents) are kept; the oldest go first, and a
+/// mark seen again isn't kept twice.
+#[test]
+fn filled_documents_keep_the_newest_64_marks() {
+    let mut filled = super::FilledDocuments::default();
+    assert!(filled.is_empty());
+    filled.mark((0..70).map(|n| format!("m{n}")));
+    filled.mark(["m69".to_string()]);
+    for evicted in 0..6 {
+        assert!(!filled.holds_any(&[format!("m{evicted}")]), "m{evicted}");
+    }
+    for kept in [6, 7, 40, 69] {
+        assert!(filled.holds_any(&[format!("m{kept}")]), "m{kept}");
+    }
+    // One more evicts only the oldest kept.
+    filled.mark(["m70".to_string()]);
+    assert!(!filled.holds_any(&["m6".into()]));
+    assert!(filled.holds_any(&["m7".into(), "nope".into()]));
+}
+
 #[tokio::test]
 async fn a_mismatched_field_or_plain_action_is_refused() {
     let (_home, host, fake) = bruh_on("https://shop.test/in").await;
     let value = canary();
+    // A value from another login than the one the fill names.
+    let other_login = FillValue {
+        login_id: "v1-other".into(),
+        ..fill_value("https://shop.test", SecretField::Password, &value)
+    };
+    assert!(invalid_with(
+        host.bruh_fill_on(
+            "a",
+            vault_fill("#pw", SecretField::Password, false),
+            other_login,
+            Some("https://shop.test/in"),
+        )
+        .await,
+        FILL_FAILED
+    ));
     assert!(invalid_with(
         host.bruh_fill_on(
             "a",
@@ -1803,6 +1903,10 @@ async fn live_a_filled_page_takes_no_screenshot_or_probe_even_after_back() {
                 "{probe:?}"
             );
         }
+        // An exact match on the field's type still works.
+        host.bruh_command("a", click("input[type=password]".into()))
+            .await
+            .unwrap();
     };
     refused_here().await;
     let host = &host;

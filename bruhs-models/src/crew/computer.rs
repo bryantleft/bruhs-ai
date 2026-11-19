@@ -92,7 +92,11 @@ pub const FILL_FAILED: &str =
 /// A bruh selector on a document a vault fill touched that could read the
 /// value back ([`selector_reads_values`]).
 pub const SELECTOR_AFTER_FILL: &str =
-    "After a vault fill, pick elements on this page by id, class, tag or position, without [ or value states such as :valid. Take a snapshot to find them.";
+    "After a vault fill, pick elements on this page by id, class, tag, position or an exact attribute such as [type=password] or [name=user], never value or value states such as :valid. Take a snapshot to find them.";
+/// A vault fill into a field whose form says it sends with GET, which would
+/// put the value in the page address.
+pub const FILL_GET_FORM: &str =
+    "That field's form sends with GET, which would put the value in the page address, so the vault won't fill it. Stop here and tell the owner.";
 pub const ONE_PASSWORD_NEEDS_OWNER: &str =
     "1Password needs the owner to sign in on this computer. Stop here and say so.";
 pub const ONE_PASSWORD_UNAVAILABLE: &str =
@@ -467,6 +471,14 @@ pub fn secret_input_types(field: SecretField) -> &'static [&'static str] {
     }
 }
 
+/// Whether a vault fill of `field` must never sit in a form that sends with
+/// GET, where submitting puts it in the page address ([`FILL_GET_FORM`]).
+/// A username is metadata.
+#[must_use]
+pub fn stays_out_of_addresses(field: SecretField) -> bool {
+    field != SecretField::Username
+}
+
 /// The pseudo-classes whose match depends on what a field holds.
 const VALUE_STATES: [&str; 10] = [
     ":valid",
@@ -481,16 +493,91 @@ const VALUE_STATES: [&str; 10] = [
     ":-webkit-autofill",
 ];
 
+/// The attributes an attribute selector may name on a filled document:
+/// ones no framework or masking library mirrors a field's value into.
+const SAFE_ATTRIBUTES: [&str; 10] = [
+    "type",
+    "name",
+    "id",
+    "for",
+    "autocomplete",
+    "role",
+    "placeholder",
+    "aria-label",
+    "data-testid",
+    "inputmode",
+];
+
 /// Whether a selector's match count could tell what a filled field holds:
-/// an attribute selector (a page may mirror the value into `value`), a
-/// value state, or an escape or comment that could spell either. Refused
-/// with [`SELECTOR_AFTER_FILL`] on a document a vault fill touched.
+/// a value state, an attribute selector outside the exact-match allowlist
+/// ([`safe_attribute`]), or an escape, comment or quote outside one that
+/// could spell either. Refused with [`SELECTOR_AFTER_FILL`] on a document a
+/// vault fill touched. Anything that doesn't parse is refused.
 #[must_use]
 pub fn selector_reads_values(selector: &str) -> bool {
-    let selector = selector.to_ascii_lowercase();
-    selector.contains(['[', '\\'])
-        || selector.contains("/*")
-        || VALUE_STATES.iter().any(|state| selector.contains(state))
+    let lower = selector.to_ascii_lowercase();
+    if lower.contains('\\')
+        || lower.contains("/*")
+        || VALUE_STATES.iter().any(|state| lower.contains(state))
+    {
+        return true;
+    }
+    let mut rest = lower.as_str();
+    loop {
+        // Outside brackets, a stray `]` or a quote means it didn't parse.
+        let Some(at) = rest.find(['[', ']', '"', '\'']) else {
+            return false;
+        };
+        if !rest[at..].starts_with('[') {
+            return true;
+        }
+        match safe_attribute(&rest[at + 1..]) {
+            Some(after) => rest = after,
+            None => return true,
+        }
+    }
+}
+
+/// One attribute selector's inside, after its `[`, when it reads
+/// `ws* NAME ws* ("=" ws* VALUE ws* (i|s)? ws*)? "]"` with NAME in
+/// [`SAFE_ATTRIBUTES`] and VALUE an identifier or a quoted string with no
+/// backslash, bracket, newline or quote of its own kind. Only `=`: every
+/// other operator matches a prefix or a part. Returns what follows `]`.
+fn safe_attribute(inside: &str) -> Option<&str> {
+    let ident = |text: &str| -> usize {
+        text.find(|c: char| !(c.is_ascii_alphanumeric() || c == '_' || c == '-'))
+            .unwrap_or(text.len())
+    };
+    let rest = inside.trim_start();
+    let name_len = ident(rest);
+    if !SAFE_ATTRIBUTES.contains(&&rest[..name_len]) {
+        return None;
+    }
+    let rest = rest[name_len..].trim_start();
+    if let Some(after) = rest.strip_prefix(']') {
+        return Some(after);
+    }
+    let rest = rest.strip_prefix('=')?.trim_start();
+    let rest = match rest.chars().next()? {
+        quote @ ('"' | '\'') => {
+            let body = &rest[1..];
+            let end = body.find(quote)?;
+            if body[..end].contains(['\\', '[', ']', '\n', '\r', '\x0c']) {
+                return None;
+            }
+            &body[end + 1..]
+        }
+        _ => {
+            let len = ident(rest);
+            if len == 0 {
+                return None;
+            }
+            &rest[len..]
+        }
+    };
+    let rest = rest.trim_start();
+    let rest = rest.strip_prefix(['i', 's']).map_or(rest, str::trim_start);
+    rest.strip_prefix(']')
 }
 
 /// An approval card's summary of a browser call, before it is cut to size.
@@ -1744,16 +1831,19 @@ mod tests {
             secret_input_types(SecretField::Totp),
             ["text", "tel", "number", "password"]
         );
+        assert!(stays_out_of_addresses(SecretField::Password));
+        assert!(stays_out_of_addresses(SecretField::Totp));
+        assert!(!stays_out_of_addresses(SecretField::Username));
     }
 
     /// On a filled document a selector's match count can read the value
     /// back: through an attribute the page mirrors it into, or a value
-    /// state. Escapes and comments could hide either, so they go too.
+    /// state. Only exact matches on attributes nobody mirrors a value into
+    /// stay; escapes, comments and anything that doesn't parse go.
     #[test]
     fn selectors_that_could_read_a_filled_value_are_named() {
         for probe in [
-            "#p[value^=\"a\"]",
-            "input[type=password]",
+            r#"#p[value^="a"]"#,
             "#p:valid",
             "#p:INVALID",
             "#p:user-valid",
@@ -1764,8 +1854,32 @@ mod tests {
             "#p:blank",
             "#p:autofill",
             "#p:-webkit-autofill",
-            "#p:v\\61lid",
+            r"#p:v\61lid",
             "#p:/**/valid",
+            "[value^=a]",
+            "#p[value]",
+            r#"#p[Value="x"]"#,
+            "[data-value=x]",
+            "[type^=p]",
+            "[type~=p]",
+            "[type$=d]",
+            "[type*=s]",
+            "[lang|=en]",
+            "[x|value]",
+            "[*|value=x]",
+            "[aria-valuetext=a]",
+            "[aria-valuenow=1]",
+            "[title=x]",
+            r#"[name="a]"]"#,
+            r#"[name="a\"b"]"#,
+            r#"[name="open"#,
+            "[name=]",
+            "[name=a b]",
+            "[name=a x]",
+            "[name",
+            "input]",
+            r#"#p"x"#,
+            r#"[placeholder=":valid"]"#,
         ] {
             assert!(selector_reads_values(probe), "{probe}");
         }
@@ -1774,10 +1888,22 @@ mod tests {
             "form .password > input",
             "input:nth-of-type(2)",
             "#validate",
+            "input[type=password]",
+            r#"input[name="password"]"#,
+            "[name='Passwd']",
+            "button[type=submit]",
+            r#"[id="a:b"]"#,
+            "[TYPE=password i]",
+            r#"[ type = "email" s ]"#,
+            "form[role=form] input[autocomplete=current-password]",
+            r#"[aria-label="Sign in"][data-testid=login]"#,
+            "label[for=user]",
+            "[inputmode=numeric]",
+            "input[placeholder]",
         ] {
             assert!(!selector_reads_values(plain), "{plain}");
         }
-        assert!(!SELECTOR_AFTER_FILL.is_empty());
+        assert!(!SELECTOR_AFTER_FILL.is_empty() && !FILL_GET_FORM.is_empty());
     }
 
     #[test]

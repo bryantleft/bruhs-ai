@@ -10,7 +10,10 @@
 use std::io::Write as _;
 
 use bruhs_models::{
-    crew::{secret_input_types, FILL_FAILED, LOGIN_WRONG_ORIGIN, SECRET_FIELD_MISMATCH},
+    crew::{
+        secret_input_types, stays_out_of_addresses, FILL_FAILED, FILL_GET_FORM, LOGIN_WRONG_ORIGIN,
+        SECRET_FIELD_MISMATCH,
+    },
     local_tools::{cdp_key, ToolReply},
     vault::SecretField,
 };
@@ -25,16 +28,23 @@ use super::{
 use crate::local_tools::{computer::FilledDocuments, ToolError};
 
 /// The isolated world's name, which Chrome shows in its context list.
+/// Each fill makes a new world on the document, kept until the document
+/// unloads: a long-lived page with many fills holds them all (memory only).
 const WORLD: &str = "bruhs-vault";
 
 /// Takes no value. Checks the document's origin, finds the one field,
-/// applies the field-kind rule and keeps the field for [`WRITE`].
-const CHECK: &str = r"function(s,o,t){if(location.origin!==o)return{ok:false,why:'origin'};let es;try{es=document.querySelectorAll(s)}catch(_){return{ok:false,why:'missing'}}if(es.length!==1)return{ok:false,why:'missing'};const e=es[0];if(!(e instanceof HTMLInputElement)||!t.includes(e.type))return{ok:false,why:'kind'};if(e.disabled||e.readOnly)return{ok:false,why:'editable'};globalThis.__bruhsVaultField=e;return{ok:true}}";
+/// applies the field-kind rule, refuses (`g`) a field whose form declares
+/// `method=get`, and keeps the field for [`WRITE`].
+const CHECK: &str = r"function(s,o,t,g){if(location.origin!==o)return{ok:false,why:'origin'};let es;try{es=document.querySelectorAll(s)}catch(_){return{ok:false,why:'missing'}}if(es.length!==1)return{ok:false,why:'missing'};const e=es[0];if(!(e instanceof HTMLInputElement)||!t.includes(e.type))return{ok:false,why:'kind'};if(e.disabled||e.readOnly)return{ok:false,why:'editable'};if(g&&e.form&&(e.form.getAttribute('method')||'').trim().toLowerCase()==='get')return{ok:false,why:'get'};globalThis.__bruhsVaultField=e;return{ok:true}}";
 
 /// Checks the origin and the kept field again, focuses it (which runs page
 /// code, so the kind is checked once more after), sets the value through
 /// the native setter and dispatches `input` and `change`, in one task.
-const WRITE: &str = r"function(o,t,v){const e=globalThis.__bruhsVaultField;globalThis.__bruhsVaultField=null;const fits=()=>location.origin===o&&e instanceof HTMLInputElement&&e.isConnected&&e.ownerDocument===document&&t.includes(e.type)&&!e.disabled&&!e.readOnly;if(!fits())return{ok:false,why:'moved'};e.focus();if(!fits())return{ok:false,why:'moved'};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,v);e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return{ok:true}}";
+/// With `g`, the field's form never submits natively with GET while it
+/// holds a value (a form with no method sends with GET, as does a submit
+/// button with `formmethod=get`): the submit is cancelled, so the value
+/// never lands in a page address. A page's own script submits as it likes.
+const WRITE: &str = r"function(o,t,g,v){const e=globalThis.__bruhsVaultField;globalThis.__bruhsVaultField=null;const fits=()=>location.origin===o&&e instanceof HTMLInputElement&&e.isConnected&&e.ownerDocument===document&&t.includes(e.type)&&!e.disabled&&!e.readOnly;if(!fits())return{ok:false,why:'moved'};e.focus();if(!fits())return{ok:false,why:'moved'};Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(e,v);if(g){document.addEventListener('submit',x=>{const f=x.target,b=x.submitter,m=b&&b.hasAttribute('formmethod')?b.formMethod:f.method;if(m==='get'&&e.form===f&&e.value)x.preventDefault()},true)}e.dispatchEvent(new Event('input',{bubbles:true}));e.dispatchEvent(new Event('change',{bubbles:true}));return{ok:true}}";
 
 fn fill_failed() -> ToolError {
     ToolError::Invalid(FILL_FAILED.into())
@@ -49,7 +59,7 @@ pub(in crate::local_tools) fn filled_reply(field: SecretField, submit: bool) -> 
     }
 }
 
-/// The main frame's id and its document's marks: its loader and its
+/// The main frame's id and its document's marks: its loader (first) and its
 /// history entry. Back without the back/forward cache loads a new document
 /// on the same entry, with form values restored, so both count.
 pub(super) async fn document_marks(cdp: &mut Cdp) -> Result<(String, Vec<String>), ToolError> {
@@ -130,6 +140,7 @@ pub(super) async fn check(
                     {"value": selector},
                     {"value": origin},
                     {"value": secret_input_types(field)},
+                    {"value": stays_out_of_addresses(field)},
                 ],
                 "returnByValue": true,
                 "awaitPromise": false,
@@ -139,6 +150,13 @@ pub(super) async fn check(
         .await
         .map_err(|_| fill_failed())?;
     answered(&checked)?;
+    // The world sits on the document whose marks were read only if that
+    // document is still the one loaded: a navigation before the world was
+    // made (and another after) would leave the filled one unmarked.
+    let (_, again) = document_marks(cdp).await.map_err(|_| fill_failed())?;
+    if again.first() != marks.first() {
+        return Err(fill_failed());
+    }
     Ok(Checked { context, marks })
 }
 
@@ -158,11 +176,7 @@ pub(super) async fn write(
     struct Params<'a> {
         function_declaration: &'static str,
         execution_context_id: i64,
-        arguments: (
-            Argument<&'a str>,
-            Argument<&'a [&'a str]>,
-            Argument<&'a str>,
-        ),
+        arguments: Arguments<'a>,
         return_by_value: bool,
         await_promise: bool,
         user_gesture: bool,
@@ -171,6 +185,13 @@ pub(super) async fn write(
     struct Argument<T> {
         value: T,
     }
+    /// Origin, field types, whether to keep it out of addresses, value.
+    type Arguments<'a> = (
+        Argument<&'a str>,
+        Argument<&'a [&'a str]>,
+        Argument<bool>,
+        Argument<&'a str>,
+    );
     let params = Params {
         function_declaration: WRITE,
         execution_context_id: context,
@@ -179,11 +200,15 @@ pub(super) async fn write(
             Argument {
                 value: secret_input_types(field),
             },
+            Argument {
+                value: stays_out_of_addresses(field),
+            },
             Argument { value },
         ),
         return_by_value: true,
         await_promise: false,
-        user_gesture: true,
+        // The page's listeners get no activation to open popups with.
+        user_gesture: false,
     };
     // JSON escapes a byte as six at most.
     let room = value
@@ -217,6 +242,7 @@ fn answered(result: &Value) -> Result<(), ToolError> {
     Err(match answer["why"].as_str() {
         Some("origin") => ToolError::Refused(LOGIN_WRONG_ORIGIN.into()),
         Some("kind") => ToolError::Invalid(SECRET_FIELD_MISMATCH.into()),
+        Some("get") => ToolError::Refused(FILL_GET_FORM.into()),
         _ => fill_failed(),
     })
 }

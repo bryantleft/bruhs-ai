@@ -58,10 +58,12 @@ pub(super) fn platform_refusal() -> Option<&'static str> {
     (!cfg!(unix)).then_some(COMPUTER_UNSUPPORTED)
 }
 
-/// A vault value the command route resolved for one fill, with the login's
-/// origin and the field it is. Neither `Debug` nor `Clone`; the value is
-/// zeroed when dropped, which is when the step returns.
+/// A vault value the command route resolved for one fill, with the login
+/// and field it is and the login's origin. Neither `Debug` nor `Clone`; the
+/// value is zeroed when dropped, which is when the step returns.
 pub struct FillValue {
+    /// The vault login the value came from, which the fill must name.
+    pub login_id: String,
     /// The login's exact origin ([`bruhs_models::vault::login_origin`]).
     pub origin: String,
     pub field: SecretField,
@@ -806,13 +808,17 @@ impl LocalToolsHost {
     ) -> Result<ToolReply, ToolError> {
         let slot = self.checked_slot(agent_id, &action)?;
         // A vault fill goes only with its value, and the value only with
-        // the fill of its own field.
+        // the fill of its own login and field.
         let fill = action
             .secret_fill()
             .map(|(selector, reference, submit)| (selector.to_owned(), reference.field, submit));
+        let login = action
+            .secret_fill()
+            .map(|(_, reference, _)| &reference.login_id);
         match (&fill, &secret) {
             (Some(_), None) => return Err(ToolError::Invalid(VAULT_FOR_BRUHS.into())),
-            (Some((_, field, _)), Some(value)) if *field == value.field => {}
+            (Some((_, field, _)), Some(value))
+                if *field == value.field && login == Some(&value.login_id) => {}
             (None, None) => {}
             _ => return Err(ToolError::Invalid(FILL_FAILED.into())),
         }
@@ -882,6 +888,7 @@ impl LocalToolsHost {
             }
             // Anything but a read may have landed before a page dies.
             let acts = action.kind() != BrowserActionKind::Read;
+            let screenshot = matches!(action, BrowserAction::Screenshot);
             let reply = match (fill, &secret) {
                 (Some((selector, field, submit)), Some(value)) => {
                     let OpenPage { page, filled, .. } = &mut *open;
@@ -902,6 +909,22 @@ impl LocalToolsHost {
                 _ => tokio::time::timeout(self.policy.timeout, open.page.run(action, self.policy))
                     .await
                     .unwrap_or_else(|_| Err(ToolError::Unavailable(ACTION_TIMED_OUT.into()))),
+            };
+            // The page may have moved onto a filled document (going back by
+            // itself) while the capture ran: then the image goes.
+            let reply = match reply {
+                Ok(shot) if screenshot && !open.filled.is_empty() => {
+                    match after_fill_refusal(open, &BrowserAction::Screenshot).await {
+                        Some(refusal) => {
+                            if let Some(image) = &shot.image {
+                                let _ = tokio::fs::remove_file(&image.path).await;
+                            }
+                            Err(ToolError::Refused(refusal.into()))
+                        }
+                        None => Ok(shot),
+                    }
+                }
+                other => other,
             };
             if open.page.gone() {
                 // The page target ended under Chrome. Close it where it was
@@ -1455,6 +1478,8 @@ mod fake {
         secret_fills: HashMap<String, Vec<SecretFill>>,
         /// The document each bruh's page is on; `doc-0` until set.
         documents: HashMap<String, String>,
+        /// The document each bruh's page moves to during its next action.
+        documents_during_action: HashMap<String, String>,
     }
 
     impl FakePages {
@@ -1523,6 +1548,14 @@ mod fake {
         /// back to one).
         pub fn set_document(&self, agent_id: &str, id: &str) {
             self.seen().documents.insert(agent_id.into(), id.into());
+        }
+
+        /// The page moves to document `id` while its next action runs, as
+        /// one going back by itself during a screenshot.
+        pub fn set_document_during_next_action(&self, agent_id: &str, id: &str) {
+            self.seen()
+                .documents_during_action
+                .insert(agent_id.into(), id.into());
         }
 
         /// Whether the bruh's held action has reached its page.
@@ -1684,6 +1717,9 @@ mod fake {
             let (hold, fail) = {
                 let mut seen = self.pages.seen();
                 let fail = seen.fail_actions.remove(&self.agent_id);
+                if let Some(document) = seen.documents_during_action.remove(&self.agent_id) {
+                    seen.documents.insert(self.agent_id.clone(), document);
+                }
                 seen.actions
                     .entry(self.agent_id.clone())
                     .or_default()
