@@ -20,6 +20,9 @@ mod tests;
 mod video;
 
 pub use computer::BruhComputer;
+pub(crate) use network::is_this_computer;
+#[cfg(test)]
+pub(crate) use network::interface_addresses_for_tests;
 #[cfg(any(test, feature = "test-support"))]
 pub use computer::{FakePages, PageLaunch};
 pub use process::ProcessPolicy;

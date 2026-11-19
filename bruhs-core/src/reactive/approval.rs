@@ -10,8 +10,9 @@ use crate::PermissionDecision;
 use bruhs_models::{
     agent::AgentProvider,
     crew::{
-        approval_fingerprint, browser_gate, permission_gate, same_page_host, ApprovalState,
-        BruhAccess, Gate, BRUH_BROWSER_TOOL, CONTROL_WAIT_EXPIRED, PAGE_CHANGED,
+        approval_fingerprint, browser_gate, network_host, permission_gate, same_page_host,
+        ApprovalState, BruhAccess, Gate, BRUH_BROWSER_TOOL, CONTROL_WAIT_EXPIRED,
+        LOCAL_HOST_DENIAL, PAGE_CHANGED,
     },
     local_tools::{BrowserAction, BrowserActionKind, Control},
     reactive::{ReactiveRun, RunStatus},
@@ -19,6 +20,8 @@ use bruhs_models::{
 use rusqlite::Connection;
 use serde_json::Value;
 use std::{
+    future::Future,
+    net::IpAddr,
     path::{Path, PathBuf},
     sync::{Arc, Mutex, PoisonError},
     time::Duration,
@@ -30,6 +33,8 @@ const NOT_ANSWERED: &str =
     "The owner has not answered yet. Stop here and say you are waiting on their approval.";
 /// Symlinks followed while resolving one path, as in most kernels.
 const MAX_LINKS: u8 = 40;
+/// How long the gate waits for a network tool call's host to resolve.
+const RESOLVE_WAIT: Duration = Duration::from_secs(2);
 /// How long an allowed browser step waits for the helper's request: the
 /// helper's own request deadline.
 const ALLOWANCE_TTL: Duration = crate::capture_client::REQUEST_TIMEOUT;
@@ -370,6 +375,12 @@ pub(super) async fn decide(
         let gate = browser_gate(access, provider, computer, &call, call["page_url"].as_str());
         (call, gate)
     } else {
+        // The gate reads only the name, and a name can point here.
+        if let Some(host) = network_host(tool, input) {
+            if reaches_this_computer(&host, system_lookup).await {
+                return Ok(Some(deny(LOCAL_HOST_DENIAL)));
+            }
+        }
         let (input, resolved) = resolved_input(input);
         // A path that can't be resolved never counts as inside the folder.
         let project = if resolved {
@@ -437,6 +448,35 @@ pub(super) async fn decide(
         ApprovalWait::Expired => Some(deny(NOT_ANSWERED)),
         ApprovalWait::Stopped => None,
     })
+}
+
+/// Whether a network tool call's `host` is this computer: an address
+/// literal, or a name `lookup` resolves within [`RESOLVE_WAIT`], counts when
+/// any address is local or on one of this computer's interfaces
+/// ([`crate::local_tools::is_this_computer`]). A name that doesn't resolve
+/// in time passes on to the gate. The connection resolves again later, so
+/// a name whose DNS changes in between still gets through (rebinding).
+async fn reaches_this_computer<F, Fut>(host: &str, lookup: F) -> bool
+where
+    F: FnOnce(String) -> Fut,
+    Fut: Future<Output = std::io::Result<Vec<IpAddr>>>,
+{
+    if let Ok(ip) = host.parse::<IpAddr>() {
+        return crate::local_tools::is_this_computer(ip);
+    }
+    match tokio::time::timeout(RESOLVE_WAIT, lookup(host.to_owned())).await {
+        Ok(Ok(addresses)) => addresses
+            .into_iter()
+            .any(crate::local_tools::is_this_computer),
+        _ => false,
+    }
+}
+
+async fn system_lookup(host: String) -> std::io::Result<Vec<IpAddr>> {
+    Ok(tokio::net::lookup_host((host.as_str(), 0))
+        .await?
+        .map(|address| address.ip())
+        .collect())
 }
 
 fn deny(reason: &str) -> PermissionDecision {
@@ -517,6 +557,47 @@ mod tests {
         assert!(allowances.take("a", &command, deadline).is_none());
         // An expired allowance is gone for good.
         assert!(allowances.take("a", &command, just_before).is_none());
+    }
+
+    /// A name that resolves here is this computer, whatever it reads as;
+    /// one that doesn't resolve in time passes on to the gate.
+    #[tokio::test(start_paused = true)]
+    async fn a_name_that_resolves_here_reaches_this_computer() {
+        let answer = |ips: &'static [&'static str]| {
+            move |_: String| async move {
+                Ok(ips
+                    .iter()
+                    .map(|ip| ip.parse().unwrap())
+                    .collect::<Vec<IpAddr>>())
+            }
+        };
+        assert!(reaches_this_computer("rebind.example", answer(&["127.0.0.1"])).await);
+        assert!(reaches_this_computer("split.example", answer(&["93.184.216.34", "::1"])).await);
+        assert!(reaches_this_computer("mapped.example", answer(&["::ffff:127.0.0.1"])).await);
+        assert!(!reaches_this_computer("cdn.example", answer(&["93.184.216.34"])).await);
+        let failed = |_: String| async { Err(std::io::Error::other("no such name")) };
+        assert!(!reaches_this_computer("nowhere.example", failed).await);
+        let never = |_: String| std::future::pending::<std::io::Result<Vec<IpAddr>>>();
+        assert!(!reaches_this_computer("slow.example", never).await);
+        assert!(reaches_this_computer("::1", never).await);
+        // This computer's own interface address, by literal.
+        if let Some(own) = own_address() {
+            assert!(
+                reaches_this_computer(&own.to_string(), never).await,
+                "{own}"
+            );
+        }
+    }
+
+    /// One of this computer's interface addresses that isn't loopback or
+    /// link-local, if it has one.
+    fn own_address() -> Option<IpAddr> {
+        crate::local_tools::interface_addresses_for_tests()
+            .into_iter()
+            .find(|ip| match ip {
+                IpAddr::V4(ip) => !ip.is_loopback() && !ip.is_link_local(),
+                IpAddr::V6(_) => false,
+            })
     }
 
     #[test]

@@ -310,6 +310,32 @@ fn local_address(ip: IpAddr) -> bool {
         }
 }
 
+/// Whether `ip` is this computer, outside the guard: an address the guard
+/// refuses by rule ([`refused`]), or one on this computer's interfaces
+/// read now. The crew's permission gate asks this for the addresses a
+/// network tool call's host resolves to. Where the interfaces can't be
+/// read, only the rule applies.
+pub(crate) fn is_this_computer(ip: IpAddr) -> bool {
+    if local_address(ip) {
+        return true;
+    }
+    match addresses::interface_addresses() {
+        Ok(own) => own
+            .into_iter()
+            .any(|own| own.to_canonical() == ip.to_canonical()),
+        Err(error) => {
+            tracing::warn!(%error, "couldn't read this computer's interface addresses");
+            false
+        }
+    }
+}
+
+/// This computer's interface addresses, for tests outside the guard.
+#[cfg(test)]
+pub(crate) fn interface_addresses_for_tests() -> Vec<IpAddr> {
+    addresses::interface_addresses().unwrap_or_default()
+}
+
 /// The production refusal: [`refused`], and any address on one of this
 /// computer's interfaces.
 fn this_computer(own: Arc<OwnAddresses>) -> Refusal {

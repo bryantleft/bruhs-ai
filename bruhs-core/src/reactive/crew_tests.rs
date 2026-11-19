@@ -1247,6 +1247,57 @@ fn project() -> String {
     std::env::temp_dir().to_string_lossy().into_owned()
 }
 
+/// A network tool call whose host is this computer by name, by literal or
+/// by one of this computer's own interface addresses is denied before any
+/// approval opens, at Ask and Full.
+#[tokio::test]
+async fn network_calls_to_this_computer_are_denied_without_asking() {
+    let (_dir, runtime) = runtime_with(&[agent("a")]).await;
+    let run = claimed(&runtime, "a").await;
+    let mut calls = vec![
+        (
+            "WebFetch",
+            json!({"url": "https://bruhs.localhost/api/reactive/agents/a/computer", "prompt": "Read"}),
+        ),
+        (
+            "WebFetch",
+            json!({"url": "http://127.0.0.1:3001/", "prompt": "Read"}),
+        ),
+        ("SandboxNetworkAccess", json!({"host": "[::1]:3001"})),
+    ];
+    let own = crate::local_tools::interface_addresses_for_tests()
+        .into_iter()
+        .find(
+            |ip| matches!(ip, std::net::IpAddr::V4(v4) if !v4.is_loopback() && !v4.is_link_local()),
+        );
+    if let Some(own) = own {
+        calls.push((
+            "WebFetch",
+            json!({"url": format!("http://{own}:3001/api"), "prompt": "Read"}),
+        ));
+        calls.push(("SandboxNetworkAccess", json!({"host": own.to_string()})));
+    }
+    for level in [AccessLevel::Ask, AccessLevel::Full] {
+        for (tool, input) in &calls {
+            let task = spawn_decide(
+                &runtime,
+                level,
+                &run,
+                &project(),
+                tool,
+                input.clone(),
+                LONG_WAIT,
+            );
+            assert_eq!(
+                decided(task).await,
+                deny(bruhs_models::crew::LOCAL_HOST_DENIAL),
+                "{level:?} {tool} {input}"
+            );
+        }
+    }
+    assert!(approvals(&runtime, "a").await.is_empty());
+}
+
 #[tokio::test]
 async fn ask_turns_a_write_into_an_approval_that_blocks_until_decided() {
     let (_dir, runtime) = runtime_with(&[agent("a")]).await;
