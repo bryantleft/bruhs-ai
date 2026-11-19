@@ -14,24 +14,22 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
         with:
           persist-credentials: false
-      - name: Fetch release binaries
+      - name: Download draft release package
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh run download 44444352371 -n native-$RUNNER_OS -D native
-      - name: Install Linux runtime dependencies
+        run: |
+          if [[ $RUNNER_OS == Linux ]]; then file=Bruhs-Linux-x64.deb; else file=Bruhs-Windows-x64.zip; fi
+          gh release download v0.2.0 --pattern "$file" --pattern SHA256SUMS
+          grep -F "$file" SHA256SUMS | sha256sum --check -
+      - name: Install Ubuntu package
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get satisfy -y "$(cat native/depends), libxkbcommon-x11-0, libvulkan1, mesa-vulkan-drivers, xvfb, xauth, fonts-dejavu-core"
-          chmod +x native/bruhs-*
-      - name: Start packaged desktop and verify bundled helper identity
-        shell: bash
+          sudo apt-get install -y ./Bruhs-Linux-x64.deb xvfb xauth fonts-dejavu-core mesa-vulkan-drivers
+          xvfb-run -a python3 scripts/release-startup-test.py
+      - name: Extract and launch portable Windows package
+        if: runner.os == 'Windows'
         run: |
-          mkdir -p native/web
-          echo smoke > native/web/index.html
-          if [[ $RUNNER_OS == Linux ]]; then
-            xvfb-run -a python3 scripts/release-startup-test.py
-          else
-            python scripts/release-startup-test.py
-          fi
+          Expand-Archive Bruhs-Windows-x64.zip .
+          python scripts/release-startup-test.py

@@ -5,9 +5,8 @@ import subprocess
 import time
 from urllib.request import urlopen
 
-root = Path('native').resolve()
-commit = (root / 'commit').read_text().strip()
-assert commit == '62b011ea' or commit.startswith('62b011ea')
+root = Path('Bruhs' if os.name == 'nt' else '/opt/bruhs').resolve()
+commit = '9850730b871b730395557642f9137eb1f57dc7c0'
 ext = '.exe' if os.name == 'nt' else ''
 app = subprocess.Popen([root / ('bruhs-desktop' + ext)], cwd=root)
 try:
@@ -19,7 +18,7 @@ try:
                     health = json.load(response)
                     assert health['app'] == name and health['build'] == commit, health
             with urlopen('http://127.0.0.1:3001/', timeout=2) as index:
-                assert index.read().strip() == b'smoke'
+                assert b'data-bruhs-boot' in index.read()
             break
         except OSError:
             time.sleep(1)
