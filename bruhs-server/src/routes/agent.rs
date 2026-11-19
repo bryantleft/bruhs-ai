@@ -69,7 +69,7 @@ pub struct AgentRequest {
 fn query_event_to_json(event: &QueryEvent) -> Value {
     match event {
         QueryEvent::SecretRequest(request) => {
-            json!({"type": "secret_request", "id": request.id, "thread_id": request.thread_id, "operation": request.operation, "cwd": request.cwd, "saved_available": request.saved_available, "storage_unavailable": request.storage_unavailable})
+            json!({"type": "secret_request", "id": request.id, "thread_id": request.thread_id, "operation": request.operation, "cwd": request.cwd, "saved_available": request.saved_available, "storage_unavailable": request.storage_unavailable, "saved_source": request.saved_source})
         }
         QueryEvent::SecretResolved { id } => json!({"type": "secret_resolved", "id": id}),
         QueryEvent::ThreadRequest(request) => json!({
@@ -604,6 +604,29 @@ mod tests {
                     storage_unavailable: false,
                     connection: None,
                     saved_source: None,
+                };
+                (
+                    QueryEvent::SecretRequest(request.clone()),
+                    Typed::SecretRequest(request),
+                )
+            },
+            {
+                // A request a shared vault entry answers says so, so the
+                // web form names it and offers no Forget saved (D17).
+                let request = bruhs_models::secrets::SecretRequest {
+                    id: "private-2".into(),
+                    thread_id: bruhs_models::ids::ThreadId::new_v4(),
+                    operation: bruhs_models::secrets::SecretOperation {
+                        name: "DEPLOY_KEY".into(),
+                        reason: "Deploy project".into(),
+                        env_var: "DEPLOY_TOKEN".into(),
+                        command: vec!["deploy".into()],
+                    },
+                    cwd: "/tmp/project".into(),
+                    saved_available: true,
+                    storage_unavailable: false,
+                    connection: None,
+                    saved_source: Some(bruhs_models::vault::SavedSource::Global),
                 };
                 (
                     QueryEvent::SecretRequest(request.clone()),
