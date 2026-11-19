@@ -117,9 +117,21 @@ fn identify(body: &str, app: &str) -> Option<String> {
 /// The bundle's `Contents/MacOS` and `Contents/Resources`, when running from
 /// one.
 fn bundle_dirs() -> Option<(PathBuf, PathBuf)> {
+    if !cfg!(target_os = "macos") {
+        let exe = std::env::current_exe().ok()?;
+        let dir = exe.parent()?;
+        return dir
+            .join("web/index.html")
+            .is_file()
+            .then(|| (dir.to_owned(), dir.to_owned()));
+    }
     let app = bruhs_core::updates::release::current_app_bundle()?;
     let contents = app.join("Contents");
     Some((contents.join("MacOS"), contents.join("Resources")))
+}
+
+fn helper_binary(dir: &Path, name: &str) -> PathBuf {
+    dir.join(format!("{name}{}", std::env::consts::EXE_SUFFIX))
 }
 
 /// What to do when this build can't update the background service itself.
@@ -130,7 +142,7 @@ pub const SERVICE_INSTALL_HINT: &str = "Run bruhs-server service install from th
 pub fn bundled() -> bool {
     static BUNDLED: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *BUNDLED.get_or_init(|| {
-        bundle_dirs().is_some_and(|(macos, _)| macos.join("bruhs-server").is_file())
+        bundle_dirs().is_some_and(|(macos, _)| helper_binary(&macos, "bruhs-server").is_file())
     })
 }
 
@@ -142,7 +154,7 @@ pub fn update_bundled_service() -> Result<(), String> {
     let Some((macos, resources)) = bundle_dirs() else {
         return Err(SERVICE_INSTALL_HINT.into());
     };
-    let binary = macos.join("bruhs-server");
+    let binary = helper_binary(&macos, "bruhs-server");
     if !binary.is_file() {
         return Err(SERVICE_INSTALL_HINT.into());
     }
@@ -197,7 +209,7 @@ pub fn start(cx: &mut App) {
         return;
     };
     for helper in &HELPERS {
-        let binary = macos.join(helper.binary);
+        let binary = helper_binary(&macos, helper.binary);
         if !binary.is_file() {
             continue;
         }

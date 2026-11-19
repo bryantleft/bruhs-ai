@@ -1,0 +1,54 @@
+name: Release desktop binaries
+on:
+  workflow_dispatch:
+    inputs:
+      version:
+        description: Release version without v
+        required: true
+permissions:
+  contents: read
+env:
+  BRUHS_RELEASE_VERSION: ${{ inputs.version }}
+  CARGO_PROFILE_RELEASE_LTO: "off"
+  CARGO_PROFILE_RELEASE_CODEGEN_UNITS: "16"
+  CARGO_PROFILE_RELEASE_STRIP: symbols
+jobs:
+  build:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, windows-2022]
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 150
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0
+      - if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld cmake pkg-config libdbus-1-dev libasound2-dev libudev-dev libxkbcommon-x11-dev libx11-dev libxcb1-dev libxcb-shape0-dev libxcb-xfixes0-dev libwayland-dev libfontconfig1-dev libfreetype6-dev libssl-dev libwebkit2gtk-4.1-dev dpkg-dev
+      - run: cargo build --release --locked -p bruhs-desktop -p bruhs-server -p bruhs-capture
+      - name: Stage binaries and record build identity
+        shell: bash
+        run: |
+          set -eu
+          mkdir native
+          ext=""
+          if [[ $RUNNER_OS == Windows ]]; then ext=".exe"; fi
+          for bin in bruhs-desktop bruhs-capture bruhs-server; do cp "target/release/$bin$ext" native/; done
+          git rev-parse HEAD > native/commit
+          echo "$BRUHS_RELEASE_VERSION" > native/version
+      - name: Resolve Ubuntu runtime dependencies
+        if: runner.os == 'Linux'
+        run: |
+          mkdir -p debian
+          touch debian/control
+          dpkg-shlibdeps -O native/bruhs-* | sed 's/^shlibs:Depends=//' > native/depends
+          test -s native/depends
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02
+        with:
+          name: native-${{ runner.os }}
+          path: native/
+          if-no-files-found: error
