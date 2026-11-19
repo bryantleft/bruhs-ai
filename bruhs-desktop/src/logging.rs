@@ -48,6 +48,8 @@ pub fn init() -> Option<PathBuf> {
     });
     let stderr_layer = (cfg!(debug_assertions) || path.is_none()).then(|| {
         tracing_subscriber::fmt::layer()
+            .with_file(true)
+            .with_line_number(true)
             .with_writer(io::stderr)
             .with_filter(level)
     });
