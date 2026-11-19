@@ -120,10 +120,24 @@ pub async fn screencast(
             return Err(AppError::Forbidden(LIVE_VIEW_FOREIGN_PAGE.into()));
         }
     }
-    let watch = host.watch_computer(&session).map_err(error)?;
-    Ok(upgrade
-        .max_message_size(MAX_MESSAGE_BYTES)
-        .on_upgrade(move |socket| live_view(host, watch, socket)))
+    // A refusal (an unknown or closed browser, four viewers) still opens
+    // the socket, to say why: a browser can't read a refused upgrade.
+    let watch = host.watch_computer(&session);
+    let upgrade = upgrade.max_message_size(MAX_MESSAGE_BYTES);
+    Ok(match watch {
+        Ok(watch) => upgrade.on_upgrade(move |socket| live_view(host, watch, socket)),
+        Err(refusal) => {
+            let deadline = host.command_timeout();
+            let error = refusal.to_string();
+            upgrade.on_upgrade(move |socket| refuse(socket, error, deadline))
+        }
+    })
+}
+
+/// Say why the live view can't open, then close.
+async fn refuse(mut socket: WebSocket, error: String, deadline: Duration) {
+    let _ = send(&mut socket, &ScreencastMessage::Error { error }, deadline).await;
+    let _ = tokio::time::timeout(deadline, socket.close()).await;
 }
 
 /// The state on connect and on every change, frames one at a time (the

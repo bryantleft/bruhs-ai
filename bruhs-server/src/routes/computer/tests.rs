@@ -4,8 +4,9 @@ use axum::{http::StatusCode, Extension};
 use bruhs_core::local_tools::{FakePages, LocalToolsHost};
 use bruhs_core::reactive::ReactiveRuntime;
 use bruhs_models::crew::{
-    AccessLevel, BruhAccess, BruhLook, ACTION_STOPPED, NOT_FOR_BRUHS, PAGE_CHANGED,
-    STEP_FROM_A_PAGE, STEP_NOT_APPROVED, TAKE_CONTROL_FIRST, TURN_ON_IN_SETTINGS,
+    AccessLevel, BruhAccess, BruhLook, ACTION_STOPPED, LIVE_VIEW_ENDED, MAX_VIEWERS,
+    NOT_FOR_BRUHS, PAGE_CHANGED, STEP_FROM_A_PAGE, STEP_NOT_APPROVED, TAKE_CONTROL_FIRST,
+    TURN_ON_IN_SETTINGS, VIEWERS_FULL,
 };
 use bruhs_models::local_tools::{
     screencast_path, ComputerInput, ComputerState, Control, MouseButton, MouseKind,
@@ -417,19 +418,67 @@ async fn foreign_pages_and_the_bruh_browser_cannot_open_a_live_view() {
             .unwrap_err(),
         StatusCode::FORBIDDEN
     );
-    assert_eq!(
-        fixture
-            .connect("not-a-session", &[("origin", APP_ORIGIN)])
-            .await
-            .unwrap_err(),
-        StatusCode::NOT_FOUND
-    );
     assert!(fixture
         .connect(&session, &[("origin", APP_ORIGIN)])
         .await
         .is_ok());
     // The desktop's native client sends no Origin.
     assert!(fixture.connect(&session, &[]).await.is_ok());
+}
+
+/// A live view the service refuses opens, says why with the shared copy,
+/// then closes: a browser can't read a refused upgrade's body.
+#[tokio::test]
+async fn a_refused_live_view_says_why_then_closes() {
+    let fixture = Fixture::new().await;
+    fixture.computer_on().await;
+    let session = fixture.open().await.session_id.unwrap();
+    let ended = |message: Option<Message>| match message {
+        None | Some(Message::Close(_)) => true,
+        other => panic!("expected the live view to close, got {other:?}"),
+    };
+    let mut unknown = fixture
+        .connect("not-a-session", &[("origin", APP_ORIGIN)])
+        .await
+        .expect("an unknown session still opens");
+    assert_eq!(
+        next_text(&mut unknown).await,
+        ScreencastMessage::Error {
+            error: LIVE_VIEW_ENDED.into()
+        }
+    );
+    assert!(ended(
+        tokio::time::timeout(Duration::from_secs(5), unknown.next())
+            .await
+            .expect("the live view closes")
+            .and_then(Result::ok)
+    ));
+
+    let mut watching = Vec::new();
+    for _ in 0..MAX_VIEWERS {
+        let mut socket = fixture.connect(&session, &[]).await.unwrap();
+        assert!(matches!(
+            next_text(&mut socket).await,
+            ScreencastMessage::State(_)
+        ));
+        watching.push(socket);
+    }
+    let mut fifth = fixture
+        .connect(&session, &[("origin", APP_ORIGIN)])
+        .await
+        .expect("a fifth viewer still opens");
+    assert_eq!(
+        next_text(&mut fifth).await,
+        ScreencastMessage::Error {
+            error: VIEWERS_FULL.into()
+        }
+    );
+    assert!(ended(
+        tokio::time::timeout(Duration::from_secs(5), fifth.next())
+            .await
+            .expect("the live view closes")
+            .and_then(Result::ok)
+    ));
 }
 
 #[tokio::test]
