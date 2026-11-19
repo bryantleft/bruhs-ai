@@ -531,3 +531,29 @@ fn gpui_keys_become_dom_keys() {
     assert_eq!(modifiers(&all), 15);
     assert_eq!(modifiers(&Modifiers::command()), MODIFIER_META);
 }
+
+#[gpui::test]
+fn a_frame_covers_the_box_and_focus_draws_the_webs_outline(cx: &mut gpui::TestAppContext) {
+    // The web's `<img>` fills its box and paints over the box's inset ring;
+    // its focus outline is 2px, inside, on top of the frame.
+    let (_panel, view, cx) = open(cx, 900.0, 1200.0);
+    apply(
+        &view,
+        cx,
+        ScreencastEvent::State(browser(Control::Owner, false)),
+    );
+    apply(&view, cx, ScreencastEvent::Frame(jpeg()));
+    cx.run_until_parked();
+    let live = cx.debug_bounds("desktop-computer-live").unwrap();
+    let frame = cx.debug_bounds("desktop-computer-frame").unwrap();
+    assert_eq!(frame, live, "the frame covers the whole box, ring included");
+    assert!(shown(cx, "desktop-computer-ring"), "the ring sits under it");
+    assert!(!shown(cx, "desktop-computer-focus-ring"));
+    view.update_in(cx, |view, window, cx| view.focus.focus(window, cx));
+    cx.run_until_parked();
+    assert_eq!(
+        cx.debug_bounds("desktop-computer-focus-ring"),
+        Some(live),
+        "focus draws over the frame"
+    );
+}

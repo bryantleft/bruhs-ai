@@ -43,6 +43,24 @@ const ERROR: &str = "rounded-grape bg-lychee-500/10 p-3 text-body-sm text-lychee
 /// A request button while its request runs: still focusable, but dimmed.
 const BUSY: &str = "aria-busy:cursor-progress aria-busy:opacity-60";
 
+/// The live view's classes. Without a frame the `<img>` has no `src`, and
+/// Chrome draws its silver broken-image border over the box's ring, so it
+/// stays see-through until a frame comes, or while focused, so its outline
+/// shows.
+fn live_view_class(has_frame: bool, input: bool) -> String {
+    let touch = if input {
+        " touch-none cursor-default"
+    } else {
+        ""
+    };
+    let empty = if has_frame {
+        ""
+    } else {
+        " opacity-0 focus:opacity-100"
+    };
+    format!("block h-full w-full select-none object-contain focus:outline-2 focus:-outline-offset-2 focus:outline-persimmon-400{touch}{empty}")
+}
+
 #[component]
 pub fn BruhComputer(agent_id: String) -> impl IntoView {
     let data = use_crew_snapshot();
@@ -538,10 +556,7 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
             tabindex=move || input_on().then_some("0")
             aria-label=move || input_on().then_some(LIVE_VIEW_LABEL)
             aria-describedby=move || input_on().then_some("bruh-computer-hint")
-            class=move || {
-                let touch = if input_on() { "touch-none cursor-default" } else { "" };
-                format!("block h-full w-full select-none object-contain focus:outline-2 focus:-outline-offset-2 focus:outline-persimmon-400 {touch}")
-            }
+            class=move || live_view_class(live.has_frame.get(), input_on())
             on:focus=move |_| focused.set(true)
             on:blur=move |_| {
                 focused.set(false);
@@ -669,5 +684,31 @@ pub fn BruhComputer(agent_id: String) -> impl IntoView {
             </div>
             <p id="bruh-computer-hint" data-computer-hint="" class="min-h-[1lh] text-label-sm text-rambutan-500">{move || hint.get()}</p>
         </div>
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::live_view_class;
+
+    #[test]
+    fn the_empty_live_view_hides_chromes_broken_image_box() {
+        // No frame yet: an `<img>` without `src` draws Chrome's silver
+        // broken-image border over the box's ring, which the desktop
+        // doesn't have. It stays hidden until a frame, or focus, shows it.
+        let empty = live_view_class(false, false);
+        assert!(empty.split_whitespace().any(|class| class == "opacity-0"));
+        assert!(empty
+            .split_whitespace()
+            .any(|class| class == "focus:opacity-100"));
+        let framed = live_view_class(true, false);
+        assert!(!framed
+            .split_whitespace()
+            .any(|class| class.contains("opacity")));
+        let held = live_view_class(true, true);
+        assert!(held.split_whitespace().any(|class| class == "touch-none"));
+        assert!(!held
+            .split_whitespace()
+            .any(|class| class.contains("opacity")));
     }
 }

@@ -610,12 +610,15 @@ impl ComputerView {
     }
 
     /// The 16:10 live view: the frame drawn `object-fit: contain`, and the
-    /// owner's pointer, wheel and keys while they hold control.
+    /// owner's pointer, wheel and keys while they hold control. As on the
+    /// web, the box's ring sits under the frame, which covers it, and the
+    /// focus outline (2px, inside) draws on top.
     fn render_live(
         &self,
         controls: ComputerControls,
         width: f32,
         hint: Option<&'static str>,
+        focused: bool,
         cx: &Context<'_, Self>,
     ) -> Stateful<Div> {
         let bounds = self.bounds.clone();
@@ -661,8 +664,17 @@ impl ComputerView {
             .overflow_hidden()
             .rounded(px(RADIUS_GRAPE_PX))
             .bg(theme::longan_900())
-            .border_1()
-            .border_color(theme::longan_700())
+            .child(
+                div()
+                    .debug_selector(|| "desktop-computer-ring".to_string())
+                    .absolute()
+                    .top_0()
+                    .left_0()
+                    .size_full()
+                    .rounded(px(RADIUS_GRAPE_PX))
+                    .border_1()
+                    .border_color(theme::longan_700()),
+            )
             .child(pointer)
             .when_some(self.frame.clone(), |live, frame| {
                 live.child(
@@ -672,7 +684,25 @@ impl ComputerView {
                         .top_0()
                         .left_0()
                         .size_full()
-                        .child(img(frame).size_full().object_fit(ObjectFit::Contain)),
+                        .child(
+                            img(frame)
+                                .size_full()
+                                .rounded(px(RADIUS_GRAPE_PX))
+                                .object_fit(ObjectFit::Contain),
+                        ),
+                )
+            })
+            .when(focused, |live| {
+                live.child(
+                    div()
+                        .debug_selector(|| "desktop-computer-focus-ring".to_string())
+                        .absolute()
+                        .top_0()
+                        .left_0()
+                        .size_full()
+                        .rounded(px(RADIUS_GRAPE_PX))
+                        .border_2()
+                        .border_color(theme::persimmon_400()),
                 )
             });
         // Web: the image's `alt` once a frame shows, and while the owner
@@ -687,7 +717,6 @@ impl ComputerView {
         }
         live.when_some(hint, |live, hint| live.aria_description(hint))
             .track_focus(&self.focus)
-            .focus(|style| style.border_color(theme::persimmon_400()))
             .on_any_mouse_down(cx.listener(Self::mouse_down))
             .on_scroll(cx.listener(Self::wheel))
             .on_key_up(cx.listener(Self::key_up))
@@ -731,6 +760,7 @@ impl Render for ComputerView {
             .child(self.status(cx));
         let hint_line = self.hint(window, cx);
         let hint: SharedString = hint_line.unwrap_or_default().into();
+        let focused = controls.input && self.focus.is_focused(window);
         let body = div()
             .w(px(column))
             .min_w_0()
@@ -750,7 +780,7 @@ impl Render for ComputerView {
                     div()
                         .flex()
                         .justify_center()
-                        .child(self.render_live(controls, live_width, hint_line, cx)),
+                        .child(self.render_live(controls, live_width, hint_line, focused, cx)),
                 )
             })
             .child(
