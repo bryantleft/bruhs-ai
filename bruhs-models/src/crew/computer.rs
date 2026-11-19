@@ -124,7 +124,7 @@ pub const FILL_MAY_HAVE_RUN: &str =
     "The login may have been typed. Take a snapshot before trying again.";
 /// The run preamble's paragraph for a bruh whose Computer is on and that
 /// has a usable login.
-pub const VAULT_PREAMBLE: &str = "Your browser can sign in with vault logins. `logins` lists the ones you may use; `fill` with `secret: {login_id, field}` types one into a field on that login's own site, and `submit: true` presses Enter. You never see the values. If a fill says the owner is needed, stop and say so.";
+pub const VAULT_PREAMBLE: &str = "Your browser can sign in with vault logins. `logins` lists the ones you may use; `fill` with `secret: {login_id, field}` types one into a field on that login's own site. Add `submit: true` only in a sign-in form you haven't typed in yourself; otherwise fill, then press Enter with the `key` action. You never see the values. If a fill says the owner is needed, stop and say so.";
 
 /// A vault login a bruh may fill, as `logins` lists it and the gate checks
 /// a fill against it. Never a value.

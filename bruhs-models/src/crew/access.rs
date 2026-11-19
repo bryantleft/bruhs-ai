@@ -2032,6 +2032,11 @@ mod tests {
         let on = run_preamble("Ada", &full, AccessLevel::Full, true, true, &[]);
         assert!(on.contains("You never see the values."), "{on}");
         assert!(on.contains(VAULT_PREAMBLE), "{on}");
+        // Ruling A2 I1: submit only in a sign-in form the bruh didn't type
+        // in; Enter otherwise goes through `key`.
+        assert!(VAULT_PREAMBLE.contains("sign-in form"), "{VAULT_PREAMBLE}");
+        assert!(VAULT_PREAMBLE.contains("`key`"), "{VAULT_PREAMBLE}");
+        assert!(!VAULT_PREAMBLE.contains("presses Enter"), "{VAULT_PREAMBLE}");
         assert!(!run_preamble("Ada", &full, AccessLevel::Full, true, false, &[]).contains("vault"));
         assert!(!run_preamble("Ada", &full, AccessLevel::Full, false, true, &[]).contains("vault"));
     }
