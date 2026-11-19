@@ -6,7 +6,7 @@ import time
 from urllib.request import urlopen
 
 root = Path('Bruhs' if os.name == 'nt' else '/opt/bruhs').resolve()
-commit = '9850730b871b730395557642f9137eb1f57dc7c0'
+commit = '21118b24d0c2d82d483fc0ed21b34926ea57db35'
 ext = '.exe' if os.name == 'nt' else ''
 app = subprocess.Popen([root / ('bruhs-desktop' + ext)], cwd=root)
 try:
