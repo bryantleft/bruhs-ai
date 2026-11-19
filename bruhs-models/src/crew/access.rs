@@ -469,6 +469,19 @@ impl Lexer<'_> {
                     in_word = true;
                     self.double_quoted(&mut word, depth)?;
                 }
+                // `$'…'` is ANSI-C quoting, read as bash decodes it, and
+                // `$"…"` a locale string, read as double quotes (ruling
+                // A2 M2): either can spell a program name.
+                '$' if self.peek() == Some('\'') => {
+                    self.pos += 1;
+                    in_word = true;
+                    self.ansi_c_quoted(&mut word);
+                }
+                '$' if self.peek() == Some('"') => {
+                    self.pos += 1;
+                    in_word = true;
+                    self.double_quoted(&mut word, depth)?;
+                }
                 '\\' => match self.next() {
                     Some('\n') | None => {}
                     Some(escaped) => {
@@ -507,6 +520,78 @@ impl Lexer<'_> {
         if !command.is_empty() {
             self.commands.push(std::mem::take(command));
         }
+    }
+
+    /// The rest of a `$'…'` word, its escapes decoded as bash does. A NUL
+    /// ends the word's text, as it ends bash's.
+    fn ansi_c_quoted(&mut self, word: &mut String) {
+        let mut ended = false;
+        let mut push = |word: &mut String, c: Option<char>| match c {
+            Some('\0') | None => ended = true,
+            Some(c) if !ended => word.push(c),
+            Some(_) => {}
+        };
+        while let Some(c) = self.next() {
+            match c {
+                '\'' => return,
+                '\\' => {
+                    let Some(escaped) = self.next() else {
+                        return;
+                    };
+                    let decoded = match escaped {
+                        'a' => Some('\u{7}'),
+                        'b' => Some('\u{8}'),
+                        'e' | 'E' => Some('\u{1b}'),
+                        'f' => Some('\u{c}'),
+                        'n' => Some('\n'),
+                        'r' => Some('\r'),
+                        't' => Some('\t'),
+                        'v' => Some('\u{b}'),
+                        '\\' | '\'' | '"' | '?' => Some(escaped),
+                        '0'..='7' => {
+                            let mut value = escaped.to_digit(8).unwrap_or_default();
+                            value = self.digits(value, 8, 2);
+                            char::from_u32(value & 0xff)
+                        }
+                        'x' => self.escaped_number(16, 2),
+                        'u' => self.escaped_number(16, 4),
+                        'U' => self.escaped_number(16, 8),
+                        'c' => self.next().map(|c| {
+                            char::from_u32(u32::from(c.to_ascii_uppercase()) ^ 0x40).unwrap_or(c)
+                        }),
+                        other => {
+                            push(word, Some('\\'));
+                            Some(other)
+                        }
+                    };
+                    push(word, decoded);
+                }
+                other => push(word, Some(other)),
+            }
+        }
+    }
+
+    /// `\xHH`, `\uHHHH` or `\UHHHHHHHH` after its letter: up to `most`
+    /// digits in `radix`. None when no digit follows (bash keeps the text,
+    /// which names no program either way).
+    fn escaped_number(&mut self, radix: u32, most: usize) -> Option<char> {
+        let first = self.peek()?.to_digit(radix)?;
+        self.pos += 1;
+        char::from_u32(self.digits(first, radix, most - 1))
+    }
+
+    /// `value` extended by up to `most` more digits in `radix`.
+    fn digits(&mut self, mut value: u32, radix: u32, most: usize) -> u32 {
+        for _ in 0..most {
+            match self.peek().and_then(|c| c.to_digit(radix)) {
+                Some(digit) => {
+                    value = value.saturating_mul(radix).saturating_add(digit);
+                    self.pos += 1;
+                }
+                None => break,
+            }
+        }
+        value
     }
 
     /// The rest of a double-quoted word: only `$(…)` and backticks run.
@@ -737,8 +822,11 @@ enum GlobToken {
 
 /// Whether a shell glob (`*`, `?`, and `[…]` taken as any one character)
 /// could expand to `name`. A word without them must equal it. Iterative,
-/// O(pattern × name): the pattern is the model's.
+/// O(pattern × name): the pattern is the model's. A `[` is a class only
+/// when a `]` follows it somewhere, so no `[` scans the rest in vain
+/// (ruling A2 M1).
 fn glob_matches(pattern: &[u8], name: &[u8]) -> bool {
+    let last_close = pattern.iter().rposition(|&byte| byte == b']');
     let mut tokens = Vec::with_capacity(pattern.len());
     let mut index = 0;
     while let Some(&byte) = pattern.get(index) {
@@ -746,13 +834,15 @@ fn glob_matches(pattern: &[u8], name: &[u8]) -> bool {
         tokens.push(match byte {
             b'*' => GlobToken::Any,
             b'?' => GlobToken::One,
-            b'[' => match pattern[index..].iter().position(|&byte| byte == b']') {
-                Some(close) => {
-                    index += close + 1;
-                    GlobToken::One
-                }
-                None => GlobToken::Literal(b'['),
-            },
+            b'[' if last_close.is_some_and(|close| close >= index) => {
+                let close = pattern[index..]
+                    .iter()
+                    .position(|&byte| byte == b']')
+                    .unwrap_or_default();
+                index += close + 1;
+                GlobToken::One
+            }
+            b'[' => GlobToken::Literal(b'['),
             other => GlobToken::Literal(other),
         });
     }
@@ -2085,6 +2175,11 @@ mod tests {
         assert!(glob_matches(b"s*c?r[iI]t*", b"security"));
         assert!(!glob_matches(b"s*c?r[iI]t*x", b"security"));
         assert!(glob_matches(b"*", b"op") && !glob_matches(b"o", b"op"));
+        // Ruling A2 M1: a `[` with no `]` after it never scans the rest.
+        let brackets = "[".repeat(200_000);
+        assert!(!is_vault_command(&brackets));
+        assert!(!glob_matches(brackets.as_bytes(), b"op"));
+        assert!(glob_matches(b"[[o]p", b"op") && !glob_matches(b"[o", b"op"));
         let elapsed = started.elapsed();
         assert!(
             elapsed < std::time::Duration::from_millis(200),
@@ -2142,6 +2237,14 @@ mod tests {
             "ls 2>&1 | op read x",
             "f() { security dump-keychain; }",
             "x=1; op read x",
+            // ANSI-C and locale quoting (ruling A2 M2).
+            "$'op' read op://P/I/password",
+            "$'\\x73ecurity' find-generic-password -w -s bruhs-ai-secrets",
+            "$'\\163ecurity' dump-keychain",
+            "$'\\u0073ecurity' dump-keychain",
+            "o$'p' read x",
+            "$\"op\" read x",
+            "sh -c $'op read x'",
             // Nested deeper than anyone writes by hand.
             &deep,
         ];
@@ -2192,6 +2295,8 @@ mod tests {
             "echo done # security dump-keychain",
             "cat <<< \"security dump-keychain\"",
             "bash -c 'echo security'",
+            "printf $'op\\n'",
+            "echo $'security'",
         ] {
             assert!(!is_vault_command(line), "{line}");
         }
